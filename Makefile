@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration lint
+.PHONY: up down logs shell db-shell migrate migration rollback seed install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -20,6 +20,10 @@ migration:
 
 rollback:
 	docker compose exec backend alembic downgrade -1
+
+# Usage: make seed TICKER=AAPL  or  make seed TICKER="AAPL MSFT NVDA"
+seed:
+	docker compose exec backend python -m app.scripts.seed_ticker $(TICKER)
 
 # ── Shells ────────────────────────────────────────────────
 shell:

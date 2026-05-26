@@ -27,7 +27,7 @@ class HistoricalReaction(Base):
     ticker_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tickers.id", ondelete="CASCADE"), nullable=False)
     # Nullable — reaction can be stored before a linked event row exists
     event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"), nullable=True)
-    event_type: Mapped[EventType] = mapped_column(Enum(EventType, name="event_type_enum"), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType, name="event_type_enum", values_callable=lambda x: [e.value for e in x]), nullable=False)
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
     close_before: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # T-1 close
     open_after: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))   # T open

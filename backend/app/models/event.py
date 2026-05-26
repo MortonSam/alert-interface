@@ -26,11 +26,11 @@ class Event(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Nullable — macro/FRED events don't belong to a single ticker
     ticker_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickers.id", ondelete="SET NULL"), nullable=True)
-    event_type: Mapped[EventType] = mapped_column(Enum(EventType, name="event_type_enum"), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType, name="event_type_enum", values_callable=lambda x: [e.value for e in x]), nullable=False)
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    source: Mapped[DataSource] = mapped_column(Enum(DataSource, name="data_source_enum"), nullable=False, default=DataSource.MANUAL)
+    source: Mapped[DataSource] = mapped_column(Enum(DataSource, name="data_source_enum", values_callable=lambda x: [e.value for e in x]), nullable=False, default=DataSource.MANUAL)
     source_url: Mapped[str | None] = mapped_column(Text)
     is_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Flexible bag for source-specific data: EPS estimate, FDA drug name, FRED series ID, etc.
