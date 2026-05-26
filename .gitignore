@@ -4,18 +4,12 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-.env
-.env.local
 
-cat > .gitignore << 'EOF'
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
+# Secrets — real env files only; *.example files are safe to commit
 .env
 .env.local
+.env.*.local
+frontend/.env.local
 
 # Node
 node_modules/
@@ -23,11 +17,10 @@ node_modules/
 dist/
 build/
 
-# Secrets
+# Keys / certs
 *.key
 *.pem
 secrets/
-.env.*
 
 # OS
 .DS_Store

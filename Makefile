@@ -1,0 +1,36 @@
+.PHONY: up down logs shell db-shell migrate migration lint
+
+# ── Docker ────────────────────────────────────────────────
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f backend
+
+# ── Database ──────────────────────────────────────────────
+migrate:
+	docker compose exec backend alembic upgrade head
+
+# Usage: make migration name="add_thesis_table"
+migration:
+	docker compose exec backend alembic revision --autogenerate -m "$(name)"
+
+rollback:
+	docker compose exec backend alembic downgrade -1
+
+# ── Shells ────────────────────────────────────────────────
+shell:
+	docker compose exec backend bash
+
+db-shell:
+	docker compose exec db psql -U alert -d alertdb
+
+# ── Local dev (no Docker) ─────────────────────────────────
+install:
+	pip install -r backend/requirements.txt
+
+run:
+	cd backend && uvicorn app.main:app --reload --port 8000
