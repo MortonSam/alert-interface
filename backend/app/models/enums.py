@@ -17,3 +17,10 @@ class DataSource(str, enum.Enum):
     FDA = "fda"
     POLYGON = "polygon"
     MANUAL = "manual"
+
+
+class EarningsOutcome(str, enum.Enum):
+    BEAT    = "beat"
+    MISS    = "miss"
+    MEET    = "meet"
+    UNKNOWN = "unknown"

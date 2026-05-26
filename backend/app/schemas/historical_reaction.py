@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.enums import EventType
+from app.models.enums import EarningsOutcome, EventType
 
 
 class HistoricalReactionBase(BaseModel):
@@ -21,6 +21,11 @@ class HistoricalReactionBase(BaseModel):
     volume_before: int | None = None
     volume_after: int | None = None
     notes: str | None = None
+    eps_estimate: Decimal | None = None
+    eps_actual: Decimal | None = None
+    revenue_estimate: int | None = None
+    revenue_actual: int | None = None
+    outcome: EarningsOutcome = EarningsOutcome.UNKNOWN
 
 
 class HistoricalReactionCreate(HistoricalReactionBase):

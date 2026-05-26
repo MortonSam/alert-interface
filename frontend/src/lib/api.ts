@@ -50,6 +50,8 @@ export interface Event {
   updated_at: string;
 }
 
+export type EarningsOutcome = "beat" | "miss" | "meet" | "unknown";
+
 export interface HistoricalReaction {
   id: string;
   ticker_id: string;
@@ -65,6 +67,11 @@ export interface HistoricalReaction {
   volume_before: number | null;
   volume_after: number | null;
   notes: string | null;
+  eps_estimate: string | null;
+  eps_actual: string | null;
+  revenue_estimate: number | null;
+  revenue_actual: number | null;
+  outcome: EarningsOutcome;
   created_at: string;
 }
 
@@ -139,8 +146,10 @@ export const api = {
   },
 
   reactions: {
-    list: (filters?: { ticker_id?: string; event_type?: EventType }) => {
-      const params = new URLSearchParams(filters as Record<string, string>);
+    list: (filters?: { symbol?: string; ticker_id?: string; event_type?: EventType }) => {
+      const params = new URLSearchParams(
+        Object.fromEntries(Object.entries(filters ?? {}).filter(([, v]) => v != null)) as Record<string, string>
+      );
       return request<HistoricalReaction[]>(`/reactions/?${params}`);
     },
     get: (id: string) => request<HistoricalReaction>(`/reactions/${id}`),

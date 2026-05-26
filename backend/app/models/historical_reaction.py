@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
-from app.models.enums import EventType
+from app.models.enums import EarningsOutcome, EventType
 
 if TYPE_CHECKING:
     from app.models.event import Event
@@ -38,6 +38,17 @@ class HistoricalReaction(Base):
     volume_before: Mapped[int | None] = mapped_column(BigInteger)
     volume_after: Mapped[int | None] = mapped_column(BigInteger)
     notes: Mapped[str | None] = mapped_column(Text)
+    # EPS / revenue outcome (earnings-specific)
+    eps_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    eps_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    revenue_estimate: Mapped[int | None] = mapped_column(BigInteger)
+    revenue_actual: Mapped[int | None] = mapped_column(BigInteger)
+    outcome: Mapped[EarningsOutcome] = mapped_column(
+        Enum(EarningsOutcome, name="earnings_outcome_enum", values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=EarningsOutcome.UNKNOWN,
+        server_default="unknown",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticker: Mapped["Ticker"] = relationship(back_populates="historical_reactions")

@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
+from app.models.ticker import Ticker
 from app.schemas.historical_reaction import HistoricalReactionCreate, HistoricalReactionRead
 
 router = APIRouter(prefix="/reactions", tags=["historical-reactions"])
@@ -14,12 +15,18 @@ router = APIRouter(prefix="/reactions", tags=["historical-reactions"])
 
 @router.get("/", response_model=list[HistoricalReactionRead])
 async def list_reactions(
-    ticker_id: uuid.UUID | None = None,
-    event_type: EventType | None = None,
+    symbol: str | None = Query(None, description="Filter by ticker symbol (e.g. AAPL)"),
+    ticker_id: uuid.UUID | None = Query(None),
+    event_type: EventType | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[HistoricalReaction]:
     q = select(HistoricalReaction).order_by(HistoricalReaction.event_date.desc())
-    if ticker_id:
+    if symbol:
+        ticker_id_sq = (
+            select(Ticker.id).where(Ticker.symbol == symbol.upper()).scalar_subquery()
+        )
+        q = q.where(HistoricalReaction.ticker_id == ticker_id_sq)
+    elif ticker_id:
         q = q.where(HistoricalReaction.ticker_id == ticker_id)
     if event_type:
         q = q.where(HistoricalReaction.event_type == event_type)
