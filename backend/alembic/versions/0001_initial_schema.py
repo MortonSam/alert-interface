@@ -73,11 +73,11 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         # ticker_id is nullable — macro events (FRED releases) have no single ticker
         sa.Column("ticker_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tickers.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("event_type", sa.Enum(name="event_type_enum", create_type=False), nullable=False),
+        sa.Column("event_type", postgresql.ENUM(name="event_type_enum", create_type=False), nullable=False),
         sa.Column("event_date", sa.Date(), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("description", sa.Text()),
-        sa.Column("source", sa.Enum(name="data_source_enum", create_type=False), nullable=False, server_default="manual"),
+        sa.Column("source", postgresql.ENUM(name="data_source_enum", create_type=False), nullable=False, server_default="manual"),
         sa.Column("source_url", sa.Text()),
         sa.Column("is_confirmed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         # Flexible bucket for source-specific metadata (e.g. EPS estimate, FDA PDUFA drug name)
@@ -98,7 +98,7 @@ def upgrade() -> None:
         sa.Column("ticker_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tickers.id", ondelete="CASCADE"), nullable=False),
         # event_id is nullable — reaction can be recorded without a linked event row
         sa.Column("event_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("events.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("event_type", sa.Enum(name="event_type_enum", create_type=False), nullable=False),
+        sa.Column("event_type", postgresql.ENUM(name="event_type_enum", create_type=False), nullable=False),
         sa.Column("event_date", sa.Date(), nullable=False),
         sa.Column("close_before", sa.Numeric(12, 4)),   # closing price on T-1
         sa.Column("open_after", sa.Numeric(12, 4)),     # opening price on T
