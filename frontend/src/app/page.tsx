@@ -1,3 +1,5 @@
+import { TickerGrid } from "./ticker-grid";
+
 export default function Home() {
   return (
     <main className="min-h-screen p-8">
@@ -32,6 +34,8 @@ export default function Home() {
             </p>
           </div>
         </div>
+
+        <TickerGrid />
       </div>
     </main>
   );

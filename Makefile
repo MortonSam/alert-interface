@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration rollback seed install run
+.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -24,6 +24,9 @@ rollback:
 # Usage: make seed TICKER=AAPL  or  make seed TICKER="AAPL MSFT NVDA"
 seed:
 	docker compose exec backend python -m app.scripts.seed_ticker $(TICKER)
+
+seed-macro:
+	docker compose exec backend python -m app.scripts.seed_macro
 
 # ── Shells ────────────────────────────────────────────────
 shell:

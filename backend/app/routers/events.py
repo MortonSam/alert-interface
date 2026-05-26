@@ -2,7 +2,7 @@ import uuid
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -31,8 +31,14 @@ async def upcoming_events(
         .order_by(Event.event_date)
     )
     if symbol:
-        q = q.join(Ticker, Event.ticker_id == Ticker.id).where(
-            Ticker.symbol == symbol.upper()
+        # Return ticker-specific events OR macro events (ticker_id IS NULL).
+        # The subquery yields NULL when the symbol doesn't exist, which is fine —
+        # ticker_id = NULL is always false in SQL, so only macros come back.
+        ticker_id_sq = (
+            select(Ticker.id).where(Ticker.symbol == symbol.upper()).scalar_subquery()
+        )
+        q = q.where(
+            or_(Event.ticker_id == ticker_id_sq, Event.ticker_id.is_(None))
         )
     if event_type:
         q = q.where(Event.event_type == event_type)
