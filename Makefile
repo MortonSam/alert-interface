@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions install run
+.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-sp500 seed-sp500-retry validate install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -31,6 +31,15 @@ seed-macro:
 # Usage: make seed-reactions TICKER=AAPL  or  make seed-reactions TICKER="AAPL MSFT NVDA"
 seed-reactions:
 	docker compose exec backend python -m app.scripts.seed_historical_reactions $(TICKER)
+
+seed-sp500:
+	docker compose exec backend python -m app.scripts.seed_sp500
+
+seed-sp500-retry:
+	docker compose exec backend python -m app.scripts.seed_sp500 --retry-only
+
+validate:
+	docker compose exec backend python -m app.scripts.validate_data
 
 # ── Shells ────────────────────────────────────────────────
 shell:

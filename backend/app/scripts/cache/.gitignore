@@ -1,0 +1,2 @@
+# Ignore generated cache files but keep the directory tracked
+*.json
