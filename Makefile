@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-sp500 seed-sp500-retry validate install run
+.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-sp500 seed-sp500-retry seed-sp500-force validate install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -37,6 +37,9 @@ seed-sp500:
 
 seed-sp500-retry:
 	docker compose exec backend python -m app.scripts.seed_sp500 --retry-only
+
+seed-sp500-force:
+	docker compose exec backend python -m app.scripts.seed_sp500 --force-update
 
 validate:
 	docker compose exec backend python -m app.scripts.validate_data

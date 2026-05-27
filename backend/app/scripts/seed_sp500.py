@@ -65,6 +65,29 @@ BATCH_SLEEP      = 2.0          # seconds between batches
 RETRY_DELAYS     = (2, 5, 12)   # seconds for retry 1, 2, 3
 SKIP_IF_UPDATED_WITHIN = 7      # days — skip recently-refreshed tickers
 
+# ── Sector normalisation ──────────────────────────────────────────────────────
+
+# Map non-canonical / yfinance labels → official GICS sector names.
+# Canonical list: Communication Services, Consumer Discretionary,
+# Consumer Staples, Energy, Financials, Health Care, Industrials,
+# Information Technology, Materials, Real Estate, Utilities
+SECTOR_NORM: dict[str, str] = {
+    # yfinance labels
+    "Financial Services":  "Financials",
+    "Technology":          "Information Technology",
+    "Healthcare":          "Health Care",
+    "Consumer Cyclical":   "Consumer Discretionary",
+    "Consumer Defensive":  "Consumer Staples",
+    "Basic Materials":     "Materials",
+    "Communication":       "Communication Services",
+}
+
+
+def normalize_sector(s: str | None) -> str | None:
+    if not s:
+        return s
+    return SECTOR_NORM.get(s.strip(), s.strip())
+
 
 # ── Wikipedia scrape ──────────────────────────────────────────────────────────
 
@@ -212,11 +235,14 @@ def _fetch_yf(wiki_row: dict) -> dict:
     symbol = wiki_row["symbol"]
     t = yf.Ticker(symbol)
     info = t.info or {}
+    # Wikipedia/GICS is authoritative; yfinance is fallback only
+    sector   = wiki_row["sector"]   or info.get("sector")   or None
+    industry = wiki_row["industry"] or info.get("industry") or None
     return {
         "symbol":        symbol,
         "name":          info.get("longName") or info.get("shortName") or wiki_row["name"] or None,
-        "sector":        info.get("sector")   or wiki_row["sector"]   or None,
-        "industry":      info.get("industry") or wiki_row["industry"] or None,
+        "sector":        normalize_sector(sector),
+        "industry":      industry,
         "exchange":      info.get("exchange") or None,
         "market_cap":    info.get("marketCap") or None,
         "next_earnings": _next_earnings_date(t),
@@ -318,7 +344,7 @@ async def process_ticker(wiki_row: dict, loop) -> TickerResult:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-async def main(retry_only: bool, limit: int | None) -> int:
+async def main(retry_only: bool, limit: int | None, force_update: bool = False) -> int:
     # 1. Determine candidate list
     if retry_only:
         failed_symbols = load_failed()
@@ -337,9 +363,9 @@ async def main(retry_only: bool, limit: int | None) -> int:
         candidates = candidates[:limit]
         print(f"--limit {limit}: processing first {len(candidates)} tickers.", flush=True)
 
-    # 2. Skip recently-updated tickers
+    # 2. Skip recently-updated tickers (unless --force-update)
     async with AsyncSessionLocal() as session:
-        skip_set = await build_skip_set(session)
+        skip_set = set() if force_update else await build_skip_set(session)
 
     to_process = [r for r in candidates if r["symbol"] not in skip_set]
     skipped    = len(candidates) - len(to_process)
@@ -410,9 +436,11 @@ def parse_args() -> argparse.Namespace:
                    help="Only retry symbols from cache/failed_tickers.json")
     p.add_argument("--limit", type=int, default=None, metavar="N",
                    help="Process only the first N candidates (for testing)")
+    p.add_argument("--force-update", action="store_true",
+                   help="Skip the 7-day freshness check and reprocess all tickers")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    sys.exit(asyncio.run(main(retry_only=args.retry_only, limit=args.limit)))
+    sys.exit(asyncio.run(main(retry_only=args.retry_only, limit=args.limit, force_update=args.force_update)))
