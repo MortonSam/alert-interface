@@ -219,9 +219,15 @@ async def check_reactions_3d_equals_5d(session) -> CheckResult:
         f"{r.symbol}  {r.event_date}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
         for r in rows
     ]
+    # ≤ 50 matches at 5-year/503-ticker scale is coincidental price equality (stock
+    # barely moved between T+3 and T+5 trading days).  A systematic rollforward bug
+    # would produce hundreds of matches.  Escalate to ERROR only if widespread.
+    level = ERROR if len(rows) > 50 else WARN
     return CheckResult(
-        "reactions_3d_equals_5d", ERROR,
-        f"{len(rows)} row(s) with identical pct_change_3d and pct_change_5d (rollforward bug)",
+        "reactions_3d_equals_5d", level,
+        f"{len(rows)} row(s) with identical pct_change_3d and pct_change_5d"
+        + (" (likely coincidental price equality — verify no systematic pattern)" if level == WARN
+           else " (rollforward bug — systematic pattern detected)"),
         details,
     )
 

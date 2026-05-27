@@ -16,35 +16,64 @@ trading day when the target falls on a weekend or market holiday.
 
 Upserts match on (ticker_id, event_date, event_type).
 
+CLI flags
+---------
+  TICKER [...]   Seed specific ticker(s) — one-off mode (unchanged)
+  --all          Process every ticker in the database
+  --retry-only   Only retry symbols from cache/failed_reactions.json
+  --limit N      Cap the candidate list at N (for testing)
+
 Usage
 -----
     python -m app.scripts.seed_historical_reactions AAPL
     python -m app.scripts.seed_historical_reactions AAPL MSFT NVDA
+    python -m app.scripts.seed_historical_reactions --all
+    python -m app.scripts.seed_historical_reactions --all --limit 20
+    python -m app.scripts.seed_historical_reactions --retry-only
     make seed-reactions TICKER=AAPL
-    make seed-reactions TICKER="AAPL MSFT NVDA"
+    make seed-reactions-all
+    make seed-reactions-retry
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import json
 import sys
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from tqdm import tqdm
 
 from app.database import AsyncSessionLocal
 from app.models.enums import EarningsOutcome, EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 
+
 LOOKBACK_YEARS = 5
 # We need T+5 data, so skip very recent earnings to avoid incomplete windows
 MIN_AGE_DAYS = 8
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+
+CACHE_DIR              = Path(__file__).parent / "cache"
+FAILED_REACTIONS_CACHE = CACHE_DIR / "failed_reactions.json"
+
+# ── Bulk-run tuning ───────────────────────────────────────────────────────────
+
+BULK_BATCH_SIZE    = 5
+BULK_BATCH_SLEEP   = 3.0          # seconds between batches
+BULK_RETRY_DELAYS  = (3, 8, 15)   # seconds for retry 1, 2, 3
+SKIP_MIN_REACTIONS = 15           # skip if ticker already has at least this many ...
+SKIP_WITHIN_DAYS   = 90           # ... AND the most recent is within this many days
 
 
 # ── Price helpers ─────────────────────────────────────────────────────────────
@@ -254,7 +283,38 @@ async def upsert_reaction(
     return existing is None
 
 
-# ── Per-ticker seed ───────────────────────────────────────────────────────────
+# ── Failed-ticker cache ───────────────────────────────────────────────────────
+
+def load_failed_reactions() -> list[str]:
+    if not FAILED_REACTIONS_CACHE.exists():
+        return []
+    return json.loads(FAILED_REACTIONS_CACHE.read_text())
+
+
+def save_failed_reactions(symbols: list[str]) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    FAILED_REACTIONS_CACHE.write_text(json.dumps(sorted(symbols), indent=2))
+
+
+# ── Skip logic ────────────────────────────────────────────────────────────────
+
+async def build_reactions_skip_set(session) -> set[str]:
+    """Return symbols that already have >= SKIP_MIN_REACTIONS reactions within SKIP_WITHIN_DAYS."""
+    cutoff = date.today() - timedelta(days=SKIP_WITHIN_DAYS)
+    rows = (await session.execute(
+        select(Ticker.symbol)
+        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+        .where(HistoricalReaction.event_type == EventType.EARNINGS)
+        .group_by(Ticker.id, Ticker.symbol)
+        .having(
+            func.count(HistoricalReaction.id) >= SKIP_MIN_REACTIONS,
+            func.max(HistoricalReaction.event_date) >= cutoff,
+        )
+    )).scalars().all()
+    return set(rows)
+
+
+# ── Per-ticker seed (one-off, verbose) ────────────────────────────────────────
 
 async def seed(symbol: str) -> None:
     sym = symbol.upper()
@@ -311,19 +371,190 @@ async def seed(symbol: str) -> None:
     print(f"  ✓ {inserted} inserted, {updated} updated, {skipped} skipped")
 
 
+# ── Bulk infrastructure ───────────────────────────────────────────────────────
+
+def _fetch_ticker_data_sync(symbol: str) -> tuple[list, pd.DataFrame]:
+    """Sync yfinance fetch — called via run_in_executor.
+    Returns (earnings_entries, hist_df); raises on hard failure."""
+    yf_ticker = yf.Ticker(symbol)
+    earnings_entries = _fetch_earnings_dates(yf_ticker)
+    if not earnings_entries:
+        return [], pd.DataFrame()
+    lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
+    hist = _fetch_price_history(yf_ticker, lookback)
+    return earnings_entries, hist
+
+
+async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
+    """Seed one ticker in bulk mode. Returns (inserted, updated, no_price_data).
+    Raises on any error so the retry wrapper can catch it."""
+    earnings_entries, hist = await loop.run_in_executor(
+        None, _fetch_ticker_data_sync, ticker.symbol
+    )
+    if not earnings_entries or hist.empty:
+        return 0, 0, 0
+
+    dates_cache = _build_date_cache(hist)
+    inserted = updated = no_price = 0
+
+    async with AsyncSessionLocal() as session:
+        for event_date, eps_estimate, eps_actual in earnings_entries:
+            data = _compute(hist, dates_cache, event_date)
+            if data is None:
+                no_price += 1
+                continue
+            data["eps_estimate"] = eps_estimate
+            data["eps_actual"]   = eps_actual
+            data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
+            created = await upsert_reaction(session, ticker, event_date, data)
+            if created:
+                inserted += 1
+            else:
+                updated += 1
+        await session.commit()
+
+    return inserted, updated, no_price
+
+
+async def process_ticker_bulk(ticker: Ticker, loop) -> tuple[bool, int, int, int]:
+    """Fetch + upsert with retries. Returns (ok, inserted, updated, no_price)."""
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate(BULK_RETRY_DELAYS, start=1):
+        try:
+            ins, upd, nop = await _seed_ticker_bulk(ticker, loop)
+            return True, ins, upd, nop
+        except Exception as exc:
+            last_exc = exc
+            if attempt < len(BULK_RETRY_DELAYS):
+                await asyncio.sleep(delay)
+    tqdm.write(f"  ✗ {ticker.symbol}: failed after {len(BULK_RETRY_DELAYS)} attempts — {last_exc}")
+    return False, 0, 0, 0
+
+
+# ── Bulk main ─────────────────────────────────────────────────────────────────
+
+async def main_bulk(retry_only: bool, limit: int | None) -> int:
+    # 1. Load all DB tickers
+    async with AsyncSessionLocal() as session:
+        all_tickers: list[Ticker] = list(
+            (await session.execute(select(Ticker).order_by(Ticker.symbol))).scalars().all()
+        )
+
+    by_symbol = {t.symbol: t for t in all_tickers}
+
+    if retry_only:
+        failed_symbols = load_failed_reactions()
+        if not failed_symbols:
+            print("No failed tickers in cache. Nothing to retry.")
+            return 0
+        candidates = [by_symbol[s] for s in failed_symbols if s in by_symbol]
+        print(f"Retrying {len(candidates)} previously-failed tickers.", flush=True)
+    else:
+        candidates = all_tickers
+
+    if limit is not None:
+        candidates = candidates[:limit]
+        print(f"--limit {limit}: processing first {len(candidates)} tickers.", flush=True)
+
+    # 2. Build skip set
+    async with AsyncSessionLocal() as session:
+        skip_set = await build_reactions_skip_set(session)
+
+    to_process = [t for t in candidates if t.symbol not in skip_set]
+    n_skipped  = len(candidates) - len(to_process)
+    if n_skipped:
+        print(
+            f"{n_skipped} skipped "
+            f"(≥{SKIP_MIN_REACTIONS} reactions within {SKIP_WITHIN_DAYS} days).",
+            flush=True,
+        )
+
+    if not to_process:
+        print("Nothing to process.")
+        return 0
+
+    # 3. Process in batches
+    loop = asyncio.get_event_loop()
+    succeeded: list[str] = []
+    failed:    list[str] = []
+    total_ins = total_upd = total_nop = 0
+
+    batches = [to_process[i : i + BULK_BATCH_SIZE] for i in range(0, len(to_process), BULK_BATCH_SIZE)]
+
+    with tqdm(total=len(to_process), unit="ticker", dynamic_ncols=True) as bar:
+        for batch_idx, batch in enumerate(batches):
+            tasks = [process_ticker_bulk(t, loop) for t in batch]
+            results = await asyncio.gather(*tasks)
+
+            for ticker, (ok, ins, upd, nop) in zip(batch, results):
+                if ok:
+                    succeeded.append(ticker.symbol)
+                    total_ins += ins
+                    total_upd += upd
+                    total_nop += nop
+                else:
+                    failed.append(ticker.symbol)
+                bar.update(1)
+                bar.set_postfix(ok=len(succeeded), skip=n_skipped, fail=len(failed))
+
+            if batch_idx < len(batches) - 1:
+                await asyncio.sleep(BULK_BATCH_SLEEP)
+
+    # 4. Persist failures
+    if retry_only:
+        still_failed = [s for s in load_failed_reactions() if s not in succeeded]
+        save_failed_reactions(still_failed)
+    else:
+        existing_failed = load_failed_reactions()
+        merged_failed   = sorted(set(existing_failed) | set(failed) - set(succeeded))
+        save_failed_reactions(merged_failed)
+
+    # 5. Summary
+    print()
+    print(f"{'─' * 50}")
+    print(f"  ✓ {len(succeeded)} succeeded  ⚠ {n_skipped} skipped  ✗ {len(failed)} failed")
+    print(f"  📊 {total_ins} inserted  {total_upd} updated  {total_nop} no-price-data")
+    if failed:
+        print(f"\n  Failed: {', '.join(failed)}")
+        print("  Run `make seed-reactions-retry` to retry just those.")
+    print(f"{'─' * 50}")
+    return 1 if failed else 0
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main() -> None:
-    symbols = [s.upper() for s in sys.argv[1:]]
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Seed historical earnings reactions")
+    p.add_argument("tickers", nargs="*", metavar="TICKER",
+                   help="Specific ticker(s) to seed (one-off mode)")
+    p.add_argument("--all", action="store_true", dest="all_tickers",
+                   help="Process every ticker in the database")
+    p.add_argument("--retry-only", action="store_true",
+                   help="Only retry symbols from cache/failed_reactions.json")
+    p.add_argument("--limit", type=int, default=None, metavar="N",
+                   help="Cap the candidate list at N (for testing; use with --all or --retry-only)")
+    return p.parse_args()
+
+
+async def main() -> int:
+    args = parse_args()
+
+    if args.all_tickers or args.retry_only:
+        return await main_bulk(retry_only=args.retry_only, limit=args.limit)
+
+    # One-off mode: positional TICKER args
+    symbols = [s.upper() for s in args.tickers]
     if not symbols:
         print("Usage: python -m app.scripts.seed_historical_reactions SYMBOL [SYMBOL ...]")
-        sys.exit(1)
+        print("       python -m app.scripts.seed_historical_reactions --all [--limit N]")
+        print("       python -m app.scripts.seed_historical_reactions --retry-only")
+        return 1
 
     for sym in symbols:
         await seed(sym)
-
     print("\n✓ Done.\n")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))
