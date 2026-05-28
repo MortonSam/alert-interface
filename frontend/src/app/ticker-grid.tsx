@@ -1,13 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type Ticker } from "@/lib/api";
+
+const PAGE_SIZE = 50;
+
+function fmtMcap(n: number | null): string {
+  if (!n) return "";
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  return `$${n.toLocaleString()}`;
+}
+
+function fmtDate(d: string | null): string {
+  if (!d) return "";
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+type SortKey = "market_cap" | "symbol" | "name" | "next_earnings";
+
+function getPageNums(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | "…")[] = [1];
+  if (current > 3) out.push("…");
+  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+    out.push(i);
+  }
+  if (current < total - 2) out.push("…");
+  out.push(total);
+  return out;
+}
 
 export function TickerGrid() {
   const [tickers, setTickers] = useState<Ticker[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sector, setSector] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortKey>("market_cap");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.tickers
@@ -17,12 +56,82 @@ export function TickerGrid() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Debounce search input
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  // Reset to page 1 on filter/sort change
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, sector, sort]);
+
+  // Sector counts from full (unfiltered) list
+  const sectorCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of tickers) {
+      if (t.sector) m.set(t.sector, (m.get(t.sector) ?? 0) + 1);
+    }
+    return m;
+  }, [tickers]);
+
+  const sectors = useMemo(() => [...sectorCounts.keys()].sort(), [sectorCounts]);
+
+  // Filtered + sorted list
+  const filtered = useMemo(() => {
+    let list = tickers;
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      list = list.filter(
+        (t) =>
+          t.symbol.toLowerCase().includes(q) ||
+          (t.name ?? "").toLowerCase().includes(q)
+      );
+    }
+    if (sector) {
+      list = list.filter((t) => t.sector === sector);
+    }
+    return [...list].sort((a, b) => {
+      switch (sort) {
+        case "symbol":
+          return a.symbol.localeCompare(b.symbol);
+        case "name":
+          return (a.name ?? "").localeCompare(b.name ?? "");
+        case "next_earnings": {
+          const dateA = a.next_earnings_date ?? "9999-99-99";
+          const dateB = b.next_earnings_date ?? "9999-99-99";
+          return dateA < dateB ? -1 : dateA > dateB ? 1 : 0;
+        }
+        default: // market_cap desc
+          return (b.market_cap ?? 0) - (a.market_cap ?? 0);
+      }
+    });
+  }, [tickers, debouncedSearch, sector, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const isFiltered = !!debouncedSearch || !!sector || sort !== "market_cap";
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setDebouncedSearch("");
+    setSector(null);
+    setSort("market_cap");
+  }, []);
+
   if (loading) {
     return (
-      <section className="mt-10">
-        <div className="h-6 w-24 bg-muted rounded animate-pulse mb-4" />
+      <section className="mt-8 space-y-4">
+        <div className="h-9 bg-muted rounded animate-pulse w-full" />
+        <div className="flex gap-2 flex-wrap">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-7 w-28 bg-muted rounded-full animate-pulse" />
+          ))}
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-          {Array.from({ length: 12 }).map((_, i) => (
+          {Array.from({ length: 18 }).map((_, i) => (
             <div key={i} className="rounded-lg border bg-card p-4 animate-pulse">
               <div className="h-6 bg-muted rounded w-14 mb-2" />
               <div className="h-3 bg-muted rounded w-full mb-1" />
@@ -37,7 +146,7 @@ export function TickerGrid() {
 
   if (error) {
     return (
-      <section className="mt-10">
+      <section className="mt-8">
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           Failed to load tickers: {error}
         </div>
@@ -47,47 +156,175 @@ export function TickerGrid() {
 
   if (tickers.length === 0) {
     return (
-      <section className="mt-10">
+      <section className="mt-8">
         <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
-          No tickers found. Seed some with <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">seed_ticker.py</code> to get started.
+          No tickers found. Seed some with{" "}
+          <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">seed_ticker.py</code>{" "}
+          to get started.
         </div>
       </section>
     );
   }
 
   return (
-    <section className="mt-10">
-      <h2 className="text-lg font-semibold mb-4">
-        Tickers{" "}
-        <span className="text-muted-foreground font-normal text-sm">({tickers.length})</span>
-      </h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-        {tickers.map((ticker) => (
-          <Link
-            key={ticker.id}
-            href={`/tickers/${ticker.symbol}`}
-            className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent hover:border-border"
+    <section className="mt-8 space-y-4">
+      {/* Search + Sort */}
+      <div className="flex gap-3 flex-wrap items-center">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search symbol or name…"
+          className="flex-1 min-w-[200px] h-9 rounded-md border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          className="h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="market_cap">Market Cap ↓</option>
+          <option value="symbol">Symbol A–Z</option>
+          <option value="name">Name A–Z</option>
+          <option value="next_earnings">Next Earnings</option>
+        </select>
+      </div>
+
+      {/* Sector pills */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setSector(null)}
+          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            sector === null
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          All <span className="opacity-60">({tickers.length})</span>
+        </button>
+        {sectors.map((s) => (
+          <button
+            key={s}
+            onClick={() => setSector(sector === s ? null : s)}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              sector === s
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+            }`}
           >
-            <div className="text-xl font-bold tracking-tight">{ticker.symbol}</div>
-            {ticker.name && (
-              <div className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-snug">
-                {ticker.name}
-              </div>
-            )}
-            <div className="mt-3 space-y-0.5">
-              {ticker.sector && (
-                <div className="text-xs text-muted-foreground line-clamp-1">{ticker.sector}</div>
-              )}
-              {ticker.industry && (
-                <div className="text-xs text-muted-foreground line-clamp-1">{ticker.industry}</div>
-              )}
-              {ticker.exchange && (
-                <div className="text-xs font-medium text-foreground/60 mt-1">{ticker.exchange}</div>
-              )}
-            </div>
-          </Link>
+            {s} <span className="opacity-60">({sectorCounts.get(s)})</span>
+          </button>
         ))}
       </div>
+
+      {/* Result count + clear */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          Showing{" "}
+          <span className="font-medium text-foreground">
+            {filtered.length === tickers.length
+              ? tickers.length
+              : `${filtered.length} of ${tickers.length}`}
+          </span>{" "}
+          tickers
+        </span>
+        {isFiltered && (
+          <button
+            onClick={clearFilters}
+            className="hover:text-foreground underline underline-offset-2"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Grid */}
+      {filtered.length === 0 ? (
+        <div className="rounded-lg border bg-card px-6 py-12 text-center">
+          <p className="text-sm text-muted-foreground mb-3">
+            No tickers match your filters.
+          </p>
+          <button onClick={clearFilters} className="text-sm text-primary hover:underline">
+            Clear filters
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+          {paginated.map((ticker) => (
+            <Link
+              key={ticker.id}
+              href={`/tickers/${ticker.symbol}`}
+              className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent hover:border-border flex flex-col gap-1 min-h-[96px]"
+            >
+              <div className="flex items-start justify-between gap-1">
+                <span className="text-xl font-bold tracking-tight leading-none">
+                  {ticker.symbol}
+                </span>
+                {ticker.market_cap ? (
+                  <span className="text-xs text-muted-foreground font-medium mt-0.5 shrink-0">
+                    {fmtMcap(ticker.market_cap)}
+                  </span>
+                ) : null}
+              </div>
+              {ticker.name && (
+                <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
+                  {ticker.name}
+                </div>
+              )}
+              <div className="mt-auto pt-1 space-y-0.5">
+                {ticker.sector && (
+                  <div className="text-xs text-muted-foreground line-clamp-1">
+                    {ticker.sector}
+                  </div>
+                )}
+                {ticker.next_earnings_date && (
+                  <div className="text-xs font-medium text-foreground/70">
+                    Earnings {fmtDate(ticker.next_earnings_date)}
+                  </div>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 pt-2 flex-wrap">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={safePage === 1}
+            className="px-3 py-1.5 rounded text-sm border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ← Prev
+          </button>
+          {getPageNums(safePage, totalPages).map((p, i) =>
+            p === "…" ? (
+              <span key={`ell-${i}`} className="px-2 text-sm text-muted-foreground select-none">
+                …
+              </span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => setPage(p as number)}
+                className={`px-3 py-1.5 rounded text-sm border transition-colors ${
+                  safePage === p
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "hover:bg-accent"
+                }`}
+              >
+                {p}
+              </button>
+            )
+          )}
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={safePage === totalPages}
+            className="px-3 py-1.5 rounded text-sm border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </section>
   );
 }

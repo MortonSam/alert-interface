@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,5 +31,6 @@ class TickerRead(TickerBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    next_earnings_date: date | None = None
     created_at: datetime
     updated_at: datetime
