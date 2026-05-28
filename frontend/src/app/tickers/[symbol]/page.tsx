@@ -8,7 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type ExpectedMove, type OptionsChain, type OptionContract } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -805,6 +805,560 @@ function Stat({ label, value }: { label: string; value: string | null | undefine
   );
 }
 
+// ── Options / IV helpers ──────────────────────────────────────────────────────
+
+function fmtIV(iv: number | null): string {
+  return iv == null ? "—" : `${(iv * 100).toFixed(1)}%`;
+}
+function fmtPctDecimal(v: number | null, digits = 1): string {
+  return v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
+}
+
+// ── Tooltip component ─────────────────────────────────────────────────────────
+
+function Tip({
+  children,
+  text,
+  placement = "above",
+}: {
+  children: React.ReactNode;
+  text: string;
+  placement?: "above" | "below";
+}) {
+  return (
+    <span className="relative group/tip inline-flex items-center cursor-help">
+      {children}
+      <span
+        role="tooltip"
+        className={cn(
+          "pointer-events-none absolute left-1/2 -translate-x-1/2 w-60 z-50",
+          placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
+          "rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg",
+          "opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150",
+          "whitespace-normal leading-relaxed text-left font-normal",
+        )}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
+const TIPS = {
+  iv:           "Implied Volatility — the market's forecast of how much this stock will move, stated as an annualized %. Higher IV = bigger expected swings = pricier options.",
+  atm:          "At-The-Money — the strike price closest to where the stock is currently trading. The expected move is anchored here.",
+  straddle:     "A straddle is buying both an ATM call and an ATM put. Its total cost equals the market's best guess at the stock's move in either direction.",
+  impliedRange: "The price range the market thinks the stock will stay within by expiration, derived from options pricing. About 68% of outcomes are expected to fall inside this band.",
+  impliedMove:  "Derived from the ATM straddle price divided by the stock price. It's what options traders collectively expect the stock to move — in either direction — by expiration.",
+  bid:          "The highest price a buyer is currently willing to pay for this option contract.",
+  ask:          "The lowest price a seller will accept. The fair value is usually near the midpoint between bid and ask.",
+  openInterest: "The total number of open option contracts at this strike that haven't been closed or exercised. High open interest means more market participation.",
+  strike:       "The fixed price at which the option lets you buy (call) or sell (put) the stock, regardless of where the stock actually trades.",
+} as const;
+
+// ── IV heatmap helper ─────────────────────────────────────────────────────────
+
+function ivHeatBg(iv: number | null, minIV: number, maxIV: number): React.CSSProperties {
+  if (iv == null || minIV >= maxIV) return {};
+  const t = Math.max(0, Math.min(1, (iv - minIV) / (maxIV - minIV)));
+  // cool blue (low IV) → warm orange (high IV), subtle opacity
+  const r = Math.round(59  + t * (249 - 59));
+  const g = Math.round(130 + t * (115 - 130));
+  const b = Math.round(246 + t * (22  - 246));
+  const a = 0.10 + t * 0.12;
+  return { backgroundColor: `rgba(${r},${g},${b},${a.toFixed(2)})` };
+}
+
+// ── ExpectedMoveCard ──────────────────────────────────────────────────────────
+
+function ExpectedMoveCard({ em, onSelectExpiration }: { em: ExpectedMove; onSelectExpiration?: (exp: string) => void }) {
+  const emPct = em.expected_move_pct;
+  const emDol = em.expected_move_dollars;
+  const stats = em.historical_stats;
+  const daysPast = em.days_expiration_past_earnings;
+
+  // "isolated" = expiration falls within 3 days of earnings, so straddle ≈ earnings-day premium
+  const isIsolated = daysPast != null && daysPast <= 3;
+  // windows are mismatched when expiration is far past earnings (implied = multi-week vol, historical = 1-day move)
+  const windowsMismatched = em.earnings_date != null && daysPast != null && daysPast > 3;
+
+  return (
+    <div className="rounded-lg border bg-card px-5 py-4 space-y-4">
+      {/* Headline */}
+      <div>
+        <div className="text-2xl font-bold tabular-nums">
+          {emPct != null ? `±${fmtPctDecimal(emPct)}` : "—"}
+          {emDol != null && (
+            <span className="text-lg font-semibold text-muted-foreground ml-2">
+              (${emDol.toFixed(2)})
+            </span>
+          )}
+        </div>
+
+        {/* Primary subtitle: always shows what the number actually covers */}
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {isIsolated
+            ? <>Earnings-day implied move — expiration{" "}
+                {em.expiration_used && (
+                  <button
+                    className="underline underline-offset-2 hover:text-foreground transition-colors"
+                    onClick={() => onSelectExpiration?.(em.expiration_used!)}
+                  >
+                    {em.expiration_used}
+                  </button>
+                )}{" "}
+                is {daysPast === 0 ? "same day as" : `${daysPast}d after`} the {em.earnings_date} earnings
+              </>
+            : em.earnings_date
+              ? <>Implied move by{" "}
+                  {em.expiration_used && (
+                    <button
+                      className="underline underline-offset-2 hover:text-foreground transition-colors"
+                      onClick={() => onSelectExpiration?.(em.expiration_used!)}
+                    >
+                      {em.expiration_used}
+                    </button>
+                  )}
+                </>
+              : <>Market implied move by{" "}
+                  {em.expiration_used && (
+                    <button
+                      className="underline underline-offset-2 hover:text-foreground transition-colors"
+                      onClick={() => onSelectExpiration?.(em.expiration_used!)}
+                    >
+                      {em.expiration_used}
+                    </button>
+                  )}
+                </>
+          }
+        </p>
+
+        {/* Window-mismatch warning banner */}
+        {windowsMismatched && (
+          <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-2.5 py-1.5">
+            This covers the full period to expiration — <strong>{daysPast} days past the {em.earnings_date} earnings</strong>.
+            It reflects total vol over that window, not just the earnings event.
+          </p>
+        )}
+      </div>
+
+      {/* Implied range */}
+      {em.implied_range_low != null && em.implied_range_high != null && (
+        <div className="flex items-center gap-3 text-sm">
+          <Tip text={TIPS.impliedRange}>
+            <span className="text-muted-foreground underline decoration-dotted underline-offset-2">
+              Implied range
+            </span>
+          </Tip>
+          <span className="font-semibold tabular-nums">
+            ${em.implied_range_low.toFixed(2)}
+            <span className="text-muted-foreground mx-2">–</span>
+            ${em.implied_range_high.toFixed(2)}
+          </span>
+        </div>
+      )}
+
+      {/* ATM detail */}
+      {(em.atm_strike != null || em.straddle_price != null) && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
+          {em.atm_strike != null && (
+            <Tip text={TIPS.atm}>
+              <span className="underline decoration-dotted underline-offset-2">
+                ATM strike ${em.atm_strike}
+              </span>
+            </Tip>
+          )}
+          {em.atm_strike != null && em.straddle_price != null && <span>·</span>}
+          {em.straddle_price != null && (
+            <Tip text={TIPS.straddle}>
+              <span className="underline decoration-dotted underline-offset-2">
+                straddle ${em.straddle_price.toFixed(2)}
+              </span>
+            </Tip>
+          )}
+        </p>
+      )}
+
+      {/* Historical 1-day earnings moves */}
+      {stats && stats.sample_size >= 2 && (
+        <div className="rounded-md border bg-muted/30 px-4 py-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Past earnings-day 1d moves (n={stats.sample_size})
+          </p>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-xs text-muted-foreground">Avg</p>
+              <p className="text-sm font-semibold tabular-nums">±{fmtPctDecimal(stats.avg_abs_move_pct)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Max</p>
+              <p className="text-sm font-semibold tabular-nums">±{fmtPctDecimal(stats.max_abs_move_pct)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Min</p>
+              <p className="text-sm font-semibold tabular-nums">±{fmtPctDecimal(stats.min_abs_move_pct)}</p>
+            </div>
+          </div>
+
+          {/* Only show direct comparison when windows match */}
+          {isIsolated ? (
+            <p className="text-xs text-muted-foreground">
+              {stats.above_expected} of {stats.sample_size} past earnings exceeded this implied move ·{" "}
+              historical avg ±{fmtPctDecimal(stats.avg_abs_move_pct)}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground italic">
+              Direct comparison unavailable — the implied ±{fmtPctDecimal(emPct)} covers{" "}
+              {daysPast != null ? `${daysPast} days past earnings` : "multiple weeks"}, while these
+              figures measure the single earnings day only.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Data quality note — only shown when not already covered by the window-mismatch banner */}
+      {em.data_quality_note && !windowsMismatched && (
+        <p className="text-xs text-muted-foreground italic">{em.data_quality_note}</p>
+      )}
+    </div>
+  );
+}
+
+// ── OptionsChainView ──────────────────────────────────────────────────────────
+
+function OptionsChainView({
+  chain,
+  onExpiration,
+}: {
+  chain: OptionsChain;
+  onExpiration: (exp: string) => void;
+}) {
+  const allStrikes = useMemo(
+    () => Array.from(new Set([...chain.calls, ...chain.puts].map((c) => c.strike))).sort((a, b) => a - b),
+    [chain.calls, chain.puts],
+  );
+  const callMap = useMemo(
+    () => new Map<number, OptionContract>(chain.calls.map((c) => [c.strike, c])),
+    [chain.calls],
+  );
+  const putMap = useMemo(
+    () => new Map<number, OptionContract>(chain.puts.map((p) => [p.strike, p])),
+    [chain.puts],
+  );
+
+  // IV heatmap: compute min/max across all non-null IVs in this chain
+  const { minIV, maxIV } = useMemo(() => {
+    const ivs = [
+      ...chain.calls.map((c) => c.implied_volatility),
+      ...chain.puts.map((p) => p.implied_volatility),
+    ].filter((v): v is number => v != null);
+    return { minIV: ivs.length ? Math.min(...ivs) : 0, maxIV: ivs.length ? Math.max(...ivs) : 1 };
+  }, [chain.calls, chain.puts]);
+
+  return (
+    <div className="space-y-3">
+      {/* Expiration selector */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm text-muted-foreground">Expiration:</label>
+        <select
+          className="rounded-md border bg-background px-2 py-1 text-sm"
+          value={chain.expiration}
+          onChange={(e) => onExpiration(e.target.value)}
+        >
+          {chain.available_expirations.map((exp) => (
+            <option key={exp} value={exp}>{exp}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Chain table */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/40">
+                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
+                  <Tip text={TIPS.bid} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Call Bid</span>
+                  </Tip>
+                </th>
+                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
+                  <Tip text={TIPS.ask} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Call Ask</span>
+                  </Tip>
+                </th>
+                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
+                  <Tip text={TIPS.iv} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Call IV</span>
+                  </Tip>
+                </th>
+                <th className="px-3 py-2.5 text-center font-medium text-muted-foreground">
+                  <Tip text={TIPS.strike} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Strike</span>
+                  </Tip>
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
+                  <Tip text={TIPS.iv} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Put IV</span>
+                  </Tip>
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
+                  <Tip text={TIPS.bid} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Put Bid</span>
+                  </Tip>
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
+                  <Tip text={TIPS.ask} placement="below">
+                    <span className="underline decoration-dotted underline-offset-2">Put Ask</span>
+                  </Tip>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {allStrikes.map((strike) => {
+                const call = callMap.get(strike);
+                const put  = putMap.get(strike);
+                const isAtm = call?.is_atm || put?.is_atm;
+                return (
+                  <tr
+                    key={strike}
+                    className={cn(
+                      "transition-colors",
+                      isAtm ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-muted/30",
+                    )}
+                  >
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {call?.bid != null ? call.bid.toFixed(2) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {call?.ask != null ? call.ask.toFixed(2) : "—"}
+                    </td>
+                    {/* Call IV — heatmap tinted */}
+                    <td
+                      className="px-3 py-2 text-right tabular-nums font-medium"
+                      style={ivHeatBg(call?.implied_volatility ?? null, minIV, maxIV)}
+                    >
+                      {fmtIV(call?.implied_volatility ?? null)}
+                    </td>
+                    <td className="px-3 py-2 text-center font-semibold tabular-nums">
+                      {strike.toFixed(0)}
+                      {isAtm && (
+                        <Tip text={TIPS.atm} placement="below">
+                          <span className="ml-1 text-xs font-normal text-blue-600 dark:text-blue-400 underline decoration-dotted underline-offset-2">
+                            ATM
+                          </span>
+                        </Tip>
+                      )}
+                    </td>
+                    {/* Put IV — heatmap tinted */}
+                    <td
+                      className="px-3 py-2 text-left tabular-nums font-medium"
+                      style={ivHeatBg(put?.implied_volatility ?? null, minIV, maxIV)}
+                    >
+                      {fmtIV(put?.implied_volatility ?? null)}
+                    </td>
+                    <td className="px-3 py-2 text-left tabular-nums">
+                      {put?.bid != null ? put.bid.toFixed(2) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-left tabular-nums">
+                      {put?.ask != null ? put.ask.toFixed(2) : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {allStrikes.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                    No options data available for this expiration.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
+          IV columns are color-shaded from cool (low) to warm (high) — warmer = pricier vol.
+          Options data may be delayed after hours. Options are leveraged instruments — use for analytical context only.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── OptionsEducation ──────────────────────────────────────────────────────────
+
+function OptionsEducation({
+  em,
+  chain,
+  symbol,
+}: {
+  em: ExpectedMove;
+  chain: OptionsChain;
+  symbol: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const atmCall   = chain.calls.find((c) => c.is_atm);
+  const atmPut    = chain.puts.find((p)  => p.is_atm);
+  const strike    = em.atm_strike;
+  const price     = em.current_price;
+  const emPct     = em.expected_move_pct;
+  const exp       = em.expiration_used;
+
+  const callMid = atmCall
+    ? atmCall.bid != null && atmCall.ask != null
+      ? (atmCall.bid + atmCall.ask) / 2
+      : atmCall.last_price
+    : null;
+  const putMid = atmPut
+    ? atmPut.bid != null && atmPut.ask != null
+      ? (atmPut.bid + atmPut.ask) / 2
+      : atmPut.last_price
+    : null;
+
+  const callBreakeven = strike != null && callMid != null ? strike + callMid : null;
+  const putBreakeven  = strike != null && putMid  != null ? strike - putMid  : null;
+  const callIV        = atmCall?.implied_volatility;
+
+  return (
+    <div className="mt-6 rounded-lg border bg-card overflow-visible">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-medium hover:bg-muted/30 transition-colors text-left"
+        aria-expanded={open}
+      >
+        <span>How options work — applied to {symbol}</span>
+        <span className="text-muted-foreground text-xs shrink-0 ml-4">{open ? "▲ Collapse" : "▼ Expand"}</span>
+      </button>
+
+      {open && (
+        <div className="border-t divide-y divide-border/60">
+
+          {/* 1 — Calls & Puts */}
+          <section className="px-5 py-4 space-y-2 text-sm leading-relaxed">
+            <h3 className="font-semibold">Calls & Puts</h3>
+            <p className="text-muted-foreground">
+              A <strong className="text-foreground">call option</strong> gives you the right to{" "}
+              <em>buy</em> {symbol} at a fixed price (the <em>strike</em>) by the expiration date —
+              no matter how high the stock goes.
+              {strike != null && callMid != null && (
+                <> The ${strike} call currently costs about{" "}
+                  <strong className="text-foreground">${callMid.toFixed(2)}</strong> per share.
+                  You profit if {symbol} climbs above{" "}
+                  <strong className="text-foreground">
+                    ${callBreakeven?.toFixed(2)}
+                  </strong>{" "}
+                  by {exp} — that's the strike plus the option's cost (your breakeven).
+                </>
+              )}
+            </p>
+            <p className="text-muted-foreground">
+              A <strong className="text-foreground">put option</strong> is the mirror image — the
+              right to <em>sell</em> at the strike, useful when you expect the stock to fall.
+              {strike != null && putMid != null && (
+                <> The ${strike} put costs about{" "}
+                  <strong className="text-foreground">${putMid.toFixed(2)}</strong>.
+                  It profits if {symbol} drops below{" "}
+                  <strong className="text-foreground">
+                    ${putBreakeven?.toFixed(2)}
+                  </strong>{" "}
+                  by {exp}.
+                </>
+              )}
+            </p>
+            <p className="text-muted-foreground">
+              Options expire worthless if the stock never reaches the breakeven. You can also sell
+              them before expiry — if the stock moves your way, the option gains value even before
+              expiration.
+            </p>
+          </section>
+
+          {/* 2 — Expected Move */}
+          <section className="px-5 py-4 space-y-2 text-sm leading-relaxed">
+            <h3 className="font-semibold">The Expected Move</h3>
+            <p className="text-muted-foreground">
+              The "expected move" comes from adding the ATM call and put prices together — a
+              position called a <em>straddle</em>.
+              {em.straddle_price != null && strike != null && (
+                <> The ${strike} straddle costs{" "}
+                  <strong className="text-foreground">${em.straddle_price.toFixed(2)}</strong>.
+                  That's the market's implied range of motion in either direction.
+                </>
+              )}
+            </p>
+            {emPct != null && em.implied_range_low != null && em.implied_range_high != null && (
+              <p className="text-muted-foreground">
+                Dividing by the stock price gives{" "}
+                <strong className="text-foreground">±{(emPct * 100).toFixed(1)}%</strong>, which
+                puts the implied range at{" "}
+                <strong className="text-foreground">
+                  ${em.implied_range_low.toFixed(2)}–${em.implied_range_high.toFixed(2)}
+                </strong>{" "}
+                by {exp}. Any option struck <em>outside</em> that range is a bet that {symbol} moves
+                more than the market currently expects.
+              </p>
+            )}
+            {em.days_expiration_past_earnings != null && em.earnings_date && (
+              <p className="text-muted-foreground text-xs italic">
+                Note: the expiration is {em.days_expiration_past_earnings} days past the{" "}
+                {em.earnings_date} earnings, so this range reflects the full period to expiration,
+                not just the single earnings day.
+              </p>
+            )}
+          </section>
+
+          {/* 3 — Implied Volatility */}
+          <section className="px-5 py-4 space-y-2 text-sm leading-relaxed">
+            <h3 className="font-semibold">Implied Volatility (IV)</h3>
+            <p className="text-muted-foreground">
+              IV is the market's forecast of how much a stock will move, expressed as an annualized
+              percentage. High IV = bigger expected swings = pricier options. Low IV = calmer
+              expectations = cheaper options.
+              {callIV != null && price != null && (
+                <> {symbol}'s ATM call IV is currently{" "}
+                  <strong className="text-foreground">{(callIV * 100).toFixed(1)}%</strong>{" "}
+                  annualized.
+                </>
+              )}
+            </p>
+            {callIV != null && (
+              <p className="text-muted-foreground">
+                You can estimate the expected <em>daily</em> move by dividing by √252 (trading days
+                per year): {(callIV * 100).toFixed(1)}% ÷ 15.9 ≈{" "}
+                <strong className="text-foreground">
+                  {((callIV / Math.sqrt(252)) * 100).toFixed(1)}% per day
+                </strong>
+                . Whether that's high or low <em>for {symbol} specifically</em> is called IV Rank — a
+                future feature.
+              </p>
+            )}
+          </section>
+
+          {/* 4 — Reading the Chain */}
+          <section className="px-5 py-4 space-y-2 text-sm leading-relaxed">
+            <h3 className="font-semibold">Reading the Chain</h3>
+            <p className="text-muted-foreground">
+              The options chain shows every available strike for a given expiration. Each row has a
+              call on the left and a put on the right, with the strike price in the middle. The{" "}
+              <strong className="text-foreground">ATM row</strong> (highlighted in blue) is where the
+              expected move is anchored.
+            </p>
+            <p className="text-muted-foreground">
+              <strong className="text-foreground">Bid/Ask:</strong> the prices market makers will
+              buy/sell at — the fair value is usually the midpoint.{" "}
+              <strong className="text-foreground">IV</strong> is color-coded: warmer (orange) means
+              higher implied volatility, cooler (blue) means lower. Notice that put IV is often
+              higher than call IV at the same strike — this is called <em>volatility skew</em>,
+              reflecting the market's greater fear of sharp drops than sharp rallies.
+            </p>
+          </section>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Status types ──────────────────────────────────────────────────────────────
 
 type TickerStatus   = "loading" | "found" | "missing" | "error";
@@ -829,6 +1383,13 @@ export default function TickerPage() {
   const [reactionError, setReactionError]   = useState<string | null>(null);
 
   const [quote, setQuote]             = useState<TickerQuote | null>(null);
+
+  const [expectedMove, setExpectedMove]   = useState<ExpectedMove | null>(null);
+  const [emStatus, setEmStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
+  const [optionsChain, setOptionsChain]   = useState<OptionsChain | null>(null);
+  const [ocStatus, setOcStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
+  const [selectedExpiration, setSelectedExpiration] = useState<string | null>(null);
+
   const [note, setNote]               = useState<ResearchNote | null>(null);
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
   const [generating, setGenerating]   = useState(false);
@@ -866,6 +1427,27 @@ export default function TickerPage() {
   useEffect(() => {
     api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
   }, [upperSymbol]);
+
+  useEffect(() => {
+    api.tickers.expectedMove(upperSymbol)
+      .then((data) => {
+        setExpectedMove(data);
+        if (data.expiration_used) setSelectedExpiration(data.expiration_used);
+        setEmStatus(data.expected_move_pct != null || data.current_price != null ? "done" : "empty");
+      })
+      .catch(() => setEmStatus("error"));
+  }, [upperSymbol]);
+
+  useEffect(() => {
+    if (selectedExpiration === null) return;
+    setOcStatus("loading");
+    api.tickers.options(upperSymbol, selectedExpiration)
+      .then((data) => {
+        setOptionsChain(data);
+        setOcStatus(data.calls.length > 0 || data.puts.length > 0 ? "done" : "empty");
+      })
+      .catch(() => setOcStatus("error"));
+  }, [upperSymbol, selectedExpiration]);
 
   useEffect(() => {
     api.researchNotes
@@ -1200,6 +1782,69 @@ export default function TickerPage() {
             </div>
           )}
         </div>
+
+        {/* ── Options & Expected Move ────────────────────────────────────────── */}
+        <div className="mt-10 mb-10">
+          <h2 className="text-lg font-semibold mb-4">Options & Expected Move</h2>
+
+          {emStatus === "loading" && (
+            <div className="animate-pulse space-y-3">
+              <div className="h-6 bg-muted rounded w-3/4 mb-4" />
+              <div className="h-28 bg-muted rounded-lg" />
+            </div>
+          )}
+          {emStatus === "error" && (
+            <p className="text-sm text-muted-foreground">Could not load options data.</p>
+          )}
+          {emStatus === "empty" && (
+            <p className="text-sm text-muted-foreground">No options data available for {upperSymbol}.</p>
+          )}
+          {emStatus === "done" && expectedMove && (
+            <>
+              {/* Plain-English summary — prominent, above the card */}
+              {expectedMove.plain_summary && (
+                <p className="text-base text-foreground leading-relaxed mb-4">
+                  {expectedMove.plain_summary}
+                </p>
+              )}
+              <ExpectedMoveCard
+                em={expectedMove}
+                onSelectExpiration={setSelectedExpiration}
+              />
+            </>
+          )}
+
+          <div className="mt-6">
+            {selectedExpiration !== null && ocStatus === "loading" && (
+              <div className="animate-pulse space-y-3">
+                <div className="h-8 bg-muted rounded w-48" />
+                <div className="h-64 bg-muted rounded-lg" />
+              </div>
+            )}
+            {ocStatus === "error" && (
+              <p className="text-sm text-muted-foreground">Could not load options chain.</p>
+            )}
+            {ocStatus === "empty" && (
+              <p className="text-sm text-muted-foreground">No options chain data available.</p>
+            )}
+            {ocStatus === "done" && optionsChain && (
+              <OptionsChainView
+                chain={optionsChain}
+                onExpiration={setSelectedExpiration}
+              />
+            )}
+          </div>
+
+          {/* Education — rendered when both datasets are ready */}
+          {emStatus === "done" && expectedMove && ocStatus === "done" && optionsChain && (
+            <OptionsEducation
+              em={expectedMove}
+              chain={optionsChain}
+              symbol={upperSymbol}
+            />
+          )}
+        </div>
+
       </div>
     </main>
   );

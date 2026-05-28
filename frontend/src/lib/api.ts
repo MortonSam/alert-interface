@@ -153,6 +153,33 @@ export interface TickerQuote {
   sparkline: SparklinePoint[];
 }
 
+export interface OptionContract {
+  strike: number; bid: number | null; ask: number | null; last_price: number | null;
+  volume: number | null; open_interest: number | null;
+  implied_volatility: number | null;  // 0–1 decimal
+  is_atm: boolean;
+}
+export interface OptionsChain {
+  symbol: string; expiration: string; current_price: number | null;
+  calls: OptionContract[]; puts: OptionContract[];
+  available_expirations: string[]; as_of: string;
+}
+export interface HistoricalMoveStats {
+  avg_abs_move_pct: number; max_abs_move_pct: number; min_abs_move_pct: number;
+  sample_size: number; above_expected: number; below_expected: number;
+}
+export interface ExpectedMove {
+  symbol: string; current_price: number | null;
+  expected_move_pct: number | null; expected_move_dollars: number | null;
+  implied_range_low: number | null; implied_range_high: number | null;
+  expiration_used: string | null; earnings_date: string | null;
+  days_expiration_past_earnings: number | null;
+  straddle_price: number | null; atm_strike: number | null;
+  historical_stats: HistoricalMoveStats | null;
+  plain_summary: string | null;
+  data_quality_note: string | null; as_of: string;
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -185,6 +212,12 @@ export const api = {
       request<Ticker>(`/tickers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/tickers/${id}`, { method: "DELETE" }),
+    expectedMove: (symbol: string) =>
+      request<ExpectedMove>(`/tickers/expected-move/${symbol}`),
+    options: (symbol: string, expiration?: string) =>
+      request<OptionsChain>(expiration
+        ? `/tickers/options/${symbol}?expiration=${encodeURIComponent(expiration)}`
+        : `/tickers/options/${symbol}`),
   },
 
   watchlists: {

@@ -1,8 +1,10 @@
 import asyncio
 import uuid
-from datetime import date
+from datetime import date, timedelta, timezone
+from datetime import datetime as dt_datetime
+from statistics import mean
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,11 +12,97 @@ from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
+from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead
 from app.schemas.ticker import EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
+
+
+def _build_plain_summary(
+    symbol: str,
+    expected_move_pct: float | None,
+    implied_range_low: float | None,
+    implied_range_high: float | None,
+    expiration_used: str | None,
+    earnings_date: str | None,
+    days_expiration_past_earnings: int | None,
+    historical_stats: HistoricalMoveStats | None,
+) -> str | None:
+    if expected_move_pct is None or expiration_used is None:
+        return None
+
+    pct_str = f"±{expected_move_pct * 100:.1f}%"
+
+    # Base sentence
+    if implied_range_low is not None and implied_range_high is not None:
+        base = (
+            f"{symbol} options are pricing in a {pct_str} move "
+            f"(${implied_range_low:.2f}–${implied_range_high:.2f}) by {expiration_used}."
+        )
+    else:
+        base = f"{symbol} options are pricing in a {pct_str} move by {expiration_used}."
+
+    parts = [base]
+
+    # Earnings clause — only when expiration is within 30 days of earnings
+    if (
+        earnings_date
+        and days_expiration_past_earnings is not None
+        and 0 <= days_expiration_past_earnings <= 30
+    ):
+        parts.append(f"This is partly driven by the {earnings_date} earnings report.")
+
+    # Magnitude vs historical — always honest about window mismatch
+    if historical_stats and historical_stats.sample_size >= 3:
+        avg = historical_stats.avg_abs_move_pct
+        hist_str = f"±{avg * 100:.1f}%"
+        max_str = f"±{historical_stats.max_abs_move_pct * 100:.1f}%"
+
+        if days_expiration_past_earnings is not None and days_expiration_past_earnings <= 3:
+            # Windows roughly match — direct comparison fair
+            ratio = expected_move_pct / avg if avg > 0 else 1.0
+            if ratio > 1.25:
+                parts.append(
+                    f"That's a wider-than-usual range — the historical average 1-day earnings move is {hist_str}."
+                )
+            elif ratio < 0.80:
+                parts.append(
+                    f"That's a narrower-than-usual range — the historical average 1-day earnings move is {hist_str}."
+                )
+            else:
+                parts.append(
+                    f"That's roughly in line with the historical average 1-day earnings move of {hist_str}."
+                )
+        else:
+            # Mismatched windows — show historical for context but frame honestly
+            days_label = (
+                f"{days_expiration_past_earnings} days to expiration"
+                if days_expiration_past_earnings is not None
+                else "multiple weeks to expiration"
+            )
+            parts.append(
+                f"For context, {symbol}'s historical average 1-day earnings move is {hist_str} (max {max_str}), "
+                f"but the implied {pct_str} covers {days_label}, not just the earnings day."
+            )
+
+    return " ".join(parts)
+
+
+def _mid_or_last(bid, ask, last):
+    if bid and ask and bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    return last if last and last > 0 else None
+
+
+def _build_contracts(chain_side, atm_strike):
+    return [OptionContractRead(
+        strike=c["strike"], bid=c["bid"], ask=c["ask"], last_price=c["lastPrice"],
+        volume=c["volume"], open_interest=c["openInterest"],
+        implied_volatility=c["impliedVolatility"],
+        is_atm=(atm_strike is not None and c["strike"] == atm_strike),
+    ) for c in chain_side]
 
 
 @router.get("/", response_model=list[TickerRead])
@@ -141,6 +229,227 @@ async def get_ticker_chart(
                 ))
 
     return TickerChartRead(symbol=sym, period=period, history=history, earnings_markers=markers)
+
+
+@router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
+async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> ExpectedMoveRead:
+    sym = symbol.upper()
+    finnhub = FinnhubClient()
+    loop = asyncio.get_event_loop()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+
+    try:
+        quote, expirations = await asyncio.gather(
+            finnhub.get_quote(sym),
+            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+    finally:
+        await finnhub.close()
+
+    current_price = float(quote.get("c") or 0) or None
+
+    if not expirations:
+        return ExpectedMoveRead(
+            symbol=sym, current_price=current_price,
+            expected_move_pct=None, expected_move_dollars=None,
+            implied_range_low=None, implied_range_high=None,
+            expiration_used=None, earnings_date=None,
+            days_expiration_past_earnings=None,
+            straddle_price=None, atm_strike=None,
+            historical_stats=None,
+            plain_summary=None,
+            data_quality_note="No options expirations available for this symbol.",
+            as_of=as_of,
+        )
+
+    today = date.today()
+
+    # Look up ticker + next earnings
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    earnings_str: str | None = None
+    if ticker_row:
+        ned_q = (
+            select(func.min(Event.event_date))
+            .where(Event.event_type == "earnings", Event.event_date >= today)
+            .where(Event.ticker_id == ticker_row.id)
+        )
+        ned_result = (await db.execute(ned_q)).scalar_one_or_none()
+        if ned_result:
+            earnings_str = ned_result.isoformat() if hasattr(ned_result, "isoformat") else str(ned_result)
+
+    data_quality_note: str | None = None
+    chosen_exp: str | None = None
+    days_expiration_past_earnings: int | None = None
+
+    if earnings_str:
+        # Pick the expiration CLOSEST to (but not before) earnings — minimises extra vol
+        post_earnings = [e for e in expirations if e >= earnings_str]
+        if post_earnings:
+            chosen_exp = post_earnings[0]  # expirations are already sorted ascending
+        else:
+            chosen_exp = expirations[-1]
+            data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
+
+        if chosen_exp and earnings_str:
+            earnings_date_obj = date.fromisoformat(earnings_str)
+            exp_date_obj = date.fromisoformat(chosen_exp)
+            days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
+            if days_expiration_past_earnings > 7 and data_quality_note is None:
+                data_quality_note = (
+                    f"Nearest available expiration ({chosen_exp}) is "
+                    f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
+                    f"The implied move covers the full period to expiration, not just the earnings event."
+                )
+    else:
+        week_out = (today + timedelta(days=7)).isoformat()
+        chosen_exp = next((e for e in expirations if e >= week_out), None)
+        if chosen_exp is None:
+            chosen_exp = expirations[0]
+        data_quality_note = "No earnings date found; using nearest weekly expiration."
+
+    chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+
+    calls = chain.get("calls", [])
+    puts = chain.get("puts", [])
+
+    call_strikes = {c["strike"] for c in calls}
+    put_strikes = {p["strike"] for p in puts}
+    intersection = call_strikes & put_strikes
+
+    atm_strike: float | None = None
+    straddle_price: float | None = None
+    expected_move_pct: float | None = None
+    expected_move_dollars: float | None = None
+    implied_range_low: float | None = None
+    implied_range_high: float | None = None
+
+    if intersection and current_price:
+        atm_strike = min(intersection, key=lambda s: abs(s - current_price))
+        atm_call = next((c for c in calls if c["strike"] == atm_strike), None)
+        atm_put = next((p for p in puts if p["strike"] == atm_strike), None)
+        call_price = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
+        put_price = _mid_or_last(atm_put["bid"], atm_put["ask"], atm_put["lastPrice"]) if atm_put else None
+        if call_price is not None and put_price is not None:
+            straddle_price = call_price + put_price
+            expected_move_pct = straddle_price / current_price
+            expected_move_dollars = straddle_price
+            implied_range_low = current_price - straddle_price
+            implied_range_high = current_price + straddle_price
+
+    # Historical stats
+    historical_stats: HistoricalMoveStats | None = None
+    if ticker_row:
+        r_q = select(HistoricalReaction).where(
+            HistoricalReaction.ticker_id == ticker_row.id,
+            HistoricalReaction.event_type == "earnings",
+            HistoricalReaction.pct_change_1d.isnot(None),
+        )
+        reactions = (await db.execute(r_q)).scalars().all()
+        if reactions:
+            abs_moves = [abs(float(r.pct_change_1d)) / 100 for r in reactions]
+            historical_stats = HistoricalMoveStats(
+                avg_abs_move_pct=mean(abs_moves),
+                max_abs_move_pct=max(abs_moves),
+                min_abs_move_pct=min(abs_moves),
+                sample_size=len(abs_moves),
+                above_expected=sum(1 for m in abs_moves if expected_move_pct is not None and m > expected_move_pct),
+                below_expected=sum(1 for m in abs_moves if expected_move_pct is None or m <= expected_move_pct),
+            )
+
+    plain_summary = _build_plain_summary(
+        symbol=sym,
+        expected_move_pct=expected_move_pct,
+        implied_range_low=implied_range_low,
+        implied_range_high=implied_range_high,
+        expiration_used=chosen_exp,
+        earnings_date=earnings_str,
+        days_expiration_past_earnings=days_expiration_past_earnings,
+        historical_stats=historical_stats,
+    )
+
+    return ExpectedMoveRead(
+        symbol=sym,
+        current_price=current_price,
+        expected_move_pct=expected_move_pct,
+        expected_move_dollars=expected_move_dollars,
+        implied_range_low=implied_range_low,
+        implied_range_high=implied_range_high,
+        expiration_used=chosen_exp,
+        earnings_date=earnings_str,
+        days_expiration_past_earnings=days_expiration_past_earnings,
+        straddle_price=straddle_price,
+        atm_strike=atm_strike,
+        historical_stats=historical_stats,
+        plain_summary=plain_summary,
+        data_quality_note=data_quality_note,
+        as_of=as_of,
+    )
+
+
+@router.get("/options/{symbol}", response_model=OptionsChainRead)
+async def get_options_chain(
+    symbol: str,
+    expiration: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> OptionsChainRead:
+    sym = symbol.upper()
+    finnhub = FinnhubClient()
+    loop = asyncio.get_event_loop()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+
+    try:
+        quote, available = await asyncio.gather(
+            finnhub.get_quote(sym),
+            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+    finally:
+        await finnhub.close()
+
+    current_price = float(quote.get("c") or 0) or None
+
+    if not available:
+        return OptionsChainRead(
+            symbol=sym, expiration="", current_price=current_price,
+            calls=[], puts=[], available_expirations=[], as_of=as_of,
+        )
+
+    chosen = expiration if (expiration and expiration in available) else available[0]
+    chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen)
+
+    calls_raw = chain.get("calls", [])
+    puts_raw = chain.get("puts", [])
+
+    all_strikes = sorted({c["strike"] for c in calls_raw} | {p["strike"] for p in puts_raw})
+    atm_strike: float | None = None
+    if all_strikes and current_price:
+        atm_strike = min(all_strikes, key=lambda s: abs(s - current_price))
+
+    def _filter_side(side_raw):
+        if not atm_strike:
+            return side_raw
+        sorted_strikes = sorted({c["strike"] for c in side_raw})
+        if atm_strike not in sorted_strikes:
+            return side_raw
+        atm_idx = sorted_strikes.index(atm_strike)
+        keep = set(sorted_strikes[max(0, atm_idx - 15): atm_idx + 16])
+        return [c for c in side_raw if c["strike"] in keep]
+
+    filtered_calls = _filter_side(calls_raw)
+    filtered_puts = _filter_side(puts_raw)
+
+    return OptionsChainRead(
+        symbol=sym,
+        expiration=chosen,
+        current_price=current_price,
+        calls=_build_contracts(filtered_calls, atm_strike),
+        puts=_build_contracts(filtered_puts, atm_strike),
+        available_expirations=available,
+        as_of=as_of,
+    )
 
 
 @router.get("/{ticker_id}", response_model=TickerRead)
