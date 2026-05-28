@@ -10,7 +10,7 @@ import yfinance as yf
 class YFinanceClient:
     @staticmethod
     def get_info(symbol: str) -> dict[str, Any]:
-        return yf.Ticker(symbol).info
+        return yf.Ticker(symbol).info or {}
 
     @staticmethod
     def get_earnings_calendar(symbol: str) -> dict[str, Any]:

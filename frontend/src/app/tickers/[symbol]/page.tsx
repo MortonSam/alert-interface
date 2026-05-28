@@ -845,7 +845,18 @@ export default function TickerPage() {
 
           {noteStatus === "done" && note && !generating && (
             <div className="rounded-lg border bg-card">
-              {/* Contradicted warning banner */}
+              {/* Ungrounded filing warning — shown when no SEC filing was available */}
+              {note.source_filings.length === 0 && (
+                <div className="flex items-start gap-3 px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900 text-sm text-amber-700 dark:text-amber-400">
+                  <span className="mt-0.5 shrink-0">⚠</span>
+                  <span>
+                    <strong>Generated without SEC filing.</strong>{" "}
+                    This note is based on general knowledge and earnings history only — not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                  </span>
+                </div>
+              )}
+
+              {/* Contradicted claims warning */}
               {note.verification && note.verification.summary.contradicted > 0 && (
                 <div className="flex items-start gap-3 px-6 py-3 bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900 text-sm text-red-700 dark:text-red-400">
                   <span className="mt-0.5 shrink-0">⚠</span>
@@ -881,8 +892,8 @@ export default function TickerPage() {
                 <ReactMarkdown>{note.content}</ReactMarkdown>
               </div>
 
-              {/* Verification panel */}
-              {note.verification && (
+              {/* Verification panel — or notice if verification was unavailable */}
+              {note.verification ? (
                 <VerificationPanel
                   verification={note.verification}
                   verifiedAt={note.verified_at}
@@ -890,6 +901,23 @@ export default function TickerPage() {
                   open={verificationOpen}
                   onToggle={() => setVerificationOpen(o => !o)}
                 />
+              ) : (
+                <div className="border-t px-6 py-3 text-xs text-muted-foreground">
+                  Verification unavailable — claims in this note have not been checked against source data.
+                  <button
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          const n = await api.researchNotes.verify(upperSymbol);
+                          setNote(n);
+                        } catch { /* ignore */ }
+                      })();
+                    }}
+                    className="ml-2 underline underline-offset-2 hover:text-foreground transition-colors"
+                  >
+                    Retry verification
+                  </button>
+                </div>
               )}
             </div>
           )}

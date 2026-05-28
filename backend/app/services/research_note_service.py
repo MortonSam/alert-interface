@@ -333,10 +333,16 @@ async def generate_research_note(
     ticker = await _resolve_ticker(db, ticker_id, symbol)
     filing, sections, reactions = await _fetch_context(db, ticker)
 
-    # Generate
+    # Generate — upstream failure → 502 with a clear message
     prompt = _build_generation_prompt(ticker, filing, sections, reactions)
     client = AnthropicClient()
-    gen = await client.generate_research_note(prompt)
+    try:
+        gen = await client.generate_research_note(prompt)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Research note generation failed: {exc}. Please try again.",
+        )
 
     print(
         f"Research note generated for {ticker.symbol}: "
@@ -344,10 +350,21 @@ async def generate_research_note(
         flush=True,
     )
 
-    # Verify
-    verification, verification_model = await _run_verification(
-        gen["content"], filing, sections, reactions
-    )
+    # Verify — best-effort: never discard the note if verification fails for any reason
+    verification: dict | None = None
+    verification_model: str | None = None
+    verified_at_dt: datetime | None = None
+    try:
+        verification, verification_model = await _run_verification(
+            gen["content"], filing, sections, reactions
+        )
+        verified_at_dt = datetime.now(timezone.utc)
+    except Exception as exc:
+        print(
+            f"Verification failed for {ticker.symbol}: {exc!r} "
+            f"— saving note without verification",
+            flush=True,
+        )
 
     source_filings: list[dict] = []
     if filing:
@@ -370,7 +387,7 @@ async def generate_research_note(
             input_tokens       = gen["input_tokens"],
             output_tokens      = gen["output_tokens"],
             verification       = verification,
-            verified_at        = now,
+            verified_at        = verified_at_dt,
             verification_model = verification_model,
         )
         .on_conflict_do_update(
@@ -383,7 +400,7 @@ async def generate_research_note(
                 input_tokens       = gen["input_tokens"],
                 output_tokens      = gen["output_tokens"],
                 verification       = verification,
-                verified_at        = now,
+                verified_at        = verified_at_dt,
                 verification_model = verification_model,
                 updated_at         = now,
             ),
@@ -413,9 +430,15 @@ async def verify_existing_note(
         raise HTTPException(status_code=404, detail="No research note found — generate one first")
 
     filing, sections, reactions = await _fetch_context(db, ticker)
-    verification, verification_model = await _run_verification(
-        note.content, filing, sections, reactions
-    )
+    try:
+        verification, verification_model = await _run_verification(
+            note.content, filing, sections, reactions
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Verification failed: {exc}. Please try again.",
+        )
 
     now = datetime.now(timezone.utc)
     note.verification       = verification

@@ -69,7 +69,10 @@ class EdgarClient:
             resp = await self._sec_client.get("/files/company_tickers.json")
             resp.raise_for_status()
             data = resp.json()
-            cache_file.write_text(json.dumps(data))
+            try:
+                cache_file.write_text(json.dumps(data))
+            except OSError as exc:
+                print(f"Warning: could not write CIK cache: {exc}", flush=True)
 
         upper = symbol.upper()
         for entry in data.values():
@@ -145,7 +148,10 @@ class EdgarClient:
         resp = await self._sec_client.get(url)
         resp.raise_for_status()
         html = resp.text
-        cache_file.write_text(html, encoding="utf-8")
+        try:
+            cache_file.write_text(html, encoding="utf-8")
+        except OSError as exc:
+            print(f"Warning: could not cache filing {accession_number}: {exc}", flush=True)
         return html
 
     # ── Section extraction ───────────────────────────────────────────────────
