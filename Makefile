@@ -38,6 +38,9 @@ seed-reactions-all:
 seed-reactions-retry:
 	docker compose exec backend python -m app.scripts.seed_historical_reactions --retry-only
 
+seed-reactions-force:
+	docker compose exec backend python -m app.scripts.seed_historical_reactions --all --force
+
 seed-sp500:
 	docker compose exec backend python -m app.scripts.seed_sp500
 

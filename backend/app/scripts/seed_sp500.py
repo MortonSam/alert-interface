@@ -271,6 +271,7 @@ async def upsert_ticker(session, data: dict) -> Ticker:
                 industry   = data["industry"],
                 exchange   = data["exchange"],
                 market_cap = data["market_cap"],
+                updated_at = datetime.now(timezone.utc),
             ),
         )
         .returning(Ticker)

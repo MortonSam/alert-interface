@@ -73,7 +73,7 @@ BULK_BATCH_SIZE    = 5
 BULK_BATCH_SLEEP   = 3.0          # seconds between batches
 BULK_RETRY_DELAYS  = (3, 8, 15)   # seconds for retry 1, 2, 3
 SKIP_MIN_REACTIONS = 15           # skip if ticker already has at least this many ...
-SKIP_WITHIN_DAYS   = 90           # ... AND the most recent is within this many days
+SKIP_WITHIN_DAYS   = 14           # ... AND the most recent is within this many days
 
 
 # ── Price helpers ─────────────────────────────────────────────────────────────
@@ -433,7 +433,7 @@ async def process_ticker_bulk(ticker: Ticker, loop) -> tuple[bool, int, int, int
 
 # ── Bulk main ─────────────────────────────────────────────────────────────────
 
-async def main_bulk(retry_only: bool, limit: int | None) -> int:
+async def main_bulk(retry_only: bool, limit: int | None, force: bool = False) -> int:
     # 1. Load all DB tickers
     async with AsyncSessionLocal() as session:
         all_tickers: list[Ticker] = list(
@@ -456,9 +456,13 @@ async def main_bulk(retry_only: bool, limit: int | None) -> int:
         candidates = candidates[:limit]
         print(f"--limit {limit}: processing first {len(candidates)} tickers.", flush=True)
 
-    # 2. Build skip set
-    async with AsyncSessionLocal() as session:
-        skip_set = await build_reactions_skip_set(session)
+    # 2. Build skip set (empty when --force)
+    if force:
+        skip_set: set[str] = set()
+        print("--force: skipping freshness check, reprocessing all tickers.", flush=True)
+    else:
+        async with AsyncSessionLocal() as session:
+            skip_set = await build_reactions_skip_set(session)
 
     to_process = [t for t in candidates if t.symbol not in skip_set]
     n_skipped  = len(candidates) - len(to_process)
@@ -533,6 +537,8 @@ def parse_args() -> argparse.Namespace:
                    help="Only retry symbols from cache/failed_reactions.json")
     p.add_argument("--limit", type=int, default=None, metavar="N",
                    help="Cap the candidate list at N (for testing; use with --all or --retry-only)")
+    p.add_argument("--force", action="store_true",
+                   help="Skip the freshness check and reprocess all tickers")
     return p.parse_args()
 
 
@@ -540,7 +546,7 @@ async def main() -> int:
     args = parse_args()
 
     if args.all_tickers or args.retry_only:
-        return await main_bulk(retry_only=args.retry_only, limit=args.limit)
+        return await main_bulk(retry_only=args.retry_only, limit=args.limit, force=args.force)
 
     # One-off mode: positional TICKER args
     symbols = [s.upper() for s in args.tickers]
