@@ -5,8 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.research_note import ResearchNote
-from app.schemas.research_note import ResearchNoteGenerateRequest, ResearchNoteRead
-from app.services.research_note_service import generate_research_note, get_research_note
+from app.schemas.research_note import (
+    ResearchNoteGenerateRequest,
+    ResearchNoteRead,
+    ResearchNoteVerifyRequest,
+)
+from app.services.research_note_service import (
+    generate_research_note,
+    get_research_note,
+    verify_existing_note,
+)
 
 router = APIRouter(prefix="/research-notes", tags=["research-notes"])
 
@@ -17,6 +25,14 @@ async def generate(
     db: AsyncSession = Depends(get_db),
 ) -> ResearchNote:
     return await generate_research_note(db, payload.ticker_id, payload.symbol)
+
+
+@router.post("/verify", response_model=ResearchNoteRead)
+async def verify(
+    payload: ResearchNoteVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ResearchNote:
+    return await verify_existing_note(db, payload.ticker_id, payload.symbol)
 
 
 @router.get("/", response_model=ResearchNoteRead)

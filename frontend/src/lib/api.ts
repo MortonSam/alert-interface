@@ -90,6 +90,17 @@ export interface SourceFiling {
   url: string;
 }
 
+export interface VerificationClaim {
+  claim: string;
+  status: "supported" | "unsupported" | "contradicted";
+  evidence: string;
+}
+
+export interface VerificationResult {
+  claims: VerificationClaim[];
+  summary: { supported: number; unsupported: number; contradicted: number };
+}
+
 export interface ResearchNote {
   id: string;
   ticker_id: string;
@@ -99,6 +110,9 @@ export interface ResearchNote {
   model_used: string;
   input_tokens: number;
   output_tokens: number;
+  verification: VerificationResult | null;
+  verified_at: string | null;
+  verification_model: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -170,6 +184,11 @@ export const api = {
       request<ResearchNote>(`/research-notes/?symbol=${encodeURIComponent(symbol)}`),
     generate: (symbol: string) =>
       request<ResearchNote>("/research-notes/generate", {
+        method: "POST",
+        body: JSON.stringify({ symbol }),
+      }),
+    verify: (symbol: string) =>
+      request<ResearchNote>("/research-notes/verify", {
         method: "POST",
         body: JSON.stringify({ symbol }),
       }),

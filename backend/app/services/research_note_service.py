@@ -1,7 +1,8 @@
-"""Service layer for generating and retrieving AI research notes."""
+"""Service layer for generating and verifying AI research notes."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -42,11 +43,7 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     def _stats(vals: list[float]) -> dict:
         if not vals:
             return {"min": None, "max": None, "avg": None}
-        return {
-            "min": min(vals),
-            "max": max(vals),
-            "avg": sum(vals) / len(vals),
-        }
+        return {"min": min(vals), "max": max(vals), "avg": sum(vals) / len(vals)}
 
     vals_1d = [v for r in reactions if (v := _pct(r.pct_change_1d)) is not None]
     vals_3d = [v for r in reactions if (v := _pct(r.pct_change_3d)) is not None]
@@ -54,8 +51,7 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
 
     s1, s3, s5 = _stats(vals_1d), _stats(vals_3d), _stats(vals_5d)
 
-    # Most recent quarter (first row — already ordered DESC)
-    latest = reactions[0]
+    latest          = reactions[0]
     latest_date     = str(latest.event_date)
     latest_outcome  = latest.outcome.value
     latest_eps_est  = f"${float(latest.eps_estimate):.2f}" if latest.eps_estimate else "N/A"
@@ -105,7 +101,7 @@ PRECOMPUTED STATISTICS (authoritative — use these exact figures, do not recoun
 """
 
 
-# ── Prompt builder ────────────────────────────────────────────────────────────
+# ── Prompt builders ───────────────────────────────────────────────────────────
 
 def _format_market_cap(mc: int | None) -> str:
     if mc is None:
@@ -119,7 +115,7 @@ def _format_market_cap(mc: int | None) -> str:
     return f"${mc:,}"
 
 
-def _build_prompt(
+def _build_generation_prompt(
     ticker: Ticker,
     filing: dict | None,
     sections: dict | None,
@@ -130,7 +126,6 @@ def _build_prompt(
     industry   = ticker.industry or "N/A"
     market_cap = _format_market_cap(ticker.market_cap)
 
-    # Filing block
     if filing and sections:
         mda   = sections.get("mda", "").strip()
         risks = sections.get("risk_factors", "").strip()
@@ -143,11 +138,9 @@ def _build_prompt(
     else:
         filing_block = "(No SEC filing available — use general knowledge for this company.)"
 
-    # Precomputed stats
     stats = _precompute_stats(reactions)
     stats_block = _stats_block(stats)
 
-    # Raw earnings table (for qualitative context only)
     if reactions:
         rows = []
         for r in reactions:
@@ -205,17 +198,62 @@ Target 400-600 words. Be specific; cite numbers from the filing or the precomput
 """
 
 
-# ── Generate ──────────────────────────────────────────────────────────────────
+def _build_verification_prompt(
+    note_content: str,
+    filing: dict | None,
+    sections: dict | None,
+    reactions: list[HistoricalReaction],
+) -> str:
+    if filing and sections:
+        mda   = sections.get("mda", "").strip()
+        risks = sections.get("risk_factors", "").strip()
+        filing_block = (
+            f"FILING: {filing['form_type']} filed {filing['filing_date']}\n"
+            f"--- MD&A ---\n{mda or '(not extracted)'}\n"
+            f"--- RISK FACTORS ---\n{risks or '(not extracted)'}\n"
+            f"--- END ---"
+        )
+    else:
+        filing_block = "(No SEC filing available.)"
 
-async def generate_research_note(
-    db: AsyncSession,
-    ticker_id: uuid.UUID | None,
-    symbol: str | None,
-) -> ResearchNote:
-    # 1. Resolve ticker
-    ticker = await _resolve_ticker(db, ticker_id, symbol)
+    stats = _precompute_stats(reactions)
+    stats_block = _stats_block(stats)
 
-    # 2. EDGAR filing (graceful degradation)
+    return f"""\
+You are a rigorous fact-checker for financial research notes. Verify every factual claim in the note below against the provided evidence sources ONLY.
+
+EVIDENCE SOURCE 1 — SEC FILING TEXT:
+{filing_block}
+
+EVIDENCE SOURCE 2 — PRECOMPUTED STATISTICS (these are ground truth for all numerical earnings claims):
+{stats_block}
+
+NOTE TO VERIFY:
+{note_content}
+
+CLASSIFICATION RULES:
+- "supported": The claim is directly and specifically confirmed by the filing text or precomputed stats. Quote the specific supporting text in "evidence".
+- "unsupported": The claim is plausible but cannot be confirmed from the provided sources (e.g. drawn from general knowledge, an estimate, or an inference not in the sources). Explain why in "evidence".
+- "contradicted": The claim directly conflicts with the filing text or precomputed stats. Quote the contradiction in "evidence".
+
+STRICT RULES:
+- Bias toward "unsupported" when in doubt — do NOT use outside knowledge to mark something "supported".
+- The precomputed stats are the sole ground truth for beat/miss/meet counts, averages, and all move percentages.
+- Check every specific number, statistic, date, product name, and factual assertion.
+- Skip purely subjective or stylistic phrases that contain no verifiable facts.
+- The summary counts must exactly equal the number of claims in the claims array.
+
+Output ONLY valid JSON — no preamble, no markdown fences, no explanation outside the JSON:
+{{"claims": [{{"claim": "...", "status": "supported|unsupported|contradicted", "evidence": "..."}}], "summary": {{"supported": N, "unsupported": N, "contradicted": N}}}}\
+"""
+
+
+# ── Context fetcher (shared by generate + re-verify) ─────────────────────────
+
+async def _fetch_context(
+    db: AsyncSession, ticker: Ticker
+) -> tuple[dict | None, dict | None, list[HistoricalReaction]]:
+    """Return (filing, sections, reactions) for a ticker."""
     filing: dict | None = None
     sections: dict | None = None
     edgar = EdgarClient()
@@ -228,7 +266,6 @@ async def generate_research_note(
     finally:
         await edgar.close()
 
-    # 3. All available earnings reactions (up to 20)
     rows = await db.execute(
         select(HistoricalReaction)
         .where(
@@ -239,15 +276,79 @@ async def generate_research_note(
         .limit(20)
     )
     reactions = list(rows.scalars().all())
+    return filing, sections, reactions
 
-    # 4. Build prompt with precomputed stats
-    prompt = _build_prompt(ticker, filing, sections, reactions)
 
-    # 5. Call Claude
-    anthropic = AnthropicClient()
-    result = await anthropic.generate_research_note(prompt)
+# ── Verification core ─────────────────────────────────────────────────────────
 
-    # 6. Build source_filings list
+async def _run_verification(
+    note_content: str,
+    filing: dict | None,
+    sections: dict | None,
+    reactions: list[HistoricalReaction],
+) -> tuple[dict, str]:
+    """Call Opus to verify the note. Returns (verification_dict, model_used)."""
+    prompt = _build_verification_prompt(note_content, filing, sections, reactions)
+    client = AnthropicClient()
+    raw = await client.verify_research_note(prompt)
+
+    model_used    = raw["model_used"]
+    response_text = raw["content"].strip()
+
+    # Strip accidental markdown fences if present
+    if response_text.startswith("```"):
+        response_text = response_text.split("```")[1]
+        if response_text.startswith("json"):
+            response_text = response_text[4:]
+        response_text = response_text.strip()
+
+    verification = json.loads(response_text)
+
+    print(
+        f"Verification complete: "
+        f"{verification['summary']['supported']} supported, "
+        f"{verification['summary']['unsupported']} unsupported, "
+        f"{verification['summary']['contradicted']} contradicted "
+        f"| {raw['input_tokens']} in / {raw['output_tokens']} out tokens",
+        flush=True,
+    )
+
+    contradicted = [c for c in verification["claims"] if c["status"] == "contradicted"]
+    if contradicted:
+        print(f"  ⚠ CONTRADICTED CLAIMS ({len(contradicted)}):", flush=True)
+        for c in contradicted:
+            print(f"    • {c['claim'][:120]}", flush=True)
+            print(f"      Evidence: {c['evidence'][:160]}", flush=True)
+
+    return verification, model_used
+
+
+# ── Generate ──────────────────────────────────────────────────────────────────
+
+async def generate_research_note(
+    db: AsyncSession,
+    ticker_id: uuid.UUID | None,
+    symbol: str | None,
+) -> ResearchNote:
+    ticker = await _resolve_ticker(db, ticker_id, symbol)
+    filing, sections, reactions = await _fetch_context(db, ticker)
+
+    # Generate
+    prompt = _build_generation_prompt(ticker, filing, sections, reactions)
+    client = AnthropicClient()
+    gen = await client.generate_research_note(prompt)
+
+    print(
+        f"Research note generated for {ticker.symbol}: "
+        f"{gen['input_tokens']} in / {gen['output_tokens']} out tokens",
+        flush=True,
+    )
+
+    # Verify
+    verification, verification_model = await _run_verification(
+        gen["content"], filing, sections, reactions
+    )
+
     source_filings: list[dict] = []
     if filing:
         source_filings.append({
@@ -257,29 +358,34 @@ async def generate_research_note(
             "url":              filing.get("url", ""),
         })
 
-    # 7. Upsert
     now = datetime.now(timezone.utc)
     stmt = (
         pg_insert(ResearchNote)
         .values(
-            ticker_id      = ticker.id,
-            generated_at   = now,
-            source_filings = source_filings,
-            content        = result["content"],
-            model_used     = result["model_used"],
-            input_tokens   = result["input_tokens"],
-            output_tokens  = result["output_tokens"],
+            ticker_id          = ticker.id,
+            generated_at       = now,
+            source_filings     = source_filings,
+            content            = gen["content"],
+            model_used         = gen["model_used"],
+            input_tokens       = gen["input_tokens"],
+            output_tokens      = gen["output_tokens"],
+            verification       = verification,
+            verified_at        = now,
+            verification_model = verification_model,
         )
         .on_conflict_do_update(
             constraint="uq_research_notes_ticker",
             set_=dict(
-                generated_at   = now,
-                source_filings = source_filings,
-                content        = result["content"],
-                model_used     = result["model_used"],
-                input_tokens   = result["input_tokens"],
-                output_tokens  = result["output_tokens"],
-                updated_at     = now,
+                generated_at       = now,
+                source_filings     = source_filings,
+                content            = gen["content"],
+                model_used         = gen["model_used"],
+                input_tokens       = gen["input_tokens"],
+                output_tokens      = gen["output_tokens"],
+                verification       = verification,
+                verified_at        = now,
+                verification_model = verification_model,
+                updated_at         = now,
             ),
         )
         .returning(ResearchNote)
@@ -287,12 +393,37 @@ async def generate_research_note(
     note = (await db.execute(stmt)).scalar_one()
     await db.commit()
     await db.refresh(note)
+    return note
 
-    print(
-        f"Research note generated for {ticker.symbol}: "
-        f"{result['input_tokens']} in / {result['output_tokens']} out tokens",
-        flush=True,
+
+# ── Re-verify existing note ───────────────────────────────────────────────────
+
+async def verify_existing_note(
+    db: AsyncSession,
+    ticker_id: uuid.UUID | None,
+    symbol: str | None,
+) -> ResearchNote:
+    ticker = await _resolve_ticker(db, ticker_id, symbol)
+
+    note_row = await db.execute(
+        select(ResearchNote).where(ResearchNote.ticker_id == ticker.id)
     )
+    note = note_row.scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=404, detail="No research note found — generate one first")
+
+    filing, sections, reactions = await _fetch_context(db, ticker)
+    verification, verification_model = await _run_verification(
+        note.content, filing, sections, reactions
+    )
+
+    now = datetime.now(timezone.utc)
+    note.verification       = verification
+    note.verified_at        = now
+    note.verification_model = verification_model
+    note.updated_at         = now
+    await db.commit()
+    await db.refresh(note)
     return note
 
 

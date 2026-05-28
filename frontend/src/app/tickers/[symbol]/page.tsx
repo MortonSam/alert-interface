@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
-import { api, type Ticker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote } from "@/lib/api";
+import { api, type Ticker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -484,6 +484,77 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
   );
 }
 
+// ── Verification panel ────────────────────────────────────────────────────────
+
+const CLAIM_STYLES: Record<VerificationClaim["status"], { dot: string; badge: string; label: string }> = {
+  supported:    { dot: "bg-green-500",  badge: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",  label: "Supported" },
+  unsupported:  { dot: "bg-amber-400",  badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",  label: "Unsupported" },
+  contradicted: { dot: "bg-red-500",    badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",          label: "Contradicted" },
+};
+
+function VerificationPanel({
+  verification,
+  verifiedAt,
+  model,
+  open,
+  onToggle,
+}: {
+  verification: VerificationResult;
+  verifiedAt: string | null;
+  model: string | null;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { supported, unsupported, contradicted } = verification.summary;
+  const total = supported + unsupported + contradicted;
+
+  return (
+    <div className="border-t">
+      {/* Summary bar / toggle */}
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-6 py-3 text-xs hover:bg-muted/30 transition-colors"
+      >
+        <span className="flex items-center gap-3 font-medium">
+          <span className="text-green-600 dark:text-green-400">✓ {supported} supported</span>
+          <span className="text-amber-600 dark:text-amber-400">⚠ {unsupported} unsupported</span>
+          {contradicted > 0
+            ? <span className="text-red-600 dark:text-red-400">✗ {contradicted} contradicted</span>
+            : <span className="text-muted-foreground">✗ 0 contradicted</span>
+          }
+          <span className="text-muted-foreground font-normal">
+            · verified {verifiedAt ? timeAgo(verifiedAt) : "—"}{model ? ` · ${model}` : ""}
+          </span>
+        </span>
+        <span className="text-muted-foreground">{open ? "▲" : "▼"} {total} claims</span>
+      </button>
+
+      {/* Expandable claims list */}
+      {open && (
+        <div className="px-6 pb-5 space-y-2">
+          {verification.claims.map((c, i) => {
+            const style = CLAIM_STYLES[c.status];
+            return (
+              <div key={i} className="flex gap-3 text-sm">
+                <div className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${style.dot}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${style.badge}`}>
+                      {style.label}
+                    </span>
+                    <span className="text-foreground/90">{c.claim}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{c.evidence}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Stat strip ────────────────────────────────────────────────────────────────
 
 function Stat({ label, value }: { label: string; value: string | null | undefined }) {
@@ -522,6 +593,7 @@ export default function TickerPage() {
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
   const [generating, setGenerating]   = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [verificationOpen, setVerificationOpen] = useState(false);
 
   useEffect(() => {
     api.tickers
@@ -748,7 +820,7 @@ export default function TickerPage() {
             <div className="rounded-lg border bg-card px-6 py-10 text-center">
               <p className="text-sm font-medium mb-1">No research note generated yet.</p>
               <p className="text-xs text-muted-foreground mb-5">
-                AI-generated summary using SEC filings + earnings history · ~20 seconds · ~$0.30 in API credit
+                AI-generated summary using SEC filings + earnings history · ~40 seconds · ~$0.17 in API credit (generation ~$0.02 + Opus verification ~$0.15)
               </p>
               <button
                 onClick={() => void handleGenerate()}
@@ -761,7 +833,7 @@ export default function TickerPage() {
 
           {generating && (
             <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground animate-pulse">
-              Generating research note… this takes ~20 seconds
+              Generating + verifying research note… this takes ~40 seconds
             </div>
           )}
 
@@ -773,6 +845,18 @@ export default function TickerPage() {
 
           {noteStatus === "done" && note && !generating && (
             <div className="rounded-lg border bg-card">
+              {/* Contradicted warning banner */}
+              {note.verification && note.verification.summary.contradicted > 0 && (
+                <div className="flex items-start gap-3 px-6 py-3 bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900 text-sm text-red-700 dark:text-red-400">
+                  <span className="mt-0.5 shrink-0">⚠</span>
+                  <span>
+                    <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
+                    See the verification section below for details. Consider regenerating.
+                  </span>
+                </div>
+              )}
+
+              {/* Header bar */}
               <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
                 <span>
                   Generated {timeAgo(note.generated_at)}
@@ -788,12 +872,25 @@ export default function TickerPage() {
                   Regenerate
                 </button>
               </div>
+
+              {/* Note content */}
               <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
                 prose-headings:text-foreground prose-headings:font-semibold
                 prose-p:text-foreground/90 prose-li:text-foreground/90
                 prose-strong:text-foreground">
                 <ReactMarkdown>{note.content}</ReactMarkdown>
               </div>
+
+              {/* Verification panel */}
+              {note.verification && (
+                <VerificationPanel
+                  verification={note.verification}
+                  verifiedAt={note.verified_at}
+                  model={note.verification_model}
+                  open={verificationOpen}
+                  onToggle={() => setVerificationOpen(o => !o)}
+                />
+              )}
             </div>
           )}
         </div>
