@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # External APIs
     anthropic_api_key: str = ""
+    finnhub_api_key: str = ""
     polygon_api_key: str = ""
     fred_api_key: str = ""
     ntfy_topic: str = ""

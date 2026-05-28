@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
-import { api, type Ticker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult } from "@/lib/api";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine,
+} from "recharts";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -555,6 +559,241 @@ function VerificationPanel({
   );
 }
 
+// ── Price chart ───────────────────────────────────────────────────────────────
+
+const CHART_PERIODS = ["1mo", "3mo", "6mo", "1y", "5y"] as const;
+type ChartPeriod = (typeof CHART_PERIODS)[number];
+
+const PERIOD_LABELS: Record<ChartPeriod, string> = {
+  "1mo": "1M", "3mo": "3M", "6mo": "6M", "1y": "1Y", "5y": "5Y",
+};
+
+const OUTCOME_DOT_COLOR: Record<EarningsMarker["outcome"], string> = {
+  beat: "#16a34a",
+  miss: "#dc2626",
+  meet: "#9ca3af",
+  unknown: "#9ca3af",
+};
+
+function formatXTick(epochMs: number): string {
+  const d = new Date(epochMs);
+  return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+}
+
+function formatYTick(v: number): string {
+  return `$${v.toFixed(0)}`;
+}
+
+function PriceChartTooltip({
+  active, payload, markerMap,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { date: string; close: number; epochMs: number } }>;
+  markerMap: Map<string, EarningsMarker>;
+}) {
+  if (!active || !payload?.length) return null;
+  const { date, close } = payload[0].payload;
+  const marker = markerMap.get(date);
+  return (
+    <div className="rounded-lg border bg-card shadow-md px-3 py-2 text-xs min-w-[140px]">
+      <p className="font-medium text-foreground mb-1">{date}</p>
+      <p className="tabular-nums">${close.toFixed(2)}</p>
+      {marker && (
+        <div className="mt-1.5 pt-1.5 border-t space-y-0.5">
+          <p className={cn(
+            "font-semibold",
+            marker.outcome === "beat" && "text-green-600",
+            marker.outcome === "miss" && "text-red-600",
+            (marker.outcome === "meet" || marker.outcome === "unknown") && "text-muted-foreground",
+          )}>
+            Earnings · {marker.outcome.charAt(0).toUpperCase() + marker.outcome.slice(1)}
+          </p>
+          {(marker.eps_estimate != null || marker.eps_actual != null) && (
+            <p className="text-muted-foreground">
+              EPS {marker.eps_actual != null ? `$${marker.eps_actual.toFixed(2)}` : "—"}
+              {marker.eps_estimate != null && ` vs $${marker.eps_estimate.toFixed(2)} est`}
+            </p>
+          )}
+          {marker.pct_change_1d != null && (
+            <p className={marker.pct_change_1d >= 0 ? "text-green-600" : "text-red-600"}>
+              1d {marker.pct_change_1d >= 0 ? "+" : ""}{marker.pct_change_1d.toFixed(2)}%
+              {marker.pct_change_3d != null && ` · 3d ${marker.pct_change_3d >= 0 ? "+" : ""}${marker.pct_change_3d.toFixed(2)}%`}
+              {marker.pct_change_5d != null && ` · 5d ${marker.pct_change_5d >= 0 ? "+" : ""}${marker.pct_change_5d.toFixed(2)}%`}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriceChart({ symbol }: { symbol: string }) {
+  const [period, setPeriod] = useState<ChartPeriod>("1y");
+  const [chartData, setChartData] = useState<TickerChart | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api.tickers.chart(symbol, period).then((d) => {
+      setChartData(d);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [symbol, period]);
+
+  // Build epoch-keyed data for recharts
+  const { lineData, markerMap } = useMemo(() => {
+    const empty = {
+      lineData: [] as Array<{ date: string; epochMs: number; close: number }>,
+      markerMap: new Map<string, EarningsMarker>(),
+    };
+    if (!chartData) return empty;
+    const mm = new Map<string, EarningsMarker>(
+      chartData.earnings_markers.map((m) => [m.date, m])
+    );
+    const ld = chartData.history.map((p) => ({
+      date: p.date,
+      epochMs: new Date(p.date + "T12:00:00Z").getTime(),
+      close: p.close,
+    }));
+    return { lineData: ld, markerMap: mm };
+  }, [chartData]);
+
+  // x-axis ticks: sample ~6 evenly spaced
+  const xTicks = useMemo(() => {
+    if (lineData.length < 2) return [];
+    const n = Math.min(6, lineData.length);
+    return Array.from({ length: n }, (_, i) =>
+      lineData[Math.floor((i / (n - 1)) * (lineData.length - 1))].epochMs
+    );
+  }, [lineData]);
+
+  // Earnings marker reference lines (vertical)
+  const markerDates = useMemo(() => {
+    return chartData?.earnings_markers.map((m) => ({
+      ...m,
+      epochMs: new Date(m.date + "T12:00:00Z").getTime(),
+    })) ?? [];
+  }, [chartData]);
+
+  if (loading) {
+    return (
+      <div className="h-52 rounded-lg border bg-card animate-pulse mt-6" />
+    );
+  }
+
+  if (!chartData || lineData.length === 0) return null;
+
+  const isUp = lineData[lineData.length - 1].close >= lineData[0].close;
+  const lineColor = isUp ? "#16a34a" : "#dc2626";
+
+  return (
+    <div className="mt-6 rounded-lg border bg-card px-4 pt-4 pb-2">
+      {/* Period selector */}
+      <div className="flex gap-1 mb-3">
+        {CHART_PERIODS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={cn(
+              "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
+              period === p
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            )}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-muted-foreground self-center pr-1">
+          {markerDates.length > 0 && `${markerDates.length} earnings marker${markerDates.length !== 1 ? "s" : ""}`}
+        </span>
+      </div>
+
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={lineData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+          <XAxis
+            dataKey="epochMs"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            scale="time"
+            ticks={xTicks}
+            tickFormatter={formatXTick}
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={["auto", "auto"]}
+            tickFormatter={formatYTick}
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false}
+            tickLine={false}
+            width={50}
+          />
+          <Tooltip
+            content={<PriceChartTooltip markerMap={markerMap} />}
+            cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1, strokeDasharray: "4 2" }}
+          />
+
+          {/* Vertical dashed lines at each earnings date */}
+          {markerDates.map((m) => (
+            <ReferenceLine
+              key={m.date}
+              x={m.epochMs}
+              stroke={OUTCOME_DOT_COLOR[m.outcome]}
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              strokeOpacity={0.6}
+            />
+          ))}
+
+          <Line
+            dataKey="close"
+            dot={(props: { cx?: number; cy?: number; payload?: { date: string } }) => {
+              const { cx, cy, payload } = props;
+              if (cx == null || cy == null || !payload) return <g key="empty" />;
+              const marker = markerMap.get(payload.date);
+              if (!marker) return <g key={payload.date} />;
+              return (
+                <circle
+                  key={payload.date}
+                  cx={cx}
+                  cy={cy}
+                  r={5}
+                  fill={OUTCOME_DOT_COLOR[marker.outcome]}
+                  stroke="white"
+                  strokeWidth={1.5}
+                />
+              );
+            }}
+            activeDot={{ r: 4, fill: lineColor }}
+            stroke={lineColor}
+            strokeWidth={1.5}
+            type="monotone"
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Legend */}
+      {markerDates.length > 0 && (
+        <div className="flex gap-4 mt-1 px-1 pb-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-600" /> Beat
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" /> Miss
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-400" /> Meet / Unknown
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Stat strip ────────────────────────────────────────────────────────────────
 
 function Stat({ label, value }: { label: string; value: string | null | undefined }) {
@@ -589,6 +828,7 @@ export default function TickerPage() {
   const [reactionStatus, setReactionStatus] = useState<SectionStatus>("loading");
   const [reactionError, setReactionError]   = useState<string | null>(null);
 
+  const [quote, setQuote]             = useState<TickerQuote | null>(null);
   const [note, setNote]               = useState<ResearchNote | null>(null);
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
   const [generating, setGenerating]   = useState(false);
@@ -621,6 +861,10 @@ export default function TickerPage() {
       .list({ symbol: upperSymbol, event_type: "earnings" })
       .then((rows) => { setReactions(rows); setReactionStatus("done"); })
       .catch((e: Error) => { setReactionError(e.message); setReactionStatus("error"); });
+  }, [upperSymbol]);
+
+  useEffect(() => {
+    api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -697,6 +941,40 @@ export default function TickerPage() {
             <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
           )}
         </div>
+
+        {/* Live price header */}
+        {quote && quote.price != null && (
+          <div className="mt-5 flex items-center gap-5 flex-wrap">
+            <div className="flex items-baseline gap-2.5">
+              <span className="text-3xl font-bold tabular-nums tracking-tight">
+                ${quote.price.toFixed(2)}
+              </span>
+              {quote.change != null && quote.change_pct != null && (
+                <span
+                  className={cn(
+                    "text-sm font-medium tabular-nums",
+                    quote.change >= 0
+                      ? "text-green-600 dark:text-green-400"
+                      : "text-red-600 dark:text-red-400",
+                  )}
+                >
+                  {quote.change >= 0 ? "+" : ""}
+                  {quote.change.toFixed(2)}{" "}
+                  ({quote.change_pct >= 0 ? "+" : ""}
+                  {quote.change_pct.toFixed(2)}%)
+                </span>
+              )}
+            </div>
+            {quote.high != null && quote.low != null && (
+              <span className="text-xs text-muted-foreground ml-auto">
+                H&nbsp;{quote.high.toFixed(2)} · L&nbsp;{quote.low.toFixed(2)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Interactive price chart with earnings markers */}
+        <PriceChart symbol={upperSymbol} />
 
         {/* Stats strip */}
         <div className="mt-8 flex flex-wrap gap-x-10 gap-y-4 rounded-lg border bg-card p-5">

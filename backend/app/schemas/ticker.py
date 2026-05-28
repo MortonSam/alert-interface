@@ -34,3 +34,42 @@ class TickerRead(TickerBase):
     next_earnings_date: date | None = None
     created_at: datetime
     updated_at: datetime
+
+
+# ── Chart response ────────────────────────────────────────────────────────────
+
+class EarningsMarker(BaseModel):
+    date: str             # "YYYY-MM-DD"
+    eps_estimate: float | None = None
+    eps_actual: float | None = None
+    outcome: str          # "beat" | "miss" | "meet" | "unknown"
+    pct_change_1d: float | None = None
+    pct_change_3d: float | None = None
+    pct_change_5d: float | None = None
+
+
+class TickerChartRead(BaseModel):
+    symbol: str
+    period: str
+    history: list["SparklinePoint"]
+    earnings_markers: list[EarningsMarker]
+
+
+# ── Quote response (Finnhub) ──────────────────────────────────────────────────
+
+class SparklinePoint(BaseModel):
+    date: str   # "YYYY-MM-DD"
+    close: float
+
+
+class TickerQuoteRead(BaseModel):
+    symbol: str
+    price: float | None
+    change: float | None        # absolute change from prev close
+    change_pct: float | None    # % change from prev close
+    high: float | None          # day high
+    low: float | None           # day low
+    open: float | None          # day open
+    prev_close: float | None
+    timestamp: int | None       # Unix UTC
+    sparkline: list[SparklinePoint]  # daily closes, chronological

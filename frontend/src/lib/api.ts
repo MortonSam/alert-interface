@@ -118,6 +118,41 @@ export interface ResearchNote {
   updated_at: string;
 }
 
+export interface SparklinePoint {
+  date: string;   // "YYYY-MM-DD"
+  close: number;
+}
+
+export interface EarningsMarker {
+  date: string;
+  eps_estimate: number | null;
+  eps_actual: number | null;
+  outcome: "beat" | "miss" | "meet" | "unknown";
+  pct_change_1d: number | null;
+  pct_change_3d: number | null;
+  pct_change_5d: number | null;
+}
+
+export interface TickerChart {
+  symbol: string;
+  period: string;
+  history: SparklinePoint[];
+  earnings_markers: EarningsMarker[];
+}
+
+export interface TickerQuote {
+  symbol: string;
+  price: number | null;
+  change: number | null;
+  change_pct: number | null;
+  high: number | null;
+  low: number | null;
+  open: number | null;
+  prev_close: number | null;
+  timestamp: number | null;
+  sparkline: SparklinePoint[];
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -141,6 +176,9 @@ export const api = {
     list: (activeOnly = true) =>
       request<Ticker[]>(`/tickers/?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),
+    quote: (symbol: string) => request<TickerQuote>(`/tickers/quote/${symbol}`),
+    chart: (symbol: string, period = "1y") =>
+      request<TickerChart>(`/tickers/chart/${symbol}?period=${period}`),
     create: (data: Partial<Ticker>) =>
       request<Ticker>("/tickers/", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Partial<Ticker>) =>
