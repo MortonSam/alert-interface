@@ -40,3 +40,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Runtime caches (EDGAR filings, ticker lists — fetched on demand, not source files)
+backend/app/services/cache/*.json
+backend/app/services/cache/*.html
+backend/app/scripts/cache/*.json

@@ -11,6 +11,7 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from app.models.event import Event
     from app.models.historical_reaction import HistoricalReaction
+    from app.models.research_note import ResearchNote
     from app.models.watchlist import WatchlistTicker
 
 
@@ -31,3 +32,4 @@ class Ticker(Base):
     events: Mapped[list["Event"]] = relationship(back_populates="ticker")
     historical_reactions: Mapped[list["HistoricalReaction"]] = relationship(back_populates="ticker")
     watchlist_items: Mapped[list["WatchlistTicker"]] = relationship(back_populates="ticker")
+    research_note: Mapped["ResearchNote | None"] = relationship(back_populates="ticker", uselist=False)

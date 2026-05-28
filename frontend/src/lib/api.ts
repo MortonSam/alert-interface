@@ -83,6 +83,26 @@ export interface WatchlistTicker {
   ticker: Ticker;
 }
 
+export interface SourceFiling {
+  form_type: string;
+  accession_number: string;
+  filing_date: string;
+  url: string;
+}
+
+export interface ResearchNote {
+  id: string;
+  ticker_id: string;
+  generated_at: string;
+  source_filings: SourceFiling[];
+  content: string;
+  model_used: string;
+  input_tokens: number;
+  output_tokens: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Watchlist {
   id: string;
   name: string;
@@ -143,6 +163,16 @@ export const api = {
       request<Event>(`/events/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/events/${id}`, { method: "DELETE" }),
+  },
+
+  researchNotes: {
+    get: (symbol: string) =>
+      request<ResearchNote>(`/research-notes/?symbol=${encodeURIComponent(symbol)}`),
+    generate: (symbol: string) =>
+      request<ResearchNote>("/research-notes/generate", {
+        method: "POST",
+        body: JSON.stringify({ symbol }),
+      }),
   },
 
   reactions: {

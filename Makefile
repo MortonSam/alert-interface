@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-reactions-all seed-reactions-retry seed-sp500 seed-sp500-retry seed-sp500-force validate install run
+.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-reactions-all seed-reactions-retry seed-sp500 seed-sp500-retry seed-sp500-force validate research-stats install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -49,6 +49,13 @@ seed-sp500-force:
 
 validate:
 	docker compose exec backend python -m app.scripts.validate_data
+
+research-stats:
+	docker compose exec db psql -U alert -d alertdb -c \
+	"SELECT t.symbol, rn.model_used, rn.input_tokens, rn.output_tokens, \
+	 rn.input_tokens + rn.output_tokens AS total_tokens, rn.generated_at \
+	 FROM research_notes rn JOIN tickers t ON t.id = rn.ticker_id \
+	 ORDER BY rn.generated_at DESC;"
 
 # ── Shells ────────────────────────────────────────────────
 shell:

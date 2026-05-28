@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
-import { api, type Ticker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction } from "@/lib/api";
+import ReactMarkdown from "react-markdown";
+import { api, type Ticker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -46,6 +47,17 @@ function formatVolume(v: number | null): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
   return v.toLocaleString();
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (mins < 1)   return "just now";
+  if (mins < 60)  return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 // ── Catalyst section helpers ──────────────────────────────────────────────────
@@ -506,6 +518,11 @@ export default function TickerPage() {
   const [reactionStatus, setReactionStatus] = useState<SectionStatus>("loading");
   const [reactionError, setReactionError]   = useState<string | null>(null);
 
+  const [note, setNote]               = useState<ResearchNote | null>(null);
+  const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
+  const [generating, setGenerating]   = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   useEffect(() => {
     api.tickers
       .list(false)
@@ -533,6 +550,35 @@ export default function TickerPage() {
       .then((rows) => { setReactions(rows); setReactionStatus("done"); })
       .catch((e: Error) => { setReactionError(e.message); setReactionStatus("error"); });
   }, [upperSymbol]);
+
+  useEffect(() => {
+    api.researchNotes
+      .get(upperSymbol)
+      .then((n) => { setNote(n); setNoteStatus("done"); })
+      .catch((e: Error) => {
+        if (e.message.startsWith("API 404")) { setNoteStatus("empty"); }
+        else { setNoteStatus("error"); }
+      });
+  }, [upperSymbol]);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const n = await api.researchNotes.generate(upperSymbol);
+      setNote(n);
+      setNoteStatus("done");
+    } catch (e: unknown) {
+      setGenerateError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function handleRegenerate() {
+    if (!window.confirm("Regenerate this research note? This uses ~$0.30 in API credit.")) return;
+    void handleGenerate();
+  }
 
   if (tickerStatus === "missing") notFound();
 
@@ -668,6 +714,87 @@ export default function TickerPage() {
           )}
           {reactionStatus === "done" && reactions.length > 0 && (
             <ReactionsTable reactions={reactions} />
+          )}
+        </div>
+
+        {/* Research Note */}
+        <div className="mt-10 mb-10">
+          <h2 className="text-lg font-semibold mb-4">Research Note</h2>
+
+          {noteStatus === "loading" && (
+            <div className="rounded-lg border bg-card p-6 animate-pulse space-y-3">
+              <div className="h-4 bg-muted rounded w-1/3" />
+              <div className="h-4 bg-muted rounded w-full" />
+              <div className="h-4 bg-muted rounded w-5/6" />
+              <div className="h-4 bg-muted rounded w-2/3" />
+            </div>
+          )}
+
+          {noteStatus === "error" && (
+            <div className="rounded-lg border bg-card px-6 py-10 text-center">
+              <p className="text-sm text-muted-foreground mb-4">Could not load research note.</p>
+              {!generating && (
+                <button
+                  onClick={() => void handleGenerate()}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Generate Research Note
+                </button>
+              )}
+            </div>
+          )}
+
+          {noteStatus === "empty" && !generating && (
+            <div className="rounded-lg border bg-card px-6 py-10 text-center">
+              <p className="text-sm font-medium mb-1">No research note generated yet.</p>
+              <p className="text-xs text-muted-foreground mb-5">
+                AI-generated summary using SEC filings + earnings history · ~20 seconds · ~$0.30 in API credit
+              </p>
+              <button
+                onClick={() => void handleGenerate()}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Generate Research Note
+              </button>
+            </div>
+          )}
+
+          {generating && (
+            <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground animate-pulse">
+              Generating research note… this takes ~20 seconds
+            </div>
+          )}
+
+          {generateError && !generating && (
+            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive">
+              Generation failed: {generateError}
+            </div>
+          )}
+
+          {noteStatus === "done" && note && !generating && (
+            <div className="rounded-lg border bg-card">
+              <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
+                <span>
+                  Generated {timeAgo(note.generated_at)}
+                  {note.source_filings.length > 0 && (
+                    <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
+                  )}
+                  {" · "}{note.input_tokens + note.output_tokens} tokens
+                </span>
+                <button
+                  onClick={handleRegenerate}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+                >
+                  Regenerate
+                </button>
+              </div>
+              <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
+                prose-headings:text-foreground prose-headings:font-semibold
+                prose-p:text-foreground/90 prose-li:text-foreground/90
+                prose-strong:text-foreground">
+                <ReactMarkdown>{note.content}</ReactMarkdown>
+              </div>
+            </div>
           )}
         </div>
       </div>
