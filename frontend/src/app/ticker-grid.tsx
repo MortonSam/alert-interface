@@ -2,9 +2,23 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { api, type Ticker } from "@/lib/api";
+import { api, type SystemStatus, type Ticker } from "@/lib/api";
 
 const PAGE_SIZE = 50;
+
+function fmtAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function isStale(iso: string): boolean {
+  return Date.now() - new Date(iso).getTime() > 3 * 24 * 60 * 60 * 1000;
+}
 
 function fmtMcap(n: number | null): string {
   if (!n) return "";
@@ -41,6 +55,7 @@ export function TickerGrid() {
   const [tickers, setTickers] = useState<Ticker[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -54,6 +69,7 @@ export function TickerGrid() {
       .then(setTickers)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+    api.system.status().then(setSystemStatus).catch(() => null);
   }, []);
 
   // Debounce search input
@@ -168,6 +184,21 @@ export function TickerGrid() {
 
   return (
     <section className="mt-8 space-y-4">
+      {/* Freshness indicator */}
+      {systemStatus?.last_refreshed_at && (
+        <div className="flex justify-end">
+          <span
+            className={`text-xs px-2 py-0.5 rounded-full ${
+              isStale(systemStatus.last_refreshed_at)
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                : "text-muted-foreground"
+            }`}
+          >
+            Data updated {fmtAgo(systemStatus.last_refreshed_at)}
+          </span>
+        </div>
+      )}
+
       {/* Search + Sort */}
       <div className="flex gap-3 flex-wrap items-center">
         <input

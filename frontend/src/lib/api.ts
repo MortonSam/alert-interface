@@ -118,6 +118,13 @@ export interface ResearchNote {
   updated_at: string;
 }
 
+export interface SystemStatus {
+  last_refreshed_at: string | null;
+  total_tickers: number;
+  total_reactions: number;
+  most_recent_reaction_date: string | null;
+}
+
 export interface Watchlist {
   id: string;
   name: string;
@@ -193,6 +200,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ symbol }),
       }),
+  },
+
+  system: {
+    status: () => request<SystemStatus>("/system/status"),
   },
 
   reactions: {
