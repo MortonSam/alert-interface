@@ -1684,10 +1684,35 @@ function StrategyCard({
 
   const mult = contracts * 100; // shares per position
 
+  // x-axis range: implied range ± 30% of range width, extended if breakeven falls outside
+  const xRange = useMemo(() => {
+    const irLo = data.implied_range_low;
+    const irHi = data.implied_range_high;
+    let lo: number, hi: number;
+    if (irLo != null && irHi != null) {
+      const pad = (irHi - irLo) * 0.30;
+      lo = irLo - pad;
+      hi = irHi + pad;
+    } else {
+      lo = cp * 0.80;
+      hi = cp * 1.20;
+    }
+    // Extend if the strategy's breakeven would fall outside the frame
+    const beValues: number[] = [];
+    if (strategy === "long_call")    beValues.push(selectedStrike + premium);
+    if (strategy === "long_put")     beValues.push(selectedStrike - premium);
+    if (strategy === "covered_call") beValues.push(cp - premium);
+    if (strategy === "csp")          beValues.push(selectedStrike - premium);
+    for (const be of beValues) {
+      if (be < lo) lo = be - (hi - lo) * 0.05;
+      if (be > hi) hi = be + (hi - lo) * 0.05;
+    }
+    return { lo, hi };
+  }, [data.implied_range_low, data.implied_range_high, cp, strategy, selectedStrike, premium]);
+
   const chartData = useMemo(() => {
     if (!cp) return [];
-    const lo = cp * 0.60;
-    const hi = cp * 1.40;
+    const { lo, hi } = xRange;
     return Array.from({ length: 100 }, (_, i) => {
       const S = lo + (i / 99) * (hi - lo);
       return {
@@ -1695,7 +1720,7 @@ function StrategyCard({
         pnl:   parseFloat((payoffPS(strategy, selectedStrike, premium, cp, S) * mult).toFixed(2)),
       };
     });
-  }, [strategy, selectedStrike, premium, cp, mult]);
+  }, [strategy, selectedStrike, premium, cp, mult, xRange]);
 
   const stats = useMemo(
     () => strategyStats(strategy, selectedStrike, premium, cp),
@@ -1802,16 +1827,16 @@ function StrategyCard({
           {/* Zero line */}
           <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1} />
 
-          {/* Current price */}
+          {/* Current price — label at bottom so it never collides with B/E label at top */}
           <ReferenceLine
             x={cp}
             stroke="hsl(var(--muted-foreground))"
             strokeWidth={1}
             strokeDasharray="3 3"
-            label={{ value: "now", position: "insideTopRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+            label={{ value: "now", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
           />
 
-          {/* Breakeven(s) */}
+          {/* Breakeven(s) — label at top */}
           {stats.breakevens.map((be, i) => (
             <ReferenceLine
               key={i}
@@ -1819,7 +1844,7 @@ function StrategyCard({
               stroke="#16a34a"
               strokeWidth={1}
               strokeDasharray="3 3"
-              label={{ value: "B/E", position: "insideTopLeft", fontSize: 9, fill: "#16a34a" }}
+              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#16a34a" }}
             />
           ))}
 
