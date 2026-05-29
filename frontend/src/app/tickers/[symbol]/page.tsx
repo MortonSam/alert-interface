@@ -2017,22 +2017,37 @@ function MultiLegStrategyCard({
   const { legs, stats } = useMemo<{ legs: Leg[]; stats: MultiLegStats }>(() => {
     const scObj = callStrikes.find((s) => s.strike === shortCallStrike);
     const spObj = putStrikes.find((s) => s.strike === shortPutStrike);
-    const scIdx = scObj ? callStrikes.indexOf(scObj) : -1;
-    const spIdx = spObj ? putStrikes.indexOf(spObj) : -1;
+    // Wings: snap to the valid strike nearest to ±$10 from the short strike.
+    // Dollar-width targeting is robust to missing strikes; index-stepping is not.
+    const TARGET_WING = 10;
 
-    // Wings: 2 strikes out in the sorted list
-    const lcObj =
-      scIdx >= 0
-        ? scIdx + 2 < callStrikes.length
-          ? callStrikes[scIdx + 2]
-          : callStrikes[callStrikes.length - 1]
-        : null;
-    const lpObj =
-      spIdx >= 0
-        ? spIdx >= 2
-          ? putStrikes[spIdx - 2]
-          : putStrikes[0]
-        : null;
+    const lcObj = scObj
+      ? callStrikes
+          .filter((s) => s.strike > shortCallStrike)
+          .reduce<StrikeData | null>(
+            (best, s) =>
+              !best ||
+              Math.abs(s.strike - (shortCallStrike + TARGET_WING)) <
+                Math.abs(best.strike - (shortCallStrike + TARGET_WING))
+                ? s
+                : best,
+            null,
+          )
+      : null;
+
+    const lpObj = spObj
+      ? putStrikes
+          .filter((s) => s.strike < shortPutStrike)
+          .reduce<StrikeData | null>(
+            (best, s) =>
+              !best ||
+              Math.abs(s.strike - (shortPutStrike - TARGET_WING)) <
+                Math.abs(best.strike - (shortPutStrike - TARGET_WING))
+                ? s
+                : best,
+            null,
+          )
+      : null;
 
     let legs: Leg[] = [];
     let netCredit = 0;
