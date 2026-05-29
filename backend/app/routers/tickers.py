@@ -230,14 +230,15 @@ async def get_ticker_chart(
     period: str = "1y",
     db: AsyncSession = Depends(get_db),
 ) -> TickerChartRead:
-    """Daily price history + earnings markers for the interactive chart."""
+    """Daily (or intraday) price history + earnings markers for the interactive chart."""
     sym = symbol.upper()
 
-    # yfinance history runs sync — offload to thread pool
     loop = asyncio.get_event_loop()
-    history_raw: list[dict] = await loop.run_in_executor(
-        None, YFinanceClient.get_daily_closes, sym, period
+    chart_result: dict = await loop.run_in_executor(
+        None, YFinanceClient.get_chart_history, sym, period
     )
+    history_raw: list[dict] = chart_result["history"]
+    start_price: float | None = chart_result["start_price"]
 
     history = [SparklinePoint(date=p["date"], close=p["close"]) for p in history_raw]
 
@@ -272,7 +273,7 @@ async def get_ticker_chart(
                     pct_change_5d=float(r.pct_change_5d) if r.pct_change_5d is not None else None,
                 ))
 
-    return TickerChartRead(symbol=sym, period=period, history=history, earnings_markers=markers)
+    return TickerChartRead(symbol=sym, period=period, history=history, earnings_markers=markers, start_price=start_price)
 
 
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)

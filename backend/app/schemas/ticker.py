@@ -53,6 +53,7 @@ class TickerChartRead(BaseModel):
     period: str
     history: list["SparklinePoint"]
     earnings_markers: list[EarningsMarker]
+    start_price: float | None = None  # reference for the period's change calc
 
 
 # ── Quote response (Finnhub) ──────────────────────────────────────────────────

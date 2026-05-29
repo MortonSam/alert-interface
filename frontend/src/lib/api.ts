@@ -138,6 +138,7 @@ export interface TickerChart {
   period: string;
   history: SparklinePoint[];
   earnings_markers: EarningsMarker[];
+  start_price: number | null;  // reference close for the period's change calculation
 }
 
 export interface TickerQuote {

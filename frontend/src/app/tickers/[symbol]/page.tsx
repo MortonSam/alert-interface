@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
@@ -562,12 +562,33 @@ function VerificationPanel({
 
 // ── Price chart ───────────────────────────────────────────────────────────────
 
-const CHART_PERIODS = ["1mo", "3mo", "6mo", "1y", "5y"] as const;
+const CHART_PERIODS = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "5y"] as const;
 type ChartPeriod = (typeof CHART_PERIODS)[number];
 
 const PERIOD_LABELS: Record<ChartPeriod, string> = {
-  "1mo": "1M", "3mo": "3M", "6mo": "6M", "1y": "1Y", "5y": "5Y",
+  "1d": "1D", "5d": "5D", "1mo": "1M", "3mo": "3M", "6mo": "6M", "1y": "1Y", "5y": "5Y",
 };
+
+const PERIOD_WINDOW_LABEL: Record<ChartPeriod, string> = {
+  "1d": "today",
+  "5d": "past 5d",
+  "1mo": "past month",
+  "3mo": "past 3 months",
+  "6mo": "past 6 months",
+  "1y": "past year",
+  "5y": "past 5 years",
+};
+
+/** For intraday (1D) dates like "2026-05-28T13:30:00Z", show time in ET. Otherwise show the date string. */
+function formatTooltipDate(date: string): string {
+  if (date.length > 10) {
+    return new Date(date).toLocaleTimeString("en-US", {
+      hour: "numeric", minute: "2-digit", hour12: true,
+      timeZone: "America/New_York",
+    });
+  }
+  return date;
+}
 
 const OUTCOME_DOT_COLOR: Record<EarningsMarker["outcome"], string> = {
   beat: "#16a34a",
@@ -575,11 +596,6 @@ const OUTCOME_DOT_COLOR: Record<EarningsMarker["outcome"], string> = {
   meet: "#9ca3af",
   unknown: "#9ca3af",
 };
-
-function formatXTick(epochMs: number): string {
-  const d = new Date(epochMs);
-  return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
-}
 
 function formatYTick(v: number): string {
   return `$${v.toFixed(0)}`;
@@ -597,7 +613,7 @@ function PriceChartTooltip({
   const marker = markerMap.get(date);
   return (
     <div className="rounded-lg border bg-card shadow-md px-3 py-2 text-xs min-w-[140px]">
-      <p className="font-medium text-foreground mb-1">{date}</p>
+      <p className="font-medium text-foreground mb-1">{formatTooltipDate(date)}</p>
       <p className="tabular-nums">${close.toFixed(2)}</p>
       {marker && (
         <div className="mt-1.5 pt-1.5 border-t space-y-0.5">
@@ -628,20 +644,31 @@ function PriceChartTooltip({
   );
 }
 
-function PriceChart({ symbol }: { symbol: string }) {
-  const [period, setPeriod] = useState<ChartPeriod>("1y");
+function PriceChart({
+  symbol,
+  period,
+  onPeriodChange,
+  onChartLoad,
+}: {
+  symbol: string;
+  period: ChartPeriod;
+  onPeriodChange: (p: ChartPeriod) => void;
+  onChartLoad: (startPrice: number | null) => void;
+}) {
   const [chartData, setChartData] = useState<TickerChart | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
+    onChartLoad(null); // clear header change while loading new range
     api.tickers.chart(symbol, period).then((d) => {
       setChartData(d);
+      onChartLoad(d.start_price);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [symbol, period]);
+  }, [symbol, period, onChartLoad]);
 
-  // Build epoch-keyed data for recharts
+  // Build epoch-keyed data. Intraday dates are full ISO strings; daily are "YYYY-MM-DD".
   const { lineData, markerMap } = useMemo(() => {
     const empty = {
       lineData: [] as Array<{ date: string; epochMs: number; close: number }>,
@@ -653,7 +680,10 @@ function PriceChart({ symbol }: { symbol: string }) {
     );
     const ld = chartData.history.map((p) => ({
       date: p.date,
-      epochMs: new Date(p.date + "T12:00:00Z").getTime(),
+      // Intraday: full ISO string parseable directly; daily: append noon UTC to anchor day correctly
+      epochMs: p.date.length > 10
+        ? new Date(p.date).getTime()
+        : new Date(p.date + "T12:00:00Z").getTime(),
       close: p.close,
     }));
     return { lineData: ld, markerMap: mm };
@@ -669,14 +699,28 @@ function PriceChart({ symbol }: { symbol: string }) {
   }, [lineData]);
 
   // y-axis: tight domain framing actual price range, padded 5%
+  // Also include start_price (prev close reference line) so it stays in view on 1D
   const yDomain = useMemo((): [number, number] | ["auto", "auto"] => {
     if (!lineData.length) return ["auto", "auto"];
-    const closes = lineData.map((d) => d.close);
-    const lo = Math.min(...closes);
-    const hi = Math.max(...closes);
+    const vals = lineData.map((d) => d.close);
+    if (chartData?.start_price != null) vals.push(chartData.start_price);
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
     const pad = (hi - lo) * 0.05;
     return [lo - pad, hi + pad];
-  }, [lineData]);
+  }, [lineData, chartData?.start_price]);
+
+  // x-axis tick labels: HH:MM for intraday, Mon 'YY for daily
+  const formatXTick = (epochMs: number) => {
+    const d = new Date(epochMs);
+    if (period === "1d") {
+      return d.toLocaleTimeString("en-US", {
+        hour: "numeric", minute: "2-digit", hour12: true,
+        timeZone: "America/New_York",
+      });
+    }
+    return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  };
 
   // Earnings marker reference lines (vertical)
   const markerDates = useMemo(() => {
@@ -694,7 +738,9 @@ function PriceChart({ symbol }: { symbol: string }) {
 
   if (!chartData || lineData.length === 0) return null;
 
-  const isUp = lineData[lineData.length - 1].close >= lineData[0].close;
+  // Use start_price as the reference for color (green if current > start)
+  const refPrice = chartData.start_price ?? lineData[0].close;
+  const isUp = lineData[lineData.length - 1].close >= refPrice;
   const lineColor = isUp ? "#16a34a" : "#dc2626";
 
   return (
@@ -704,7 +750,7 @@ function PriceChart({ symbol }: { symbol: string }) {
         {CHART_PERIODS.map((p) => (
           <button
             key={p}
-            onClick={() => setPeriod(p)}
+            onClick={() => onPeriodChange(p)}
             className={cn(
               "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
               period === p
@@ -746,6 +792,17 @@ function PriceChart({ symbol }: { symbol: string }) {
             content={<PriceChartTooltip markerMap={markerMap} />}
             cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1, strokeDasharray: "4 2" }}
           />
+
+          {/* Previous-close reference line for 1D intraday view */}
+          {period === "1d" && chartData.start_price != null && (
+            <ReferenceLine
+              y={chartData.start_price}
+              stroke="hsl(var(--muted-foreground))"
+              strokeWidth={1}
+              strokeDasharray="4 2"
+              strokeOpacity={0.45}
+            />
+          )}
 
           {/* Vertical dashed lines at each earnings date */}
           {markerDates.map((m) => (
@@ -1422,6 +1479,11 @@ export default function TickerPage() {
   const [reactionError, setReactionError]   = useState<string | null>(null);
 
   const [quote, setQuote]             = useState<TickerQuote | null>(null);
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("1y");
+  const [chartStartPrice, setChartStartPrice] = useState<number | null>(null);
+  const handleChartLoad = useCallback((startPrice: number | null) => {
+    setChartStartPrice(startPrice);
+  }, []);
 
   const [expectedMove, setExpectedMove]   = useState<ExpectedMove | null>(null);
   const [emStatus, setEmStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
@@ -1570,21 +1632,20 @@ export default function TickerPage() {
               <span className="text-3xl font-bold tabular-nums tracking-tight">
                 ${quote.price.toFixed(2)}
               </span>
-              {quote.change != null && quote.change_pct != null && (
-                <span
-                  className={cn(
+              {chartStartPrice != null && (() => {
+                const chg    = quote.price! - chartStartPrice;
+                const chgPct = (chg / chartStartPrice) * 100;
+                return (
+                  <span className={cn(
                     "text-sm font-medium tabular-nums",
-                    quote.change >= 0
-                      ? "text-green-600 dark:text-green-400"
-                      : "text-red-600 dark:text-red-400",
-                  )}
-                >
-                  {quote.change >= 0 ? "+" : ""}
-                  {quote.change.toFixed(2)}{" "}
-                  ({quote.change_pct >= 0 ? "+" : ""}
-                  {quote.change_pct.toFixed(2)}%)
-                </span>
-              )}
+                    chg >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                  )}>
+                    {chg >= 0 ? "+" : ""}{chg.toFixed(2)}{" "}
+                    ({chgPct >= 0 ? "+" : ""}{chgPct.toFixed(2)}%){" "}
+                    <span className="font-normal opacity-60">{PERIOD_WINDOW_LABEL[chartPeriod]}</span>
+                  </span>
+                );
+              })()}
             </div>
             {quote.high != null && quote.low != null && (
               <span className="text-xs text-muted-foreground ml-auto">
@@ -1595,7 +1656,12 @@ export default function TickerPage() {
         )}
 
         {/* Interactive price chart with earnings markers */}
-        <PriceChart symbol={upperSymbol} />
+        <PriceChart
+          symbol={upperSymbol}
+          period={chartPeriod}
+          onPeriodChange={setChartPeriod}
+          onChartLoad={handleChartLoad}
+        />
 
         {/* Stats strip */}
         <div className="mt-8 flex flex-wrap gap-x-10 gap-y-4 rounded-lg border bg-card p-5">

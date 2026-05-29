@@ -82,3 +82,60 @@ class YFinanceClient:
             }
             for idx, close in zip(hist.index, hist["Close"])
         ]
+
+    @staticmethod
+    def get_chart_history(symbol: str, period: str) -> dict[str, Any]:
+        """Price history for the interactive chart, supporting intraday and daily ranges.
+
+        period='1d'  → intraday 1-minute bars; start_price = previous session close.
+        period='5d'  → past 5 trading days at daily interval.
+        All others   → daily bars; start_price = first close in the series.
+
+        Returns {"history": [{"date": str, "close": float}, ...], "start_price": float | None}.
+        Intraday dates are UTC ISO-8601 strings ("YYYY-MM-DDTHH:MM:SSZ").
+        Daily dates are "YYYY-MM-DD".
+        """
+        ticker = yf.Ticker(symbol)
+
+        if period == "1d":
+            intraday = ticker.history(period="1d", interval="1m", auto_adjust=True)
+            # Previous session close — fetch a short daily window
+            daily5 = ticker.history(period="5d", interval="1d", auto_adjust=True)
+
+            prev_close: float | None = None
+            if daily5 is not None and not daily5.empty:
+                closes = daily5["Close"].dropna()
+                if len(closes) >= 2:
+                    prev_close = float(closes.iloc[-2])
+                elif len(closes) == 1:
+                    prev_close = float(closes.iloc[0])
+
+            if intraday is None or intraday.empty:
+                return {"history": [], "start_price": prev_close}
+
+            history: list[dict[str, Any]] = []
+            for idx, close_val in zip(intraday.index, intraday["Close"]):
+                if pd.isna(close_val):
+                    continue
+                utc = idx.tz_convert("UTC") if idx.tzinfo else idx
+                history.append({
+                    "date": utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "close": float(close_val),
+                })
+            return {"history": history, "start_price": prev_close}
+
+        else:
+            # Explicit interval="1d" prevents yfinance defaulting to intraday for short periods
+            hist = ticker.history(period=period, interval="1d", auto_adjust=True)
+            if hist is None or hist.empty:
+                return {"history": [], "start_price": None}
+
+            closes = hist["Close"].dropna()
+            start_price: float | None = float(closes.iloc[0]) if not closes.empty else None
+
+            history = [
+                {"date": idx.strftime("%Y-%m-%d"), "close": float(close)}
+                for idx, close in zip(hist.index, hist["Close"])
+                if not pd.isna(close)
+            ]
+            return {"history": history, "start_price": start_price}
