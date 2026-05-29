@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -816,31 +817,46 @@ function fmtPctDecimal(v: number | null, digits = 1): string {
 
 // ── Tooltip component ─────────────────────────────────────────────────────────
 
-function Tip({
-  children,
-  text,
-  placement = "above",
-}: {
-  children: React.ReactNode;
-  text: string;
-  placement?: "above" | "below";
-}) {
+function Tip({ children, text }: { children: React.ReactNode; text: string }) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  function show() { if (ref.current) setRect(ref.current.getBoundingClientRect()); }
+  function hide() { setRect(null); }
+
   return (
-    <span className="relative group/tip inline-flex items-center cursor-help">
-      {children}
+    <>
       <span
-        role="tooltip"
-        className={cn(
-          "pointer-events-none absolute left-1/2 -translate-x-1/2 w-60 z-50",
-          placement === "above" ? "bottom-full mb-2" : "top-full mt-2",
-          "rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg",
-          "opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150",
-          "whitespace-normal leading-relaxed text-left font-normal",
-        )}
+        ref={ref}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        className="inline-flex items-center cursor-help"
       >
-        {text}
+        {children}
       </span>
-    </span>
+      {rect && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: "fixed",
+            // Appear above the trigger; clamp horizontally so it never runs off-screen
+            top:  rect.top - 8,
+            left: Math.max(8, Math.min(
+              (typeof window !== "undefined" ? window.innerWidth : 1200) - 248,
+              rect.left + rect.width / 2 - 120,
+            )),
+            transform: "translateY(-100%)",
+            zIndex: 9999,
+          }}
+          className="w-60 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl pointer-events-none whitespace-normal leading-relaxed"
+        >
+          {text}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -1046,12 +1062,23 @@ function OptionsChainView({
     [chain.puts],
   );
 
-  // IV heatmap: compute min/max across all non-null IVs in this chain
+  // A side is "dead" when both bid and ask are zero — no real market exists
+  function isDeadSide(c: OptionContract | undefined): boolean {
+    if (!c) return false; // absence is handled separately; this is for existing but illiquid rows
+    return (c.bid == null || c.bid === 0) && (c.ask == null || c.ask === 0);
+  }
+
+  // IV heatmap: only use liquid contracts (not dead) and cap IV at 100% to exclude calc artifacts
+  const IV_CAP = 1.0;
   const { minIV, maxIV } = useMemo(() => {
     const ivs = [
-      ...chain.calls.map((c) => c.implied_volatility),
-      ...chain.puts.map((p) => p.implied_volatility),
-    ].filter((v): v is number => v != null);
+      ...chain.calls
+        .filter((c) => !isDeadSide(c))
+        .map((c) => c.implied_volatility),
+      ...chain.puts
+        .filter((p) => !isDeadSide(p))
+        .map((p) => p.implied_volatility),
+    ].filter((v): v is number => v != null && v <= IV_CAP);
     return { minIV: ivs.length ? Math.min(...ivs) : 0, maxIV: ivs.length ? Math.max(...ivs) : 1 };
   }, [chain.calls, chain.puts]);
 
@@ -1078,37 +1105,37 @@ function OptionsChainView({
             <thead>
               <tr className="border-b bg-muted/40">
                 <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                  <Tip text={TIPS.bid} placement="below">
+                  <Tip text={TIPS.bid}>
                     <span className="underline decoration-dotted underline-offset-2">Call Bid</span>
                   </Tip>
                 </th>
                 <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                  <Tip text={TIPS.ask} placement="below">
+                  <Tip text={TIPS.ask}>
                     <span className="underline decoration-dotted underline-offset-2">Call Ask</span>
                   </Tip>
                 </th>
                 <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                  <Tip text={TIPS.iv} placement="below">
+                  <Tip text={TIPS.iv}>
                     <span className="underline decoration-dotted underline-offset-2">Call IV</span>
                   </Tip>
                 </th>
                 <th className="px-3 py-2.5 text-center font-medium text-muted-foreground">
-                  <Tip text={TIPS.strike} placement="below">
+                  <Tip text={TIPS.strike}>
                     <span className="underline decoration-dotted underline-offset-2">Strike</span>
                   </Tip>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                  <Tip text={TIPS.iv} placement="below">
+                  <Tip text={TIPS.iv}>
                     <span className="underline decoration-dotted underline-offset-2">Put IV</span>
                   </Tip>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                  <Tip text={TIPS.bid} placement="below">
+                  <Tip text={TIPS.bid}>
                     <span className="underline decoration-dotted underline-offset-2">Put Bid</span>
                   </Tip>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                  <Tip text={TIPS.ask} placement="below">
+                  <Tip text={TIPS.ask}>
                     <span className="underline decoration-dotted underline-offset-2">Put Ask</span>
                   </Tip>
                 </th>
@@ -1116,9 +1143,12 @@ function OptionsChainView({
             </thead>
             <tbody className="divide-y divide-border">
               {allStrikes.map((strike) => {
-                const call = callMap.get(strike);
-                const put  = putMap.get(strike);
-                const isAtm = call?.is_atm || put?.is_atm;
+                const call    = callMap.get(strike);
+                const put     = putMap.get(strike);
+                const isAtm   = call?.is_atm || put?.is_atm;
+                const callDead = isDeadSide(call);
+                const putDead  = isDeadSide(put);
+                const deadCls  = "text-muted-foreground/50";
                 return (
                   <tr
                     key={strike}
@@ -1127,41 +1157,46 @@ function OptionsChainView({
                       isAtm ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-muted/30",
                     )}
                   >
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {call?.bid != null ? call.bid.toFixed(2) : "—"}
+                    {/* Call bid */}
+                    <td className={cn("px-3 py-2 text-right tabular-nums", callDead && deadCls)}>
+                      {callDead ? "—" : (call?.bid != null ? call.bid.toFixed(2) : "—")}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {call?.ask != null ? call.ask.toFixed(2) : "—"}
+                    {/* Call ask */}
+                    <td className={cn("px-3 py-2 text-right tabular-nums", callDead && deadCls)}>
+                      {callDead ? "—" : (call?.ask != null ? call.ask.toFixed(2) : "—")}
                     </td>
-                    {/* Call IV — heatmap tinted */}
+                    {/* Call IV — heatmap tinted only for live contracts */}
                     <td
-                      className="px-3 py-2 text-right tabular-nums font-medium"
-                      style={ivHeatBg(call?.implied_volatility ?? null, minIV, maxIV)}
+                      className={cn("px-3 py-2 text-right tabular-nums font-medium", callDead && deadCls)}
+                      style={callDead ? {} : ivHeatBg(call?.implied_volatility ?? null, minIV, maxIV)}
                     >
-                      {fmtIV(call?.implied_volatility ?? null)}
+                      {callDead ? "—" : fmtIV(call?.implied_volatility ?? null)}
                     </td>
+                    {/* Strike — always shown */}
                     <td className="px-3 py-2 text-center font-semibold tabular-nums">
                       {strike.toFixed(0)}
                       {isAtm && (
-                        <Tip text={TIPS.atm} placement="below">
+                        <Tip text={TIPS.atm}>
                           <span className="ml-1 text-xs font-normal text-blue-600 dark:text-blue-400 underline decoration-dotted underline-offset-2">
                             ATM
                           </span>
                         </Tip>
                       )}
                     </td>
-                    {/* Put IV — heatmap tinted */}
+                    {/* Put IV — heatmap tinted only for live contracts */}
                     <td
-                      className="px-3 py-2 text-left tabular-nums font-medium"
-                      style={ivHeatBg(put?.implied_volatility ?? null, minIV, maxIV)}
+                      className={cn("px-3 py-2 text-left tabular-nums font-medium", putDead && deadCls)}
+                      style={putDead ? {} : ivHeatBg(put?.implied_volatility ?? null, minIV, maxIV)}
                     >
-                      {fmtIV(put?.implied_volatility ?? null)}
+                      {putDead ? "—" : fmtIV(put?.implied_volatility ?? null)}
                     </td>
-                    <td className="px-3 py-2 text-left tabular-nums">
-                      {put?.bid != null ? put.bid.toFixed(2) : "—"}
+                    {/* Put bid */}
+                    <td className={cn("px-3 py-2 text-left tabular-nums", putDead && deadCls)}>
+                      {putDead ? "—" : (put?.bid != null ? put.bid.toFixed(2) : "—")}
                     </td>
-                    <td className="px-3 py-2 text-left tabular-nums">
-                      {put?.ask != null ? put.ask.toFixed(2) : "—"}
+                    {/* Put ask */}
+                    <td className={cn("px-3 py-2 text-left tabular-nums", putDead && deadCls)}>
+                      {putDead ? "—" : (put?.ask != null ? put.ask.toFixed(2) : "—")}
                     </td>
                   </tr>
                 );
