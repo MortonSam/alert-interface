@@ -158,6 +158,7 @@ export interface OptionContract {
   volume: number | null; open_interest: number | null;
   implied_volatility: number | null;  // 0–1 decimal
   is_atm: boolean;
+  data_quality_flag: string | null;   // null = trustworthy; else reason ("iv_outlier", "no_market", etc.)
 }
 export interface OptionsChain {
   symbol: string; expiration: string; current_price: number | null;

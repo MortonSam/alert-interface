@@ -850,7 +850,7 @@ function Tip({ children, text }: { children: React.ReactNode; text: string }) {
             transform: "translateY(-100%)",
             zIndex: 9999,
           }}
-          className="w-60 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl pointer-events-none whitespace-normal leading-relaxed"
+          className="w-60 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 shadow-xl pointer-events-none whitespace-normal leading-relaxed"
         >
           {text}
         </div>,
@@ -1062,23 +1062,17 @@ function OptionsChainView({
     [chain.puts],
   );
 
-  // A side is "dead" when both bid and ask are zero — no real market exists
-  function isDeadSide(c: OptionContract | undefined): boolean {
-    if (!c) return false; // absence is handled separately; this is for existing but illiquid rows
-    return (c.bid == null || c.bid === 0) && (c.ask == null || c.ask === 0);
+  // A contract is questionable if the backend set data_quality_flag
+  function isQuestionable(c: OptionContract | undefined): boolean {
+    return c != null && c.data_quality_flag != null;
   }
 
-  // IV heatmap: only use liquid contracts (not dead) and cap IV at 100% to exclude calc artifacts
-  const IV_CAP = 1.0;
+  // IV heatmap: only use trustworthy contracts for the color scale
   const { minIV, maxIV } = useMemo(() => {
-    const ivs = [
-      ...chain.calls
-        .filter((c) => !isDeadSide(c))
-        .map((c) => c.implied_volatility),
-      ...chain.puts
-        .filter((p) => !isDeadSide(p))
-        .map((p) => p.implied_volatility),
-    ].filter((v): v is number => v != null && v <= IV_CAP);
+    const ivs = [...chain.calls, ...chain.puts]
+      .filter((c) => !isQuestionable(c))
+      .map((c) => c.implied_volatility)
+      .filter((v): v is number => v != null);
     return { minIV: ivs.length ? Math.min(...ivs) : 0, maxIV: ivs.length ? Math.max(...ivs) : 1 };
   }, [chain.calls, chain.puts]);
 
@@ -1143,12 +1137,12 @@ function OptionsChainView({
             </thead>
             <tbody className="divide-y divide-border">
               {allStrikes.map((strike) => {
-                const call    = callMap.get(strike);
-                const put     = putMap.get(strike);
-                const isAtm   = call?.is_atm || put?.is_atm;
-                const callDead = isDeadSide(call);
-                const putDead  = isDeadSide(put);
-                const deadCls  = "text-muted-foreground/50";
+                const call = callMap.get(strike);
+                const put  = putMap.get(strike);
+                const isAtm = call?.is_atm || put?.is_atm;
+                const callQ = isQuestionable(call);
+                const putQ  = isQuestionable(put);
+                const deadCls = "text-muted-foreground/50";
                 return (
                   <tr
                     key={strike}
@@ -1158,19 +1152,19 @@ function OptionsChainView({
                     )}
                   >
                     {/* Call bid */}
-                    <td className={cn("px-3 py-2 text-right tabular-nums", callDead && deadCls)}>
-                      {callDead ? "—" : (call?.bid != null ? call.bid.toFixed(2) : "—")}
+                    <td className={cn("px-3 py-2 text-right tabular-nums", callQ && deadCls)}>
+                      {callQ ? "—" : (call?.bid != null ? call.bid.toFixed(2) : "—")}
                     </td>
                     {/* Call ask */}
-                    <td className={cn("px-3 py-2 text-right tabular-nums", callDead && deadCls)}>
-                      {callDead ? "—" : (call?.ask != null ? call.ask.toFixed(2) : "—")}
+                    <td className={cn("px-3 py-2 text-right tabular-nums", callQ && deadCls)}>
+                      {callQ ? "—" : (call?.ask != null ? call.ask.toFixed(2) : "—")}
                     </td>
-                    {/* Call IV — heatmap tinted only for live contracts */}
+                    {/* Call IV — heatmap tinted only for trustworthy contracts */}
                     <td
-                      className={cn("px-3 py-2 text-right tabular-nums font-medium", callDead && deadCls)}
-                      style={callDead ? {} : ivHeatBg(call?.implied_volatility ?? null, minIV, maxIV)}
+                      className={cn("px-3 py-2 text-right tabular-nums font-medium", callQ && deadCls)}
+                      style={callQ ? {} : ivHeatBg(call?.implied_volatility ?? null, minIV, maxIV)}
                     >
-                      {callDead ? "—" : fmtIV(call?.implied_volatility ?? null)}
+                      {callQ ? "—" : fmtIV(call?.implied_volatility ?? null)}
                     </td>
                     {/* Strike — always shown */}
                     <td className="px-3 py-2 text-center font-semibold tabular-nums">
@@ -1183,20 +1177,20 @@ function OptionsChainView({
                         </Tip>
                       )}
                     </td>
-                    {/* Put IV — heatmap tinted only for live contracts */}
+                    {/* Put IV — heatmap tinted only for trustworthy contracts */}
                     <td
-                      className={cn("px-3 py-2 text-left tabular-nums font-medium", putDead && deadCls)}
-                      style={putDead ? {} : ivHeatBg(put?.implied_volatility ?? null, minIV, maxIV)}
+                      className={cn("px-3 py-2 text-left tabular-nums font-medium", putQ && deadCls)}
+                      style={putQ ? {} : ivHeatBg(put?.implied_volatility ?? null, minIV, maxIV)}
                     >
-                      {putDead ? "—" : fmtIV(put?.implied_volatility ?? null)}
+                      {putQ ? "—" : fmtIV(put?.implied_volatility ?? null)}
                     </td>
                     {/* Put bid */}
-                    <td className={cn("px-3 py-2 text-left tabular-nums", putDead && deadCls)}>
-                      {putDead ? "—" : (put?.bid != null ? put.bid.toFixed(2) : "—")}
+                    <td className={cn("px-3 py-2 text-left tabular-nums", putQ && deadCls)}>
+                      {putQ ? "—" : (put?.bid != null ? put.bid.toFixed(2) : "—")}
                     </td>
                     {/* Put ask */}
-                    <td className={cn("px-3 py-2 text-left tabular-nums", putDead && deadCls)}>
-                      {putDead ? "—" : (put?.ask != null ? put.ask.toFixed(2) : "—")}
+                    <td className={cn("px-3 py-2 text-left tabular-nums", putQ && deadCls)}>
+                      {putQ ? "—" : (put?.ask != null ? put.ask.toFixed(2) : "—")}
                     </td>
                   </tr>
                 );

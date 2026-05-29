@@ -96,12 +96,56 @@ def _mid_or_last(bid, ask, last):
     return last if last and last > 0 else None
 
 
-def _build_contracts(chain_side, atm_strike):
+_IV_TRUST_CAP = 1.0  # 100% annualized IV — above this is a calc artifact on normal equities
+
+
+def _flag_contract(c: dict, current_price: float, is_call: bool) -> str | None:
+    """Return a short reason string if a contract looks untrustworthy, else None."""
+    bid    = c.get("bid")  or 0.0
+    ask    = c.get("ask")  or 0.0
+    iv     = c.get("impliedVolatility")
+    oi     = c.get("openInterest") or 0
+    vol    = c.get("volume")       or 0
+    strike = c["strike"]
+
+    # 1. No market at all
+    if bid == 0.0 and ask == 0.0:
+        return "no_market"
+
+    # 2. IV above sanity cap
+    if iv is not None and iv > _IV_TRUST_CAP:
+        return "iv_outlier"
+
+    # 3. Bid below intrinsic (arb-free violation — impossible in a real market)
+    if bid > 0 and current_price > 0:
+        intrinsic = max(0.0, (current_price - strike) if is_call else (strike - current_price))
+        if intrinsic > 0 and bid < intrinsic * 0.95:   # 5% tolerance for rounding
+            return "below_intrinsic"
+
+    # 4. Bid-ask spread > 50% of mid (no liquid market)
+    if bid > 0 and ask > 0:
+        mid    = (bid + ask) / 2.0
+        spread = ask - bid
+        if mid > 0 and spread / mid > 0.50:
+            return "wide_spread"
+
+    # 5. Zero OI and zero volume — weakest alone; only flag if IV is also absent/zero
+    if oi == 0 and vol == 0 and (iv is None or iv == 0):
+        return "no_market"
+
+    return None
+
+
+def _build_contracts(chain_side, atm_strike, current_price: float | None = None, is_call: bool = False):
     return [OptionContractRead(
         strike=c["strike"], bid=c["bid"], ask=c["ask"], last_price=c["lastPrice"],
         volume=c["volume"], open_interest=c["openInterest"],
         implied_volatility=c["impliedVolatility"],
         is_atm=(atm_strike is not None and c["strike"] == atm_strike),
+        data_quality_flag=(
+            _flag_contract(c, current_price, is_call)
+            if current_price is not None else None
+        ),
     ) for c in chain_side]
 
 
@@ -445,8 +489,8 @@ async def get_options_chain(
         symbol=sym,
         expiration=chosen,
         current_price=current_price,
-        calls=_build_contracts(filtered_calls, atm_strike),
-        puts=_build_contracts(filtered_puts, atm_strike),
+        calls=_build_contracts(filtered_calls, atm_strike, current_price=current_price, is_call=True),
+        puts=_build_contracts(filtered_puts,  atm_strike, current_price=current_price, is_call=False),
         available_expirations=available,
         as_of=as_of,
     )

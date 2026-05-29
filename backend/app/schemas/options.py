@@ -11,6 +11,7 @@ class OptionContractRead(BaseModel):
     open_interest: int | None
     implied_volatility: float | None   # 0–1 decimal (0.30 = 30%)
     is_atm: bool
+    data_quality_flag: str | None = None  # null = trustworthy; else short reason string
 
 
 class OptionsChainRead(BaseModel):
