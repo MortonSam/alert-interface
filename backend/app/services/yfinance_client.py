@@ -88,7 +88,7 @@ class YFinanceClient:
         """Price history for the interactive chart, supporting intraday and daily ranges.
 
         period='1d'  → intraday 1-minute bars; start_price = previous session close.
-        period='5d'  → past 5 trading days at daily interval.
+        period='7d'  → intraday 30-minute bars over 7 days; start_price = first bar's close.
         All others   → daily bars; start_price = first close in the series.
 
         Returns {"history": [{"date": str, "close": float}, ...], "start_price": float | None}.
@@ -123,6 +123,23 @@ class YFinanceClient:
                     "close": float(close_val),
                 })
             return {"history": history, "start_price": prev_close}
+
+        elif period == "7d":
+            intraday = ticker.history(period="7d", interval="30m", auto_adjust=True)
+            if intraday is None or intraday.empty:
+                return {"history": [], "start_price": None}
+
+            history = []
+            for idx, close_val in zip(intraday.index, intraday["Close"]):
+                if pd.isna(close_val):
+                    continue
+                utc = idx.tz_convert("UTC") if idx.tzinfo else idx
+                history.append({
+                    "date": utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "close": float(close_val),
+                })
+            start_price = history[0]["close"] if history else None
+            return {"history": history, "start_price": start_price}
 
         else:
             # Explicit interval="1d" prevents yfinance defaulting to intraday for short periods

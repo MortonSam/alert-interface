@@ -562,16 +562,16 @@ function VerificationPanel({
 
 // ── Price chart ───────────────────────────────────────────────────────────────
 
-const CHART_PERIODS = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "5y"] as const;
+const CHART_PERIODS = ["1d", "7d", "1mo", "3mo", "6mo", "1y", "5y"] as const;
 type ChartPeriod = (typeof CHART_PERIODS)[number];
 
 const PERIOD_LABELS: Record<ChartPeriod, string> = {
-  "1d": "1D", "5d": "5D", "1mo": "1M", "3mo": "3M", "6mo": "6M", "1y": "1Y", "5y": "5Y",
+  "1d": "1D", "7d": "1W", "1mo": "1M", "3mo": "3M", "6mo": "6M", "1y": "1Y", "5y": "5Y",
 };
 
 const PERIOD_WINDOW_LABEL: Record<ChartPeriod, string> = {
   "1d": "today",
-  "5d": "past 5d",
+  "7d": "past 1w",
   "1mo": "past month",
   "3mo": "past 3 months",
   "6mo": "past 6 months",
@@ -579,10 +579,19 @@ const PERIOD_WINDOW_LABEL: Record<ChartPeriod, string> = {
   "5y": "past 5 years",
 };
 
-/** For intraday (1D) dates like "2026-05-28T13:30:00Z", show time in ET. Otherwise show the date string. */
-function formatTooltipDate(date: string): string {
+/** Format tooltip date: intraday ISO → "May 28, 10:30 AM ET"; daily → raw date string. */
+function formatTooltipDate(date: string, period: ChartPeriod): string {
   if (date.length > 10) {
-    return new Date(date).toLocaleTimeString("en-US", {
+    const d = new Date(date);
+    if (period === "1d") {
+      return d.toLocaleTimeString("en-US", {
+        hour: "numeric", minute: "2-digit", hour12: true,
+        timeZone: "America/New_York",
+      });
+    }
+    // 7D: show "May 28, 10:30 AM"
+    return d.toLocaleString("en-US", {
+      month: "short", day: "numeric",
       hour: "numeric", minute: "2-digit", hour12: true,
       timeZone: "America/New_York",
     });
@@ -602,18 +611,19 @@ function formatYTick(v: number): string {
 }
 
 function PriceChartTooltip({
-  active, payload, markerMap,
+  active, payload, markerMap, period,
 }: {
   active?: boolean;
   payload?: Array<{ payload: { date: string; close: number; epochMs: number } }>;
   markerMap: Map<string, EarningsMarker>;
+  period: ChartPeriod;
 }) {
   if (!active || !payload?.length) return null;
   const { date, close } = payload[0].payload;
   const marker = markerMap.get(date);
   return (
     <div className="rounded-lg border bg-card shadow-md px-3 py-2 text-xs min-w-[140px]">
-      <p className="font-medium text-foreground mb-1">{formatTooltipDate(date)}</p>
+      <p className="font-medium text-foreground mb-1">{formatTooltipDate(date, period)}</p>
       <p className="tabular-nums">${close.toFixed(2)}</p>
       {marker && (
         <div className="mt-1.5 pt-1.5 border-t space-y-0.5">
@@ -668,35 +678,61 @@ function PriceChart({
     }).catch(() => setLoading(false));
   }, [symbol, period, onChartLoad]);
 
-  // Build epoch-keyed data. Intraday dates are full ISO strings; daily are "YYYY-MM-DD".
+  // Intraday periods use index-based x-axis to eliminate overnight/weekend gaps.
+  const isIntraday = period === "1d" || period === "7d";
+
+  // Build chart data. Each point gets: date (raw), epochMs (for tooltip/lookup), close, idx.
   const { lineData, markerMap } = useMemo(() => {
     const empty = {
-      lineData: [] as Array<{ date: string; epochMs: number; close: number }>,
+      lineData: [] as Array<{ date: string; epochMs: number; close: number; idx: number }>,
       markerMap: new Map<string, EarningsMarker>(),
     };
     if (!chartData) return empty;
     const mm = new Map<string, EarningsMarker>(
       chartData.earnings_markers.map((m) => [m.date, m])
     );
-    const ld = chartData.history.map((p) => ({
+    const ld = chartData.history.map((p, i) => ({
       date: p.date,
-      // Intraday: full ISO string parseable directly; daily: append noon UTC to anchor day correctly
       epochMs: p.date.length > 10
         ? new Date(p.date).getTime()
         : new Date(p.date + "T12:00:00Z").getTime(),
       close: p.close,
+      idx: i,
     }));
     return { lineData: ld, markerMap: mm };
   }, [chartData]);
 
-  // x-axis ticks: ~6 evenly spaced
+  // x-axis ticks
   const xTicks = useMemo(() => {
     if (lineData.length < 2) return [];
+    if (period === "1d") {
+      // Evenly-spaced indices (6 ticks) for single-day intraday
+      const n = Math.min(6, lineData.length);
+      return Array.from({ length: n }, (_, i) =>
+        lineData[Math.floor((i / (n - 1)) * (lineData.length - 1))].idx
+      );
+    }
+    if (period === "7d") {
+      // One tick at the first bar of each trading day
+      const seen = new Set<string>();
+      const ticks: number[] = [];
+      for (const bar of lineData) {
+        const dayKey = new Date(bar.epochMs).toLocaleDateString("en-CA", {
+          timeZone: "America/New_York", // "YYYY-MM-DD" format via en-CA locale
+        });
+        if (!seen.has(dayKey)) {
+          seen.add(dayKey);
+          ticks.push(bar.idx);
+        }
+      }
+      return ticks;
+    }
+    // Daily periods: epochMs-based, ~6 evenly spaced
     const n = Math.min(6, lineData.length);
     return Array.from({ length: n }, (_, i) =>
       lineData[Math.floor((i / (n - 1)) * (lineData.length - 1))].epochMs
     );
-  }, [lineData]);
+  }, [lineData, period]);
 
   // y-axis: tight domain framing actual price range, padded 5%
   // Also include start_price (prev close reference line) so it stays in view on 1D
@@ -710,16 +746,27 @@ function PriceChart({
     return [lo - pad, hi + pad];
   }, [lineData, chartData?.start_price]);
 
-  // x-axis tick labels: HH:MM for intraday, Mon 'YY for daily
-  const formatXTick = (epochMs: number) => {
-    const d = new Date(epochMs);
+  // x-axis tick formatter
+  // For intraday (1D/7D): val is a bar index — look up the real timestamp from lineData.
+  // For daily: val is epochMs directly.
+  const formatXTick = (val: number) => {
     if (period === "1d") {
-      return d.toLocaleTimeString("en-US", {
+      const bar = lineData[val];
+      if (!bar) return "";
+      return new Date(bar.epochMs).toLocaleTimeString("en-US", {
         hour: "numeric", minute: "2-digit", hour12: true,
         timeZone: "America/New_York",
       });
     }
-    return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+    if (period === "7d") {
+      const bar = lineData[val];
+      if (!bar) return "";
+      return new Date(bar.epochMs).toLocaleDateString("en-US", {
+        month: "short", day: "numeric",
+        timeZone: "America/New_York",
+      });
+    }
+    return new Date(val).toLocaleDateString("en-US", { month: "short", year: "2-digit" });
   };
 
   // Earnings marker reference lines (vertical)
@@ -770,10 +817,10 @@ function PriceChart({
         <LineChart data={lineData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
           <XAxis
-            dataKey="epochMs"
+            dataKey={isIntraday ? "idx" : "epochMs"}
             type="number"
-            domain={["dataMin", "dataMax"]}
-            scale="time"
+            domain={isIntraday ? [0, lineData.length - 1] : ["dataMin", "dataMax"]}
+            scale={isIntraday ? "linear" : "time"}
             ticks={xTicks}
             tickFormatter={formatXTick}
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
@@ -789,7 +836,7 @@ function PriceChart({
             width={50}
           />
           <Tooltip
-            content={<PriceChartTooltip markerMap={markerMap} />}
+            content={<PriceChartTooltip markerMap={markerMap} period={period} />}
             cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1, strokeDasharray: "4 2" }}
           />
 
@@ -804,8 +851,8 @@ function PriceChart({
             />
           )}
 
-          {/* Vertical dashed lines at each earnings date */}
-          {markerDates.map((m) => (
+          {/* Vertical dashed lines at each earnings date — daily ranges only (epochMs x-axis) */}
+          {!isIntraday && markerDates.map((m) => (
             <ReferenceLine
               key={m.date}
               x={m.epochMs}
