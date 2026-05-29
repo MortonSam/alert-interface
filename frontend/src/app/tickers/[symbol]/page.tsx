@@ -1508,6 +1508,7 @@ function OptionsEducation({
 // ── Strategy Explainer ────────────────────────────────────────────────────────
 
 type StrategyType = "long_call" | "long_put" | "covered_call" | "csp";
+type MultiLegType = "bear_call_spread" | "short_strangle" | "iron_condor";
 type Outlook = "bullish" | "bearish" | "neutral";
 
 interface StrategyMeta {
@@ -1558,10 +1559,10 @@ const STRATEGY_META: Record<StrategyType, StrategyMeta> = {
   },
 };
 
-const OUTLOOK_STRATEGIES: Record<Outlook, StrategyType[]> = {
+const OUTLOOK_STRATEGIES: Record<Outlook, (StrategyType | MultiLegType)[]> = {
   bullish: ["long_call", "covered_call", "csp"],
-  bearish: ["long_put"],
-  neutral: [],
+  bearish: ["long_put", "bear_call_spread"],
+  neutral: ["short_strangle", "iron_condor"],
 };
 
 function payoffPS(
@@ -1609,6 +1610,69 @@ function strategyStats(
         breakevens: [K - premium],
       };
   }
+}
+
+// ── Multi-leg strategies ──────────────────────────────────────────────────────
+
+interface MultiLegMeta {
+  name: string;
+  oneLiner: string;
+  description: string;
+}
+
+const MULTI_LEG_META: Record<MultiLegType, MultiLegMeta> = {
+  bear_call_spread: {
+    name: "Bear Call Spread",
+    oneLiner: "Bearish — sell an OTM call, buy a higher-strike call to cap risk.",
+    description:
+      "You sell a call at the short strike and buy a higher call (the wing) to limit upside risk. " +
+      "You collect a net credit upfront. If the stock stays below the short strike at expiration, " +
+      "both calls expire worthless and you keep the full credit. If it rises above the long strike, " +
+      "you lose the wing width minus the credit. A defined-risk bearish trade.",
+  },
+  short_strangle: {
+    name: "Short Strangle",
+    oneLiner: "Neutral — sell an OTM call and OTM put, profit if the stock stays between the short strikes.",
+    description:
+      "You simultaneously sell an out-of-the-money call and put, collecting both premiums. " +
+      "Max gain is the combined credit if the stock expires between the two short strikes. " +
+      "Losses are unlimited in either direction — the call side has no cap, and the put side grows " +
+      "as the stock falls toward zero. Thrives in high-IV environments but requires active management.",
+  },
+  iron_condor: {
+    name: "Iron Condor",
+    oneLiner: "Neutral — a short strangle with protective wings on both sides for fully defined risk.",
+    description:
+      "A short call spread plus a short put spread. You collect a net credit and profit if the stock " +
+      "stays between the short strikes at expiration. The wings (long options) cap your maximum loss at " +
+      "wing width minus the credit. Less premium than a naked strangle, but risk is fully defined.",
+  },
+};
+
+interface Leg {
+  kind: "call" | "put";
+  K: number;
+  mid: number;
+  dir: 1 | -1;  // 1 = long, -1 = short
+  label: string;
+}
+
+function multiLegPayoffPS(legs: Leg[], S: number): number {
+  return legs.reduce((sum, leg) => {
+    const intrinsic = leg.kind === "call" ? Math.max(0, S - leg.K) : Math.max(0, leg.K - S);
+    return sum + leg.dir * (intrinsic - leg.mid);
+  }, 0);
+}
+
+interface MultiLegStats {
+  netCredit: number;
+  maxGain: number;
+  maxLoss: number | null;  // null = unlimited
+  breakevens: number[];
+}
+
+function isMultiLeg(s: StrategyType | MultiLegType): s is MultiLegType {
+  return s === "bear_call_spread" || s === "short_strangle" || s === "iron_condor";
 }
 
 // Custom Y-axis tick: signed (+/−), color-coded green/red
@@ -1833,7 +1897,7 @@ function StrategyCard({
             stroke="hsl(var(--muted-foreground))"
             strokeWidth={1}
             strokeDasharray="3 3"
-            label={{ value: "now", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+            label={{ value: "Current", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
           />
 
           {/* Breakeven(s) — label at top */}
@@ -1893,6 +1957,351 @@ function StrategyCard({
   );
 }
 
+function MultiLegStrategyCard({
+  strategy,
+  data,
+}: {
+  strategy: MultiLegType;
+  data: StrategyData;
+}) {
+  const meta = MULTI_LEG_META[strategy];
+  const cp = data.current_price ?? 0;
+
+  const callStrikes = useMemo<StrikeData[]>(
+    () => data.strikes.filter((s) => s.call_mid != null).sort((a, b) => a.strike - b.strike),
+    [data.strikes],
+  );
+  const putStrikes = useMemo<StrikeData[]>(
+    () => data.strikes.filter((s) => s.put_mid != null).sort((a, b) => a.strike - b.strike),
+    [data.strikes],
+  );
+
+  const irLo = data.implied_range_low;
+  const irHi = data.implied_range_high;
+
+  // Default short call: nearest call >= irHi, or ATM
+  const defaultSC = useMemo(() => {
+    if (irHi != null) {
+      const found = callStrikes.find((s) => s.strike >= irHi);
+      if (found) return found.strike;
+    }
+    return (
+      callStrikes.find((s) => s.is_atm)?.strike ??
+      callStrikes[Math.floor(callStrikes.length / 2)]?.strike ??
+      0
+    );
+  }, [callStrikes, irHi]);
+
+  // Default short put: nearest put <= irLo, or ATM
+  const defaultSP = useMemo(() => {
+    if (irLo != null) {
+      const found = [...putStrikes].reverse().find((s) => s.strike <= irLo);
+      if (found) return found.strike;
+    }
+    return (
+      putStrikes.find((s) => s.is_atm)?.strike ??
+      putStrikes[Math.floor(putStrikes.length / 2)]?.strike ??
+      0
+    );
+  }, [putStrikes, irLo]);
+
+  const [shortCallStrike, setShortCallStrike] = useState<number>(defaultSC);
+  const [shortPutStrike, setShortPutStrike] = useState<number>(defaultSP);
+  const [contracts, setContracts] = useState<number>(1);
+
+  useEffect(() => { setShortCallStrike(defaultSC); }, [defaultSC]);
+  useEffect(() => { setShortPutStrike(defaultSP); }, [defaultSP]);
+
+  const mult = contracts * 100;
+
+  const { legs, stats } = useMemo<{ legs: Leg[]; stats: MultiLegStats }>(() => {
+    const scObj = callStrikes.find((s) => s.strike === shortCallStrike);
+    const spObj = putStrikes.find((s) => s.strike === shortPutStrike);
+    const scIdx = scObj ? callStrikes.indexOf(scObj) : -1;
+    const spIdx = spObj ? putStrikes.indexOf(spObj) : -1;
+
+    // Wings: 2 strikes out in the sorted list
+    const lcObj =
+      scIdx >= 0
+        ? scIdx + 2 < callStrikes.length
+          ? callStrikes[scIdx + 2]
+          : callStrikes[callStrikes.length - 1]
+        : null;
+    const lpObj =
+      spIdx >= 0
+        ? spIdx >= 2
+          ? putStrikes[spIdx - 2]
+          : putStrikes[0]
+        : null;
+
+    let legs: Leg[] = [];
+    let netCredit = 0;
+    let maxGain = 0;
+    let maxLoss: number | null = 0;
+    let breakevens: number[] = [];
+
+    if (strategy === "bear_call_spread" && scObj && lcObj) {
+      netCredit = scObj.call_mid! - lcObj.call_mid!;
+      legs = [
+        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
+        { kind: "call", K: lcObj.strike, mid: lcObj.call_mid!, dir: 1,  label: `Long call $${lcObj.strike.toFixed(0)} (wing)` },
+      ];
+      maxGain = netCredit;
+      maxLoss = lcObj.strike - scObj.strike - netCredit;
+      breakevens = [scObj.strike + netCredit];
+    } else if (strategy === "short_strangle" && scObj && spObj) {
+      netCredit = scObj.call_mid! + spObj.put_mid!;
+      legs = [
+        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
+        { kind: "put",  K: spObj.strike, mid: spObj.put_mid!,  dir: -1, label: `Short put $${spObj.strike.toFixed(0)}` },
+      ];
+      maxGain = netCredit;
+      maxLoss = null;
+      breakevens = [spObj.strike - netCredit, scObj.strike + netCredit];
+    } else if (strategy === "iron_condor" && scObj && lcObj && spObj && lpObj) {
+      netCredit = scObj.call_mid! + spObj.put_mid! - lcObj.call_mid! - lpObj.put_mid!;
+      legs = [
+        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
+        { kind: "call", K: lcObj.strike, mid: lcObj.call_mid!, dir: 1,  label: `Long call $${lcObj.strike.toFixed(0)} (wing)` },
+        { kind: "put",  K: spObj.strike, mid: spObj.put_mid!,  dir: -1, label: `Short put $${spObj.strike.toFixed(0)}` },
+        { kind: "put",  K: lpObj.strike, mid: lpObj.put_mid!,  dir: 1,  label: `Long put $${lpObj.strike.toFixed(0)} (wing)` },
+      ];
+      maxGain = netCredit;
+      const callWingWidth = lcObj.strike - scObj.strike;
+      const putWingWidth = spObj.strike - lpObj.strike;
+      maxLoss = Math.max(callWingWidth, putWingWidth) - netCredit;
+      breakevens = [spObj.strike - netCredit, scObj.strike + netCredit];
+    }
+
+    return { legs, stats: { netCredit, maxGain, maxLoss, breakevens } };
+  }, [strategy, shortCallStrike, shortPutStrike, callStrikes, putStrikes]);
+
+  // x-range: implied range ±30%, extended to include all strikes and breakevens
+  const xRange = useMemo(() => {
+    let lo: number, hi: number;
+    if (irLo != null && irHi != null) {
+      const pad = (irHi - irLo) * 0.30;
+      lo = irLo - pad;
+      hi = irHi + pad;
+    } else {
+      lo = cp * 0.80;
+      hi = cp * 1.20;
+    }
+    for (const leg of legs) {
+      if (leg.K < lo) lo = leg.K - (hi - lo) * 0.05;
+      if (leg.K > hi) hi = leg.K + (hi - lo) * 0.05;
+    }
+    for (const be of stats.breakevens) {
+      if (be < lo) lo = be - (hi - lo) * 0.05;
+      if (be > hi) hi = be + (hi - lo) * 0.05;
+    }
+    return { lo, hi };
+  }, [irLo, irHi, cp, legs, stats.breakevens]);
+
+  const chartData = useMemo(() => {
+    if (!cp || !legs.length) return [];
+    const { lo, hi } = xRange;
+    return Array.from({ length: 100 }, (_, i) => {
+      const S = lo + (i / 99) * (hi - lo);
+      return {
+        price: parseFloat(S.toFixed(2)),
+        pnl:   parseFloat((multiLegPayoffPS(legs, S) * mult).toFixed(2)),
+      };
+    });
+  }, [legs, cp, mult, xRange]);
+
+  if (!callStrikes.length || !cp) {
+    return (
+      <div className="rounded-lg border bg-card px-5 py-4 text-sm text-muted-foreground">
+        No valid contracts available for {meta.name}.
+      </div>
+    );
+  }
+
+  const pnls = chartData.map((d) => d.pnl);
+  const yMin = pnls.length ? Math.min(...pnls) : -100;
+  const yMax = pnls.length ? Math.max(...pnls) : 100;
+  const yPad = (yMax - yMin) * 0.12 || 1;
+  const yDomain: [number, number] = [yMin - yPad, yMax + yPad];
+  const xLo = chartData[0]?.price ?? 0;
+  const xHi = chartData[chartData.length - 1]?.price ?? 0;
+  const hasShortPut = strategy === "short_strangle" || strategy === "iron_condor";
+
+  return (
+    <div className="rounded-lg border bg-card px-5 py-4 space-y-3">
+      <div>
+        <h4 className="font-semibold text-sm">{meta.name}</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">{meta.oneLiner}</p>
+      </div>
+
+      <p className="text-sm text-muted-foreground leading-relaxed">{meta.description}</p>
+
+      {/* Strike selectors */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">Short call:</span>
+          <select
+            value={shortCallStrike}
+            onChange={(e) => setShortCallStrike(parseFloat(e.target.value))}
+            className="rounded-md border bg-background px-2 py-1 text-sm"
+          >
+            {callStrikes.map((s) => (
+              <option key={s.strike} value={s.strike}>
+                ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""} — call ${s.call_mid?.toFixed(2) ?? "—"}
+              </option>
+            ))}
+          </select>
+        </div>
+        {hasShortPut && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground shrink-0">Short put:</span>
+            <select
+              value={shortPutStrike}
+              onChange={(e) => setShortPutStrike(parseFloat(e.target.value))}
+              className="rounded-md border bg-background px-2 py-1 text-sm"
+            >
+              {putStrikes.map((s) => (
+                <option key={s.strike} value={s.strike}>
+                  ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""} — put ${s.put_mid?.toFixed(2) ?? "—"}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">Contracts:</span>
+          <input
+            type="number"
+            min={1}
+            max={500}
+            value={contracts}
+            onChange={(e) => setContracts(Math.max(1, parseInt(e.target.value) || 1))}
+            className="rounded-md border bg-background px-2 py-1 text-sm w-16 tabular-nums"
+          />
+        </div>
+        {data.expiration && (
+          <span className="text-xs text-muted-foreground">expiry {data.expiration}</span>
+        )}
+      </div>
+
+      {/* Legs summary */}
+      {legs.length > 0 && (
+        <div className="rounded-md bg-muted/40 px-3 py-2 text-xs space-y-0.5">
+          {legs.map((leg, i) => (
+            <div key={i} className="flex justify-between text-muted-foreground">
+              <span>{leg.label}</span>
+              <span className="tabular-nums">${leg.mid.toFixed(2)} mid</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Payoff diagram */}
+      <ResponsiveContainer width="100%" height={160}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+          <XAxis
+            dataKey="price"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            tickFormatter={(v: number) => `$${v.toFixed(0)}`}
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={yDomain}
+            tick={<PayoffYTick />}
+            axisLine={false}
+            tickLine={false}
+            width={68}
+          />
+          <Tooltip
+            content={<PayoffTooltip />}
+            cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 }}
+          />
+
+          {/* Implied range band */}
+          {data.implied_range_low != null && data.implied_range_high != null && (
+            <ReferenceArea
+              x1={Math.max(data.implied_range_low, xLo)}
+              x2={Math.min(data.implied_range_high, xHi)}
+              fill="hsl(var(--muted))"
+              fillOpacity={0.35}
+            />
+          )}
+
+          {/* Zero line */}
+          <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1} />
+
+          {/* Current price */}
+          <ReferenceLine
+            x={cp}
+            stroke="hsl(var(--muted-foreground))"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            label={{ value: "Current", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+          />
+
+          {/* Breakevens */}
+          {stats.breakevens.map((be, i) => (
+            <ReferenceLine
+              key={i}
+              x={be}
+              stroke="#16a34a"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#16a34a" }}
+            />
+          ))}
+
+          <Line
+            dataKey="pnl"
+            stroke="#3b82f6"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3, fill: "#3b82f6" }}
+            type="linear"
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Key stats */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm pt-1 border-t">
+        <div className="flex justify-between gap-2">
+          <span className="text-muted-foreground">Net credit:</span>
+          <span className="font-medium tabular-nums text-green-600 dark:text-green-400">
+            +${(stats.netCredit * mult).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+        {stats.breakevens.map((be, i) => (
+          <div key={i} className="flex justify-between gap-2">
+            <span className="text-muted-foreground">
+              Breakeven{stats.breakevens.length > 1 ? (be < cp ? " (down)" : " (up)") : " (stock price)"}:
+            </span>
+            <span className="font-medium tabular-nums">${be.toFixed(2)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between gap-2">
+          <span className="text-muted-foreground">Max gain:</span>
+          <span className="font-medium tabular-nums text-green-600 dark:text-green-400">
+            +${(stats.maxGain * mult).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span className="text-muted-foreground">Max loss:</span>
+          <span className="font-medium tabular-nums text-red-600 dark:text-red-400">
+            {stats.maxLoss == null
+              ? "Unlimited ↓"
+              : `−$${(stats.maxLoss * mult).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StrategyExplainer({ data, symbol }: { data: StrategyData; symbol: string }) {
   const [open, setOpen] = useState(false);
   const [outlook, setOutlook] = useState<Outlook>("bullish");
@@ -1943,19 +2352,16 @@ function StrategyExplainer({ data, symbol }: { data: StrategyData; symbol: strin
             </p>
           )}
 
-          {/* Strategy cards or placeholder */}
-          {outlook === "neutral" ? (
-            <div className="rounded-lg border bg-muted/30 px-5 py-6 text-center text-sm text-muted-foreground space-y-1">
-              <p className="font-medium">Multi-leg neutral strategies — coming in the next phase</p>
-              <p className="text-xs opacity-70">Iron Condor, Short Strangle, and Bear Call Spread will appear here.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {OUTLOOK_STRATEGIES[outlook].map((s) => (
-                <StrategyCard key={s} strategy={s} data={data} />
-              ))}
-            </div>
-          )}
+          {/* Strategy cards */}
+          <div className="space-y-4">
+            {OUTLOOK_STRATEGIES[outlook].map((s) =>
+              isMultiLeg(s) ? (
+                <MultiLegStrategyCard key={s} strategy={s} data={data} />
+              ) : (
+                <StrategyCard key={s} strategy={s as StrategyType} data={data} />
+              )
+            )}
+          </div>
         </div>
       )}
     </div>
