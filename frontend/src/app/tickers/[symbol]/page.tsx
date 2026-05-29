@@ -766,6 +766,9 @@ function PriceChart({
         timeZone: "America/New_York",
       });
     }
+    if (period === "1mo" || period === "3mo") {
+      return new Date(val).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
     return new Date(val).toLocaleDateString("en-US", { month: "short", year: "2-digit" });
   };
 
@@ -885,7 +888,7 @@ function PriceChart({
             activeDot={{ r: 4, fill: lineColor }}
             stroke={lineColor}
             strokeWidth={1.5}
-            type="monotone"
+            type="linear"
             isAnimationActive={false}
           />
         </LineChart>
