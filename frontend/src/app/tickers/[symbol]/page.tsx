@@ -1611,6 +1611,26 @@ function strategyStats(
   }
 }
 
+// Custom Y-axis tick: signed (+/−), color-coded green/red
+function PayoffYTick({
+  x, y, payload,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value: number };
+}) {
+  if (x == null || y == null || !payload) return null;
+  const v = payload.value;
+  const color = v < 0 ? "#dc2626" : v > 0 ? "#16a34a" : "hsl(var(--muted-foreground))";
+  const abs = Math.abs(Math.round(v)).toLocaleString("en-US");
+  const label = v >= 0 ? `+$${abs}` : `-$${abs}`;
+  return (
+    <text x={x} y={y} fill={color} fontSize={10} textAnchor="end" dominantBaseline="middle">
+      {label}
+    </text>
+  );
+}
+
 function PayoffTooltip({
   active,
   payload,
@@ -1620,11 +1640,12 @@ function PayoffTooltip({
 }) {
   if (!active || !payload?.length) return null;
   const { price, pnl } = payload[0].payload;
+  const abs = Math.abs(pnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (
     <div className="rounded border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 shadow px-3 py-2 text-xs space-y-0.5">
       <p>Stock at expiry: <strong>${price.toFixed(2)}</strong></p>
       <p className={cn("font-medium", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-        P&L: {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}/share
+        {pnl >= 0 ? "+" : "−"}${abs} total
       </p>
     </div>
   );
@@ -1652,6 +1673,7 @@ function StrategyCard({
   }, [validStrikes]);
 
   const [selectedStrike, setSelectedStrike] = useState<number>(initialStrike);
+  const [contracts, setContracts] = useState<number>(1);
 
   useEffect(() => {
     setSelectedStrike(initialStrike);
@@ -1659,6 +1681,8 @@ function StrategyCard({
 
   const strikeObj = validStrikes.find((s) => s.strike === selectedStrike);
   const premium = (meta.usesCall ? strikeObj?.call_mid : strikeObj?.put_mid) ?? 0;
+
+  const mult = contracts * 100; // shares per position
 
   const chartData = useMemo(() => {
     if (!cp) return [];
@@ -1668,10 +1692,10 @@ function StrategyCard({
       const S = lo + (i / 99) * (hi - lo);
       return {
         price: parseFloat(S.toFixed(2)),
-        pnl:   parseFloat(payoffPS(strategy, selectedStrike, premium, cp, S).toFixed(4)),
+        pnl:   parseFloat((payoffPS(strategy, selectedStrike, premium, cp, S) * mult).toFixed(2)),
       };
     });
-  }, [strategy, selectedStrike, premium, cp]);
+  }, [strategy, selectedStrike, premium, cp, mult]);
 
   const stats = useMemo(
     () => strategyStats(strategy, selectedStrike, premium, cp),
@@ -1704,24 +1728,37 @@ function StrategyCard({
 
       <p className="text-sm text-muted-foreground leading-relaxed">{meta.description}</p>
 
-      {/* Strike selector */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground shrink-0">Strike:</span>
-        <select
-          value={selectedStrike}
-          onChange={(e) => setSelectedStrike(parseFloat(e.target.value))}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-        >
-          {validStrikes.map((s) => {
-            const mid = meta.usesCall ? s.call_mid : s.put_mid;
-            return (
-              <option key={s.strike} value={s.strike}>
-                ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}{" "}
-                — {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "—"}
-              </option>
-            );
-          })}
-        </select>
+      {/* Strike + contracts selectors */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">Strike:</span>
+          <select
+            value={selectedStrike}
+            onChange={(e) => setSelectedStrike(parseFloat(e.target.value))}
+            className="rounded-md border bg-background px-2 py-1 text-sm"
+          >
+            {validStrikes.map((s) => {
+              const mid = meta.usesCall ? s.call_mid : s.put_mid;
+              return (
+                <option key={s.strike} value={s.strike}>
+                  ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}{" "}
+                  — {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "—"}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">Contracts:</span>
+          <input
+            type="number"
+            min={1}
+            max={500}
+            value={contracts}
+            onChange={(e) => setContracts(Math.max(1, parseInt(e.target.value) || 1))}
+            className="rounded-md border bg-background px-2 py-1 text-sm w-16 tabular-nums"
+          />
+        </div>
         {data.expiration && (
           <span className="text-xs text-muted-foreground">expiry {data.expiration}</span>
         )}
@@ -1742,11 +1779,10 @@ function StrategyCard({
           />
           <YAxis
             domain={yDomain}
-            tickFormatter={(v: number) => `${v >= 0 ? "+" : ""}$${Math.abs(v).toFixed(0)}`}
-            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            tick={<PayoffYTick />}
             axisLine={false}
             tickLine={false}
-            width={50}
+            width={68}
           />
           <Tooltip
             content={<PayoffTooltip />}
@@ -1799,28 +1835,32 @@ function StrategyCard({
         </LineChart>
       </ResponsiveContainer>
 
-      {/* Key stats */}
+      {/* Key stats — dollar figures scaled to contract size; breakeven stays as stock price */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm pt-1 border-t">
         <div className="flex justify-between gap-2">
           <span className="text-muted-foreground">Premium {meta.usesCall ? "paid" : "received"}:</span>
-          <span className="font-medium tabular-nums">${premium.toFixed(2)}/sh</span>
+          <span className="font-medium tabular-nums">
+            ${(premium * mult).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
         </div>
         {stats.breakevens.map((be, i) => (
           <div key={i} className="flex justify-between gap-2">
-            <span className="text-muted-foreground">Breakeven:</span>
-            <span className="font-medium tabular-nums text-green-600 dark:text-green-400">${be.toFixed(2)}</span>
+            <span className="text-muted-foreground">Breakeven (stock price):</span>
+            <span className="font-medium tabular-nums">${be.toFixed(2)}</span>
           </div>
         ))}
         <div className="flex justify-between gap-2">
           <span className="text-muted-foreground">Max gain:</span>
           <span className="font-medium tabular-nums text-green-600 dark:text-green-400">
-            {stats.maxGain == null ? "Unlimited ↑" : `$${stats.maxGain.toFixed(2)}/sh`}
+            {stats.maxGain == null
+              ? "Unlimited ↑"
+              : `+$${(stats.maxGain * mult).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </span>
         </div>
         <div className="flex justify-between gap-2">
           <span className="text-muted-foreground">Max loss:</span>
           <span className="font-medium tabular-nums text-red-600 dark:text-red-400">
-            ${stats.maxLoss.toFixed(2)}/sh
+            −${(stats.maxLoss * mult).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
       </div>
