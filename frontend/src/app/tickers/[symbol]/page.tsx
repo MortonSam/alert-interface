@@ -7,9 +7,9 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine,
+  ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type ExpectedMove, type OptionsChain, type OptionContract } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -1505,6 +1505,398 @@ function OptionsEducation({
   );
 }
 
+// ── Strategy Explainer ────────────────────────────────────────────────────────
+
+type StrategyType = "long_call" | "long_put" | "covered_call" | "csp";
+type Outlook = "bullish" | "bearish" | "neutral";
+
+interface StrategyMeta {
+  name: string;
+  oneLiner: string;
+  description: string;
+  usesCall: boolean;
+}
+
+const STRATEGY_META: Record<StrategyType, StrategyMeta> = {
+  long_call: {
+    name: "Long Call",
+    oneLiner: "Bullish — pay a premium for the right to buy shares at the strike.",
+    description:
+      "A long call profits when the stock rises above your breakeven by expiration. " +
+      "Risk is capped at the premium paid — no matter how far the stock falls, that's " +
+      "the most you can lose. Upside is theoretically unlimited as the stock moves higher.",
+    usesCall: true,
+  },
+  long_put: {
+    name: "Long Put",
+    oneLiner: "Bearish — pay a premium for the right to sell shares at the strike.",
+    description:
+      "A long put profits when the stock falls below your breakeven. Risk is limited " +
+      "to the premium paid. Maximum gain is the strike minus the premium (approached " +
+      "as the stock nears zero). A defined-risk way to express a bearish view.",
+    usesCall: false,
+  },
+  covered_call: {
+    name: "Covered Call",
+    oneLiner: "Mildly bullish or neutral — sell a call against 100 shares you already own.",
+    description:
+      "You own 100 shares and sell a call at the chosen strike, collecting the premium " +
+      "immediately. If the stock stays below the strike at expiration you keep both the " +
+      "shares and the premium, reducing your effective cost basis. If it rises above, " +
+      "your shares get called away at the strike — capping your upside.",
+    usesCall: true,
+  },
+  csp: {
+    name: "Cash-Secured Put",
+    oneLiner: "Neutral to bullish — sell a put with cash set aside to buy shares if assigned.",
+    description:
+      "You sell a put and hold enough cash to buy 100 shares if the stock falls to the " +
+      "strike. If it stays above, you keep the premium — your maximum gain. If it falls " +
+      "below, you effectively buy the stock at (strike − premium), often below today's price. " +
+      "Generates income while expressing willingness to own the stock at a lower price.",
+    usesCall: false,
+  },
+};
+
+const OUTLOOK_STRATEGIES: Record<Outlook, StrategyType[]> = {
+  bullish: ["long_call", "covered_call", "csp"],
+  bearish: ["long_put"],
+  neutral: [],
+};
+
+function payoffPS(
+  strategy: StrategyType,
+  K: number,
+  premium: number,
+  currentPrice: number,
+  S: number,
+): number {
+  switch (strategy) {
+    case "long_call":    return Math.max(0, S - K) - premium;
+    case "long_put":     return Math.max(0, K - S) - premium;
+    case "covered_call": return (S - currentPrice) + premium - Math.max(0, S - K);
+    case "csp":          return premium - Math.max(0, K - S);
+  }
+}
+
+interface StrategyStats {
+  maxGain: number | null;  // null = unlimited
+  maxLoss: number;
+  breakevens: number[];
+}
+
+function strategyStats(
+  strategy: StrategyType,
+  K: number,
+  premium: number,
+  currentPrice: number,
+): StrategyStats {
+  switch (strategy) {
+    case "long_call":
+      return { maxGain: null, maxLoss: premium, breakevens: [K + premium] };
+    case "long_put":
+      return { maxGain: K - premium, maxLoss: premium, breakevens: [K - premium] };
+    case "covered_call":
+      return {
+        maxGain: K - currentPrice + premium,
+        maxLoss: currentPrice - premium,
+        breakevens: [currentPrice - premium],
+      };
+    case "csp":
+      return {
+        maxGain: premium,
+        maxLoss: K - premium,
+        breakevens: [K - premium],
+      };
+  }
+}
+
+function PayoffTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { price: number; pnl: number } }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const { price, pnl } = payload[0].payload;
+  return (
+    <div className="rounded border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 shadow px-3 py-2 text-xs space-y-0.5">
+      <p>Stock at expiry: <strong>${price.toFixed(2)}</strong></p>
+      <p className={cn("font-medium", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
+        P&L: {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}/share
+      </p>
+    </div>
+  );
+}
+
+function StrategyCard({
+  strategy,
+  data,
+}: {
+  strategy: StrategyType;
+  data: StrategyData;
+}) {
+  const meta = STRATEGY_META[strategy];
+  const cp = data.current_price ?? 0;
+
+  const validStrikes = useMemo<StrikeData[]>(() => {
+    return data.strikes
+      .filter((s) => (meta.usesCall ? s.call_mid != null : s.put_mid != null))
+      .sort((a, b) => a.strike - b.strike);
+  }, [data.strikes, meta.usesCall]);
+
+  const initialStrike = useMemo(() => {
+    const atm = validStrikes.find((s) => s.is_atm);
+    return atm?.strike ?? validStrikes[Math.floor(validStrikes.length / 2)]?.strike ?? 0;
+  }, [validStrikes]);
+
+  const [selectedStrike, setSelectedStrike] = useState<number>(initialStrike);
+
+  useEffect(() => {
+    setSelectedStrike(initialStrike);
+  }, [initialStrike]);
+
+  const strikeObj = validStrikes.find((s) => s.strike === selectedStrike);
+  const premium = (meta.usesCall ? strikeObj?.call_mid : strikeObj?.put_mid) ?? 0;
+
+  const chartData = useMemo(() => {
+    if (!cp) return [];
+    const lo = cp * 0.60;
+    const hi = cp * 1.40;
+    return Array.from({ length: 100 }, (_, i) => {
+      const S = lo + (i / 99) * (hi - lo);
+      return {
+        price: parseFloat(S.toFixed(2)),
+        pnl:   parseFloat(payoffPS(strategy, selectedStrike, premium, cp, S).toFixed(4)),
+      };
+    });
+  }, [strategy, selectedStrike, premium, cp]);
+
+  const stats = useMemo(
+    () => strategyStats(strategy, selectedStrike, premium, cp),
+    [strategy, selectedStrike, premium, cp],
+  );
+
+  if (!validStrikes.length || !cp) {
+    return (
+      <div className="rounded-lg border bg-card px-5 py-4 text-sm text-muted-foreground">
+        No valid contracts available for {meta.name}.
+      </div>
+    );
+  }
+
+  const pnls = chartData.map((d) => d.pnl);
+  const yMin = Math.min(...pnls);
+  const yMax = Math.max(...pnls);
+  const yPad = (yMax - yMin) * 0.12 || 1;
+  const yDomain: [number, number] = [yMin - yPad, yMax + yPad];
+
+  const xLo = chartData[0]?.price ?? 0;
+  const xHi = chartData[chartData.length - 1]?.price ?? 0;
+
+  return (
+    <div className="rounded-lg border bg-card px-5 py-4 space-y-3">
+      <div>
+        <h4 className="font-semibold text-sm">{meta.name}</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">{meta.oneLiner}</p>
+      </div>
+
+      <p className="text-sm text-muted-foreground leading-relaxed">{meta.description}</p>
+
+      {/* Strike selector */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-muted-foreground shrink-0">Strike:</span>
+        <select
+          value={selectedStrike}
+          onChange={(e) => setSelectedStrike(parseFloat(e.target.value))}
+          className="rounded-md border bg-background px-2 py-1 text-sm"
+        >
+          {validStrikes.map((s) => {
+            const mid = meta.usesCall ? s.call_mid : s.put_mid;
+            return (
+              <option key={s.strike} value={s.strike}>
+                ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}{" "}
+                — {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "—"}
+              </option>
+            );
+          })}
+        </select>
+        {data.expiration && (
+          <span className="text-xs text-muted-foreground">expiry {data.expiration}</span>
+        )}
+      </div>
+
+      {/* Payoff diagram */}
+      <ResponsiveContainer width="100%" height={160}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+          <XAxis
+            dataKey="price"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            tickFormatter={(v: number) => `$${v.toFixed(0)}`}
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={yDomain}
+            tickFormatter={(v: number) => `${v >= 0 ? "+" : ""}$${Math.abs(v).toFixed(0)}`}
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false}
+            tickLine={false}
+            width={50}
+          />
+          <Tooltip
+            content={<PayoffTooltip />}
+            cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 }}
+          />
+
+          {/* Implied range band */}
+          {data.implied_range_low != null && data.implied_range_high != null && (
+            <ReferenceArea
+              x1={Math.max(data.implied_range_low, xLo)}
+              x2={Math.min(data.implied_range_high, xHi)}
+              fill="hsl(var(--muted))"
+              fillOpacity={0.35}
+            />
+          )}
+
+          {/* Zero line */}
+          <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1} />
+
+          {/* Current price */}
+          <ReferenceLine
+            x={cp}
+            stroke="hsl(var(--muted-foreground))"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            label={{ value: "now", position: "insideTopRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+          />
+
+          {/* Breakeven(s) */}
+          {stats.breakevens.map((be, i) => (
+            <ReferenceLine
+              key={i}
+              x={be}
+              stroke="#16a34a"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              label={{ value: "B/E", position: "insideTopLeft", fontSize: 9, fill: "#16a34a" }}
+            />
+          ))}
+
+          <Line
+            dataKey="pnl"
+            stroke="#3b82f6"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 3, fill: "#3b82f6" }}
+            type="linear"
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Key stats */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm pt-1 border-t">
+        <div className="flex justify-between gap-2">
+          <span className="text-muted-foreground">Premium {meta.usesCall ? "paid" : "received"}:</span>
+          <span className="font-medium tabular-nums">${premium.toFixed(2)}/sh</span>
+        </div>
+        {stats.breakevens.map((be, i) => (
+          <div key={i} className="flex justify-between gap-2">
+            <span className="text-muted-foreground">Breakeven:</span>
+            <span className="font-medium tabular-nums text-green-600 dark:text-green-400">${be.toFixed(2)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between gap-2">
+          <span className="text-muted-foreground">Max gain:</span>
+          <span className="font-medium tabular-nums text-green-600 dark:text-green-400">
+            {stats.maxGain == null ? "Unlimited ↑" : `$${stats.maxGain.toFixed(2)}/sh`}
+          </span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span className="text-muted-foreground">Max loss:</span>
+          <span className="font-medium tabular-nums text-red-600 dark:text-red-400">
+            ${stats.maxLoss.toFixed(2)}/sh
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StrategyExplainer({ data, symbol }: { data: StrategyData; symbol: string }) {
+  const [open, setOpen] = useState(false);
+  const [outlook, setOutlook] = useState<Outlook>("bullish");
+
+  return (
+    <div className="mt-6 rounded-lg border bg-card overflow-visible">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-medium hover:bg-muted/30 transition-colors text-left"
+        aria-expanded={open}
+      >
+        <span>Directional strategy explainer — {symbol}</span>
+        <span className="text-muted-foreground text-xs shrink-0 ml-4">{open ? "▲ Collapse" : "▼ Expand"}</span>
+      </button>
+
+      {open && (
+        <div className="border-t px-5 py-4 space-y-5">
+          <p className="text-xs text-muted-foreground italic leading-relaxed">
+            Educational only — not investment advice. Payoff diagrams show at-expiration outcomes
+            per share using real bid/ask mid-prices from the {data.expiration} expiration.
+            Options are leveraged instruments; actual outcomes depend on timing, assignment, and
+            transaction costs.
+          </p>
+
+          {/* Outlook tabs */}
+          <div className="flex gap-1">
+            {(["bullish", "bearish", "neutral"] as Outlook[]).map((o) => (
+              <button
+                key={o}
+                onClick={() => setOutlook(o)}
+                className={cn(
+                  "px-3 py-1 rounded text-xs font-medium capitalize transition-colors",
+                  outlook === o
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                )}
+              >
+                {o.charAt(0).toUpperCase() + o.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Implied range legend */}
+          {data.implied_range_low != null && data.implied_range_high != null && (
+            <p className="text-xs text-muted-foreground">
+              <span className="inline-block w-3 h-3 rounded-sm bg-muted opacity-80 mr-1.5 align-middle" />
+              Shaded band = implied range ${data.implied_range_low.toFixed(2)}–${data.implied_range_high.toFixed(2)} by {data.expiration}
+            </p>
+          )}
+
+          {/* Strategy cards or placeholder */}
+          {outlook === "neutral" ? (
+            <div className="rounded-lg border bg-muted/30 px-5 py-6 text-center text-sm text-muted-foreground space-y-1">
+              <p className="font-medium">Multi-leg neutral strategies — coming in the next phase</p>
+              <p className="text-xs opacity-70">Iron Condor, Short Strangle, and Bear Call Spread will appear here.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {OUTLOOK_STRATEGIES[outlook].map((s) => (
+                <StrategyCard key={s} strategy={s} data={data} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Status types ──────────────────────────────────────────────────────────────
 
 type TickerStatus   = "loading" | "found" | "missing" | "error";
@@ -1540,6 +1932,9 @@ export default function TickerPage() {
   const [optionsChain, setOptionsChain]   = useState<OptionsChain | null>(null);
   const [ocStatus, setOcStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
   const [selectedExpiration, setSelectedExpiration] = useState<string | null>(null);
+
+  const [strategyData, setStrategyData]   = useState<StrategyData | null>(null);
+  const [sdStatus, setSdStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
 
   const [note, setNote]               = useState<ResearchNote | null>(null);
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
@@ -1599,6 +1994,15 @@ export default function TickerPage() {
       })
       .catch(() => setOcStatus("error"));
   }, [upperSymbol, selectedExpiration]);
+
+  useEffect(() => {
+    api.tickers.strategyData(upperSymbol)
+      .then((d) => {
+        setStrategyData(d);
+        setSdStatus(d.strikes.length > 0 ? "done" : "empty");
+      })
+      .catch(() => setSdStatus("error"));
+  }, [upperSymbol]);
 
   useEffect(() => {
     api.researchNotes
@@ -1997,6 +2401,16 @@ export default function TickerPage() {
               chain={optionsChain}
               symbol={upperSymbol}
             />
+          )}
+
+          {/* Strategy explainer */}
+          {sdStatus === "done" && strategyData && (
+            <StrategyExplainer data={strategyData} symbol={upperSymbol} />
+          )}
+          {sdStatus === "empty" && (
+            <p className="text-sm text-muted-foreground mt-4">
+              Options strategy analysis unavailable for {upperSymbol}.
+            </p>
           )}
         </div>
 

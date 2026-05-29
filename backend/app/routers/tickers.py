@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
-from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead
+from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, StrategyDataRead, StrikeData
 from app.schemas.ticker import EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.yfinance_client import YFinanceClient
@@ -494,6 +494,118 @@ async def get_options_chain(
         puts=_build_contracts(filtered_puts,  atm_strike, current_price=current_price, is_call=False),
         available_expirations=available,
         as_of=as_of,
+    )
+
+
+@router.get("/strategy-data/{symbol}", response_model=StrategyDataRead)
+async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> StrategyDataRead:
+    """Strike-level call/put mid-prices for the earnings-relevant expiration.
+    Only returns contracts that pass all quality filters (no wide spread, no_market, etc.)
+    so the frontend always works with real, trustworthy premiums.
+    """
+    sym = symbol.upper()
+    finnhub = FinnhubClient()
+    loop = asyncio.get_event_loop()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+
+    try:
+        quote, expirations = await asyncio.gather(
+            finnhub.get_quote(sym),
+            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+    finally:
+        await finnhub.close()
+
+    current_price = float(quote.get("c") or 0) or None
+
+    if not expirations or not current_price:
+        return StrategyDataRead(
+            symbol=sym, current_price=current_price, expiration=None,
+            implied_range_low=None, implied_range_high=None,
+            strikes=[], as_of=as_of,
+        )
+
+    today = date.today()
+
+    # Next earnings (same logic as expected-move)
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    earnings_str: str | None = None
+    if ticker_row:
+        ned_q = (
+            select(func.min(Event.event_date))
+            .where(Event.event_type == "earnings", Event.event_date >= today)
+            .where(Event.ticker_id == ticker_row.id)
+        )
+        ned_result = (await db.execute(ned_q)).scalar_one_or_none()
+        if ned_result:
+            earnings_str = ned_result.isoformat() if hasattr(ned_result, "isoformat") else str(ned_result)
+
+    # Pick expiration
+    if earnings_str:
+        post = [e for e in expirations if e >= earnings_str]
+        chosen_exp: str = post[0] if post else expirations[-1]
+    else:
+        week_out = (today + timedelta(days=7)).isoformat()
+        chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+
+    chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+    calls_raw = chain.get("calls", [])
+    puts_raw  = chain.get("puts",  [])
+
+    call_map: dict[float, dict] = {c["strike"]: c for c in calls_raw}
+    put_map:  dict[float, dict] = {p["strike"]: p for p in puts_raw}
+    all_strike_vals = sorted(call_map.keys() | put_map.keys())
+
+    # ATM and implied range (for overlay)
+    atm_strike: float | None = None
+    implied_range_low: float | None = None
+    implied_range_high: float | None = None
+    if all_strike_vals:
+        atm_strike = min(all_strike_vals, key=lambda s: abs(s - current_price))
+        atm_c = call_map.get(atm_strike)
+        atm_p = put_map.get(atm_strike)
+        call_price = _mid_or_last(atm_c["bid"], atm_c["ask"], atm_c["lastPrice"]) if atm_c else None
+        put_price  = _mid_or_last(atm_p["bid"], atm_p["ask"], atm_p["lastPrice"]) if atm_p else None
+        if call_price is not None and put_price is not None:
+            straddle = call_price + put_price
+            implied_range_low  = current_price - straddle
+            implied_range_high = current_price + straddle
+
+    # Build per-strike data — ±35% of current price, only non-flagged mids
+    price_lo = current_price * 0.65
+    price_hi = current_price * 1.35
+    result_strikes: list[StrikeData] = []
+
+    for s in all_strike_vals:
+        if not (price_lo <= s <= price_hi):
+            continue
+        c = call_map.get(s)
+        p = put_map.get(s)
+
+        call_mid: float | None = None
+        if c and _flag_contract(c, current_price, is_call=True) is None:
+            call_mid = _mid_or_last(c["bid"], c["ask"], c["lastPrice"])
+
+        put_mid: float | None = None
+        if p and _flag_contract(p, current_price, is_call=False) is None:
+            put_mid = _mid_or_last(p["bid"], p["ask"], p["lastPrice"])
+
+        if call_mid is None and put_mid is None:
+            continue
+
+        result_strikes.append(StrikeData(
+            strike=s,
+            call_mid=call_mid,
+            put_mid=put_mid,
+            is_atm=(s == atm_strike),
+        ))
+
+    return StrategyDataRead(
+        symbol=sym, current_price=current_price, expiration=chosen_exp,
+        implied_range_low=implied_range_low, implied_range_high=implied_range_high,
+        strikes=result_strikes, as_of=as_of,
     )
 
 

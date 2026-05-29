@@ -182,6 +182,23 @@ export interface ExpectedMove {
   data_quality_note: string | null; as_of: string;
 }
 
+export interface StrikeData {
+  strike: number;
+  call_mid: number | null;
+  put_mid: number | null;
+  is_atm: boolean;
+}
+
+export interface StrategyData {
+  symbol: string;
+  current_price: number | null;
+  expiration: string | null;
+  implied_range_low: number | null;
+  implied_range_high: number | null;
+  strikes: StrikeData[];
+  as_of: string;
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -216,6 +233,8 @@ export const api = {
       request<void>(`/tickers/${id}`, { method: "DELETE" }),
     expectedMove: (symbol: string) =>
       request<ExpectedMove>(`/tickers/expected-move/${symbol}`),
+    strategyData: (symbol: string) =>
+      request<StrategyData>(`/tickers/strategy-data/${symbol}`),
     options: (symbol: string, expiration?: string) =>
       request<OptionsChain>(expiration
         ? `/tickers/options/${symbol}?expiration=${encodeURIComponent(expiration)}`
