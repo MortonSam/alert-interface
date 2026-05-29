@@ -659,13 +659,23 @@ function PriceChart({ symbol }: { symbol: string }) {
     return { lineData: ld, markerMap: mm };
   }, [chartData]);
 
-  // x-axis ticks: sample ~6 evenly spaced
+  // x-axis ticks: ~6 evenly spaced
   const xTicks = useMemo(() => {
     if (lineData.length < 2) return [];
     const n = Math.min(6, lineData.length);
     return Array.from({ length: n }, (_, i) =>
       lineData[Math.floor((i / (n - 1)) * (lineData.length - 1))].epochMs
     );
+  }, [lineData]);
+
+  // y-axis: tight domain framing actual price range, padded 5%
+  const yDomain = useMemo((): [number, number] | ["auto", "auto"] => {
+    if (!lineData.length) return ["auto", "auto"];
+    const closes = lineData.map((d) => d.close);
+    const lo = Math.min(...closes);
+    const hi = Math.max(...closes);
+    const pad = (hi - lo) * 0.05;
+    return [lo - pad, hi + pad];
   }, [lineData]);
 
   // Earnings marker reference lines (vertical)
@@ -725,7 +735,7 @@ function PriceChart({ symbol }: { symbol: string }) {
             tickLine={false}
           />
           <YAxis
-            domain={["auto", "auto"]}
+            domain={yDomain}
             tickFormatter={formatYTick}
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
             axisLine={false}
