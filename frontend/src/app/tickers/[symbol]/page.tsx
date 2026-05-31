@@ -1812,6 +1812,8 @@ function StrategyCard({
 
   const [selectedStrike, setSelectedStrike] = useState<number>(initialStrike);
   const [contracts, setContracts] = useState<number>(1);
+  const [dateOffset, setDateOffset] = useState<number>(0); // 0 = today, totalDays = expiry
+  const [scrubPrice, setScrubPrice] = useState<number>(cp);
 
   useEffect(() => {
     setSelectedStrike(initialStrike);
@@ -1828,7 +1830,6 @@ function StrategyCard({
       : (strikeObj?.put_iv  ?? atmIVData?.put_iv  ?? BS_IV_DEFAULT)
   );
 
-  // Time-to-expiration for the two pre-expiry curves
   const T_today = data.expiration
     ? Math.max(0, (dateMs(data.expiration) - Date.now()) / MS_PER_YEAR)
     : 0;
@@ -1837,7 +1838,17 @@ function StrategyCard({
     : null;
   const showEarnings = T_earnings !== null && T_earnings > 0 && T_earnings < T_today;
 
-  const mult = contracts * 100; // shares per position
+  // Date slider: 0=today → totalDays=expiry; T_slider is T at the selected date
+  const totalDays = Math.max(1, Math.round(T_today * 365.25));
+  const T_slider = Math.max(0, (totalDays - dateOffset) / 365.25);
+  const selectedDateMs = Date.now() + dateOffset * 86400000;
+  const selectedDateStr = new Date(selectedDateMs).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const daysToExpiry = Math.max(0, totalDays - dateOffset);
+  const earningsDateMs = data.earnings_date ? dateMs(data.earnings_date) : null;
+  // Disclaimer: show whenever the slider is at or before earnings (IV held constant is misleading then)
+  const showDisclaimer = showEarnings && earningsDateMs != null && selectedDateMs <= earningsDateMs;
+
+  const mult = contracts * 100;
 
   // x-axis range: implied range ± 30% of range width, extended if breakeven falls outside
   const xRange = useMemo(() => {
@@ -1865,19 +1876,18 @@ function StrategyCard({
     return { lo, hi };
   }, [data.implied_range_low, data.implied_range_high, cp, strategy, selectedStrike, premium]);
 
+  // Live chartData: recomputes on every slider tick (~100 BS evals, <1 ms)
   const chartData = useMemo(() => {
     if (!cp) return [];
     const { lo, hi } = xRange;
     return Array.from({ length: 100 }, (_, i) => {
       const S = lo + (i / 99) * (hi - lo);
-      return {
-        price:       parseFloat(S.toFixed(2)),
-        pnlExpiry:   parseFloat((payoffPS(strategy, selectedStrike, premium, cp, S) * mult).toFixed(2)),
-        pnlToday:    T_today > 0 ? parseFloat((payoffBSPS(strategy, selectedStrike, premium, cp, S, T_today, sigma, BS_R) * mult).toFixed(2)) : null,
-        pnlEarnings: showEarnings ? parseFloat((payoffBSPS(strategy, selectedStrike, premium, cp, S, T_earnings!, sigma, BS_R) * mult).toFixed(2)) : null,
-      };
+      const pnl = T_slider > 0
+        ? payoffBSPS(strategy, selectedStrike, premium, cp, S, T_slider, sigma, BS_R) * mult
+        : payoffPS(strategy, selectedStrike, premium, cp, S) * mult;
+      return { price: parseFloat(S.toFixed(2)), pnl: parseFloat(pnl.toFixed(2)) };
     });
-  }, [strategy, selectedStrike, premium, cp, mult, xRange, T_today, T_earnings, showEarnings, sigma]);
+  }, [strategy, selectedStrike, premium, cp, mult, xRange, T_slider, sigma]);
 
   const stats = useMemo(
     () => strategyStats(strategy, selectedStrike, premium, cp),
@@ -1892,16 +1902,29 @@ function StrategyCard({
     );
   }
 
-  const allPnls = chartData.flatMap((d) =>
-    [d.pnlExpiry, d.pnlToday, d.pnlEarnings].filter((v): v is number => v != null),
-  );
-  const yMin = allPnls.length ? Math.min(...allPnls) : -100;
-  const yMax = allPnls.length ? Math.max(...allPnls) : 100;
-  const yPad = (yMax - yMin) * 0.12 || 1;
-  const yDomain: [number, number] = [yMin - yPad, yMax + yPad];
+  // Stable Y-axis: computed from expiry+today endpoints so axis doesn't jump as slider moves
+  const yDomain = useMemo<[number, number]>(() => {
+    if (!cp) return [-100, 100];
+    const { lo, hi } = xRange;
+    const vals: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      const S = lo + (i / 99) * (hi - lo);
+      vals.push(payoffPS(strategy, selectedStrike, premium, cp, S) * mult);
+      if (T_today > 0) vals.push(payoffBSPS(strategy, selectedStrike, premium, cp, S, T_today, sigma, BS_R) * mult);
+    }
+    const yMin = Math.min(...vals);
+    const yMax = Math.max(...vals);
+    const pad = (yMax - yMin) * 0.15 || 1;
+    return [yMin - pad, yMax + pad];
+  }, [strategy, selectedStrike, premium, cp, mult, xRange, T_today, sigma]);
 
   const xLo = chartData[0]?.price ?? 0;
   const xHi = chartData[chartData.length - 1]?.price ?? 0;
+  const scrubPoint = chartData.length
+    ? chartData.reduce((best, d) => Math.abs(d.price - scrubPrice) < Math.abs(best.price - scrubPrice) ? d : best)
+    : null;
+  const effectivePrice = scrubPoint?.price ?? scrubPrice;
+  const scrubPnl: number | null = scrubPoint?.pnl ?? null;
 
   return (
     <div className="rounded-lg border bg-card px-5 py-4 space-y-3">
@@ -1948,10 +1971,51 @@ function StrategyCard({
         )}
       </div>
 
-      {/* Payoff diagram */}
-      <ResponsiveContainer width="100%" height={180}>
-        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+      {/* ── Hero P&L ──────────────────────────────────────────────── */}
+      <div className="py-1">
+        <p className="text-xs text-muted-foreground mb-1.5">
+          {data.symbol} at ${effectivePrice.toFixed(2)}
+          {" · "}
+          {daysToExpiry === 0 ? "At expiration" : selectedDateStr}
+        </p>
+        <p className={cn(
+          "text-4xl font-bold tabular-nums tracking-tight leading-none",
+          scrubPnl == null
+            ? "text-muted-foreground"
+            : scrubPnl >= 0
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-red-500 dark:text-red-400",
+        )}>
+          {scrubPnl == null
+            ? "—"
+            : `${scrubPnl >= 0 ? "+" : "−"}$${Math.abs(scrubPnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        </p>
+      </div>
+
+      {/* ── Live payoff chart ──────────────────────────────────────── */}
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart
+          data={chartData}
+          margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+          onMouseMove={(e) => {
+            if (e.activeLabel != null) {
+              const p = parseFloat(String(e.activeLabel));
+              if (!isNaN(p)) setScrubPrice(p);
+            }
+          }}
+          onClick={(e) => {
+            if (e.activeLabel != null) {
+              const p = parseFloat(String(e.activeLabel));
+              if (!isNaN(p)) setScrubPrice(p);
+            }
+          }}
+        >
+          <CartesianGrid
+            strokeDasharray="2 6"
+            stroke="hsl(var(--border))"
+            strokeOpacity={0.4}
+            vertical={false}
+          />
           <XAxis
             dataKey="price"
             type="number"
@@ -1968,18 +2032,14 @@ function StrategyCard({
             tickLine={false}
             width={68}
           />
-          <Tooltip
-            content={<PayoffTooltip />}
-            cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 }}
-          />
 
-          {/* Implied range band */}
+          {/* Implied range band — very faint */}
           {data.implied_range_low != null && data.implied_range_high != null && (
             <ReferenceArea
               x1={Math.max(data.implied_range_low, xLo)}
               x2={Math.min(data.implied_range_high, xHi)}
               fill="hsl(var(--muted))"
-              fillOpacity={0.35}
+              fillOpacity={0.2}
             />
           )}
 
@@ -1991,8 +2051,17 @@ function StrategyCard({
             x={cp}
             stroke="hsl(var(--muted-foreground))"
             strokeWidth={1}
-            strokeDasharray="3 3"
+            strokeDasharray="3 5"
+            strokeOpacity={0.6}
             label={{ value: "Current", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+          />
+
+          {/* Price scrubber */}
+          <ReferenceLine
+            x={effectivePrice}
+            stroke="hsl(var(--foreground))"
+            strokeWidth={1.5}
+            strokeOpacity={0.85}
           />
 
           {/* Breakeven(s) */}
@@ -2000,81 +2069,56 @@ function StrategyCard({
             <ReferenceLine
               key={i}
               x={be}
-              stroke="#16a34a"
+              stroke="#10b981"
               strokeWidth={1}
-              strokeDasharray="3 3"
-              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#16a34a" }}
+              strokeDasharray="3 5"
+              strokeOpacity={0.8}
+              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#10b981" }}
             />
           ))}
 
-          {/* Three curves: today (amber dashed), earnings (green dashed), expiry (blue solid) */}
-          {showEarnings && (
-            <Line
-              dataKey="pnlEarnings"
-              name="At earnings"
-              stroke="#10b981"
-              strokeWidth={1.5}
-              dot={false}
-              activeDot={{ r: 3, fill: "#10b981" }}
-              type="monotone"
-              strokeDasharray="3 3"
-              isAnimationActive={false}
-              connectNulls
-            />
-          )}
-          {T_today > 0 && (
-            <Line
-              dataKey="pnlToday"
-              name="Today"
-              stroke="#f59e0b"
-              strokeWidth={1.5}
-              dot={false}
-              activeDot={{ r: 3, fill: "#f59e0b" }}
-              type="monotone"
-              strokeDasharray="5 3"
-              isAnimationActive={false}
-              connectNulls
-            />
-          )}
+          {/* P&L curve — redraws live with each slider tick */}
           <Line
-            dataKey="pnlExpiry"
-            name="At expiration"
+            dataKey="pnl"
             stroke="#3b82f6"
-            strokeWidth={2}
+            strokeWidth={2.5}
             dot={false}
-            activeDot={{ r: 3, fill: "#3b82f6" }}
-            type="linear"
+            activeDot={false}
+            type={T_slider === 0 ? "linear" : "monotone"}
             isAnimationActive={false}
+            connectNulls
           />
         </LineChart>
       </ResponsiveContainer>
 
-      {/* Legend */}
-      <div className="flex gap-4 text-[10px] text-muted-foreground justify-end -mt-1">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-4 border-b-2 border-blue-500" />
-          At expiration
-        </span>
-        {T_today > 0 && (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-4 border-b-2 border-amber-500 border-dashed" />
-            Today
+      {/* ── Date slider ────────────────────────────────────────────── */}
+      <div className="space-y-1.5 px-0.5">
+        <input
+          type="range"
+          min={0}
+          max={totalDays}
+          value={dateOffset}
+          onChange={(e) => setDateOffset(parseInt(e.target.value))}
+          className="w-full h-1 rounded-full appearance-none cursor-pointer"
+          style={{ accentColor: "hsl(var(--foreground))" }}
+        />
+        <div className="flex justify-between items-baseline text-[10px]">
+          <span className="text-muted-foreground">Today</span>
+          <span className="font-medium text-foreground">
+            {daysToExpiry === 0
+              ? "At expiration"
+              : `${selectedDateStr} · ${daysToExpiry}d to expiry`}
           </span>
-        )}
-        {showEarnings && (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-4 border-b-2 border-emerald-500 border-dashed" />
-            At earnings
-          </span>
-        )}
+          <span className="text-muted-foreground">Expiry</span>
+        </div>
       </div>
 
-      {/* IV crush disclaimer — non-negotiable when earnings curve is shown */}
-      {showEarnings && (
-        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
-          <strong>Note:</strong> The earnings-date curve uses current implied volatility held constant.
-          It does not model the IV crush that typically follows an earnings release — real post-earnings
-          option values will likely be lower.
+      {/* IV-crush disclaimer — shows when slider is at or before earnings date */}
+      {showDisclaimer && (
+        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+          <strong>Note:</strong> This curve holds today&apos;s implied volatility constant.
+          In practice, IV typically collapses after an earnings release — option values at
+          or around earnings will likely be lower than shown.
         </p>
       )}
 
@@ -2162,6 +2206,8 @@ function MultiLegStrategyCard({
   const [shortCallStrike, setShortCallStrike] = useState<number>(defaultSC);
   const [shortPutStrike, setShortPutStrike] = useState<number>(defaultSP);
   const [contracts, setContracts] = useState<number>(1);
+  const [dateOffset, setDateOffset] = useState<number>(0);
+  const [scrubPrice, setScrubPrice] = useState<number>(cp);
 
   useEffect(() => { setShortCallStrike(defaultSC); }, [defaultSC]);
   useEffect(() => { setShortPutStrike(defaultSP); }, [defaultSP]);
@@ -2175,6 +2221,15 @@ function MultiLegStrategyCard({
     ? Math.max(0, (dateMs(data.expiration) - dateMs(data.earnings_date)) / MS_PER_YEAR)
     : null;
   const showEarnings = T_earnings !== null && T_earnings > 0 && T_earnings < T_today;
+
+  // Date slider derived values
+  const totalDays = Math.max(1, Math.round(T_today * 365.25));
+  const T_slider = Math.max(0, (totalDays - dateOffset) / 365.25);
+  const selectedDateMs = Date.now() + dateOffset * 86400000;
+  const selectedDateStr = new Date(selectedDateMs).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const daysToExpiry = Math.max(0, totalDays - dateOffset);
+  const earningsDateMs = data.earnings_date ? dateMs(data.earnings_date) : null;
+  const showDisclaimer = showEarnings && earningsDateMs != null && selectedDateMs <= earningsDateMs;
 
   const { legs, stats } = useMemo<{ legs: Leg[]; stats: MultiLegStats }>(() => {
     const scObj = callStrikes.find((s) => s.strike === shortCallStrike);
@@ -2280,19 +2335,18 @@ function MultiLegStrategyCard({
     return { lo, hi };
   }, [irLo, irHi, cp, legs, stats.breakevens]);
 
+  // Live chartData: single pnl series, recomputes with each slider tick
   const chartData = useMemo(() => {
     if (!cp || !legs.length) return [];
     const { lo, hi } = xRange;
     return Array.from({ length: 100 }, (_, i) => {
       const S = lo + (i / 99) * (hi - lo);
-      return {
-        price:       parseFloat(S.toFixed(2)),
-        pnlExpiry:   parseFloat((multiLegPayoffPS(legs, S) * mult).toFixed(2)),
-        pnlToday:    T_today > 0 ? parseFloat((multiLegPayoffBSPS(legs, S, T_today, BS_R) * mult).toFixed(2)) : null,
-        pnlEarnings: showEarnings ? parseFloat((multiLegPayoffBSPS(legs, S, T_earnings!, BS_R) * mult).toFixed(2)) : null,
-      };
+      const pnl = T_slider > 0
+        ? multiLegPayoffBSPS(legs, S, T_slider, BS_R) * mult
+        : multiLegPayoffPS(legs, S) * mult;
+      return { price: parseFloat(S.toFixed(2)), pnl: parseFloat(pnl.toFixed(2)) };
     });
-  }, [legs, cp, mult, xRange, T_today, T_earnings, showEarnings]);
+  }, [legs, cp, mult, xRange, T_slider]);
 
   if (!callStrikes.length || !cp) {
     return (
@@ -2302,16 +2356,30 @@ function MultiLegStrategyCard({
     );
   }
 
-  const allPnls = chartData.flatMap((d) =>
-    [d.pnlExpiry, d.pnlToday, d.pnlEarnings].filter((v): v is number => v != null),
-  );
-  const yMin = allPnls.length ? Math.min(...allPnls) : -100;
-  const yMax = allPnls.length ? Math.max(...allPnls) : 100;
-  const yPad = (yMax - yMin) * 0.12 || 1;
-  const yDomain: [number, number] = [yMin - yPad, yMax + yPad];
+  // Stable Y-axis: computed from expiry+today only so axis stays fixed as slider moves
+  const yDomain = useMemo<[number, number]>(() => {
+    if (!cp || !legs.length) return [-100, 100];
+    const { lo, hi } = xRange;
+    const vals: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      const S = lo + (i / 99) * (hi - lo);
+      vals.push(multiLegPayoffPS(legs, S) * mult);
+      if (T_today > 0) vals.push(multiLegPayoffBSPS(legs, S, T_today, BS_R) * mult);
+    }
+    const yMin = Math.min(...vals);
+    const yMax = Math.max(...vals);
+    const pad = (yMax - yMin) * 0.15 || 1;
+    return [yMin - pad, yMax + pad];
+  }, [legs, cp, mult, xRange, T_today]);
+
   const xLo = chartData[0]?.price ?? 0;
   const xHi = chartData[chartData.length - 1]?.price ?? 0;
   const hasShortPut = strategy === "short_strangle" || strategy === "iron_condor";
+  const scrubPoint = chartData.length
+    ? chartData.reduce((best, d) => Math.abs(d.price - scrubPrice) < Math.abs(best.price - scrubPrice) ? d : best)
+    : null;
+  const effectivePrice = scrubPoint?.price ?? scrubPrice;
+  const scrubPnl: number | null = scrubPoint?.pnl ?? null;
 
   return (
     <div className="rounded-lg border bg-card px-5 py-4 space-y-3">
@@ -2382,10 +2450,48 @@ function MultiLegStrategyCard({
         </div>
       )}
 
-      {/* Payoff diagram */}
-      <ResponsiveContainer width="100%" height={180}>
-        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+      {/* ── Hero P&L ──────────────────────────────────────────────── */}
+      <div className="py-1">
+        <p className="text-xs text-muted-foreground mb-1.5">
+          {data.symbol} at ${effectivePrice.toFixed(2)}
+          {" · "}
+          {daysToExpiry === 0 ? "At expiration" : selectedDateStr}
+        </p>
+        <p
+          className={cn(
+            "text-4xl font-bold tabular-nums tracking-tight leading-none",
+            scrubPnl == null
+              ? "text-muted-foreground"
+              : scrubPnl >= 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-red-500 dark:text-red-400",
+          )}
+        >
+          {scrubPnl == null
+            ? "—"
+            : `${scrubPnl >= 0 ? "+" : "−"}$${Math.abs(scrubPnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        </p>
+      </div>
+
+      {/* ── Live payoff chart ──────────────────────────────────────── */}
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart
+          data={chartData}
+          margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+          onMouseMove={(e) => {
+            if (e.activeLabel != null) {
+              const p = parseFloat(String(e.activeLabel));
+              if (!isNaN(p)) setScrubPrice(p);
+            }
+          }}
+          onClick={(e) => {
+            if (e.activeLabel != null) {
+              const p = parseFloat(String(e.activeLabel));
+              if (!isNaN(p)) setScrubPrice(p);
+            }
+          }}
+        >
+          <CartesianGrid strokeDasharray="2 6" stroke="hsl(var(--border))" strokeOpacity={0.4} vertical={false} />
           <XAxis
             dataKey="price"
             type="number"
@@ -2402,10 +2508,6 @@ function MultiLegStrategyCard({
             tickLine={false}
             width={68}
           />
-          <Tooltip
-            content={<PayoffTooltip />}
-            cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 }}
-          />
 
           {/* Implied range band */}
           {data.implied_range_low != null && data.implied_range_high != null && (
@@ -2413,7 +2515,7 @@ function MultiLegStrategyCard({
               x1={Math.max(data.implied_range_low, xLo)}
               x2={Math.min(data.implied_range_high, xHi)}
               fill="hsl(var(--muted))"
-              fillOpacity={0.35}
+              fillOpacity={0.2}
             />
           )}
 
@@ -2425,8 +2527,17 @@ function MultiLegStrategyCard({
             x={cp}
             stroke="hsl(var(--muted-foreground))"
             strokeWidth={1}
-            strokeDasharray="3 3"
+            strokeDasharray="3 5"
+            strokeOpacity={0.6}
             label={{ value: "Current", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+          />
+
+          {/* Price scrubber */}
+          <ReferenceLine
+            x={effectivePrice}
+            stroke="hsl(var(--foreground))"
+            strokeWidth={1.5}
+            strokeOpacity={0.85}
           />
 
           {/* Breakevens */}
@@ -2434,81 +2545,54 @@ function MultiLegStrategyCard({
             <ReferenceLine
               key={i}
               x={be}
-              stroke="#16a34a"
+              stroke="#10b981"
               strokeWidth={1}
-              strokeDasharray="3 3"
-              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#16a34a" }}
+              strokeDasharray="3 5"
+              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#10b981" }}
             />
           ))}
 
-          {/* Three curves: earnings (green dashed), today (amber dashed), expiry (blue solid) */}
-          {showEarnings && (
-            <Line
-              dataKey="pnlEarnings"
-              name="At earnings"
-              stroke="#10b981"
-              strokeWidth={1.5}
-              dot={false}
-              activeDot={{ r: 3, fill: "#10b981" }}
-              type="monotone"
-              strokeDasharray="3 3"
-              isAnimationActive={false}
-              connectNulls
-            />
-          )}
-          {T_today > 0 && (
-            <Line
-              dataKey="pnlToday"
-              name="Today"
-              stroke="#f59e0b"
-              strokeWidth={1.5}
-              dot={false}
-              activeDot={{ r: 3, fill: "#f59e0b" }}
-              type="monotone"
-              strokeDasharray="5 3"
-              isAnimationActive={false}
-              connectNulls
-            />
-          )}
           <Line
-            dataKey="pnlExpiry"
-            name="At expiration"
+            dataKey="pnl"
             stroke="#3b82f6"
-            strokeWidth={2}
+            strokeWidth={2.5}
             dot={false}
-            activeDot={{ r: 3, fill: "#3b82f6" }}
-            type="linear"
+            activeDot={false}
+            type={T_slider === 0 ? "linear" : "monotone"}
             isAnimationActive={false}
+            connectNulls
           />
         </LineChart>
       </ResponsiveContainer>
 
-      {/* Legend */}
-      <div className="flex gap-4 text-[10px] text-muted-foreground justify-end -mt-1">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-4 border-b-2 border-blue-500" />
-          At expiration
-        </span>
-        {T_today > 0 && (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-4 border-b-2 border-amber-500 border-dashed" />
-            Today
+      {/* ── Date slider ────────────────────────────────────────────── */}
+      <div className="space-y-1.5 px-0.5">
+        <input
+          type="range"
+          min={0}
+          max={totalDays}
+          value={dateOffset}
+          onChange={(e) => setDateOffset(parseInt(e.target.value))}
+          className="w-full h-1 rounded-full appearance-none cursor-pointer"
+          style={{ accentColor: "hsl(var(--foreground))" }}
+        />
+        <div className="flex justify-between items-baseline text-[10px]">
+          <span className="text-muted-foreground">Today</span>
+          <span className="font-medium text-foreground">
+            {daysToExpiry === 0
+              ? "At expiration"
+              : `${selectedDateStr} · ${daysToExpiry}d to expiry`}
           </span>
-        )}
-        {showEarnings && (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-4 border-b-2 border-emerald-500 border-dashed" />
-            At earnings
-          </span>
-        )}
+          <span className="text-muted-foreground">Expiry</span>
+        </div>
       </div>
 
-      {/* IV crush disclaimer */}
-      {showEarnings && (
-        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
-          <strong>Note:</strong> The earnings-date curve uses current implied volatility held constant.
-          It does not model the IV crush that typically follows an earnings release — real post-earnings
-          option values will likely be lower.
+      {/* IV-crush disclaimer — shows when slider is at or before earnings date */}
+      {showDisclaimer && (
+        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+          <strong>Note:</strong> This curve holds today&apos;s implied volatility constant.
+          It does not model the IV crush that typically follows an earnings release — real
+          post-earnings option values will likely be lower.
         </p>
       )}
 
