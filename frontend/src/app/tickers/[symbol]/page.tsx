@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -2831,6 +2831,8 @@ export default function TickerPage() {
 
   const [realizedVol, setRealizedVol]     = useState<RealizedVol | null>(null);
   const [rvStatus, setRvStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
+  const [optionsRead, setOptionsRead]     = useState<OptionsRead | null>(null);
+  const [orStatus, setOrStatus]           = useState<"loading" | "done" | "error">("loading");
 
   const [expectedMove, setExpectedMove]   = useState<ExpectedMove | null>(null);
   const [emStatus, setEmStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
@@ -2886,6 +2888,12 @@ export default function TickerPage() {
         setRvStatus(data.current_rv != null ? "done" : "empty");
       })
       .catch(() => setRvStatus("error"));
+  }, [upperSymbol]);
+
+  useEffect(() => {
+    api.tickers.optionsRead(upperSymbol)
+      .then((data) => { setOptionsRead(data); setOrStatus("done"); })
+      .catch(() => setOrStatus("error"));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -3295,6 +3303,32 @@ export default function TickerPage() {
         {/* ── Options & Expected Move ────────────────────────────────────────── */}
         <div className="mt-10 mb-10">
           <h2 className="text-lg font-semibold mb-4">Options & Expected Move</h2>
+
+          {/* AI options setup read */}
+          {orStatus === "loading" && (
+            <div className="rounded-lg border bg-card px-5 py-4 mb-6 animate-pulse space-y-2">
+              <div className="h-3 bg-muted rounded w-40" />
+              <div className="h-4 bg-muted rounded w-full" />
+              <div className="h-4 bg-muted rounded w-11/12" />
+              <div className="h-4 bg-muted rounded w-4/5" />
+            </div>
+          )}
+          {orStatus === "done" && optionsRead && (
+            <div className="rounded-lg border bg-card px-5 py-4 mb-6 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  AI read — options setup
+                </span>
+                <span className="text-[10px] text-muted-foreground/70">
+                  · educational interpretation · not investment advice
+                </span>
+              </div>
+              <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
+              <p className="text-[10px] text-muted-foreground/60">
+                {optionsRead.model_used} · {optionsRead.cached ? "cached" : "generated"} {timeAgo(optionsRead.generated_at)}
+              </p>
+            </div>
+          )}
 
           {emStatus === "loading" && (
             <div className="animate-pulse space-y-3">

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from datetime import date, timedelta, timezone
 from datetime import datetime as dt_datetime
@@ -12,7 +13,9 @@ from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
-from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, RealizedVolRead, StrategyDataRead, StrikeData
+from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
+from app.services.anthropic_client import AnthropicClient
+from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.yfinance_client import YFinanceClient
@@ -613,6 +616,279 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         earnings_date=earnings_str,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
         strikes=result_strikes, as_of=as_of,
+    )
+
+
+@router.get("/options-read/{symbol}", response_model=OptionsReadRead)
+async def get_options_read(symbol: str, db: AsyncSession = Depends(get_db)) -> OptionsReadRead:
+    """AI-generated 2–4 sentence interpretive read synthesizing vol/options data.
+
+    Every number is precomputed server-side and injected as an authoritative string.
+    The model narrates; it does not calculate. Cached per calendar day in system_metadata.
+    """
+    sym = symbol.upper()
+    loop = asyncio.get_event_loop()
+    today = date.today()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+    cache_key = f"options_read:{sym}:{today.isoformat()}"
+
+    # ── Cache check ───────────────────────────────────────────────────────────
+    cached_raw = await _get_meta(db, cache_key)
+    if cached_raw:
+        try:
+            c = json.loads(cached_raw)
+            return OptionsReadRead(
+                symbol=sym, content=c["content"], facts=c["facts"],
+                model_used=c["model_used"], generated_at=c["generated_at"],
+                cached=True, as_of=as_of,
+            )
+        except Exception:
+            pass  # corrupt cache → fall through to regenerate
+
+    # ── Gather data in parallel ───────────────────────────────────────────────
+    finnhub = FinnhubClient()
+    try:
+        quote, expirations, rv_raw = await asyncio.gather(
+            finnhub.get_quote(sym),
+            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
+            loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+    finally:
+        await finnhub.close()
+
+    current_price: float | None = float(quote.get("c") or 0) or None
+
+    # Ticker + next earnings from DB
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    earnings_str: str | None = None
+    ticker_name: str = sym
+    if ticker_row:
+        ticker_name = ticker_row.name or sym
+        ned = (await db.execute(
+            select(func.min(Event.event_date))
+            .where(Event.event_type == "earnings", Event.event_date >= today,
+                   Event.ticker_id == ticker_row.id)
+        )).scalar_one_or_none()
+        if ned:
+            earnings_str = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
+
+    # Pick expiration (same logic as expected-move endpoint)
+    chosen_exp: str | None = None
+    if expirations:
+        if earnings_str:
+            post = [e for e in expirations if e >= earnings_str]
+            chosen_exp = post[0] if post else expirations[-1]
+        else:
+            week_out = (today + timedelta(days=7)).isoformat()
+            chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+
+    # Options chain
+    chain: dict = {"calls": [], "puts": []}
+    if chosen_exp:
+        chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+
+    calls = chain.get("calls", [])
+    puts  = chain.get("puts", [])
+
+    # ATM strike, straddle, expected move, ATM IV
+    atm_strike: float | None = None
+    expected_move_pct: float | None = None
+    expected_move_dollars: float | None = None
+    implied_range_low: float | None = None
+    implied_range_high: float | None = None
+    atm_iv: float | None = None
+
+    if calls and puts and current_price:
+        intersection = {c["strike"] for c in calls} & {p["strike"] for p in puts}
+        if intersection:
+            atm_strike = min(intersection, key=lambda s: abs(s - current_price))
+            atm_call = next((c for c in calls if c["strike"] == atm_strike), None)
+            atm_put  = next((p for p in puts  if p["strike"] == atm_strike), None)
+            call_price = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
+            put_price  = _mid_or_last(atm_put["bid"],  atm_put["ask"],  atm_put["lastPrice"])  if atm_put  else None
+            if call_price is not None and put_price is not None:
+                straddle = call_price + put_price
+                expected_move_pct    = straddle / current_price
+                expected_move_dollars = straddle
+                implied_range_low    = current_price - straddle
+                implied_range_high   = current_price + straddle
+            ivs = [c["impliedVolatility"] for c in [atm_call, atm_put]
+                   if c and c.get("impliedVolatility") is not None]
+            atm_iv = sum(ivs) / len(ivs) if ivs else None
+
+    # RV rank/percentile
+    current_rv: float | None = rv_raw.get("current_rv")
+    rv_series: list[float]   = rv_raw.get("rv_series", [])
+    rv_rank: float | None    = None
+    rv_percentile: float | None = None
+    rv_min: float | None     = None
+    rv_max: float | None     = None
+    rv_sample_days: int      = rv_raw.get("sample_days", 0)
+
+    if rv_series and current_rv is not None:
+        rv_min = min(rv_series)
+        rv_max = max(rv_series)
+        rv_rank = (current_rv - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
+        rv_rank = round(max(0.0, min(100.0, rv_rank)), 1)
+        rv_percentile = round(sum(1 for v in rv_series if v < current_rv) / len(rv_series) * 100, 1)
+
+    # IV-RV spread (in percentage points)
+    iv_rv_spread_pp: float | None = (
+        round((atm_iv - current_rv) * 100, 1)
+        if atm_iv is not None and current_rv is not None else None
+    )
+
+    # Historical earnings avg absolute 1d move
+    avg_earn_move_pct: float | None = None
+    earn_sample: int = 0
+    if ticker_row:
+        reactions = (await db.execute(
+            select(HistoricalReaction).where(
+                HistoricalReaction.ticker_id == ticker_row.id,
+                HistoricalReaction.event_type == "earnings",
+                HistoricalReaction.pct_change_1d.isnot(None),
+            )
+        )).scalars().all()
+        abs_moves = [abs(float(r.pct_change_1d)) for r in reactions]  # stored as full pct (e.g. 2.77 = 2.77%)
+        if abs_moves:
+            avg_earn_move_pct = round(mean(abs_moves), 1)
+            earn_sample = len(abs_moves)
+
+    # Earnings window
+    expiration_spans_earnings = False
+    days_exp_past_earnings: int | None = None
+    days_to_exp: int | None = None
+    if chosen_exp:
+        exp_obj = date.fromisoformat(chosen_exp)
+        days_to_exp = (exp_obj - today).days
+        if earnings_str:
+            earn_obj = date.fromisoformat(earnings_str)
+            if exp_obj >= earn_obj:
+                expiration_spans_earnings = True
+                days_exp_past_earnings = (exp_obj - earn_obj).days
+
+    # ── Build pre-formatted fact strings (the model sees ONLY these) ──────────
+    def _fp(v: float | None, d: int = 2) -> str:
+        return f"${v:.{d}f}" if v is not None else "(unavailable)"
+
+    def _fpct(v: float | None, d: int = 1) -> str:
+        """0-1 decimal → formatted percent string."""
+        return f"{v * 100:.{d}f}%" if v is not None else "(unavailable)"
+
+    facts: dict = {
+        "symbol":                    sym,
+        "company_name":              ticker_name,
+        "current_price":             _fp(current_price),
+        "expected_move_pct":         f"±{expected_move_pct * 100:.1f}%" if expected_move_pct is not None else "(unavailable)",
+        "expected_move_dollars":     f"±{_fp(expected_move_dollars)}" if expected_move_dollars is not None else "(unavailable)",
+        "implied_range":             f"{_fp(implied_range_low)} – {_fp(implied_range_high)}" if implied_range_low is not None and implied_range_high is not None else "(unavailable)",
+        "expiration_date":           chosen_exp or "(unavailable)",
+        "days_to_expiration":        str(days_to_exp) if days_to_exp is not None else "(unavailable)",
+        "atm_strike":                _fp(atm_strike),
+        "atm_iv":                    _fpct(atm_iv),
+        "next_earnings_date":        earnings_str or "(unavailable)",
+        "expiration_spans_earnings": str(expiration_spans_earnings),
+        "days_exp_past_earnings":    str(days_exp_past_earnings) if days_exp_past_earnings is not None else "N/A",
+        "realized_vol_20d":          _fpct(current_rv),
+        "rv_rank":                   f"{rv_rank:.1f}" if rv_rank is not None else "(unavailable)",
+        "rv_percentile":             f"{rv_percentile:.1f}" if rv_percentile is not None else "(unavailable)",
+        "rv_1yr_range":              f"{_fpct(rv_min)} – {_fpct(rv_max)}" if rv_min is not None and rv_max is not None else "(unavailable)",
+        "rv_sample_days":            str(rv_sample_days),
+        "iv_rv_spread":              (f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"),
+        "avg_earnings_1d_move":      f"±{avg_earn_move_pct:.1f}%" if avg_earn_move_pct is not None else "(unavailable)",
+        "earnings_sample_size":      str(earn_sample) if earn_sample > 0 else "(unavailable)",
+    }
+
+    # Earnings window note — a full pre-written sentence so the model can't miscalculate
+    if expiration_spans_earnings and days_exp_past_earnings is not None:
+        earnings_window_note = (
+            f"The {chosen_exp} expiration falls {days_exp_past_earnings} calendar days "
+            f"after the {earnings_str} earnings date, so the implied move covers the full "
+            f"period through expiration, not just the earnings reaction."
+        )
+    else:
+        earnings_window_note = "(unavailable — expiration does not span the next earnings date)"
+
+    # ── Prompt ────────────────────────────────────────────────────────────────
+    prompt = f"""\
+You are a senior options trader narrating what you see on the screen for {sym} ({ticker_name}).
+Write exactly 2–4 tight sentences of interpretive prose for a sophisticated reader of a financial research tool.
+
+INJECTED FACTS — use ONLY these exact strings verbatim for every number you state.
+Do NOT derive, approximate, recompute, or restate any figure differently from what appears below.
+If a fact says "(unavailable)", omit that thread entirely — do not guess or fabricate.
+
+--- FACT BLOCK ---
+Symbol / Company:           {sym} / {ticker_name}
+Current price:              {facts["current_price"]}
+
+EXPECTED MOVE (options-implied, ATM straddle):
+  Implied move:             {facts["expected_move_pct"]} ({facts["expected_move_dollars"]}) by {facts["expiration_date"]} ({facts["days_to_expiration"]} calendar days)
+  Implied price range:      {facts["implied_range"]}
+  ATM strike / ATM IV:      {facts["atm_strike"]} / {facts["atm_iv"]}
+
+EARNINGS CONTEXT:
+  Next earnings date:       {facts["next_earnings_date"]}
+  Expiration spans earnings:{facts["expiration_spans_earnings"]}
+  Earnings window note:     {earnings_window_note}
+
+VOLATILITY:
+  20-day realized vol:      {facts["realized_vol_20d"]}
+  RV rank (0–100):          {facts["rv_rank"]}   [0=lowest in past year, 100=highest]
+  RV percentile:            {facts["rv_percentile"]}   [{facts["rv_percentile"]}% of the past {facts["rv_sample_days"]} trading days had lower realized vol]
+  1-yr RV range:            {facts["rv_1yr_range"]}
+  IV − RV spread:           {facts["iv_rv_spread"]}   [positive = options pricing more vol than recently delivered; negative = options cheap vs realized]
+
+HISTORICAL EARNINGS (from actual past reactions):
+  Avg absolute 1-day move:  {facts["avg_earnings_1d_move"]}
+  Based on:                 {facts["earnings_sample_size"]} past earnings events
+--- END FACT BLOCK ---
+
+STRICT RULES:
+1. Every number you write MUST be copied verbatim from the fact block. No rounding, reformatting, or paraphrasing of figures.
+2. Write PROSE ONLY — no bullets, headers, lists, or markdown.
+3. Cover these threads in a natural flow across 2–4 sentences:
+   a. What the market is pricing: state the implied move, implied range, and expiration.
+   b. The vol context: connect the RV rank and the IV−RV spread — is implied vol historically cheap or rich vs what the stock has recently delivered? Be specific about what this looks like from each side of the trade.
+   c. If expiration spans earnings (True): use the earnings window note verbatim or paraphrase it — note the expiration extends past earnings.
+   d. If available: briefly note the historical average earnings-day move for comparison.
+4. You MAY describe the setup descriptively from a premium-seller or premium-buyer perspective — but NO trade recommendations, no "you should buy/sell," no price targets.
+5. Omit any thread where the fact says "(unavailable)".
+6. Do NOT add disclaimers or caveats — the UI handles that.
+7. Target 60–100 words. Be specific and grounded; no generic filler.\
+"""
+
+    print(f"[options-read] Generating for {sym} | facts: {json.dumps(facts, indent=2)}", flush=True)
+
+    # ── Generate ──────────────────────────────────────────────────────────────
+    client = AnthropicClient()
+    try:
+        gen = await client.generate_options_read(prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Options read generation failed: {exc}")
+
+    generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
+    print(
+        f"[options-read] {sym}: {gen['input_tokens']} in / {gen['output_tokens']} out tokens",
+        flush=True,
+    )
+
+    # ── Cache for the calendar day ────────────────────────────────────────────
+    try:
+        await _set_meta(db, cache_key, json.dumps({
+            "content": gen["content"], "facts": facts,
+            "model_used": gen["model_used"], "generated_at": generated_at,
+        }))
+        await db.commit()
+    except Exception as exc:
+        print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
+
+    return OptionsReadRead(
+        symbol=sym, content=gen["content"], facts=facts,
+        model_used=gen["model_used"], generated_at=generated_at,
+        cached=False, as_of=as_of,
     )
 
 

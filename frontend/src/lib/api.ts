@@ -202,6 +202,16 @@ export interface StrategyData {
   as_of: string;
 }
 
+export interface OptionsRead {
+  symbol: string;
+  content: string;                        // 2–4 sentence interpretive prose
+  facts: Record<string, string>;          // precomputed fact strings injected into the prompt
+  model_used: string;
+  generated_at: string;
+  cached: boolean;
+  as_of: string;
+}
+
 export interface RealizedVol {
   symbol: string;
   current_rv: number | null;       // annualized 20-day RV, 0–1 decimal (0.172 = 17.2%)
@@ -246,6 +256,8 @@ export const api = {
       request<Ticker>(`/tickers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/tickers/${id}`, { method: "DELETE" }),
+    optionsRead: (symbol: string) =>
+      request<OptionsRead>(`/tickers/options-read/${symbol}`),
     realizedVol: (symbol: string) =>
       request<RealizedVol>(`/tickers/rv/${symbol}`),
     expectedMove: (symbol: string) =>

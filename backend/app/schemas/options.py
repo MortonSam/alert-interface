@@ -85,3 +85,15 @@ class RealizedVolRead(BaseModel):
     sample_days: int                 # number of RV data points in the trailing window
     window_days: int                 # rolling window used (20 trading days)
     as_of: str
+
+
+# ── AI-generated options setup read ───────────────────────────────────────────
+
+class OptionsReadRead(BaseModel):
+    symbol: str
+    content: str                     # the 2–4 sentence interpretive prose
+    facts: dict                      # the precomputed fact block injected into the prompt
+    model_used: str
+    generated_at: str                # ISO UTC of generation
+    cached: bool                     # True if served from today's cache
+    as_of: str

@@ -32,6 +32,24 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
+    async def generate_options_read(self, prompt: str) -> dict:
+        """Generate a short (2–4 sentence) interpretive options setup read.
+
+        Uses Sonnet; max_tokens is tight because the output is prose-only,
+        60–100 words. All numbers are injected by the caller — the model only narrates.
+        """
+        msg = await self._client.messages.create(
+            model=GENERATION_MODEL,
+            max_tokens=350,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {
+            "content":       msg.content[0].text.strip(),
+            "model_used":    GENERATION_MODEL,
+            "input_tokens":  msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
+
     async def verify_research_note(self, prompt: str) -> dict:
         """Verify a research note. Uses Opus for higher accuracy.
 
