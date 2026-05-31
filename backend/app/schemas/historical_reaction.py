@@ -37,3 +37,26 @@ class HistoricalReactionRead(HistoricalReactionBase):
 
     id: uuid.UUID
     created_at: datetime
+
+    # Computed enrichment fields — not stored in DB; populated by the router
+    eps_surprise_pct: float | None = None   # (eps_actual − eps_estimate) / |eps_estimate| × 100
+    gap_pct: float | None = None            # (open_after / close_before − 1) × 100
+    intraday_pct: float | None = None       # (close_after / open_after − 1) × 100
+
+
+class ReactionSummaryRead(BaseModel):
+    """Aggregate insights for a ticker's earnings reaction history."""
+    symbol: str
+    sector: str | None
+    total_quarters: int
+    beat_count: int
+    miss_count: int
+    meet_count: int
+    beat_rate_pct: float
+    beat_but_dropped_count: int             # beats where T+1 was negative
+    beat_but_dropped_rate_pct: float | None # beat_but_dropped / beat_count × 100
+    avg_1d_on_beat: float | None
+    avg_1d_on_miss: float | None
+    avg_abs_1d: float | None                # average |pct_change_1d| across all quarters
+    sector_avg_abs_1d: float | None         # same metric across sector peers (None if <5 peers)
+    sector_peer_count: int                  # distinct peer tickers used for sector avg

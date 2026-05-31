@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -135,6 +135,101 @@ function CatalystRow({ event }: { event: Event }) {
   );
 }
 
+// ── Earnings insights panel ───────────────────────────────────────────────────
+
+function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
+  const dropRate = s.beat_but_dropped_rate_pct;
+  const pricingNote =
+    dropRate == null ? null
+    : dropRate > 50 ? "beats appear largely priced in"
+    : dropRate > 25 ? "beats partially priced in"
+    : "beats tend to drive the stock higher";
+
+  const sectorVsOwn =
+    s.sector_avg_abs_1d != null && s.avg_abs_1d != null
+      ? s.avg_abs_1d < s.sector_avg_abs_1d * 0.85 ? "smaller than"
+      : s.avg_abs_1d > s.sector_avg_abs_1d * 1.15 ? "larger than"
+      : "similar to"
+      : null;
+
+  return (
+    <div className="rounded-lg border bg-card px-5 py-4 space-y-3 mb-3">
+      {/* Beat rate + beat-but-dropped headline */}
+      <div>
+        <p className="text-sm font-semibold">
+          Beat EPS in {s.beat_count} of {s.total_quarters} quarter{s.total_quarters !== 1 ? "s" : ""}{" "}
+          ({s.beat_rate_pct.toFixed(0)}%)
+        </p>
+        {dropRate != null && s.beat_count > 0 && (
+          <p
+            className={cn(
+              "text-sm mt-0.5",
+              dropRate > 50
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-muted-foreground",
+            )}
+          >
+            Stock fell next day in {s.beat_but_dropped_count} of {s.beat_count} beats
+            {" "}({dropRate.toFixed(0)}%){pricingNote ? ` — ${pricingNote}` : ""}
+          </p>
+        )}
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2">
+        {(
+          [
+            ["Avg T+1 on beats", s.avg_1d_on_beat],
+            ["Avg T+1 on misses", s.avg_1d_on_miss],
+          ] as [string, number | null][]
+        ).map(([label, val]) => (
+          <div key={label}>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{label}</p>
+            <p
+              className={cn(
+                "text-sm font-semibold tabular-nums",
+                val == null ? "text-muted-foreground"
+                : val > 0 ? "text-green-700 dark:text-green-400"
+                : "text-red-600 dark:text-red-400",
+              )}
+            >
+              {val == null ? "—" : `${val > 0 ? "+" : ""}${val.toFixed(2)}%`}
+            </p>
+          </div>
+        ))}
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Avg abs move</p>
+          <p className="text-sm font-semibold tabular-nums text-foreground">
+            {s.avg_abs_1d != null ? `±${s.avg_abs_1d.toFixed(2)}%` : "—"}
+          </p>
+        </div>
+
+        {s.sector_avg_abs_1d != null && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+              {s.sector ?? "Sector"} avg move
+            </p>
+            <p className="text-sm font-semibold tabular-nums text-muted-foreground">
+              ±{s.sector_avg_abs_1d.toFixed(2)}%
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Sector comparison sentence */}
+      {sectorVsOwn != null && s.avg_abs_1d != null && s.sector_avg_abs_1d != null && (
+        <p className="text-xs text-muted-foreground">
+          Typical earnings move (±{s.avg_abs_1d.toFixed(2)}%) is{" "}
+          <span className="font-medium">{sectorVsOwn}</span> the{" "}
+          {s.sector ?? "sector"} peer average (±{s.sector_avg_abs_1d.toFixed(2)}%){" "}
+          across {s.sector_peer_count} peers
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Reactions table ───────────────────────────────────────────────────────────
 
 type ReactionSortKey = "event_date" | "pct_change_1d" | "pct_change_3d" | "pct_change_5d";
@@ -183,6 +278,58 @@ function PctCell({ value }: { value: string | null }) {
         {n > 0 ? "+" : ""}
         {n.toFixed(2)}%
       </span>
+    </td>
+  );
+}
+
+// Enriched 1d% cell with optional gap/intraday secondary line
+function Pct1dCell({
+  value,
+  gapPct,
+  intradayPct,
+}: {
+  value: string | null;
+  gapPct: number | null;
+  intradayPct: number | null;
+}) {
+  if (value == null) {
+    return (
+      <td className="px-3 py-2.5 text-right text-sm text-muted-foreground tabular-nums">—</td>
+    );
+  }
+  const n = parseFloat(value);
+  const hasSecondary = gapPct != null || intradayPct != null;
+
+  const fmt = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+
+  return (
+    <td
+      className={cn(
+        "px-3 py-2.5 text-right text-sm font-medium tabular-nums",
+        n > 0 && "text-green-700 dark:text-green-400",
+        n < 0 && "text-red-600 dark:text-red-400",
+        n === 0 && "text-muted-foreground",
+      )}
+    >
+      <div className="flex flex-col items-end gap-0.5">
+        <span
+          className={cn(
+            "inline-block rounded px-1",
+            n > 0 && "bg-green-50 dark:bg-green-900/20",
+            n < 0 && "bg-red-50 dark:bg-red-900/20",
+          )}
+        >
+          {n > 0 ? "+" : ""}
+          {n.toFixed(2)}%
+        </span>
+        {hasSecondary && (
+          <span className="text-[10px] font-normal text-muted-foreground/60 whitespace-nowrap">
+            {gapPct != null ? `gap ${fmt(gapPct)}` : ""}
+            {gapPct != null && intradayPct != null ? " · " : ""}
+            {intradayPct != null ? `day ${fmt(intradayPct)}` : ""}
+          </span>
+        )}
+      </div>
     </td>
   );
 }
@@ -448,21 +595,31 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
                     <EventTypeBadge type={r.event_type} />
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex items-center gap-1.5 flex-wrap">
                       <OutcomeBadge outcome={r.outcome} />
-                      {r.pct_change_1d == null ? (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      ) : parseFloat(r.pct_change_1d) > 0 ? (
-                        <span className="text-xs font-medium text-green-600 dark:text-green-400">↑</span>
-                      ) : (
-                        <span className="text-xs font-medium text-red-500 dark:text-red-400">↓</span>
+                      {r.eps_surprise_pct != null && (
+                        <span
+                          className={cn(
+                            "text-xs font-medium tabular-nums",
+                            r.eps_surprise_pct > 0
+                              ? "text-green-600 dark:text-green-400"
+                              : "text-red-500 dark:text-red-400",
+                          )}
+                        >
+                          {r.eps_surprise_pct > 0 ? "+" : ""}
+                          {r.eps_surprise_pct.toFixed(1)}%
+                        </span>
                       )}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums">
                     {formatPrice(r.open_after)}
                   </td>
-                  <PctCell value={r.pct_change_1d} />
+                  <Pct1dCell
+                    value={r.pct_change_1d}
+                    gapPct={r.gap_pct}
+                    intradayPct={r.intraday_pct}
+                  />
                   <PctCell value={r.pct_change_3d} />
                   <PctCell value={r.pct_change_5d} />
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
@@ -2821,6 +2978,7 @@ export default function TickerPage() {
   const [reactions, setReactions]         = useState<HistoricalReaction[]>([]);
   const [reactionStatus, setReactionStatus] = useState<SectionStatus>("loading");
   const [reactionError, setReactionError]   = useState<string | null>(null);
+  const [reactionSummary, setReactionSummary] = useState<ReactionSummary | null>(null);
 
   const [quote, setQuote]             = useState<TickerQuote | null>(null);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("1y");
@@ -2875,6 +3033,10 @@ export default function TickerPage() {
       .list({ symbol: upperSymbol, event_type: "earnings" })
       .then((rows) => { setReactions(rows); setReactionStatus("done"); })
       .catch((e: Error) => { setReactionError(e.message); setReactionStatus("error"); });
+    api.reactions
+      .summary(upperSymbol)
+      .then(setReactionSummary)
+      .catch(() => setReactionSummary(null));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -3126,7 +3288,12 @@ export default function TickerPage() {
             </div>
           )}
           {reactionStatus === "done" && reactions.length > 0 && (
-            <ReactionsTable reactions={reactions} />
+            <>
+              {reactionSummary && reactionSummary.total_quarters >= 3 && (
+                <EarningsInsightsPanel s={reactionSummary} />
+              )}
+              <ReactionsTable reactions={reactions} />
+            </>
           )}
         </div>
 

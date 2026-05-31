@@ -74,6 +74,27 @@ export interface HistoricalReaction {
   revenue_actual: number | null;
   outcome: EarningsOutcome;
   created_at: string;
+  // Computed enrichment fields (populated server-side, null for non-earnings rows)
+  eps_surprise_pct: number | null;  // (eps_actual − eps_estimate) / |eps_estimate| × 100
+  gap_pct: number | null;           // (open_after / close_before − 1) × 100
+  intraday_pct: number | null;      // (close_after / open_after − 1) × 100
+}
+
+export interface ReactionSummary {
+  symbol: string;
+  sector: string | null;
+  total_quarters: number;
+  beat_count: number;
+  miss_count: number;
+  meet_count: number;
+  beat_rate_pct: number;
+  beat_but_dropped_count: number;
+  beat_but_dropped_rate_pct: number | null;
+  avg_1d_on_beat: number | null;
+  avg_1d_on_miss: number | null;
+  avg_abs_1d: number | null;
+  sector_avg_abs_1d: number | null;
+  sector_peer_count: number;
 }
 
 export interface WatchlistTicker {
@@ -334,6 +355,8 @@ export const api = {
       );
       return request<HistoricalReaction[]>(`/reactions/?${params}`);
     },
+    summary: (symbol: string) =>
+      request<ReactionSummary>(`/reactions/summary?symbol=${encodeURIComponent(symbol)}`),
     get: (id: string) => request<HistoricalReaction>(`/reactions/${id}`),
     create: (data: Partial<HistoricalReaction>) =>
       request<HistoricalReaction>("/reactions/", { method: "POST", body: JSON.stringify(data) }),
