@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { TickerGrid } from "./ticker-grid";
 
 export default function Home() {
@@ -18,13 +19,13 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="rounded-lg border bg-card p-6">
-            <h2 className="font-semibold mb-2">Watchlists</h2>
+          <Link href="/watchlist" className="rounded-lg border bg-card p-6 block hover:bg-accent transition-colors group">
+            <h2 className="font-semibold mb-2 group-hover:underline">Watchlists</h2>
             <p className="text-sm text-muted-foreground">
               Track your positions and monitor catalysts across your portfolio.
-              Push notifications via ntfy.sh.
+              Live prices, implied moves, and RV rank per row.
             </p>
-          </div>
+          </Link>
 
           <div className="rounded-lg border bg-card p-6">
             <h2 className="font-semibold mb-2">AI Research</h2>
