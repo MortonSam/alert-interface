@@ -11,13 +11,22 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="rounded-lg border bg-card p-6">
-            <h2 className="font-semibold mb-2">Catalyst Panel</h2>
+          {/* Build a Trade — primary CTA */}
+          <Link
+            href="/build"
+            className="rounded-lg border-2 border-primary/40 bg-primary/5 p-6 block hover:bg-primary/10 hover:border-primary/60 transition-colors group"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="font-semibold group-hover:underline">Build a Trade</h2>
+              <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">
+                New
+              </span>
+            </div>
             <p className="text-sm text-muted-foreground">
-              Upcoming events in the next 60 days — earnings, macro releases, FDA dates,
-              ex-div, product launches. Historical reactions table per ticker.
+              Pick a stock, choose a direction, and get an AI-drafted trade idea grounded
+              in options data, earnings history, and volatility. Saves to your tracker.
             </p>
-          </div>
+          </Link>
 
           <Link href="/watchlist" className="rounded-lg border bg-card p-6 block hover:bg-accent transition-colors group">
             <h2 className="font-semibold mb-2 group-hover:underline">Watchlists</h2>
@@ -30,8 +39,8 @@ export default function Home() {
           <Link href="/theses" className="rounded-lg border bg-card p-6 block hover:bg-accent transition-colors group">
             <h2 className="font-semibold mb-2 group-hover:underline">Thesis Tracker</h2>
             <p className="text-sm text-muted-foreground">
-              Record and resolve directional bets. Track entry price, conviction,
-              target date, and grade your own calls after the fact.
+              Review and resolve your open theses. Track option P&amp;L mark-to-market,
+              grade your calls, and record reflections.
             </p>
           </Link>
         </div>

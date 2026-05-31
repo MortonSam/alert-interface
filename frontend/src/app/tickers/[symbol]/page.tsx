@@ -2798,6 +2798,7 @@ function StrategyExplainer({ data, symbol }: { data: StrategyData; symbol: strin
   );
 }
 
+
 // ── Status types ──────────────────────────────────────────────────────────────
 
 type TickerStatus   = "loading" | "found" | "missing" | "error";

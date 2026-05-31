@@ -20,6 +20,7 @@ from app.schemas.thesis import (
     ThesisCreate,
     ThesisDraftRead,
     ThesisDraftRequest,
+    ThesisMarkRead,
     ThesisRead,
     ThesisResolve,
 )
@@ -47,14 +48,10 @@ def _to_read(thesis: Thesis) -> ThesisRead:
 
 def _extract_json(text: str) -> dict:
     """Pull first {...} JSON block from model output, tolerating prose and common quirks."""
-    # Find outermost {...}
     match = re.search(r"\{[\s\S]*\}", text)
     raw = match.group() if match else text
-
     # Sanitize: model sometimes writes "$329.00" as a bare JSON value (invalid).
-    # Replace `: $<number>` with `: <number>` so json.loads doesn't choke.
     raw = re.sub(r":\s*\$([0-9]+(?:\.[0-9]+)?)", r": \1", raw)
-
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -68,17 +65,13 @@ def _build_strike_lines(
     limit: int = 12,
 ) -> tuple[str, list[dict]]:
     """Return (formatted text block, list of {strike, mid, iv} dicts) for quality strikes."""
-    # Quality filter: has some market
     quality = [c for c in side_raw if (c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0]
-
-    # ATM-centred window
     all_strikes = sorted({c["strike"] for c in quality})
     if atm_strike and atm_strike in all_strikes:
         idx = all_strikes.index(atm_strike)
         keep = set(all_strikes[max(0, idx - (limit // 2)): idx + (limit // 2) + 1])
     else:
         keep = set(all_strikes[:limit])
-
     rows = []
     for c in quality:
         if c["strike"] not in keep:
@@ -88,9 +81,7 @@ def _build_strike_lines(
             continue
         iv = c.get("impliedVolatility")
         rows.append({"strike": c["strike"], "mid": round(mid, 2), "iv": round(iv * 100, 1) if iv else None})
-
     rows.sort(key=lambda r: r["strike"])
-
     lines = []
     for r in rows:
         dist = r["strike"] - current_price
@@ -98,9 +89,138 @@ def _build_strike_lines(
         atm_tag = "  ← ATM" if r["strike"] == atm_strike else ""
         iv_str = f", IV {r['iv']:.1f}%" if r["iv"] else ""
         lines.append(f"  ${r['strike']:.2f} ({dist_str}): mid ${r['mid']:.2f}{iv_str}{atm_tag}")
-
     text = "\n".join(lines) if lines else "  (no liquid strikes available)"
     return text, rows
+
+
+async def _compute_option_mark(
+    thesis: Thesis,
+    loop: asyncio.AbstractEventLoop,
+    stock_price_override: float | None = None,
+) -> ThesisMarkRead:
+    """Compute mark-to-market P&L for the option leg.
+
+    stock_price_override: skip Finnhub fetch when price is already known (e.g. at resolution).
+    """
+    as_of = datetime.now(tz=timezone.utc).isoformat()
+
+    if not thesis.option_type or not thesis.strike or not thesis.option_expiration:
+        return ThesisMarkRead(
+            thesis_id=thesis.id,
+            option_type=None, strike=None, strike2=None,
+            current_price=None, current_mid1=None, current_mid2=None,
+            entry_premium=None, entry_premium2=None, contracts=thesis.contracts or 1,
+            pnl_dollars=None, pnl_pct=None,
+            mark_basis="no_option_leg", is_expired=False, mark_note=None, as_of=as_of,
+        )
+
+    strike1     = float(thesis.strike)
+    strike2     = float(thesis.strike2) if thesis.strike2 else None
+    entry_prem1 = float(thesis.entry_premium) if thesis.entry_premium else None
+    entry_prem2 = float(thesis.entry_premium2) if thesis.entry_premium2 else None
+    contracts   = thesis.contracts or 1
+    exp_date    = thesis.option_expiration
+    today       = date.today()
+    is_expired  = today > exp_date
+    sym         = thesis.ticker.symbol
+
+    # ── Stock price ────────────────────────────────────────────────────────────
+    current_price: float | None = stock_price_override
+    if current_price is None:
+        finnhub = FinnhubClient()
+        try:
+            quote = await finnhub.get_quote(sym)
+            p = quote.get("c")
+            if p and float(p) > 0:
+                current_price = float(p)
+        except Exception:
+            pass
+        finally:
+            await finnhub.close()
+
+    current_mid1: float | None = None
+    current_mid2: float | None = None
+    mark_basis = "not_found"
+    mark_note: str | None = None
+
+    if is_expired:
+        # Settle at intrinsic value
+        if current_price is not None:
+            if thesis.option_type == "call":
+                current_mid1 = max(0.0, current_price - strike1)
+                if strike2 is not None:
+                    current_mid2 = max(0.0, current_price - strike2)
+            else:  # put
+                current_mid1 = max(0.0, strike1 - current_price)
+                if strike2 is not None:
+                    current_mid2 = max(0.0, strike2 - current_price)
+            mark_basis = "intrinsic"
+            mark_note = f"Expired {exp_date.isoformat()} — settled at intrinsic value"
+        else:
+            mark_note = f"Expired {exp_date.isoformat()} — could not fetch stock price for intrinsic"
+    else:
+        # Fetch live chain
+        exp_str = exp_date.isoformat()
+        try:
+            chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, exp_str)
+        except Exception as exc:
+            mark_note = f"Chain fetch failed: {exc}"
+            chain = {"calls": [], "puts": []}
+
+        side = chain.get("calls") if thesis.option_type == "call" else chain.get("puts", [])
+        c1 = next((c for c in side if c["strike"] == strike1), None) if side else None
+        if c1:
+            current_mid1 = _mid_or_last(c1.get("bid"), c1.get("ask"), c1.get("lastPrice"))
+
+        if strike2 is not None:
+            c2 = next((c for c in side if c["strike"] == strike2), None) if side else None
+            if c2:
+                current_mid2 = _mid_or_last(c2.get("bid"), c2.get("ask"), c2.get("lastPrice"))
+
+        if current_mid1 is not None:
+            mark_basis = "live_chain"
+        else:
+            mark_note = mark_note or f"Strike ${strike1:.2f} not found in {exp_str} chain"
+
+    # ── P&L ───────────────────────────────────────────────────────────────────
+    pnl_dollars: float | None = None
+    pnl_pct: float | None     = None
+
+    if entry_prem1 is not None:
+        if strike2 is None:
+            # Single leg: (current_mid - entry) × contracts × 100
+            if current_mid1 is not None:
+                pnl_dollars = (current_mid1 - entry_prem1) * contracts * 100
+                if entry_prem1 > 0:
+                    pnl_pct = (current_mid1 - entry_prem1) / entry_prem1
+        else:
+            # Spread: long leg1, short leg2
+            # net_current = mid1 - mid2;  net_entry = entry1 - entry2
+            if current_mid1 is not None and current_mid2 is not None and entry_prem2 is not None:
+                net_current = current_mid1 - current_mid2
+                net_entry   = entry_prem1 - entry_prem2
+                pnl_dollars = (net_current - net_entry) * contracts * 100
+                if net_entry > 0:
+                    pnl_pct = (net_current - net_entry) / net_entry
+
+    return ThesisMarkRead(
+        thesis_id=thesis.id,
+        option_type=thesis.option_type,
+        strike=strike1,
+        strike2=strike2,
+        current_price=current_price,
+        current_mid1=current_mid1,
+        current_mid2=current_mid2,
+        entry_premium=entry_prem1,
+        entry_premium2=entry_prem2,
+        contracts=contracts,
+        pnl_dollars=round(pnl_dollars, 2) if pnl_dollars is not None else None,
+        pnl_pct=round(pnl_pct, 4) if pnl_pct is not None else None,
+        mark_basis=mark_basis,
+        is_expired=is_expired,
+        mark_note=mark_note,
+        as_of=as_of,
+    )
 
 
 # ── Draft endpoint ─────────────────────────────────────────────────────────────
@@ -172,7 +292,7 @@ async def draft_thesis(
     beat_drops = [r for r in beats if float(r.pct_change_1d) < 0]
     bbd_rate: float | None = len(beat_drops) / len(beats) * 100 if beats else None
 
-    # ── 3. Choose expiration (same logic as /expected-move) ───────────────────
+    # ── 3. Choose expiration ──────────────────────────────────────────────────
     chosen_exp: str | None = None
     if expirations:
         if earnings_str:
@@ -190,7 +310,6 @@ async def draft_thesis(
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
 
-    # ATM, straddle, expected move
     atm_strike: float | None = None
     expected_move_pct: float | None = None
     expected_move_dollars: float | None = None
@@ -207,10 +326,10 @@ async def draft_thesis(
         pp = _mid_or_last(atm_put["bid"],  atm_put["ask"],  atm_put["lastPrice"])  if atm_put  else None
         if cp and pp:
             straddle = cp + pp
-            expected_move_pct    = straddle / current_price
+            expected_move_pct     = straddle / current_price
             expected_move_dollars = straddle
-            implied_range_low    = current_price - straddle
-            implied_range_high   = current_price + straddle
+            implied_range_low     = current_price - straddle
+            implied_range_high    = current_price + straddle
         ivs = [c["impliedVolatility"] for c in [atm_call, atm_put]
                if c and c.get("impliedVolatility") is not None]
         atm_iv = sum(ivs) / len(ivs) if ivs else None
@@ -235,14 +354,14 @@ async def draft_thesis(
     if direction == "bullish":
         primary_raw, secondary_raw = calls_raw, puts_raw
         primary_label, secondary_label = "CALLS (for bullish position)", "PUTS (for spread second leg)"
-        target_1x     = implied_range_high  # upper edge of implied range
-        target_hist_max = current_price * (1 + (hist_max or 0.08))  # upside worst-case
+        target_1x       = implied_range_high
+        target_hist_max = current_price * (1 + (hist_max or 0.08))
         target_hist_max_label = "upside"
     else:  # bearish
         primary_raw, secondary_raw = puts_raw, calls_raw
         primary_label, secondary_label = "PUTS (for bearish position)", "CALLS (for spread second leg)"
-        target_1x     = implied_range_low
-        target_hist_max = current_price * (1 - (hist_max or 0.08))  # downside worst-case
+        target_1x       = implied_range_low
+        target_hist_max = current_price * (1 - (hist_max or 0.08))
         target_hist_max_label = "downside"
 
     primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, current_price)
@@ -250,7 +369,7 @@ async def draft_thesis(
 
     valid_primary_strikes = {r["strike"] for r in primary_rows}
 
-    # ── 7. Realism pre-check for proposed_target ─────────────────────────────
+    # ── 7. Realism pre-check ──────────────────────────────────────────────────
     realism_precheck = ""
     if payload.proposed_target is not None:
         pt = payload.proposed_target
@@ -271,41 +390,41 @@ async def draft_thesis(
         else:
             realism_precheck += "Evaluate whether this target fits the requested aggressiveness profile.\n"
 
-    # ── 8. Build fact_block dict (returned to caller for transparency) ────────
+    # ── 8. Build fact_block dict ──────────────────────────────────────────────
     fact_block: dict = {
-        "symbol":                  sym,
-        "direction":               direction,
-        "aggressiveness":          aggressiveness,
-        "current_price":           round(current_price, 2),
-        "atm_strike":              atm_strike,
-        "earnings_date":           earnings_str,
-        "expiration_used":         chosen_exp,
-        "days_to_expiration":      days_to_exp,
-        "expected_move_pct":       round(expected_move_pct * 100, 2) if expected_move_pct else None,
-        "expected_move_dollars":   round(expected_move_dollars, 2) if expected_move_dollars else None,
-        "implied_range_low":       round(implied_range_low, 2) if implied_range_low else None,
-        "implied_range_high":      round(implied_range_high, 2) if implied_range_high else None,
-        "straddle_price":          round(expected_move_dollars, 2) if expected_move_dollars else None,
-        "hist_avg_abs_move_pct":   round(hist_avg * 100, 2) if hist_avg else None,
-        "hist_max_abs_move_pct":   round(hist_max * 100, 2) if hist_max else None,
-        "hist_min_abs_move_pct":   round(hist_min * 100, 2) if hist_min else None,
-        "hist_sample_size":        hist_sample,
-        "beat_rate_pct":           round(beat_rate, 1) if beat_rate is not None else None,
+        "symbol":                    sym,
+        "direction":                 direction,
+        "aggressiveness":            aggressiveness,
+        "current_price":             round(current_price, 2),
+        "atm_strike":                atm_strike,
+        "earnings_date":             earnings_str,
+        "expiration_used":           chosen_exp,
+        "days_to_expiration":        days_to_exp,
+        "expected_move_pct":         round(expected_move_pct * 100, 2) if expected_move_pct else None,
+        "expected_move_dollars":     round(expected_move_dollars, 2) if expected_move_dollars else None,
+        "implied_range_low":         round(implied_range_low, 2) if implied_range_low else None,
+        "implied_range_high":        round(implied_range_high, 2) if implied_range_high else None,
+        "straddle_price":            round(expected_move_dollars, 2) if expected_move_dollars else None,
+        "hist_avg_abs_move_pct":     round(hist_avg * 100, 2) if hist_avg else None,
+        "hist_max_abs_move_pct":     round(hist_max * 100, 2) if hist_max else None,
+        "hist_min_abs_move_pct":     round(hist_min * 100, 2) if hist_min else None,
+        "hist_sample_size":          hist_sample,
+        "beat_rate_pct":             round(beat_rate, 1) if beat_rate is not None else None,
         "beat_but_dropped_rate_pct": round(bbd_rate, 1) if bbd_rate is not None else None,
-        "atm_iv_pct":              round(atm_iv * 100, 1) if atm_iv else None,
-        "rv_20d_pct":              round(current_rv * 100, 1) if current_rv else None,
-        "rv_rank":                 rv_rank,
-        "iv_rv_spread_pp":         iv_rv_spread_pp,
-        "primary_strikes":         primary_rows,
-        "secondary_strikes":       secondary_rows,
+        "atm_iv_pct":                round(atm_iv * 100, 1) if atm_iv else None,
+        "rv_20d_pct":                round(current_rv * 100, 1) if current_rv else None,
+        "rv_rank":                   rv_rank,
+        "iv_rv_spread_pp":           iv_rv_spread_pp,
+        "primary_strikes":           primary_rows,
+        "secondary_strikes":         secondary_rows,
     }
 
     # ── 9. Build prompt ───────────────────────────────────────────────────────
     def _n(v, fmt=".2f"): return f"{v:{fmt}}" if v is not None else "(unavailable)"
     def _pct(v, fmt=".1f"): return f"{v*100:{fmt}}%" if v is not None else "(unavailable)"
 
-    em_display = f"±{expected_move_pct*100:.2f}% (±${expected_move_dollars:.2f})" if expected_move_pct and expected_move_dollars else "(unavailable)"
-    ir_display = f"${implied_range_low:.2f} – ${implied_range_high:.2f}" if implied_range_low and implied_range_high else "(unavailable)"
+    em_display  = f"±{expected_move_pct*100:.2f}% (±${expected_move_dollars:.2f})" if expected_move_pct and expected_move_dollars else "(unavailable)"
+    ir_display  = f"${implied_range_low:.2f} – ${implied_range_high:.2f}" if implied_range_low and implied_range_high else "(unavailable)"
     t1x_display = f"${target_1x:.2f}" if target_1x else "(unavailable)"
     thmax_display = f"${target_hist_max:.2f} ({target_hist_max_label}, based on hist max ±{hist_max*100:.1f}%)" if hist_max else "(unavailable)"
 
@@ -382,7 +501,6 @@ Return ONLY this JSON object (no other text):
         f"primary_strikes={len(primary_rows)}",
         flush=True,
     )
-    print(f"[thesis-draft] fact_block:\n{json.dumps(fact_block, indent=2)}", flush=True)
 
     # ── 10. Generate ──────────────────────────────────────────────────────────
     client = AnthropicClient()
@@ -399,14 +517,13 @@ Return ONLY this JSON object (no other text):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}")
 
-    suggested_target  = parsed.get("suggested_target")
-    suggested_strike  = parsed.get("suggested_strike")
-    spread_strike     = parsed.get("suggested_spread_strike")
-    strategy          = parsed.get("strategy")
-    reasoning         = parsed.get("reasoning", "")
-    realism_flag      = parsed.get("realism_flag")
+    suggested_target = parsed.get("suggested_target")
+    suggested_strike = parsed.get("suggested_strike")
+    spread_strike    = parsed.get("suggested_spread_strike")
+    strategy         = parsed.get("strategy")
+    reasoning        = parsed.get("reasoning", "")
+    realism_flag     = parsed.get("realism_flag")
 
-    # Validate strike is from the real chain
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (
             f"Note: AI suggested strike ${suggested_strike:.2f} was not found in the available chain "
@@ -465,17 +582,42 @@ async def create_thesis(
     if not ticker:
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
 
+    loop = asyncio.get_event_loop()
+
+    # ── Capture entry_price from live quote ───────────────────────────────────
     entry_price: float | None = None
     finnhub = FinnhubClient()
     try:
         quote = await finnhub.get_quote(sym)
-        price = quote.get("c")
-        if price and float(price) > 0:
-            entry_price = float(price)
+        p = quote.get("c")
+        if p and float(p) > 0:
+            entry_price = float(p)
     except Exception:
         pass
     finally:
         await finnhub.close()
+
+    # ── Capture entry_premium from live chain (if option leg specified) ───────
+    entry_premium: float | None = None
+    entry_premium2: float | None = None
+
+    if payload.option_type and payload.strike and payload.option_expiration:
+        try:
+            chain = await loop.run_in_executor(
+                None, YFinanceClient.get_option_chain, sym, payload.option_expiration
+            )
+            side = chain.get("calls") if payload.option_type == "call" else chain.get("puts", [])
+            c1 = next((c for c in side if c["strike"] == float(payload.strike)), None) if side else None
+            if c1:
+                entry_premium = _mid_or_last(c1.get("bid"), c1.get("ask"), c1.get("lastPrice"))
+            if payload.strike2 is not None:
+                c2 = next((c for c in side if c["strike"] == float(payload.strike2)), None) if side else None
+                if c2:
+                    entry_premium2 = _mid_or_last(c2.get("bid"), c2.get("ask"), c2.get("lastPrice"))
+        except Exception:
+            pass  # graceful: thesis created without option premium
+
+    opt_exp = date.fromisoformat(payload.option_expiration) if payload.option_expiration else None
 
     thesis = Thesis(
         ticker_id=ticker.id,
@@ -487,6 +629,15 @@ async def create_thesis(
         entry_price=entry_price,
         reasoning=payload.reasoning,
         status=ThesisStatus.OPEN,
+        option_type=payload.option_type,
+        strike=payload.strike,
+        option_expiration=opt_exp,
+        entry_premium=entry_premium,
+        contracts=payload.contracts,
+        strike2=payload.strike2,
+        entry_premium2=entry_premium2,
+        spread_type=payload.spread_type,
+        from_ai_draft=payload.from_ai_draft,
     )
     db.add(thesis)
     await db.commit()
@@ -495,6 +646,20 @@ async def create_thesis(
         select(Thesis).options(selectinload(Thesis.ticker)).where(Thesis.id == thesis.id)
     )
     return _to_read(result.scalar_one())
+
+
+@router.get("/{thesis_id}/mark", response_model=ThesisMarkRead)
+async def mark_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> ThesisMarkRead:
+    """Compute live mark-to-market P&L for a thesis's option leg."""
+    result = await db.execute(
+        select(Thesis).options(selectinload(Thesis.ticker)).where(Thesis.id == thesis_id)
+    )
+    thesis = result.scalar_one_or_none()
+    if not thesis:
+        raise HTTPException(status_code=404, detail="Thesis not found")
+
+    loop = asyncio.get_event_loop()
+    return await _compute_option_mark(thesis, loop)
 
 
 @router.get("/{thesis_id}", response_model=ThesisRead)
@@ -532,9 +697,9 @@ async def resolve_thesis(
         finnhub = FinnhubClient()
         try:
             quote = await finnhub.get_quote(thesis.ticker.symbol)
-            price = quote.get("c")
-            if price and float(price) > 0:
-                resolution_price = float(price)
+            p = quote.get("c")
+            if p and float(p) > 0:
+                resolution_price = float(p)
         except Exception:
             pass
         finally:
@@ -547,14 +712,14 @@ async def resolve_thesis(
     target_reached: bool | None = None
 
     if resolution_price is not None and thesis.entry_price is not None:
-        entry = float(thesis.entry_price)
+        entry     = float(thesis.entry_price)
         direction = thesis.direction
 
         if direction == "bullish":
             direction_correct = resolution_price > entry
         elif direction == "bearish":
             direction_correct = resolution_price < entry
-        else:  # neutral — stayed within ±5% of entry
+        else:  # neutral — stayed within ±5%
             pct_change = abs(resolution_price - entry) / entry if entry else 0
             direction_correct = pct_change <= 0.05
 
@@ -567,13 +732,24 @@ async def resolve_thesis(
             else:
                 target_reached = abs(resolution_price - entry) <= abs(target - entry)
 
+    # ── Option P&L at resolution ───────────────────────────────────────────────
+    option_pnl_dollars: float | None = None
+    option_pnl_pct: float | None = None
+    if thesis.option_type:
+        loop = asyncio.get_event_loop()
+        mark = await _compute_option_mark(thesis, loop, stock_price_override=resolution_price)
+        option_pnl_dollars = mark.pnl_dollars
+        option_pnl_pct     = mark.pnl_pct
+
     thesis.price_at_resolution = resolution_price
-    thesis.direction_correct = direction_correct
-    thesis.target_reached = target_reached
-    thesis.self_grade = payload.self_grade
-    thesis.reflection = payload.reflection
-    thesis.resolved_at = datetime.now(timezone.utc)
-    thesis.status = ThesisStatus.NEEDS_MANUAL_RESOLUTION if needs_manual else ThesisStatus.RESOLVED
+    thesis.direction_correct   = direction_correct
+    thesis.target_reached      = target_reached
+    thesis.self_grade          = payload.self_grade
+    thesis.reflection          = payload.reflection
+    thesis.resolved_at         = datetime.now(timezone.utc)
+    thesis.option_pnl_dollars  = option_pnl_dollars
+    thesis.option_pnl_pct      = option_pnl_pct
+    thesis.status              = ThesisStatus.NEEDS_MANUAL_RESOLUTION if needs_manual else ThesisStatus.RESOLVED
 
     await db.commit()
 

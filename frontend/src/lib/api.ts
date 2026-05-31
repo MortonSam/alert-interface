@@ -14,6 +14,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const detail = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${detail}`);
   }
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -259,7 +262,7 @@ export interface Thesis {
   catalyst: string | null;
   price_target: string | null; // Decimal as string from backend
   target_date: string;         // "YYYY-MM-DD"
-  entry_price: string | null;  // captured at creation
+  entry_price: string | null;  // stock price captured at creation
   reasoning: string | null;
   status: ThesisStatus;
   resolved_at: string | null;
@@ -268,9 +271,41 @@ export interface Thesis {
   target_reached: boolean | null;
   self_grade: SelfGrade | null;
   reflection: string | null;
+  // Option leg
+  option_type: string | null;           // "call" | "put"
+  strike: string | null;                // Decimal as string
+  option_expiration: string | null;     // "YYYY-MM-DD"
+  entry_premium: string | null;         // option mid at creation, server-captured
+  contracts: number;
+  strike2: string | null;               // second leg (spread)
+  entry_premium2: string | null;
+  spread_type: string | null;
+  from_ai_draft: boolean;
+  // Option P&L (filled at resolution)
+  option_pnl_dollars: string | null;
+  option_pnl_pct: string | null;
   created_at: string;
   updated_at: string;
   is_due: boolean;
+}
+
+export interface ThesisMarkRead {
+  thesis_id: string;
+  option_type: string | null;
+  strike: number | null;
+  strike2: number | null;
+  current_price: number | null;
+  current_mid1: number | null;
+  current_mid2: number | null;
+  entry_premium: number | null;
+  entry_premium2: number | null;
+  contracts: number;
+  pnl_dollars: number | null;
+  pnl_pct: number | null;                // fraction: 0.28 = +28%
+  mark_basis: "live_chain" | "intrinsic" | "not_found" | "no_option_leg";
+  is_expired: boolean;
+  mark_note: string | null;
+  as_of: string;
 }
 
 export interface ThesisCreate {
@@ -281,6 +316,14 @@ export interface ThesisCreate {
   price_target?: number;
   target_date: string;
   reasoning?: string;
+  // Option leg (entry_premium captured server-side from chain)
+  option_type?: "call" | "put";
+  strike?: number;
+  option_expiration?: string;   // "YYYY-MM-DD"
+  contracts?: number;
+  strike2?: number;
+  spread_type?: string;
+  from_ai_draft?: boolean;
 }
 
 export interface ThesisResolve {
@@ -458,6 +501,8 @@ export const api = {
       request<void>(`/theses/${id}`, { method: "DELETE" }),
     draft: (data: ThesisDraftRequest) =>
       request<ThesisDraftRead>("/theses/draft", { method: "POST", body: JSON.stringify(data) }),
+    mark: (id: string) =>
+      request<ThesisMarkRead>(`/theses/${id}/mark`),
   },
 
   reactions: {

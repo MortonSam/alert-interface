@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, type Thesis, type ThesisCreate, type ThesisDraftRead, type ThesisResolve, type SelfGrade } from "@/lib/api";
+import {
+  api,
+  type Thesis,
+  type ThesisCreate,
+  type ThesisDraftRead,
+  type ThesisMarkRead,
+  type ThesisResolve,
+  type SelfGrade,
+} from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -13,9 +21,15 @@ function fmtPrice(v: string | null | undefined): string {
 }
 
 function fmtDate(v: string): string {
-  // "YYYY-MM-DD" → "MMM D, YYYY"
   const [y, m, d] = v.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
+}
+
+function fmtDateShort(v: string): string {
+  const [y, m, d] = v.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function pctChange(entry: string | null, resolution: string | null): string {
@@ -25,6 +39,31 @@ function pctChange(entry: string | null, resolution: string | null): string {
   if (!e) return "";
   const pct = ((r - e) / e) * 100;
   return (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%";
+}
+
+function fmtPnl(dollars: number | null, pct: number | null): { str: string; color: string } {
+  if (dollars == null) return { str: "—", color: "text-muted-foreground" };
+  const sign = dollars >= 0 ? "+" : "";
+  const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
+  const absStr = `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`;
+  const color =
+    dollars > 0 ? "text-emerald-600 dark:text-emerald-400" :
+    dollars < 0 ? "text-red-500 dark:text-red-400" :
+    "text-foreground";
+  return { str: absStr, color };
+}
+
+function fmtOptionLeg(thesis: Thesis): string | null {
+  if (!thesis.option_type || !thesis.strike) return null;
+  const s1 = parseFloat(thesis.strike);
+  const exp = thesis.option_expiration ? fmtDateShort(thesis.option_expiration) : "—";
+  if (thesis.strike2) {
+    const s2 = parseFloat(thesis.strike2);
+    const name = thesis.option_type === "call" ? "Bull call spread" : "Bear put spread";
+    return `${name} $${s1.toFixed(0)}/$${s2.toFixed(0)} · ${exp}`;
+  }
+  const name = thesis.option_type === "call" ? "Long call" : "Long put";
+  return `${name} $${s1.toFixed(0)} · ${exp}`;
 }
 
 const DIRECTION_COLOR: Record<string, string> = {
@@ -58,16 +97,113 @@ function ConvictionDots({ n }: { n: number }) {
   );
 }
 
+// ── Option P&L section ────────────────────────────────────────────────────────
+
+function OptionPnlSection({
+  thesis,
+  mark,
+}: {
+  thesis: Thesis;
+  mark?: ThesisMarkRead | "loading" | "error";
+}) {
+  const legDesc = fmtOptionLeg(thesis);
+  if (!legDesc) return null;
+
+  let pnlDollars: number | null = null;
+  let pnlPct: number | null = null;
+  let markLabel: string | null = null;
+  let markNote: string | null = null;
+  let isLoading = false;
+  let isError = false;
+  let isNoData = false;
+
+  if (thesis.status === "resolved") {
+    pnlDollars = thesis.option_pnl_dollars ? parseFloat(thesis.option_pnl_dollars) : null;
+    pnlPct = thesis.option_pnl_pct ? parseFloat(thesis.option_pnl_pct) : null;
+    markLabel = "at resolution";
+  } else if (mark === "loading") {
+    isLoading = true;
+  } else if (mark === "error") {
+    isError = true;
+  } else if (mark) {
+    if (mark.mark_basis === "no_option_leg") {
+      isNoData = true;
+    } else {
+      pnlDollars = mark.pnl_dollars;
+      pnlPct = mark.pnl_pct;
+      markLabel = mark.is_expired ? "intrinsic" : mark.mark_basis === "live_chain" ? "live" : null;
+      markNote = mark.mark_note;
+    }
+  }
+
+  if (isNoData) return null;
+
+  const { str: pnlStr, color: pnlColor } = fmtPnl(pnlDollars, pnlPct);
+
+  return (
+    <div className="mt-2 mb-1">
+      <div className="text-xs text-muted-foreground mb-0.5">{legDesc}</div>
+      {isLoading ? (
+        <div className="h-6 bg-muted rounded w-28 animate-pulse" />
+      ) : isError ? (
+        <span className="text-xs text-muted-foreground italic">Mark unavailable</span>
+      ) : (
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className={`text-xl font-bold tabular-nums leading-tight ${pnlColor}`}>
+            {pnlStr}
+          </span>
+          {markLabel && (
+            <span className="text-xs text-muted-foreground">{markLabel}</span>
+          )}
+        </div>
+      )}
+      {markNote && !isError && (
+        <p className="text-xs text-muted-foreground mt-0.5 italic">{markNote}</p>
+      )}
+    </div>
+  );
+}
+
 // ── Draft panel ───────────────────────────────────────────────────────────────
+
+interface OptionLegDraft {
+  option_type: "call" | "put";
+  strike: number | null;
+  strike2: number | null;
+  option_expiration: string | null;
+  spread_type: string | null;
+}
 
 function DraftPanel({
   draft,
   onAccept,
 }: {
   draft: ThesisDraftRead;
-  onAccept: (target: number | null, reasoning: string | null) => void;
+  onAccept: (
+    target: number | null,
+    reasoning: string | null,
+    optionLeg: OptionLegDraft | null
+  ) => void;
 }) {
   const fb = draft.fact_block;
+
+  function handleAccept() {
+    const hasStrike = draft.suggested_strike != null;
+    const hasSpread = draft.suggested_spread_strike != null;
+    const leg: OptionLegDraft | null = hasStrike
+      ? {
+          option_type: draft.direction === "bullish" ? "call" : "put",
+          strike: draft.suggested_strike,
+          strike2: draft.suggested_spread_strike,
+          option_expiration: fb.expiration_used ?? null,
+          spread_type: hasSpread
+            ? (draft.direction === "bullish" ? "bull_call_spread" : "bear_put_spread")
+            : null,
+        }
+      : null;
+    onAccept(draft.suggested_target, draft.reasoning, leg);
+  }
+
   return (
     <div className="rounded-lg border bg-muted/30 p-4 space-y-3 text-sm">
       <div className="flex items-center justify-between">
@@ -77,7 +213,6 @@ function DraftPanel({
         <span className="text-xs text-muted-foreground">{draft.model_used}</span>
       </div>
 
-      {/* Realism flag — shown first and prominently if present */}
       {draft.realism_flag && (
         <div className="rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 px-3 py-2">
           <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-0.5">⚠ Realism Flag</p>
@@ -85,12 +220,9 @@ function DraftPanel({
         </div>
       )}
 
-      {/* Core suggestion */}
       <div className="space-y-1">
-        {draft.strategy && (
-          <p className="font-medium">{draft.strategy}</p>
-        )}
-        <div className="flex gap-4 flex-wrap text-muted-foreground">
+        {draft.strategy && <p className="font-medium">{draft.strategy}</p>}
+        <div className="flex gap-4 flex-wrap text-muted-foreground text-sm">
           {draft.suggested_target != null && (
             <span>Target: <span className="text-foreground font-medium">${draft.suggested_target.toFixed(2)}</span></span>
           )}
@@ -103,38 +235,44 @@ function DraftPanel({
         </div>
       </div>
 
-      {/* Reasoning */}
       <p className="text-muted-foreground leading-relaxed">{draft.reasoning}</p>
 
-      {/* Data context strip */}
       <div className="rounded-md bg-background border px-3 py-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
         <span>Price: <span className="text-foreground">${fb.current_price.toFixed(2)}</span></span>
         <span>Implied move: <span className="text-foreground">±{fb.expected_move_pct?.toFixed(1) ?? "—"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "—"})</span></span>
         <span>Implied range: <span className="text-foreground">${fb.implied_range_low?.toFixed(2) ?? "—"} – ${fb.implied_range_high?.toFixed(2) ?? "—"}</span></span>
         <span>Earnings: <span className="text-foreground">{fb.earnings_date ?? "—"}</span></span>
-        <span>Hist avg move: <span className="text-foreground">±{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
-        <span>Hist max move: <span className="text-foreground">±{fb.hist_max_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
+        <span>Hist avg: <span className="text-foreground">±{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
+        <span>Hist max: <span className="text-foreground">±{fb.hist_max_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
         <span>Beat rate: <span className="text-foreground">{fb.beat_rate_pct?.toFixed(1) ?? "—"}%</span></span>
         <span>RV rank: <span className="text-foreground">{fb.rv_rank?.toFixed(0) ?? "—"}/100</span></span>
       </div>
 
       <p className="text-xs text-muted-foreground italic">
-        Data-grounded suggestion — not a recommendation. Direction is yours; review and edit before saving.
+        Data-grounded suggestion — not a recommendation. Review and edit before saving.
       </p>
 
       <button
         type="button"
-        onClick={() => onAccept(draft.suggested_target, draft.reasoning)}
+        onClick={handleAccept}
         className="rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors"
       >
-        Accept suggestion → fill target &amp; reasoning
+        Accept → fill target, reasoning &amp; option leg
       </button>
     </div>
   );
 }
 
-
 // ── Create form ───────────────────────────────────────────────────────────────
+
+interface OptionLegState {
+  option_type: "call" | "put";
+  strike: string;
+  option_expiration: string;
+  contracts: string;
+  strike2: string;
+  spread_type: string;
+}
 
 function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
   const [open, setOpen] = useState(false);
@@ -144,6 +282,17 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ThesisDraftRead | null>(null);
   const [aggressiveness, setAggressiveness] = useState<"conservative" | "moderate" | "aggressive">("moderate");
+
+  const [optionLegEnabled, setOptionLegEnabled] = useState(false);
+  const [fromAiDraft, setFromAiDraft] = useState(false);
+  const [optionLeg, setOptionLeg] = useState<OptionLegState>({
+    option_type: "call",
+    strike: "",
+    option_expiration: "",
+    contracts: "1",
+    strike2: "",
+    spread_type: "",
+  });
 
   const defaultDate = () => {
     const d = new Date();
@@ -158,15 +307,37 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
     target_date: defaultDate(),
   });
 
+  function resetForm() {
+    setForm({ symbol: "", direction: "bullish", conviction: 3, target_date: defaultDate() });
+    setDraft(null);
+    setDraftError(null);
+    setOptionLegEnabled(false);
+    setFromAiDraft(false);
+    setOptionLeg({ option_type: "call", strike: "", option_expiration: "", contracts: "1", strike2: "", spread_type: "" });
+    setError(null);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
     try {
-      const thesis = await api.theses.create(form);
+      const optionPayload: Partial<ThesisCreate> =
+        optionLegEnabled && optionLeg.strike && optionLeg.option_expiration
+          ? {
+              option_type: optionLeg.option_type,
+              strike: parseFloat(optionLeg.strike),
+              option_expiration: optionLeg.option_expiration,
+              contracts: parseInt(optionLeg.contracts) || 1,
+              ...(optionLeg.strike2 ? { strike2: parseFloat(optionLeg.strike2) } : {}),
+              ...(optionLeg.spread_type ? { spread_type: optionLeg.spread_type } : {}),
+              from_ai_draft: fromAiDraft,
+            }
+          : {};
+      const thesis = await api.theses.create({ ...form, ...optionPayload });
       onCreated(thesis);
       setOpen(false);
-      setForm({ symbol: "", direction: "bullish", conviction: 3, target_date: defaultDate() });
+      resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create thesis");
     } finally {
@@ -186,10 +357,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="rounded-lg border bg-card p-5 space-y-4 max-w-xl"
-    >
+    <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-5 space-y-4 max-w-xl">
       <h3 className="font-semibold text-base">New Thesis</h3>
 
       <div className="grid grid-cols-2 gap-3">
@@ -221,9 +389,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Conviction (1–5)</label>
           <input
-            type="number"
-            min={1}
-            max={5}
+            type="number" min={1} max={5}
             className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
             value={form.conviction}
             onChange={e => setForm(f => ({ ...f, conviction: parseInt(e.target.value) }))}
@@ -246,9 +412,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Price Target (optional)</label>
           <input
-            type="number"
-            step="0.01"
-            min="0"
+            type="number" step="0.01" min="0"
             className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
             placeholder="e.g. 220.00"
             value={form.price_target ?? ""}
@@ -332,17 +496,100 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
           {draft && (
             <DraftPanel
               draft={draft}
-              onAccept={(target, reasoning) => {
+              onAccept={(target, reasoning, leg) => {
                 setForm(f => ({
                   ...f,
                   price_target: target ?? f.price_target,
                   reasoning: reasoning ?? f.reasoning,
                 }));
+                if (leg) {
+                  setOptionLegEnabled(true);
+                  setFromAiDraft(true);
+                  setOptionLeg({
+                    option_type: leg.option_type,
+                    strike: leg.strike != null ? String(leg.strike) : "",
+                    option_expiration: leg.option_expiration ?? "",
+                    contracts: "1",
+                    strike2: leg.strike2 != null ? String(leg.strike2) : "",
+                    spread_type: leg.spread_type ?? "",
+                  });
+                }
               }}
             />
           )}
         </div>
       )}
+
+      {/* ── Option leg (manual or from AI draft) ──────────────────────── */}
+      <div className="rounded-md border border-dashed bg-muted/10 px-4 py-3 space-y-3">
+        <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={optionLegEnabled}
+            onChange={e => setOptionLegEnabled(e.target.checked)}
+          />
+          Track option position
+          {fromAiDraft && optionLegEnabled && (
+            <span className="ml-1 text-blue-500">(from AI draft)</span>
+          )}
+        </label>
+        {optionLegEnabled && (
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Type</label>
+              <select
+                className="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+                value={optionLeg.option_type}
+                onChange={e => setOptionLeg(l => ({ ...l, option_type: e.target.value as "call" | "put" }))}
+              >
+                <option value="call">Call</option>
+                <option value="put">Put</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Strike</label>
+              <input
+                type="number" step="0.5"
+                className="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+                placeholder="e.g. 195"
+                value={optionLeg.strike}
+                onChange={e => setOptionLeg(l => ({ ...l, strike: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Expiration</label>
+              <input
+                type="date"
+                className="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+                value={optionLeg.option_expiration}
+                onChange={e => setOptionLeg(l => ({ ...l, option_expiration: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Contracts</label>
+              <input
+                type="number" min="1" step="1"
+                className="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+                value={optionLeg.contracts}
+                onChange={e => setOptionLeg(l => ({ ...l, contracts: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Spread strike (opt.)</label>
+              <input
+                type="number" step="0.5"
+                className="w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+                placeholder="e.g. 205"
+                value={optionLeg.strike2}
+                onChange={e => setOptionLeg(l => ({ ...l, strike2: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+        {optionLegEnabled && (
+          <p className="text-xs text-muted-foreground">Entry premium will be captured from the live chain at creation.</p>
+        )}
+      </div>
 
       <p className="text-xs text-muted-foreground">Entry price will be captured from the live quote at creation.</p>
 
@@ -358,7 +605,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
         </button>
         <button
           type="button"
-          onClick={() => { setOpen(false); setError(null); }}
+          onClick={() => { setOpen(false); resetForm(); }}
           className="rounded-md border px-4 py-1.5 text-sm hover:bg-accent"
         >
           Cancel
@@ -381,10 +628,7 @@ function ResolveForm({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<ThesisResolve>({
-    reflection: "",
-    self_grade: "right",
-  });
+  const [form, setForm] = useState<ThesisResolve>({ reflection: "", self_grade: "right" });
   const [priceOverride, setPriceOverride] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -408,7 +652,6 @@ function ResolveForm({
   return (
     <form onSubmit={handleSubmit} className="mt-3 space-y-3 border-t pt-3">
       <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Resolve Thesis</p>
-
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Self-grade</label>
@@ -425,9 +668,7 @@ function ResolveForm({
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Price override (optional)</label>
           <input
-            type="number"
-            step="0.01"
-            min="0"
+            type="number" step="0.01" min="0"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
             placeholder="Use live quote if blank"
             value={priceOverride}
@@ -435,7 +676,6 @@ function ResolveForm({
           />
         </div>
       </div>
-
       <div>
         <label className="text-xs text-muted-foreground mb-1 block">Reflection</label>
         <textarea
@@ -447,9 +687,10 @@ function ResolveForm({
           required
         />
       </div>
-
+      {thesis.option_type && (
+        <p className="text-xs text-muted-foreground">Option P&L will be computed from the live chain at resolution.</p>
+      )}
       {error && <p className="text-sm text-red-500">{error}</p>}
-
       <div className="flex gap-2">
         <button
           type="submit"
@@ -470,18 +711,23 @@ function ResolveForm({
 
 function ThesisCard({
   thesis,
+  mark,
   onResolved,
   onDeleted,
 }: {
   thesis: Thesis;
+  mark?: ThesisMarkRead | "loading" | "error";
   onResolved: (t: Thesis) => void;
   onDeleted: (id: string) => void;
 }) {
   const [resolving, setResolving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [reasoningOpen, setReasoningOpen] = useState(false);
+  const [reflectionOpen, setReflectionOpen] = useState(false);
 
-  const isOpen = thesis.status === "open" || thesis.status === "needs_manual_resolution";
+  const isOpen      = thesis.status === "open" || thesis.status === "needs_manual_resolution";
   const needsManual = thesis.status === "needs_manual_resolution";
+  const isResolved  = thesis.status === "resolved";
 
   async function handleDelete() {
     if (!confirm(`Delete thesis for ${thesis.ticker_symbol}?`)) return;
@@ -496,7 +742,7 @@ function ThesisCard({
 
   return (
     <div className={`rounded-lg border bg-card p-4 space-y-2 ${deleting ? "opacity-40" : ""}`}>
-      {/* Header row */}
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <Link href={`/tickers/${thesis.ticker_symbol}`} className="font-semibold hover:underline">
@@ -516,6 +762,11 @@ function ThesisCard({
               Needs manual resolution
             </span>
           )}
+          {thesis.from_ai_draft && (
+            <span className="text-xs bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-1.5 py-0.5 rounded">
+              AI
+            </span>
+          )}
         </div>
         <button
           onClick={handleDelete}
@@ -526,57 +777,79 @@ function ThesisCard({
         </button>
       </div>
 
-      {/* Price row */}
-      <div className="flex items-center gap-4 text-sm flex-wrap">
-        <span className="text-muted-foreground">
-          Entry: <span className="text-foreground font-medium">{fmtPrice(thesis.entry_price)}</span>
-        </span>
+      {/* ── Option P&L headline ────────────────────────────────────────── */}
+      <OptionPnlSection thesis={thesis} mark={mark} />
+
+      {/* ── Compact fact row ───────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 text-sm flex-wrap text-muted-foreground">
+        <span>Entry: <span className="text-foreground font-medium">{fmtPrice(thesis.entry_price)}</span></span>
         {thesis.price_target && (
-          <span className="text-muted-foreground">
-            Target: <span className="text-foreground font-medium">{fmtPrice(thesis.price_target)}</span>
-          </span>
+          <span>→ Target: <span className="text-foreground font-medium">{fmtPrice(thesis.price_target)}</span></span>
         )}
-        <span className="text-muted-foreground">
-          By: <span className="text-foreground">{fmtDate(thesis.target_date)}</span>
-        </span>
+        <span>By: <span className="text-foreground">{fmtDate(thesis.target_date)}</span></span>
+        {thesis.catalyst && (
+          <span className="text-muted-foreground">· {thesis.catalyst}</span>
+        )}
       </div>
 
-      {/* Catalyst / reasoning */}
-      {thesis.catalyst && (
-        <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">Catalyst:</span> {thesis.catalyst}
+      {/* ── Option entry details (when tracked) ───────────────────────── */}
+      {thesis.entry_premium && (
+        <p className="text-xs text-muted-foreground">
+          Option entry: <span className="text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
+          {thesis.contracts > 1 && ` · ${thesis.contracts} contracts`}
         </p>
       )}
+
+      {/* ── Collapsible reasoning ──────────────────────────────────────── */}
       {thesis.reasoning && (
-        <p className="text-sm text-muted-foreground">{thesis.reasoning}</p>
+        <div>
+          <button
+            type="button"
+            onClick={() => setReasoningOpen(o => !o)}
+            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+          >
+            {reasoningOpen ? "▾" : "▸"} Reasoning
+          </button>
+          {reasoningOpen && (
+            <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{thesis.reasoning}</p>
+          )}
+        </div>
       )}
 
-      {/* Resolution outcome */}
-      {thesis.status === "resolved" && (
-        <div className="rounded-md bg-muted/40 px-3 py-2 space-y-1">
+      {/* ── Resolution outcome ─────────────────────────────────────────── */}
+      {isResolved && (
+        <div className="rounded-md bg-muted/40 px-3 py-2 space-y-1.5">
+          {/* Stock outcome row */}
           <div className="flex items-center gap-3 flex-wrap text-sm">
             <span className="text-muted-foreground">
-              Resolved: <span className="text-foreground font-medium">{fmtPrice(thesis.price_at_resolution)}</span>
+              Resolved:{" "}
+              <span className="text-foreground font-medium">{fmtPrice(thesis.price_at_resolution)}</span>
               {" "}
-              <span className={thesis.direction === "bullish"
-                ? parseFloat(thesis.price_at_resolution ?? "0") >= parseFloat(thesis.entry_price ?? "0") ? "text-emerald-600" : "text-red-500"
-                : thesis.direction === "bearish"
-                ? parseFloat(thesis.price_at_resolution ?? "0") <= parseFloat(thesis.entry_price ?? "0") ? "text-emerald-600" : "text-red-500"
-                : ""}>
+              <span className={
+                thesis.direction === "bullish"
+                  ? parseFloat(thesis.price_at_resolution ?? "0") >= parseFloat(thesis.entry_price ?? "0")
+                    ? "text-emerald-600" : "text-red-500"
+                  : thesis.direction === "bearish"
+                  ? parseFloat(thesis.price_at_resolution ?? "0") <= parseFloat(thesis.entry_price ?? "0")
+                    ? "text-emerald-600" : "text-red-500"
+                  : ""
+              }>
                 ({pctChange(thesis.entry_price, thesis.price_at_resolution)})
               </span>
             </span>
-            <span>
-              Direction:{" "}
-              <span className={thesis.direction_correct ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                {thesis.direction_correct ? "Correct" : "Incorrect"}
+            {thesis.direction_correct != null && (
+              <span>
+                Direction:{" "}
+                <span className={thesis.direction_correct ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                  {thesis.direction_correct ? "✓" : "✗"}
+                </span>
               </span>
-            </span>
-            {thesis.target_reached !== null && (
+            )}
+            {thesis.target_reached != null && (
               <span>
                 Target:{" "}
                 <span className={thesis.target_reached ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
-                  {thesis.target_reached ? "Reached" : "Not reached"}
+                  {thesis.target_reached ? "✓" : "✗"}
                 </span>
               </span>
             )}
@@ -586,13 +859,40 @@ function ThesisCard({
               </span>
             )}
           </div>
+
+          {/* AI verdict row (if option P&L stored) */}
+          {thesis.option_pnl_dollars != null && (
+            <div className="text-xs text-muted-foreground">
+              Trade:{" "}
+              <span className={
+                parseFloat(thesis.option_pnl_dollars) >= 0
+                  ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                  : "text-red-500 dark:text-red-400 font-medium"
+              }>
+                {fmtPnl(parseFloat(thesis.option_pnl_dollars), thesis.option_pnl_pct ? parseFloat(thesis.option_pnl_pct) : null).str}
+              </span>
+            </div>
+          )}
+
+          {/* Collapsible reflection */}
           {thesis.reflection && (
-            <p className="text-sm text-muted-foreground italic">&ldquo;{thesis.reflection}&rdquo;</p>
+            <div>
+              <button
+                type="button"
+                onClick={() => setReflectionOpen(o => !o)}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                {reflectionOpen ? "▾" : "▸"} Reflection
+              </button>
+              {reflectionOpen && (
+                <p className="text-sm text-muted-foreground mt-1 italic leading-relaxed">&ldquo;{thesis.reflection}&rdquo;</p>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {/* Resolve button / form */}
+      {/* ── Resolve button / form ──────────────────────────────────────── */}
       {isOpen && (
         resolving ? (
           <ResolveForm
@@ -621,28 +921,65 @@ export default function ThesesPage() {
   const [theses, setTheses] = useState<Thesis[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "resolved">("all");
+  const [marks, setMarks] = useState<Record<string, ThesisMarkRead | "loading" | "error">>({});
   const initialized = useRef(false);
+  const markRequested = useRef<Set<string>>(new Set());
 
+  // Initial load
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-
     api.theses.list().then(data => {
       setTheses(data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
+  // Progressive mark loading for open theses with option legs
+  useEffect(() => {
+    const openWithOptions = theses.filter(
+      t => (t.status === "open" || t.status === "needs_manual_resolution") && t.option_type
+    );
+    const newOnes = openWithOptions.filter(t => !markRequested.current.has(t.id));
+    if (newOnes.length === 0) return;
+
+    for (const t of newOnes) {
+      markRequested.current.add(t.id);
+      setMarks(prev => ({ ...prev, [t.id]: "loading" }));
+      api.theses.mark(t.id)
+        .then(data => setMarks(prev => ({ ...prev, [t.id]: data })))
+        .catch(() => setMarks(prev => ({ ...prev, [t.id]: "error" })));
+    }
+  }, [theses]);
+
   function handleCreated(t: Thesis) {
     setTheses(prev => [t, ...prev]);
+    if (t.option_type && !markRequested.current.has(t.id)) {
+      markRequested.current.add(t.id);
+      setMarks(prev => ({ ...prev, [t.id]: "loading" }));
+      api.theses.mark(t.id)
+        .then(data => setMarks(prev => ({ ...prev, [t.id]: data })))
+        .catch(() => setMarks(prev => ({ ...prev, [t.id]: "error" })));
+    }
   }
 
   function handleResolved(updated: Thesis) {
     setTheses(prev => prev.map(t => t.id === updated.id ? updated : t));
+    // Resolved cards use stored pnl — remove from live marks dict
+    setMarks(prev => {
+      const next = { ...prev };
+      delete next[updated.id];
+      return next;
+    });
   }
 
   function handleDeleted(id: string) {
     setTheses(prev => prev.filter(t => t.id !== id));
+    setMarks(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }
 
   const filtered = theses.filter(t => {
@@ -652,7 +989,7 @@ export default function ThesesPage() {
   });
 
   const openCount = theses.filter(t => t.status === "open" || t.status === "needs_manual_resolution").length;
-  const dueCount = theses.filter(t => t.is_due && (t.status === "open" || t.status === "needs_manual_resolution")).length;
+  const dueCount  = theses.filter(t => t.is_due && (t.status === "open" || t.status === "needs_manual_resolution")).length;
 
   return (
     <main className="min-h-screen p-8">
@@ -669,7 +1006,12 @@ export default function ThesesPage() {
           </Link>
         </div>
 
-        <CreateThesisForm onCreated={handleCreated} />
+        <Link
+          href="/build"
+          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          + Build a Trade
+        </Link>
 
         {/* Filter tabs */}
         <div className="flex gap-1 mt-6 mb-4">
@@ -708,6 +1050,7 @@ export default function ThesesPage() {
               <ThesisCard
                 key={thesis.id}
                 thesis={thesis}
+                mark={thesis.status !== "resolved" ? marks[thesis.id] : undefined}
                 onResolved={handleResolved}
                 onDeleted={handleDeleted}
               />

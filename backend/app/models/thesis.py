@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey, Numeric, SmallInteger, Text, func
+    Boolean, Date, DateTime, Enum, ForeignKey, Numeric, SmallInteger, String, Text, func
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -70,6 +70,21 @@ class Thesis(Base):
         Enum("right", "right_for_wrong_reasons", "wrong", name="self_grade_enum"),
     )
     reflection: Mapped[str | None] = mapped_column(Text)  # always manual
+
+    # ── Option leg (optional — for tracking structured trades) ─────────────────
+    option_type: Mapped[str | None] = mapped_column(String(8))          # "call" | "put"
+    strike: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    option_expiration: Mapped[date | None] = mapped_column(Date)
+    entry_premium: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))   # mid at creation
+    contracts: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1")
+    strike2: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))         # second leg (spread)
+    entry_premium2: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    spread_type: Mapped[str | None] = mapped_column(String(32))
+    from_ai_draft: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    # ── Option P&L (filled at resolution) ─────────────────────────────────────
+    option_pnl_dollars: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    option_pnl_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
