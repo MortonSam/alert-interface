@@ -24,6 +24,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Ticker data (seed_sp500)",        ["python", "-m", "app.scripts.seed_sp500"]),
     ("Macro calendar (seed_macro)",     ["python", "-m", "app.scripts.seed_macro"]),
     ("Historical reactions (--all)",    ["python", "-m", "app.scripts.seed_historical_reactions", "--all"]),
+    ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 

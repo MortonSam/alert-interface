@@ -202,6 +202,18 @@ export interface StrategyData {
   as_of: string;
 }
 
+export interface RealizedVol {
+  symbol: string;
+  current_rv: number | null;       // annualized 20-day RV, 0–1 decimal (0.172 = 17.2%)
+  rv_rank: number | null;          // 0–100: where today's RV sits in its 1-yr [min, max] range
+  rv_percentile: number | null;    // 0–100: % of trailing 252 days with lower RV
+  rv_min_1y: number | null;
+  rv_max_1y: number | null;
+  sample_days: number;
+  window_days: number;
+  as_of: string;
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -234,6 +246,8 @@ export const api = {
       request<Ticker>(`/tickers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/tickers/${id}`, { method: "DELETE" }),
+    realizedVol: (symbol: string) =>
+      request<RealizedVol>(`/tickers/rv/${symbol}`),
     expectedMove: (symbol: string) =>
       request<ExpectedMove>(`/tickers/expected-move/${symbol}`),
     strategyData: (symbol: string) =>

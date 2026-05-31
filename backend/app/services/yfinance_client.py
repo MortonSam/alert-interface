@@ -156,3 +156,90 @@ class YFinanceClient:
                 if not pd.isna(close)
             ]
             return {"history": history, "start_price": start_price}
+
+    @staticmethod
+    def get_realized_vol_data(symbol: str, rv_window: int = 20) -> dict[str, Any]:
+        """Compute 20-day annualized realized (historical) volatility and its
+        trailing 1-year rank / percentile.
+
+        Method: daily log returns -> rolling std over ``rv_window`` trading days
+        -> annualize by x sqrt(252).  Returns trailing 252 RV values so the caller
+        can compute rank and percentile without re-fetching price history.
+
+        Returns:
+            {
+                "current_rv":  float | None,   # most-recent RV (0-1 decimal)
+                "rv_series":   list[float],    # trailing 252 RV values, oldest->newest
+                "sample_days": int,
+            }
+        """
+        import numpy as np
+
+        hist = yf.Ticker(symbol).history(period="3y", interval="1d", auto_adjust=True)
+        if hist is None or hist.empty:
+            return {"current_rv": None, "rv_series": [], "sample_days": 0}
+
+        closes = hist["Close"].dropna()
+        if len(closes) < rv_window + 2:
+            return {"current_rv": None, "rv_series": [], "sample_days": 0}
+
+        log_returns = np.log(closes / closes.shift(1)).dropna()
+        rolling_rv = log_returns.rolling(window=rv_window).std() * np.sqrt(252)
+        rolling_rv = rolling_rv.dropna()
+
+        if rolling_rv.empty:
+            return {"current_rv": None, "rv_series": [], "sample_days": 0}
+
+        trailing = rolling_rv.iloc[-252:]
+        return {
+            "current_rv": float(rolling_rv.iloc[-1]),
+            "rv_series": [float(v) for v in trailing],
+            "sample_days": len(trailing),
+        }
+
+    @staticmethod
+    def get_atm_iv_snapshot(symbol: str) -> dict[str, Any]:
+        """Fetch ATM implied vol, current price, and ATM strike for daily snapshotting.
+
+        Uses the nearest expiration >= 7 calendar days out for a stable IV reading.
+        Returns a dict with keys: atm_iv, current_price, atm_strike (all may be None).
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+
+            # Current price via recent daily history (more robust than .info in batch)
+            hist = ticker.history(period="2d", interval="1d", auto_adjust=True)
+            current_price: float | None = (
+                float(hist["Close"].iloc[-1])
+                if hist is not None and not hist.empty
+                else None
+            )
+
+            exps = list(ticker.options) if ticker.options else []
+            if not exps or current_price is None:
+                return {"atm_iv": None, "current_price": current_price, "atm_strike": None}
+
+            week_out = (pd.Timestamp.today() + pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+            chosen = next((e for e in exps if e >= week_out), exps[0])
+
+            chain = ticker.option_chain(chosen)
+            calls = _parse_option_df(chain.calls)
+            puts  = _parse_option_df(chain.puts)
+
+            all_strikes = sorted({c["strike"] for c in calls} | {p["strike"] for p in puts})
+            if not all_strikes:
+                return {"atm_iv": None, "current_price": current_price, "atm_strike": None}
+
+            atm_strike = min(all_strikes, key=lambda s: abs(s - current_price))
+            atm_call = next((c for c in calls if c["strike"] == atm_strike), None)
+            atm_put  = next((p for p in puts  if p["strike"] == atm_strike), None)
+            ivs = [
+                c["impliedVolatility"]
+                for c in [atm_call, atm_put]
+                if c and c.get("impliedVolatility") is not None
+            ]
+            atm_iv: float | None = sum(ivs) / len(ivs) if ivs else None
+
+            return {"atm_iv": atm_iv, "current_price": current_price, "atm_strike": atm_strike}
+        except Exception:
+            return {"atm_iv": None, "current_price": None, "atm_strike": None}

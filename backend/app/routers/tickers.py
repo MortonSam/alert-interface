@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
-from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, StrategyDataRead, StrikeData
+from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.schemas.ticker import EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.yfinance_client import YFinanceClient
@@ -613,6 +613,50 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         earnings_date=earnings_str,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
         strikes=result_strikes, as_of=as_of,
+    )
+
+
+@router.get("/rv/{symbol}", response_model=RealizedVolRead)
+async def get_realized_vol(symbol: str) -> RealizedVolRead:
+    """20-day annualized realized (historical) volatility + trailing 1-year rank and percentile.
+
+    Rank = where today's RV sits in its 1-year [min, max] range (0-100).
+    Percentile = % of the trailing 252 trading days where RV was below today's (0-100).
+    """
+    sym = symbol.upper()
+    loop = asyncio.get_event_loop()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+
+    data: dict = await loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym)
+
+    current_rv: float | None = data.get("current_rv")
+    rv_series: list[float] = data.get("rv_series", [])
+    sample_days: int = data.get("sample_days", 0)
+
+    if not rv_series or current_rv is None:
+        return RealizedVolRead(
+            symbol=sym, current_rv=None,
+            rv_rank=None, rv_percentile=None,
+            rv_min_1y=None, rv_max_1y=None,
+            sample_days=0, window_days=20, as_of=as_of,
+        )
+
+    rv_min = min(rv_series)
+    rv_max = max(rv_series)
+    rv_rank = (current_rv - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
+    rv_rank = max(0.0, min(100.0, rv_rank))
+    rv_percentile = sum(1 for v in rv_series if v < current_rv) / len(rv_series) * 100
+
+    return RealizedVolRead(
+        symbol=sym,
+        current_rv=current_rv,
+        rv_rank=round(rv_rank, 1),
+        rv_percentile=round(rv_percentile, 1),
+        rv_min_1y=rv_min,
+        rv_max_1y=rv_max,
+        sample_days=sample_days,
+        window_days=20,
+        as_of=as_of,
     )
 
 

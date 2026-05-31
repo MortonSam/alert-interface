@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ResearchNote, type VerificationClaim, type VerificationResult, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
@@ -2702,6 +2702,98 @@ function StrategyExplainer({ data, symbol }: { data: StrategyData; symbol: strin
 type TickerStatus   = "loading" | "found" | "missing" | "error";
 type SectionStatus  = "loading" | "done" | "error";
 
+// ── Realized Volatility Panel ─────────────────────────────────────────────────
+
+function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
+  const pct = (v: number | null, d = 1) =>
+    v == null ? "—" : `${(v * 100).toFixed(d)}%`;
+
+  const rank = rv.rv_rank ?? 0;
+
+  const { text: interp, color: interpColor } =
+    rank < 25
+      ? {
+          text: "Vol is quiet — the stock is moving less than usual relative to the past year.",
+          color: "text-blue-600 dark:text-blue-400",
+        }
+      : rank > 75
+      ? {
+          text: "Vol is elevated — the stock is moving more than usual relative to the past year.",
+          color: "text-amber-600 dark:text-amber-400",
+        }
+      : {
+          text: "Vol is near its historical average for the past year.",
+          color: "text-muted-foreground",
+        };
+
+  const gaugeColor =
+    rank < 25 ? "bg-blue-500" : rank > 75 ? "bg-amber-500" : "bg-foreground/60";
+
+  return (
+    <div className="rounded-lg border bg-card px-5 py-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
+            Realized Volatility Rank
+          </p>
+          <p className="text-3xl font-bold tabular-nums leading-none">
+            {rv.rv_rank?.toFixed(1) ?? "—"}
+            <span className="text-base font-normal text-muted-foreground ml-1">/ 100</span>
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted-foreground mb-0.5">{rv.window_days}-day realized vol</p>
+          <p className="text-xl font-semibold tabular-nums">{pct(rv.current_rv)}</p>
+        </div>
+      </div>
+
+      {/* Gauge */}
+      <div className="space-y-1.5">
+        <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+          <div
+            className={cn("absolute left-0 top-0 h-full rounded-full", gaugeColor)}
+            style={{ width: `${Math.min(100, rank)}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[10px] text-muted-foreground">
+          <span>0 — low vol</span>
+          <span>100 — high vol</span>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3 text-center pt-0.5">
+        <div>
+          <p className="text-xs text-muted-foreground mb-0.5">Percentile</p>
+          <p className="text-lg font-semibold tabular-nums">{rv.rv_percentile?.toFixed(1) ?? "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-0.5">1yr Low</p>
+          <p className="text-lg font-semibold tabular-nums">{pct(rv.rv_min_1y)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-0.5">1yr High</p>
+          <p className="text-lg font-semibold tabular-nums">{pct(rv.rv_max_1y)}</p>
+        </div>
+      </div>
+
+      {/* Interpretation */}
+      <p className={cn("text-sm leading-snug", interpColor)}>{interp}</p>
+
+      {/* Honest disclaimer */}
+      <p className="text-[11px] text-muted-foreground border-t pt-3 leading-relaxed">
+        <strong>Realized (historical) volatility</strong> measures how much the stock has actually
+        moved — annualized standard deviation of daily log returns over a {rv.window_days}-trading-day
+        window, ranked against the trailing {rv.sample_days} trading days.{" "}
+        <em>This is not implied volatility.</em> IV Rank (what the options market expects) requires
+        daily IV snapshots — collection started today and will appear once enough history accrues
+        (~3–6 months).
+      </p>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TickerPage() {
@@ -2726,6 +2818,9 @@ export default function TickerPage() {
   const handleChartLoad = useCallback((startPrice: number | null) => {
     setChartStartPrice(startPrice);
   }, []);
+
+  const [realizedVol, setRealizedVol]     = useState<RealizedVol | null>(null);
+  const [rvStatus, setRvStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
 
   const [expectedMove, setExpectedMove]   = useState<ExpectedMove | null>(null);
   const [emStatus, setEmStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
@@ -2772,6 +2867,15 @@ export default function TickerPage() {
 
   useEffect(() => {
     api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
+  }, [upperSymbol]);
+
+  useEffect(() => {
+    api.tickers.realizedVol(upperSymbol)
+      .then((data) => {
+        setRealizedVol(data);
+        setRvStatus(data.current_rv != null ? "done" : "empty");
+      })
+      .catch(() => setRvStatus("error"));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -3139,6 +3243,42 @@ export default function TickerPage() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* ── Volatility Context ─────────────────────────────────────────────── */}
+        <div className="mt-10">
+          <h2 className="text-lg font-semibold mb-4">Volatility Context</h2>
+
+          {rvStatus === "loading" && (
+            <div className="rounded-lg border bg-card px-5 py-4 space-y-4 animate-pulse">
+              <div className="flex justify-between">
+                <div className="space-y-2">
+                  <div className="h-3 bg-muted rounded w-36" />
+                  <div className="h-8 bg-muted rounded w-24" />
+                </div>
+                <div className="space-y-2 text-right">
+                  <div className="h-3 bg-muted rounded w-24 ml-auto" />
+                  <div className="h-6 bg-muted rounded w-16 ml-auto" />
+                </div>
+              </div>
+              <div className="h-2 bg-muted rounded-full" />
+              <div className="grid grid-cols-3 gap-3">
+                {[0,1,2].map(i => <div key={i} className="h-10 bg-muted rounded" />)}
+              </div>
+              <div className="h-3 bg-muted rounded w-3/4" />
+            </div>
+          )}
+          {rvStatus === "error" && (
+            <p className="text-sm text-muted-foreground">Could not load volatility data.</p>
+          )}
+          {rvStatus === "empty" && (
+            <p className="text-sm text-muted-foreground">
+              Insufficient price history for volatility analysis.
+            </p>
+          )}
+          {rvStatus === "done" && realizedVol && (
+            <RealizedVolPanel rv={realizedVol} />
           )}
         </div>
 

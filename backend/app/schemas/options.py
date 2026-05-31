@@ -71,3 +71,17 @@ class StrategyDataRead(BaseModel):
     implied_range_high: float | None
     strikes: list[StrikeData]        # only strikes with at least one valid mid-price
     as_of: str
+
+
+# ── Realized volatility rank / percentile ──────────────────────────────────────
+
+class RealizedVolRead(BaseModel):
+    symbol: str
+    current_rv: float | None         # annualized 20-day RV, 0–1 decimal (0.24 = 24%)
+    rv_rank: float | None            # 0–100: where today's RV sits in the trailing 1-yr range
+    rv_percentile: float | None      # 0–100: % of trailing 252 days where RV was below today's
+    rv_min_1y: float | None          # trailing 252-day minimum RV
+    rv_max_1y: float | None          # trailing 252-day maximum RV
+    sample_days: int                 # number of RV data points in the trailing window
+    window_days: int                 # rolling window used (20 trading days)
+    as_of: str
