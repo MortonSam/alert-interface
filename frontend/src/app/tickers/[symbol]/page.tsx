@@ -141,8 +141,8 @@ function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
   const dropRate = s.beat_but_dropped_rate_pct;
   const pricingNote =
     dropRate == null ? null
-    : dropRate > 50 ? "beats appear largely priced in"
-    : dropRate > 25 ? "beats partially priced in"
+    : dropRate >= 50 ? "beats appear largely priced in"
+    : dropRate >= 25 ? "beats partially priced in"
     : "beats tend to drive the stock higher";
 
   const sectorVsOwn =
@@ -164,7 +164,7 @@ function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
           <p
             className={cn(
               "text-sm mt-0.5",
-              dropRate > 50
+              dropRate >= 50
                 ? "text-amber-700 dark:text-amber-400"
                 : "text-muted-foreground",
             )}
