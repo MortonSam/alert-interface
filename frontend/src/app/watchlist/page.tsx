@@ -602,7 +602,7 @@ export default function WatchlistPage() {
                         Day
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Next Catalyst
+                        Next Earnings
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Implied Move
