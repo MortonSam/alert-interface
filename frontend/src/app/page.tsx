@@ -27,13 +27,13 @@ export default function Home() {
             </p>
           </Link>
 
-          <div className="rounded-lg border bg-card p-6">
-            <h2 className="font-semibold mb-2">AI Research</h2>
+          <Link href="/theses" className="rounded-lg border bg-card p-6 block hover:bg-accent transition-colors group">
+            <h2 className="font-semibold mb-2 group-hover:underline">Thesis Tracker</h2>
             <p className="text-sm text-muted-foreground">
-              Claude-powered one-pagers and thesis tracking. New filings are graded
-              against your prior view automatically.
+              Record and resolve directional bets. Track entry price, conviction,
+              target date, and grade your own calls after the fact.
             </p>
-          </div>
+          </Link>
         </div>
 
         <TickerGrid />

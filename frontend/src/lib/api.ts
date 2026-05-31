@@ -246,6 +246,99 @@ export interface RealizedVol {
   as_of: string;
 }
 
+export type ThesisDirection = "bullish" | "bearish" | "neutral";
+export type ThesisStatus = "open" | "resolved" | "needs_manual_resolution";
+export type SelfGrade = "right" | "right_for_wrong_reasons" | "wrong";
+
+export interface Thesis {
+  id: string;
+  ticker_id: string;
+  ticker_symbol: string | null;
+  direction: ThesisDirection;
+  conviction: number;          // 1–5
+  catalyst: string | null;
+  price_target: string | null; // Decimal as string from backend
+  target_date: string;         // "YYYY-MM-DD"
+  entry_price: string | null;  // captured at creation
+  reasoning: string | null;
+  status: ThesisStatus;
+  resolved_at: string | null;
+  price_at_resolution: string | null;
+  direction_correct: boolean | null;
+  target_reached: boolean | null;
+  self_grade: SelfGrade | null;
+  reflection: string | null;
+  created_at: string;
+  updated_at: string;
+  is_due: boolean;
+}
+
+export interface ThesisCreate {
+  symbol: string;
+  direction: ThesisDirection;
+  conviction: number;
+  catalyst?: string;
+  price_target?: number;
+  target_date: string;
+  reasoning?: string;
+}
+
+export interface ThesisResolve {
+  reflection: string;
+  self_grade: SelfGrade;
+  price_override?: number;
+}
+
+export interface ThesisDraftRequest {
+  symbol: string;
+  direction: ThesisDirection;
+  aggressiveness: "conservative" | "moderate" | "aggressive";
+  proposed_target?: number;
+}
+
+export interface ThesisDraftStrike {
+  strike: number;
+  mid: number;
+  iv: number | null;
+}
+
+export interface ThesisDraftRead {
+  symbol: string;
+  direction: ThesisDirection;
+  aggressiveness: string;
+  suggested_target: number | null;
+  suggested_strike: number | null;
+  suggested_spread_strike: number | null;
+  strategy: string | null;
+  reasoning: string;
+  realism_flag: string | null;
+  fact_block: {
+    current_price: number;
+    atm_strike: number | null;
+    earnings_date: string | null;
+    expiration_used: string | null;
+    days_to_expiration: number | null;
+    expected_move_pct: number | null;      // percentage, e.g. 4.7
+    expected_move_dollars: number | null;
+    implied_range_low: number | null;
+    implied_range_high: number | null;
+    hist_avg_abs_move_pct: number | null;  // percentage, e.g. 2.74
+    hist_max_abs_move_pct: number | null;
+    hist_sample_size: number;
+    beat_rate_pct: number | null;
+    beat_but_dropped_rate_pct: number | null;
+    atm_iv_pct: number | null;
+    rv_20d_pct: number | null;
+    rv_rank: number | null;
+    iv_rv_spread_pp: number | null;
+    primary_strikes: ThesisDraftStrike[];
+    secondary_strikes: ThesisDraftStrike[];
+    [key: string]: unknown;
+  };
+  model_used: string;
+  generated_at: string;
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -347,6 +440,24 @@ export const api = {
 
   system: {
     status: () => request<SystemStatus>("/system/status"),
+  },
+
+  theses: {
+    list: (filters?: { symbol?: string; status?: string }) => {
+      const params = new URLSearchParams(
+        Object.fromEntries(Object.entries(filters ?? {}).filter(([, v]) => v != null)) as Record<string, string>
+      );
+      return request<Thesis[]>(`/theses/?${params}`);
+    },
+    get: (id: string) => request<Thesis>(`/theses/${id}`),
+    create: (data: ThesisCreate) =>
+      request<Thesis>("/theses/", { method: "POST", body: JSON.stringify(data) }),
+    resolve: (id: string, data: ThesisResolve) =>
+      request<Thesis>(`/theses/${id}/resolve`, { method: "POST", body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request<void>(`/theses/${id}`, { method: "DELETE" }),
+    draft: (data: ThesisDraftRequest) =>
+      request<ThesisDraftRead>("/theses/draft", { method: "POST", body: JSON.stringify(data) }),
   },
 
   reactions: {

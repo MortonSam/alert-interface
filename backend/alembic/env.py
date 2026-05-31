@@ -6,7 +6,7 @@ from alembic import context
 
 # Import models so their metadata is registered
 from app.models.base import Base
-from app.models import ticker, watchlist, event, historical_reaction, research_note, system_metadata, iv_history  # noqa: F401
+from app.models import ticker, watchlist, event, historical_reaction, research_note, system_metadata, iv_history, thesis  # noqa: F401
 
 config = context.config
 

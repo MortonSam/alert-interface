@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import events, historical_reactions, research_notes, system, tickers, watchlists
+from app.routers import events, historical_reactions, research_notes, system, tickers, watchlists, thesis
 
 app = FastAPI(
     title="Alert Interface API",
@@ -25,6 +25,7 @@ app.include_router(events.router, prefix="/api/v1")
 app.include_router(historical_reactions.router, prefix="/api/v1")
 app.include_router(research_notes.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
+app.include_router(thesis.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["meta"])
