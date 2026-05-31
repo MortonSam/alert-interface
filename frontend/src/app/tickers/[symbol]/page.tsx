@@ -2711,23 +2711,33 @@ function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
   const rank = rv.rv_rank ?? 0;
 
   const { text: interp, color: interpColor } =
-    rank < 25
+    rank < 20
       ? {
-          text: "Vol is quiet — the stock is moving less than usual relative to the past year.",
+          text: "Vol is very quiet — the stock is moving much less than usual this past year.",
           color: "text-blue-600 dark:text-blue-400",
         }
-      : rank > 75
+      : rank < 40
       ? {
-          text: "Vol is elevated — the stock is moving more than usual relative to the past year.",
+          text: "Vol is on the low side — moving less than its typical level this past year.",
+          color: "text-blue-500 dark:text-blue-400",
+        }
+      : rank < 60
+      ? {
+          text: "Vol is near its historical average for the past year.",
+          color: "text-muted-foreground",
+        }
+      : rank < 80
+      ? {
+          text: "Vol is on the high side — moving more than its typical level this past year.",
           color: "text-amber-600 dark:text-amber-400",
         }
       : {
-          text: "Vol is near its historical average for the past year.",
-          color: "text-muted-foreground",
+          text: "Vol is very elevated — moving much more than usual this past year.",
+          color: "text-amber-600 dark:text-amber-400",
         };
 
   const gaugeColor =
-    rank < 25 ? "bg-blue-500" : rank > 75 ? "bg-amber-500" : "bg-foreground/60";
+    rank < 40 ? "bg-blue-500" : rank < 60 ? "bg-foreground/60" : "bg-amber-500";
 
   return (
     <div className="rounded-lg border bg-card px-5 py-4 space-y-4">
