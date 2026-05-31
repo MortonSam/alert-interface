@@ -585,12 +585,16 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         p = put_map.get(s)
 
         call_mid: float | None = None
+        call_iv: float | None = None
         if c and _flag_contract(c, current_price, is_call=True) is None:
             call_mid = _mid_or_last(c["bid"], c["ask"], c["lastPrice"])
+            call_iv = c.get("impliedVolatility")  # already cleaned by _parse_option_df
 
         put_mid: float | None = None
+        put_iv: float | None = None
         if p and _flag_contract(p, current_price, is_call=False) is None:
             put_mid = _mid_or_last(p["bid"], p["ask"], p["lastPrice"])
+            put_iv = p.get("impliedVolatility")
 
         if call_mid is None and put_mid is None:
             continue
@@ -599,11 +603,14 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             strike=s,
             call_mid=call_mid,
             put_mid=put_mid,
+            call_iv=call_iv,
+            put_iv=put_iv,
             is_atm=(s == atm_strike),
         ))
 
     return StrategyDataRead(
         symbol=sym, current_price=current_price, expiration=chosen_exp,
+        earnings_date=earnings_str,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
         strikes=result_strikes, as_of=as_of,
     )

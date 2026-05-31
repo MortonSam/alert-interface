@@ -57,6 +57,8 @@ class StrikeData(BaseModel):
     strike: float
     call_mid: float | None   # mid-price of call at this strike (None if flagged/unavailable)
     put_mid: float | None    # mid-price of put at this strike (None if flagged/unavailable)
+    call_iv: float | None = None   # implied volatility of call (0–1 decimal), None if unavailable
+    put_iv: float | None = None    # implied volatility of put  (0–1 decimal), None if unavailable
     is_atm: bool
 
 
@@ -64,6 +66,7 @@ class StrategyDataRead(BaseModel):
     symbol: str
     current_price: float | None
     expiration: str | None           # "YYYY-MM-DD" — same expiration logic as expected-move
+    earnings_date: str | None = None # "YYYY-MM-DD" — next earnings, used for time-value curves
     implied_range_low: float | None
     implied_range_high: float | None
     strikes: list[StrikeData]        # only strikes with at least one valid mid-price

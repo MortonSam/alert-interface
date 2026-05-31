@@ -186,6 +186,8 @@ export interface StrikeData {
   strike: number;
   call_mid: number | null;
   put_mid: number | null;
+  call_iv: number | null;  // implied volatility 0–1 decimal, null if unavailable
+  put_iv: number | null;
   is_atm: boolean;
 }
 
@@ -193,6 +195,7 @@ export interface StrategyData {
   symbol: string;
   current_price: number | null;
   expiration: string | null;
+  earnings_date: string | null;  // next earnings date for pre-expiry curve
   implied_range_low: number | null;
   implied_range_high: number | null;
   strikes: StrikeData[];

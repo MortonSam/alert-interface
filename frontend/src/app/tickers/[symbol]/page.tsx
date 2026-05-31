@@ -1653,7 +1653,8 @@ interface Leg {
   kind: "call" | "put";
   K: number;
   mid: number;
-  dir: 1 | -1;  // 1 = long, -1 = short
+  sigma: number;   // implied volatility (0–1 decimal) used for pre-expiry BS pricing
+  dir: 1 | -1;    // 1 = long, -1 = short
   label: string;
 }
 
@@ -1661,6 +1662,14 @@ function multiLegPayoffPS(legs: Leg[], S: number): number {
   return legs.reduce((sum, leg) => {
     const intrinsic = leg.kind === "call" ? Math.max(0, S - leg.K) : Math.max(0, leg.K - S);
     return sum + leg.dir * (intrinsic - leg.mid);
+  }, 0);
+}
+
+function multiLegPayoffBSPS(legs: Leg[], S: number, T: number, r: number): number {
+  if (T <= 0) return multiLegPayoffPS(legs, S);
+  return legs.reduce((sum, leg) => {
+    const bsPrice = blackScholes(leg.kind, S, leg.K, T, leg.sigma, r);
+    return sum + leg.dir * (bsPrice - leg.mid);
   }, 0);
 }
 
@@ -1673,6 +1682,61 @@ interface MultiLegStats {
 
 function isMultiLeg(s: StrategyType | MultiLegType): s is MultiLegType {
   return s === "bear_call_spread" || s === "short_strangle" || s === "iron_condor";
+}
+
+// ── Black-Scholes pricing ──────────────────────────────────────────────────────
+
+const BS_R = 0.045;          // risk-free rate (~4.5%; barely moves results at these timeframes)
+const BS_IV_DEFAULT = 0.30;  // fallback IV when per-strike IV is unavailable
+const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000;
+
+/** Abramowitz & Stegun 7.1.26 — max error < 1.5e-7. */
+function erfApprox(x: number): number {
+  const a1 =  0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+  const a4 = -1.453152027, a5 =  1.061405429, p  = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + p * ax);
+  const y = 1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t) * Math.exp(-ax * ax);
+  return sign * y;
+}
+
+function normCDF(x: number): number {
+  return 0.5 * (1 + erfApprox(x / Math.SQRT2));
+}
+
+/** Black-Scholes option price. T in years, sigma and r as 0–1 decimals. */
+function blackScholes(
+  kind: "call" | "put",
+  S: number, K: number, T: number, sigma: number, r: number,
+): number {
+  if (T <= 0 || sigma <= 0) return kind === "call" ? Math.max(0, S - K) : Math.max(0, K - S);
+  const sqrtT = Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+  return kind === "call"
+    ? S * normCDF(d1) - K * Math.exp(-r * T) * normCDF(d2)
+    : K * Math.exp(-r * T) * normCDF(-d2) - S * normCDF(-d1);
+}
+
+/** MS from epoch for a "YYYY-MM-DD" string (midnight local). */
+function dateMs(s: string): number { return new Date(s + "T00:00:00").getTime(); }
+
+/** Single-leg P&L per share before expiration using Black-Scholes for the option. */
+function payoffBSPS(
+  strategy: StrategyType,
+  K: number, premium: number, currentPrice: number, S: number,
+  T: number, sigma: number, r: number,
+): number {
+  if (T <= 0) return payoffPS(strategy, K, premium, currentPrice, S);
+  const bsC = blackScholes("call", S, K, T, sigma, r);
+  const bsP = blackScholes("put",  S, K, T, sigma, r);
+  switch (strategy) {
+    case "long_call":    return bsC - premium;
+    case "long_put":     return bsP - premium;
+    case "covered_call": return (S - currentPrice) + premium - bsC;
+    case "csp":          return premium - bsP;
+  }
 }
 
 // Custom Y-axis tick: signed (+/−), color-coded green/red
@@ -1700,17 +1764,27 @@ function PayoffTooltip({
   payload,
 }: {
   active?: boolean;
-  payload?: Array<{ payload: { price: number; pnl: number } }>;
+  payload?: Array<{
+    name: string;
+    dataKey: string;
+    value: number;
+    color: string;
+    payload: { price: number };
+  }>;
 }) {
   if (!active || !payload?.length) return null;
-  const { price, pnl } = payload[0].payload;
-  const abs = Math.abs(pnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const price = payload[0].payload.price;
   return (
     <div className="rounded border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 shadow px-3 py-2 text-xs space-y-0.5">
-      <p>Stock at expiry: <strong>${price.toFixed(2)}</strong></p>
-      <p className={cn("font-medium", pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-        {pnl >= 0 ? "+" : "−"}${abs} total
-      </p>
+      <p className="text-zinc-500 dark:text-zinc-400">Stock: <strong className="text-zinc-900 dark:text-zinc-100">${price.toFixed(2)}</strong></p>
+      {payload.filter(p => p.value != null).map((p) => {
+        const abs = Math.abs(p.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return (
+          <p key={p.dataKey} style={{ color: p.color }} className="font-medium">
+            {p.name}: {p.value >= 0 ? "+" : "−"}${abs}
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -1746,6 +1820,23 @@ function StrategyCard({
   const strikeObj = validStrikes.find((s) => s.strike === selectedStrike);
   const premium = (meta.usesCall ? strikeObj?.call_mid : strikeObj?.put_mid) ?? 0;
 
+  // IV for BS pricing: use per-strike IV, fall back to ATM IV, then a default
+  const atmIVData = data.strikes.find((s) => s.is_atm);
+  const sigma = (
+    meta.usesCall
+      ? (strikeObj?.call_iv ?? atmIVData?.call_iv ?? BS_IV_DEFAULT)
+      : (strikeObj?.put_iv  ?? atmIVData?.put_iv  ?? BS_IV_DEFAULT)
+  );
+
+  // Time-to-expiration for the two pre-expiry curves
+  const T_today = data.expiration
+    ? Math.max(0, (dateMs(data.expiration) - Date.now()) / MS_PER_YEAR)
+    : 0;
+  const T_earnings = (data.earnings_date && data.expiration)
+    ? Math.max(0, (dateMs(data.expiration) - dateMs(data.earnings_date)) / MS_PER_YEAR)
+    : null;
+  const showEarnings = T_earnings !== null && T_earnings > 0 && T_earnings < T_today;
+
   const mult = contracts * 100; // shares per position
 
   // x-axis range: implied range ± 30% of range width, extended if breakeven falls outside
@@ -1780,11 +1871,13 @@ function StrategyCard({
     return Array.from({ length: 100 }, (_, i) => {
       const S = lo + (i / 99) * (hi - lo);
       return {
-        price: parseFloat(S.toFixed(2)),
-        pnl:   parseFloat((payoffPS(strategy, selectedStrike, premium, cp, S) * mult).toFixed(2)),
+        price:       parseFloat(S.toFixed(2)),
+        pnlExpiry:   parseFloat((payoffPS(strategy, selectedStrike, premium, cp, S) * mult).toFixed(2)),
+        pnlToday:    T_today > 0 ? parseFloat((payoffBSPS(strategy, selectedStrike, premium, cp, S, T_today, sigma, BS_R) * mult).toFixed(2)) : null,
+        pnlEarnings: showEarnings ? parseFloat((payoffBSPS(strategy, selectedStrike, premium, cp, S, T_earnings!, sigma, BS_R) * mult).toFixed(2)) : null,
       };
     });
-  }, [strategy, selectedStrike, premium, cp, mult, xRange]);
+  }, [strategy, selectedStrike, premium, cp, mult, xRange, T_today, T_earnings, showEarnings, sigma]);
 
   const stats = useMemo(
     () => strategyStats(strategy, selectedStrike, premium, cp),
@@ -1799,9 +1892,11 @@ function StrategyCard({
     );
   }
 
-  const pnls = chartData.map((d) => d.pnl);
-  const yMin = Math.min(...pnls);
-  const yMax = Math.max(...pnls);
+  const allPnls = chartData.flatMap((d) =>
+    [d.pnlExpiry, d.pnlToday, d.pnlEarnings].filter((v): v is number => v != null),
+  );
+  const yMin = allPnls.length ? Math.min(...allPnls) : -100;
+  const yMax = allPnls.length ? Math.max(...allPnls) : 100;
   const yPad = (yMax - yMin) * 0.12 || 1;
   const yDomain: [number, number] = [yMin - yPad, yMax + yPad];
 
@@ -1854,7 +1949,7 @@ function StrategyCard({
       </div>
 
       {/* Payoff diagram */}
-      <ResponsiveContainer width="100%" height={160}>
+      <ResponsiveContainer width="100%" height={180}>
         <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
           <XAxis
@@ -1891,7 +1986,7 @@ function StrategyCard({
           {/* Zero line */}
           <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1} />
 
-          {/* Current price — label at bottom so it never collides with B/E label at top */}
+          {/* Current price */}
           <ReferenceLine
             x={cp}
             stroke="hsl(var(--muted-foreground))"
@@ -1900,7 +1995,7 @@ function StrategyCard({
             label={{ value: "Current", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
           />
 
-          {/* Breakeven(s) — label at top */}
+          {/* Breakeven(s) */}
           {stats.breakevens.map((be, i) => (
             <ReferenceLine
               key={i}
@@ -1912,8 +2007,38 @@ function StrategyCard({
             />
           ))}
 
+          {/* Three curves: today (amber dashed), earnings (green dashed), expiry (blue solid) */}
+          {showEarnings && (
+            <Line
+              dataKey="pnlEarnings"
+              name="At earnings"
+              stroke="#10b981"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 3, fill: "#10b981" }}
+              type="monotone"
+              strokeDasharray="3 3"
+              isAnimationActive={false}
+              connectNulls
+            />
+          )}
+          {T_today > 0 && (
+            <Line
+              dataKey="pnlToday"
+              name="Today"
+              stroke="#f59e0b"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 3, fill: "#f59e0b" }}
+              type="monotone"
+              strokeDasharray="5 3"
+              isAnimationActive={false}
+              connectNulls
+            />
+          )}
           <Line
-            dataKey="pnl"
+            dataKey="pnlExpiry"
+            name="At expiration"
             stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
@@ -1923,6 +2048,35 @@ function StrategyCard({
           />
         </LineChart>
       </ResponsiveContainer>
+
+      {/* Legend */}
+      <div className="flex gap-4 text-[10px] text-muted-foreground justify-end -mt-1">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-4 border-b-2 border-blue-500" />
+          At expiration
+        </span>
+        {T_today > 0 && (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-4 border-b-2 border-amber-500 border-dashed" />
+            Today
+          </span>
+        )}
+        {showEarnings && (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-4 border-b-2 border-emerald-500 border-dashed" />
+            At earnings
+          </span>
+        )}
+      </div>
+
+      {/* IV crush disclaimer — non-negotiable when earnings curve is shown */}
+      {showEarnings && (
+        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+          <strong>Note:</strong> The earnings-date curve uses current implied volatility held constant.
+          It does not model the IV crush that typically follows an earnings release — real post-earnings
+          option values will likely be lower.
+        </p>
+      )}
 
       {/* Key stats — dollar figures scaled to contract size; breakeven stays as stock price */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm pt-1 border-t">
@@ -2014,6 +2168,14 @@ function MultiLegStrategyCard({
 
   const mult = contracts * 100;
 
+  const T_today = data.expiration
+    ? Math.max(0, (dateMs(data.expiration) - Date.now()) / MS_PER_YEAR)
+    : 0;
+  const T_earnings = (data.earnings_date && data.expiration)
+    ? Math.max(0, (dateMs(data.expiration) - dateMs(data.earnings_date)) / MS_PER_YEAR)
+    : null;
+  const showEarnings = T_earnings !== null && T_earnings > 0 && T_earnings < T_today;
+
   const { legs, stats } = useMemo<{ legs: Leg[]; stats: MultiLegStats }>(() => {
     const scObj = callStrikes.find((s) => s.strike === shortCallStrike);
     const spObj = putStrikes.find((s) => s.strike === shortPutStrike);
@@ -2049,6 +2211,11 @@ function MultiLegStrategyCard({
           )
       : null;
 
+    // IV fallbacks: per-strike IV, then ATM IV, then global default
+    const atmSd = data.strikes.find((s) => s.is_atm);
+    const fbC = atmSd?.call_iv ?? BS_IV_DEFAULT;
+    const fbP = atmSd?.put_iv  ?? BS_IV_DEFAULT;
+
     let legs: Leg[] = [];
     let netCredit = 0;
     let maxGain = 0;
@@ -2058,8 +2225,8 @@ function MultiLegStrategyCard({
     if (strategy === "bear_call_spread" && scObj && lcObj) {
       netCredit = scObj.call_mid! - lcObj.call_mid!;
       legs = [
-        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
-        { kind: "call", K: lcObj.strike, mid: lcObj.call_mid!, dir: 1,  label: `Long call $${lcObj.strike.toFixed(0)} (wing)` },
+        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, sigma: scObj.call_iv ?? fbC, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
+        { kind: "call", K: lcObj.strike, mid: lcObj.call_mid!, sigma: lcObj.call_iv ?? fbC, dir: 1,  label: `Long call $${lcObj.strike.toFixed(0)} (wing)` },
       ];
       maxGain = netCredit;
       maxLoss = lcObj.strike - scObj.strike - netCredit;
@@ -2067,8 +2234,8 @@ function MultiLegStrategyCard({
     } else if (strategy === "short_strangle" && scObj && spObj) {
       netCredit = scObj.call_mid! + spObj.put_mid!;
       legs = [
-        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
-        { kind: "put",  K: spObj.strike, mid: spObj.put_mid!,  dir: -1, label: `Short put $${spObj.strike.toFixed(0)}` },
+        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, sigma: scObj.call_iv ?? fbC, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
+        { kind: "put",  K: spObj.strike, mid: spObj.put_mid!,  sigma: spObj.put_iv  ?? fbP, dir: -1, label: `Short put $${spObj.strike.toFixed(0)}` },
       ];
       maxGain = netCredit;
       maxLoss = null;
@@ -2076,10 +2243,10 @@ function MultiLegStrategyCard({
     } else if (strategy === "iron_condor" && scObj && lcObj && spObj && lpObj) {
       netCredit = scObj.call_mid! + spObj.put_mid! - lcObj.call_mid! - lpObj.put_mid!;
       legs = [
-        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
-        { kind: "call", K: lcObj.strike, mid: lcObj.call_mid!, dir: 1,  label: `Long call $${lcObj.strike.toFixed(0)} (wing)` },
-        { kind: "put",  K: spObj.strike, mid: spObj.put_mid!,  dir: -1, label: `Short put $${spObj.strike.toFixed(0)}` },
-        { kind: "put",  K: lpObj.strike, mid: lpObj.put_mid!,  dir: 1,  label: `Long put $${lpObj.strike.toFixed(0)} (wing)` },
+        { kind: "call", K: scObj.strike, mid: scObj.call_mid!, sigma: scObj.call_iv ?? fbC, dir: -1, label: `Short call $${scObj.strike.toFixed(0)}` },
+        { kind: "call", K: lcObj.strike, mid: lcObj.call_mid!, sigma: lcObj.call_iv ?? fbC, dir: 1,  label: `Long call $${lcObj.strike.toFixed(0)} (wing)` },
+        { kind: "put",  K: spObj.strike, mid: spObj.put_mid!,  sigma: spObj.put_iv  ?? fbP, dir: -1, label: `Short put $${spObj.strike.toFixed(0)}` },
+        { kind: "put",  K: lpObj.strike, mid: lpObj.put_mid!,  sigma: lpObj.put_iv  ?? fbP, dir: 1,  label: `Long put $${lpObj.strike.toFixed(0)} (wing)` },
       ];
       maxGain = netCredit;
       const callWingWidth = lcObj.strike - scObj.strike;
@@ -2119,11 +2286,13 @@ function MultiLegStrategyCard({
     return Array.from({ length: 100 }, (_, i) => {
       const S = lo + (i / 99) * (hi - lo);
       return {
-        price: parseFloat(S.toFixed(2)),
-        pnl:   parseFloat((multiLegPayoffPS(legs, S) * mult).toFixed(2)),
+        price:       parseFloat(S.toFixed(2)),
+        pnlExpiry:   parseFloat((multiLegPayoffPS(legs, S) * mult).toFixed(2)),
+        pnlToday:    T_today > 0 ? parseFloat((multiLegPayoffBSPS(legs, S, T_today, BS_R) * mult).toFixed(2)) : null,
+        pnlEarnings: showEarnings ? parseFloat((multiLegPayoffBSPS(legs, S, T_earnings!, BS_R) * mult).toFixed(2)) : null,
       };
     });
-  }, [legs, cp, mult, xRange]);
+  }, [legs, cp, mult, xRange, T_today, T_earnings, showEarnings]);
 
   if (!callStrikes.length || !cp) {
     return (
@@ -2133,9 +2302,11 @@ function MultiLegStrategyCard({
     );
   }
 
-  const pnls = chartData.map((d) => d.pnl);
-  const yMin = pnls.length ? Math.min(...pnls) : -100;
-  const yMax = pnls.length ? Math.max(...pnls) : 100;
+  const allPnls = chartData.flatMap((d) =>
+    [d.pnlExpiry, d.pnlToday, d.pnlEarnings].filter((v): v is number => v != null),
+  );
+  const yMin = allPnls.length ? Math.min(...allPnls) : -100;
+  const yMax = allPnls.length ? Math.max(...allPnls) : 100;
   const yPad = (yMax - yMin) * 0.12 || 1;
   const yDomain: [number, number] = [yMin - yPad, yMax + yPad];
   const xLo = chartData[0]?.price ?? 0;
@@ -2212,7 +2383,7 @@ function MultiLegStrategyCard({
       )}
 
       {/* Payoff diagram */}
-      <ResponsiveContainer width="100%" height={160}>
+      <ResponsiveContainer width="100%" height={180}>
         <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
           <XAxis
@@ -2270,8 +2441,38 @@ function MultiLegStrategyCard({
             />
           ))}
 
+          {/* Three curves: earnings (green dashed), today (amber dashed), expiry (blue solid) */}
+          {showEarnings && (
+            <Line
+              dataKey="pnlEarnings"
+              name="At earnings"
+              stroke="#10b981"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 3, fill: "#10b981" }}
+              type="monotone"
+              strokeDasharray="3 3"
+              isAnimationActive={false}
+              connectNulls
+            />
+          )}
+          {T_today > 0 && (
+            <Line
+              dataKey="pnlToday"
+              name="Today"
+              stroke="#f59e0b"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 3, fill: "#f59e0b" }}
+              type="monotone"
+              strokeDasharray="5 3"
+              isAnimationActive={false}
+              connectNulls
+            />
+          )}
           <Line
-            dataKey="pnl"
+            dataKey="pnlExpiry"
+            name="At expiration"
             stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
@@ -2281,6 +2482,35 @@ function MultiLegStrategyCard({
           />
         </LineChart>
       </ResponsiveContainer>
+
+      {/* Legend */}
+      <div className="flex gap-4 text-[10px] text-muted-foreground justify-end -mt-1">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-4 border-b-2 border-blue-500" />
+          At expiration
+        </span>
+        {T_today > 0 && (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-4 border-b-2 border-amber-500 border-dashed" />
+            Today
+          </span>
+        )}
+        {showEarnings && (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-4 border-b-2 border-emerald-500 border-dashed" />
+            At earnings
+          </span>
+        )}
+      </div>
+
+      {/* IV crush disclaimer */}
+      {showEarnings && (
+        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+          <strong>Note:</strong> The earnings-date curve uses current implied volatility held constant.
+          It does not model the IV crush that typically follows an earnings release — real post-earnings
+          option values will likely be lower.
+        </p>
+      )}
 
       {/* Key stats */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm pt-1 border-t">
