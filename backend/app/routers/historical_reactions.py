@@ -32,18 +32,6 @@ def _enrich(r: HistoricalReaction) -> HistoricalReactionRead:
                 (float(r.eps_actual) - est) / abs(est) * 100, 1
             )
 
-    # Overnight gap: close_before → open_after
-    if r.close_before is not None and r.open_after is not None:
-        cb = float(r.close_before)
-        if cb > 0:
-            read.gap_pct = round((float(r.open_after) / cb - 1) * 100, 2)
-
-    # Intraday drift: open_after → close_after (on the event day)
-    if r.open_after is not None and r.close_after is not None:
-        oa = float(r.open_after)
-        if oa > 0:
-            read.intraday_pct = round((float(r.close_after) / oa - 1) * 100, 2)
-
     return read
 
 

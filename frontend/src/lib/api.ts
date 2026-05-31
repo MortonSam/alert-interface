@@ -74,10 +74,11 @@ export interface HistoricalReaction {
   revenue_actual: number | null;
   outcome: EarningsOutcome;
   created_at: string;
-  // Computed enrichment fields (populated server-side, null for non-earnings rows)
+  // Computed enrichment field (populated server-side, null for non-earnings rows)
   eps_surprise_pct: number | null;  // (eps_actual − eps_estimate) / |eps_estimate| × 100
-  gap_pct: number | null;           // (open_after / close_before − 1) × 100
-  intraday_pct: number | null;      // (close_after / open_after − 1) × 100
+  // gap_pct / intraday_pct omitted: open_after/close_after are event-day pre-print prices for
+  // after-close reporters, so those figures measure pre-earnings trading, not the reaction.
+  // Revisit when next-day OHLCV (T+1 open) is stored.
 }
 
 export interface ReactionSummary {

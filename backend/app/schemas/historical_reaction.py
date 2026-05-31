@@ -38,10 +38,12 @@ class HistoricalReactionRead(HistoricalReactionBase):
     id: uuid.UUID
     created_at: datetime
 
-    # Computed enrichment fields — not stored in DB; populated by the router
+    # Computed enrichment field — not stored in DB; populated by the router
     eps_surprise_pct: float | None = None   # (eps_actual − eps_estimate) / |eps_estimate| × 100
-    gap_pct: float | None = None            # (open_after / close_before − 1) × 100
-    intraday_pct: float | None = None       # (close_after / open_after − 1) × 100
+    # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
+    # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day
+    # prices, not the post-earnings reaction. Meaningful decomposition requires next-day OHLCV
+    # (T+1 open), which is not currently stored. Revisit when price-history data is richer.
 
 
 class ReactionSummaryRead(BaseModel):

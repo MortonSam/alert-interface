@@ -282,58 +282,6 @@ function PctCell({ value }: { value: string | null }) {
   );
 }
 
-// Enriched 1d% cell with optional gap/intraday secondary line
-function Pct1dCell({
-  value,
-  gapPct,
-  intradayPct,
-}: {
-  value: string | null;
-  gapPct: number | null;
-  intradayPct: number | null;
-}) {
-  if (value == null) {
-    return (
-      <td className="px-3 py-2.5 text-right text-sm text-muted-foreground tabular-nums">—</td>
-    );
-  }
-  const n = parseFloat(value);
-  const hasSecondary = gapPct != null || intradayPct != null;
-
-  const fmt = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
-
-  return (
-    <td
-      className={cn(
-        "px-3 py-2.5 text-right text-sm font-medium tabular-nums",
-        n > 0 && "text-green-700 dark:text-green-400",
-        n < 0 && "text-red-600 dark:text-red-400",
-        n === 0 && "text-muted-foreground",
-      )}
-    >
-      <div className="flex flex-col items-end gap-0.5">
-        <span
-          className={cn(
-            "inline-block rounded px-1",
-            n > 0 && "bg-green-50 dark:bg-green-900/20",
-            n < 0 && "bg-red-50 dark:bg-red-900/20",
-          )}
-        >
-          {n > 0 ? "+" : ""}
-          {n.toFixed(2)}%
-        </span>
-        {hasSecondary && (
-          <span className="text-[10px] font-normal text-muted-foreground/60 whitespace-nowrap">
-            {gapPct != null ? `gap ${fmt(gapPct)}` : ""}
-            {gapPct != null && intradayPct != null ? " · " : ""}
-            {intradayPct != null ? `day ${fmt(intradayPct)}` : ""}
-          </span>
-        )}
-      </div>
-    </td>
-  );
-}
-
 function StatNum({ value }: { value: number }) {
   return (
     <span
@@ -615,11 +563,7 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums">
                     {formatPrice(r.open_after)}
                   </td>
-                  <Pct1dCell
-                    value={r.pct_change_1d}
-                    gapPct={r.gap_pct}
-                    intradayPct={r.intraday_pct}
-                  />
+                  <PctCell value={r.pct_change_1d} />
                   <PctCell value={r.pct_change_3d} />
                   <PctCell value={r.pct_change_5d} />
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
