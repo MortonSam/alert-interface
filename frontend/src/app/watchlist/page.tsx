@@ -130,12 +130,14 @@ function WatchlistRow({
         <ChangeCell quote={quote} status={quoteStatus} />
       </td>
       <td className="py-3 px-4 text-sm">
-        {ticker.next_earnings_date ? (
+        {emStatus === "loading" ? (
+          <Skeleton w="w-16" />
+        ) : em?.earnings_date ? (
           <span className="inline-flex items-center gap-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-1 py-0.5 rounded">
               EPS
             </span>
-            <span className="text-muted-foreground">{fmtDate(ticker.next_earnings_date)}</span>
+            <span className="text-muted-foreground">{fmtDate(em.earnings_date)}</span>
           </span>
         ) : (
           <span className="text-muted-foreground text-xs">—</span>
