@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   api,
   type Ticker,
@@ -11,7 +12,7 @@ import {
   type Thesis,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { GiBull, GiBearFace } from "react-icons/gi";
 
 // ── Step header ────────────────────────────────────────────────────────────────
 
@@ -286,7 +287,10 @@ type BuildStep =
   | "saving"
   | "done";
 
-export default function BuildTradePage() {
+function BuildTradePageContent() {
+  const searchParams = useSearchParams();
+  const tickerParam = searchParams.get("ticker");
+
   // Ticker list
   const [tickers, setTickers] = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
@@ -325,8 +329,16 @@ export default function BuildTradePage() {
   const [savedThesis, setSavedThesis] = useState<Thesis | null>(null);
 
   useEffect(() => {
-    api.tickers.list().then(setTickers).catch(() => null).finally(() => setTickersLoading(false));
-  }, []);
+    api.tickers.list().then((list) => {
+      setTickers(list);
+      if (tickerParam) {
+        const sym = tickerParam.toUpperCase();
+        const match = list.find((t) => t.symbol.toUpperCase() === sym);
+        if (match) handleSelectTicker(match);
+        // invalid param: falls through — step stays pick_stock, picker stays empty
+      }
+    }).catch(() => null).finally(() => setTickersLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSelectTicker(t: Ticker) {
     setSelectedTicker(t);
@@ -558,7 +570,7 @@ export default function BuildTradePage() {
                       : "border-border hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/10",
                   )}
                 >
-                  <TrendingUp aria-hidden="true" className="w-9 h-9 mx-auto mb-2" strokeWidth={1.75} />
+                  <GiBull aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
                   <div className="text-base font-bold">Bullish</div>
                   <div className="text-xs opacity-60 mt-1">expecting it to rise</div>
                 </button>
@@ -573,7 +585,7 @@ export default function BuildTradePage() {
                       : "border-border hover:border-red-300 hover:bg-red-50/40 dark:hover:border-red-700 dark:hover:bg-red-900/10",
                   )}
                 >
-                  <TrendingDown aria-hidden="true" className="w-9 h-9 mx-auto mb-2" strokeWidth={1.75} />
+                  <GiBearFace aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
                   <div className="text-base font-bold">Bearish</div>
                   <div className="text-xs opacity-60 mt-1">expecting it to fall</div>
                 </button>
@@ -751,5 +763,13 @@ export default function BuildTradePage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function BuildTradePage() {
+  return (
+    <Suspense>
+      <BuildTradePageContent />
+    </Suspense>
   );
 }

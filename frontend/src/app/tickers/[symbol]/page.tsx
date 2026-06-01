@@ -3044,11 +3044,19 @@ export default function TickerPage() {
         </Link>
 
         {/* Header */}
-        <div className="mt-6">
-          <h1 className="text-5xl font-bold tracking-tight">{ticker.symbol}</h1>
-          {ticker.name && (
-            <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
-          )}
+        <div className="mt-6 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-5xl font-bold tracking-tight">{ticker.symbol}</h1>
+            {ticker.name && (
+              <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
+            )}
+          </div>
+          <Link
+            href={`/build?ticker=${ticker.symbol}`}
+            className="shrink-0 self-center rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors"
+          >
+            Build a trade on {ticker.symbol} →
+          </Link>
         </div>
 
         {/* Live price header */}
