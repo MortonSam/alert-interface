@@ -185,8 +185,12 @@ export function TickerGrid() {
   return (
     <section className="mt-8 space-y-4">
       {/* Freshness indicator */}
-      {systemStatus?.last_refreshed_at && (
-        <div className="flex justify-end">
+      <div className="flex justify-end items-center gap-2">
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          Prices live
+        </span>
+        {systemStatus?.last_refreshed_at && (
           <span
             className={`text-xs px-2 py-0.5 rounded-full ${
               isStale(systemStatus.last_refreshed_at)
@@ -194,10 +198,10 @@ export function TickerGrid() {
                 : "text-muted-foreground"
             }`}
           >
-            Data updated {fmtAgo(systemStatus.last_refreshed_at)}
+            Reference data {fmtAgo(systemStatus.last_refreshed_at)}
           </span>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Search + Sort */}
       <div className="flex gap-3 flex-wrap items-center">
