@@ -445,7 +445,7 @@ CRITICAL RULES (violating any is an error):
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
 CURRENT PRICE:      ${current_price:.2f}
-ATM STRIKE:         ${atm_strike:.2f} ({"unavailable" if not atm_strike else ""})
+ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
 NEXT EARNINGS DATE: {earnings_str or "(unknown)"}
 EXPIRATION USED:    {chosen_exp or "(none)"} ({_n(days_to_exp, "d")} days out)
 
@@ -499,8 +499,9 @@ Return ONLY this JSON object (no other text):
 
     print(
         f"[thesis-draft] {sym} {direction} {aggressiveness} | "
-        f"price=${current_price:.2f} em=±{expected_move_pct*100:.1f}% "
-        f"hist_max=±{hist_max*100:.1f}% "
+        f"price=${current_price:.2f} "
+        f"em=±{f'{expected_move_pct*100:.1f}%' if expected_move_pct is not None else 'N/A'} "
+        f"hist_max=±{f'{hist_max*100:.1f}%' if hist_max is not None else 'N/A'} "
         f"primary_strikes={len(primary_rows)}",
         flush=True,
     )
