@@ -14,6 +14,47 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Returns true when US equity markets are plausibly open.
+ * Heuristic only — no holiday calendar. Uses America/New_York via the browser's
+ * Intl API so DST is handled automatically. Mon-Fri 09:30-16:00 ET.
+ */
+function isMarketHours(): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? "";
+  const weekday = get("weekday");
+  const mins = parseInt(get("hour"), 10) * 60 + parseInt(get("minute"), 10);
+  return !["Sat", "Sun"].includes(weekday) && mins >= 9 * 60 + 30 && mins < 16 * 60;
+}
+
+/** Format an ISO timestamp as "HH:MM:SS" (local time) for same-day, or "EEE HH:MM" across days. */
+function fmtAsOf(isoStr: string): string {
+  try {
+    const d = new Date(isoStr);
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth()    === now.getMonth()    &&
+      d.getDate()     === now.getDate();
+    if (sameDay) {
+      return d.toLocaleTimeString("en-US", {
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      });
+    }
+    return d.toLocaleString("en-US", {
+      weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+  } catch {
+    return isoStr;
+  }
+}
+
 function fmtPrice(v: string | null | undefined): string {
   if (v == null) return "—";
   const n = parseFloat(v);
@@ -102,9 +143,11 @@ function ConvictionDots({ n }: { n: number }) {
 function OptionPnlSection({
   thesis,
   mark,
+  refreshing,
 }: {
   thesis: Thesis;
   mark?: ThesisMarkRead | "loading" | "error";
+  refreshing?: boolean;
 }) {
   const legDesc = fmtOptionLeg(thesis);
   if (!legDesc) return null;
@@ -116,6 +159,8 @@ function OptionPnlSection({
   let isLoading = false;
   let isError = false;
   let isNoData = false;
+
+  let asOf: string | null = null;
 
   if (thesis.status === "resolved") {
     pnlDollars = thesis.option_pnl_dollars ? parseFloat(thesis.option_pnl_dollars) : null;
@@ -133,6 +178,7 @@ function OptionPnlSection({
       pnlPct = mark.pnl_pct;
       markLabel = mark.is_expired ? "intrinsic" : mark.mark_basis === "live_chain" ? "live" : null;
       markNote = mark.mark_note;
+      asOf = mark.as_of; // actual chain fetch time, not request time
     }
   }
 
@@ -149,11 +195,19 @@ function OptionPnlSection({
         <span className="text-xs text-muted-foreground italic">Mark unavailable</span>
       ) : (
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className={`text-xl font-bold tabular-nums leading-tight ${pnlColor}`}>
+          <span className={`text-xl font-bold tabular-nums leading-tight transition-opacity ${pnlColor} ${refreshing ? "opacity-50" : ""}`}>
             {pnlStr}
           </span>
           {markLabel && (
             <span className="text-xs text-muted-foreground">{markLabel}</span>
+          )}
+          {asOf && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              as of {fmtAsOf(asOf)}
+              {refreshing && (
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
+              )}
+            </span>
           )}
         </div>
       )}
@@ -712,11 +766,13 @@ function ResolveForm({
 function ThesisCard({
   thesis,
   mark,
+  refreshing,
   onResolved,
   onDeleted,
 }: {
   thesis: Thesis;
   mark?: ThesisMarkRead | "loading" | "error";
+  refreshing?: boolean;
   onResolved: (t: Thesis) => void;
   onDeleted: (id: string) => void;
 }) {
@@ -791,7 +847,7 @@ function ThesisCard({
       )}
 
       {/* ── Option P&L headline ────────────────────────────────────────── */}
-      <OptionPnlSection thesis={thesis} mark={mark} />
+      <OptionPnlSection thesis={thesis} mark={mark} refreshing={refreshing} />
 
       {/* ── Compact fact row ───────────────────────────────────────────── */}
       <div className="flex items-center gap-3 text-sm flex-wrap text-muted-foreground">
@@ -938,13 +994,19 @@ function ThesisCard({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+const POLL_INTERVAL_MS = 60_000; // 60s — aligns with the 45s chain cache TTL; most polls are cache hits
+
 export default function ThesesPage() {
   const [theses, setTheses] = useState<Thesis[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "resolved">("all");
   const [marks, setMarks] = useState<Record<string, ThesisMarkRead | "loading" | "error">>({});
+  const [refreshing, setRefreshing] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
   const markRequested = useRef<Set<string>>(new Set());
+  // Stable ref so the polling closure always reads the current thesis list
+  const thesesRef = useRef<Thesis[]>([]);
+  useEffect(() => { thesesRef.current = theses; }, [theses]);
 
   // Initial load
   useEffect(() => {
@@ -955,6 +1017,60 @@ export default function ThesesPage() {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
+
+  // Live re-mark polling for open positions during market hours.
+  // Runs every 60s; pauses when the tab is hidden; resumes immediately on focus.
+  useEffect(() => {
+    const pollAll = () => {
+      // Only poll during US market hours (America/New_York, Mon-Fri 09:30-16:00 ET).
+      // Outside hours the last mark remains visible with its as_of timestamp, which is honest.
+      if (!isMarketHours()) return;
+      if (document.hidden) return;
+
+      const targets = thesesRef.current.filter(
+        t => (t.status === "open" || t.status === "needs_manual_resolution") && t.option_type
+      );
+      if (targets.length === 0) return;
+
+      // All open positions fire simultaneously — a single batch per interval.
+      // Same-symbol+expiration hits share the 45s chain cache, so only the first
+      // request in a batch actually calls yfinance; the rest are in-process cache hits.
+      const ids = targets.map(t => t.id);
+      setRefreshing(new Set(ids));
+
+      Promise.all(
+        ids.map(id =>
+          api.theses.mark(id)
+            .then(data => ({ id, data, ok: true as const }))
+            .catch(() => ({ id, data: null, ok: false as const }))
+        )
+      ).then(results => {
+        setMarks(prev => {
+          const next = { ...prev };
+          for (const r of results) {
+            if (r.ok && r.data) next[r.id] = r.data;
+            // On transient error: keep the previous value rather than flipping to "error"
+          }
+          return next;
+        });
+        setRefreshing(new Set());
+      });
+    };
+
+    pollAll(); // fire immediately on mount; don't wait up to 60s for the first tick
+    const interval = setInterval(pollAll, POLL_INTERVAL_MS);
+
+    // Pause when tab hides; poll immediately when it comes back into focus
+    const onVisibilityChange = () => {
+      if (!document.hidden) pollAll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []); // intentionally stable — reads current theses via thesesRef
 
   // Progressive mark loading for open theses with option legs
   useEffect(() => {
@@ -1072,6 +1188,7 @@ export default function ThesesPage() {
                 key={thesis.id}
                 thesis={thesis}
                 mark={thesis.status !== "resolved" ? marks[thesis.id] : undefined}
+                refreshing={refreshing.has(thesis.id)}
                 onResolved={handleResolved}
                 onDeleted={handleDeleted}
               />
