@@ -11,6 +11,7 @@ import {
   type Thesis,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { TrendingUp, TrendingDown } from "lucide-react";
 
 // ── Step header ────────────────────────────────────────────────────────────────
 
@@ -557,13 +558,7 @@ export default function BuildTradePage() {
                       : "border-border hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/10",
                   )}
                 >
-                  {/* Bull head — horns + round head + wide muzzle, currentColor */}
-                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="w-9 h-9 mx-auto mb-2">
-                    <path d="M5 10 C4 6 2 3 1 1 C3 1 6 5 8 10 Z" />
-                    <path d="M19 10 C20 6 22 3 23 1 C21 1 18 5 16 10 Z" />
-                    <circle cx="12" cy="13" r="7" />
-                    <ellipse cx="12" cy="19" rx="5" ry="3" />
-                  </svg>
+                  <TrendingUp aria-hidden="true" className="w-9 h-9 mx-auto mb-2" strokeWidth={1.75} />
                   <div className="text-base font-bold">Bullish</div>
                   <div className="text-xs opacity-60 mt-1">expecting it to rise</div>
                 </button>
@@ -578,13 +573,7 @@ export default function BuildTradePage() {
                       : "border-border hover:border-red-300 hover:bg-red-50/40 dark:hover:border-red-700 dark:hover:bg-red-900/10",
                   )}
                 >
-                  {/* Bear head — round ears + round head + wide muzzle, currentColor */}
-                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="w-9 h-9 mx-auto mb-2">
-                    <circle cx="7" cy="6" r="3.5" />
-                    <circle cx="17" cy="6" r="3.5" />
-                    <circle cx="12" cy="13.5" r="7.5" />
-                    <ellipse cx="12" cy="19" rx="4.5" ry="3" />
-                  </svg>
+                  <TrendingDown aria-hidden="true" className="w-9 h-9 mx-auto mb-2" strokeWidth={1.75} />
                   <div className="text-base font-bold">Bearish</div>
                   <div className="text-xs opacity-60 mt-1">expecting it to fall</div>
                 </button>
