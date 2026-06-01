@@ -3,12 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import events, historical_reactions, research_notes, system, tickers, watchlists, thesis
+from app.startup import lifespan
 
 app = FastAPI(
     title="Alert Interface API",
     description="Personal finance research tool — catalyst panel, watchlists, AI research.",
     version="0.1.0",
     debug=settings.debug,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
