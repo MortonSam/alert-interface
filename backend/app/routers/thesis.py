@@ -26,6 +26,7 @@ from app.schemas.thesis import (
 )
 from app.services.anthropic_client import AnthropicClient
 from app.services.finnhub_client import FinnhubClient
+from app.services.options_cache import fetch_chain
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/theses", tags=["theses"])
@@ -159,10 +160,12 @@ async def _compute_option_mark(
         else:
             mark_note = f"Expired {exp_date.isoformat()} — could not fetch stock price for intrinsic"
     else:
-        # Fetch live chain
+        # Fetch live chain (cached)
         exp_str = exp_date.isoformat()
         try:
-            chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, exp_str)
+            chain_entry = await fetch_chain(sym, exp_str, loop)
+            chain = chain_entry.chain
+            as_of = chain_entry.fetched_at.isoformat()
         except Exception as exc:
             mark_note = f"Chain fetch failed: {exc}"
             chain = {"calls": [], "puts": []}

@@ -18,6 +18,7 @@ from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
+from app.services.options_cache import fetch_chain
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
@@ -357,7 +358,9 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             chosen_exp = expirations[0]
         data_quality_note = "No earnings date found; using nearest weekly expiration."
 
-    chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+    chain_entry = await fetch_chain(sym, chosen_exp, loop)
+    chain = chain_entry.chain
+    as_of = chain_entry.fetched_at.isoformat()
 
     calls = chain.get("calls", [])
     puts = chain.get("puts", [])
@@ -466,7 +469,9 @@ async def get_options_chain(
         )
 
     chosen = expiration if (expiration and expiration in available) else available[0]
-    chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen)
+    chain_entry = await fetch_chain(sym, chosen, loop)
+    chain = chain_entry.chain
+    as_of = chain_entry.fetched_at.isoformat()
 
     calls_raw = chain.get("calls", [])
     puts_raw = chain.get("puts", [])
@@ -553,7 +558,9 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         week_out = (today + timedelta(days=7)).isoformat()
         chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
 
-    chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+    chain_entry = await fetch_chain(sym, chosen_exp, loop)
+    chain = chain_entry.chain
+    as_of = chain_entry.fetched_at.isoformat()
     calls_raw = chain.get("calls", [])
     puts_raw  = chain.get("puts",  [])
 
