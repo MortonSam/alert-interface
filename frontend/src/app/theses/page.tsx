@@ -722,6 +722,7 @@ function ThesisCard({
 }) {
   const [resolving, setResolving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [reflectionOpen, setReflectionOpen] = useState(false);
 
@@ -732,11 +733,19 @@ function ThesisCard({
   async function handleDelete() {
     if (!confirm(`Delete thesis for ${thesis.ticker_symbol}?`)) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       await api.theses.delete(thesis.id);
       onDeleted(thesis.id);
-    } catch {
-      setDeleting(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // 404 means it's already gone — remove from UI anyway
+      if (msg.includes("404")) {
+        onDeleted(thesis.id);
+      } else {
+        setDeleting(false);
+        setDeleteError(msg);
+      }
     }
   }
 
@@ -776,6 +785,10 @@ function ThesisCard({
           Delete
         </button>
       </div>
+
+      {deleteError && (
+        <p className="text-xs text-destructive">Delete failed: {deleteError}</p>
+      )}
 
       {/* ── Option P&L headline ────────────────────────────────────────── */}
       <OptionPnlSection thesis={thesis} mark={mark} />
