@@ -98,6 +98,24 @@ class ThesisMarkRead(BaseModel):
     as_of: str                          # ISO UTC timestamp
 
 
+class ThesisStockMarkRead(BaseModel):
+    """Live price mark for a stock-only thesis (no option leg).
+
+    Separate from ThesisMarkRead — stock theses are tracked against the live
+    quote, not the option chain.  The two mark types must never be mixed.
+    """
+    thesis_id: uuid.UUID
+    current_price: float | None
+    entry_price: float | None
+    price_target: float | None
+    pct_from_entry: float | None        # signed %, e.g. +0.96 or -2.1
+    pct_to_target: float | None         # 0–100+ (% of the way; can exceed 100 if past target)
+    verdict: str | None                 # "on_track" | "reversed" | "target_hit"
+    direction: str
+    as_of: str                          # ISO UTC timestamp
+    auto_resolved: bool = False         # True if this call triggered auto-resolution
+
+
 class ThesisDraftRequest(BaseModel):
     symbol: str
     direction: str                        # bullish | bearish

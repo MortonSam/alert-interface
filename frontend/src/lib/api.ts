@@ -382,6 +382,20 @@ export interface ThesisDraftRead {
   generated_at: string;
 }
 
+export interface ThesisStockMarkRead {
+  /** Live price mark for a stock-only thesis (no option leg). */
+  thesis_id: string;
+  current_price: number | null;
+  entry_price: number | null;
+  price_target: number | null;
+  pct_from_entry: number | null;   // signed %, e.g. +0.96 or -2.1
+  pct_to_target: number | null;    // 0–100+ (% of the way to target; can exceed 100)
+  verdict: "on_track" | "reversed" | "target_hit" | null;
+  direction: string;
+  as_of: string;
+  auto_resolved: boolean;
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -503,6 +517,8 @@ export const api = {
       request<ThesisDraftRead>("/theses/draft", { method: "POST", body: JSON.stringify(data) }),
     mark: (id: string) =>
       request<ThesisMarkRead>(`/theses/${id}/mark`),
+    stockMark: (id: string) =>
+      request<ThesisStockMarkRead>(`/theses/${id}/stock-mark`),
   },
 
   reactions: {

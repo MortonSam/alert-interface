@@ -8,6 +8,7 @@ import {
   type ThesisCreate,
   type ThesisDraftRead,
   type ThesisMarkRead,
+  type ThesisStockMarkRead,
   type ThesisResolve,
   type SelfGrade,
 } from "@/lib/api";
@@ -218,6 +219,93 @@ function OptionPnlSection({
   );
 }
 
+// ── Stock price mark (for theses with no option leg) ──────────────────────────
+
+const VERDICT_COLOR: Record<string, string> = {
+  on_track:   "text-emerald-600 dark:text-emerald-400",
+  reversed:   "text-red-500 dark:text-red-400",
+  target_hit: "text-emerald-700 dark:text-emerald-300 font-semibold",
+};
+const VERDICT_LABEL: Record<string, string> = {
+  on_track:   "On track",
+  reversed:   "Reversed",
+  target_hit: "Target hit",
+};
+
+function StockPriceMark({
+  thesis,
+  mark,
+  refreshing,
+}: {
+  thesis: Thesis;
+  mark?: ThesisStockMarkRead | "loading" | "error";
+  refreshing?: boolean;
+}) {
+  // Only renders for open stock-only theses — option theses use OptionPnlSection.
+  if (thesis.option_type) return null;
+  if (thesis.status === "resolved") return null;
+
+  if (!mark || mark === "error") return null;
+
+  if (mark === "loading") {
+    return (
+      <div className="mt-2 mb-1">
+        <div className="h-5 bg-muted rounded w-44 animate-pulse" />
+      </div>
+    );
+  }
+
+  const { verdict, pct_from_entry, pct_to_target, current_price, as_of } = mark;
+
+  const pctSign  = pct_from_entry != null && pct_from_entry >= 0 ? "+" : "";
+  const pctColor =
+    pct_from_entry == null       ? "text-muted-foreground" :
+    pct_from_entry > 0           ? "text-emerald-600 dark:text-emerald-400" :
+    pct_from_entry < 0           ? "text-red-500 dark:text-red-400" :
+                                   "text-foreground";
+
+  // Clamp display to 0–100% so "−5% to target" doesn't mislead
+  const pctToDisplay =
+    pct_to_target != null
+      ? Math.max(0, Math.min(100, pct_to_target)).toFixed(0)
+      : null;
+
+  return (
+    <div className="mt-2 mb-1 space-y-0.5">
+      {/* Headline: current price + % from entry */}
+      <div className="flex items-center gap-2 flex-wrap text-sm">
+        {current_price != null && (
+          <span className="font-medium text-foreground">${current_price.toFixed(2)}</span>
+        )}
+        {pct_from_entry != null && (
+          <span className={pctColor}>
+            {pctSign}{pct_from_entry.toFixed(2)}% from entry
+          </span>
+        )}
+        {pctToDisplay != null && (
+          <span className="text-muted-foreground text-xs">
+            · {pctToDisplay}% to target
+          </span>
+        )}
+      </div>
+      {/* Verdict + as-of timestamp */}
+      <div className="flex items-center gap-2 text-xs">
+        {verdict && (
+          <span className={VERDICT_COLOR[verdict] ?? "text-muted-foreground"}>
+            {VERDICT_LABEL[verdict] ?? verdict}
+          </span>
+        )}
+        <span className="text-muted-foreground flex items-center gap-1">
+          as of {fmtAsOf(as_of)}
+          {refreshing && (
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ── Draft panel ───────────────────────────────────────────────────────────────
 
 interface OptionLegDraft {
@@ -311,7 +399,9 @@ function DraftPanel({
         onClick={handleAccept}
         className="rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors"
       >
-        Accept → fill target, reasoning &amp; option leg
+        {draft.suggested_strike != null
+          ? "Accept → fill target, reasoning & option leg"
+          : "Accept → fill target & reasoning"}
       </button>
     </div>
   );
@@ -766,12 +856,14 @@ function ResolveForm({
 function ThesisCard({
   thesis,
   mark,
+  stockMark,
   refreshing,
   onResolved,
   onDeleted,
 }: {
   thesis: Thesis;
   mark?: ThesisMarkRead | "loading" | "error";
+  stockMark?: ThesisStockMarkRead | "loading" | "error";
   refreshing?: boolean;
   onResolved: (t: Thesis) => void;
   onDeleted: (id: string) => void;
@@ -846,8 +938,11 @@ function ThesisCard({
         <p className="text-xs text-destructive">Delete failed: {deleteError}</p>
       )}
 
-      {/* ── Option P&L headline ────────────────────────────────────────── */}
+      {/* ── Option P&L headline (option theses only) ───────────────────── */}
       <OptionPnlSection thesis={thesis} mark={mark} refreshing={refreshing} />
+
+      {/* ── Stock price mark (stock-only theses, open) ─────────────────── */}
+      <StockPriceMark thesis={thesis} mark={stockMark} refreshing={refreshing} />
 
       {/* ── Compact fact row ───────────────────────────────────────────── */}
       <div className="flex items-center gap-3 text-sm flex-wrap text-muted-foreground">
@@ -1001,9 +1096,12 @@ export default function ThesesPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "resolved">("all");
   const [marks, setMarks] = useState<Record<string, ThesisMarkRead | "loading" | "error">>({});
+  const [stockMarks, setStockMarks] = useState<Record<string, ThesisStockMarkRead | "loading" | "error">>({});
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set());
+  const [stockRefreshing, setStockRefreshing] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
   const markRequested = useRef<Set<string>>(new Set());
+  const stockMarkRequested = useRef<Set<string>>(new Set());
   // Stable ref so the polling closure always reads the current thesis list
   const thesesRef = useRef<Thesis[]>([]);
   useEffect(() => { thesesRef.current = theses; }, [theses]);
@@ -1089,34 +1187,114 @@ export default function ThesesPage() {
     }
   }, [theses]);
 
+  // Progressive mark loading for open stock-only theses (separate from option path)
+  useEffect(() => {
+    const openStockTheses = theses.filter(
+      t => (t.status === "open" || t.status === "needs_manual_resolution") && !t.option_type
+    );
+    const newOnes = openStockTheses.filter(t => !stockMarkRequested.current.has(t.id));
+    if (newOnes.length === 0) return;
+
+    for (const t of newOnes) {
+      stockMarkRequested.current.add(t.id);
+      setStockMarks(prev => ({ ...prev, [t.id]: "loading" }));
+      api.theses.stockMark(t.id)
+        .then(data => {
+          setStockMarks(prev => ({ ...prev, [t.id]: data }));
+          // Auto-resolution happened server-side — refresh thesis list so the
+          // card transitions from open to resolved without a page reload.
+          if (data.auto_resolved) {
+            api.theses.list().then(fresh => setTheses(fresh)).catch(() => null);
+          }
+        })
+        .catch(() => setStockMarks(prev => ({ ...prev, [t.id]: "error" })));
+    }
+  }, [theses]);
+
+  // Live re-mark polling for open stock-only theses during market hours.
+  // Mirrors the option polling effect but is fully independent — touches only
+  // stockMarks / stockRefreshing, never the option mark state.
+  useEffect(() => {
+    const pollStockAll = () => {
+      if (!isMarketHours()) return;
+      if (document.hidden) return;
+
+      const targets = thesesRef.current.filter(
+        t => (t.status === "open" || t.status === "needs_manual_resolution") && !t.option_type
+      );
+      if (targets.length === 0) return;
+
+      const ids = targets.map(t => t.id);
+      setStockRefreshing(new Set(ids));
+
+      Promise.all(
+        ids.map(id =>
+          api.theses.stockMark(id)
+            .then(data => ({ id, data, ok: true as const }))
+            .catch(() => ({ id, data: null, ok: false as const }))
+        )
+      ).then(results => {
+        let anyAutoResolved = false;
+        setStockMarks(prev => {
+          const next = { ...prev };
+          for (const r of results) {
+            if (r.ok && r.data) {
+              next[r.id] = r.data;
+              if (r.data.auto_resolved) anyAutoResolved = true;
+            }
+            // On transient error: keep the previous value (same policy as option polling)
+          }
+          return next;
+        });
+        setStockRefreshing(new Set());
+        if (anyAutoResolved) {
+          api.theses.list().then(fresh => setTheses(fresh)).catch(() => null);
+        }
+      });
+    };
+
+    pollStockAll();
+    const interval = setInterval(pollStockAll, POLL_INTERVAL_MS);
+    const onVisibilityChange = () => { if (!document.hidden) pollStockAll(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []); // intentionally stable — reads current theses via thesesRef
+
   function handleCreated(t: Thesis) {
     setTheses(prev => [t, ...prev]);
-    if (t.option_type && !markRequested.current.has(t.id)) {
-      markRequested.current.add(t.id);
-      setMarks(prev => ({ ...prev, [t.id]: "loading" }));
-      api.theses.mark(t.id)
-        .then(data => setMarks(prev => ({ ...prev, [t.id]: data })))
-        .catch(() => setMarks(prev => ({ ...prev, [t.id]: "error" })));
+    if (t.option_type) {
+      if (!markRequested.current.has(t.id)) {
+        markRequested.current.add(t.id);
+        setMarks(prev => ({ ...prev, [t.id]: "loading" }));
+        api.theses.mark(t.id)
+          .then(data => setMarks(prev => ({ ...prev, [t.id]: data })))
+          .catch(() => setMarks(prev => ({ ...prev, [t.id]: "error" })));
+      }
+    } else {
+      if (!stockMarkRequested.current.has(t.id)) {
+        stockMarkRequested.current.add(t.id);
+        setStockMarks(prev => ({ ...prev, [t.id]: "loading" }));
+        api.theses.stockMark(t.id)
+          .then(data => setStockMarks(prev => ({ ...prev, [t.id]: data })))
+          .catch(() => setStockMarks(prev => ({ ...prev, [t.id]: "error" })));
+      }
     }
   }
 
   function handleResolved(updated: Thesis) {
     setTheses(prev => prev.map(t => t.id === updated.id ? updated : t));
-    // Resolved cards use stored pnl — remove from live marks dict
-    setMarks(prev => {
-      const next = { ...prev };
-      delete next[updated.id];
-      return next;
-    });
+    // Resolved cards use stored outcome — remove from both live-mark dicts
+    setMarks(prev => { const next = { ...prev }; delete next[updated.id]; return next; });
+    setStockMarks(prev => { const next = { ...prev }; delete next[updated.id]; return next; });
   }
 
   function handleDeleted(id: string) {
     setTheses(prev => prev.filter(t => t.id !== id));
-    setMarks(prev => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    setMarks(prev => { const next = { ...prev }; delete next[id]; return next; });
+    setStockMarks(prev => { const next = { ...prev }; delete next[id]; return next; });
   }
 
   const filtered = theses.filter(t => {
@@ -1188,7 +1366,8 @@ export default function ThesesPage() {
                 key={thesis.id}
                 thesis={thesis}
                 mark={thesis.status !== "resolved" ? marks[thesis.id] : undefined}
-                refreshing={refreshing.has(thesis.id)}
+                stockMark={thesis.status !== "resolved" ? stockMarks[thesis.id] : undefined}
+                refreshing={refreshing.has(thesis.id) || stockRefreshing.has(thesis.id)}
                 onResolved={handleResolved}
                 onDeleted={handleDeleted}
               />

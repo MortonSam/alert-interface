@@ -23,6 +23,7 @@ from app.schemas.thesis import (
     ThesisMarkRead,
     ThesisRead,
     ThesisResolve,
+    ThesisStockMarkRead,
 )
 from app.services.anthropic_client import AnthropicClient
 from app.services.finnhub_client import FinnhubClient
@@ -664,6 +665,133 @@ async def mark_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) 
 
     loop = asyncio.get_event_loop()
     return await _compute_option_mark(thesis, loop)
+
+
+@router.get("/{thesis_id}/stock-mark", response_model=ThesisStockMarkRead)
+async def stock_mark_thesis(
+    thesis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ThesisStockMarkRead:
+    """Compute live price mark for a stock-only thesis (no option leg).
+
+    Marks against the live Finnhub quote — never the options chain.
+
+    If the thesis is past its target_date and still open, auto-resolves it in
+    the same request using the live price.  Sets status to RESOLVED (with
+    target_reached and direction_correct) or NEEDS_MANUAL_RESOLUTION if the
+    price fetch fails.  The frontend should refresh the thesis list when
+    auto_resolved is True.
+
+    Returns 400 for option theses — those use GET /mark instead.
+    """
+    result = await db.execute(
+        select(Thesis).options(selectinload(Thesis.ticker)).where(Thesis.id == thesis_id)
+    )
+    thesis = result.scalar_one_or_none()
+    if not thesis:
+        raise HTTPException(status_code=404, detail="Thesis not found")
+    if thesis.option_type:
+        raise HTTPException(
+            status_code=400,
+            detail="This thesis has an option leg — use GET /theses/{id}/mark instead.",
+        )
+
+    sym   = thesis.ticker.symbol
+    as_of = datetime.now(tz=timezone.utc).isoformat()
+
+    # ── Fetch live stock price (separate from option chain) ────────────────────
+    current_price: float | None = None
+    finnhub = FinnhubClient()
+    try:
+        quote = await finnhub.get_quote(sym)
+        p = quote.get("c")
+        if p and float(p) > 0:
+            current_price = float(p)
+    except Exception:
+        pass
+    finally:
+        await finnhub.close()
+
+    entry  = float(thesis.entry_price)  if thesis.entry_price  else None
+    target = float(thesis.price_target) if thesis.price_target else None
+
+    # ── Compute price progress metrics ─────────────────────────────────────────
+    pct_from_entry: float | None = None
+    pct_to_target:  float | None = None
+    verdict:        str | None   = None
+
+    if current_price is not None and entry is not None:
+        pct_from_entry = (current_price - entry) / entry * 100
+
+        # pct_to_target: fraction of the way from entry to target (signed).
+        # Negative means moving in the wrong direction.
+        if target is not None and target != entry:
+            pct_to_target = (current_price - entry) / (target - entry) * 100
+
+        direction = thesis.direction
+        if direction == "bullish":
+            if target is not None and current_price >= target:
+                verdict = "target_hit"
+            elif current_price >= entry:   # flat at entry counts as "on track" (not yet reversed)
+                verdict = "on_track"
+            else:
+                verdict = "reversed"
+        elif direction == "bearish":
+            if target is not None and current_price <= target:
+                verdict = "target_hit"
+            elif current_price <= entry:   # flat at entry counts as "on track"
+                verdict = "on_track"
+            else:
+                verdict = "reversed"
+        # neutral: no directional verdict
+
+    # ── Auto-resolve if past target_date and still open ────────────────────────
+    auto_resolved = False
+    if thesis.status == ThesisStatus.OPEN and thesis.target_date < date.today():
+        if current_price is not None and entry is not None:
+            direction_correct: bool | None = None
+            target_reached:    bool | None = None
+
+            direction = thesis.direction
+            if direction == "bullish":
+                direction_correct = current_price > entry
+                target_reached    = bool(target is not None and current_price >= target)
+            elif direction == "bearish":
+                direction_correct = current_price < entry
+                target_reached    = bool(target is not None and current_price <= target)
+            else:  # neutral — stayed within ±5%
+                pct_chg           = abs(current_price - entry) / entry if entry else 0
+                direction_correct = pct_chg <= 0.05
+                target_reached    = (
+                    bool(target is not None and abs(current_price - entry) <= abs(target - entry))
+                )
+
+            thesis.status              = ThesisStatus.RESOLVED
+            thesis.resolved_at         = datetime.now(timezone.utc)
+            thesis.price_at_resolution = current_price   # SQLAlchemy converts float → Numeric
+            thesis.direction_correct   = direction_correct
+            thesis.target_reached      = target_reached
+            await db.commit()
+            auto_resolved = True
+        else:
+            # Price unavailable — flag for manual resolution so the user can
+            # enter the final price themselves via the resolve form.
+            thesis.status = ThesisStatus.NEEDS_MANUAL_RESOLUTION
+            await db.commit()
+            auto_resolved = True
+
+    return ThesisStockMarkRead(
+        thesis_id=thesis.id,
+        current_price=current_price,
+        entry_price=entry,
+        price_target=target,
+        pct_from_entry=round(pct_from_entry, 2) if pct_from_entry is not None else None,
+        pct_to_target=round(pct_to_target,  1) if pct_to_target  is not None else None,
+        verdict=verdict,
+        direction=thesis.direction,
+        as_of=as_of,
+        auto_resolved=auto_resolved,
+    )
 
 
 @router.get("/{thesis_id}", response_model=ThesisRead)
