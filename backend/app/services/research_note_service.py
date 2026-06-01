@@ -203,6 +203,7 @@ def _build_verification_prompt(
     filing: dict | None,
     sections: dict | None,
     reactions: list[HistoricalReaction],
+    ticker: "Ticker",
 ) -> str:
     if filing and sections:
         mda   = sections.get("mda", "").strip()
@@ -219,6 +220,16 @@ def _build_verification_prompt(
     stats = _precompute_stats(reactions)
     stats_block = _stats_block(stats)
 
+    # Mirror the ticker metadata block the generation prompt injects so the
+    # verifier can mark those claims supported rather than unsupported.
+    ticker_block = (
+        f"SYMBOL: {ticker.symbol}\n"
+        f"NAME: {ticker.name or ticker.symbol}\n"
+        f"SECTOR: {ticker.sector or 'N/A'}\n"
+        f"INDUSTRY: {ticker.industry or 'N/A'}\n"
+        f"MARKET CAP: {_format_market_cap(ticker.market_cap)}"
+    )
+
     return f"""\
 You are a rigorous fact-checker for financial research notes. Verify every factual claim in the note below against the provided evidence sources ONLY.
 
@@ -228,17 +239,21 @@ EVIDENCE SOURCE 1 — SEC FILING TEXT:
 EVIDENCE SOURCE 2 — PRECOMPUTED STATISTICS (these are ground truth for all numerical earnings claims):
 {stats_block}
 
+EVIDENCE SOURCE 3 — TICKER METADATA (live data from the application database injected at generation time):
+{ticker_block}
+
 NOTE TO VERIFY:
 {note_content}
 
 CLASSIFICATION RULES:
-- "supported": The claim is directly and specifically confirmed by the filing text or precomputed stats. Quote the specific supporting text in "evidence".
+- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, or ticker metadata. Quote the specific supporting text in "evidence".
 - "unsupported": The claim is plausible but cannot be confirmed from the provided sources (e.g. drawn from general knowledge, an estimate, or an inference not in the sources). Explain why in "evidence".
-- "contradicted": The claim directly conflicts with the filing text or precomputed stats. Quote the contradiction in "evidence".
+- "contradicted": The claim directly conflicts with the filing text, precomputed stats, or ticker metadata. Quote the contradiction in "evidence".
 
 STRICT RULES:
 - Bias toward "unsupported" when in doubt — do NOT use outside knowledge to mark something "supported".
 - The precomputed stats are the sole ground truth for beat/miss/meet counts, averages, and all move percentages.
+- Ticker metadata (symbol, name, sector, industry, market cap) is ground truth for those fields.
 - Check every specific number, statistic, date, product name, and factual assertion.
 - Skip purely subjective or stylistic phrases that contain no verifiable facts.
 - The summary counts must exactly equal the number of claims in the claims array.
@@ -286,9 +301,10 @@ async def _run_verification(
     filing: dict | None,
     sections: dict | None,
     reactions: list[HistoricalReaction],
+    ticker: "Ticker",
 ) -> tuple[dict, str]:
     """Call Opus to verify the note. Returns (verification_dict, model_used)."""
-    prompt = _build_verification_prompt(note_content, filing, sections, reactions)
+    prompt = _build_verification_prompt(note_content, filing, sections, reactions, ticker)
     client = AnthropicClient()
     raw = await client.verify_research_note(prompt)
 
@@ -356,7 +372,7 @@ async def generate_research_note(
     verified_at_dt: datetime | None = None
     try:
         verification, verification_model = await _run_verification(
-            gen["content"], filing, sections, reactions
+            gen["content"], filing, sections, reactions, ticker
         )
         verified_at_dt = datetime.now(timezone.utc)
     except Exception as exc:
@@ -432,7 +448,7 @@ async def verify_existing_note(
     filing, sections, reactions = await _fetch_context(db, ticker)
     try:
         verification, verification_model = await _run_verification(
-            note.content, filing, sections, reactions
+            note.content, filing, sections, reactions, ticker
         )
     except Exception as exc:
         raise HTTPException(
