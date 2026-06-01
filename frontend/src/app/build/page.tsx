@@ -141,6 +141,33 @@ function DraftDisplay({
 }) {
   const fb = draft.fact_block;
 
+  // ── Cost / risk — computed from structured primary_strikes, never from prose ─
+  const isSpread = draft.suggested_spread_strike != null;
+  const leg1Mid: number | null = draft.suggested_strike != null
+    ? (fb.primary_strikes.find((r) => r.strike === draft.suggested_strike)?.mid ?? null)
+    : null;
+  const leg2Mid: number | null = draft.suggested_spread_strike != null
+    ? (fb.primary_strikes.find((r) => r.strike === draft.suggested_spread_strike)?.mid ?? null)
+    : null;
+  const netDebit: number | null =
+    isSpread && leg1Mid != null && leg2Mid != null ? leg1Mid - leg2Mid : null;
+  const spreadWidth: number | null =
+    draft.suggested_strike != null && draft.suggested_spread_strike != null
+      ? Math.abs(draft.suggested_spread_strike - draft.suggested_strike)
+      : null;
+  // Single leg: cost = premium × 100. Spread: cost = net debit × 100.
+  const costPerContract: number | null = isSpread
+    ? (netDebit != null ? netDebit * 100 : null)
+    : (leg1Mid != null ? leg1Mid * 100 : null);
+  const maxLossPerContract: number | null = costPerContract; // identical for both structures
+  // Spread max gain = (width − net debit) × 100. Long put = (strike − premium) × 100.
+  // Long call max gain is unlimited — handled in JSX.
+  const maxGainPerContract: number | null = isSpread
+    ? (spreadWidth != null && netDebit != null ? (spreadWidth - netDebit) * 100 : null)
+    : draft.direction === "bearish" && draft.suggested_strike != null && leg1Mid != null
+      ? (draft.suggested_strike - leg1Mid) * 100
+      : null;
+
   function handleAccept() {
     const hasStrike = draft.suggested_strike != null;
     const hasSpread = draft.suggested_spread_strike != null;
@@ -227,6 +254,49 @@ function DraftDisplay({
         <span>ATM IV: <span className="text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "—"}%</span></span>
         <span>RV rank: <span className="text-foreground">{fb.rv_rank?.toFixed(0) ?? "—"}/100</span></span>
       </div>
+
+      {/* ── Cost / risk block — shown only when a strike is suggested ────────── */}
+      {draft.suggested_strike != null && (
+        <div className="rounded-lg border-2 border-border bg-card px-5 py-4 space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Position cost &amp; risk · per contract
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Cost to enter</p>
+              <p className="text-xl font-bold tabular-nums">
+                {costPerContract != null ? `$${Math.round(costPerContract)}` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Max loss</p>
+              <p className="text-xl font-bold tabular-nums text-red-600 dark:text-red-400">
+                {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Max gain</p>
+              <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {isSpread
+                  ? (maxGainPerContract != null ? `$${Math.round(maxGainPerContract)}` : "—")
+                  : draft.direction === "bullish"
+                  ? "Unlimited"
+                  : (maxGainPerContract != null ? `$${Math.round(maxGainPerContract)}` : "—")}
+              </p>
+            </div>
+          </div>
+          {isSpread && netDebit != null && spreadWidth != null && (
+            <p className="text-xs text-muted-foreground">
+              Net debit ${netDebit.toFixed(2)} · spread width ${spreadWidth.toFixed(0)}
+            </p>
+          )}
+          {leg1Mid == null && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Cost unavailable — strike not found in current chain data
+            </p>
+          )}
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground italic">
         Data-grounded suggestion — not a recommendation. Review carefully before saving.
