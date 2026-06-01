@@ -807,10 +807,18 @@ function ThesisCard({
 
       {/* ── Option entry details (when tracked) ───────────────────────── */}
       {thesis.entry_premium && (
-        <p className="text-xs text-muted-foreground">
-          Option entry: <span className="text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
-          {thesis.contracts > 1 && ` · ${thesis.contracts} contracts`}
-        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="text-xs text-muted-foreground">
+            Option entry: <span className="text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
+            {thesis.contracts > 1 && ` · ${thesis.contracts} contracts`}
+          </p>
+          <Link
+            href={`/theses/${thesis.id}`}
+            className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            Simulate →
+          </Link>
+        </div>
       )}
 
       {/* ── Collapsible reasoning ──────────────────────────────────────── */}
