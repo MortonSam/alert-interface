@@ -8,6 +8,7 @@ import {
   type Ticker,
   type TickerQuote,
   type ThesisDraftRead,
+  type ThesisDraftAlternativeRead,
   type ThesisCreate,
   type Thesis,
 } from "@/lib/api";
@@ -168,6 +169,47 @@ function DraftDisplay({
       ? (draft.suggested_strike - leg1Mid) * 100
       : null;
 
+  // ── Budget alternative — local state, on-demand only ─────────────────────
+  const [altOpen, setAltOpen] = useState(false);
+  const [altBudgetInput, setAltBudgetInput] = useState("");
+  const [altLoading, setAltLoading] = useState(false);
+  const [altResult, setAltResult] = useState<ThesisDraftAlternativeRead | null>(null);
+  const [altError, setAltError] = useState(false);
+
+  const altBudgetParsed = parseFloat(altBudgetInput);
+  const altBudgetValid =
+    altBudgetInput.trim() !== "" && Number.isFinite(altBudgetParsed) && altBudgetParsed > 0;
+
+  function resetAlt() {
+    setAltOpen(false);
+    setAltBudgetInput("");
+    setAltResult(null);
+    setAltError(false);
+  }
+
+  async function handleGenerateAlternative() {
+    if (!altBudgetValid || costPerContract == null || draft.suggested_strike == null) return;
+    setAltLoading(true);
+    setAltResult(null);
+    setAltError(false);
+    try {
+      const result = await api.theses.draftAlternative({
+        symbol: draft.symbol,
+        direction: draft.direction as "bullish" | "bearish",
+        aggressiveness: draft.aggressiveness as "conservative" | "moderate" | "aggressive",
+        budget: altBudgetParsed,
+        best_strike: draft.suggested_strike,
+        best_spread_strike: draft.suggested_spread_strike ?? null,
+        best_cost: costPerContract,
+      });
+      setAltResult(result);
+    } catch {
+      setAltError(true);
+    } finally {
+      setAltLoading(false);
+    }
+  }
+
   function handleAccept() {
     const hasStrike = draft.suggested_strike != null;
     const hasSpread = draft.suggested_spread_strike != null;
@@ -294,6 +336,113 @@ function DraftDisplay({
             <p className="text-xs text-amber-600 dark:text-amber-400">
               Cost unavailable — strike not found in current chain data
             </p>
+          )}
+        </div>
+      )}
+
+      {/* ── Budget alternative trigger + panel ────────────────────────────── */}
+      {costPerContract != null && (
+        <div className="space-y-3">
+          {!altOpen ? (
+            <button
+              type="button"
+              onClick={() => setAltOpen(true)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Too expensive? See an affordable alternative →
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-muted-foreground shrink-0">Budget ($)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={altBudgetInput}
+                  onChange={(e) => {
+                    setAltBudgetInput(e.target.value);
+                    setAltResult(null);
+                    setAltError(false);
+                  }}
+                  placeholder="e.g. 2000"
+                  className="w-32 rounded-lg border bg-background px-3 py-1.5 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleGenerateAlternative}
+                  disabled={altLoading || !altBudgetValid}
+                  className="rounded-lg border bg-muted text-foreground px-4 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-50"
+                >
+                  {altLoading ? "Generating…" : "Generate alternative"}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetAlt}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Error state */}
+              {altError && (
+                <p className="text-xs text-muted-foreground">
+                  Couldn&apos;t generate an alternative — try again.
+                </p>
+              )}
+
+              {/* fits=true — affordable alternative found */}
+              {altResult?.fits && (
+                <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 space-y-2.5">
+                  <p className="text-sm font-semibold text-foreground">
+                    Affordable alternative
+                    <span className="ml-1.5 font-normal text-muted-foreground">· cheaper option, with tradeoffs</span>
+                  </p>
+                  <div className="flex items-baseline gap-3 flex-wrap">
+                    {altResult.strategy && (
+                      <p className="text-base font-bold">{altResult.strategy}</p>
+                    )}
+                    {altResult.cost_to_enter != null && (
+                      <span className="text-lg font-bold tabular-nums">
+                        ${Math.round(altResult.cost_to_enter).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  {altResult.target != null && (
+                    <p className="text-xs text-muted-foreground">
+                      Target: <span className="text-foreground font-medium">${altResult.target.toFixed(2)}</span>
+                    </p>
+                  )}
+                  {altResult.tradeoff && (
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      <span className="font-medium text-foreground">Tradeoff:</span>{" "}
+                      {altResult.tradeoff}
+                    </p>
+                  )}
+                  {altResult.reasoning && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {altResult.reasoning}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* fits=false — nothing good fits */}
+              {altResult != null && !altResult.fits && (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                    Nothing good fits this budget
+                  </p>
+                  {altResult.note && (
+                    <p className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">
+                      {altResult.note}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
