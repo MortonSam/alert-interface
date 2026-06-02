@@ -382,6 +382,30 @@ export interface ThesisDraftRead {
   generated_at: string;
 }
 
+export interface ThesisDraftAlternativeRequest {
+  symbol: string;
+  direction: ThesisDirection;
+  aggressiveness: "conservative" | "moderate" | "aggressive";
+  budget: number;
+  best_strike: number;
+  best_spread_strike?: number | null;
+  best_cost: number;
+}
+
+export interface ThesisDraftAlternativeRead {
+  fits: boolean;
+  strategy: string | null;
+  suggested_strike: number | null;
+  suggested_spread_strike: number | null;
+  cost_to_enter: number | null;
+  target: number | null;
+  tradeoff: string | null;
+  reasoning: string | null;
+  note: string | null;
+  model_used: string;
+  generated_at: string;
+}
+
 export interface ThesisStockMarkRead {
   /** Live price mark for a stock-only thesis (no option leg). */
   thesis_id: string;
@@ -515,6 +539,8 @@ export const api = {
       request<void>(`/theses/${id}`, { method: "DELETE" }),
     draft: (data: ThesisDraftRequest) =>
       request<ThesisDraftRead>("/theses/draft", { method: "POST", body: JSON.stringify(data) }),
+    draftAlternative: (data: ThesisDraftAlternativeRequest) =>
+      request<ThesisDraftAlternativeRead>("/theses/draft-alternative", { method: "POST", body: JSON.stringify(data) }),
     mark: (id: string) =>
       request<ThesisMarkRead>(`/theses/${id}/mark`),
     stockMark: (id: string) =>

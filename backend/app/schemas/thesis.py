@@ -136,3 +136,27 @@ class ThesisDraftRead(BaseModel):
     fact_block: dict                       # all injected facts (for transparency/verification)
     model_used: str
     generated_at: str
+
+
+class ThesisDraftAlternativeRequest(BaseModel):
+    symbol: str
+    direction: str                           # bullish | bearish
+    aggressiveness: str                      # conservative | moderate | aggressive
+    budget: float                            # max cost per contract in dollars
+    best_strike: float                       # leg 1 of the best play (context only)
+    best_spread_strike: float | None = None  # leg 2 of best play if spread
+    best_cost: float                         # cost of best play per contract (context only)
+
+
+class ThesisDraftAlternativeRead(BaseModel):
+    fits: bool                    # True if a good affordable alternative was found
+    strategy: str | None          # e.g. "Bull call spread $305/$320 ($8.10 net debit)" — null if fits=False
+    suggested_strike: float | None
+    suggested_spread_strike: float | None
+    cost_to_enter: float | None   # must be <= budget when fits=True; null when fits=False
+    target: float | None          # data-grounded price target at same aggressiveness
+    tradeoff: str | None          # honest statement of what's given up vs best play; null when fits=False
+    reasoning: str | None         # 2-3 sentences citing real strikes/prices; null when fits=False
+    note: str | None              # when fits=False: why nothing good fits + recommendation; null when fits=True
+    model_used: str
+    generated_at: str
