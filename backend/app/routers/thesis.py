@@ -97,6 +97,20 @@ def _build_strike_lines(
     return text, rows
 
 
+def _canonicalize_spread(
+    suggested_strike: float | None,
+    spread_strike: float | None,
+    direction: str,
+) -> tuple[float | None, float | None]:
+    """suggested_strike is always the LONG leg. Bull call -> long lower; bear put -> long higher."""
+    if suggested_strike is None or spread_strike is None:
+        return suggested_strike, spread_strike
+    if abs(suggested_strike - spread_strike) < 1e-6:
+        return suggested_strike, None  # degenerate -> single leg
+    lo, hi = sorted([suggested_strike, spread_strike])
+    return (lo, hi) if direction == "bullish" else (hi, lo)
+
+
 async def _compute_option_mark(
     thesis: Thesis,
     loop: asyncio.AbstractEventLoop,
@@ -531,15 +545,7 @@ Return ONLY this JSON object (no other text):
     reasoning        = parsed.get("reasoning", "")
     realism_flag     = parsed.get("realism_flag")
 
-    # Canonicalize spread legs so suggested_strike is ALWAYS the long leg.
-    # Bull call spread -> long the lower strike; bear put spread -> long the higher strike.
-    # The AI does not reliably order the legs, and the whole app assumes leg 1 is long.
-    if suggested_strike is not None and spread_strike is not None:
-        if abs(suggested_strike - spread_strike) < 1e-6:
-            spread_strike = None  # degenerate same-strike "spread" -> single leg
-        else:
-            lo, hi = sorted([suggested_strike, spread_strike])
-            suggested_strike, spread_strike = (lo, hi) if direction == "bullish" else (hi, lo)
+    suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
 
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (
@@ -766,11 +772,33 @@ Return ONLY this JSON object (no other text):
     strategy          = parsed.get("strategy")
     suggested_strike  = parsed.get("suggested_strike")
     spread_strike     = parsed.get("suggested_spread_strike")
-    cost_to_enter     = parsed.get("cost_to_enter")
+    cost_to_enter     = parsed.get("cost_to_enter")  # AI value; overridden below from chain mids
     target            = parsed.get("target")
     tradeoff          = parsed.get("tradeoff")
     reasoning         = parsed.get("reasoning")
     note              = parsed.get("note")
+
+    # Canonicalize leg order: suggested_strike is always the long leg.
+    suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
+
+    # Override cost_to_enter with Python-computed value from chain mids — never trust the AI's figure.
+    # primary_rows is already in scope: list of {"strike": float, "mid": float, "iv": ...}
+    if fits and suggested_strike is not None:
+        def _find_mid(k: float) -> float | None:
+            row = next((r for r in primary_rows if abs(r["strike"] - k) < 1e-6), None)
+            return row["mid"] if row else None
+
+        long_mid = _find_mid(suggested_strike)
+        if long_mid is None:
+            cost_to_enter = None
+        elif spread_strike is not None:
+            short_mid = _find_mid(spread_strike)
+            if short_mid is None:
+                cost_to_enter = None
+            else:
+                cost_to_enter = round((long_mid - short_mid) * 100, 2)
+        else:
+            cost_to_enter = round(long_mid * 100, 2)
 
     # ── 10. Validate — prefer fits=false over returning bad data ──────────────
     if fits:
@@ -788,7 +816,7 @@ Return ONLY this JSON object (no other text):
             failures.append(f"spread strike ${spread_strike:.2f} not in available chain")
 
         if cost_to_enter is None:
-            failures.append("fits=true but no cost_to_enter returned")
+            failures.append("fits=true but cost_to_enter could not be computed — strike mid not found in chain")
         elif cost_to_enter > budget:
             failures.append(
                 f"cost_to_enter ${cost_to_enter:.2f} exceeds budget ${budget:.2f}"
