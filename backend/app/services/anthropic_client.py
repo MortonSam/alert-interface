@@ -68,6 +68,27 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
+    async def generate_thesis_draft_alternative(self, prompt: str) -> dict:
+        """Generate a budget-constrained alternative trade (JSON output).
+
+        Uses a higher token limit (1500) than the main draft because the
+        alternative prompt's cost arithmetic can be verbose before the model
+        settles on the right structure.  The prompt instructs the model to keep
+        any arithmetic compact inside the JSON fields rather than as a prose
+        preamble, but we give headroom in case it needs to check its math.
+        """
+        msg = await self._client.messages.create(
+            model=GENERATION_MODEL,
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {
+            "content":       msg.content[0].text.strip(),
+            "model_used":    GENERATION_MODEL,
+            "input_tokens":  msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
+
     async def verify_research_note(self, prompt: str) -> dict:
         """Verify a research note. Uses Opus for higher accuracy.
 

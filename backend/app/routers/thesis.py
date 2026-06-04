@@ -669,11 +669,12 @@ async def draft_alternative(
 You are a financial data assistant. The user wants a {direction} trade on {sym} but their budget of ${budget:.0f} per contract is below the best play's cost of ${payload.best_cost:.0f} ({best_play_desc}). Find a REAL cheaper alternative from the available strikes, OR honestly report that nothing good fits within the budget.
 
 CRITICAL RULES (violating any is an error):
-1. Return ONLY a valid JSON object — no prose before or after, no markdown fences
-2. "suggested_strike" and "suggested_spread_strike" MUST be exact float values listed under AVAILABLE STRIKES — never invent a strike
-3. "cost_to_enter" MUST be <= {budget:.2f} when fits=true. Naked cost = premium × 100; spread cost = net_debit × 100 where net_debit = leg1_mid − leg2_mid
-4. HONESTY GUARDRAIL: If every structure that fits the budget is far-OTM (more than 3 strikes from ATM) or costs less than $50 per contract for this underlying, it is a lottery ticket. Set fits=false and explain honestly. It is better to report nothing fits than to suggest a low-probability play
-5. Frame as a data-grounded suggestion to review — not financial advice
+1. Output ONLY the JSON object. Do not write any reasoning, explanation, or "thinking out loud" text before the JSON. Your response must begin with {{ and end with }}.
+2. You may and should verify your arithmetic, but show any necessary math compactly INSIDE the JSON fields (e.g. in "tradeoff": "Caps max gain at $253 ([$5.00 width − $2.47 debit] × 100)"), NOT as prose before the JSON object.
+3. "suggested_strike" and "suggested_spread_strike" MUST be exact float values listed under AVAILABLE STRIKES — never invent a strike
+4. "cost_to_enter" MUST be <= {budget:.2f} when fits=true. Naked cost = premium × 100; spread cost = net_debit × 100 where net_debit = leg1_mid − leg2_mid
+5. HONESTY GUARDRAIL: If every structure that fits the budget is far-OTM (more than 3 strikes from ATM) or costs less than $50 per contract for this underlying, it is a lottery ticket. Set fits=false and explain honestly. It is better to report nothing fits than to suggest a low-probability play
+6. Frame as a data-grounded suggestion to review — not financial advice
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
@@ -733,7 +734,7 @@ Return ONLY this JSON object (no other text):
     # ── 8. Generate ───────────────────────────────────────────────────────────
     client = AnthropicClient()
     try:
-        gen = await client.generate_thesis_draft(prompt)
+        gen = await client.generate_thesis_draft_alternative(prompt)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
 

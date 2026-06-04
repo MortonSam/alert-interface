@@ -14,6 +14,8 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { GiBull, GiBearFace } from "react-icons/gi";
+import PayoffSimulator from "@/components/PayoffSimulator";
+import { type Leg, dateMs } from "@/lib/black-scholes";
 
 // ── Step header ────────────────────────────────────────────────────────────────
 
@@ -121,6 +123,54 @@ function TickerPicker({ tickers, onSelect }: { tickers: Ticker[]; onSelect: (t: 
   );
 }
 
+// ── Draft simulator props builder ─────────────────────────────────────────────
+
+function buildDraftSimProps(draft: ThesisDraftRead) {
+  const fb = draft.fact_block;
+  if (draft.suggested_strike == null) return null;
+  if (draft.direction !== "bullish" && draft.direction !== "bearish") return null;
+  if (fb.expiration_used == null) return null;
+  const kind: "call" | "put" = draft.direction === "bullish" ? "call" : "put";
+
+  const findRow = (k: number) =>
+    fb.primary_strikes.find(r => Math.abs(r.strike - k) < 1e-3)
+    ?? fb.secondary_strikes.find(r => Math.abs(r.strike - k) < 1e-3);
+
+  const row1 = findRow(draft.suggested_strike);
+  if (!row1) return null;
+  let usingIVFallback = row1.iv == null;
+  const legs: Leg[] = [{
+    kind, K: draft.suggested_strike, mid: row1.mid,
+    sigma: (row1.iv ?? fb.atm_iv_pct ?? 30) / 100,
+    dir: 1, label: `Long $${draft.suggested_strike}`,
+  }];
+
+  if (draft.suggested_spread_strike != null) {
+    const row2 = findRow(draft.suggested_spread_strike);
+    if (!row2) return null;
+    usingIVFallback = usingIVFallback || row2.iv == null;
+    legs.push({
+      kind, K: draft.suggested_spread_strike, mid: row2.mid,
+      sigma: (row2.iv ?? fb.atm_iv_pct ?? 30) / 100,
+      dir: -1, label: `Short $${draft.suggested_spread_strike}`,
+    });
+  }
+
+  return {
+    legs,
+    spot: fb.current_price,
+    currentPrice: fb.current_price,
+    symbol: draft.symbol,
+    expirationMs: dateMs(fb.expiration_used),
+    mult: 100,
+    xMin: fb.implied_range_low ?? fb.current_price * 0.8,
+    xMax: fb.implied_range_high ?? fb.current_price * 1.2,
+    earningsMs: fb.earnings_date ? dateMs(fb.earnings_date) : null,
+    usingIVFallback,
+    sdFailed: false,
+  };
+}
+
 // ── Draft display ──────────────────────────────────────────────────────────────
 
 interface OptionLegDraft {
@@ -179,6 +229,25 @@ function DraftDisplay({
   const altBudgetParsed = parseFloat(altBudgetInput);
   const altBudgetValid =
     altBudgetInput.trim() !== "" && Number.isFinite(altBudgetParsed) && altBudgetParsed > 0;
+
+  // ── Alternative cost/risk — derived from altResult when fits=true ──────────
+  const altIsSpread = altResult?.fits ? altResult.suggested_spread_strike != null : false;
+  const altCostToEnter: number | null = altResult?.fits ? (altResult.cost_to_enter ?? null) : null;
+  const altMaxLoss: number | null = altCostToEnter;
+  // Spread: (width − net_debit) × 100 = width × 100 − cost_to_enter
+  // Naked call: Unlimited (signal via altIsUnlimited)
+  // Naked put: (strike − cost_to_enter/100) × 100
+  const altIsUnlimited = altResult?.fits === true && !altIsSpread && draft.direction === "bullish";
+  const altMaxGain: number | null =
+    altResult?.fits
+      ? (altIsSpread && altCostToEnter != null && altResult.suggested_strike != null && altResult.suggested_spread_strike != null
+          ? Math.abs(altResult.suggested_spread_strike - altResult.suggested_strike) * 100 - altCostToEnter
+          : (!altIsSpread && draft.direction === "bearish" && altResult.suggested_strike != null && altCostToEnter != null
+              ? (altResult.suggested_strike - altCostToEnter / 100) * 100
+              : null))
+      : null;
+
+  const simProps = useMemo(() => buildDraftSimProps(draft), [draft]);
 
   function resetAlt() {
     setAltOpen(false);
@@ -318,13 +387,19 @@ function DraftDisplay({
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Max gain</p>
-              <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                {isSpread
-                  ? (maxGainPerContract != null ? `$${Math.round(maxGainPerContract)}` : "—")
-                  : draft.direction === "bullish"
-                  ? "Unlimited"
-                  : (maxGainPerContract != null ? `$${Math.round(maxGainPerContract)}` : "—")}
-              </p>
+              {isSpread ? (
+                <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "—"}
+                </p>
+              ) : draft.direction === "bullish" ? (
+                <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  Unlimited
+                </p>
+              ) : (
+                <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "—"}
+                </p>
+              )}
             </div>
           </div>
           {isSpread && netDebit != null && spreadWidth != null && (
@@ -339,6 +414,9 @@ function DraftDisplay({
           )}
         </div>
       )}
+
+      {/* ── Payoff simulator ──────────────────────────────────────────────── */}
+      {simProps && <PayoffSimulator {...simProps} />}
 
       {/* ── Budget alternative trigger + panel ────────────────────────────── */}
       {costPerContract != null && (
@@ -396,19 +474,39 @@ function DraftDisplay({
               {/* fits=true — affordable alternative found */}
               {altResult?.fits && (
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 space-y-2.5">
-                  <p className="text-sm font-semibold text-foreground">
+                  <p className="text-base font-bold text-foreground">
                     Affordable alternative
                     <span className="ml-1.5 font-normal text-muted-foreground">· cheaper option, with tradeoffs</span>
                   </p>
-                  <div className="flex items-baseline gap-3 flex-wrap">
-                    {altResult.strategy && (
-                      <p className="text-base font-bold">{altResult.strategy}</p>
-                    )}
-                    {altResult.cost_to_enter != null && (
-                      <span className="text-lg font-bold tabular-nums">
-                        ${Math.round(altResult.cost_to_enter).toLocaleString()}
-                      </span>
-                    )}
+                  {altResult.strategy && (
+                    <p className="text-lg font-bold text-foreground">{altResult.strategy}</p>
+                  )}
+                  {/* Cost/risk grid — same structure as best-play block above */}
+                  <div className="grid grid-cols-3 gap-4 pt-0.5">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Cost to enter</p>
+                      <p className="text-xl font-bold tabular-nums">
+                        {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Max loss</p>
+                      <p className="text-xl font-bold tabular-nums text-red-600 dark:text-red-400">
+                        {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Max gain</p>
+                      {altIsUnlimited ? (
+                        <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                          Unlimited
+                        </p>
+                      ) : (
+                        <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                          {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "—"}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   {altResult.target != null && (
                     <p className="text-xs text-muted-foreground">
