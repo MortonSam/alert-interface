@@ -531,6 +531,16 @@ Return ONLY this JSON object (no other text):
     reasoning        = parsed.get("reasoning", "")
     realism_flag     = parsed.get("realism_flag")
 
+    # Canonicalize spread legs so suggested_strike is ALWAYS the long leg.
+    # Bull call spread -> long the lower strike; bear put spread -> long the higher strike.
+    # The AI does not reliably order the legs, and the whole app assumes leg 1 is long.
+    if suggested_strike is not None and spread_strike is not None:
+        if abs(suggested_strike - spread_strike) < 1e-6:
+            spread_strike = None  # degenerate same-strike "spread" -> single leg
+        else:
+            lo, hi = sorted([suggested_strike, spread_strike])
+            suggested_strike, spread_strike = (lo, hi) if direction == "bullish" else (hi, lo)
+
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (
             f"Note: AI suggested strike ${suggested_strike:.2f} was not found in the available chain "
