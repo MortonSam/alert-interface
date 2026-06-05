@@ -84,11 +84,11 @@ function SimTooltip({
   const { price, pnl } = pt;
   const abs = Math.abs(pnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (
-    <div className="rounded border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 shadow px-3 py-2 text-xs space-y-0.5">
-      <p className="text-zinc-500 dark:text-zinc-400">
-        Stock: <strong className="text-zinc-900 dark:text-zinc-100">${price.toFixed(2)}</strong>
+    <div className="rounded border bg-card border-border text-foreground shadow px-3 py-2 text-xs space-y-0.5">
+      <p className="text-muted-foreground">
+        Stock: <strong className="text-foreground">${price.toFixed(2)}</strong>
       </p>
-      <p style={{ color: pnl >= 0 ? "#16a34a" : "#dc2626" }} className="font-medium">
+      <p className={`font-medium ${pnl >= 0 ? "text-success" : "text-destructive"}`}>
         Simulated: {pnl >= 0 ? "+" : "−"}${abs}
       </p>
     </div>
@@ -200,7 +200,7 @@ export default function PayoffSimulator({
 
       {/* Header pill — stays prominent so "this is modeled" is always clear */}
       <div className="flex items-center gap-2">
-        <span className="bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 text-xs font-medium px-2 py-0.5 rounded-full">
+        <span className="bg-cool/10 text-cool border border-cool/40 text-xs font-medium px-2 py-0.5 rounded-full">
           SIMULATED
         </span>
         <span className="text-xs text-muted-foreground">Black-Scholes projection</span>
@@ -231,12 +231,12 @@ export default function PayoffSimulator({
           {daysLeft === 0 ? "At expiration" : selectedDateStr}
         </p>
         <p className={[
-          "text-4xl font-bold tabular-nums tracking-tight leading-none",
+          "text-4xl font-bold font-mono tabular-nums tracking-tight leading-none",
           scrubPnl == null
             ? "text-muted-foreground"
             : scrubPnl >= 0
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-red-500 dark:text-red-400",
+              ? "text-success"
+              : "text-destructive",
         ].join(" ")}>
           {scrubPnl == null
             ? "—"
@@ -254,7 +254,7 @@ export default function PayoffSimulator({
             className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
             style={{ zIndex: 1 }}
           >
-            <span className="text-[11px] font-semibold tracking-widest text-indigo-400/25 dark:text-indigo-500/20 uppercase">
+            <span className="text-[11px] font-semibold tracking-widest text-cool/20 uppercase">
               Simulated
             </span>
           </div>
@@ -315,10 +315,10 @@ export default function PayoffSimulator({
                 />
               )}
 
-              {/* Price scrubber — neutral so it doesn't fight the green/red curve */}
+              {/* Price scrubber */}
               <ReferenceLine
                 x={effectivePrice}
-                stroke="hsl(var(--foreground))"
+                stroke="hsl(var(--cool))"
                 strokeWidth={1.5}
                 strokeOpacity={0.7}
               />
@@ -366,12 +366,12 @@ export default function PayoffSimulator({
             className="absolute bottom-1 -translate-x-1/2 transition-none"
             style={{ left: `${labelLeft}%` }}
           >
-            <div className="bg-indigo-600 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm">
+            <div className="bg-cool text-cool-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap shadow-sm">
               {thumbLabel}
             </div>
             {/* Connector line from pill to thumb */}
             <div className="flex justify-center mt-0.5">
-              <div className="w-px h-1.5 bg-indigo-500 rounded-full" />
+              <div className="w-px h-1.5 bg-cool rounded-full" />
             </div>
           </div>
         </div>
@@ -382,12 +382,12 @@ export default function PayoffSimulator({
           <div className="absolute inset-x-0 h-1.5 rounded-full bg-border pointer-events-none" />
           {/* Filled portion — Today → thumb */}
           <div
-            className="absolute left-0 h-1.5 rounded-full bg-indigo-500 pointer-events-none transition-none"
+            className="absolute left-0 h-1.5 rounded-full bg-cool pointer-events-none transition-none"
             style={{ width: `${thumbPct}%` }}
           />
           {/* Visual thumb circle */}
           <div
-            className="absolute w-4 h-4 rounded-full bg-indigo-600 shadow ring-2 ring-white dark:ring-zinc-900 pointer-events-none transition-none"
+            className="absolute w-4 h-4 rounded-full bg-cool shadow ring-2 ring-background pointer-events-none transition-none"
             style={{ left: `${thumbPct}%`, transform: "translateX(-50%)" }}
           />
           {/* Native input — transparent overlay, handles all drag interactions */}

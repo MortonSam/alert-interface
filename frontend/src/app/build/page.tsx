@@ -194,6 +194,9 @@ function DraftDisplay({
 
   // ── Cost / risk — computed from structured primary_strikes, never from prose ─
   const isSpread = draft.suggested_spread_strike != null;
+  const shortName = isSpread
+    ? (draft.direction === "bullish" ? "Bull call spread" : "Bear put spread")
+    : `Long ${draft.direction === "bullish" ? "call" : "put"}`;
   const leg1Mid: number | null = draft.suggested_strike != null
     ? (fb.primary_strikes.find((r) => r.strike === draft.suggested_strike)?.mid ?? null)
     : null;
@@ -300,103 +303,108 @@ function DraftDisplay({
 
   return (
     <div className="space-y-4">
+
+      {/* A) Header */}
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           AI Draft — {draft.aggressiveness} · {draft.direction}
         </p>
-        <span className="text-xs text-muted-foreground">{draft.model_used}</span>
+        <span className="font-mono text-xs text-muted-foreground">{draft.model_used}</span>
       </div>
 
+      {/* B) Realism flag */}
       {draft.realism_flag && (
-        <div className="rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 px-4 py-3">
-          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-1">⚠ Realism Flag</p>
-          <p className="text-sm text-amber-800 dark:text-amber-300">{draft.realism_flag}</p>
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+          <p className="text-xs font-semibold text-amber-300 mb-1">⚠ Realism Flag</p>
+          <p className="text-sm text-amber-200/90 leading-relaxed">{draft.realism_flag}</p>
         </div>
       )}
 
-      <div className="space-y-2">
-        {draft.strategy && (
-          <p className="text-lg font-semibold">{draft.strategy}</p>
-        )}
+      {/* C) Headline — strategy name + strikes in font-mono */}
+      <div className="space-y-1.5">
+        <h2 className="text-3xl md:text-4xl font-display font-bold tracking-tight">
+          {shortName}
+          {draft.suggested_strike != null && (
+            <span className="font-mono text-foreground">
+              {" "}${draft.suggested_strike}
+              {draft.suggested_spread_strike != null && ` / ${draft.suggested_spread_strike}`}
+            </span>
+          )}
+        </h2>
+
+        {/* D) Subline — target, muted label, mono value */}
         <div className="flex gap-6 flex-wrap text-sm text-muted-foreground">
           {draft.suggested_target != null && (
             <span>
-              Target:{" "}
-              <span className="text-foreground font-medium">${draft.suggested_target.toFixed(2)}</span>
-            </span>
-          )}
-          {draft.suggested_strike != null && (
-            <span>
-              Strike:{" "}
-              <span className="text-foreground font-medium">${draft.suggested_strike.toFixed(2)}</span>
-            </span>
-          )}
-          {draft.suggested_spread_strike != null && (
-            <span>
-              Spread leg:{" "}
-              <span className="text-foreground font-medium">${draft.suggested_spread_strike.toFixed(2)}</span>
+              Target{" "}
+              <span className="font-mono text-foreground">${draft.suggested_target.toFixed(2)}</span>
             </span>
           )}
         </div>
+
+        {/* E) Leg detail — verbose strategy name, muted */}
+        {draft.strategy && (
+          <p className="font-mono text-sm text-muted-foreground">{draft.strategy}</p>
+        )}
       </div>
 
-      <p className="text-muted-foreground leading-relaxed">{draft.reasoning}</p>
+      {/* F) Reasoning */}
+      <p className="text-muted-foreground leading-relaxed max-w-prose">{draft.reasoning}</p>
 
-      <div className="rounded-lg bg-muted/40 px-4 py-3 grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs text-muted-foreground">
-        <span>Price: <span className="text-foreground">${fb.current_price.toFixed(2)}</span></span>
+      {/* G) Fact grid */}
+      <div className="bg-secondary border border-border rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
+        <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span></span>
         <span>
           Implied move:{" "}
-          <span className="text-foreground">
+          <span className="font-mono text-foreground">
             ±{fb.expected_move_pct?.toFixed(1) ?? "—"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "—"})
           </span>
         </span>
         <span>
           Range:{" "}
-          <span className="text-foreground">
+          <span className="font-mono text-foreground">
             ${fb.implied_range_low?.toFixed(2) ?? "—"} – ${fb.implied_range_high?.toFixed(2) ?? "—"}
           </span>
         </span>
-        <span>Earnings: <span className="text-foreground">{fb.earnings_date ?? "—"}</span></span>
+        <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ?? "—"}</span></span>
         <span>
           Hist avg ±:{" "}
-          <span className="text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span>
+          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span>
         </span>
-        <span>Beat rate: <span className="text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "—"}%</span></span>
-        <span>ATM IV: <span className="text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "—"}%</span></span>
-        <span>RV rank: <span className="text-foreground">{fb.rv_rank?.toFixed(0) ?? "—"}/100</span></span>
+        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "—"}%</span></span>
+        <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "—"}%</span></span>
+        <span>RV rank: <span className="font-mono text-foreground">{fb.rv_rank?.toFixed(0) ?? "—"}/100</span></span>
       </div>
 
-      {/* ── Cost / risk block — shown only when a strike is suggested ────────── */}
+      {/* H) Position cost & risk */}
       {draft.suggested_strike != null && (
-        <div className="rounded-lg border-2 border-border bg-card px-5 py-4 space-y-3">
+        <div className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Position cost &amp; risk · per contract
           </p>
           <div className="grid grid-cols-3 gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Cost to enter</p>
-              <p className="text-xl font-bold tabular-nums">
+            <div className="bg-secondary border border-border rounded-md p-5">
+              <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
+              <p className="font-mono text-3xl font-semibold tabular-nums">
                 {costPerContract != null ? `$${Math.round(costPerContract)}` : "—"}
               </p>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Max loss</p>
-              <p className="text-xl font-bold tabular-nums text-red-600 dark:text-red-400">
+            <div className="bg-secondary border border-border rounded-md p-5">
+              <p className="text-xs text-muted-foreground mb-2">Max loss</p>
+              <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
                 {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "—"}
               </p>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Max gain</p>
+            <div className="bg-secondary border border-border rounded-md p-5">
+              <p className="text-xs text-muted-foreground mb-2">Max gain</p>
               {isSpread ? (
-                <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                <p className="font-mono text-3xl font-semibold tabular-nums text-success">
                   {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "—"}
                 </p>
               ) : draft.direction === "bullish" ? (
-                <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                  Unlimited
-                </p>
+                <p className="text-xl font-semibold text-success">Unlimited</p>
               ) : (
-                <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                <p className="font-mono text-3xl font-semibold tabular-nums text-success">
                   {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "—"}
                 </p>
               )}
@@ -415,17 +423,17 @@ function DraftDisplay({
         </div>
       )}
 
-      {/* ── Payoff simulator ──────────────────────────────────────────────── */}
+      {/* I) Payoff simulator */}
       {simProps && <PayoffSimulator {...simProps} />}
 
-      {/* ── Budget alternative trigger + panel ────────────────────────────── */}
+      {/* J) Budget alternative trigger + panel */}
       {costPerContract != null && (
         <div className="space-y-3">
           {!altOpen ? (
             <button
               type="button"
               onClick={() => setAltOpen(true)}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-sm font-medium text-cool hover:text-cool/80 transition-colors"
             >
               Too expensive? See an affordable alternative →
             </button>
@@ -464,14 +472,12 @@ function DraftDisplay({
                 </button>
               </div>
 
-              {/* Error state */}
               {altError && (
                 <p className="text-xs text-muted-foreground">
                   Couldn&apos;t generate an alternative — try again.
                 </p>
               )}
 
-              {/* fits=true — affordable alternative found */}
               {altResult?.fits && (
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 space-y-2.5">
                   <p className="text-base font-bold text-foreground">
@@ -481,28 +487,25 @@ function DraftDisplay({
                   {altResult.strategy && (
                     <p className="text-lg font-bold text-foreground">{altResult.strategy}</p>
                   )}
-                  {/* Cost/risk grid — same structure as best-play block above */}
                   <div className="grid grid-cols-3 gap-4 pt-0.5">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Cost to enter</p>
-                      <p className="text-xl font-bold tabular-nums">
+                    <div className="bg-secondary border border-border rounded-md p-5">
+                      <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
+                      <p className="font-mono text-3xl font-semibold tabular-nums">
                         {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "—"}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Max loss</p>
-                      <p className="text-xl font-bold tabular-nums text-red-600 dark:text-red-400">
+                    <div className="bg-secondary border border-border rounded-md p-5">
+                      <p className="text-xs text-muted-foreground mb-2">Max loss</p>
+                      <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
                         {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "—"}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Max gain</p>
+                    <div className="bg-secondary border border-border rounded-md p-5">
+                      <p className="text-xs text-muted-foreground mb-2">Max gain</p>
                       {altIsUnlimited ? (
-                        <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                          Unlimited
-                        </p>
+                        <p className="text-xl font-semibold text-success">Unlimited</p>
                       ) : (
-                        <p className="text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                        <p className="font-mono text-3xl font-semibold tabular-nums text-success">
                           {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "—"}
                         </p>
                       )}
@@ -527,7 +530,6 @@ function DraftDisplay({
                 </div>
               )}
 
-              {/* fits=false — nothing good fits */}
               {altResult != null && !altResult.fits && (
                 <div className="rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-4 py-3 space-y-1">
                   <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
@@ -549,18 +551,19 @@ function DraftDisplay({
         Data-grounded suggestion — not a recommendation. Review carefully before saving.
       </p>
 
+      {/* K) CTA row */}
       <div className="flex gap-3 pt-1">
         <button
           type="button"
           onClick={handleAccept}
-          className="rounded-lg bg-primary text-primary-foreground px-6 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors"
+          className="rounded-xl bg-primary text-primary-foreground px-6 py-3.5 text-sm font-medium hover:opacity-90 transition-opacity"
         >
           Continue with this trade →
         </button>
         <button
           type="button"
           onClick={onRegenerate}
-          className="rounded-lg border bg-background px-4 py-2.5 text-sm hover:bg-accent transition-colors"
+          className="rounded-xl border border-border text-muted-foreground hover:text-foreground px-5 py-3.5 text-sm bg-transparent transition-colors"
         >
           Regenerate
         </button>
