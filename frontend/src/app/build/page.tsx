@@ -30,7 +30,7 @@ function StepHeader({ n, label, done }: { n: number; label: string; done?: boole
       >
         {done ? "✓" : n}
       </div>
-      <h2 className="text-base font-semibold">{label}</h2>
+      <h2 className="text-base font-semibold text-muted-foreground">{label}</h2>
     </div>
   );
 }
@@ -327,7 +327,7 @@ function DraftDisplay({
           {draft.suggested_strike != null && (
             <span className="font-mono text-foreground">
               {" "}${draft.suggested_strike}
-              {draft.suggested_spread_strike != null && ` / ${draft.suggested_spread_strike}`}
+              {draft.suggested_spread_strike != null && ` / $${draft.suggested_spread_strike}`}
             </span>
           )}
         </h2>
@@ -845,15 +845,15 @@ function BuildTradePageContent() {
                 <TickerPicker tickers={tickers} onSelect={handleSelectTicker} />
               )
             ) : (
-              <div className="flex items-center justify-between rounded-xl border bg-card px-5 py-3.5">
+              <div className="flex items-center justify-between rounded-[var(--radius)] border border-border bg-card px-5 py-3.5">
                 <div className="flex items-center gap-4 min-w-0">
-                  <span className="text-2xl font-bold tracking-tight">{selectedTicker.symbol}</span>
+                  <span className="text-2xl font-display font-bold tracking-tight">{selectedTicker.symbol}</span>
                   {selectedTicker.name && (
                     <span className="text-sm text-muted-foreground truncate hidden sm:block">
                       {selectedTicker.name}
                     </span>
                   )}
-                  <span className="text-sm font-semibold tabular-nums shrink-0">
+                  <span className="font-mono text-sm font-semibold tabular-nums shrink-0">
                     {quoteLoading ? (
                       <span className="inline-block w-14 h-4 bg-muted rounded animate-pulse align-middle" />
                     ) : currentPrice != null ? (
@@ -866,7 +866,7 @@ function BuildTradePageContent() {
                 <button
                   type="button"
                   onClick={handleChangeTicker}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors ml-4 shrink-0"
+                  className="text-xs text-cool hover:text-cool/80 transition-colors ml-4 shrink-0"
                 >
                   Change
                 </button>
@@ -884,10 +884,10 @@ function BuildTradePageContent() {
                   type="button"
                   onClick={() => pickDirection("bullish")}
                   className={cn(
-                    "py-8 rounded-2xl border-2 text-center transition-all select-none",
+                    "py-8 rounded-[var(--radius)] border text-center transition-all select-none",
                     direction === "bullish"
                       ? "bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-400 dark:text-emerald-300"
-                      : "border-border hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/10",
+                      : "border-border text-muted-foreground hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/10",
                   )}
                 >
                   <GiBull aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
@@ -899,10 +899,10 @@ function BuildTradePageContent() {
                   type="button"
                   onClick={() => pickDirection("bearish")}
                   className={cn(
-                    "py-8 rounded-2xl border-2 text-center transition-all select-none",
+                    "py-8 rounded-[var(--radius)] border text-center transition-all select-none",
                     direction === "bearish"
                       ? "bg-red-50 border-red-500 text-red-700 dark:bg-red-900/30 dark:border-red-400 dark:text-red-300"
-                      : "border-border hover:border-red-300 hover:bg-red-50/40 dark:hover:border-red-700 dark:hover:bg-red-900/10",
+                      : "border-border text-muted-foreground hover:border-red-300 hover:bg-red-50/40 dark:hover:border-red-700 dark:hover:bg-red-900/10",
                   )}
                 >
                   <GiBearFace aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
