@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Schibsted_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import Link from "next/link";
+import NavLinks from "@/components/NavLinks";
 import "./globals.css";
 
 const fontDisplay = Bricolage_Grotesque({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-display", display: "swap" });
@@ -21,24 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="font-bold text-sm tracking-tight mr-2">
               Alert Interface
             </Link>
-            <Link
-              href="/build"
-              className="text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-            >
-              Build a Trade
-            </Link>
-            <Link
-              href="/theses"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Tracker
-            </Link>
-            <Link
-              href="/watchlist"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Watchlists
-            </Link>
+            <NavLinks />
           </div>
         </header>
         {children}

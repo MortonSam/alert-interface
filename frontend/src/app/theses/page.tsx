@@ -89,8 +89,8 @@ function fmtPnl(dollars: number | null, pct: number | null): { str: string; colo
   const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
   const absStr = `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`;
   const color =
-    dollars > 0 ? "text-emerald-600 dark:text-emerald-400" :
-    dollars < 0 ? "text-red-500 dark:text-red-400" :
+    dollars > 0 ? "text-success" :
+    dollars < 0 ? "text-destructive" :
     "text-foreground";
   return { str: absStr, color };
 }
@@ -111,7 +111,7 @@ function fmtOptionLeg(thesis: Thesis): string | null {
 const DIRECTION_COLOR: Record<string, string> = {
   bullish: "text-emerald-600 dark:text-emerald-400",
   bearish: "text-red-500 dark:text-red-400",
-  neutral: "text-slate-500",
+  neutral: "text-muted-foreground",
 };
 
 const GRADE_LABEL: Record<SelfGrade, string> = {
@@ -132,7 +132,7 @@ function ConvictionDots({ n }: { n: number }) {
       {Array.from({ length: 5 }).map((_, i) => (
         <span
           key={i}
-          className={`inline-block w-2 h-2 rounded-full ${i < n ? "bg-blue-500" : "bg-muted"}`}
+          className={`inline-block w-2 h-2 rounded-full ${i < n ? "bg-cool" : "bg-muted"}`}
         />
       ))}
     </span>
@@ -196,7 +196,7 @@ function OptionPnlSection({
         <span className="text-xs text-muted-foreground italic">Mark unavailable</span>
       ) : (
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className={`text-xl font-bold tabular-nums leading-tight transition-opacity ${pnlColor} ${refreshing ? "opacity-50" : ""}`}>
+          <span className={`text-xl font-bold font-mono tabular-nums leading-tight transition-opacity ${pnlColor} ${refreshing ? "opacity-50" : ""}`}>
             {pnlStr}
           </span>
           {markLabel && (
@@ -204,7 +204,7 @@ function OptionPnlSection({
           )}
           {asOf && (
             <span className="text-xs text-muted-foreground flex items-center gap-1">
-              as of {fmtAsOf(asOf)}
+              as of <span className="font-mono">{fmtAsOf(asOf)}</span>
               {refreshing && (
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
               )}
@@ -259,10 +259,10 @@ function StockPriceMark({
 
   const pctSign  = pct_from_entry != null && pct_from_entry >= 0 ? "+" : "";
   const pctColor =
-    pct_from_entry == null       ? "text-muted-foreground" :
-    pct_from_entry > 0           ? "text-emerald-600 dark:text-emerald-400" :
-    pct_from_entry < 0           ? "text-red-500 dark:text-red-400" :
-                                   "text-foreground";
+    pct_from_entry == null ? "text-muted-foreground" :
+    pct_from_entry > 0     ? "text-success" :
+    pct_from_entry < 0     ? "text-destructive" :
+                             "text-foreground";
 
   // Clamp display to 0–100% so "−5% to target" doesn't mislead
   const pctToDisplay =
@@ -275,15 +275,15 @@ function StockPriceMark({
       {/* Headline: current price + % from entry */}
       <div className="flex items-center gap-2 flex-wrap text-sm">
         {current_price != null && (
-          <span className="font-medium text-foreground">${current_price.toFixed(2)}</span>
+          <span className="font-mono font-medium text-foreground">${current_price.toFixed(2)}</span>
         )}
         {pct_from_entry != null && (
-          <span className={pctColor}>
+          <span className={`font-mono ${pctColor}`}>
             {pctSign}{pct_from_entry.toFixed(2)}% from entry
           </span>
         )}
         {pctToDisplay != null && (
-          <span className="text-muted-foreground text-xs">
+          <span className="font-mono text-muted-foreground text-xs">
             · {pctToDisplay}% to target
           </span>
         )}
@@ -296,7 +296,7 @@ function StockPriceMark({
           </span>
         )}
         <span className="text-muted-foreground flex items-center gap-1">
-          as of {fmtAsOf(as_of)}
+          as of <span className="font-mono">{fmtAsOf(as_of)}</span>
           {refreshing && (
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
           )}
@@ -920,7 +920,7 @@ function ThesisCard({
             </span>
           )}
           {thesis.from_ai_draft && (
-            <span className="text-xs bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-cool/10 text-cool border border-cool/40 px-1.5 py-0.5 rounded">
               AI
             </span>
           )}
@@ -946,11 +946,11 @@ function ThesisCard({
 
       {/* ── Compact fact row ───────────────────────────────────────────── */}
       <div className="flex items-center gap-3 text-sm flex-wrap text-muted-foreground">
-        <span>Entry: <span className="text-foreground font-medium">{fmtPrice(thesis.entry_price)}</span></span>
+        <span>Entry: <span className="font-mono text-foreground font-medium">{fmtPrice(thesis.entry_price)}</span></span>
         {thesis.price_target && (
-          <span>→ Target: <span className="text-foreground font-medium">{fmtPrice(thesis.price_target)}</span></span>
+          <span>→ Target: <span className="font-mono text-foreground font-medium">{fmtPrice(thesis.price_target)}</span></span>
         )}
-        <span>By: <span className="text-foreground">{fmtDate(thesis.target_date)}</span></span>
+        <span>By: <span className="font-mono text-foreground">{fmtDate(thesis.target_date)}</span></span>
         {thesis.catalyst && (
           <span className="text-muted-foreground">· {thesis.catalyst}</span>
         )}
@@ -960,12 +960,12 @@ function ThesisCard({
       {thesis.entry_premium && (
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-xs text-muted-foreground">
-            Option entry: <span className="text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
+            Option entry: <span className="font-mono text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
             {thesis.contracts > 1 && ` · ${thesis.contracts} contracts`}
           </p>
           <Link
             href={`/theses/${thesis.id}`}
-            className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+            className="text-xs text-cool hover:text-cool/80 transition-colors"
           >
             Simulate →
           </Link>
@@ -1076,7 +1076,7 @@ function ThesisCard({
           thesis.is_due && (
             <button
               onClick={() => setResolving(true)}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              className="text-sm text-cool hover:text-cool/80 transition-colors"
             >
               Resolve thesis
             </button>
@@ -1334,10 +1334,10 @@ export default function ThesesPage() {
             <button
               key={f}
               onClick={() => setStatusFilter(f)}
-              className={`px-3 py-1 rounded-md text-sm capitalize transition-colors ${
+              className={`px-3 py-1 rounded-full text-sm capitalize transition-colors ${
                 statusFilter === f
-                  ? "bg-primary text-primary-foreground"
-                  : "hover:bg-accent text-muted-foreground"
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {f}
