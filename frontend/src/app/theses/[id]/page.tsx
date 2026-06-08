@@ -11,6 +11,7 @@ import {
   type Leg, dateMs,
 } from "@/lib/black-scholes";
 import { cn } from "@/lib/utils";
+import { buildPlainEnglish } from "@/lib/plain-english";
 import PayoffSimulator from "@/components/PayoffSimulator";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -234,6 +235,55 @@ export default function ThesisDetailPage() {
 
   const expStr = thesis?.option_expiration ? fmtDateShort(thesis.option_expiration) : null;
 
+  // ── Plain-English reasoning (from entry premiums, total dollars) ────────────
+
+  const plainEnglish = useMemo(() => {
+    if (!thesis || !hasOption) return null;
+    const strike = thesis.strike ? parseFloat(thesis.strike) : null;
+    const spreadStrike = thesis.strike2 ? parseFloat(thesis.strike2) : null;
+    const leg1Mid = thesis.entry_premium ? parseFloat(thesis.entry_premium) : null;
+    const leg2Mid = thesis.entry_premium2 ? parseFloat(thesis.entry_premium2) : null;
+    const isSpread = Boolean(thesis.strike2);
+    const netDebit = isSpread && leg1Mid != null && leg2Mid != null ? leg1Mid - leg2Mid : null;
+    const spreadWidth = strike != null && spreadStrike != null ? Math.abs(spreadStrike - strike) : null;
+    const contracts = thesis.contracts || 1;
+    const shortName = isSpread
+      ? (thesis.direction === "bullish" ? "Bull call spread" : "Bear put spread")
+      : `Long ${thesis.direction === "bullish" ? "call" : "put"}`;
+
+    const cost = costBasis;   // total (× contracts × 100), matches hero
+    const maxLoss = costBasis;
+    const maxGain: number | "unlimited" | null = isSpread
+      ? (spreadWidth != null && netDebit != null ? (spreadWidth - netDebit) * contracts * 100 : null)
+      : thesis.direction === "bullish"
+        ? "unlimited"
+        : (strike != null && leg1Mid != null ? (strike - leg1Mid) * contracts * 100 : null);
+    const breakeven = isSpread
+      ? (strike != null && netDebit != null
+          ? (thesis.direction === "bullish" ? strike + netDebit : strike - netDebit)
+          : null)
+      : (strike != null && leg1Mid != null
+          ? (thesis.direction === "bullish" ? strike + leg1Mid : strike - leg1Mid)
+          : null);
+
+    return buildPlainEnglish({
+      shortName,
+      direction: thesis.direction,
+      isSpread,
+      symbol: thesis.ticker_symbol ?? "",
+      strike,
+      spreadStrike,
+      cost,
+      maxLoss,
+      maxGain,
+      netDebit,
+      breakeven,
+      expiration: thesis.option_expiration ?? null,
+    });
+  }, [thesis, hasOption, costBasis]);
+
+  const [reasoningMode, setReasoningMode] = useState<"plain" | "detailed">("detailed");
+
   // ── Direction pill + state badge ────────────────────────────────────────────
 
   const dirPillClass = thesis?.direction === "bullish"
@@ -394,12 +444,35 @@ export default function ThesisDetailPage() {
 
       {/* ── Thesis Detail ──────────────────────────────────────────────────── */}
       <div className="space-y-4">
-        {thesis.reasoning && (
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-              Reasoning
-            </h3>
-            <p className="text-sm text-foreground leading-relaxed">{thesis.reasoning}</p>
+        {(thesis.reasoning || plainEnglish) && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Reasoning
+              </h3>
+              {plainEnglish != null && thesis.reasoning && (
+                <div className="inline-flex rounded-lg border border-border bg-secondary p-0.5 text-xs font-medium">
+                  {(["detailed", "plain"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setReasoningMode(mode)}
+                      className={cn(
+                        "rounded-md px-3 py-1.5 transition-colors",
+                        reasoningMode === mode
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {mode === "plain" ? "Plain English" : "Detailed"}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-sm text-foreground leading-relaxed">
+              {plainEnglish != null && reasoningMode === "plain" ? plainEnglish : thesis.reasoning}
+            </p>
           </div>
         )}
 
