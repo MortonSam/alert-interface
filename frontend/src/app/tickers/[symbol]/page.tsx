@@ -10,7 +10,7 @@ import {
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
 import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, rvRankShort } from "@/lib/utils";
 import {
   BS_R, BS_IV_DEFAULT, MS_PER_YEAR,
   type Leg, dateMs, erfApprox, normCDF,
@@ -2790,12 +2790,16 @@ function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
-            Realized Volatility Rank
+            Realized-vol rank
           </p>
           <p className="text-3xl font-bold tabular-nums leading-none">
             {rv.rv_rank?.toFixed(1) ?? "—"}
-            <span className="text-base font-normal text-muted-foreground ml-1">/ 100</span>
           </p>
+          {rv.rv_rank != null && (
+            <p className={cn("text-sm font-medium mt-0.5", rvRankShort(rv.rv_rank).colorClass)}>
+              {rvRankShort(rv.rv_rank).tag}
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="text-xs text-muted-foreground mb-0.5">{rv.window_days}-day realized vol</p>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { rvRankShort } from "@/lib/utils";
 import {
   api,
   type Thesis,
@@ -387,7 +388,7 @@ function DraftPanel({
         <span>Hist avg: <span className="text-foreground">±{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
         <span>Hist max: <span className="text-foreground">±{fb.hist_max_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
         <span>Beat rate: <span className="text-foreground">{fb.beat_rate_pct?.toFixed(1) ?? "—"}%</span></span>
-        <span>RV rank: <span className="text-foreground">{fb.rv_rank?.toFixed(0) ?? "—"}/100</span></span>
+        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="text-foreground">—</span>}</span>
       </div>
 
       <p className="text-xs text-muted-foreground italic">

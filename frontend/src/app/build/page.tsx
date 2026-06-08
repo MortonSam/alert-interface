@@ -12,7 +12,7 @@ import {
   type ThesisCreate,
   type Thesis,
 } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, rvRankShort } from "@/lib/utils";
 import { GiBull, GiBearFace } from "react-icons/gi";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
@@ -171,6 +171,77 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
   };
 }
 
+// ── Plain-English reasoning builder (deterministic, no LLM) ──────────────────
+
+function buildPlainEnglish(opts: {
+  shortName: string;
+  direction: string;
+  isSpread: boolean;
+  symbol: string;
+  strike: number | null;
+  spreadStrike: number | null;
+  cost: number | null;
+  maxLoss: number | null;
+  maxGain: number | "unlimited" | null;
+  netDebit: number | null;
+  breakeven: number | null;
+  expiration: string | null;
+}): string | null {
+  const { shortName, direction, isSpread, symbol, strike, spreadStrike, cost, maxLoss, maxGain, netDebit, breakeven, expiration } = opts;
+  if (cost == null || maxLoss == null || strike == null) return null;
+
+  const $w = (n: number) => `$${Math.round(n)}`;                 // whole-dollar
+  const $d = (n: number) => `$${n.toFixed(2)}`;                  // 2-decimal
+  const exp = expiration ? ` at expiration on ${expiration}` : " at expiration";
+  const sentences: string[] = [];
+
+  if (isSpread && direction === "bullish") {
+    // ── Bull call spread ──
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a bet the stock rises, with both cost and risk capped.`);
+    if (spreadStrike != null)
+      sentences.push(`You buy the $${strike} call and sell the $${spreadStrike} call, paying ${$w(cost)} up front${netDebit != null ? ` (net debit ${$d(netDebit)}/share)` : ""}.`);
+    sentences.push(`That ${$w(maxLoss)} is the most you can lose.`);
+    if (maxGain != null && maxGain !== "unlimited" && spreadStrike != null)
+      sentences.push(`If ${symbol} closes above $${spreadStrike}${exp}, you make the most you can: ${$w(maxGain)}.`);
+    if (breakeven != null)
+      sentences.push(`You start making money above ${$d(breakeven)} (breakeven).`);
+    sentences.push(`Below $${strike} the spread expires worthless and you lose the full ${$w(maxLoss)}.`);
+
+  } else if (isSpread && direction === "bearish") {
+    // ── Bear put spread ──
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a bet the stock falls, with both cost and risk capped.`);
+    if (spreadStrike != null)
+      sentences.push(`You buy the $${strike} put and sell the $${spreadStrike} put, paying ${$w(cost)} up front${netDebit != null ? ` (net debit ${$d(netDebit)}/share)` : ""}.`);
+    sentences.push(`That ${$w(maxLoss)} is the most you can lose.`);
+    if (maxGain != null && maxGain !== "unlimited" && spreadStrike != null)
+      sentences.push(`If ${symbol} closes below $${spreadStrike}${exp}, you make the most you can: ${$w(maxGain)}.`);
+    if (breakeven != null)
+      sentences.push(`You start making money below ${$d(breakeven)} (breakeven).`);
+    sentences.push(`Above $${strike} the spread expires worthless and you lose the full ${$w(maxLoss)}.`);
+
+  } else if (!isSpread && direction === "bullish") {
+    // ── Long call (unlimited upside) ──
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a leveraged bet the stock rises.`);
+    sentences.push(`You pay ${$w(cost)} for the $${strike} call. That premium is the most you can lose.`);
+    sentences.push(`Your upside is uncapped — the higher ${symbol} goes above $${strike}${exp}, the more you make.`);
+    if (breakeven != null)
+      sentences.push(`You start making money above ${$d(breakeven)} (breakeven).`);
+    sentences.push(`Below $${strike} the call expires worthless and you lose the full ${$w(maxLoss)}.`);
+
+  } else {
+    // ── Long put ──
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a leveraged bet the stock falls.`);
+    sentences.push(`You pay ${$w(cost)} for the $${strike} put. That premium is the most you can lose.`);
+    if (maxGain != null && maxGain !== "unlimited")
+      sentences.push(`If ${symbol} drops to zero${exp}, you make the most you can: ${$w(maxGain)}.`);
+    if (breakeven != null)
+      sentences.push(`You start making money below ${$d(breakeven)} (breakeven).`);
+    sentences.push(`Above $${strike} the put expires worthless and you lose the full ${$w(maxLoss)}.`);
+  }
+
+  return sentences.join(" ");
+}
+
 // ── Draft display ──────────────────────────────────────────────────────────────
 
 interface OptionLegDraft {
@@ -221,6 +292,36 @@ function DraftDisplay({
     : draft.direction === "bearish" && draft.suggested_strike != null && leg1Mid != null
       ? (draft.suggested_strike - leg1Mid) * 100
       : null;
+
+  // Breakeven — derived from already-computed mids, never re-looked-up
+  const breakeven: number | null = (() => {
+    if (draft.suggested_strike == null) return null;
+    if (isSpread) {
+      return netDebit != null ? draft.suggested_strike + netDebit : null;
+    }
+    if (leg1Mid == null) return null;
+    return draft.direction === "bullish"
+      ? draft.suggested_strike + leg1Mid
+      : draft.suggested_strike - leg1Mid;
+  })();
+
+  // Plain-English reasoning (deterministic, template-stitched)
+  const plainEnglish = buildPlainEnglish({
+    shortName,
+    direction: draft.direction,
+    isSpread,
+    symbol: draft.symbol,
+    strike: draft.suggested_strike,
+    spreadStrike: draft.suggested_spread_strike,
+    cost: costPerContract,
+    maxLoss: maxLossPerContract,
+    maxGain: (!isSpread && draft.direction === "bullish") ? "unlimited" : maxGainPerContract,
+    netDebit,
+    breakeven,
+    expiration: fb.expiration_used ?? null,
+  });
+
+  const [reasoningMode, setReasoningMode] = useState<"plain" | "detailed">("plain");
 
   // ── Budget alternative — local state, on-demand only ─────────────────────
   const [altOpen, setAltOpen] = useState(false);
@@ -348,8 +449,31 @@ function DraftDisplay({
         )}
       </div>
 
-      {/* F) Reasoning */}
-      <p className="text-muted-foreground leading-relaxed max-w-prose">{draft.reasoning}</p>
+      {/* F) Reasoning — with Plain English / Detailed toggle */}
+      <div className="space-y-2">
+        {plainEnglish != null && (
+          <div className="inline-flex rounded-lg border border-border bg-secondary p-0.5 text-xs font-medium">
+            {(["plain", "detailed"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setReasoningMode(mode)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 transition-colors",
+                  reasoningMode === mode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {mode === "plain" ? "Plain English" : "Detailed"}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-muted-foreground leading-relaxed max-w-prose">
+          {plainEnglish != null && reasoningMode === "plain" ? plainEnglish : draft.reasoning}
+        </p>
+      </div>
 
       {/* G) Fact grid */}
       <div className="bg-secondary border border-border rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
@@ -373,7 +497,7 @@ function DraftDisplay({
         </span>
         <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "—"}%</span></span>
         <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "—"}%</span></span>
-        <span>RV rank: <span className="font-mono text-foreground">{fb.rv_rank?.toFixed(0) ?? "—"}/100</span></span>
+        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="font-mono text-foreground">—</span>}</span>
       </div>
 
       {/* H) Position cost & risk */}
@@ -825,7 +949,7 @@ function BuildTradePageContent() {
           <Link href="/" className="text-sm text-muted-foreground hover:text-foreground mb-5 inline-block">
             ← Home
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight">Build a Trade</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
             AI-drafted idea grounded in live options data, earnings history, and volatility.
             Not financial advice.
@@ -847,13 +971,13 @@ function BuildTradePageContent() {
             ) : (
               <div className="flex items-center justify-between rounded-[var(--radius)] border border-border bg-card px-5 py-3.5">
                 <div className="flex items-center gap-4 min-w-0">
-                  <span className="text-2xl font-display font-bold tracking-tight">{selectedTicker.symbol}</span>
+                  <span className="text-2xl font-display font-bold tracking-tight text-foreground">{selectedTicker.symbol}</span>
                   {selectedTicker.name && (
                     <span className="text-sm text-muted-foreground truncate hidden sm:block">
                       {selectedTicker.name}
                     </span>
                   )}
-                  <span className="font-mono text-sm font-semibold tabular-nums shrink-0">
+                  <span className="font-mono text-sm font-semibold tabular-nums shrink-0 text-foreground">
                     {quoteLoading ? (
                       <span className="inline-block w-14 h-4 bg-muted rounded animate-pulse align-middle" />
                     ) : currentPrice != null ? (

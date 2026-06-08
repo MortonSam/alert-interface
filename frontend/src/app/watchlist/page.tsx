@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
+import { rvRankShort } from "@/lib/utils";
 import {
   api,
   type Watchlist,
@@ -81,13 +82,8 @@ function RVRankCell({ rv, status }: { rv: RealizedVol | null; status: string }) 
   if (!rv || rv.rv_rank == null)
     return <span className="text-muted-foreground text-xs">—</span>;
   const rank = rv.rv_rank;
-  const color =
-    rank > 60
-      ? "text-amber-600 dark:text-amber-400"
-      : rank < 40
-      ? "text-blue-500 dark:text-blue-400"
-      : "text-muted-foreground";
-  return <span className={`${color} tabular-nums`}>{rank.toFixed(0)}/100</span>;
+  const { tag, colorClass } = rvRankShort(rank);
+  return <span className="tabular-nums">{rank.toFixed(0)} · <span className={colorClass}>{tag}</span></span>;
 }
 
 function WatchlistRow({
@@ -608,7 +604,7 @@ export default function WatchlistPage() {
                         Implied Move
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        RV Rank
+                        Realized-vol rank
                       </th>
                       <th className="py-2.5 px-4" />
                     </tr>
