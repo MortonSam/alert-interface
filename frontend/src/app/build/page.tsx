@@ -17,6 +17,29 @@ import { GiBull, GiBearFace } from "react-icons/gi";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 
+// ── Recent tickers (localStorage, SSR-safe) ──────────────────────────────────
+
+type RecentTicker = { symbol: string; name: string | null };
+const RECENT_KEY = "alertinterface:recent_tickers";
+
+function readRecents(): RecentTicker[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+  } catch { return []; }
+}
+
+function pushRecent(t: { symbol: string; name: string | null }) {
+  try {
+    const list = readRecents().filter((r) => r.symbol !== t.symbol);
+    list.unshift({ symbol: t.symbol, name: t.name });
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 5)));
+  } catch { /* quota / private browsing — ignore */ }
+}
+
 // ── Step header ────────────────────────────────────────────────────────────────
 
 function StepHeader({ n, label, done }: { n: number; label: string; done?: boolean }) {
@@ -772,6 +795,10 @@ function BuildTradePageContent() {
   // Result
   const [savedThesis, setSavedThesis] = useState<Thesis | null>(null);
 
+  // Recent searches (client-only localStorage)
+  const [recents, setRecents] = useState<RecentTicker[]>([]);
+  useEffect(() => { setRecents(readRecents()); }, []);
+
   useEffect(() => {
     api.tickers.list().then((list) => {
       setTickers(list);
@@ -789,6 +816,8 @@ function BuildTradePageContent() {
     setQuote(null);
     setQuoteLoading(true);
     setStep("pick_direction");
+    pushRecent({ symbol: t.symbol, name: t.name });
+    setRecents(readRecents());
     api.tickers
       .quote(t.symbol)
       .then(setQuote)
@@ -966,7 +995,35 @@ function BuildTradePageContent() {
               tickersLoading ? (
                 <div className="h-12 bg-muted rounded-xl animate-pulse" />
               ) : (
-                <TickerPicker tickers={tickers} onSelect={handleSelectTicker} />
+                <div className="space-y-4">
+                  <TickerPicker tickers={tickers} onSelect={handleSelectTicker} />
+
+                  {/* Recent searches */}
+                  {recents.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent</p>
+                      <div className="flex flex-wrap gap-2">
+                        {recents.map((r) => {
+                          const match = tickers.find((t) => t.symbol === r.symbol);
+                          return (
+                            <button
+                              key={r.symbol}
+                              type="button"
+                              disabled={!match}
+                              onClick={() => match && handleSelectTicker(match)}
+                              className="flex items-center gap-2 rounded-lg border border-border bg-secondary px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <span className="font-display font-bold">{r.symbol}</span>
+                              {r.name && (
+                                <span className="text-muted-foreground text-xs truncate max-w-[120px]">{r.name}</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )
             ) : (
               <div className="flex items-center justify-between rounded-[var(--radius)] border border-border bg-card px-5 py-3.5">
