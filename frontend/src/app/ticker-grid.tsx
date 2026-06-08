@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { api, type SystemStatus, type Ticker } from "@/lib/api";
+import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 24;
 
 function fmtAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -129,6 +129,26 @@ export function TickerGrid() {
   const safePage = Math.min(page, totalPages);
   const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const isFiltered = !!debouncedSearch || !!sector || sort !== "market_cap";
+
+  // ── Batch quote fetch for the current page ──────────────────────────────────
+  const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
+  const [quotesLoading, setQuotesLoading] = useState(false);
+  const pageSymbols = paginated.map((t) => t.symbol).join(",");
+
+  useEffect(() => {
+    if (!pageSymbols) return;
+    const syms = pageSymbols.split(",");
+    setQuotesLoading(true);
+    api.tickers
+      .quotes(syms)
+      .then((data) => {
+        const m = new Map<string, BatchQuote>();
+        for (const q of data) m.set(q.symbol, q);
+        setQuotes(m);
+      })
+      .catch(() => setQuotes(new Map()))
+      .finally(() => setQuotesLoading(false));
+  }, [pageSymbols]);
 
   const clearFilters = useCallback(() => {
     setSearch("");
@@ -284,41 +304,72 @@ export function TickerGrid() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-          {paginated.map((ticker) => (
-            <Link
-              key={ticker.id}
-              href={`/tickers/${ticker.symbol}`}
-              className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent hover:border-border flex flex-col gap-1 min-h-[96px]"
-            >
-              <div className="flex items-start justify-between gap-1">
-                <span className="text-xl font-bold tracking-tight leading-none">
-                  {ticker.symbol}
-                </span>
-                {ticker.market_cap ? (
-                  <span className="text-xs text-muted-foreground font-medium mt-0.5 shrink-0">
-                    {fmtMcap(ticker.market_cap)}
+          {paginated.map((ticker) => {
+            const q = quotes.get(ticker.symbol);
+            const hasQuote = q && q.price != null;
+            return (
+              <Link
+                key={ticker.id}
+                href={`/tickers/${ticker.symbol}`}
+                className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent hover:border-border flex flex-col gap-1 min-h-[96px]"
+              >
+                {/* Header: Symbol + Price */}
+                <div className="flex items-start justify-between gap-1">
+                  <span className="text-xl font-bold tracking-tight leading-none">
+                    {ticker.symbol}
                   </span>
-                ) : null}
-              </div>
-              {ticker.name && (
-                <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
-                  {ticker.name}
+                  <div className="text-right shrink-0">
+                    {quotesLoading && !hasQuote ? (
+                      <div className="inline-block w-14 h-5 bg-muted rounded animate-pulse" />
+                    ) : hasQuote ? (
+                      <span className="font-mono text-sm font-semibold tabular-nums">
+                        ${q.price!.toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-sm text-muted-foreground">—</span>
+                    )}
+                    {/* Day change % */}
+                    {hasQuote && q.change_pct != null ? (
+                      <div
+                        className={`font-mono text-xs tabular-nums ${
+                          q.change_pct >= 0 ? "text-success" : "text-destructive"
+                        }`}
+                      >
+                        {q.change_pct >= 0 ? "+" : ""}
+                        {q.change_pct.toFixed(2)}%
+                      </div>
+                    ) : quotesLoading && !hasQuote ? (
+                      <div className="inline-block w-10 h-3.5 bg-muted rounded animate-pulse mt-0.5" />
+                    ) : null}
+                  </div>
                 </div>
-              )}
-              <div className="mt-auto pt-1 space-y-0.5">
-                {ticker.sector && (
-                  <div className="text-xs text-muted-foreground line-clamp-1">
-                    {ticker.sector}
+
+                {/* Company name */}
+                {ticker.name && (
+                  <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
+                    {ticker.name}
                   </div>
                 )}
-                {ticker.next_earnings_date && (
-                  <div className="text-xs font-medium text-foreground/70">
-                    Earnings {fmtDate(ticker.next_earnings_date)}
+
+                {/* Footer: Sector + Market Cap + Earnings */}
+                <div className="mt-auto pt-1 space-y-0.5">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {ticker.sector && (
+                      <span className="line-clamp-1">{ticker.sector}</span>
+                    )}
+                    {ticker.market_cap ? (
+                      <span className="shrink-0">{fmtMcap(ticker.market_cap)}</span>
+                    ) : null}
                   </div>
-                )}
-              </div>
-            </Link>
-          ))}
+                  {ticker.next_earnings_date && (
+                    <div className="text-xs font-medium text-foreground/70">
+                      Earnings {fmtDate(ticker.next_earnings_date)}
+                    </div>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
 

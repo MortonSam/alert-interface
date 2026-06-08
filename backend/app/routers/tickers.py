@@ -16,9 +16,10 @@ from app.models.historical_reaction import HistoricalReaction
 from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
-from app.schemas.ticker import EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
+from app.schemas.ticker import BatchQuoteRead, EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
+from app.services import quote_cache
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
@@ -226,6 +227,47 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         timestamp=int(quote["t"]) if quote.get("t") else None,
         sparkline=[SparklinePoint(date=c["date"], close=c["close"]) for c in candles],
     )
+
+
+@router.get("/quotes", response_model=list[BatchQuoteRead])
+async def get_batch_quotes(symbols: str = Query(..., description="Comma-separated symbols")) -> list[BatchQuoteRead]:
+    """Batch real-time quotes for the home grid, with 60s per-symbol cache."""
+    raw = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    syms = list(dict.fromkeys(raw))[:50]  # dedupe, cap at 50
+
+    # Partition into cache hits vs misses
+    results: dict[str, BatchQuoteRead] = {}
+    to_fetch: list[str] = []
+    for sym in syms:
+        cached = quote_cache.get(sym)
+        if cached is not None:
+            results[sym] = BatchQuoteRead(symbol=sym, **cached)
+        else:
+            to_fetch.append(sym)
+
+    # Fetch all misses concurrently via one FinnhubClient
+    if to_fetch:
+        finnhub = FinnhubClient()
+        try:
+            raw_quotes = await asyncio.gather(
+                *(finnhub.get_quote(s) for s in to_fetch),
+                return_exceptions=True,
+            )
+        finally:
+            await finnhub.close()
+
+        for sym, q in zip(to_fetch, raw_quotes):
+            if isinstance(q, BaseException):
+                results[sym] = BatchQuoteRead(symbol=sym, price=None, change=None, change_pct=None)
+                continue
+            price = float(q.get("c") or 0) or None
+            change = float(q.get("d")) if q.get("d") is not None else None
+            change_pct = float(q.get("dp")) if q.get("dp") is not None else None
+            data = {"price": price, "change": change, "change_pct": change_pct}
+            quote_cache.set(sym, data)
+            results[sym] = BatchQuoteRead(symbol=sym, **data)
+
+    return [results.get(s, BatchQuoteRead(symbol=s, price=None, change=None, change_pct=None)) for s in syms]
 
 
 @router.get("/chart/{symbol}", response_model=TickerChartRead)

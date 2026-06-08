@@ -74,3 +74,10 @@ class TickerQuoteRead(BaseModel):
     prev_close: float | None
     timestamp: int | None       # Unix UTC
     sparkline: list[SparklinePoint]  # daily closes, chronological
+
+
+class BatchQuoteRead(BaseModel):
+    symbol: str
+    price: float | None
+    change: float | None
+    change_pct: float | None

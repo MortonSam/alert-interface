@@ -166,6 +166,13 @@ export interface TickerChart {
   start_price: number | null;  // reference close for the period's change calculation
 }
 
+export interface BatchQuote {
+  symbol: string;
+  price: number | null;
+  change: number | null;
+  change_pct: number | null;
+}
+
 export interface TickerQuote {
   symbol: string;
   price: number | null;
@@ -444,6 +451,8 @@ export const api = {
       request<Ticker[]>(`/tickers/?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),
     quote: (symbol: string) => request<TickerQuote>(`/tickers/quote/${symbol}`),
+    quotes: (symbols: string[]) =>
+      request<BatchQuote[]>(`/tickers/quotes?symbols=${symbols.join(",")}`),
     chart: (symbol: string, period = "1y") =>
       request<TickerChart>(`/tickers/chart/${symbol}?period=${period}`),
     create: (data: Partial<Ticker>) =>
