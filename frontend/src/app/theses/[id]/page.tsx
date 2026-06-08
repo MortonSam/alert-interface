@@ -29,19 +29,6 @@ function fmtDateShort(v: string): string {
   });
 }
 
-function fmtOptionLeg(thesis: Thesis): string | null {
-  if (!thesis.option_type || !thesis.strike) return null;
-  const s1 = parseFloat(thesis.strike);
-  const exp = thesis.option_expiration ? fmtDate(thesis.option_expiration) : "—";
-  if (thesis.strike2) {
-    const s2 = parseFloat(thesis.strike2);
-    const name = thesis.option_type === "call" ? "Bull call spread" : "Bear put spread";
-    return `${name} $${s1.toFixed(0)}/$${s2.toFixed(0)} · ${exp}`;
-  }
-  const name = thesis.option_type === "call" ? "Long call" : "Long put";
-  return `${name} $${s1.toFixed(0)} · ${exp}`;
-}
-
 function fmtBasis(basis: ThesisMarkRead["mark_basis"]): string {
   switch (basis) {
     case "live_chain":    return "live chain";
@@ -109,7 +96,6 @@ export default function ThesisDetailPage() {
   const [strategyData, setStrategyData] = useState<StrategyData | null>(null);
   const [thesisError, setThesisError]   = useState<string | null>(null);
   const [markError, setMarkError]       = useState<string | null>(null);
-  const [reasoningOpen, setReasoningOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -169,30 +155,106 @@ export default function ThesisDetailPage() {
 
   const earningsDateMs = strategyData?.earnings_date ? dateMs(strategyData.earnings_date) : null;
 
-  // ── Mark panel helpers ────────────────────────────────────────────────────
+  // ── P&L: three states ───────────────────────────────────────────────────────
 
-  const pnlDollars = mark?.pnl_dollars ?? null;
-  const pnlPct = mark?.pnl_pct ?? null;
+  const hasOption = thesis ? Boolean(thesis.option_type && thesis.strike) : false;
+  const isResolved = thesis?.status === "resolved";
+  const isExpired = mark?.is_expired ?? false;
+
+  let pnlDollars: number | null = null;
+  let pnlPct: number | null = null;
+  let pnlLabel = "Live P&L";
+
+  if (isResolved && thesis?.option_pnl_dollars != null) {
+    // State 1: Resolved — snapshotted on the Thesis record
+    pnlDollars = parseFloat(thesis.option_pnl_dollars);
+    pnlPct = thesis.option_pnl_pct != null ? parseFloat(thesis.option_pnl_pct) : null;
+    pnlLabel = "Closed P&L";
+  } else if (isExpired && !isResolved) {
+    // State 2: Expired but not yet resolved — intrinsic settlement
+    pnlDollars = mark?.pnl_dollars ?? null;
+    pnlPct = mark?.pnl_pct ?? null;
+    pnlLabel = "Expired (intrinsic)";
+  } else {
+    // State 3: Active — live chain mark
+    pnlDollars = mark?.pnl_dollars ?? null;
+    pnlPct = mark?.pnl_pct ?? null;
+    pnlLabel = "Live P&L";
+  }
+
   const pnlColor = pnlDollars == null
     ? "text-muted-foreground"
     : pnlDollars > 0
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? "text-success"
       : pnlDollars < 0
-        ? "text-red-500 dark:text-red-400"
+        ? "text-destructive"
         : "text-foreground";
 
-  const pnlStr = pnlDollars == null
+  const pnlDollarStr = pnlDollars == null
     ? "—"
     : `${pnlDollars >= 0 ? "+" : "−"}$${Math.abs(pnlDollars).toLocaleString("en-US", {
         minimumFractionDigits: 0, maximumFractionDigits: 0,
-      })}${pnlPct != null ? ` (${pnlPct >= 0 ? "+" : ""}${(pnlPct * 100).toFixed(1)}%)` : ""}`;
+      })}`;
 
-  // ── Loading / error states ────────────────────────────────────────────────
+  const pnlPctStr = pnlPct != null
+    ? `${pnlPct >= 0 ? "+" : ""}${(pnlPct * 100).toFixed(1)}%`
+    : null;
+
+  // ── Cost basis ──────────────────────────────────────────────────────────────
+
+  const costBasis = (() => {
+    if (!thesis?.entry_premium) return null;
+    const p1 = parseFloat(thesis.entry_premium);
+    if (thesis.strike2 && thesis.entry_premium2) {
+      const p2 = parseFloat(thesis.entry_premium2);
+      return (p1 - p2) * thesis.contracts * 100;
+    }
+    return p1 * thesis.contracts * 100;
+  })();
+
+  // ── Trade description pieces ────────────────────────────────────────────────
+
+  const tradeName = (() => {
+    if (!thesis?.option_type || !thesis.strike) return null;
+    if (thesis.strike2) {
+      return thesis.option_type === "call" ? "Bull call spread" : "Bear put spread";
+    }
+    return thesis.option_type === "call" ? "Long call" : "Long put";
+  })();
+
+  const strikeStr = (() => {
+    if (!thesis?.strike) return null;
+    const s1 = parseFloat(thesis.strike).toFixed(0);
+    if (thesis.strike2) {
+      const s2 = parseFloat(thesis.strike2).toFixed(0);
+      return `${s1}/${s2}`;
+    }
+    return s1;
+  })();
+
+  const expStr = thesis?.option_expiration ? fmtDateShort(thesis.option_expiration) : null;
+
+  // ── Direction pill + state badge ────────────────────────────────────────────
+
+  const dirPillClass = thesis?.direction === "bullish"
+    ? "bg-success/10 text-success"
+    : thesis?.direction === "bearish"
+      ? "bg-destructive/10 text-destructive"
+      : "bg-muted text-muted-foreground";
+
+  const stateBadge = isResolved
+    ? { label: "CLOSED", cls: "bg-muted text-muted-foreground" }
+    : isExpired
+      ? { label: "EXPIRED", cls: "bg-primary/10 text-primary" }
+      : { label: "LIVE", cls: "bg-success/10 text-success" };
+
+  // ── Loading / error states ──────────────────────────────────────────────────
 
   if (thesisState === "loading") {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-10 text-sm text-muted-foreground">
-        Loading thesis…
+      <div className="max-w-3xl mx-auto px-4 py-10 space-y-4">
+        <div className="h-4 w-32 bg-secondary rounded animate-pulse" />
+        <div className="h-64 bg-card border border-border rounded-2xl animate-pulse" />
       </div>
     );
   }
@@ -208,121 +270,162 @@ export default function ThesisDetailPage() {
     );
   }
 
-  const hasOption = Boolean(thesis.option_type && thesis.strike);
-  const optionLegStr = fmtOptionLeg(thesis);
-
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="space-y-1">
-        <Link href="/theses" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Back to Tracker
-        </Link>
-        <div className="flex items-center gap-2 flex-wrap mt-2">
-          <h1 className="text-xl font-semibold">
+      <Link href="/theses" className="text-sm text-muted-foreground hover:text-foreground">
+        ← Back to Tracker
+      </Link>
+
+      {/* ── Hero Card ──────────────────────────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-2xl px-6 py-5 space-y-4">
+
+        {/* Row 1: Ticker · direction pill · state badge */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-lg font-display font-semibold tracking-tight">
             {thesis.ticker_symbol}
-            <span className="text-muted-foreground font-normal"> · </span>
-            <span className={
-              thesis.direction === "bullish" ? "text-emerald-600 dark:text-emerald-400" :
-              thesis.direction === "bearish" ? "text-red-500 dark:text-red-400" :
-              "text-slate-500"
-            }>{thesis.direction}</span>
-            {optionLegStr && (
-              <>
-                <span className="text-muted-foreground font-normal"> · </span>
-                <span className="text-base font-normal">{optionLegStr}</span>
-              </>
+          </span>
+          <span className={cn(
+            "text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full",
+            dirPillClass,
+          )}>
+            {thesis.direction}
+          </span>
+          <span className={cn(
+            "text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1",
+            stateBadge.cls,
+          )}>
+            {!isResolved && !isExpired && (
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
             )}
-          </h1>
+            {stateBadge.label}
+          </span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>{"★".repeat(thesis.conviction)}{"☆".repeat(5 - thesis.conviction)}</span>
-          {thesis.catalyst && <span>· {thesis.catalyst}</span>}
-          <span>· By {fmtDate(thesis.target_date)}</span>
-          {thesis.entry_price && (
-            <span>· Entry ${parseFloat(thesis.entry_price).toFixed(2)}</span>
-          )}
-        </div>
-        {thesis.reasoning && (
-          <div className="mt-1">
-            <button
-              type="button"
-              onClick={() => setReasoningOpen(o => !o)}
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-            >
-              {reasoningOpen ? "▾" : "▸"} Reasoning
-            </button>
-            {reasoningOpen && (
-              <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{thesis.reasoning}</p>
+
+        {/* Row 2: Trade name with mono strikes */}
+        {tradeName && strikeStr && (
+          <p className="text-sm text-muted-foreground">
+            {tradeName}{" "}
+            <span className="font-mono text-foreground">{strikeStr}</span>
+            {expStr && <span> · {expStr}</span>}
+          </p>
+        )}
+
+        {/* Row 3: BIG P&L number */}
+        {hasOption && (
+          <div>
+            {markState === "loading" ? (
+              <div className="h-12 w-44 bg-secondary rounded animate-pulse" />
+            ) : markState === "error" ? (
+              <p className="text-sm text-destructive">{markError ?? "Failed to load mark."}</p>
+            ) : (
+              <>
+                <p className={cn(
+                  "text-[46px] font-mono font-bold tabular-nums tracking-tight leading-none",
+                  pnlColor,
+                )}>
+                  {pnlDollarStr}
+                  {pnlPctStr && (
+                    <span className="text-lg font-semibold ml-2 opacity-70">{pnlPctStr}</span>
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  {pnlLabel}
+                  {mark && <span> · {fmtBasis(mark.mark_basis)}</span>}
+                </p>
+              </>
             )}
           </div>
         )}
-      </div>
 
-      {/* ── No option leg ──────────────────────────────────────────────────── */}
-      {!hasOption && (
-        <div className="rounded-lg border bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
-          This thesis does not have an option leg tracked. No live mark or simulator available.
-        </div>
-      )}
+        {/* No option leg fallback */}
+        {!hasOption && (
+          <p className="text-sm text-muted-foreground">
+            Stock-only thesis — no option leg tracked.
+          </p>
+        )}
 
-      {hasOption && (
-        <div className="space-y-4">
-
-          {/* ── Panel 1: Live Mark ───────────────────────────────────────── */}
-          <div className="rounded-lg border bg-card px-5 py-4 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 text-xs font-medium px-2 py-0.5 rounded-full">
-                LIVE MARK
+        {/* Row 4: Price + cost strip */}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+          {cp != null && (
+            <span>Current <span className="font-mono text-foreground">${cp.toFixed(2)}</span></span>
+          )}
+          {thesis.entry_price && (
+            <span>Entry <span className="font-mono text-foreground">${parseFloat(thesis.entry_price).toFixed(2)}</span></span>
+          )}
+          {thesis.price_target && (
+            <span>Target <span className="font-mono text-foreground">${parseFloat(thesis.price_target).toFixed(2)}</span></span>
+          )}
+          {costBasis != null && (
+            <span>
+              Cost{" "}
+              <span className="font-mono text-foreground">
+                ${costBasis.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </span>
-              {mark?.is_expired && (
-                <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-medium px-2 py-0.5 rounded-full">
-                  EXPIRED
-                </span>
-              )}
-            </div>
-
-            {markState === "loading" && (
-              <p className="text-sm text-muted-foreground">Loading mark…</p>
-            )}
-            {markState === "error" && (
-              <p className="text-sm text-destructive">{markError ?? "Failed to load mark."}</p>
-            )}
-            {markState === "done" && mark && (
-              <>
-                <p className={cn("text-3xl font-bold tabular-nums tracking-tight leading-none", pnlColor)}>
-                  {pnlStr}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Basis: {fmtBasis(mark.mark_basis)}
-                  {mark.current_price != null && ` · ${thesis.ticker_symbol} @ $${mark.current_price.toFixed(2)}`}
-                </p>
-                {mark.mark_note && (
-                  <p className="text-xs text-muted-foreground">{mark.mark_note}</p>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* ── Panel 2: Simulator ──────────────────────────────────────── */}
-          {legs && expMs != null && (
-            <PayoffSimulator
-              legs={legs}
-              spot={initialScrub}
-              currentPrice={cp}
-              symbol={thesis.ticker_symbol ?? ""}
-              expirationMs={expMs}
-              mult={mult}
-              xMin={xRange.lo}
-              xMax={xRange.hi}
-              earningsMs={earningsDateMs}
-              usingIVFallback={usingIVFallback}
-              sdFailed={sdFailed}
-            />
+            </span>
+          )}
+          {thesis.contracts > 0 && hasOption && (
+            <span>{thesis.contracts} contract{thesis.contracts !== 1 ? "s" : ""}</span>
           )}
         </div>
+      </div>
+
+      {/* ── Payoff Simulator ───────────────────────────────────────────────── */}
+      {legs && expMs != null && (
+        <div className="bg-secondary rounded-2xl p-4 space-y-3">
+          <span className="inline-block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-background/50 px-2.5 py-0.5 rounded">
+            Payoff Simulator
+          </span>
+          <PayoffSimulator
+            legs={legs}
+            spot={initialScrub}
+            currentPrice={cp}
+            symbol={thesis.ticker_symbol ?? ""}
+            expirationMs={expMs}
+            mult={mult}
+            xMin={xRange.lo}
+            xMax={xRange.hi}
+            earningsMs={earningsDateMs}
+            usingIVFallback={usingIVFallback}
+            sdFailed={sdFailed}
+          />
+        </div>
       )}
+
+      {/* ── Thesis Detail ──────────────────────────────────────────────────── */}
+      <div className="space-y-4">
+        {thesis.reasoning && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              Reasoning
+            </h3>
+            <p className="text-sm text-foreground leading-relaxed">{thesis.reasoning}</p>
+          </div>
+        )}
+
+        {thesis.notes && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              Notes
+            </h3>
+            <p className="text-sm text-foreground leading-relaxed">{thesis.notes}</p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 text-sm flex-wrap">
+          <span className="text-primary tracking-wide">
+            {"★".repeat(thesis.conviction)}{"☆".repeat(5 - thesis.conviction)}
+          </span>
+          {thesis.catalyst && (
+            <span className="text-foreground">{thesis.catalyst}</span>
+          )}
+          <span className="text-muted-foreground">By {fmtDate(thesis.target_date)}</span>
+        </div>
+
+        {mark?.mark_note && (
+          <p className="text-xs text-muted-foreground">{mark.mark_note}</p>
+        )}
+      </div>
     </div>
   );
 }

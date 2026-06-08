@@ -50,6 +50,7 @@ class Thesis(Base):
     target_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     entry_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # captured at creation from live quote
     reasoning: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     # ── Status ─────────────────────────────────────────────────────────────────
     status: Mapped[str] = mapped_column(

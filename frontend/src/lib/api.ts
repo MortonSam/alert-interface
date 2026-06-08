@@ -271,6 +271,7 @@ export interface Thesis {
   target_date: string;         // "YYYY-MM-DD"
   entry_price: string | null;  // stock price captured at creation
   reasoning: string | null;
+  notes: string | null;
   status: ThesisStatus;
   resolved_at: string | null;
   price_at_resolution: string | null;
@@ -323,6 +324,7 @@ export interface ThesisCreate {
   price_target?: number;
   target_date: string;
   reasoning?: string;
+  notes?: string;
   // Option leg (entry_premium captured server-side from chain)
   option_type?: "call" | "put";
   strike?: number;

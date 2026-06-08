@@ -927,6 +927,7 @@ async def create_thesis(
         target_date=payload.target_date,
         entry_price=entry_price,
         reasoning=payload.reasoning,
+        notes=payload.notes,
         status=ThesisStatus.OPEN,
         option_type=payload.option_type,
         strike=payload.strike,

@@ -15,6 +15,7 @@ class ThesisCreate(BaseModel):
     price_target: float | None = None
     target_date: date
     reasoning: str | None = None
+    notes: str | None = None
     # entry_price is NOT accepted from the client — always captured from live quote at creation
 
     # Option leg (optional) — entry_premium/entry_premium2 are server-captured from chain
@@ -47,6 +48,7 @@ class ThesisRead(BaseModel):
     target_date: date
     entry_price: Decimal | None          # stock price when thesis was created
     reasoning: str | None
+    notes: str | None
 
     status: str
     resolved_at: datetime | None

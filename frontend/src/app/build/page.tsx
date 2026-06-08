@@ -787,7 +787,7 @@ function BuildTradePageContent() {
   const [conviction, setConviction] = useState(3);
   const [targetDate, setTargetDate] = useState(defaultTargetDate);
   const [priceTarget, setPriceTarget] = useState("");
-  const [reasoning, setReasoning] = useState("");
+  const [notes, setNotes] = useState("");
   const [optionLeg, setOptionLeg] = useState<OptionLegDraft | null>(null);
   const [contracts, setContracts] = useState("1");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -859,7 +859,6 @@ function BuildTradePageContent() {
 
   function handleAcceptDraft(target: number | null, draftReasoning: string, leg: OptionLegDraft | null) {
     if (target != null) setPriceTarget(target.toFixed(2));
-    setReasoning(draftReasoning);
     setOptionLeg(leg);
     setStep("confirm");
   }
@@ -886,7 +885,8 @@ function BuildTradePageContent() {
         conviction,
         target_date: targetDate,
         ...(priceTarget ? { price_target: parseFloat(priceTarget) } : {}),
-        ...(reasoning.trim() ? { reasoning: reasoning.trim() } : {}),
+        ...(draft?.reasoning ? { reasoning: draft.reasoning } : {}),
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
         from_ai_draft: true,
         ...optionPayload,
       });
@@ -908,7 +908,7 @@ function BuildTradePageContent() {
     setConviction(3);
     setTargetDate(defaultTargetDate());
     setPriceTarget("");
-    setReasoning("");
+    setNotes("");
     setOptionLeg(null);
     setContracts("1");
     setSaveError(null);
@@ -1227,12 +1227,13 @@ function BuildTradePageContent() {
 
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-2">
-                    Reasoning
+                    Notes
                   </label>
                   <textarea
                     rows={4}
-                    value={reasoning}
-                    onChange={(e) => setReasoning(e.target.value)}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Your own notes on this thesis (optional)"
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm resize-none"
                   />
                 </div>
