@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { rvRankShort } from "@/lib/utils";
+import Callout from "@/components/Callout";
 import {
   api,
   type Thesis,
@@ -357,10 +358,9 @@ function DraftPanel({
       </div>
 
       {draft.realism_flag && (
-        <div className="rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 px-3 py-2">
-          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-0.5">⚠ Realism Flag</p>
-          <p className="text-xs text-amber-800 dark:text-amber-300">{draft.realism_flag}</p>
-        </div>
+        <Callout severity="caution" title="Realism Flag" compact>
+          {draft.realism_flag}
+        </Callout>
       )}
 
       <div className="space-y-1">

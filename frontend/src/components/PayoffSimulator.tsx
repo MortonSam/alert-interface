@@ -5,6 +5,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import Callout from "@/components/Callout";
 import {
   BS_R,
   type Leg,
@@ -213,14 +214,14 @@ export default function PayoffSimulator({
         </p>
       )}
       {(sdFailed || usingIVFallback) && (
-        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+        <Callout severity="info" compact>
           <strong>
             {sdFailed
               ? "Could not load current IV for this strike — simulation uses a 30% default and may be inaccurate."
               : "IV for one or more strikes not found — simulation uses a 30% default and may be inaccurate."}
           </strong>{" "}
           Real IV may differ significantly (e.g. high-vol names can be 50–80%).
-        </p>
+        </Callout>
       )}
 
       {/* Hero simulated P&L */}
@@ -416,11 +417,11 @@ export default function PayoffSimulator({
 
       {/* IV-crush caveat */}
       {showDisclaimer && (
-        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
-          <strong>Note:</strong> This curve holds today&apos;s implied volatility constant.
+        <Callout severity="info" compact>
+          This curve holds today&apos;s implied volatility constant.
           In practice, IV typically collapses after an earnings release — option values at
           or around earnings will likely be lower than shown.
-        </p>
+        </Callout>
       )}
 
       {/* Footnote — keeps the "not a forecast" label visible at all times */}

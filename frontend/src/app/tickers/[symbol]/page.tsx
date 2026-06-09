@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
+import Callout from "@/components/Callout";
 import {
   BS_R, BS_IV_DEFAULT, MS_PER_YEAR,
   type Leg, dateMs, erfApprox, normCDF,
@@ -1174,10 +1175,10 @@ function ExpectedMoveCard({ em, onSelectExpiration }: { em: ExpectedMove; onSele
 
         {/* Window-mismatch warning banner */}
         {windowsMismatched && (
-          <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-2.5 py-1.5">
+          <Callout severity="info" compact className="mt-1.5">
             This covers the full period to expiration — <strong>{daysPast} days past the {em.earnings_date} earnings</strong>.
             It reflects total vol over that window, not just the earnings event.
-          </p>
+          </Callout>
         )}
       </div>
 
@@ -2159,11 +2160,11 @@ function StrategyCard({
 
       {/* IV-crush disclaimer — shows when slider is at or before earnings date */}
       {showDisclaimer && (
-        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
-          <strong>Note:</strong> This curve holds today&apos;s implied volatility constant.
+        <Callout severity="info" compact>
+          This curve holds today&apos;s implied volatility constant.
           In practice, IV typically collapses after an earnings release — option values at
           or around earnings will likely be lower than shown.
-        </p>
+        </Callout>
       )}
 
       {/* Key stats — dollar figures scaled to contract size; breakeven stays as stock price */}
@@ -2633,11 +2634,11 @@ function MultiLegStrategyCard({
 
       {/* IV-crush disclaimer — shows when slider is at or before earnings date */}
       {showDisclaimer && (
-        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
-          <strong>Note:</strong> This curve holds today&apos;s implied volatility constant.
+        <Callout severity="info" compact>
+          This curve holds today&apos;s implied volatility constant.
           It does not model the IV crush that typically follows an earnings release — real
           post-earnings option values will likely be lower.
-        </p>
+        </Callout>
       )}
 
       {/* Key stats */}
@@ -3255,24 +3256,18 @@ export default function TickerPage() {
             <div className="rounded-lg border bg-card">
               {/* Ungrounded filing warning — shown when no SEC filing was available */}
               {note.source_filings.length === 0 && (
-                <div className="flex items-start gap-3 px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900 text-sm text-amber-700 dark:text-amber-400">
-                  <span className="mt-0.5 shrink-0">⚠</span>
-                  <span>
-                    <strong>Generated without SEC filing.</strong>{" "}
-                    This note is based on general knowledge and earnings history only — not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
-                  </span>
-                </div>
+                <Callout severity="caution" banner>
+                  <strong>Generated without SEC filing.</strong>{" "}
+                  This note is based on general knowledge and earnings history only — not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                </Callout>
               )}
 
               {/* Contradicted claims warning */}
               {note.verification && note.verification.summary.contradicted > 0 && (
-                <div className="flex items-start gap-3 px-6 py-3 bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900 text-sm text-red-700 dark:text-red-400">
-                  <span className="mt-0.5 shrink-0">⚠</span>
-                  <span>
-                    <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
-                    See the verification section below for details. Consider regenerating.
-                  </span>
-                </div>
+                <Callout severity="alert" banner>
+                  <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
+                  See the verification section below for details. Consider regenerating.
+                </Callout>
               )}
 
               {/* Header bar */}

@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import { buildPlainEnglish } from "@/lib/plain-english";
+import Callout from "@/components/Callout";
 import { GiBull, GiBearFace } from "react-icons/gi";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
@@ -368,10 +369,9 @@ function DraftDisplay({
 
       {/* B) Realism flag */}
       {draft.realism_flag && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-          <p className="text-xs font-semibold text-amber-300 mb-1">⚠ Realism Flag</p>
-          <p className="text-sm text-amber-200/90 leading-relaxed">{draft.realism_flag}</p>
-        </div>
+        <Callout severity="caution" title="Realism Flag">
+          {draft.realism_flag}
+        </Callout>
       )}
 
       {/* C) Headline — strategy name + strikes in font-mono */}
@@ -493,9 +493,9 @@ function DraftDisplay({
             </p>
           )}
           {leg1Mid == null && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
+            <Callout severity="caution" compact>
               Cost unavailable — strike not found in current chain data
-            </p>
+            </Callout>
           )}
         </div>
       )}
@@ -608,16 +608,9 @@ function DraftDisplay({
               )}
 
               {altResult != null && !altResult.fits && (
-                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-4 py-3 space-y-1">
-                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                    Nothing good fits this budget
-                  </p>
-                  {altResult.note && (
-                    <p className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">
-                      {altResult.note}
-                    </p>
-                  )}
-                </div>
+                <Callout severity="caution" title="Nothing good fits this budget">
+                  {altResult.note}
+                </Callout>
               )}
             </>
           )}
