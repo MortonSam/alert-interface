@@ -2896,8 +2896,6 @@ export default function TickerPage() {
 
   const [note, setNote]               = useState<ResearchNote | null>(null);
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
-  const [generating, setGenerating]   = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
   const [verificationOpen, setVerificationOpen] = useState(false);
 
   useEffect(() => {
@@ -2981,6 +2979,7 @@ export default function TickerPage() {
       .catch(() => setSdStatus("error"));
   }, [upperSymbol]);
 
+  // ── Research note: initial load ──────────────────────────────────────────
   useEffect(() => {
     api.researchNotes
       .get(upperSymbol)
@@ -2991,17 +2990,36 @@ export default function TickerPage() {
       });
   }, [upperSymbol]);
 
+  // ── Research note: poll while generating/verifying ─────────────────────
+  const pollInFlight = useRef(false);
+  useEffect(() => {
+    if (!note || (note.status !== "generating" && note.status !== "verifying")) return;
+    const started = Date.now();
+    const MAX_POLL_MS = 3 * 60 * 1000; // 3 minutes cap
+    const id = setInterval(() => {
+      if (pollInFlight.current) return;
+      if (Date.now() - started > MAX_POLL_MS) { clearInterval(id); return; }
+      pollInFlight.current = true;
+      api.researchNotes
+        .get(upperSymbol)
+        .then((n) => { setNote(n); setNoteStatus("done"); })
+        .catch(() => {})
+        .finally(() => { pollInFlight.current = false; });
+    }, 3000);
+    return () => clearInterval(id);
+  }, [note?.status, upperSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleGenerate() {
-    setGenerating(true);
-    setGenerateError(null);
     try {
       const n = await api.researchNotes.generate(upperSymbol);
       setNote(n);
       setNoteStatus("done");
     } catch (e: unknown) {
-      setGenerateError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setGenerating(false);
+      setNote((prev) =>
+        prev
+          ? { ...prev, status: "failed", error: e instanceof Error ? e.message : "Unknown error" }
+          : null,
+      );
     }
   }
 
@@ -3202,6 +3220,7 @@ export default function TickerPage() {
         <div className="mt-10 mb-10">
           <h2 className="text-lg font-semibold mb-4">Research Note</h2>
 
+          {/* Initial page load skeleton */}
           {noteStatus === "loading" && (
             <div className="rounded-lg border bg-card p-6 animate-pulse space-y-3">
               <div className="h-4 bg-muted rounded w-1/3" />
@@ -3211,21 +3230,21 @@ export default function TickerPage() {
             </div>
           )}
 
+          {/* Fetch error (network / unexpected) */}
           {noteStatus === "error" && (
             <div className="rounded-lg border bg-card px-6 py-10 text-center">
               <p className="text-sm text-muted-foreground mb-4">Could not load research note.</p>
-              {!generating && (
-                <button
-                  onClick={() => void handleGenerate()}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  Generate Research Note
-                </button>
-              )}
+              <button
+                onClick={() => void handleGenerate()}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Generate Research Note
+              </button>
             </div>
           )}
 
-          {noteStatus === "empty" && !generating && (
+          {/* No note yet — prompt to generate */}
+          {noteStatus === "empty" && (
             <div className="rounded-lg border bg-card px-6 py-10 text-center">
               <p className="text-sm font-medium mb-1">No research note generated yet.</p>
               <p className="text-xs text-muted-foreground mb-5">
@@ -3240,19 +3259,68 @@ export default function TickerPage() {
             </div>
           )}
 
-          {generating && (
-            <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground animate-pulse">
-              Generating + verifying research note… this takes ~40 seconds
+          {/* ── Live note states: generating → verifying → complete / failed ── */}
+          {noteStatus === "done" && note && note.status === "generating" && (
+            <div className="rounded-lg border bg-card px-6 py-10 text-center animate-pulse">
+              <p className="text-sm font-medium mb-1">Generating research note…</p>
+              <p className="text-xs text-muted-foreground">
+                Analyzing filings and earnings history · ~40 seconds
+              </p>
             </div>
           )}
 
-          {generateError && !generating && (
-            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive">
-              Generation failed: {generateError}
+          {noteStatus === "done" && note && note.status === "verifying" && (
+            <div className="rounded-lg border bg-card">
+              {/* Ungrounded filing warning */}
+              {note.source_filings.length === 0 && (
+                <Callout severity="caution" banner>
+                  <strong>Generated without SEC filing.</strong>{" "}
+                  This note is based on general knowledge and earnings history only — not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                </Callout>
+              )}
+
+              {/* Header bar */}
+              <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
+                <span>
+                  Generated {timeAgo(note.generated_at)}
+                  {note.source_filings.length > 0 && (
+                    <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
+                  )}
+                  {" · "}{note.input_tokens + note.output_tokens} tokens
+                </span>
+              </div>
+
+              {/* Note content */}
+              <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
+                prose-headings:text-foreground prose-headings:font-semibold
+                prose-p:text-foreground/90 prose-li:text-foreground/90
+                prose-strong:text-foreground">
+                <ReactMarkdown>{note.content}</ReactMarkdown>
+              </div>
+
+              {/* Verification in progress */}
+              <div className="border-t px-6 py-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/40 border-t-muted-foreground animate-spin" />
+                Verifying claims against filings…
+              </div>
             </div>
           )}
 
-          {noteStatus === "done" && note && !generating && (
+          {noteStatus === "done" && note && note.status === "failed" && (
+            <div className="space-y-3">
+              <Callout severity="caution" title="Generation failed">
+                {note.error || "An unknown error occurred."}
+              </Callout>
+              <button
+                onClick={() => void handleGenerate()}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {noteStatus === "done" && note && note.status === "complete" && (
             <div className="rounded-lg border bg-card">
               {/* Ungrounded filing warning — shown when no SEC filing was available */}
               {note.source_filings.length === 0 && (
