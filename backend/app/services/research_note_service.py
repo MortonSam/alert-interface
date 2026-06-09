@@ -8,10 +8,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.research_note import ResearchNote
@@ -339,57 +340,15 @@ async def _run_verification(
     return verification, model_used
 
 
-# ── Generate ──────────────────────────────────────────────────────────────────
+# ── Generate (two-phase: immediate upsert + background work) ─────────────────
 
-async def generate_research_note(
+async def start_research_note_generation(
     db: AsyncSession,
     ticker_id: uuid.UUID | None,
     symbol: str | None,
 ) -> ResearchNote:
+    """Upsert a placeholder row with status='generating' and return immediately."""
     ticker = await _resolve_ticker(db, ticker_id, symbol)
-    filing, sections, reactions = await _fetch_context(db, ticker)
-
-    # Generate — upstream failure → 502 with a clear message
-    prompt = _build_generation_prompt(ticker, filing, sections, reactions)
-    client = AnthropicClient()
-    try:
-        gen = await client.generate_research_note(prompt)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Research note generation failed: {exc}. Please try again.",
-        )
-
-    print(
-        f"Research note generated for {ticker.symbol}: "
-        f"{gen['input_tokens']} in / {gen['output_tokens']} out tokens",
-        flush=True,
-    )
-
-    # Verify — best-effort: never discard the note if verification fails for any reason
-    verification: dict | None = None
-    verification_model: str | None = None
-    verified_at_dt: datetime | None = None
-    try:
-        verification, verification_model = await _run_verification(
-            gen["content"], filing, sections, reactions, ticker
-        )
-        verified_at_dt = datetime.now(timezone.utc)
-    except Exception as exc:
-        print(
-            f"Verification failed for {ticker.symbol}: {exc!r} "
-            f"— saving note without verification",
-            flush=True,
-        )
-
-    source_filings: list[dict] = []
-    if filing:
-        source_filings.append({
-            "form_type":        filing["form_type"],
-            "accession_number": filing["accession_number"],
-            "filing_date":      filing["filing_date"],
-            "url":              filing.get("url", ""),
-        })
 
     now = datetime.now(timezone.utc)
     stmt = (
@@ -397,27 +356,31 @@ async def generate_research_note(
         .values(
             ticker_id          = ticker.id,
             generated_at       = now,
-            source_filings     = source_filings,
-            content            = gen["content"],
-            model_used         = gen["model_used"],
-            input_tokens       = gen["input_tokens"],
-            output_tokens      = gen["output_tokens"],
-            verification       = verification,
-            verified_at        = verified_at_dt,
-            verification_model = verification_model,
+            source_filings     = [],
+            content            = "",
+            model_used         = "",
+            input_tokens       = 0,
+            output_tokens      = 0,
+            verification       = None,
+            verified_at        = None,
+            verification_model = None,
+            status             = "generating",
+            error              = None,
         )
         .on_conflict_do_update(
             constraint="uq_research_notes_ticker",
             set_=dict(
                 generated_at       = now,
-                source_filings     = source_filings,
-                content            = gen["content"],
-                model_used         = gen["model_used"],
-                input_tokens       = gen["input_tokens"],
-                output_tokens      = gen["output_tokens"],
-                verification       = verification,
-                verified_at        = verified_at_dt,
-                verification_model = verification_model,
+                source_filings     = [],
+                content            = "",
+                model_used         = "",
+                input_tokens       = 0,
+                output_tokens      = 0,
+                verification       = None,
+                verified_at        = None,
+                verification_model = None,
+                status             = "generating",
+                error              = None,
                 updated_at         = now,
             ),
         )
@@ -427,6 +390,98 @@ async def generate_research_note(
     await db.commit()
     await db.refresh(note)
     return note
+
+
+async def run_research_note_background(
+    ticker_id: uuid.UUID,
+    symbol: str,
+) -> None:
+    """Background task: fetch context, generate with Sonnet, verify with Opus.
+
+    Opens its own DB session — the request session is already closed.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            ticker = await _resolve_ticker(db, ticker_id, symbol)
+            filing, sections, reactions = await _fetch_context(db, ticker)
+
+            # ── Phase 1: Sonnet generation ────────────────────────────────
+            prompt = _build_generation_prompt(ticker, filing, sections, reactions)
+            client = AnthropicClient()
+            gen = await client.generate_research_note(prompt)
+
+            print(
+                f"Research note generated for {ticker.symbol}: "
+                f"{gen['input_tokens']} in / {gen['output_tokens']} out tokens",
+                flush=True,
+            )
+
+            source_filings: list[dict] = []
+            if filing:
+                source_filings.append({
+                    "form_type":        filing["form_type"],
+                    "accession_number": filing["accession_number"],
+                    "filing_date":      filing["filing_date"],
+                    "url":              filing.get("url", ""),
+                })
+
+            now = datetime.now(timezone.utc)
+            await db.execute(
+                update(ResearchNote)
+                .where(ResearchNote.ticker_id == ticker.id)
+                .values(
+                    content        = gen["content"],
+                    model_used     = gen["model_used"],
+                    input_tokens   = gen["input_tokens"],
+                    output_tokens  = gen["output_tokens"],
+                    source_filings = source_filings,
+                    status         = "verifying",
+                    updated_at     = now,
+                )
+            )
+            await db.commit()
+
+        except Exception as exc:
+            print(f"Research note generation failed for {symbol}: {exc!r}", flush=True)
+            now = datetime.now(timezone.utc)
+            await db.execute(
+                update(ResearchNote)
+                .where(ResearchNote.ticker_id == ticker_id)
+                .values(status="failed", error=str(exc), updated_at=now)
+            )
+            await db.commit()
+            return
+
+        # ── Phase 2: Opus verification (best-effort) ─────────────────
+        try:
+            verification, verification_model = await _run_verification(
+                gen["content"], filing, sections, reactions, ticker
+            )
+            now = datetime.now(timezone.utc)
+            await db.execute(
+                update(ResearchNote)
+                .where(ResearchNote.ticker_id == ticker.id)
+                .values(
+                    verification       = verification,
+                    verified_at        = now,
+                    verification_model = verification_model,
+                    status             = "complete",
+                    updated_at         = now,
+                )
+            )
+            await db.commit()
+        except Exception as exc:
+            print(
+                f"Verification failed for {symbol}: {exc!r} — marking complete without verification",
+                flush=True,
+            )
+            now = datetime.now(timezone.utc)
+            await db.execute(
+                update(ResearchNote)
+                .where(ResearchNote.ticker_id == ticker.id)
+                .values(status="complete", updated_at=now)
+            )
+            await db.commit()
 
 
 # ── Re-verify existing note ───────────────────────────────────────────────────
@@ -468,6 +523,9 @@ async def verify_existing_note(
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
+STUCK_TIMEOUT_SECONDS = 180  # 3 minutes
+
+
 async def get_research_note(
     db: AsyncSession,
     ticker_id: uuid.UUID | None,
@@ -477,7 +535,21 @@ async def get_research_note(
     row = await db.execute(
         select(ResearchNote).where(ResearchNote.ticker_id == ticker.id)
     )
-    return row.scalar_one_or_none()
+    note = row.scalar_one_or_none()
+    if note is None:
+        return None
+
+    # Stuck-job guard: if generating/verifying for > 3 minutes, mark failed
+    if note.status in ("generating", "verifying"):
+        age = (datetime.now(timezone.utc) - note.updated_at).total_seconds()
+        if age > STUCK_TIMEOUT_SECONDS:
+            note.status = "failed"
+            note.error = "Generation timed out"
+            note.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(note)
+
+    return note
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

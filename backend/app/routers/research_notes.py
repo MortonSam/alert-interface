@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -11,8 +11,9 @@ from app.schemas.research_note import (
     ResearchNoteVerifyRequest,
 )
 from app.services.research_note_service import (
-    generate_research_note,
     get_research_note,
+    run_research_note_background,
+    start_research_note_generation,
     verify_existing_note,
 )
 
@@ -22,9 +23,16 @@ router = APIRouter(prefix="/research-notes", tags=["research-notes"])
 @router.post("/generate", response_model=ResearchNoteRead, status_code=201)
 async def generate(
     payload: ResearchNoteGenerateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> ResearchNote:
-    return await generate_research_note(db, payload.ticker_id, payload.symbol)
+    note = await start_research_note_generation(db, payload.ticker_id, payload.symbol)
+    background_tasks.add_task(
+        run_research_note_background,
+        ticker_id=note.ticker_id,
+        symbol=payload.symbol or "",
+    )
+    return note
 
 
 @router.post("/verify", response_model=ResearchNoteRead)

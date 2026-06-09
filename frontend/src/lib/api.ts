@@ -139,6 +139,8 @@ export interface ResearchNote {
   verification: VerificationResult | null;
   verified_at: string | null;
   verification_model: string | null;
+  status: "generating" | "verifying" | "complete" | "failed";
+  error: string | null;
   created_at: string;
   updated_at: string;
 }

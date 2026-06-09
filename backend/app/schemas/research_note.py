@@ -43,6 +43,8 @@ class ResearchNoteRead(BaseModel):
     verification: VerificationResult | None = None
     verified_at: datetime | None = None
     verification_model: str | None = None
+    status: str
+    error: str | None = None
     created_at: datetime
     updated_at: datetime
 
