@@ -12,6 +12,7 @@ import {
 import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
+import StructuredNoteView from "@/components/StructuredNoteView";
 import {
   BS_R, BS_IV_DEFAULT, MS_PER_YEAR,
   type Leg, dateMs, erfApprox, normCDF,
@@ -3290,13 +3291,23 @@ export default function TickerPage() {
                 </span>
               </div>
 
-              {/* Note content */}
-              <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
-                prose-headings:text-foreground prose-headings:font-semibold
-                prose-p:text-foreground/90 prose-li:text-foreground/90
-                prose-strong:text-foreground">
-                <ReactMarkdown>{note.content}</ReactMarkdown>
-              </div>
+              {/* Note content — structured or legacy markdown */}
+              {note.structured_content ? (
+                <StructuredNoteView
+                  note={note.structured_content}
+                  symbol={upperSymbol}
+                  companyName={ticker?.name}
+                  sector={ticker?.sector}
+                  industry={ticker?.industry}
+                />
+              ) : (
+                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
+                  prose-headings:text-foreground prose-headings:font-semibold
+                  prose-p:text-foreground/90 prose-li:text-foreground/90
+                  prose-strong:text-foreground">
+                  <ReactMarkdown>{note.content}</ReactMarkdown>
+                </div>
+              )}
 
               {/* Verification in progress */}
               <div className="border-t px-6 py-3 flex items-center gap-2 text-xs text-muted-foreground">
@@ -3355,13 +3366,23 @@ export default function TickerPage() {
                 </button>
               </div>
 
-              {/* Note content */}
-              <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
-                prose-headings:text-foreground prose-headings:font-semibold
-                prose-p:text-foreground/90 prose-li:text-foreground/90
-                prose-strong:text-foreground">
-                <ReactMarkdown>{note.content}</ReactMarkdown>
-              </div>
+              {/* Note content — structured or legacy markdown */}
+              {note.structured_content ? (
+                <StructuredNoteView
+                  note={note.structured_content}
+                  symbol={upperSymbol}
+                  companyName={ticker?.name}
+                  sector={ticker?.sector}
+                  industry={ticker?.industry}
+                />
+              ) : (
+                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
+                  prose-headings:text-foreground prose-headings:font-semibold
+                  prose-p:text-foreground/90 prose-li:text-foreground/90
+                  prose-strong:text-foreground">
+                  <ReactMarkdown>{note.content}</ReactMarkdown>
+                </div>
+              )}
 
               {/* Verification panel — or notice if verification was unavailable */}
               {note.verification ? (
