@@ -15,14 +15,14 @@ class AnthropicClient:
         self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def generate_research_note(self, prompt: str) -> dict:
-        """Generate a research note.
+        """Generate a research note (structured JSON output).
 
         Returns:
             {"content": str, "model_used": str, "input_tokens": int, "output_tokens": int}
         """
         msg = await self._client.messages.create(
             model=GENERATION_MODEL,
-            max_tokens=1024,
+            max_tokens=2500,
             messages=[{"role": "user", "content": prompt}],
         )
         return {

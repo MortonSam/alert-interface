@@ -40,6 +40,7 @@ class ResearchNoteRead(BaseModel):
     model_used: str
     input_tokens: int
     output_tokens: int
+    structured_content: dict | None = None
     verification: VerificationResult | None = None
     verified_at: datetime | None = None
     verification_model: str | None = None

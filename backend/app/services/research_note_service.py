@@ -116,6 +116,66 @@ def _format_market_cap(mc: int | None) -> str:
     return f"${mc:,}"
 
 
+# ── Stats object (Python-attached, exact values) ─────────────────────────────
+
+def _build_stats_object(
+    ticker: Ticker,
+    reactions: list[HistoricalReaction],
+) -> dict:
+    """Build the stats sub-object with exact DB values. Never fabricate."""
+    stats: dict = {
+        "market_cap": ticker.market_cap,
+        "eps_estimate": None,
+        "eps_actual": None,
+        "eps_beat_pct": None,
+        "revenue_estimate": None,
+        "revenue_actual": None,
+        "revenue_beat_pct": None,
+        "beat_count": None,
+        "total_quarters": None,
+        "latest_move_1d": None,
+        "latest_outcome": None,
+        "latest_quarter_date": None,
+    }
+    if not reactions:
+        return stats
+
+    precomputed = _precompute_stats(reactions)
+    stats["beat_count"] = precomputed.get("beat")
+    stats["total_quarters"] = precomputed.get("total")
+
+    latest = reactions[0]
+    stats["latest_quarter_date"] = str(latest.event_date)
+    stats["latest_outcome"] = latest.outcome.value
+    stats["latest_move_1d"] = _fmt_pct(_pct(latest.pct_change_1d))
+
+    if latest.eps_estimate is not None:
+        stats["eps_estimate"] = round(float(latest.eps_estimate), 4)
+    if latest.eps_actual is not None:
+        stats["eps_actual"] = round(float(latest.eps_actual), 4)
+    if latest.eps_estimate and latest.eps_actual and float(latest.eps_estimate) != 0:
+        stats["eps_beat_pct"] = round(
+            (float(latest.eps_actual) - float(latest.eps_estimate))
+            / abs(float(latest.eps_estimate))
+            * 100,
+            2,
+        )
+
+    if latest.revenue_estimate is not None:
+        stats["revenue_estimate"] = latest.revenue_estimate
+    if latest.revenue_actual is not None:
+        stats["revenue_actual"] = latest.revenue_actual
+    if latest.revenue_estimate and latest.revenue_actual and latest.revenue_estimate != 0:
+        stats["revenue_beat_pct"] = round(
+            (latest.revenue_actual - latest.revenue_estimate)
+            / abs(latest.revenue_estimate)
+            * 100,
+            2,
+        )
+
+    return stats
+
+
 def _build_generation_prompt(
     ticker: Ticker,
     filing: dict | None,
@@ -161,7 +221,7 @@ def _build_generation_prompt(
         table_block = "(No earnings data.)"
 
     return f"""\
-You are a financial research analyst. Write a concise research note for {ticker.symbol}.
+You are a financial research analyst producing a STRUCTURED research note for {ticker.symbol}.
 
 COMPANY: {ticker.symbol} — {name}
 SECTOR: {sector} | INDUSTRY: {industry}
@@ -174,29 +234,117 @@ MARKET CAP: {market_cap}
 EARNINGS TABLE (for qualitative context — do NOT count rows, recompute averages, or derive any statistics; use the precomputed values above for all numerical claims):
 {table_block}
 
+OUTPUT FORMAT: Return ONLY a valid JSON object with exactly these keys (no markdown fences, no preamble, no text outside the JSON):
+
+{{
+  "rating": "bullish" | "neutral" | "bearish",
+  "bottom_line": "One paragraph (3-5 sentences) synthesizing the investment picture — what matters most right now.",
+  "what_they_do": "2-4 sentences on core business and revenue model.",
+  "highlights": [
+    {{"lead": "short bold label (2-5 words)", "detail": "1-3 sentence analysis"}},
+    ...
+  ],
+  "watch": [
+    {{"lead": "short label", "detail": "1-3 sentence analysis"}},
+    ...
+  ],
+  "risks": [
+    {{"lead": "short label", "detail": "1-3 sentence analysis"}},
+    ...
+  ]
+}}
+
 RULES:
+- "rating" MUST be exactly one of: "bullish", "neutral", "bearish". Base it on the overall picture from filings + earnings data.
+- 3-6 items in each of highlights, watch, and risks.
 - The precomputed statistics above are authoritative. Use those exact figures for any numerical claim about earnings history.
 - Do NOT count, rank, or compute any statistics yourself from the table.
 - Do NOT make superlative claims ("strongest", "best ever", "largest") unless the precomputed stats unambiguously support them.
 - Only state facts about the business that appear in the filing excerpt or are well-established public knowledge.
-- Do not invent revenue figures, margin percentages, or guidance numbers not in the filing.
-
-Write a research one-pager in markdown with EXACTLY these four sections:
-
-## What They Do
-[2-3 sentences on core business and revenue model]
-
-## Recent Quarter Highlights
-[4-6 bullet points — draw from the filing excerpt and the precomputed most-recent-quarter stats above]
-
-## What to Watch
-[3-4 forward-looking items from the filing]
-
-## Key Risks
-[3 bullet points from the filing's risk factors]
-
-Target 400-600 words. Be specific; cite numbers from the filing or the precomputed stats.\
+- Do NOT invent revenue figures, margin percentages, ARR, RPO, guidance, or valuation multiples not present in the provided context.
+- Do NOT include a "stats" key — numerical stats are attached separately by the system.
+- Return ONLY valid JSON. No markdown fences. No preamble. No explanation outside the JSON object.\
 """
+
+
+def _strip_json_fences(text: str) -> str:
+    """Strip ```json ... ``` fences if the model wraps its JSON response."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    return text
+
+
+def _parse_generation_response(raw_text: str) -> dict:
+    """Parse and validate the model's structured JSON response.
+
+    Raises ValueError with a clear message on parse failure.
+    """
+    cleaned = _strip_json_fences(raw_text)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Model returned invalid JSON: {exc}") from exc
+
+    # Validate required keys
+    required = {"rating", "bottom_line", "what_they_do", "highlights", "watch", "risks"}
+    missing = required - set(data.keys())
+    if missing:
+        raise ValueError(f"Model response missing required keys: {missing}")
+
+    if data["rating"] not in ("bullish", "neutral", "bearish"):
+        raise ValueError(f"Invalid rating: {data['rating']!r}")
+
+    for section in ("highlights", "watch", "risks"):
+        if not isinstance(data[section], list) or len(data[section]) == 0:
+            raise ValueError(f"Section '{section}' must be a non-empty array")
+        for item in data[section]:
+            if not isinstance(item, dict) or "lead" not in item or "detail" not in item:
+                raise ValueError(f"Each item in '{section}' must have 'lead' and 'detail'")
+
+    return data
+
+
+def _serialize_structured_note(structured: dict, ticker: Ticker) -> str:
+    """Render the structured note as readable text for the content column + verification."""
+    name = ticker.name or ticker.symbol
+    lines = [
+        f"# {ticker.symbol} — {name}",
+        f"**Rating: {structured['rating'].title()}**",
+        "",
+        structured["bottom_line"],
+        "",
+        "---",
+        "",
+        "## What They Do",
+        structured["what_they_do"],
+        "",
+        "---",
+        "",
+        "## Recent Quarter Highlights",
+    ]
+    for item in structured["highlights"]:
+        lines.append(f"- **{item['lead']}:** {item['detail']}")
+    lines += ["", "---", "", "## What to Watch"]
+    for item in structured["watch"]:
+        lines.append(f"- **{item['lead']}:** {item['detail']}")
+    lines += ["", "---", "", "## Key Risks"]
+    for item in structured["risks"]:
+        lines.append(f"- **{item['lead']}:** {item['detail']}")
+
+    stats = structured.get("stats", {})
+    if stats.get("latest_quarter_date"):
+        lines += [
+            "",
+            "---",
+            f"*Most recent quarter: {stats['latest_quarter_date']}"
+            f" ({stats.get('latest_outcome', 'N/A').upper()})*",
+        ]
+
+    return "\n".join(lines)
 
 
 def _build_verification_prompt(
@@ -364,6 +512,7 @@ async def start_research_note_generation(
             verification       = None,
             verified_at        = None,
             verification_model = None,
+            structured_content = None,
             status             = "generating",
             error              = None,
         )
@@ -379,6 +528,7 @@ async def start_research_note_generation(
                 verification       = None,
                 verified_at        = None,
                 verification_model = None,
+                structured_content = None,
                 status             = "generating",
                 error              = None,
                 updated_at         = now,
@@ -405,7 +555,7 @@ async def run_research_note_background(
             ticker = await _resolve_ticker(db, ticker_id, symbol)
             filing, sections, reactions = await _fetch_context(db, ticker)
 
-            # ── Phase 1: Sonnet generation ────────────────────────────────
+            # ── Phase 1: Sonnet generation (structured JSON) ─────────────
             prompt = _build_generation_prompt(ticker, filing, sections, reactions)
             client = AnthropicClient()
             gen = await client.generate_research_note(prompt)
@@ -415,6 +565,16 @@ async def run_research_note_background(
                 f"{gen['input_tokens']} in / {gen['output_tokens']} out tokens",
                 flush=True,
             )
+
+            # Parse structured JSON from model response
+            structured = _parse_generation_response(gen["content"])
+
+            # Attach Python-computed stats (exact DB values, never model-generated)
+            stats_obj = _build_stats_object(ticker, reactions)
+            structured["stats"] = stats_obj
+
+            # Serialize to readable text for content column + verifier
+            content_text = _serialize_structured_note(structured, ticker)
 
             source_filings: list[dict] = []
             if filing:
@@ -430,13 +590,14 @@ async def run_research_note_background(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
                 .values(
-                    content        = gen["content"],
-                    model_used     = gen["model_used"],
-                    input_tokens   = gen["input_tokens"],
-                    output_tokens  = gen["output_tokens"],
-                    source_filings = source_filings,
-                    status         = "verifying",
-                    updated_at     = now,
+                    content            = content_text,
+                    structured_content = structured,
+                    model_used         = gen["model_used"],
+                    input_tokens       = gen["input_tokens"],
+                    output_tokens      = gen["output_tokens"],
+                    source_filings     = source_filings,
+                    status             = "verifying",
+                    updated_at         = now,
                 )
             )
             await db.commit()
@@ -455,7 +616,7 @@ async def run_research_note_background(
         # ── Phase 2: Opus verification (best-effort) ─────────────────
         try:
             verification, verification_model = await _run_verification(
-                gen["content"], filing, sections, reactions, ticker
+                content_text, filing, sections, reactions, ticker
             )
             now = datetime.now(timezone.utc)
             await db.execute(

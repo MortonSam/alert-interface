@@ -127,6 +127,36 @@ export interface VerificationResult {
   summary: { supported: number; unsupported: number; contradicted: number };
 }
 
+export interface StructuredNoteItem {
+  lead: string;
+  detail: string;
+}
+
+export interface StructuredNoteStats {
+  market_cap: number | null;
+  eps_estimate: number | null;
+  eps_actual: number | null;
+  eps_beat_pct: number | null;
+  revenue_estimate: number | null;
+  revenue_actual: number | null;
+  revenue_beat_pct: number | null;
+  beat_count: number | null;
+  total_quarters: number | null;
+  latest_move_1d: string | null;
+  latest_outcome: "beat" | "miss" | "meet" | null;
+  latest_quarter_date: string | null;
+}
+
+export interface StructuredNote {
+  rating: "bullish" | "neutral" | "bearish";
+  bottom_line: string;
+  what_they_do: string;
+  highlights: StructuredNoteItem[];
+  watch: StructuredNoteItem[];
+  risks: StructuredNoteItem[];
+  stats: StructuredNoteStats;
+}
+
 export interface ResearchNote {
   id: string;
   ticker_id: string;
@@ -136,6 +166,7 @@ export interface ResearchNote {
   model_used: string;
   input_tokens: number;
   output_tokens: number;
+  structured_content: StructuredNote | null;
   verification: VerificationResult | null;
   verified_at: string | null;
   verification_model: string | null;
