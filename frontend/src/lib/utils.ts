@@ -25,3 +25,10 @@ export const RV_RANK_TIP =
 export const RV_RANK_TIP_SHORT =
   "How volatile this stock is right now vs. its own past year. " +
   "High = choppier than usual for THIS stock, not volatile in absolute terms.";
+
+/** Tooltip text explaining implied move. */
+export const IMPLIED_MOVE_TIP =
+  "The size of the move the options market is pricing in \u2014 up OR down \u2014 " +
+  "by the next earnings report. It\u2019s a magnitude, not a direction or a prediction: " +
+  "a bigger number means the market expects a bigger swing, either way. " +
+  "Derived from the at-the-money straddle of the expiry closest to the earnings date.";

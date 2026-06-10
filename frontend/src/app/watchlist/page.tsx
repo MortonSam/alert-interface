@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT } from "@/lib/utils";
+import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
 import Tip from "@/components/Tip";
 import {
   api,
@@ -613,7 +613,11 @@ export default function WatchlistPage() {
                         Next Earnings
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Implied Move
+                        <Tip text={IMPLIED_MOVE_TIP}>
+                          <span className="border-b border-dotted border-muted-foreground/40 cursor-help">
+                            Implied Move
+                          </span>
+                        </Tip>
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         <Tip text={RV_RANK_TIP}>
