@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type OptionContract, type StrategyData, type StrikeData } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type StrategyData, type StrikeData } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
 import StructuredNoteView from "@/components/StructuredNoteView";
@@ -1033,9 +1033,6 @@ function Stat({ label, value }: { label: string; value: string | null | undefine
 
 // ── Options / IV helpers ──────────────────────────────────────────────────────
 
-function fmtIV(iv: number | null): string {
-  return iv == null ? "—" : `${(iv * 100).toFixed(1)}%`;
-}
 function fmtPctDecimal(v: number | null, digits = 1): string {
   return v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
 }
@@ -1096,19 +1093,6 @@ const TIPS = {
   openInterest: "The total number of open option contracts at this strike that haven't been closed or exercised. High open interest means more market participation.",
   strike:       "The fixed price at which the option lets you buy (call) or sell (put) the stock, regardless of where the stock actually trades.",
 } as const;
-
-// ── IV heatmap helper ─────────────────────────────────────────────────────────
-
-function ivHeatBg(iv: number | null, minIV: number, maxIV: number): React.CSSProperties {
-  if (iv == null || minIV >= maxIV) return {};
-  const t = Math.max(0, Math.min(1, (iv - minIV) / (maxIV - minIV)));
-  // cool blue (low IV) → warm orange (high IV), subtle opacity
-  const r = Math.round(59  + t * (249 - 59));
-  const g = Math.round(130 + t * (115 - 130));
-  const b = Math.round(246 + t * (22  - 246));
-  const a = 0.10 + t * 0.12;
-  return { backgroundColor: `rgba(${r},${g},${b},${a.toFixed(2)})` };
-}
 
 // ── ExpectedMoveCard ──────────────────────────────────────────────────────────
 
@@ -1261,180 +1245,6 @@ function ExpectedMoveCard({ em, onSelectExpiration }: { em: ExpectedMove; onSele
       {em.data_quality_note && !windowsMismatched && (
         <p className="text-xs text-muted-foreground italic">{em.data_quality_note}</p>
       )}
-    </div>
-  );
-}
-
-// ── OptionsChainView ──────────────────────────────────────────────────────────
-
-function OptionsChainView({
-  chain,
-  onExpiration,
-}: {
-  chain: OptionsChain;
-  onExpiration: (exp: string) => void;
-}) {
-  const allStrikes = useMemo(
-    () => Array.from(new Set([...chain.calls, ...chain.puts].map((c) => c.strike))).sort((a, b) => a - b),
-    [chain.calls, chain.puts],
-  );
-  const callMap = useMemo(
-    () => new Map<number, OptionContract>(chain.calls.map((c) => [c.strike, c])),
-    [chain.calls],
-  );
-  const putMap = useMemo(
-    () => new Map<number, OptionContract>(chain.puts.map((p) => [p.strike, p])),
-    [chain.puts],
-  );
-
-  // A contract is questionable if the backend set data_quality_flag
-  function isQuestionable(c: OptionContract | undefined): boolean {
-    return c != null && c.data_quality_flag != null;
-  }
-
-  // IV heatmap: only use trustworthy contracts for the color scale
-  const { minIV, maxIV } = useMemo(() => {
-    const ivs = [...chain.calls, ...chain.puts]
-      .filter((c) => !isQuestionable(c))
-      .map((c) => c.implied_volatility)
-      .filter((v): v is number => v != null);
-    return { minIV: ivs.length ? Math.min(...ivs) : 0, maxIV: ivs.length ? Math.max(...ivs) : 1 };
-  }, [chain.calls, chain.puts]);
-
-  return (
-    <div className="space-y-3">
-      {/* Expiration selector */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm text-muted-foreground">Expiration:</label>
-        <select
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-          value={chain.expiration}
-          onChange={(e) => onExpiration(e.target.value)}
-        >
-          {chain.available_expirations.map((exp) => (
-            <option key={exp} value={exp}>{exp}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Chain table */}
-      <div className="rounded-lg border bg-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                  <Tip text={TIPS.bid}>
-                    <span className="underline decoration-dotted underline-offset-2">Call Bid</span>
-                  </Tip>
-                </th>
-                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                  <Tip text={TIPS.ask}>
-                    <span className="underline decoration-dotted underline-offset-2">Call Ask</span>
-                  </Tip>
-                </th>
-                <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                  <Tip text={TIPS.iv}>
-                    <span className="underline decoration-dotted underline-offset-2">Call IV</span>
-                  </Tip>
-                </th>
-                <th className="px-3 py-2.5 text-center font-medium text-muted-foreground">
-                  <Tip text={TIPS.strike}>
-                    <span className="underline decoration-dotted underline-offset-2">Strike</span>
-                  </Tip>
-                </th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                  <Tip text={TIPS.iv}>
-                    <span className="underline decoration-dotted underline-offset-2">Put IV</span>
-                  </Tip>
-                </th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                  <Tip text={TIPS.bid}>
-                    <span className="underline decoration-dotted underline-offset-2">Put Bid</span>
-                  </Tip>
-                </th>
-                <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                  <Tip text={TIPS.ask}>
-                    <span className="underline decoration-dotted underline-offset-2">Put Ask</span>
-                  </Tip>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {allStrikes.map((strike) => {
-                const call = callMap.get(strike);
-                const put  = putMap.get(strike);
-                const isAtm = call?.is_atm || put?.is_atm;
-                const callQ = isQuestionable(call);
-                const putQ  = isQuestionable(put);
-                const deadCls = "text-muted-foreground/50";
-                return (
-                  <tr
-                    key={strike}
-                    className={cn(
-                      "transition-colors",
-                      isAtm ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-muted/30",
-                    )}
-                  >
-                    {/* Call bid */}
-                    <td className={cn("px-3 py-2 text-right tabular-nums", callQ && deadCls)}>
-                      {callQ ? "—" : (call?.bid != null ? call.bid.toFixed(2) : "—")}
-                    </td>
-                    {/* Call ask */}
-                    <td className={cn("px-3 py-2 text-right tabular-nums", callQ && deadCls)}>
-                      {callQ ? "—" : (call?.ask != null ? call.ask.toFixed(2) : "—")}
-                    </td>
-                    {/* Call IV — heatmap tinted only for trustworthy contracts */}
-                    <td
-                      className={cn("px-3 py-2 text-right tabular-nums font-medium", callQ && deadCls)}
-                      style={callQ ? {} : ivHeatBg(call?.implied_volatility ?? null, minIV, maxIV)}
-                    >
-                      {callQ ? "—" : fmtIV(call?.implied_volatility ?? null)}
-                    </td>
-                    {/* Strike — always shown */}
-                    <td className="px-3 py-2 text-center font-semibold tabular-nums">
-                      {strike.toFixed(0)}
-                      {isAtm && (
-                        <Tip text={TIPS.atm}>
-                          <span className="ml-1 text-xs font-normal text-blue-600 dark:text-blue-400 underline decoration-dotted underline-offset-2">
-                            ATM
-                          </span>
-                        </Tip>
-                      )}
-                    </td>
-                    {/* Put IV — heatmap tinted only for trustworthy contracts */}
-                    <td
-                      className={cn("px-3 py-2 text-left tabular-nums font-medium", putQ && deadCls)}
-                      style={putQ ? {} : ivHeatBg(put?.implied_volatility ?? null, minIV, maxIV)}
-                    >
-                      {putQ ? "—" : fmtIV(put?.implied_volatility ?? null)}
-                    </td>
-                    {/* Put bid */}
-                    <td className={cn("px-3 py-2 text-left tabular-nums", putQ && deadCls)}>
-                      {putQ ? "—" : (put?.bid != null ? put.bid.toFixed(2) : "—")}
-                    </td>
-                    {/* Put ask */}
-                    <td className={cn("px-3 py-2 text-left tabular-nums", putQ && deadCls)}>
-                      {putQ ? "—" : (put?.ask != null ? put.ask.toFixed(2) : "—")}
-                    </td>
-                  </tr>
-                );
-              })}
-              {allStrikes.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
-                    No options data available for this expiration.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
-          IV columns are color-shaded from cool (low) to warm (high) — warmer = pricier vol.
-          Options data may be delayed after hours. Options are leveraged instruments — use for analytical context only.
-        </p>
-      </div>
     </div>
   );
 }
@@ -3507,27 +3317,6 @@ export default function TickerPage() {
               />
             </>
           )}
-
-          <div className="mt-6">
-            {selectedExpiration !== null && ocStatus === "loading" && (
-              <div className="animate-pulse space-y-3">
-                <div className="h-8 bg-muted rounded w-48" />
-                <div className="h-64 bg-muted rounded-lg" />
-              </div>
-            )}
-            {ocStatus === "error" && (
-              <p className="text-sm text-muted-foreground">Could not load options chain.</p>
-            )}
-            {ocStatus === "empty" && (
-              <p className="text-sm text-muted-foreground">No options chain data available.</p>
-            )}
-            {ocStatus === "done" && optionsChain && (
-              <OptionsChainView
-                chain={optionsChain}
-                onExpiration={setSelectedExpiration}
-              />
-            )}
-          </div>
 
           {/* Education — rendered when both datasets are ready */}
           {emStatus === "done" && expectedMove && ocStatus === "done" && optionsChain && (
