@@ -2527,33 +2527,28 @@ function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
   const rank = rv.rv_rank ?? 0;
 
   const { text: interp, color: interpColor } =
-    rank < 20
+    rank < 25
       ? {
-          text: "Vol is very quiet — the stock is moving much less than usual this past year.",
-          color: "text-blue-600 dark:text-blue-400",
-        }
-      : rank < 40
-      ? {
-          text: "Vol is on the low side — moving less than its typical level this past year.",
-          color: "text-blue-500 dark:text-blue-400",
-        }
-      : rank < 60
-      ? {
-          text: "Vol is near its historical average for the past year.",
+          text: "Vol is quieter than usual for this stock — it\u2019s moving less than its own norm over the past year.",
           color: "text-muted-foreground",
         }
-      : rank < 80
+      : rank < 70
       ? {
-          text: "Vol is on the high side — moving more than its typical level this past year.",
+          text: "Vol is normal for this stock — near its typical level over the past year.",
+          color: "text-muted-foreground",
+        }
+      : rank < 90
+      ? {
+          text: "Vol is elevated for this stock — it\u2019s moving more than its own norm over the past year.",
           color: "text-amber-600 dark:text-amber-400",
         }
       : {
-          text: "Vol is very elevated — moving much more than usual this past year.",
-          color: "text-amber-600 dark:text-amber-400",
+          text: "Vol is extreme for this stock — it\u2019s moving much more than usual compared to its own past year.",
+          color: "text-primary",
         };
 
   const gaugeColor =
-    rank < 40 ? "bg-blue-500" : rank < 60 ? "bg-foreground/60" : "bg-amber-500";
+    rank < 25 ? "bg-muted-foreground/60" : rank < 70 ? "bg-foreground/60" : rank < 90 ? "bg-amber-500" : "bg-primary";
 
   return (
     <div className="rounded-lg border bg-card px-5 py-4 space-y-4">
@@ -2587,8 +2582,8 @@ function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
           />
         </div>
         <div className="flex justify-between text-[10px] text-muted-foreground">
-          <span>0 — low vol</span>
-          <span>100 — high vol</span>
+          <span>0 — quiet for this stock</span>
+          <span>100 — extreme for this stock</span>
         </div>
       </div>
 

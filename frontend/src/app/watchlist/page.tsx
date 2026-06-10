@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { rvRankShort } from "@/lib/utils";
+import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT } from "@/lib/utils";
+import Tip from "@/components/Tip";
 import {
   api,
   type Watchlist,
@@ -83,7 +84,18 @@ function RVRankCell({ rv, status }: { rv: RealizedVol | null; status: string }) 
     return <span className="text-muted-foreground text-xs">—</span>;
   const rank = rv.rv_rank;
   const { tag, colorClass } = rvRankShort(rank);
-  return <span className="tabular-nums">{rank.toFixed(0)} · <span className={colorClass}>{tag}</span></span>;
+  return (
+    <Tip text={RV_RANK_TIP_SHORT}>
+      <span className="flex flex-col">
+        <span className="tabular-nums">{rank.toFixed(0)} · <span className={colorClass}>{tag}</span></span>
+        {rv.current_rv != null && (
+          <span className="font-mono text-[10px] text-muted-foreground/60">
+            RV {(rv.current_rv * 100).toFixed(0)}% ann.
+          </span>
+        )}
+      </span>
+    </Tip>
+  );
 }
 
 function WatchlistRow({
@@ -604,7 +616,11 @@ export default function WatchlistPage() {
                         Implied Move
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Realized-vol rank
+                        <Tip text={RV_RANK_TIP}>
+                          <span className="border-b border-dotted border-muted-foreground/40 cursor-help">
+                            Realized-vol rank
+                          </span>
+                        </Tip>
                       </th>
                       <th className="py-2.5 px-4" />
                     </tr>
@@ -626,7 +642,7 @@ export default function WatchlistPage() {
                 <div className="px-4 py-3 bg-muted/20 border-t border-border">
                   <p className="text-[11px] text-muted-foreground/60">
                     Prices via Finnhub — may be delayed up to 15 min. Implied move derived from near-term options straddle.
-                    RV rank: where today&apos;s 20-day realized vol sits in its trailing 1-year range.
+                    RV rank: where this stock&apos;s current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute).
                   </p>
                 </div>
               </div>
