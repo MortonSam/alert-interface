@@ -307,6 +307,33 @@ export interface OptionsRead {
   as_of: string;
 }
 
+// ── Discover types ───────────────────────────────────────────────────────────
+
+export interface ReportingSoonItem {
+  symbol: string;
+  name: string | null;
+  earnings_date: string;
+  is_confirmed: boolean;
+}
+
+export interface ReportingSoonResponse {
+  items: ReportingSoonItem[];
+  total: number;
+}
+
+export interface JustReportedItem {
+  symbol: string;
+  name: string | null;
+  event_date: string;
+  pct_change_1d: number | null;
+  outcome: EarningsOutcome;
+}
+
+export interface JustReportedResponse {
+  items: JustReportedItem[];
+  total: number;
+}
+
 export interface RealizedVol {
   symbol: string;
   current_rv: number | null;       // annualized 20-day RV, 0–1 decimal (0.172 = 17.2%)
@@ -621,6 +648,13 @@ export const api = {
       request<ThesisMarkRead>(`/theses/${id}/mark`),
     stockMark: (id: string) =>
       request<ThesisStockMarkRead>(`/theses/${id}/stock-mark`),
+  },
+
+  discover: {
+    reportingSoon: (days = 7, limit = 12) =>
+      request<ReportingSoonResponse>(`/discover/reporting-soon?days=${days}&limit=${limit}`),
+    justReported: (days = 5, limit = 12) =>
+      request<JustReportedResponse>(`/discover/just-reported?days=${days}&limit=${limit}`),
   },
 
   reactions: {
