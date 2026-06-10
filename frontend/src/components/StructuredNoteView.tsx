@@ -83,6 +83,18 @@ const sectionColors = {
     accent: "border-l-muted-foreground/20",
     bg: "bg-muted-foreground/[0.04]",
   },
+  azure: {
+    dot: "bg-cool",
+    label: "text-cool",
+    accent: "border-l-cool/30",
+    bg: "bg-cool/[0.04]",
+  },
+  violet: {
+    dot: "bg-violet",
+    label: "text-violet",
+    accent: "border-l-violet/30",
+    bg: "bg-violet/[0.04]",
+  },
 } as const;
 
 // ── Metric tooltips ──────────────────────────────────────────────────────────
@@ -165,18 +177,21 @@ function StatCell({
   );
 }
 
-function MetricCell({
+/** Big-number metric cell for editorial financial sections. */
+function BigMetric({
   label,
   tip,
   value,
   sub,
-  subColor,
+  valueColor,
+  isFirst,
 }: {
   label: string;
   tip?: string;
   value: React.ReactNode;
   sub?: React.ReactNode;
-  subColor?: string;
+  valueColor?: string;
+  isFirst?: boolean;
 }) {
   const labelEl = tip ? (
     <Tip text={tip}>
@@ -191,16 +206,35 @@ function MetricCell({
   );
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div
+      className={cn(
+        "flex flex-col gap-0.5 py-1",
+        !isFirst && "border-l border-border pl-4",
+      )}
+    >
       {labelEl}
-      <span className="font-mono text-sm font-semibold text-foreground">
+      <span
+        className={cn(
+          "font-mono text-[26px] font-semibold leading-[0.95] tracking-tight",
+          valueColor || "text-foreground",
+        )}
+      >
         {value}
       </span>
       {sub && (
-        <span className={cn("text-[11px] text-muted-foreground", subColor)}>
+        <span className="font-mono text-[10px] text-muted-foreground/70 mt-0.5">
           {sub}
         </span>
       )}
+    </div>
+  );
+}
+
+/** Renders a row of BigMetric cells in a responsive grid with hairline dividers. */
+function MetricRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3">
+      {children}
     </div>
   );
 }
@@ -264,117 +298,174 @@ function ItemList({
   );
 }
 
-// ── Financials blocks ────────────────────────────────────────────────────────
+// ── Financials blocks (Variant 3: editorial big-number) ─────────────────────
 
 function ValuationBlock({ f }: { f: StructuredNoteFinancials }) {
-  const hasFwdPe = f.forward_pe != null;
-  const hasPs = f.ps_ttm != null;
-  const hasPeg = f.peg_ttm != null;
-  if (!hasFwdPe && !hasPs && !hasPeg) return null;
+  const cells: React.ReactNode[] = [];
+
+  if (f.forward_pe != null) {
+    cells.push(
+      <BigMetric
+        key="fpe"
+        label="Fwd P/E"
+        tip={METRIC_TIPS.forward_pe}
+        value={fmtMultiple(f.forward_pe)}
+        sub={f.pe_ttm != null ? `TTM ${fmtMultiple(f.pe_ttm)}` : undefined}
+        isFirst={cells.length === 0}
+      />,
+    );
+  }
+  if (f.ps_ttm != null) {
+    cells.push(
+      <BigMetric
+        key="ps"
+        label="P/S"
+        tip={METRIC_TIPS.ps_ttm}
+        value={fmtMultiple(f.ps_ttm)}
+        sub="trailing"
+        isFirst={cells.length === 0}
+      />,
+    );
+  }
+  if (f.peg_ttm != null) {
+    cells.push(
+      <BigMetric
+        key="peg"
+        label="PEG"
+        tip={METRIC_TIPS.peg_ttm}
+        value={fmtPeg(f.peg_ttm)}
+        sub={f.forward_peg != null ? `Fwd ${fmtPeg(f.forward_peg)}` : "trailing"}
+        isFirst={cells.length === 0}
+      />,
+    );
+  }
+
+  if (cells.length === 0) return null;
 
   return (
-    <SectionBlock color="neutral" title="Valuation">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
-        {hasFwdPe && (
-          <MetricCell
-            label="Fwd P/E"
-            tip={METRIC_TIPS.forward_pe}
-            value={fmtMultiple(f.forward_pe)}
-            sub={f.pe_ttm != null ? `TTM ${fmtMultiple(f.pe_ttm)}` : undefined}
-          />
-        )}
-        {hasPs && (
-          <MetricCell
-            label="P/S"
-            tip={METRIC_TIPS.ps_ttm}
-            value={fmtMultiple(f.ps_ttm)}
-          />
-        )}
-        {hasPeg && (
-          <MetricCell
-            label="PEG"
-            tip={METRIC_TIPS.peg_ttm}
-            value={fmtPeg(f.peg_ttm)}
-            sub={f.forward_peg != null ? `Fwd ${fmtPeg(f.forward_peg)}` : undefined}
-          />
-        )}
+    <div className="rounded-[13px] border border-border px-5 py-4">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="h-2 w-2 rounded-full bg-cool" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-cool">
+          Valuation
+        </span>
       </div>
-    </SectionBlock>
+      <MetricRow>{cells}</MetricRow>
+    </div>
   );
 }
 
 function FinancialsQualityBlock({ f }: { f: StructuredNoteFinancials }) {
-  const hasMargins =
-    f.gross_margin_ttm != null ||
-    f.operating_margin_ttm != null ||
-    f.net_margin_ttm != null;
-  const hasGrowth =
-    f.revenue_growth_ttm != null ||
-    f.eps_growth_ttm != null ||
-    f.roe_ttm != null;
+  // Margins row
+  const marginCells: React.ReactNode[] = [];
+  if (f.gross_margin_ttm != null) {
+    marginCells.push(
+      <BigMetric
+        key="gm"
+        label="Gross Margin"
+        tip={METRIC_TIPS.gross_margin}
+        value={fmtPct(f.gross_margin_ttm)}
+        sub={f.gross_margin_5y != null ? `5Y ${fmtPct(f.gross_margin_5y)}` : "TTM"}
+        isFirst={marginCells.length === 0}
+      />,
+    );
+  }
+  if (f.operating_margin_ttm != null) {
+    marginCells.push(
+      <BigMetric
+        key="om"
+        label="Op. Margin"
+        tip={METRIC_TIPS.operating_margin}
+        value={fmtPct(f.operating_margin_ttm)}
+        sub={f.operating_margin_5y != null ? `5Y ${fmtPct(f.operating_margin_5y)}` : "TTM"}
+        isFirst={marginCells.length === 0}
+      />,
+    );
+  }
+  if (f.net_margin_ttm != null) {
+    marginCells.push(
+      <BigMetric
+        key="nm"
+        label="Net Margin"
+        tip={METRIC_TIPS.net_margin}
+        value={fmtPct(f.net_margin_ttm)}
+        sub={f.net_margin_5y != null ? `5Y ${fmtPct(f.net_margin_5y)}` : "TTM"}
+        isFirst={marginCells.length === 0}
+      />,
+    );
+  }
 
-  if (!hasMargins && !hasGrowth) return null;
+  // Growth & Returns row
+  const growthCells: React.ReactNode[] = [];
+  if (f.revenue_growth_ttm != null) {
+    growthCells.push(
+      <BigMetric
+        key="rg"
+        label="Rev Growth"
+        tip={METRIC_TIPS.revenue_growth}
+        value={fmtPctSigned(f.revenue_growth_ttm)}
+        sub="YoY"
+        valueColor={f.revenue_growth_ttm >= 0 ? "text-success" : "text-destructive"}
+        isFirst={growthCells.length === 0}
+      />,
+    );
+  }
+  if (f.eps_growth_ttm != null) {
+    growthCells.push(
+      <BigMetric
+        key="eg"
+        label="EPS Growth"
+        tip={METRIC_TIPS.eps_growth}
+        value={fmtPctSigned(f.eps_growth_ttm)}
+        sub="YoY"
+        valueColor={f.eps_growth_ttm >= 0 ? "text-success" : "text-destructive"}
+        isFirst={growthCells.length === 0}
+      />,
+    );
+  }
+  if (f.roe_ttm != null) {
+    growthCells.push(
+      <BigMetric
+        key="roe"
+        label="ROE"
+        tip={METRIC_TIPS.roe}
+        value={fmtPct(f.roe_ttm)}
+        sub="TTM"
+        valueColor={f.roe_ttm >= 0 ? "text-success" : "text-destructive"}
+        isFirst={growthCells.length === 0}
+      />,
+    );
+  }
+
+  if (marginCells.length === 0 && growthCells.length === 0) return null;
 
   return (
-    <SectionBlock color="neutral" title="Financials & Quality">
-      <div className="space-y-3">
-        {hasMargins && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
-            {f.gross_margin_ttm != null && (
-              <MetricCell
-                label="Gross Margin"
-                tip={METRIC_TIPS.gross_margin}
-                value={fmtPct(f.gross_margin_ttm)}
-                sub={f.gross_margin_5y != null ? `5Y avg ${fmtPct(f.gross_margin_5y)}` : undefined}
-              />
-            )}
-            {f.operating_margin_ttm != null && (
-              <MetricCell
-                label="Op. Margin"
-                tip={METRIC_TIPS.operating_margin}
-                value={fmtPct(f.operating_margin_ttm)}
-                sub={f.operating_margin_5y != null ? `5Y avg ${fmtPct(f.operating_margin_5y)}` : undefined}
-              />
-            )}
-            {f.net_margin_ttm != null && (
-              <MetricCell
-                label="Net Margin"
-                tip={METRIC_TIPS.net_margin}
-                value={fmtPct(f.net_margin_ttm)}
-                sub={f.net_margin_5y != null ? `5Y avg ${fmtPct(f.net_margin_5y)}` : undefined}
-              />
-            )}
+    <div className="rounded-[13px] border border-border px-5 py-4">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="h-2 w-2 rounded-full bg-violet" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-violet">
+          Financials & Quality
+        </span>
+      </div>
+      <div className="space-y-4">
+        {marginCells.length > 0 && (
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50 mb-2">
+              Margins (TTM)
+            </p>
+            <MetricRow>{marginCells}</MetricRow>
           </div>
         )}
-        {hasGrowth && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
-            {f.revenue_growth_ttm != null && (
-              <MetricCell
-                label="Rev Growth"
-                tip={METRIC_TIPS.revenue_growth}
-                value={fmtPctSigned(f.revenue_growth_ttm)}
-                subColor={f.revenue_growth_ttm > 0 ? "text-success" : f.revenue_growth_ttm < 0 ? "text-destructive" : undefined}
-              />
-            )}
-            {f.eps_growth_ttm != null && (
-              <MetricCell
-                label="EPS Growth"
-                tip={METRIC_TIPS.eps_growth}
-                value={fmtPctSigned(f.eps_growth_ttm)}
-                subColor={f.eps_growth_ttm > 0 ? "text-success" : f.eps_growth_ttm < 0 ? "text-destructive" : undefined}
-              />
-            )}
-            {f.roe_ttm != null && (
-              <MetricCell
-                label="ROE"
-                tip={METRIC_TIPS.roe}
-                value={fmtPct(f.roe_ttm)}
-              />
-            )}
+        {growthCells.length > 0 && (
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50 mb-2">
+              Growth & Returns
+            </p>
+            <MetricRow>{growthCells}</MetricRow>
           </div>
         )}
       </div>
-    </SectionBlock>
+    </div>
   );
 }
 

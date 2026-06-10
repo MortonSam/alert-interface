@@ -27,6 +27,8 @@
     --ring: 29 100% 55%;
     --cool: 209 100% 59%;
     --cool-foreground: 209 100% 8%;
+    --violet: 255 90% 76%;
+    --violet-foreground: 255 90% 10%;
     --radius: 0.875rem;
   }
   .dark {
@@ -53,6 +55,8 @@
     --ring: 29 100% 55%;
     --cool: 209 100% 59%;
     --cool-foreground: 209 100% 8%;
+    --violet: 255 90% 76%;
+    --violet-foreground: 255 90% 10%;
     --radius: 0.875rem;
   }
 }
