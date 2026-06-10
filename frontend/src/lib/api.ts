@@ -147,6 +147,23 @@ export interface StructuredNoteStats {
   latest_quarter_date: string | null;
 }
 
+export interface StructuredNoteFinancials {
+  forward_pe: number | null;
+  pe_ttm: number | null;
+  ps_ttm: number | null;
+  peg_ttm: number | null;
+  forward_peg: number | null;
+  gross_margin_ttm: number | null;
+  gross_margin_5y: number | null;
+  operating_margin_ttm: number | null;
+  operating_margin_5y: number | null;
+  net_margin_ttm: number | null;
+  net_margin_5y: number | null;
+  revenue_growth_ttm: number | null;
+  eps_growth_ttm: number | null;
+  roe_ttm: number | null;
+}
+
 export interface StructuredNote {
   rating: "bullish" | "neutral" | "bearish";
   bottom_line: string;
@@ -155,6 +172,7 @@ export interface StructuredNote {
   watch: StructuredNoteItem[];
   risks: StructuredNoteItem[];
   stats: StructuredNoteStats;
+  financials: StructuredNoteFinancials | null;
 }
 
 export interface ResearchNote {

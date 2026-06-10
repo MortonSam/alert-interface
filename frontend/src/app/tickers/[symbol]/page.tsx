@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -13,6 +12,7 @@ import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMark
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
 import StructuredNoteView from "@/components/StructuredNoteView";
+import Tip from "@/components/Tip";
 import {
   BS_R, BS_IV_DEFAULT, MS_PER_YEAR,
   type Leg, dateMs, erfApprox, normCDF,
@@ -1039,51 +1039,6 @@ function Stat({ label, value }: { label: string; value: string | null | undefine
 
 function fmtPctDecimal(v: number | null, digits = 1): string {
   return v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
-}
-
-// ── Tooltip component ─────────────────────────────────────────────────────────
-
-function Tip({ children, text }: { children: React.ReactNode; text: string }) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const ref = useRef<HTMLSpanElement>(null);
-
-  function show() { if (ref.current) setRect(ref.current.getBoundingClientRect()); }
-  function hide() { setRect(null); }
-
-  return (
-    <>
-      <span
-        ref={ref}
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
-        className="inline-flex items-center cursor-help"
-      >
-        {children}
-      </span>
-      {rect && createPortal(
-        <div
-          role="tooltip"
-          style={{
-            position: "fixed",
-            // Appear above the trigger; clamp horizontally so it never runs off-screen
-            top:  rect.top - 8,
-            left: Math.max(8, Math.min(
-              (typeof window !== "undefined" ? window.innerWidth : 1200) - 248,
-              rect.left + rect.width / 2 - 120,
-            )),
-            transform: "translateY(-100%)",
-            zIndex: 9999,
-          }}
-          className="w-60 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 shadow-xl pointer-events-none whitespace-normal leading-relaxed"
-        >
-          {text}
-        </div>,
-        document.body,
-      )}
-    </>
-  );
 }
 
 const TIPS = {

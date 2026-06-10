@@ -6,6 +6,7 @@ Implemented
   get_candles(symbol, resolution, from, to) → raw candle dict {c, h, l, o, s, t, v}
   get_daily_candles(symbol, days)         → list of DayCandle dicts
   get_company_news(symbol, from_date, to_date) → list of article dicts
+  get_basic_financials(symbol)               → raw metric dict from /stock/metric
 
 Stubbed (raise NotImplementedError until needed)
 -----------
@@ -158,6 +159,17 @@ class FinnhubClient:
         resp = await self._client.get(
             "/company-news",
             params={"symbol": symbol, "from": from_date, "to": to_date},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_basic_financials(self, symbol: str) -> dict[str, Any]:
+        """Basic financials / key metrics for a symbol.
+        Finnhub endpoint: GET /stock/metric?symbol=&metric=all
+        """
+        resp = await self._client.get(
+            "/stock/metric",
+            params={"symbol": symbol, "metric": "all"},
         )
         resp.raise_for_status()
         return resp.json()

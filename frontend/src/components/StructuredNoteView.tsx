@@ -1,5 +1,8 @@
+"use client";
+
 import { cn } from "@/lib/utils";
-import type { StructuredNote, StructuredNoteItem } from "@/lib/api";
+import type { StructuredNote, StructuredNoteItem, StructuredNoteFinancials } from "@/lib/api";
+import Tip from "@/components/Tip";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -25,6 +28,26 @@ function isPositive(s: string): boolean {
 function isNegative(s: string): boolean {
   const n = parseFloat(s.replace(/[^0-9.\-+]/g, ""));
   return !isNaN(n) && n < 0;
+}
+
+function fmtMultiple(v: number | null): string | null {
+  if (v == null) return null;
+  return `${v.toFixed(1)}\u00d7`;
+}
+
+function fmtPct(v: number | null): string | null {
+  if (v == null) return null;
+  return `${v.toFixed(1)}%`;
+}
+
+function fmtPctSigned(v: number | null): string | null {
+  if (v == null) return null;
+  return `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+}
+
+function fmtPeg(v: number | null): string | null {
+  if (v == null) return null;
+  return v.toFixed(1);
 }
 
 // ── Color configs ────────────────────────────────────────────────────────────
@@ -54,7 +77,40 @@ const sectionColors = {
     accent: "border-l-destructive/30",
     bg: "bg-destructive/[0.04]",
   },
+  neutral: {
+    dot: "bg-muted-foreground/60",
+    label: "text-muted-foreground",
+    accent: "border-l-muted-foreground/20",
+    bg: "bg-muted-foreground/[0.04]",
+  },
 } as const;
+
+// ── Metric tooltips ──────────────────────────────────────────────────────────
+
+const METRIC_TIPS: Record<string, string> = {
+  forward_pe:
+    "Forward P/E \u2014 the stock price divided by next year's expected earnings. Lower means you're paying less per dollar of future profit.",
+  pe_ttm:
+    "Trailing P/E \u2014 stock price divided by the last 12 months of actual earnings. Useful as a reality check against the forward estimate.",
+  ps_ttm:
+    "Price-to-Sales \u2014 market cap divided by trailing 12-month revenue. Helpful for companies that aren't yet profitable.",
+  peg_ttm:
+    "PEG Ratio \u2014 the P/E divided by the earnings growth rate. A PEG near 1 suggests the stock is fairly priced for its growth.",
+  forward_peg:
+    "Forward PEG \u2014 same idea as PEG but uses forward earnings estimates. Below 1 may signal undervaluation relative to expected growth.",
+  gross_margin:
+    "Gross Margin \u2014 revenue minus cost of goods sold, as a percentage. Shows how much the company keeps before operating expenses.",
+  operating_margin:
+    "Operating Margin \u2014 profit from core operations as a percentage of revenue, after subtracting both cost of goods and operating expenses.",
+  net_margin:
+    "Net Profit Margin \u2014 the bottom-line percentage of revenue that becomes actual profit after all costs, interest, and taxes.",
+  revenue_growth:
+    "Revenue Growth (YoY) \u2014 how much total revenue grew compared to the same period a year ago.",
+  eps_growth:
+    "EPS Growth (YoY) \u2014 how much earnings per share grew versus the same period last year.",
+  roe:
+    "Return on Equity \u2014 net income divided by shareholder equity. Measures how effectively the company turns invested capital into profit.",
+};
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
@@ -75,7 +131,7 @@ function RatingPill({ rating }: { rating: string }) {
         styles[rating as keyof typeof styles],
       )}
     >
-      <span className="text-[8px]">●</span>
+      <span className="text-[8px]">{"\u25CF"}</span>
       {rating.charAt(0).toUpperCase() + rating.slice(1)}
     </span>
   );
@@ -97,6 +153,46 @@ function StatCell({
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
         {label}
       </span>
+      <span className="font-mono text-sm font-semibold text-foreground">
+        {value}
+      </span>
+      {sub && (
+        <span className={cn("text-[11px] text-muted-foreground", subColor)}>
+          {sub}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function MetricCell({
+  label,
+  tip,
+  value,
+  sub,
+  subColor,
+}: {
+  label: string;
+  tip?: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  subColor?: string;
+}) {
+  const labelEl = tip ? (
+    <Tip text={tip}>
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 border-b border-dotted border-muted-foreground/40">
+        {label}
+      </span>
+    </Tip>
+  ) : (
+    <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+      {label}
+    </span>
+  );
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {labelEl}
       <span className="font-mono text-sm font-semibold text-foreground">
         {value}
       </span>
@@ -168,6 +264,120 @@ function ItemList({
   );
 }
 
+// ── Financials blocks ────────────────────────────────────────────────────────
+
+function ValuationBlock({ f }: { f: StructuredNoteFinancials }) {
+  const hasFwdPe = f.forward_pe != null;
+  const hasPs = f.ps_ttm != null;
+  const hasPeg = f.peg_ttm != null;
+  if (!hasFwdPe && !hasPs && !hasPeg) return null;
+
+  return (
+    <SectionBlock color="neutral" title="Valuation">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
+        {hasFwdPe && (
+          <MetricCell
+            label="Fwd P/E"
+            tip={METRIC_TIPS.forward_pe}
+            value={fmtMultiple(f.forward_pe)}
+            sub={f.pe_ttm != null ? `TTM ${fmtMultiple(f.pe_ttm)}` : undefined}
+          />
+        )}
+        {hasPs && (
+          <MetricCell
+            label="P/S"
+            tip={METRIC_TIPS.ps_ttm}
+            value={fmtMultiple(f.ps_ttm)}
+          />
+        )}
+        {hasPeg && (
+          <MetricCell
+            label="PEG"
+            tip={METRIC_TIPS.peg_ttm}
+            value={fmtPeg(f.peg_ttm)}
+            sub={f.forward_peg != null ? `Fwd ${fmtPeg(f.forward_peg)}` : undefined}
+          />
+        )}
+      </div>
+    </SectionBlock>
+  );
+}
+
+function FinancialsQualityBlock({ f }: { f: StructuredNoteFinancials }) {
+  const hasMargins =
+    f.gross_margin_ttm != null ||
+    f.operating_margin_ttm != null ||
+    f.net_margin_ttm != null;
+  const hasGrowth =
+    f.revenue_growth_ttm != null ||
+    f.eps_growth_ttm != null ||
+    f.roe_ttm != null;
+
+  if (!hasMargins && !hasGrowth) return null;
+
+  return (
+    <SectionBlock color="neutral" title="Financials & Quality">
+      <div className="space-y-3">
+        {hasMargins && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
+            {f.gross_margin_ttm != null && (
+              <MetricCell
+                label="Gross Margin"
+                tip={METRIC_TIPS.gross_margin}
+                value={fmtPct(f.gross_margin_ttm)}
+                sub={f.gross_margin_5y != null ? `5Y avg ${fmtPct(f.gross_margin_5y)}` : undefined}
+              />
+            )}
+            {f.operating_margin_ttm != null && (
+              <MetricCell
+                label="Op. Margin"
+                tip={METRIC_TIPS.operating_margin}
+                value={fmtPct(f.operating_margin_ttm)}
+                sub={f.operating_margin_5y != null ? `5Y avg ${fmtPct(f.operating_margin_5y)}` : undefined}
+              />
+            )}
+            {f.net_margin_ttm != null && (
+              <MetricCell
+                label="Net Margin"
+                tip={METRIC_TIPS.net_margin}
+                value={fmtPct(f.net_margin_ttm)}
+                sub={f.net_margin_5y != null ? `5Y avg ${fmtPct(f.net_margin_5y)}` : undefined}
+              />
+            )}
+          </div>
+        )}
+        {hasGrowth && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
+            {f.revenue_growth_ttm != null && (
+              <MetricCell
+                label="Rev Growth"
+                tip={METRIC_TIPS.revenue_growth}
+                value={fmtPctSigned(f.revenue_growth_ttm)}
+                subColor={f.revenue_growth_ttm > 0 ? "text-success" : f.revenue_growth_ttm < 0 ? "text-destructive" : undefined}
+              />
+            )}
+            {f.eps_growth_ttm != null && (
+              <MetricCell
+                label="EPS Growth"
+                tip={METRIC_TIPS.eps_growth}
+                value={fmtPctSigned(f.eps_growth_ttm)}
+                subColor={f.eps_growth_ttm > 0 ? "text-success" : f.eps_growth_ttm < 0 ? "text-destructive" : undefined}
+              />
+            )}
+            {f.roe_ttm != null && (
+              <MetricCell
+                label="ROE"
+                tip={METRIC_TIPS.roe}
+                value={fmtPct(f.roe_ttm)}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </SectionBlock>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 interface StructuredNoteViewProps {
@@ -186,6 +396,7 @@ export default function StructuredNoteView({
   industry,
 }: StructuredNoteViewProps) {
   const { stats } = note;
+  const financials = note.financials ?? null;
 
   // ── Stat cells (only render non-null) ────────────────────────────────────
   const statCells: React.ReactNode[] = [];
@@ -199,7 +410,7 @@ export default function StructuredNoteView({
   if (stats.eps_actual != null) {
     const beatSub =
       stats.eps_estimate != null && stats.eps_beat_pct != null
-        ? `vs ${stats.eps_estimate.toFixed(2)}e · ${stats.eps_beat_pct > 0 ? "+" : ""}${stats.eps_beat_pct.toFixed(1)}%`
+        ? `vs ${stats.eps_estimate.toFixed(2)}e \u00b7 ${stats.eps_beat_pct > 0 ? "+" : ""}${stats.eps_beat_pct.toFixed(1)}%`
         : stats.eps_estimate != null
           ? `vs ${stats.eps_estimate.toFixed(2)}e`
           : undefined;
@@ -225,7 +436,7 @@ export default function StructuredNoteView({
   if (stats.revenue_actual != null) {
     const beatSub =
       stats.revenue_estimate != null && stats.revenue_beat_pct != null
-        ? `vs ${fmtRevenue(stats.revenue_estimate)}e · ${stats.revenue_beat_pct > 0 ? "+" : ""}${stats.revenue_beat_pct.toFixed(1)}%`
+        ? `vs ${fmtRevenue(stats.revenue_estimate)}e \u00b7 ${stats.revenue_beat_pct > 0 ? "+" : ""}${stats.revenue_beat_pct.toFixed(1)}%`
         : stats.revenue_estimate != null
           ? `vs ${fmtRevenue(stats.revenue_estimate)}e`
           : undefined;
@@ -271,7 +482,7 @@ export default function StructuredNoteView({
             {stats.latest_move_1d}
           </span>
         }
-        sub={`post-earnings 1d${stats.latest_outcome ? ` · ${stats.latest_outcome}` : ""}`}
+        sub={`post-earnings 1d${stats.latest_outcome ? ` \u00b7 ${stats.latest_outcome}` : ""}`}
       />,
     );
   }
@@ -297,7 +508,7 @@ export default function StructuredNoteView({
           <p className="font-mono text-xs text-muted-foreground/70 mt-2">
             {[sector, industry, stats.market_cap != null ? fmtCap(stats.market_cap) : null]
               .filter(Boolean)
-              .join(" · ")}
+              .join(" \u00b7 ")}
           </p>
         )}
       </div>
@@ -318,6 +529,9 @@ export default function StructuredNoteView({
             </p>
           </SectionBlock>
         )}
+
+        {financials && <ValuationBlock f={financials} />}
+        {financials && <FinancialsQualityBlock f={financials} />}
 
         {note.highlights.length > 0 && (
           <SectionBlock

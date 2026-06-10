@@ -19,6 +19,8 @@ from app.models.research_note import ResearchNote
 from app.models.ticker import Ticker
 from app.services.anthropic_client import AnthropicClient
 from app.services.edgar_client import EdgarClient
+from app.services.finnhub_client import FinnhubClient
+from app.services import financials_cache
 
 
 # ── Precomputed stats ─────────────────────────────────────────────────────────
@@ -174,6 +176,46 @@ def _build_stats_object(
         )
 
     return stats
+
+
+async def _fetch_financials(symbol: str) -> dict | None:
+    """Fetch curated financial metrics from Finnhub (best-effort, cached 60 min)."""
+    cached = financials_cache.get(symbol)
+    if cached is not None:
+        return cached
+
+    client = FinnhubClient()
+    try:
+        raw = await client.get_basic_financials(symbol)
+    except Exception as exc:
+        print(f"Finnhub financials fetch failed for {symbol}: {exc}", flush=True)
+        return None
+    finally:
+        await client.close()
+
+    m = raw.get("metric", {})
+    if not m:
+        return None
+
+    extracted = {
+        "forward_pe":           m.get("forwardPE"),
+        "pe_ttm":               m.get("peTTM"),
+        "ps_ttm":               m.get("psTTM"),
+        "peg_ttm":              m.get("pegTTM"),
+        "forward_peg":          m.get("forwardPEG"),
+        "gross_margin_ttm":     m.get("grossMarginTTM"),
+        "gross_margin_5y":      m.get("grossMargin5Y"),
+        "operating_margin_ttm": m.get("operatingMarginTTM"),
+        "operating_margin_5y":  m.get("operatingMargin5Y"),
+        "net_margin_ttm":       m.get("netProfitMarginTTM"),
+        "net_margin_5y":        m.get("netProfitMargin5Y"),
+        "revenue_growth_ttm":   m.get("revenueGrowthTTMYoy"),
+        "eps_growth_ttm":       m.get("epsGrowthTTMYoy"),
+        "roe_ttm":              m.get("roeTTM"),
+    }
+
+    financials_cache.set(symbol, extracted)
+    return extracted
 
 
 def _build_generation_prompt(
@@ -572,6 +614,10 @@ async def run_research_note_background(
             # Attach Python-computed stats (exact DB values, never model-generated)
             stats_obj = _build_stats_object(ticker, reactions)
             structured["stats"] = stats_obj
+
+            # Attach Finnhub financial metrics (best-effort, never model-generated)
+            financials_obj = await _fetch_financials(symbol)
+            structured["financials"] = financials_obj
 
             # Serialize to readable text for content column + verifier
             content_text = _serialize_structured_note(structured, ticker)
