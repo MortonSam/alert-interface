@@ -5,10 +5,10 @@ Implemented
   get_quote(symbol)                       → raw quote dict {c, d, dp, h, l, o, pc, t}
   get_candles(symbol, resolution, from, to) → raw candle dict {c, h, l, o, s, t, v}
   get_daily_candles(symbol, days)         → list of DayCandle dicts
+  get_company_news(symbol, from_date, to_date) → list of article dicts
 
 Stubbed (raise NotImplementedError until needed)
 -----------
-  get_company_news(symbol, from_date, to_date)
   get_earnings_estimates(symbol)
   get_recommendation_trends(symbol)
 
@@ -151,8 +151,16 @@ class FinnhubClient:
     ) -> list[dict[str, Any]]:
         """News articles for a symbol between two dates.
         Finnhub endpoint: GET /company-news?symbol=&from=&to=
+
+        Each dict has: category, datetime (unix s), headline, id, image,
+        related, source, summary, url.
         """
-        raise NotImplementedError
+        resp = await self._client.get(
+            "/company-news",
+            params={"symbol": symbol, "from": from_date, "to": to_date},
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_earnings_estimates(self, symbol: str) -> dict[str, Any]:
         """Forward EPS estimates by quarter.

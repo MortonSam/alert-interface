@@ -206,6 +206,18 @@ export interface BatchQuote {
   change_pct: number | null;
 }
 
+export interface NewsItem {
+  headline: string;
+  source: string;
+  url: string;
+  datetime: number;   // unix seconds
+  summary: string;
+}
+
+export interface NewsResponse {
+  items: NewsItem[];
+}
+
 export interface TickerQuote {
   symbol: string;
   price: number | null;
@@ -508,6 +520,8 @@ export const api = {
       request<OptionsChain>(expiration
         ? `/tickers/options/${symbol}?expiration=${encodeURIComponent(expiration)}`
         : `/tickers/options/${symbol}`),
+    news: (symbol: string) =>
+      request<NewsResponse>(`/tickers/${symbol}/news`),
   },
 
   watchlists: {

@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
-import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type StrategyData, type StrikeData } from "@/lib/api";
+import { api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker, type Event, type EventType, type EarningsOutcome, type HistoricalReaction, type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult, type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain, type StrategyData, type StrikeData, type NewsResponse } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
 import StructuredNoteView from "@/components/StructuredNoteView";
@@ -70,6 +70,10 @@ function timeAgo(iso: string): string {
   if (mins < 60)  return `${mins} minute${mins === 1 ? "" : "s"} ago`;
   if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
   return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function timeAgoUnix(unixSeconds: number): string {
+  return timeAgo(new Date(unixSeconds * 1000).toISOString());
 }
 
 // ── Catalyst section helpers ──────────────────────────────────────────────────
@@ -2709,6 +2713,10 @@ export default function TickerPage() {
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
   const [verificationOpen, setVerificationOpen] = useState(false);
 
+  const [news, setNews]               = useState<NewsResponse | null>(null);
+  const [newsStatus, setNewsStatus]   = useState<"loading" | "done" | "empty" | "error">("loading");
+  const [newsExpanded, setNewsExpanded] = useState(false);
+
   useEffect(() => {
     api.tickers
       .list(false)
@@ -2752,6 +2760,16 @@ export default function TickerPage() {
         setRvStatus(data.current_rv != null ? "done" : "empty");
       })
       .catch(() => setRvStatus("error"));
+  }, [upperSymbol]);
+
+  useEffect(() => {
+    setNewsExpanded(false);
+    api.tickers.news(upperSymbol)
+      .then((data) => {
+        setNews(data);
+        setNewsStatus(data.items.length > 0 ? "done" : "empty");
+      })
+      .catch(() => setNewsStatus("error"));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -3223,6 +3241,78 @@ export default function TickerPage() {
               )}
             </div>
           )}
+        </div>
+
+        {/* ── Recent News ───────────────────────────────────────────────────── */}
+        <div className="mt-10">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold">Recent News</h2>
+            <p className="text-xs text-muted-foreground/60 mt-0.5">
+              Live · from news sources · not verified
+            </p>
+          </div>
+
+          {newsStatus === "loading" && (
+            <div className="space-y-3 animate-pulse">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="rounded-lg border bg-card px-4 py-3 space-y-2">
+                  <div className="h-4 bg-muted rounded w-3/4" />
+                  <div className="h-3 bg-muted rounded w-1/2" />
+                </div>
+              ))}
+            </div>
+          )}
+          {newsStatus === "empty" && (
+            <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
+          )}
+          {newsStatus === "error" && (
+            <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
+          )}
+          {newsStatus === "done" && news && (() => {
+            const visible = newsExpanded ? news.items : news.items.slice(0, 3);
+            const hasMore = news.items.length > 3;
+            return (
+              <div className="space-y-2">
+                {visible.map((item) => (
+                  <div
+                    key={item.datetime + item.headline.slice(0, 20)}
+                    className="rounded-lg border border-border/60 bg-card px-4 py-3"
+                  >
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
+                    >
+                      {item.headline}
+                    </a>
+                    <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
+                      <span>{item.source}</span>
+                      <span>·</span>
+                      <span>{timeAgoUnix(item.datetime)}</span>
+                    </div>
+                    {item.summary && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                        {item.summary}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => setNewsExpanded((o) => !o)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
+                  >
+                    <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
+                    {newsExpanded
+                      ? "Show less"
+                      : `Show ${news.items.length - 3} more stories`}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── Volatility Context ─────────────────────────────────────────────── */}

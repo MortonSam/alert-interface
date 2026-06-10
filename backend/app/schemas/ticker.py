@@ -81,3 +81,17 @@ class BatchQuoteRead(BaseModel):
     price: float | None
     change: float | None
     change_pct: float | None
+
+
+# ── Company news (Finnhub) ───────────────────────────────────────────────────
+
+class NewsItem(BaseModel):
+    headline: str
+    source: str
+    url: str
+    datetime: int          # Unix timestamp (seconds)
+    summary: str
+
+
+class NewsRead(BaseModel):
+    items: list[NewsItem]

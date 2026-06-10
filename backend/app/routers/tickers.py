@@ -16,10 +16,10 @@ from app.models.historical_reaction import HistoricalReaction
 from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
-from app.schemas.ticker import BatchQuoteRead, EarningsMarker, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
+from app.schemas.ticker import BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
-from app.services import quote_cache
+from app.services import news_cache, quote_cache
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
@@ -268,6 +268,49 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
             results[sym] = BatchQuoteRead(symbol=sym, **data)
 
     return [results.get(s, BatchQuoteRead(symbol=s, price=None, change=None, change_pct=None)) for s in syms]
+
+
+@router.get("/{symbol}/news", response_model=NewsRead)
+async def get_company_news(symbol: str) -> NewsRead:
+    """Recent company news (last 48h) from Finnhub, cached 10 min."""
+    sym = symbol.upper()
+
+    cached = news_cache.get(sym)
+    if cached is not None:
+        return NewsRead(**cached)
+
+    now = dt_datetime.now(tz=timezone.utc)
+    to_date = now.strftime("%Y-%m-%d")
+    from_date = (now - timedelta(days=2)).strftime("%Y-%m-%d")
+
+    finnhub = FinnhubClient()
+    try:
+        raw = await finnhub.get_company_news(sym, from_date, to_date)
+    except Exception:
+        return NewsRead(items=[])
+    finally:
+        await finnhub.close()
+
+    items: list[NewsItem] = []
+    for article in raw:
+        headline = article.get("headline")
+        url = article.get("url")
+        if not headline or not url:
+            continue
+        items.append(NewsItem(
+            headline=headline,
+            source=article.get("source", ""),
+            url=url,
+            datetime=article.get("datetime", 0),
+            summary=article.get("summary", ""),
+        ))
+
+    items.sort(key=lambda x: x.datetime, reverse=True)
+    items = items[:12]
+
+    payload = {"items": [it.model_dump() for it in items]}
+    news_cache.set(sym, payload)
+    return NewsRead(items=items)
 
 
 @router.get("/chart/{symbol}", response_model=TickerChartRead)
