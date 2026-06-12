@@ -334,6 +334,21 @@ export interface JustReportedResponse {
   total: number;
 }
 
+export interface SuggestionItem {
+  symbol: string;
+  name: string | null;
+  score: number;
+  reports_in_days: number | null;
+  recent_move_pct: number | null;
+  recent_move_5d: number | null;
+  recent_outcome: EarningsOutcome | null;
+  event_date: string | null;  // ISO date of the reaction's report
+}
+
+export interface SuggestionsResponse {
+  items: SuggestionItem[];
+}
+
 export interface RealizedVol {
   symbol: string;
   current_rv: number | null;       // annualized 20-day RV, 0–1 decimal (0.172 = 17.2%)
@@ -655,6 +670,8 @@ export const api = {
       request<ReportingSoonResponse>(`/discover/reporting-soon?days=${days}&limit=${limit}`),
     justReported: (days = 5, limit = 12) =>
       request<JustReportedResponse>(`/discover/just-reported?days=${days}&limit=${limit}`),
+    suggestions: (limit = 5) =>
+      request<SuggestionsResponse>(`/discover/suggestions?limit=${limit}`),
   },
 
   reactions: {

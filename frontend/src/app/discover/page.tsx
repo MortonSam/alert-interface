@@ -6,6 +6,7 @@ import {
   api,
   type ReportingSoonItem,
   type JustReportedItem,
+  type SuggestionItem,
   type BatchQuote,
 } from "@/lib/api";
 
@@ -109,6 +110,7 @@ export default function DiscoverPage() {
     items: JustReportedItem[];
     total: number;
   } | null>(null);
+  const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [loading, setLoading] = useState(true);
 
@@ -116,15 +118,18 @@ export default function DiscoverPage() {
     Promise.all([
       api.discover.reportingSoon(7, LIMIT),
       api.discover.justReported(5, LIMIT),
-    ]).then(([rs, jr]) => {
+      api.discover.suggestions(5),
+    ]).then(([rs, jr, sg]) => {
       setReportingSoon(rs);
       setJustReported(jr);
+      setSuggestions(sg.items);
       setLoading(false);
 
       // Batch-fetch quotes for all displayed symbols
       const allSymbols = [
         ...rs.items.map((i) => i.symbol),
         ...jr.items.map((i) => i.symbol),
+        ...sg.items.map((i) => i.symbol),
       ];
       const unique = [...new Set(allSymbols)];
       if (unique.length > 0) {
@@ -325,6 +330,61 @@ export default function DiscoverPage() {
                             <span className={moveColor}>{moveStr}</span>
                           )}
                         </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* ── AI suggestions ─────────────────────────────── */}
+          {loading ? (
+            <SectionSkeleton />
+          ) : (
+            <section>
+              <SectionHeader
+                icon={
+                  <span className="text-primary text-sm leading-none">
+                    {"\u2726"}
+                  </span>
+                }
+                iconBg="bg-primary/10"
+                title="AI suggestions"
+                descriptor="Stocks worth a look right now"
+                total={null}
+                limit={LIMIT}
+              />
+
+              {suggestions && suggestions.length === 0 ? (
+                <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    No standout setups right now.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {suggestions?.map((item) => {
+                    const q = quotes.get(item.symbol);
+                    return (
+                      <Link
+                        key={item.symbol}
+                        href={`/tickers/${item.symbol}`}
+                        className="rounded-xl border border-border bg-card p-4 hover:border-primary/40 transition-colors group"
+                      >
+                        <div className="flex items-start justify-between mb-1">
+                          <span className="font-display text-base font-bold text-foreground group-hover:text-primary transition-colors">
+                            {item.symbol}
+                          </span>
+                          {q?.price != null && (
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {fmtPrice(q.price)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {item.name ?? "\u2014"}
+                        </p>
                       </Link>
                     );
                   })}
