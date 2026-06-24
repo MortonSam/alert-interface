@@ -190,7 +190,7 @@ export default function Home() {
       <style>{`
         .hero-bg {
           background-image: url(/hero-cosmos.jpg);
-          background-size: contain;
+          background-size: cover;
           background-position: center;
           background-repeat: no-repeat;
           background-color: #070606;
@@ -234,7 +234,7 @@ export default function Home() {
         <div className="hero-bg absolute inset-0" />
         <div className="hero-scrim absolute inset-0" />
 
-        <div className="relative z-10 flex flex-col h-full max-w-7xl mx-auto px-8">
+        <div className="relative z-10 flex flex-col h-full max-w-7xl px-8">
           <div className="max-w-[700px] pt-[7vh]">
             <p className="hero-eyebrow font-mono text-xs uppercase text-muted-foreground mb-[14px]">
               Equity research tool
