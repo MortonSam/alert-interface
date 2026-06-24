@@ -235,7 +235,7 @@ export default function Home() {
         <div className="hero-scrim absolute inset-0" />
 
         <div className="relative z-10 flex flex-col h-full max-w-7xl mx-auto px-8">
-          <div className="max-w-[600px] pt-[7vh]">
+          <div className="max-w-[700px] pt-[7vh]">
             <p className="hero-eyebrow font-mono text-xs uppercase text-muted-foreground mb-[14px]">
               Equity research tool
             </p>
@@ -246,7 +246,7 @@ export default function Home() {
               itself.
             </h1>
 
-            <div className="hero-lede mt-[18px] mb-[22px] space-y-[10px]">
+            <div className="hero-lede mt-[18px] mb-[22px] space-y-[16px]">
               <p>
                 Alert Interface brings S&amp;P 500 research into one
                 centralized workspace for retail investors.
