@@ -24,6 +24,13 @@ function fmtPrice(n: number | null | undefined): string {
   return n == null ? "" : `$${n.toFixed(2)}`;
 }
 
+/** Map days-until-earnings → color classes for the proximity tag. */
+function earningsUrgency(days: number): { bg: string; text: string } {
+  if (days <= 1) return { bg: "bg-primary/10", text: "text-primary" };       // orange — imminent
+  if (days <= 3) return { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" }; // amber — soon
+  return { bg: "bg-cool/10", text: "text-cool" };                            // azure — further out
+}
+
 // ── Section header ──────────────────────────────────────────────────────────
 
 function SectionHeader({
@@ -113,6 +120,15 @@ export default function DiscoverPage() {
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [loading, setLoading] = useState(true);
+
+  // Hide AI suggestions when every pick duplicates "Reporting soon"
+  const reportingSoonSymbols = new Set(
+    reportingSoon?.items.map((i) => i.symbol) ?? [],
+  );
+  const suggestionsAddValue =
+    !loading &&
+    suggestions != null &&
+    suggestions.some((s) => !reportingSoonSymbols.has(s.symbol));
 
   useEffect(() => {
     Promise.all([
@@ -209,6 +225,7 @@ export default function DiscoverPage() {
                   {reportingSoon?.items.map((item) => {
                     const days = daysUntil(item.earnings_date);
                     const q = quotes.get(item.symbol);
+                    const urg = earningsUrgency(days);
                     const tagLabel =
                       days <= 0
                         ? "EPS today"
@@ -219,10 +236,10 @@ export default function DiscoverPage() {
                       <Link
                         key={item.symbol}
                         href={`/tickers/${item.symbol}`}
-                        className="rounded-xl border border-border bg-card p-4 hover:border-amber-500/40 transition-colors group"
+                        className="rounded-xl border border-border bg-card p-4 hover:border-foreground/20 transition-colors group"
                       >
                         <div className="flex items-start justify-between mb-1">
-                          <span className="font-display text-base font-bold text-foreground group-hover:text-amber-500 transition-colors">
+                          <span className="font-display text-base font-bold text-foreground group-hover:text-foreground transition-colors">
                             {item.symbol}
                           </span>
                           {q?.price != null && (
@@ -234,7 +251,7 @@ export default function DiscoverPage() {
                         <p className="text-xs text-muted-foreground truncate mb-3">
                           {item.name ?? "\u2014"}
                         </p>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full ${urg.bg} ${urg.text} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
                           <span className="text-[8px]">{"\u25CF"}</span>
                           {tagLabel}
                         </span>
@@ -246,10 +263,10 @@ export default function DiscoverPage() {
             </section>
           )}
 
-          {/* ── Just reported ─────────────────────────────── */}
+          {/* ── Just reported (hidden when empty) ────────── */}
           {loading ? (
             <SectionSkeleton />
-          ) : (
+          ) : justReported && justReported.items.length === 0 ? null : (
             <section>
               <SectionHeader
                 icon={
@@ -274,14 +291,7 @@ export default function DiscoverPage() {
                 limit={LIMIT}
               />
 
-              {justReported && justReported.items.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    No notable earnings reactions in the last 5 days.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {justReported?.items.map((item) => {
                     const q = quotes.get(item.symbol);
                     const move = item.pct_change_1d;
@@ -334,14 +344,13 @@ export default function DiscoverPage() {
                     );
                   })}
                 </div>
-              )}
             </section>
           )}
 
-          {/* ── AI suggestions ─────────────────────────────── */}
+          {/* ── AI suggestions (hidden when all picks duplicate Reporting soon) */}
           {loading ? (
             <SectionSkeleton />
-          ) : (
+          ) : !suggestionsAddValue ? null : (
             <section>
               <SectionHeader
                 icon={
