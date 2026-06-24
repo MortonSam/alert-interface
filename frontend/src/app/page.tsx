@@ -246,15 +246,18 @@ export default function Home() {
               itself.
             </h1>
 
-            <p className="hero-lede mt-[18px] mb-[22px]">
-              Real numbers, plain language, and analysis you can verify.
-              Understand a company&#39;s earnings, financials, and risks — with
-              every figure traceable to the source — before you ever place a
-              trade.{" "}
-              <span className="text-muted-foreground text-[15px]">
-                Not financial advice.
-              </span>
-            </p>
+            <div className="hero-lede mt-[18px] mb-[22px] space-y-[10px]">
+              <p>
+                Alert Interface brings S&amp;P 500 company research into one
+                workspace for retail investors, covering the business,
+                valuation, financial quality, risks, earnings history, trade
+                context, watchlists, and much more.
+              </p>
+              <p>
+                Every figure is linked to its source, and every AI-written
+                claim is checked against the underlying data before you see it.
+              </p>
+            </div>
 
             <div className="flex flex-wrap gap-[13px] items-center">
               <a
