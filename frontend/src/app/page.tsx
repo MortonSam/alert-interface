@@ -237,12 +237,12 @@ export default function Home() {
         <div className="relative z-10 flex flex-col h-full max-w-7xl mx-auto px-8">
           <div className="max-w-[600px] pt-[7vh]">
             <p className="hero-eyebrow font-mono text-xs uppercase text-muted-foreground mb-[14px]">
-              Equity research
+              Equity research tool
             </p>
 
             <h1 className="hero-h1 font-display font-extrabold text-foreground">
               Stock research<br />
-              <span className="text-primary">that explains</span><br />
+              <span className="text-primary">that verifies</span><br />
               itself.
             </h1>
 
