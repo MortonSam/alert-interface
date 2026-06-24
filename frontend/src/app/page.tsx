@@ -248,10 +248,8 @@ export default function Home() {
 
             <div className="hero-lede mt-[18px] mb-[22px] space-y-[10px]">
               <p>
-                Alert Interface brings S&amp;P 500 company research into one
-                workspace for retail investors, covering the business,
-                valuation, financial quality, risks, earnings history, trade
-                context, watchlists, and much more.
+                Alert Interface brings S&amp;P 500 research into one
+                centralized workspace for retail investors.
               </p>
               <p>
                 Every figure is linked to its source, and every AI-written
