@@ -38,15 +38,13 @@ function SectionHeader({
   iconBg,
   title,
   descriptor,
-  total,
-  limit,
 }: {
   icon: React.ReactNode;
   iconBg: string;
   title: string;
   descriptor: string;
-  total: number | null;
-  limit: number;
+  total?: number | null;
+  limit?: number;
 }) {
   return (
     <div className="flex items-center gap-3 mb-4">
@@ -61,11 +59,6 @@ function SectionHeader({
         </h2>
         <p className="text-xs text-muted-foreground">{descriptor}</p>
       </div>
-      {total != null && total > limit && (
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          see all {total} &rarr;
-        </span>
-      )}
     </div>
   );
 }
@@ -120,6 +113,7 @@ export default function DiscoverPage() {
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   // Hide AI suggestions when every pick duplicates "Reporting soon"
   const reportingSoonSymbols = new Set(
@@ -130,7 +124,9 @@ export default function DiscoverPage() {
     suggestions != null &&
     suggestions.some((s) => !reportingSoonSymbols.has(s.symbol));
 
-  useEffect(() => {
+  function loadDiscover() {
+    setLoading(true);
+    setFetchError(false);
     Promise.all([
       api.discover.reportingSoon(7, LIMIT),
       api.discover.justReported(5, LIMIT),
@@ -158,8 +154,13 @@ export default function DiscoverPage() {
           })
           .catch(() => {});
       }
+    }).catch(() => {
+      setLoading(false);
+      setFetchError(true);
     });
-  }, []);
+  }
+
+  useEffect(() => { loadDiscover(); }, []);
 
   return (
     <main className="min-h-screen p-8">
@@ -183,8 +184,23 @@ export default function DiscoverPage() {
         </div>
 
         <div className="space-y-12">
+          {/* ── Fetch error ──────────────────────────────── */}
+          {fetchError && (
+            <div className="rounded-xl border border-border bg-card px-6 py-10 text-center space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Couldn&apos;t load Discover right now.
+              </p>
+              <button
+                onClick={loadDiscover}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {/* ── Reporting soon ─────────────────────────────── */}
-          {loading ? (
+          {!fetchError && loading ? (
             <SectionSkeleton />
           ) : (
             <section>
@@ -264,7 +280,7 @@ export default function DiscoverPage() {
           )}
 
           {/* ── Just reported (hidden when empty) ────────── */}
-          {loading ? (
+          {!fetchError && loading ? (
             <SectionSkeleton />
           ) : justReported && justReported.items.length === 0 ? null : (
             <section>
@@ -348,7 +364,7 @@ export default function DiscoverPage() {
           )}
 
           {/* ── AI suggestions (hidden when all picks duplicate Reporting soon) */}
-          {loading ? (
+          {!fetchError && loading ? (
             <SectionSkeleton />
           ) : !suggestionsAddValue ? null : (
             <section>
@@ -402,21 +418,16 @@ export default function DiscoverPage() {
             </section>
           )}
 
-          {/* ── Unusually active (placeholder) ────────────── */}
+          {/* ── Unusually active — hidden until RV precompute exists ──
+          const SHOW_UNUSUALLY_ACTIVE = false;
+          Restore by setting flag to true and uncommenting the section below.
+
           <section className="opacity-50">
             <SectionHeader
               icon={
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-violet"
-                >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                  strokeLinejoin="round" className="text-violet">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                 </svg>
               }
@@ -428,11 +439,11 @@ export default function DiscoverPage() {
             />
             <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-8 text-center">
               <p className="text-sm text-muted-foreground">
-                Coming soon &mdash; requires precomputing RV rank across the
-                universe.
+                Coming soon &mdash; requires precomputing RV rank across the universe.
               </p>
             </div>
           </section>
+          ── */}
         </div>
       </div>
     </main>

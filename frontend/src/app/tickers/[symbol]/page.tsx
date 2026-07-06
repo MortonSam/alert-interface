@@ -2803,7 +2803,7 @@ export default function TickerPage() {
   }
 
   function handleRegenerate() {
-    if (!window.confirm("Regenerate this research note? This uses ~$0.30 in API credit.")) return;
+    if (!window.confirm("Regenerate this research note? The current note will be replaced.")) return;
     void handleGenerate();
   }
 
@@ -2978,11 +2978,7 @@ export default function TickerPage() {
           )}
           {reactionStatus === "done" && reactions.length === 0 && (
             <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
-              No historical reactions found. Run{" "}
-              <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                make seed-reactions TICKER={ticker.symbol}
-              </code>{" "}
-              to seed data.
+              No reaction history available for this ticker yet.
             </div>
           )}
           {reactionStatus === "done" && reactions.length > 0 && (
@@ -3027,7 +3023,7 @@ export default function TickerPage() {
             <div className="rounded-lg border bg-card px-6 py-10 text-center">
               <p className="text-sm font-medium mb-1">No research note generated yet.</p>
               <p className="text-xs text-muted-foreground mb-5">
-                AI-generated summary using SEC filings + earnings history · ~40 seconds · ~$0.17 in API credit (generation ~$0.02 + Opus verification ~$0.15)
+                AI-generated summary using SEC filings + earnings history. Takes about 40 seconds.
               </p>
               <button
                 onClick={() => void handleGenerate()}
