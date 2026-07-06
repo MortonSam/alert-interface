@@ -55,9 +55,9 @@ function ChangeCell({ quote, status }: { quote: TickerQuote | null; status: stri
   const pct = quote.change_pct;
   const color =
     pct > 0
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? "text-success"
       : pct < 0
-      ? "text-red-500 dark:text-red-400"
+      ? "text-destructive"
       : "text-muted-foreground";
   return (
     <span className={`font-medium ${color}`}>
@@ -142,7 +142,7 @@ function WatchlistRow({
           <Skeleton w="w-16" />
         ) : em?.earnings_date ? (
           <span className="inline-flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-1 py-0.5 rounded">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 bg-amber-500/10 px-1 py-0.5 rounded">
               EPS
             </span>
             <span className="text-muted-foreground">{fmtDate(em.earnings_date)}</span>
@@ -481,7 +481,7 @@ export default function WatchlistPage() {
 
         {/* Error */}
         {wlStatus === "error" && (
-          <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/20 px-5 py-4 text-sm text-red-700 dark:text-red-400">
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
             Failed to load watchlists. Is the backend running?
           </div>
         )}

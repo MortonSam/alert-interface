@@ -66,10 +66,10 @@ const sectionColors = {
     bg: "bg-success/[0.04]",
   },
   watch: {
-    dot: "bg-amber-400",
-    label: "text-amber-400",
-    accent: "border-l-amber-400/30",
-    bg: "bg-amber-400/[0.04]",
+    dot: "bg-amber-500",
+    label: "text-amber-500",
+    accent: "border-l-amber-500/30",
+    bg: "bg-amber-500/[0.04]",
   },
   risks: {
     dot: "bg-destructive",

@@ -111,8 +111,8 @@ function fmtOptionLeg(thesis: Thesis): string | null {
 }
 
 const DIRECTION_COLOR: Record<string, string> = {
-  bullish: "text-emerald-600 dark:text-emerald-400",
-  bearish: "text-red-500 dark:text-red-400",
+  bullish: "text-success",
+  bearish: "text-destructive",
   neutral: "text-muted-foreground",
 };
 
@@ -123,9 +123,9 @@ const GRADE_LABEL: Record<SelfGrade, string> = {
 };
 
 const GRADE_COLOR: Record<SelfGrade, string> = {
-  right: "text-emerald-600 dark:text-emerald-400",
+  right: "text-success",
   right_for_wrong_reasons: "text-amber-500",
-  wrong: "text-red-500 dark:text-red-400",
+  wrong: "text-destructive",
 };
 
 function ConvictionDots({ n }: { n: number }) {
@@ -224,9 +224,9 @@ function OptionPnlSection({
 // ── Stock price mark (for theses with no option leg) ──────────────────────────
 
 const VERDICT_COLOR: Record<string, string> = {
-  on_track:   "text-emerald-600 dark:text-emerald-400",
-  reversed:   "text-red-500 dark:text-red-400",
-  target_hit: "text-emerald-700 dark:text-emerald-300 font-semibold",
+  on_track:   "text-success",
+  reversed:   "text-destructive",
+  target_hit: "text-success font-semibold",
 };
 const VERDICT_LABEL: Record<string, string> = {
   on_track:   "On track",
@@ -630,7 +630,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
               </button>
             </div>
           </div>
-          {draftError && <p className="text-xs text-red-500">{draftError}</p>}
+          {draftError && <p className="text-xs text-destructive">{draftError}</p>}
           {drafting && (
             <div className="animate-pulse space-y-2">
               <div className="h-3 bg-muted rounded w-3/4" />
@@ -675,7 +675,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
           />
           Track option position
           {fromAiDraft && optionLegEnabled && (
-            <span className="ml-1 text-blue-500">(from AI draft)</span>
+            <span className="ml-1 text-cool">(from AI draft)</span>
           )}
         </label>
         {optionLegEnabled && (
@@ -738,7 +738,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
 
       <p className="text-xs text-muted-foreground">Entry price will be captured from the live quote at creation.</p>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex gap-2">
         <button
@@ -835,7 +835,7 @@ function ResolveForm({
       {thesis.option_type && (
         <p className="text-xs text-muted-foreground">Option P&L will be computed from the live chain at resolution.</p>
       )}
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex gap-2">
         <button
           type="submit"
@@ -911,12 +911,12 @@ function ThesisCard({
           </span>
           <ConvictionDots n={thesis.conviction} />
           {thesis.is_due && isOpen && (
-            <span className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded">
               Due
             </span>
           )}
           {needsManual && (
-            <span className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300 px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
               Needs manual resolution
             </span>
           )}
@@ -1001,10 +1001,10 @@ function ThesisCard({
               <span className={
                 thesis.direction === "bullish"
                   ? parseFloat(thesis.price_at_resolution ?? "0") >= parseFloat(thesis.entry_price ?? "0")
-                    ? "text-emerald-600" : "text-red-500"
+                    ? "text-success" : "text-destructive"
                   : thesis.direction === "bearish"
                   ? parseFloat(thesis.price_at_resolution ?? "0") <= parseFloat(thesis.entry_price ?? "0")
-                    ? "text-emerald-600" : "text-red-500"
+                    ? "text-success" : "text-destructive"
                   : ""
               }>
                 ({pctChange(thesis.entry_price, thesis.price_at_resolution)})
@@ -1013,7 +1013,7 @@ function ThesisCard({
             {thesis.direction_correct != null && (
               <span>
                 Direction:{" "}
-                <span className={thesis.direction_correct ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                <span className={thesis.direction_correct ? "text-success" : "text-destructive"}>
                   {thesis.direction_correct ? "✓" : "✗"}
                 </span>
               </span>
@@ -1021,7 +1021,7 @@ function ThesisCard({
             {thesis.target_reached != null && (
               <span>
                 Target:{" "}
-                <span className={thesis.target_reached ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                <span className={thesis.target_reached ? "text-success" : "text-destructive"}>
                   {thesis.target_reached ? "✓" : "✗"}
                 </span>
               </span>
@@ -1039,8 +1039,8 @@ function ThesisCard({
               Trade:{" "}
               <span className={
                 parseFloat(thesis.option_pnl_dollars) >= 0
-                  ? "text-emerald-600 dark:text-emerald-400 font-medium"
-                  : "text-red-500 dark:text-red-400 font-medium"
+                  ? "text-success font-medium"
+                  : "text-destructive font-medium"
               }>
                 {fmtPnl(parseFloat(thesis.option_pnl_dollars), thesis.option_pnl_pct ? parseFloat(thesis.option_pnl_pct) : null).str}
               </span>

@@ -10,7 +10,7 @@ export function cn(...inputs: ClassValue[]) {
 export function rvRankShort(rank: number): { tag: string; colorClass: string } {
   if (rank < 25) return { tag: "low", colorClass: "text-muted-foreground" };
   if (rank < 70) return { tag: "normal", colorClass: "text-muted-foreground" };
-  if (rank < 90) return { tag: "elevated", colorClass: "text-amber-600 dark:text-amber-400" };
+  if (rank < 90) return { tag: "elevated", colorClass: "text-amber-500" };
   return { tag: "extreme", colorClass: "text-primary" };
 }
 

@@ -67,7 +67,7 @@ export default function Tip({
               transform: "translateY(-100%)",
               zIndex: 9999,
             }}
-            className="w-60 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 shadow-xl pointer-events-none whitespace-normal leading-relaxed"
+            className="w-60 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-xl pointer-events-none whitespace-normal leading-relaxed"
           >
             {text}
           </div>,

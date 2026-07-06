@@ -3,25 +3,25 @@ import { cn } from "@/lib/utils";
 
 const tiers = {
   info: {
-    text: "text-[#BFDBFF]",
-    bg: "bg-[rgba(46,155,255,0.07)]",
-    border: "border-[rgba(46,155,255,0.28)]",
-    icon: "text-[#2E9BFF]",
-    title: "text-[#9CCAFF]",
+    text: "text-cool/75",
+    bg: "bg-cool/[0.07]",
+    border: "border-cool/[0.28]",
+    icon: "text-cool",
+    title: "text-cool/90",
   },
   caution: {
-    text: "text-[#FBD89B]",
-    bg: "bg-[rgba(245,165,36,0.08)]",
-    border: "border-[rgba(245,165,36,0.32)]",
-    icon: "text-[#F5A524]",
-    title: "text-[#FAC56A]",
+    text: "text-amber-500/75",
+    bg: "bg-amber-500/[0.08]",
+    border: "border-amber-500/[0.32]",
+    icon: "text-amber-500",
+    title: "text-amber-500/90",
   },
   alert: {
-    text: "text-[#FFC2C2]",
-    bg: "bg-[rgba(255,92,92,0.08)]",
-    border: "border-[rgba(255,92,92,0.34)]",
-    icon: "text-[#FF5C5C]",
-    title: "text-[#FF9B9B]",
+    text: "text-destructive/75",
+    bg: "bg-destructive/[0.08]",
+    border: "border-destructive/[0.34]",
+    icon: "text-destructive",
+    title: "text-destructive/90",
   },
 };
 

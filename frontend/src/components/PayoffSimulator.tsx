@@ -59,7 +59,7 @@ function PayoffYTick({
 }) {
   if (x == null || y == null || !payload) return null;
   const v = payload.value;
-  const color = v < 0 ? "#dc2626" : v > 0 ? "#16a34a" : "hsl(var(--muted-foreground))";
+  const color = v < 0 ? "hsl(var(--destructive))" : v > 0 ? "hsl(var(--success))" : "hsl(var(--muted-foreground))";
   const abs = Math.abs(Math.round(v)).toLocaleString("en-US");
   const label = v >= 0 ? `+$${abs}` : `-$${abs}`;
   return (
@@ -327,7 +327,7 @@ export default function PayoffSimulator({
               {/* Green: profit zone (pnl >= 0) */}
               <Line
                 dataKey="pnl_pos"
-                stroke="#16a34a"
+                stroke="hsl(var(--success))"
                 strokeWidth={2.5}
                 dot={false}
                 activeDot={false}
@@ -338,7 +338,7 @@ export default function PayoffSimulator({
               {/* Red: loss zone (pnl < 0) */}
               <Line
                 dataKey="pnl_neg"
-                stroke="#dc2626"
+                stroke="hsl(var(--destructive))"
                 strokeWidth={2.5}
                 dot={false}
                 activeDot={false}

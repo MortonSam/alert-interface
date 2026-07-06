@@ -50,7 +50,7 @@ function StepHeader({ n, label, done }: { n: number; label: string; done?: boole
       <div
         className={cn(
           "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors",
-          done ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground",
+          done ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground",
         )}
       >
         {done ? "✓" : n}
@@ -655,8 +655,8 @@ function ConvictionPicker({ value, onChange }: { value: number; onChange: (n: nu
           className={cn(
             "w-9 h-9 rounded-lg border-2 text-sm font-bold transition-all",
             value === n
-              ? "bg-blue-500 border-blue-500 text-white"
-              : "border-border text-muted-foreground hover:border-blue-300 hover:text-foreground",
+              ? "bg-cool border-cool text-white"
+              : "border-border text-muted-foreground hover:border-cool/50 hover:text-foreground",
           )}
         >
           {n}
@@ -990,8 +990,8 @@ function BuildTradePageContent() {
                   className={cn(
                     "py-8 rounded-[var(--radius)] border text-center transition-all select-none",
                     direction === "bullish"
-                      ? "bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-400 dark:text-emerald-300"
-                      : "border-border text-muted-foreground hover:border-emerald-300 hover:bg-emerald-50/40 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/10",
+                      ? "bg-success/10 border-success text-success"
+                      : "border-border text-muted-foreground hover:border-success/50 hover:bg-success/5",
                   )}
                 >
                   <GiBull aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
@@ -1005,8 +1005,8 @@ function BuildTradePageContent() {
                   className={cn(
                     "py-8 rounded-[var(--radius)] border text-center transition-all select-none",
                     direction === "bearish"
-                      ? "bg-red-50 border-red-500 text-red-700 dark:bg-red-900/30 dark:border-red-400 dark:text-red-300"
-                      : "border-border text-muted-foreground hover:border-red-300 hover:bg-red-50/40 dark:hover:border-red-700 dark:hover:bg-red-900/10",
+                      ? "bg-destructive/10 border-destructive text-destructive"
+                      : "border-border text-muted-foreground hover:border-destructive/50 hover:bg-destructive/5",
                   )}
                 >
                   <GiBearFace aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />

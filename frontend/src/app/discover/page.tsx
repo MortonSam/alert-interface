@@ -321,9 +321,9 @@ export default function DiscoverPage() {
                             : "\u2014";
                     const moveColor =
                       move != null && move > 0
-                        ? "text-emerald-500"
+                        ? "text-success"
                         : move != null && move < 0
-                          ? "text-red-500"
+                          ? "text-destructive"
                           : "text-muted-foreground";
                     const moveStr =
                       move != null

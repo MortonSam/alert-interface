@@ -207,14 +207,14 @@ export function TickerGrid() {
       {/* Freshness indicator */}
       <div className="flex justify-end items-center gap-2">
         <span className="text-xs text-muted-foreground flex items-center gap-1">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-success" />
           Prices live
         </span>
         {systemStatus?.last_refreshed_at && (
           <span
             className={`text-xs px-2 py-0.5 rounded-full ${
               isStale(systemStatus.last_refreshed_at)
-                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                ? "bg-amber-500/10 text-amber-500"
                 : "text-muted-foreground"
             }`}
           >

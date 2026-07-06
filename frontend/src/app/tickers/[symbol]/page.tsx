@@ -79,11 +79,11 @@ function timeAgoUnix(unixSeconds: number): string {
 // ── Catalyst section helpers ──────────────────────────────────────────────────
 
 const EVENT_STYLES: Record<EventType, { label: string; cls: string }> = {
-  earnings:       { label: "Earnings",       cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
-  macro:          { label: "Macro",          cls: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300" },
-  fda:            { label: "FDA",            cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
-  ex_dividend:    { label: "Ex-Div",         cls: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300" },
-  product_launch: { label: "Launch",         cls: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
+  earnings:       { label: "Earnings",       cls: "bg-cool/10 text-cool" },
+  macro:          { label: "Macro",          cls: "bg-violet/10 text-violet" },
+  fda:            { label: "FDA",            cls: "bg-success/10 text-success" },
+  ex_dividend:    { label: "Ex-Div",         cls: "bg-secondary text-muted-foreground" },
+  product_launch: { label: "Launch",         cls: "bg-primary/10 text-primary" },
   other:          { label: "Other",          cls: "bg-muted text-muted-foreground" },
 };
 
@@ -97,9 +97,9 @@ function EventTypeBadge({ type }: { type: EventType }) {
 }
 
 const OUTCOME_STYLES: Record<EarningsOutcome, { label: string; cls: string }> = {
-  beat:    { label: "Beat",    cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" },
-  miss:    { label: "Miss",    cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
-  meet:    { label: "Meet",    cls: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300" },
+  beat:    { label: "Beat",    cls: "bg-success/10 text-success" },
+  miss:    { label: "Miss",    cls: "bg-destructive/10 text-destructive" },
+  meet:    { label: "Meet",    cls: "bg-secondary text-muted-foreground" },
   unknown: { label: "—",       cls: "bg-muted text-muted-foreground" },
 };
 
@@ -115,8 +115,8 @@ function OutcomeBadge({ outcome }: { outcome: EarningsOutcome }) {
 function DaysBadge({ days }: { days: number }) {
   const label = days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
   const cls =
-    days <= 7   ? "bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-300"
-    : days <= 30 ? "bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300"
+    days <= 7   ? "bg-primary/10 text-primary"
+    : days <= 30 ? "bg-amber-500/10 text-amber-500"
     : "bg-muted text-muted-foreground";
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${cls}`}>
@@ -497,9 +497,9 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
             className={cn(
               "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
               outcomeFilter === key
-                ? key === "beat" ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                  : key === "miss" ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                  : key === "meet" ? "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                ? key === "beat" ? "bg-success/10 text-success"
+                  : key === "miss" ? "bg-destructive/10 text-destructive"
+                  : key === "meet" ? "bg-secondary text-secondary-foreground"
                   : "bg-foreground text-background"
                 : "bg-muted text-muted-foreground hover:text-foreground",
             )}
@@ -604,9 +604,9 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
 // ── Verification panel ────────────────────────────────────────────────────────
 
 const CLAIM_STYLES: Record<VerificationClaim["status"], { dot: string; badge: string; label: string }> = {
-  supported:    { dot: "bg-green-500",  badge: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",  label: "Supported" },
-  unsupported:  { dot: "bg-amber-400",  badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",  label: "Unsupported" },
-  contradicted: { dot: "bg-red-500",    badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",          label: "Contradicted" },
+  supported:    { dot: "bg-success",      badge: "bg-success/10 text-success",           label: "Supported" },
+  unsupported:  { dot: "bg-amber-500",    badge: "bg-amber-500/10 text-amber-500",      label: "Unsupported" },
+  contradicted: { dot: "bg-destructive",  badge: "bg-destructive/10 text-destructive",  label: "Contradicted" },
 };
 
 function VerificationPanel({
@@ -712,10 +712,10 @@ function formatTooltipDate(date: string, period: ChartPeriod): string {
 }
 
 const OUTCOME_DOT_COLOR: Record<EarningsMarker["outcome"], string> = {
-  beat: "#16a34a",
-  miss: "#dc2626",
-  meet: "#9ca3af",
-  unknown: "#9ca3af",
+  beat: "hsl(var(--success))",
+  miss: "hsl(var(--destructive))",
+  meet: "hsl(var(--muted-foreground))",
+  unknown: "hsl(var(--muted-foreground))",
 };
 
 function formatYTick(v: number): string {
@@ -903,7 +903,7 @@ function PriceChart({
   // Use start_price as the reference for color (green if current > start)
   const refPrice = chartData.start_price ?? lineData[0].close;
   const isUp = lineData[lineData.length - 1].close >= refPrice;
-  const lineColor = isUp ? "#16a34a" : "#dc2626";
+  const lineColor = isUp ? "hsl(var(--success))" : "hsl(var(--destructive))";
 
   return (
     <div className="mt-6 rounded-lg border bg-card px-4 pt-4 pb-2">
@@ -1010,13 +1010,13 @@ function PriceChart({
       {markerDates.length > 0 && (
         <div className="flex gap-4 mt-1 px-1 pb-1 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-600" /> Beat
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-success" /> Beat
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" /> Miss
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-destructive" /> Miss
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-400" /> Meet / Unknown
+            <span className="inline-block w-2.5 h-2.5 rounded-full bg-muted-foreground" /> Meet / Unknown
           </span>
         </div>
       )}
@@ -1564,7 +1564,7 @@ function PayoffYTick({
 }) {
   if (x == null || y == null || !payload) return null;
   const v = payload.value;
-  const color = v < 0 ? "#dc2626" : v > 0 ? "#16a34a" : "hsl(var(--muted-foreground))";
+  const color = v < 0 ? "hsl(var(--destructive))" : v > 0 ? "hsl(var(--success))" : "hsl(var(--muted-foreground))";
   const abs = Math.abs(Math.round(v)).toLocaleString("en-US");
   const label = v >= 0 ? `+$${abs}` : `-$${abs}`;
   return (
@@ -1798,8 +1798,8 @@ function StrategyCard({
           scrubPnl == null
             ? "text-muted-foreground"
             : scrubPnl >= 0
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-red-500 dark:text-red-400",
+              ? "text-success"
+              : "text-destructive",
         )}>
           {scrubPnl == null
             ? "—"
@@ -1884,18 +1884,18 @@ function StrategyCard({
             <ReferenceLine
               key={i}
               x={be}
-              stroke="#10b981"
+              stroke="hsl(var(--success))"
               strokeWidth={1}
               strokeDasharray="3 5"
               strokeOpacity={0.8}
-              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#10b981" }}
+              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "hsl(var(--success))" }}
             />
           ))}
 
           {/* P&L curve — redraws live with each slider tick */}
           <Line
             dataKey="pnl"
-            stroke="#3b82f6"
+            stroke="hsl(var(--cool))"
             strokeWidth={2.5}
             dot={false}
             activeDot={false}
@@ -2278,8 +2278,8 @@ function MultiLegStrategyCard({
             scrubPnl == null
               ? "text-muted-foreground"
               : scrubPnl >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-red-500 dark:text-red-400",
+                ? "text-success"
+                : "text-destructive",
           )}
         >
           {scrubPnl == null
@@ -2360,16 +2360,16 @@ function MultiLegStrategyCard({
             <ReferenceLine
               key={i}
               x={be}
-              stroke="#10b981"
+              stroke="hsl(var(--success))"
               strokeWidth={1}
               strokeDasharray="3 5"
-              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "#10b981" }}
+              label={{ value: "B/E", position: "insideTopRight", fontSize: 9, fill: "hsl(var(--success))" }}
             />
           ))}
 
           <Line
             dataKey="pnl"
-            stroke="#3b82f6"
+            stroke="hsl(var(--cool))"
             strokeWidth={2.5}
             dot={false}
             activeDot={false}
@@ -2874,7 +2874,7 @@ export default function TickerPage() {
                 return (
                   <span className={cn(
                     "text-sm font-medium tabular-nums",
-                    chg >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                    chg >= 0 ? "text-success" : "text-destructive",
                   )}>
                     {chg >= 0 ? "+" : ""}{chg.toFixed(2)}{" "}
                     ({chgPct >= 0 ? "+" : ""}{chgPct.toFixed(2)}%){" "}
