@@ -202,7 +202,7 @@ export default function DiscoverPage() {
           {/* ── Reporting soon ─────────────────────────────── */}
           {!fetchError && loading ? (
             <SectionSkeleton />
-          ) : (
+          ) : !fetchError ? (
             <section>
               <SectionHeader
                 icon={
@@ -277,12 +277,12 @@ export default function DiscoverPage() {
                 </div>
               )}
             </section>
-          )}
+          ) : null}
 
           {/* ── Just reported (hidden when empty) ────────── */}
           {!fetchError && loading ? (
             <SectionSkeleton />
-          ) : justReported && justReported.items.length === 0 ? null : (
+          ) : !fetchError && justReported && justReported.items.length === 0 ? null : !fetchError ? (
             <section>
               <SectionHeader
                 icon={
@@ -361,12 +361,12 @@ export default function DiscoverPage() {
                   })}
                 </div>
             </section>
-          )}
+          ) : null}
 
           {/* ── AI suggestions (hidden when all picks duplicate Reporting soon) */}
           {!fetchError && loading ? (
             <SectionSkeleton />
-          ) : !suggestionsAddValue ? null : (
+          ) : !fetchError && suggestionsAddValue ? (
             <section>
               <SectionHeader
                 icon={
@@ -416,7 +416,7 @@ export default function DiscoverPage() {
                 </div>
               )}
             </section>
-          )}
+          ) : null}
 
           {/* ── Unusually active — hidden until RV precompute exists ──
           const SHOW_UNUSUALLY_ACTIVE = false;
