@@ -272,14 +272,15 @@ async def suggestions(
         t["rv_score"] = float(rv_row.rv_rank) / 100.0 if rv_row is not None and rv_row.rv_rank is not None else 0.0
 
     # ── Score & rank ─────────────────────────────────────────────────────────
-    # Three equal-weight signals (each 0-1), weighted 1/3 each.
-    # Before: total = earnings_score + reaction_score  (each 0-1, equal weight)
-    # After:  total = (earnings_score + reaction_score + rv_score) / 3 * 2
-    #   ↑ scaled ×2 to keep total magnitudes comparable for the >0 filter
+    # A ticker qualifies only via a catalyst (earnings or reaction).
+    # RV is a booster that re-ranks within the qualified pool.
+    # Before: total = earnings_score + reaction_score
+    # After:  total = (earnings_score + reaction_score) + 0.5 * rv_score
     scored = []
     for sym, t in tickers.items():
-        total = (t["earnings_score"] + t["reaction_score"] + t["rv_score"]) / 3.0 * 2.0
-        if total > 0:
+        catalyst = t["earnings_score"] + t["reaction_score"]
+        if catalyst > 0:
+            total = catalyst + 0.5 * t["rv_score"]
             scored.append((sym, t, total))
 
     scored.sort(key=lambda x: x[2], reverse=True)

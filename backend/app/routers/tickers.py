@@ -1152,7 +1152,7 @@ async def get_realized_vol(
     from app.services.rv_store import get_latest_rv
 
     sym = symbol.upper()
-    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+    as_of = date.today().isoformat()
 
     # ── Try precomputed snapshot first ────────────────────────────────────────
     row = await get_latest_rv(db, sym)
