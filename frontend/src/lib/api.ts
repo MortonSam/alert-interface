@@ -349,6 +349,17 @@ export interface SuggestionsResponse {
   items: SuggestionItem[];
 }
 
+export interface BatchEnrichItem {
+  symbol: string;
+  price: number | null;
+  change: number | null;
+  change_pct: number | null;
+  expected_move_pct: number | null;
+  earnings_date: string | null;
+  rv_rank: number | null;
+  current_rv: number | null;
+}
+
 export interface RealizedVol {
   symbol: string;
   current_rv: number | null;       // annualized 20-day RV, 0–1 decimal (0.172 = 17.2%)
@@ -560,6 +571,8 @@ export const api = {
     quote: (symbol: string) => request<TickerQuote>(`/tickers/quote/${symbol}`),
     quotes: (symbols: string[]) =>
       request<BatchQuote[]>(`/tickers/quotes?symbols=${symbols.join(",")}`),
+    batchEnrich: (symbols: string[]) =>
+      request<BatchEnrichItem[]>(`/tickers/batch-enrich?symbols=${symbols.join(",")}`),
     chart: (symbol: string, period = "1y") =>
       request<TickerChart>(`/tickers/chart/${symbol}?period=${period}`),
     create: (data: Partial<Ticker>) =>

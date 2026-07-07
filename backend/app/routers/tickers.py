@@ -16,7 +16,7 @@ from app.models.historical_reaction import HistoricalReaction
 from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
-from app.schemas.ticker import BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
+from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
 from app.services import news_cache, quote_cache
@@ -268,6 +268,145 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
             results[sym] = BatchQuoteRead(symbol=sym, **data)
 
     return [results.get(s, BatchQuoteRead(symbol=s, price=None, change=None, change_pct=None)) for s in syms]
+
+
+@router.get("/batch-enrich", response_model=list[BatchEnrichRead])
+async def batch_enrich(
+    symbols: str = Query(..., description="Comma-separated symbols"),
+    db: AsyncSession = Depends(get_db),
+) -> list[BatchEnrichRead]:
+    """Batch quote + expected-move + RV for watchlist rows (one call replaces N×3)."""
+    raw = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    syms = list(dict.fromkeys(raw))[:50]
+    if not syms:
+        return []
+
+    loop = asyncio.get_event_loop()
+    today = date.today()
+
+    # ── 1. Batch DB lookups ──────────────────────────────────────────────────
+    ticker_rows = (
+        await db.execute(select(Ticker).where(Ticker.symbol.in_(syms)))
+    ).scalars().all()
+    ticker_by_sym: dict[str, Ticker] = {t.symbol: t for t in ticker_rows}
+
+    earnings_by_sym: dict[str, str] = {}
+    ticker_ids = [t.id for t in ticker_rows]
+    if ticker_ids:
+        earnings_q = (
+            select(Event.ticker_id, func.min(Event.event_date))
+            .where(Event.event_type == "earnings", Event.event_date >= today)
+            .where(Event.ticker_id.in_(ticker_ids))
+            .group_by(Event.ticker_id)
+        )
+        for row in (await db.execute(earnings_q)).all():
+            tid, edate = row
+            t = next((t for t in ticker_rows if t.id == tid), None)
+            if t and edate:
+                earnings_by_sym[t.symbol] = (
+                    edate.isoformat() if hasattr(edate, "isoformat") else str(edate)
+                )
+
+    # ── 2. Batch quote fetch (Finnhub, 60s cache) ───────────────────────────
+    quotes: dict[str, dict] = {}
+    to_fetch: list[str] = []
+    for sym in syms:
+        cached = quote_cache.get(sym)
+        if cached is not None:
+            quotes[sym] = cached
+        else:
+            to_fetch.append(sym)
+
+    if to_fetch:
+        finnhub = FinnhubClient()
+        try:
+            raw_quotes = await asyncio.gather(
+                *(finnhub.get_quote(s) for s in to_fetch),
+                return_exceptions=True,
+            )
+        finally:
+            await finnhub.close()
+        for sym, q in zip(to_fetch, raw_quotes):
+            if isinstance(q, BaseException):
+                quotes[sym] = {"price": None, "change": None, "change_pct": None}
+                continue
+            price = float(q.get("c") or 0) or None
+            change = float(q.get("d")) if q.get("d") is not None else None
+            change_pct = float(q.get("dp")) if q.get("dp") is not None else None
+            data = {"price": price, "change": change, "change_pct": change_pct}
+            quote_cache.set(sym, data)
+            quotes[sym] = data
+
+    # ── 3. Per-symbol: expected-move + RV (concurrent, semaphore-capped) ─────
+    sem = asyncio.Semaphore(10)
+
+    async def _enrich(sym: str) -> BatchEnrichRead:
+        async with sem:
+            q = quotes.get(sym, {})
+            current_price = q.get("price")
+            earnings_str = earnings_by_sym.get(sym)
+
+            # — Expected move (straddle / price) ——————————————————————————————
+            em_pct: float | None = None
+            try:
+                expirations: list[str] = await loop.run_in_executor(
+                    None, YFinanceClient.get_option_expirations, sym,
+                )
+                if expirations and current_price:
+                    # Pick expiration: nearest post-earnings, or ≥7d out
+                    if earnings_str:
+                        post = [e for e in expirations if e >= earnings_str]
+                        chosen = post[0] if post else expirations[-1]
+                    else:
+                        week_out = (today + timedelta(days=7)).isoformat()
+                        chosen = next((e for e in expirations if e >= week_out), expirations[0])
+
+                    chain_entry = await fetch_chain(sym, chosen, loop)
+                    chain = chain_entry.chain
+                    calls = chain.get("calls", [])
+                    puts = chain.get("puts", [])
+                    common = {c["strike"] for c in calls} & {p["strike"] for p in puts}
+                    if common:
+                        atm = min(common, key=lambda s: abs(s - current_price))
+                        c = next((x for x in calls if x["strike"] == atm), None)
+                        p = next((x for x in puts if x["strike"] == atm), None)
+                        cp = _mid_or_last(c["bid"], c["ask"], c["lastPrice"]) if c else None
+                        pp = _mid_or_last(p["bid"], p["ask"], p["lastPrice"]) if p else None
+                        if cp is not None and pp is not None:
+                            em_pct = (cp + pp) / current_price
+            except Exception:
+                pass
+
+            # — Realized vol rank ————————————————————————————————————————————
+            rv_rank: float | None = None
+            current_rv: float | None = None
+            try:
+                rv_data: dict = await loop.run_in_executor(
+                    None, YFinanceClient.get_realized_vol_data, sym,
+                )
+                rv_val = rv_data.get("current_rv")
+                rv_series: list[float] = rv_data.get("rv_series", [])
+                if rv_val is not None and rv_series:
+                    rv_min = min(rv_series)
+                    rv_max = max(rv_series)
+                    rank = (rv_val - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
+                    rv_rank = round(max(0.0, min(100.0, rank)), 1)
+                    current_rv = rv_val
+            except Exception:
+                pass
+
+            return BatchEnrichRead(
+                symbol=sym,
+                price=q.get("price"),
+                change=q.get("change"),
+                change_pct=q.get("change_pct"),
+                expected_move_pct=em_pct,
+                earnings_date=earnings_str,
+                rv_rank=rv_rank,
+                current_rv=current_rv,
+            )
+
+    return list(await asyncio.gather(*(_enrich(s) for s in syms)))
 
 
 @router.get("/{symbol}/news", response_model=NewsRead)

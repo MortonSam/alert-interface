@@ -8,9 +8,7 @@ import {
   api,
   type Watchlist,
   type WatchlistTicker,
-  type TickerQuote,
-  type ExpectedMove,
-  type RealizedVol,
+  type BatchEnrichItem,
   type Ticker,
 } from "@/lib/api";
 
@@ -19,12 +17,8 @@ import {
 interface RowState {
   symbol: string;
   item: WatchlistTicker;
-  quoteStatus: "loading" | "done" | "error";
-  quote: TickerQuote | null;
-  emStatus: "loading" | "done" | "error";
-  em: ExpectedMove | null;
-  rvStatus: "loading" | "done" | "error";
-  rv: RealizedVol | null;
+  status: "loading" | "done" | "error";
+  data: BatchEnrichItem | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -48,11 +42,11 @@ function Skeleton({ w = "w-16" }: { w?: string }) {
   return <div className={`${w} h-4 bg-muted rounded animate-pulse`} />;
 }
 
-function ChangeCell({ quote, status }: { quote: TickerQuote | null; status: string }) {
+function ChangeCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-14" />;
-  if (!quote || quote.change_pct == null)
+  if (!data || data.change_pct == null)
     return <span className="text-muted-foreground text-xs">—</span>;
-  const pct = quote.change_pct;
+  const pct = data.change_pct;
   const color =
     pct > 0
       ? "text-success"
@@ -67,30 +61,30 @@ function ChangeCell({ quote, status }: { quote: TickerQuote | null; status: stri
   );
 }
 
-function ImpliedMoveCell({ em, status }: { em: ExpectedMove | null; status: string }) {
+function ImpliedMoveCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-12" />;
-  if (!em || em.expected_move_pct == null)
+  if (!data || data.expected_move_pct == null)
     return <span className="text-muted-foreground text-xs">—</span>;
   return (
     <span className="font-mono text-sm">
-      ±{(em.expected_move_pct * 100).toFixed(1)}%
+      ±{(data.expected_move_pct * 100).toFixed(1)}%
     </span>
   );
 }
 
-function RVRankCell({ rv, status }: { rv: RealizedVol | null; status: string }) {
+function RVRankCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-12" />;
-  if (!rv || rv.rv_rank == null)
+  if (!data || data.rv_rank == null)
     return <span className="text-muted-foreground text-xs">—</span>;
-  const rank = rv.rv_rank;
+  const rank = data.rv_rank;
   const { tag, colorClass } = rvRankShort(rank);
   return (
     <Tip text={RV_RANK_TIP_SHORT}>
       <span className="flex flex-col">
         <span className="tabular-nums">{rank.toFixed(0)} · <span className={colorClass}>{tag}</span></span>
-        {rv.current_rv != null && (
+        {data.current_rv != null && (
           <span className="font-mono text-[10px] text-muted-foreground/60">
-            RV {(rv.current_rv * 100).toFixed(0)}% ann.
+            RV {(data.current_rv * 100).toFixed(0)}% ann.
           </span>
         )}
       </span>
@@ -107,7 +101,7 @@ function WatchlistRow({
   onRemove: () => void;
   removing: boolean;
 }) {
-  const { item, quote, quoteStatus, em, emStatus, rv, rvStatus } = row;
+  const { item, data, status } = row;
   const ticker = item.ticker;
 
   return (
@@ -128,34 +122,34 @@ function WatchlistRow({
         <span className="line-clamp-1 max-w-[180px] block">{ticker.name ?? "—"}</span>
       </td>
       <td className="py-3 px-4 font-mono text-sm">
-        {quoteStatus === "loading" ? (
+        {status === "loading" ? (
           <Skeleton w="w-16" />
         ) : (
-          fmtPrice(quote?.price ?? null)
+          fmtPrice(data?.price ?? null)
         )}
       </td>
       <td className="py-3 px-4 text-sm">
-        <ChangeCell quote={quote} status={quoteStatus} />
+        <ChangeCell data={data} status={status} />
       </td>
       <td className="py-3 px-4 text-sm">
-        {emStatus === "loading" ? (
+        {status === "loading" ? (
           <Skeleton w="w-16" />
-        ) : em?.earnings_date ? (
+        ) : data?.earnings_date ? (
           <span className="inline-flex items-center gap-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 bg-amber-500/10 px-1 py-0.5 rounded">
               EPS
             </span>
-            <span className="text-muted-foreground">{fmtDate(em.earnings_date)}</span>
+            <span className="text-muted-foreground">{fmtDate(data.earnings_date)}</span>
           </span>
         ) : (
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </td>
       <td className="py-3 px-4 text-sm">
-        <ImpliedMoveCell em={em} status={emStatus} />
+        <ImpliedMoveCell data={data} status={status} />
       </td>
       <td className="py-3 px-4 text-sm">
-        <RVRankCell rv={rv} status={rvStatus} />
+        <RVRankCell data={data} status={status} />
       </td>
       <td className="py-3 px-4">
         <button
@@ -197,6 +191,23 @@ export default function WatchlistPage() {
 
   const activeWatchlist = watchlists.find((w) => w.id === activeWlId) ?? null;
 
+  // ── Batch-enrich helper ───────────────────────────────────────────────────
+
+  function applyEnrichment(
+    items: WatchlistTicker[],
+    results: BatchEnrichItem[],
+  ) {
+    const map = new Map(results.map((r) => [r.symbol, r]));
+    setRows(
+      items.map((item) => ({
+        symbol: item.ticker.symbol,
+        item,
+        status: "done" as const,
+        data: map.get(item.ticker.symbol) ?? null,
+      })),
+    );
+  }
+
   // ── Load watchlists + all tickers on mount ──────────────────────────────────
 
   useEffect(() => {
@@ -210,11 +221,10 @@ export default function WatchlistPage() {
     ).catch(() => setWlStatus("error"));
   }, []);
 
-  // ── Initialize rows + fire fetches when active watchlist changes ────────────
+  // ── Initialize rows + batch-enrich when active watchlist changes ───────────
 
   useEffect(() => {
     if (!activeWlId || !activeWatchlist) return;
-    // Avoid re-initializing if already done for this watchlist ID
     if (initializedRef.current === activeWlId) return;
     initializedRef.current = activeWlId;
 
@@ -225,87 +235,44 @@ export default function WatchlistPage() {
       items.map((item) => ({
         symbol: item.ticker.symbol,
         item,
-        quoteStatus: "loading",
-        quote: null,
-        emStatus: "loading",
-        em: null,
-        rvStatus: "loading",
-        rv: null,
-      }))
+        status: "loading",
+        data: null,
+      })),
     );
 
-    // Parallel fetches per ticker
-    for (const item of items) {
-      const sym = item.ticker.symbol;
-      fireRowFetches(sym);
+    // Single batch call replaces N×3 per-row fan-out
+    const symbols = items.map((i) => i.ticker.symbol);
+    if (symbols.length > 0) {
+      api.tickers
+        .batchEnrich(symbols)
+        .then((results) => applyEnrichment(items, results))
+        .catch(() =>
+          setRows((prev) => prev.map((r) => ({ ...r, status: "error" as const }))),
+        );
     }
   }, [activeWlId, activeWatchlist]);
 
-  function fireRowFetches(sym: string) {
-    api.tickers
-      .quote(sym)
-      .then((q) =>
-        setRows((prev) =>
-          prev.map((r) => (r.symbol === sym ? { ...r, quote: q, quoteStatus: "done" } : r))
-        )
-      )
-      .catch(() =>
-        setRows((prev) =>
-          prev.map((r) => (r.symbol === sym ? { ...r, quoteStatus: "error" } : r))
-        )
-      );
-
-    api.tickers
-      .expectedMove(sym)
-      .then((em) =>
-        setRows((prev) =>
-          prev.map((r) => (r.symbol === sym ? { ...r, em, emStatus: "done" } : r))
-        )
-      )
-      .catch(() =>
-        setRows((prev) =>
-          prev.map((r) => (r.symbol === sym ? { ...r, emStatus: "error" } : r))
-        )
-      );
-
-    api.tickers
-      .realizedVol(sym)
-      .then((rv) =>
-        setRows((prev) =>
-          prev.map((r) => (r.symbol === sym ? { ...r, rv, rvStatus: "done" } : r))
-        )
-      )
-      .catch(() =>
-        setRows((prev) =>
-          prev.map((r) => (r.symbol === sym ? { ...r, rvStatus: "error" } : r))
-        )
-      );
-  }
-
-  // ── Refresh quotes ──────────────────────────────────────────────────────────
+  // ── Refresh all data ──────────────────────────────────────────────────────
 
   const handleRefresh = useCallback(() => {
-    setRows((prev) =>
-      prev.map((r) => ({ ...r, quoteStatus: "loading" as const, quote: null }))
-    );
-    rows.forEach((r) => {
-      api.tickers
-        .quote(r.symbol)
-        .then((q) =>
-          setRows((prev) =>
-            prev.map((row) =>
-              row.symbol === r.symbol ? { ...row, quote: q, quoteStatus: "done" } : row
-            )
-          )
-        )
-        .catch(() =>
-          setRows((prev) =>
-            prev.map((row) =>
-              row.symbol === r.symbol ? { ...row, quoteStatus: "error" } : row
-            )
-          )
+    const symbols = rows.map((r) => r.symbol);
+    if (symbols.length === 0) return;
+    setRows((prev) => prev.map((r) => ({ ...r, status: "loading" as const, data: null })));
+    api.tickers
+      .batchEnrich(symbols)
+      .then((results) => {
+        const map = new Map(results.map((r) => [r.symbol, r]));
+        setRows((prev) =>
+          prev.map((row) => ({
+            ...row,
+            status: "done" as const,
+            data: map.get(row.symbol) ?? null,
+          })),
         );
-    });
+      })
+      .catch(() =>
+        setRows((prev) => prev.map((r) => ({ ...r, status: "error" as const }))),
+      );
   }, [rows]);
 
   // ── Add ticker ──────────────────────────────────────────────────────────────
@@ -328,23 +295,30 @@ export default function WatchlistPage() {
       const updated = await api.watchlists.addTicker(activeWlId, ticker.id);
       setWatchlists((prev) => prev.map((w) => (w.id === activeWlId ? updated : w)));
 
-      // Find the newly added item and seed a loading row
+      // Find the newly added item and enrich it via batch endpoint
       const newItem = updated.items.find((i) => i.ticker_id === ticker.id);
       if (newItem) {
         setRows((prev) => [
           ...prev,
-          {
-            symbol: sym,
-            item: newItem,
-            quoteStatus: "loading",
-            quote: null,
-            emStatus: "loading",
-            em: null,
-            rvStatus: "loading",
-            rv: null,
-          },
+          { symbol: sym, item: newItem, status: "loading", data: null },
         ]);
-        fireRowFetches(sym);
+        api.tickers
+          .batchEnrich([sym])
+          .then((results) => {
+            const enriched = results.find((r) => r.symbol === sym) ?? null;
+            setRows((prev) =>
+              prev.map((r) =>
+                r.symbol === sym ? { ...r, status: "done" as const, data: enriched } : r,
+              ),
+            );
+          })
+          .catch(() =>
+            setRows((prev) =>
+              prev.map((r) =>
+                r.symbol === sym ? { ...r, status: "error" as const } : r,
+              ),
+            ),
+          );
       }
 
       setAddInput("");
