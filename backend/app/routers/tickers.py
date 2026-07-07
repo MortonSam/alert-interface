@@ -337,7 +337,12 @@ async def batch_enrich(
             quote_cache.set(sym, data)
             quotes[sym] = data
 
-    # ── 3. Per-symbol: expected-move + RV (concurrent, semaphore-capped) ─────
+    # ── 3. Batch RV from precomputed snapshots (no yfinance) ────────────────
+    from app.services.rv_store import get_latest_rv_bulk
+
+    rv_rows = await get_latest_rv_bulk(db, syms)
+
+    # ── 4. Per-symbol: expected-move (concurrent, semaphore-capped) ────────
     sem = asyncio.Semaphore(10)
 
     async def _enrich(sym: str) -> BatchEnrichRead:
@@ -377,23 +382,13 @@ async def batch_enrich(
             except Exception:
                 pass
 
-            # — Realized vol rank ————————————————————————————————————————————
+            # — Realized vol from precomputed snapshot ————————————————————————
             rv_rank: float | None = None
             current_rv: float | None = None
-            try:
-                rv_data: dict = await loop.run_in_executor(
-                    None, YFinanceClient.get_realized_vol_data, sym,
-                )
-                rv_val = rv_data.get("current_rv")
-                rv_series: list[float] = rv_data.get("rv_series", [])
-                if rv_val is not None and rv_series:
-                    rv_min = min(rv_series)
-                    rv_max = max(rv_series)
-                    rank = (rv_val - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
-                    rv_rank = round(max(0.0, min(100.0, rank)), 1)
-                    current_rv = rv_val
-            except Exception:
-                pass
+            rv_row = rv_rows.get(sym)
+            if rv_row is not None:
+                rv_rank = float(rv_row.rv_rank) if rv_row.rv_rank is not None else None
+                current_rv = float(rv_row.rv_20d) if rv_row.rv_20d is not None else None
 
             return BatchEnrichRead(
                 symbol=sym,
@@ -876,18 +871,31 @@ async def get_options_read(symbol: str, db: AsyncSession = Depends(get_db)) -> O
         except Exception:
             pass  # corrupt cache → fall through to regenerate
 
+    # ── Try precomputed RV snapshot first ────────────────────────────────────
+    from app.services.rv_store import get_latest_rv
+
+    rv_snapshot_row = await get_latest_rv(db, sym)
+
     # ── Gather data in parallel ───────────────────────────────────────────────
     finnhub = FinnhubClient()
+    coros: list = [
+        finnhub.get_quote(sym),
+        loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
+    ]
+    # Only fetch live RV if no fresh snapshot
+    if rv_snapshot_row is None:
+        coros.append(loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym))
+
     try:
-        quote, expirations, rv_raw = await asyncio.gather(
-            finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-            loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym),
-        )
+        results = await asyncio.gather(*coros)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
     finally:
         await finnhub.close()
+
+    quote = results[0]
+    expirations = results[1]
+    rv_raw: dict = results[2] if len(results) > 2 else {}
 
     current_price: float | None = float(quote.get("c") or 0) or None
 
@@ -949,21 +957,28 @@ async def get_options_read(symbol: str, db: AsyncSession = Depends(get_db)) -> O
                    if c and c.get("impliedVolatility") is not None]
             atm_iv = sum(ivs) / len(ivs) if ivs else None
 
-    # RV rank/percentile
-    current_rv: float | None = rv_raw.get("current_rv")
-    rv_series: list[float]   = rv_raw.get("rv_series", [])
+    # RV rank/percentile — prefer precomputed snapshot, fall back to live
+    current_rv: float | None = None
     rv_rank: float | None    = None
     rv_percentile: float | None = None
     rv_min: float | None     = None
     rv_max: float | None     = None
-    rv_sample_days: int      = rv_raw.get("sample_days", 0)
+    rv_sample_days: int      = 0
 
-    if rv_series and current_rv is not None:
-        rv_min = min(rv_series)
-        rv_max = max(rv_series)
-        rv_rank = (current_rv - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
-        rv_rank = round(max(0.0, min(100.0, rv_rank)), 1)
-        rv_percentile = round(sum(1 for v in rv_series if v < current_rv) / len(rv_series) * 100, 1)
+    if rv_snapshot_row is not None:
+        current_rv = float(rv_snapshot_row.rv_20d) if rv_snapshot_row.rv_20d is not None else None
+        rv_rank = float(rv_snapshot_row.rv_rank) if rv_snapshot_row.rv_rank is not None else None
+        rv_percentile = float(rv_snapshot_row.rv_percentile) if rv_snapshot_row.rv_percentile is not None else None
+        rv_min = float(rv_snapshot_row.rv_min_1y) if rv_snapshot_row.rv_min_1y is not None else None
+        rv_max = float(rv_snapshot_row.rv_max_1y) if rv_snapshot_row.rv_max_1y is not None else None
+        rv_sample_days = rv_snapshot_row.sample_days
+    else:
+        current_rv = rv_raw.get("current_rv")
+        rv_rank = rv_raw.get("rv_rank")
+        rv_percentile = rv_raw.get("rv_percentile")
+        rv_min = rv_raw.get("rv_min")
+        rv_max = rv_raw.get("rv_max")
+        rv_sample_days = rv_raw.get("sample_days", 0)
 
     # IV-RV spread (in percentage points)
     iv_rv_spread_pp: float | None = (
@@ -1124,22 +1139,43 @@ STRICT RULES:
 
 
 @router.get("/rv/{symbol}", response_model=RealizedVolRead)
-async def get_realized_vol(symbol: str) -> RealizedVolRead:
+async def get_realized_vol(
+    symbol: str, db: AsyncSession = Depends(get_db),
+) -> RealizedVolRead:
     """20-day annualized realized (historical) volatility + trailing 1-year rank and percentile.
 
     Rank = where today's RV sits in its 1-year [min, max] range (0-100).
     Percentile = % of the trailing 252 trading days where RV was below today's (0-100).
+
+    Reads from precomputed rv_snapshots when fresh; falls back to live yfinance.
     """
+    from app.services.rv_store import get_latest_rv
+
     sym = symbol.upper()
-    loop = asyncio.get_event_loop()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
+    # ── Try precomputed snapshot first ────────────────────────────────────────
+    row = await get_latest_rv(db, sym)
+    if row is not None:
+        print(f"[rv] {sym}: serving from rv_snapshots ({row.as_of_date})", flush=True)
+        return RealizedVolRead(
+            symbol=sym,
+            current_rv=float(row.rv_20d) if row.rv_20d is not None else None,
+            rv_rank=float(row.rv_rank) if row.rv_rank is not None else None,
+            rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None else None,
+            rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None else None,
+            rv_max_1y=float(row.rv_max_1y) if row.rv_max_1y is not None else None,
+            sample_days=row.sample_days,
+            window_days=20,
+            as_of=row.as_of_date.isoformat(),
+        )
+
+    # ── Fallback: live yfinance fetch ─────────────────────────────────────────
+    print(f"[rv] {sym}: no fresh snapshot, falling back to yfinance", flush=True)
+    loop = asyncio.get_event_loop()
     data: dict = await loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym)
 
     current_rv: float | None = data.get("current_rv")
-    rv_series: list[float] = data.get("rv_series", [])
-    sample_days: int = data.get("sample_days", 0)
-
     if current_rv is None:
         return RealizedVolRead(
             symbol=sym, current_rv=None,
@@ -1148,17 +1184,14 @@ async def get_realized_vol(symbol: str) -> RealizedVolRead:
             sample_days=0, window_days=20, as_of=as_of,
         )
 
-    rv_min = min(rv_series) if rv_series else None
-    rv_max = max(rv_series) if rv_series else None
-
     return RealizedVolRead(
         symbol=sym,
         current_rv=current_rv,
         rv_rank=data.get("rv_rank"),
         rv_percentile=data.get("rv_percentile"),
-        rv_min_1y=rv_min,
-        rv_max_1y=rv_max,
-        sample_days=sample_days,
+        rv_min_1y=data.get("rv_min"),
+        rv_max_1y=data.get("rv_max"),
+        sample_days=data.get("sample_days", 0),
         window_days=20,
         as_of=as_of,
     )

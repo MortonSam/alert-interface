@@ -33,14 +33,17 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
     stmt = sa.text("""
         INSERT INTO rv_snapshots
             (id, symbol, as_of_date, rv_20d, rv_rank, rv_percentile,
-             sample_days, status, created_at)
+             rv_min_1y, rv_max_1y, sample_days, status, created_at)
         VALUES
             (gen_random_uuid(), :symbol, :as_of_date, :rv_20d, :rv_rank,
-             :rv_percentile, :sample_days, :status, now())
+             :rv_percentile, :rv_min_1y, :rv_max_1y,
+             :sample_days, :status, now())
         ON CONFLICT (symbol, as_of_date) DO UPDATE SET
             rv_20d        = EXCLUDED.rv_20d,
             rv_rank       = EXCLUDED.rv_rank,
             rv_percentile = EXCLUDED.rv_percentile,
+            rv_min_1y     = EXCLUDED.rv_min_1y,
+            rv_max_1y     = EXCLUDED.rv_max_1y,
             sample_days   = EXCLUDED.sample_days,
             status        = EXCLUDED.status
     """)
@@ -51,6 +54,8 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
             "rv_20d": metrics["rv_20d"],
             "rv_rank": metrics["rv_rank"],
             "rv_percentile": metrics["rv_percentile"],
+            "rv_min_1y": metrics.get("rv_min"),
+            "rv_max_1y": metrics.get("rv_max"),
             "sample_days": metrics["sample_days"],
             "status": metrics["status"],
         })
@@ -170,6 +175,7 @@ async def main(only_symbol: str | None = None) -> int:
                     continue
                 metrics = {
                     "rv_20d": None, "rv_rank": None, "rv_percentile": None,
+                    "rv_min": None, "rv_max": None,
                     "sample_days": 0, "status": "fetch_failed",
                 }
 

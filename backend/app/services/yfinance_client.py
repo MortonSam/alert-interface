@@ -199,6 +199,8 @@ class YFinanceClient:
             "sample_days": metrics["sample_days"],
             "rv_rank": metrics["rv_rank"],
             "rv_percentile": metrics["rv_percentile"],
+            "rv_min": metrics["rv_min"],
+            "rv_max": metrics["rv_max"],
             "status": metrics["status"],
         }
 

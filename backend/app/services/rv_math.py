@@ -1,6 +1,6 @@
 """Pure realized-volatility math — no I/O, no side effects.
 
-compute_rv_metrics(closes)  →  {rv_20d, rv_rank, rv_percentile, sample_days, status}
+compute_rv_metrics(closes)  →  {rv_20d, rv_rank, rv_percentile, rv_min, rv_max, sample_days, status}
 
 Used by:
 - yfinance_client.get_realized_vol_data()  (single-ticker live path)
@@ -10,6 +10,16 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
+_EMPTY: dict = {
+    "rv_20d": None,
+    "rv_rank": None,
+    "rv_percentile": None,
+    "rv_min": None,
+    "rv_max": None,
+    "sample_days": 0,
+    "status": "no_data",
+}
 
 
 def compute_rv_metrics(closes: pd.Series, rv_window: int = 20) -> dict:
@@ -28,29 +38,19 @@ def compute_rv_metrics(closes: pd.Series, rv_window: int = 20) -> dict:
         rv_20d       – float | None, most-recent annualised RV (decimal, e.g. 0.25)
         rv_rank      – float | None, 0-100 linear rank within trailing 252 range
         rv_percentile – float | None, 0-100 pct of trailing 252 days below current
+        rv_min       – float | None, trailing 252-day min RV
+        rv_max       – float | None, trailing 252-day max RV
         sample_days  – int, number of trailing RV observations (max 252)
         status       – str, one of "ok", "insufficient", "degenerate", "no_data"
     """
     if closes is None or len(closes) < rv_window + 2:
-        return {
-            "rv_20d": None,
-            "rv_rank": None,
-            "rv_percentile": None,
-            "sample_days": 0,
-            "status": "no_data",
-        }
+        return dict(_EMPTY)
 
     log_returns = np.log(closes / closes.shift(1)).dropna()
     rolling_rv = (log_returns.rolling(window=rv_window).std() * np.sqrt(252)).dropna()
 
     if rolling_rv.empty:
-        return {
-            "rv_20d": None,
-            "rv_rank": None,
-            "rv_percentile": None,
-            "sample_days": 0,
-            "status": "no_data",
-        }
+        return dict(_EMPTY)
 
     trailing = rolling_rv.iloc[-252:]
     current_rv = float(rolling_rv.iloc[-1])
@@ -62,6 +62,8 @@ def compute_rv_metrics(closes: pd.Series, rv_window: int = 20) -> dict:
             "rv_20d": current_rv,
             "rv_rank": None,
             "rv_percentile": None,
+            "rv_min": None,
+            "rv_max": None,
             "sample_days": sample_days,
             "status": "insufficient",
         }
@@ -75,6 +77,8 @@ def compute_rv_metrics(closes: pd.Series, rv_window: int = 20) -> dict:
             "rv_20d": current_rv,
             "rv_rank": None,
             "rv_percentile": None,
+            "rv_min": rv_min,
+            "rv_max": rv_max,
             "sample_days": sample_days,
             "status": "degenerate",
         }
@@ -87,6 +91,8 @@ def compute_rv_metrics(closes: pd.Series, rv_window: int = 20) -> dict:
         "rv_20d": current_rv,
         "rv_rank": round(rv_rank, 1),
         "rv_percentile": round(rv_percentile, 1),
+        "rv_min": rv_min,
+        "rv_max": rv_max,
         "sample_days": sample_days,
         "status": "ok",
     }

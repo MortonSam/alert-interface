@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -55,6 +56,18 @@ class JustReportedItem(BaseModel):
 class JustReportedResponse(BaseModel):
     items: list[JustReportedItem]
     total: int
+
+
+class UnusuallyActiveItem(BaseModel):
+    symbol: str
+    name: str | None
+    rv_rank: float
+    rv_20d: float
+    tier: str  # "extreme" or "elevated"
+
+
+class UnusuallyActiveResponse(BaseModel):
+    items: list[UnusuallyActiveItem]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -248,10 +261,24 @@ async def suggestions(
                     **reaction_data,
                 }
 
+    # ── Signal 3: RV rank (elevated vol vs own history) ─────────────────────
+    from app.services.rv_store import get_latest_rv_bulk
+
+    all_syms = list(tickers.keys())
+    rv_rows = await get_latest_rv_bulk(db, all_syms) if all_syms else {}
+    for sym, t in tickers.items():
+        rv_row = rv_rows.get(sym)
+        # Normalize rank/100 → 0-1; missing = 0 (not a crash, not exclusion)
+        t["rv_score"] = float(rv_row.rv_rank) / 100.0 if rv_row is not None and rv_row.rv_rank is not None else 0.0
+
     # ── Score & rank ─────────────────────────────────────────────────────────
+    # Three equal-weight signals (each 0-1), weighted 1/3 each.
+    # Before: total = earnings_score + reaction_score  (each 0-1, equal weight)
+    # After:  total = (earnings_score + reaction_score + rv_score) / 3 * 2
+    #   ↑ scaled ×2 to keep total magnitudes comparable for the >0 filter
     scored = []
     for sym, t in tickers.items():
-        total = t["earnings_score"] + t["reaction_score"]
+        total = (t["earnings_score"] + t["reaction_score"] + t["rv_score"]) / 3.0 * 2.0
         if total > 0:
             scored.append((sym, t, total))
 
@@ -272,3 +299,43 @@ async def suggestions(
     ]
 
     return SuggestionsResponse(items=items)
+
+
+@router.get("/unusually-active", response_model=UnusuallyActiveResponse)
+async def unusually_active(
+    limit: int = Query(12, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> UnusuallyActiveResponse:
+    """Tickers with elevated realized volatility vs. their own history (rv_rank >= 85)."""
+    # Find the latest as_of_date; return empty if stale (>7 calendar days ≈ 5 trading days)
+    max_date_result = await db.execute(
+        sa.text("SELECT max(as_of_date) FROM rv_snapshots WHERE status = 'ok'")
+    )
+    latest_date = max_date_result.scalar()
+    if latest_date is None or (date.today() - latest_date).days > 7:
+        return UnusuallyActiveResponse(items=[])
+
+    stmt = sa.text("""
+        SELECT r.symbol, t.name, r.rv_rank, r.rv_20d
+        FROM rv_snapshots r
+        JOIN tickers t ON t.symbol = r.symbol AND t.is_active = true
+        WHERE r.as_of_date = :latest_date
+          AND r.status = 'ok'
+          AND r.rv_rank >= 85
+        ORDER BY r.rv_rank DESC
+        LIMIT :limit
+    """)
+    result = await db.execute(stmt, {"latest_date": latest_date, "limit": limit})
+
+    items = [
+        UnusuallyActiveItem(
+            symbol=row.symbol,
+            name=row.name,
+            rv_rank=float(row.rv_rank),
+            rv_20d=float(row.rv_20d),
+            tier="extreme" if float(row.rv_rank) >= 93 else "elevated",
+        )
+        for row in result.all()
+    ]
+
+    return UnusuallyActiveResponse(items=items)

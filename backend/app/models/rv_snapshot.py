@@ -17,6 +17,8 @@ class RVSnapshot(Base):
     rv_20d: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
     rv_rank: Mapped[float | None] = mapped_column(Numeric(5, 1), nullable=True)
     rv_percentile: Mapped[float | None] = mapped_column(Numeric(5, 1), nullable=True)
+    rv_min_1y: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
+    rv_max_1y: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
     sample_days: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

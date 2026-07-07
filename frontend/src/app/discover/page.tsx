@@ -7,6 +7,7 @@ import {
   type ReportingSoonItem,
   type JustReportedItem,
   type SuggestionItem,
+  type UnusuallyActiveItem,
   type BatchQuote,
 } from "@/lib/api";
 
@@ -111,6 +112,7 @@ export default function DiscoverPage() {
     total: number;
   } | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
+  const [unusuallyActive, setUnusuallyActive] = useState<UnusuallyActiveItem[] | null>(null);
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -131,10 +133,12 @@ export default function DiscoverPage() {
       api.discover.reportingSoon(7, LIMIT),
       api.discover.justReported(5, LIMIT),
       api.discover.suggestions(5),
-    ]).then(([rs, jr, sg]) => {
+      api.discover.unusuallyActive(LIMIT),
+    ]).then(([rs, jr, sg, ua]) => {
       setReportingSoon(rs);
       setJustReported(jr);
       setSuggestions(sg.items);
+      setUnusuallyActive(ua.items);
       setLoading(false);
 
       // Batch-fetch quotes for all displayed symbols
@@ -142,6 +146,7 @@ export default function DiscoverPage() {
         ...rs.items.map((i) => i.symbol),
         ...jr.items.map((i) => i.symbol),
         ...sg.items.map((i) => i.symbol),
+        ...ua.items.map((i) => i.symbol),
       ];
       const unique = [...new Set(allSymbols)];
       if (unique.length > 0) {
@@ -418,32 +423,59 @@ export default function DiscoverPage() {
             </section>
           ) : null}
 
-          {/* ── Unusually active — hidden until RV precompute exists ──
-          const SHOW_UNUSUALLY_ACTIVE = false;
-          Restore by setting flag to true and uncommenting the section below.
+          {/* ── Unusually active (hidden when empty) ────────── */}
+          {!fetchError && loading ? (
+            <SectionSkeleton />
+          ) : !fetchError && unusuallyActive && unusuallyActive.length > 0 ? (
+            <section>
+              <SectionHeader
+                icon={
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                    strokeLinejoin="round" className="text-violet">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                  </svg>
+                }
+                iconBg="bg-violet/10"
+                title="Unusually active"
+                descriptor="Volatility high vs. their own norm"
+                total={null}
+                limit={LIMIT}
+              />
 
-          <section className="opacity-50">
-            <SectionHeader
-              icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                  strokeLinejoin="round" className="text-violet">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                </svg>
-              }
-              iconBg="bg-violet/10"
-              title="Unusually active"
-              descriptor="Stocks with elevated realized volatility vs. their own history"
-              total={null}
-              limit={LIMIT}
-            />
-            <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-8 text-center">
-              <p className="text-sm text-muted-foreground">
-                Coming soon &mdash; requires precomputing RV rank across the universe.
-              </p>
-            </div>
-          </section>
-          ── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {unusuallyActive.map((item) => {
+                  const q = quotes.get(item.symbol);
+                  const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${item.tier}`;
+                  return (
+                    <Link
+                      key={item.symbol}
+                      href={`/tickers/${item.symbol}`}
+                      className="rounded-xl border border-border bg-card p-4 hover:border-violet/40 transition-colors group"
+                    >
+                      <div className="flex items-start justify-between mb-1">
+                        <span className="font-display text-base font-bold text-foreground group-hover:text-violet transition-colors">
+                          {item.symbol}
+                        </span>
+                        {q?.price != null && (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {fmtPrice(q.price)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate mb-3">
+                        {item.name ?? "\u2014"}
+                      </p>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet/10 text-violet px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                        <span className="text-[8px]">{"\u25CF"}</span>
+                        {tagLabel}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
         </div>
       </div>
     </main>

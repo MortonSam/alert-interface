@@ -349,6 +349,18 @@ export interface SuggestionsResponse {
   items: SuggestionItem[];
 }
 
+export interface UnusuallyActiveItem {
+  symbol: string;
+  name: string | null;
+  rv_rank: number;
+  rv_20d: number;
+  tier: "extreme" | "elevated";
+}
+
+export interface UnusuallyActiveResponse {
+  items: UnusuallyActiveItem[];
+}
+
 export interface BatchEnrichItem {
   symbol: string;
   price: number | null;
@@ -685,6 +697,8 @@ export const api = {
       request<JustReportedResponse>(`/discover/just-reported?days=${days}&limit=${limit}`),
     suggestions: (limit = 5) =>
       request<SuggestionsResponse>(`/discover/suggestions?limit=${limit}`),
+    unusuallyActive: (limit = 12) =>
+      request<UnusuallyActiveResponse>(`/discover/unusually-active?limit=${limit}`),
   },
 
   reactions: {
