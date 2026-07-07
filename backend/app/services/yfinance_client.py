@@ -162,39 +162,44 @@ class YFinanceClient:
         """Compute 20-day annualized realized (historical) volatility and its
         trailing 1-year rank / percentile.
 
-        Method: daily log returns -> rolling std over ``rv_window`` trading days
-        -> annualize by x sqrt(252).  Returns trailing 252 RV values so the caller
-        can compute rank and percentile without re-fetching price history.
-
         Returns:
             {
-                "current_rv":  float | None,   # most-recent RV (0-1 decimal)
-                "rv_series":   list[float],    # trailing 252 RV values, oldest->newest
-                "sample_days": int,
+                "current_rv":    float | None,
+                "rv_series":     list[float],     # kept for backward compat
+                "sample_days":   int,
+                "rv_rank":       float | None,    # 0-100
+                "rv_percentile": float | None,    # 0-100
+                "status":        str,
             }
         """
         import numpy as np
 
+        from app.services.rv_math import compute_rv_metrics
+
         hist = yf.Ticker(symbol).history(period="3y", interval="1d", auto_adjust=True)
         if hist is None or hist.empty:
-            return {"current_rv": None, "rv_series": [], "sample_days": 0}
+            return {"current_rv": None, "rv_series": [], "sample_days": 0,
+                    "rv_rank": None, "rv_percentile": None, "status": "no_data"}
 
         closes = hist["Close"].dropna()
-        if len(closes) < rv_window + 2:
-            return {"current_rv": None, "rv_series": [], "sample_days": 0}
+        metrics = compute_rv_metrics(closes, rv_window=rv_window)
 
-        log_returns = np.log(closes / closes.shift(1)).dropna()
-        rolling_rv = log_returns.rolling(window=rv_window).std() * np.sqrt(252)
-        rolling_rv = rolling_rv.dropna()
+        # Build backward-compatible rv_series for callers that still need it
+        # (batch-enrich, options-read, snapshot_iv).
+        rv_series: list[float] = []
+        if len(closes) >= rv_window + 2:
+            log_returns = np.log(closes / closes.shift(1)).dropna()
+            rolling_rv = (log_returns.rolling(window=rv_window).std() * np.sqrt(252)).dropna()
+            if not rolling_rv.empty:
+                rv_series = [float(v) for v in rolling_rv.iloc[-252:]]
 
-        if rolling_rv.empty:
-            return {"current_rv": None, "rv_series": [], "sample_days": 0}
-
-        trailing = rolling_rv.iloc[-252:]
         return {
-            "current_rv": float(rolling_rv.iloc[-1]),
-            "rv_series": [float(v) for v in trailing],
-            "sample_days": len(trailing),
+            "current_rv": metrics["rv_20d"],
+            "rv_series": rv_series,
+            "sample_days": metrics["sample_days"],
+            "rv_rank": metrics["rv_rank"],
+            "rv_percentile": metrics["rv_percentile"],
+            "status": metrics["status"],
         }
 
     @staticmethod

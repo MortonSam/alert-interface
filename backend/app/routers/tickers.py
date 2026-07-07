@@ -1140,7 +1140,7 @@ async def get_realized_vol(symbol: str) -> RealizedVolRead:
     rv_series: list[float] = data.get("rv_series", [])
     sample_days: int = data.get("sample_days", 0)
 
-    if not rv_series or current_rv is None:
+    if current_rv is None:
         return RealizedVolRead(
             symbol=sym, current_rv=None,
             rv_rank=None, rv_percentile=None,
@@ -1148,17 +1148,14 @@ async def get_realized_vol(symbol: str) -> RealizedVolRead:
             sample_days=0, window_days=20, as_of=as_of,
         )
 
-    rv_min = min(rv_series)
-    rv_max = max(rv_series)
-    rv_rank = (current_rv - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
-    rv_rank = max(0.0, min(100.0, rv_rank))
-    rv_percentile = sum(1 for v in rv_series if v < current_rv) / len(rv_series) * 100
+    rv_min = min(rv_series) if rv_series else None
+    rv_max = max(rv_series) if rv_series else None
 
     return RealizedVolRead(
         symbol=sym,
         current_rv=current_rv,
-        rv_rank=round(rv_rank, 1),
-        rv_percentile=round(rv_percentile, 1),
+        rv_rank=data.get("rv_rank"),
+        rv_percentile=data.get("rv_percentile"),
         rv_min_1y=rv_min,
         rv_max_1y=rv_max,
         sample_days=sample_days,
