@@ -3310,7 +3310,7 @@ export default function TickerPage() {
               <div className="h-4 bg-muted rounded w-4/5" />
             </div>
           )}
-          {orStatus === "done" && optionsRead && (
+          {orStatus === "done" && optionsRead && optionsRead.model_used !== "none" && (
             <div className="rounded-lg border bg-card px-5 py-4 mb-6 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

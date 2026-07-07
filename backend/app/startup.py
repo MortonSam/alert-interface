@@ -31,9 +31,11 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncIterator
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.services.system_metadata_service import get_value, set_value
 
@@ -121,18 +123,84 @@ async def _background_refresh() -> None:
         _refresh_in_progress = False
 
 
+# ── Refresh loop ──────────────────────────────────────────────────────────────
+
+LOOP_INTERVAL_SECONDS = 30 * 60  # 30 minutes
+LOOP_STALENESS_HOURS = 20
+LOOP_WINDOW_START = 1   # 01:00 ET
+LOOP_WINDOW_END   = 5   # 05:00 ET
+_ET = ZoneInfo("America/New_York")
+
+
+def _in_overnight_window(now_et: datetime) -> bool:
+    """True when now_et falls within [LOOP_WINDOW_START, LOOP_WINDOW_END) hours ET."""
+    return LOOP_WINDOW_START <= now_et.hour < LOOP_WINDOW_END
+
+
+async def _refresh_loop() -> None:
+    """Permanent background loop: check every 30 min, refresh if stale + in window."""
+    while True:
+        await asyncio.sleep(LOOP_INTERVAL_SECONDS)
+        try:
+            now_et = datetime.now(_ET)
+            if not _in_overnight_window(now_et):
+                continue
+
+            last_raw, sentinel_raw = await _read_sentinel()
+            now = datetime.now(timezone.utc)
+
+            # Skip if another refresh is in-flight
+            if sentinel_raw and sentinel_raw != "done":
+                try:
+                    started_at = datetime.fromisoformat(sentinel_raw)
+                    if (now - started_at).total_seconds() / 60 < REFRESH_SENTINEL_MAX_MINUTES:
+                        continue
+                except ValueError:
+                    pass
+
+            global _refresh_in_progress
+            if _refresh_in_progress:
+                continue
+
+            # Staleness check
+            should_refresh = last_raw is None
+            if not should_refresh and last_raw:
+                try:
+                    last_dt = datetime.fromisoformat(last_raw)
+                    should_refresh = (now - last_dt).total_seconds() / 3600 > LOOP_STALENESS_HOURS
+                except ValueError:
+                    should_refresh = True
+
+            if should_refresh:
+                _log("Refresh loop: data is stale and within overnight window — starting refresh.")
+                _refresh_in_progress = True
+                await _write_sentinel(now.isoformat())
+                asyncio.create_task(_background_refresh())
+
+        except Exception as exc:
+            _log(f"Refresh loop iteration failed ({exc}) — will retry next cycle.")
+
+
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
-    """Check staleness and in-progress sentinel on startup; fire one background refresh if needed."""
+    """Check staleness on startup; fire one background refresh if needed.
+    Start a permanent loop that re-checks every 30 min overnight."""
     global _refresh_in_progress
 
+    if not settings.refresh_enabled:
+        _log("REFRESH_ENABLED=false — skipping startup check and refresh loop.")
+        yield
+        return
+
+    # ── Startup staleness check ───────────────────────────────────────────────
     try:
         last_raw, sentinel_raw = await _read_sentinel()
         now = datetime.now(timezone.utc)
+        skip_refresh = False
 
-        # ── Layer 1: DB sentinel — did another process already start a refresh? ──
+        # Layer 1: DB sentinel — did another process already start a refresh?
         if sentinel_raw and sentinel_raw != "done":
             try:
                 started_at = datetime.fromisoformat(sentinel_raw)
@@ -142,8 +210,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
                         f"Another process started a refresh {age_minutes:.0f}m ago "
                         f"(threshold: {REFRESH_SENTINEL_MAX_MINUTES}m) — skipping."
                     )
-                    yield
-                    return
+                    skip_refresh = True
                 else:
                     _log(
                         f"Stale sentinel ({age_minutes:.0f}m old, threshold {REFRESH_SENTINEL_MAX_MINUTES}m) "
@@ -152,43 +219,53 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
             except ValueError:
                 pass  # unparseable sentinel — ignore it
 
-        # ── Layer 2: Process-level guard ────────────────────────────────────────
-        if _refresh_in_progress:
+        # Layer 2: Process-level guard
+        if not skip_refresh and _refresh_in_progress:
             _log("Refresh already in progress in this process — skipping duplicate.")
-            yield
-            return
+            skip_refresh = True
 
-        # ── Staleness check ─────────────────────────────────────────────────────
-        should_refresh = False
+        # Staleness check
+        if not skip_refresh:
+            should_refresh = False
 
-        if last_raw is None:
-            _log("last_refreshed_at not found — reference data has never been refreshed.")
-            should_refresh = True
-        else:
-            try:
-                last_dt = datetime.fromisoformat(last_raw)
-                age_hours = (now - last_dt).total_seconds() / 3600
-                if age_hours > REFRESH_IF_OLDER_THAN_HOURS:
-                    _log(
-                        f"Reference data is {age_hours:.1f}h old "
-                        f"(threshold: {REFRESH_IF_OLDER_THAN_HOURS}h) — scheduling background refresh."
-                    )
-                    should_refresh = True
-                else:
-                    _log(f"Reference data is {age_hours:.1f}h old — fresh enough, skipping refresh.")
-            except ValueError:
-                _log(f"Cannot parse last_refreshed_at={last_raw!r} — scheduling refresh as precaution.")
+            if last_raw is None:
+                _log("last_refreshed_at not found — reference data has never been refreshed.")
                 should_refresh = True
+            else:
+                try:
+                    last_dt = datetime.fromisoformat(last_raw)
+                    age_hours = (now - last_dt).total_seconds() / 3600
+                    if age_hours > REFRESH_IF_OLDER_THAN_HOURS:
+                        _log(
+                            f"Reference data is {age_hours:.1f}h old "
+                            f"(threshold: {REFRESH_IF_OLDER_THAN_HOURS}h) — scheduling background refresh."
+                        )
+                        should_refresh = True
+                    else:
+                        _log(f"Reference data is {age_hours:.1f}h old — fresh enough, skipping refresh.")
+                except ValueError:
+                    _log(f"Cannot parse last_refreshed_at={last_raw!r} — scheduling refresh as precaution.")
+                    should_refresh = True
 
-        if should_refresh:
-            _refresh_in_progress = True
-            # Write sentinel BEFORE scheduling the task so the next --reload process
-            # that starts within REFRESH_SENTINEL_MAX_MINUTES will see it and skip.
-            await _write_sentinel(now.isoformat())
-            asyncio.create_task(_background_refresh())
+            if should_refresh:
+                _refresh_in_progress = True
+                # Write sentinel BEFORE scheduling the task so the next --reload
+                # process that starts within REFRESH_SENTINEL_MAX_MINUTES will see
+                # it and skip.
+                await _write_sentinel(now.isoformat())
+                asyncio.create_task(_background_refresh())
 
     except Exception as exc:
         _log(f"Startup staleness check failed ({exc}) — app will start normally without a refresh.")
         logger.exception("[startup-refresh] Exception detail:")
 
-    yield  # ← app is live and serving requests from this point onward
+    # ── Start the permanent refresh loop, then yield (app serves requests) ────
+    loop_task = asyncio.create_task(_refresh_loop())
+    try:
+        yield
+    finally:
+        loop_task.cancel()
+        try:
+            await loop_task
+        except asyncio.CancelledError:
+            pass

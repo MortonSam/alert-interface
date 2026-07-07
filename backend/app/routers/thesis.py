@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import require_admin
 from app.database import get_db
 from app.models.enums import EarningsOutcome
 from app.models.event import Event
@@ -245,7 +246,7 @@ async def _compute_option_mark(
 
 # ── Draft endpoint ─────────────────────────────────────────────────────────────
 
-@router.post("/draft", response_model=ThesisDraftRead)
+@router.post("/draft", response_model=ThesisDraftRead, dependencies=[Depends(require_admin)])
 async def draft_thesis(
     payload: ThesisDraftRequest,
     db: AsyncSession = Depends(get_db),
@@ -573,7 +574,7 @@ Return ONLY this JSON object (no other text):
 
 # ── Budget-constrained alternative endpoint ────────────────────────────────────
 
-@router.post("/draft-alternative", response_model=ThesisDraftAlternativeRead)
+@router.post("/draft-alternative", response_model=ThesisDraftAlternativeRead, dependencies=[Depends(require_admin)])
 async def draft_alternative(
     payload: ThesisDraftAlternativeRequest,
     db: AsyncSession = Depends(get_db),

@@ -5,9 +5,18 @@
 
 const BASE = "/api/v1";
 
+function _adminToken(): string | null {
+  if (typeof window === "undefined") return null; // SSR guard
+  return localStorage.getItem("admin_token");
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = _adminToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["X-Admin-Token"] = token;
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...init,
   });
   if (!res.ok) {

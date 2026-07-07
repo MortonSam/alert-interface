@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     # App
     debug: bool = False
     secret_key: str = "changeme"
+    cors_origins: str = "http://localhost:3000"  # comma-separated origins
+    admin_token: str = ""  # if set, gates AI-powered endpoints
+    refresh_enabled: bool = True  # startup + loop refresh pipeline
 
     # External APIs
     anthropic_api_key: str = ""

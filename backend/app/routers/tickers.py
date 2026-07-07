@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_admin, _get_admin_token
+from app.config import settings
 from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
@@ -846,11 +848,18 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
 
 
 @router.get("/options-read/{symbol}", response_model=OptionsReadRead)
-async def get_options_read(symbol: str, db: AsyncSession = Depends(get_db)) -> OptionsReadRead:
+async def get_options_read(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+    token: str | None = Depends(_get_admin_token),
+) -> OptionsReadRead:
     """AI-generated 2–4 sentence interpretive read synthesizing vol/options data.
 
     Every number is precomputed server-side and injected as an authoritative string.
     The model narrates; it does not calculate. Cached per calendar day in system_metadata.
+
+    Cache hits are served without authentication. On cache miss, admin token is
+    required when ADMIN_TOKEN is configured; otherwise a graceful no-read is returned.
     """
     sym = symbol.upper()
     loop = asyncio.get_event_loop()
@@ -858,7 +867,7 @@ async def get_options_read(symbol: str, db: AsyncSession = Depends(get_db)) -> O
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
     cache_key = f"options_read:{sym}:{today.isoformat()}"
 
-    # ── Cache check ───────────────────────────────────────────────────────────
+    # ── Cache check — served freely ───────────────────────────────────────────
     cached_raw = await _get_meta(db, cache_key)
     if cached_raw:
         try:
@@ -870,6 +879,18 @@ async def get_options_read(symbol: str, db: AsyncSession = Depends(get_db)) -> O
             )
         except Exception:
             pass  # corrupt cache → fall through to regenerate
+
+    # ── No cache — gate AI generation behind admin token ──────────────────────
+    if settings.admin_token and token != settings.admin_token:
+        return OptionsReadRead(
+            symbol=sym,
+            content="Options read is not available right now.",
+            facts={},
+            model_used="none",
+            generated_at=as_of,
+            cached=False,
+            as_of=as_of,
+        )
 
     # ── Try precomputed RV snapshot first ────────────────────────────────────
     from app.services.rv_store import get_latest_rv
