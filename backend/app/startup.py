@@ -94,6 +94,15 @@ async def _background_refresh() -> None:
         exit_code: int = await loop.run_in_executor(None, pipeline.main)
 
         if exit_code == 0:
+            # Write last_refreshed_at here — refresh.py's own asyncio.run()
+            # write fails when called via run_in_executor (nested loop).
+            try:
+                now_iso = datetime.now(tz=timezone.utc).isoformat()
+                async with AsyncSessionLocal() as session:
+                    await set_value(session, _KEY_LAST_REFRESHED, now_iso)
+                    await session.commit()
+            except Exception:
+                pass
             _log("Pipeline completed successfully — last_refreshed_at updated.")
         else:
             _log(

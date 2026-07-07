@@ -76,7 +76,13 @@ def main() -> int:
     print(f"{'=' * 60}\n")
 
     if all_passed:
-        asyncio.run(_record_refresh())
+        try:
+            asyncio.run(_record_refresh())
+        except RuntimeError:
+            # When called from startup.py's run_in_executor, asyncio.run()
+            # can't create a nested event loop.  startup.py writes the
+            # sentinel itself on exit_code == 0.
+            pass
         print("\n  Refresh complete.\n")
         return 0
     else:
