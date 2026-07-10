@@ -997,40 +997,38 @@ const SECTIONS = [
 ] as const;
 
 function SectionNav() {
-  const [active, setActive] = useState("overview");
+  const [active, setActive] = useState<string>("overview");
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        // Pick the topmost intersecting section (lowest boundingClientRect.top)
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActive((prev) => {
-              // Find all currently-intersecting sections and pick the one closest to top
-              const ids = SECTIONS.map((s) => s.id);
-              const topmost = ids.reduce<{ id: string; top: number } | null>((best, id) => {
-                const el = document.getElementById(id);
-                if (!el) return best;
-                const rect = el.getBoundingClientRect();
-                // Section top is within (or above) viewport and bottom is below header+nav (~96px)
-                if (rect.bottom > 96 && (!best || rect.top < best.top)) {
-                  return { id, top: rect.top };
-                }
-                return best;
-              }, null);
-              return topmost ? topmost.id : prev;
-            });
-          }
+    // Threshold: header (52px) + nav (~44px) + small buffer
+    const THRESHOLD = 100;
+
+    function computeActive() {
+      let current: string = SECTIONS[0].id;
+      for (const s of SECTIONS) {
+        const el = document.getElementById(s.id);
+        if (el && el.getBoundingClientRect().top <= THRESHOLD) {
+          current = s.id;
         }
-      },
-      // 96px = site header (52px) + section nav (~44px)
-      { rootMargin: "-96px 0px -60% 0px", threshold: 0 },
-    );
-    for (const s of SECTIONS) {
-      const el = document.getElementById(s.id);
-      if (el) observer.observe(el);
+      }
+      setActive(current);
     }
-    return () => observer.disconnect();
+
+    let raf = 0;
+    function onScroll() {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        computeActive();
+      });
+    }
+
+    computeActive();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
 
   return (
@@ -1042,6 +1040,7 @@ function SectionNav() {
             href={`#${s.id}`}
             onClick={(e) => {
               e.preventDefault();
+              setActive(s.id);
               document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
             className={cn(
