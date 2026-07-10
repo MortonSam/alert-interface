@@ -1034,7 +1034,7 @@ function SectionNav() {
   }, []);
 
   return (
-    <nav className="sticky top-13 z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8 mb-8">
+    <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8 mb-8">
       <div className="max-w-4xl mx-auto flex gap-1 overflow-x-auto py-2">
         {SECTIONS.map((s) => (
           <a
