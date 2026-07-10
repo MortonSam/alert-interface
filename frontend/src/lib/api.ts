@@ -314,6 +314,13 @@ export interface OptionsRead {
   generated_at: string;
   cached: boolean;
   as_of: string;
+  iv_rv_spread_pp: number | null;         // IV minus RV in percentage points (positive = options rich)
+}
+
+export interface OptionsBundle {
+  expected_move: ExpectedMove;
+  strategy_data: StrategyData;
+  chain: OptionsChain;
 }
 
 // ── Discover types ───────────────────────────────────────────────────────────
@@ -589,6 +596,7 @@ export const api = {
     list: (activeOnly = true) =>
       request<Ticker[]>(`/tickers/?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),
+    bySymbol: (symbol: string) => request<Ticker>(`/tickers/by-symbol/${symbol}`),
     quote: (symbol: string) => request<TickerQuote>(`/tickers/quote/${symbol}`),
     quotes: (symbols: string[]) =>
       request<BatchQuote[]>(`/tickers/quotes?symbols=${symbols.join(",")}`),
@@ -616,6 +624,8 @@ export const api = {
         : `/tickers/options/${symbol}`),
     news: (symbol: string) =>
       request<NewsResponse>(`/tickers/${symbol}/news`),
+    optionsBundle: (symbol: string) =>
+      request<OptionsBundle>(`/tickers/options-bundle/${symbol}`),
   },
 
   watchlists: {

@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
-from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
+from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
@@ -847,6 +847,225 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
     )
 
 
+@router.get("/options-bundle/{symbol}", response_model=OptionsBundleRead)
+async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) -> OptionsBundleRead:
+    """Consolidated expected-move + strategy-data + chain in a single request.
+
+    Fetches the yfinance chain once and computes all three responses from it,
+    saving 2 HTTP round-trips and eliminating redundant external calls.
+    """
+    sym = symbol.upper()
+    finnhub = FinnhubClient()
+    loop = asyncio.get_event_loop()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+
+    try:
+        quote, expirations = await asyncio.gather(
+            finnhub.get_quote(sym),
+            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+    finally:
+        await finnhub.close()
+
+    current_price = float(quote.get("c") or 0) or None
+    today = date.today()
+
+    # ── Empty-options fallback ────────────────────────────────────────────────
+    if not expirations:
+        empty_em = ExpectedMoveRead(
+            symbol=sym, current_price=current_price,
+            expected_move_pct=None, expected_move_dollars=None,
+            implied_range_low=None, implied_range_high=None,
+            expiration_used=None, earnings_date=None,
+            days_expiration_past_earnings=None,
+            straddle_price=None, atm_strike=None,
+            historical_stats=None, plain_summary=None,
+            data_quality_note="No options expirations available for this symbol.",
+            as_of=as_of,
+        )
+        empty_sd = StrategyDataRead(
+            symbol=sym, current_price=current_price, expiration=None,
+            implied_range_low=None, implied_range_high=None,
+            strikes=[], as_of=as_of,
+        )
+        empty_chain = OptionsChainRead(
+            symbol=sym, expiration="", current_price=current_price,
+            calls=[], puts=[], available_expirations=[], as_of=as_of,
+        )
+        return OptionsBundleRead(expected_move=empty_em, strategy_data=empty_sd, chain=empty_chain)
+
+    # ── Ticker + next earnings ────────────────────────────────────────────────
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    earnings_str: str | None = None
+    if ticker_row:
+        ned = (await db.execute(
+            select(func.min(Event.event_date))
+            .where(Event.event_type == "earnings", Event.event_date >= today, Event.ticker_id == ticker_row.id)
+        )).scalar_one_or_none()
+        if ned:
+            earnings_str = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
+
+    # ── Pick expiration (same logic as expected-move) ─────────────────────────
+    data_quality_note: str | None = None
+    days_expiration_past_earnings: int | None = None
+
+    if earnings_str:
+        post_earnings = [e for e in expirations if e >= earnings_str]
+        if post_earnings:
+            chosen_exp = post_earnings[0]
+        else:
+            chosen_exp = expirations[-1]
+            data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
+        earnings_date_obj = date.fromisoformat(earnings_str)
+        exp_date_obj = date.fromisoformat(chosen_exp)
+        days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
+        if days_expiration_past_earnings > 7 and data_quality_note is None:
+            data_quality_note = (
+                f"Nearest available expiration ({chosen_exp}) is "
+                f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
+                f"The implied move covers the full period to expiration, not just the earnings event."
+            )
+    else:
+        week_out = (today + timedelta(days=7)).isoformat()
+        chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+        data_quality_note = "No earnings date found; using nearest weekly expiration."
+
+    # ── Fetch chain ONCE ──────────────────────────────────────────────────────
+    chain_entry = await fetch_chain(sym, chosen_exp, loop)
+    chain = chain_entry.chain
+    as_of = chain_entry.fetched_at.isoformat()
+
+    calls_raw = chain.get("calls", [])
+    puts_raw = chain.get("puts", [])
+
+    call_strikes = {c["strike"] for c in calls_raw}
+    put_strikes = {p["strike"] for p in puts_raw}
+    intersection = call_strikes & put_strikes
+    all_strike_vals = sorted(call_strikes | put_strikes)
+
+    # ── ATM + straddle + expected move ────────────────────────────────────────
+    atm_strike: float | None = None
+    straddle_price: float | None = None
+    expected_move_pct: float | None = None
+    expected_move_dollars: float | None = None
+    implied_range_low: float | None = None
+    implied_range_high: float | None = None
+
+    if intersection and current_price:
+        atm_strike = min(intersection, key=lambda s: abs(s - current_price))
+        atm_call = next((c for c in calls_raw if c["strike"] == atm_strike), None)
+        atm_put = next((p for p in puts_raw if p["strike"] == atm_strike), None)
+        call_price = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
+        put_price = _mid_or_last(atm_put["bid"], atm_put["ask"], atm_put["lastPrice"]) if atm_put else None
+        if call_price is not None and put_price is not None:
+            straddle_price = call_price + put_price
+            expected_move_pct = straddle_price / current_price
+            expected_move_dollars = straddle_price
+            implied_range_low = current_price - straddle_price
+            implied_range_high = current_price + straddle_price
+
+    # ── Historical stats ──────────────────────────────────────────────────────
+    historical_stats: HistoricalMoveStats | None = None
+    if ticker_row:
+        r_q = select(HistoricalReaction).where(
+            HistoricalReaction.ticker_id == ticker_row.id,
+            HistoricalReaction.event_type == "earnings",
+            HistoricalReaction.pct_change_1d.isnot(None),
+        )
+        reactions = (await db.execute(r_q)).scalars().all()
+        if reactions:
+            abs_moves = [abs(float(r.pct_change_1d)) / 100 for r in reactions]
+            historical_stats = HistoricalMoveStats(
+                avg_abs_move_pct=mean(abs_moves),
+                max_abs_move_pct=max(abs_moves),
+                min_abs_move_pct=min(abs_moves),
+                sample_size=len(abs_moves),
+                above_expected=sum(1 for m in abs_moves if expected_move_pct is not None and m > expected_move_pct),
+                below_expected=sum(1 for m in abs_moves if expected_move_pct is None or m <= expected_move_pct),
+            )
+
+    plain_summary = _build_plain_summary(
+        symbol=sym, expected_move_pct=expected_move_pct,
+        implied_range_low=implied_range_low, implied_range_high=implied_range_high,
+        expiration_used=chosen_exp, earnings_date=earnings_str,
+        days_expiration_past_earnings=days_expiration_past_earnings,
+        historical_stats=historical_stats,
+    )
+
+    em = ExpectedMoveRead(
+        symbol=sym, current_price=current_price,
+        expected_move_pct=expected_move_pct, expected_move_dollars=expected_move_dollars,
+        implied_range_low=implied_range_low, implied_range_high=implied_range_high,
+        expiration_used=chosen_exp, earnings_date=earnings_str,
+        days_expiration_past_earnings=days_expiration_past_earnings,
+        straddle_price=straddle_price, atm_strike=atm_strike,
+        historical_stats=historical_stats, plain_summary=plain_summary,
+        data_quality_note=data_quality_note, as_of=as_of,
+    )
+
+    # ── Strategy data (quality-filtered per-strike mids) ──────────────────────
+    call_map: dict[float, dict] = {c["strike"]: c for c in calls_raw}
+    put_map: dict[float, dict] = {p["strike"]: p for p in puts_raw}
+
+    result_strikes: list[StrikeData] = []
+    if current_price:
+        price_lo = current_price * 0.65
+        price_hi = current_price * 1.35
+        for s in all_strike_vals:
+            if not (price_lo <= s <= price_hi):
+                continue
+            c = call_map.get(s)
+            p = put_map.get(s)
+            call_mid: float | None = None
+            call_iv: float | None = None
+            if c and _flag_contract(c, current_price, is_call=True) is None:
+                call_mid = _mid_or_last(c["bid"], c["ask"], c["lastPrice"])
+                call_iv = c.get("impliedVolatility")
+            put_mid: float | None = None
+            put_iv: float | None = None
+            if p and _flag_contract(p, current_price, is_call=False) is None:
+                put_mid = _mid_or_last(p["bid"], p["ask"], p["lastPrice"])
+                put_iv = p.get("impliedVolatility")
+            if call_mid is None and put_mid is None:
+                continue
+            result_strikes.append(StrikeData(
+                strike=s, call_mid=call_mid, put_mid=put_mid,
+                call_iv=call_iv, put_iv=put_iv, is_atm=(s == atm_strike),
+            ))
+
+    sd = StrategyDataRead(
+        symbol=sym, current_price=current_price, expiration=chosen_exp,
+        earnings_date=earnings_str,
+        implied_range_low=implied_range_low, implied_range_high=implied_range_high,
+        strikes=result_strikes, as_of=as_of,
+    )
+
+    # ── Filtered chain (±15 strikes around ATM) ──────────────────────────────
+    def _filter_side(side_raw):
+        if not atm_strike:
+            return side_raw
+        sorted_strikes = sorted({c["strike"] for c in side_raw})
+        if atm_strike not in sorted_strikes:
+            return side_raw
+        atm_idx = sorted_strikes.index(atm_strike)
+        keep = set(sorted_strikes[max(0, atm_idx - 15): atm_idx + 16])
+        return [c for c in side_raw if c["strike"] in keep]
+
+    filtered_calls = _filter_side(calls_raw)
+    filtered_puts = _filter_side(puts_raw)
+
+    chain_resp = OptionsChainRead(
+        symbol=sym, expiration=chosen_exp, current_price=current_price,
+        calls=_build_contracts(filtered_calls, atm_strike, current_price=current_price, is_call=True),
+        puts=_build_contracts(filtered_puts, atm_strike, current_price=current_price, is_call=False),
+        available_expirations=expirations, as_of=as_of,
+    )
+
+    return OptionsBundleRead(expected_move=em, strategy_data=sd, chain=chain_resp)
+
+
 @router.get("/options-read/{symbol}", response_model=OptionsReadRead)
 async def get_options_read(
     symbol: str,
@@ -876,6 +1095,7 @@ async def get_options_read(
                 symbol=sym, content=c["content"], facts=c["facts"],
                 model_used=c["model_used"], generated_at=c["generated_at"],
                 cached=True, as_of=as_of,
+                iv_rv_spread_pp=c.get("iv_rv_spread_pp"),
             )
         except Exception:
             pass  # corrupt cache → fall through to regenerate
@@ -1147,6 +1367,7 @@ STRICT RULES:
         await _set_meta(db, cache_key, json.dumps({
             "content": gen["content"], "facts": facts,
             "model_used": gen["model_used"], "generated_at": generated_at,
+            "iv_rv_spread_pp": iv_rv_spread_pp,
         }))
         await db.commit()
     except Exception as exc:
@@ -1156,6 +1377,7 @@ STRICT RULES:
         symbol=sym, content=gen["content"], facts=facts,
         model_used=gen["model_used"], generated_at=generated_at,
         cached=False, as_of=as_of,
+        iv_rv_spread_pp=iv_rv_spread_pp,
     )
 
 
@@ -1216,6 +1438,26 @@ async def get_realized_vol(
         window_days=20,
         as_of=as_of,
     )
+
+
+@router.get("/by-symbol/{symbol}", response_model=TickerRead)
+async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) -> TickerRead:
+    """Look up a single ticker by symbol. Returns 404 if not found."""
+    sym = symbol.upper()
+    ticker = (
+        await db.execute(select(Ticker).where(Ticker.symbol == sym))
+    ).scalar_one_or_none()
+    if not ticker:
+        raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
+    # Enrich with next_earnings_date
+    today = date.today()
+    ned = (await db.execute(
+        select(func.min(Event.event_date))
+        .where(Event.event_type == "earnings", Event.event_date >= today, Event.ticker_id == ticker.id)
+    )).scalar_one_or_none()
+    r = TickerRead.model_validate(ticker)
+    r.next_earnings_date = ned
+    return r
 
 
 @router.get("/{ticker_id}", response_model=TickerRead)

@@ -97,3 +97,12 @@ class OptionsReadRead(BaseModel):
     generated_at: str                # ISO UTC of generation
     cached: bool                     # True if served from today's cache
     as_of: str
+    iv_rv_spread_pp: float | None = None  # IV minus RV in percentage points (positive = options rich)
+
+
+# ── Combined options bundle (single request replaces 3) ─────────────────────
+
+class OptionsBundleRead(BaseModel):
+    expected_move: ExpectedMoveRead
+    strategy_data: StrategyDataRead
+    chain: OptionsChainRead
