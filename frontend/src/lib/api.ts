@@ -323,6 +323,17 @@ export interface OptionsBundle {
   chain: OptionsChain;
 }
 
+export interface ExplainResponse {
+  symbol: string;
+  metric: string;
+  content: string;
+  facts: Record<string, string>;
+  model_used: string;
+  generated_at: string;
+  cached: boolean;
+  as_of: string;
+}
+
 // ── Discover types ───────────────────────────────────────────────────────────
 
 export interface ReportingSoonItem {
@@ -626,6 +637,8 @@ export const api = {
       request<NewsResponse>(`/tickers/${symbol}/news`),
     optionsBundle: (symbol: string) =>
       request<OptionsBundle>(`/tickers/options-bundle/${symbol}`),
+    explain: (symbol: string, metric: string) =>
+      request<ExplainResponse>(`/tickers/explain/${symbol}/${metric}`),
   },
 
   watchlists: {

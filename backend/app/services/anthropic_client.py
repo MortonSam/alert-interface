@@ -50,6 +50,24 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
+    async def generate_explain(self, prompt: str) -> dict:
+        """Generate a 2–3 sentence contextual metric explanation.
+
+        Uses Sonnet; tight max_tokens for short prose output.
+        All numbers are injected by the caller — the model only narrates.
+        """
+        msg = await self._client.messages.create(
+            model=GENERATION_MODEL,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {
+            "content":       msg.content[0].text.strip(),
+            "model_used":    GENERATION_MODEL,
+            "input_tokens":  msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
+
     async def generate_thesis_draft(self, prompt: str) -> dict:
         """Generate a data-grounded thesis draft (JSON output).
 

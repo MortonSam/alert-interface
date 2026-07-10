@@ -4,6 +4,7 @@ import uuid
 from datetime import date, timedelta, timezone
 from datetime import datetime as dt_datetime
 from statistics import mean
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -15,7 +16,7 @@ from app.database import get_db
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
-from app.schemas.options import ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
+from app.schemas.options import ExplainRead, ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
@@ -1378,6 +1379,268 @@ STRICT RULES:
         model_used=gen["model_used"], generated_at=generated_at,
         cached=False, as_of=as_of,
         iv_rv_spread_pp=iv_rv_spread_pp,
+    )
+
+
+ExplainMetric = Literal["iv_rv_spread", "rv_rank", "expected_move", "put_call", "beat_drop_pattern"]
+
+
+@router.get("/explain/{symbol}/{metric}", response_model=ExplainRead)
+async def get_explain(
+    symbol: str,
+    metric: ExplainMetric,
+    db: AsyncSession = Depends(get_db),
+    token: str | None = Depends(_get_admin_token),
+) -> ExplainRead:
+    """Contextual 2-3 sentence explanation of a metric for a specific symbol.
+
+    All numbers are precomputed server-side and injected as fact strings.
+    The model narrates; it does not calculate. Cached per (symbol, metric, calendar day).
+    Cache hits are served without auth. On cache miss, admin token is required
+    when ADMIN_TOKEN is configured; otherwise returns a graceful empty response.
+    """
+    sym = symbol.upper()
+    today = date.today()
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+    cache_key = f"explain:{sym}:{metric}:{today.isoformat()}"
+
+    # ── Cache check — served freely ────────────────────────────────────────
+    cached_raw = await _get_meta(db, cache_key)
+    if cached_raw:
+        try:
+            c = json.loads(cached_raw)
+            return ExplainRead(
+                symbol=sym, metric=metric, content=c["content"], facts=c["facts"],
+                model_used=c["model_used"], generated_at=c["generated_at"],
+                cached=True, as_of=as_of,
+            )
+        except Exception:
+            pass  # corrupt cache — regenerate
+
+    # ── No cache — gate behind admin token ──────────────────────────────────
+    if settings.admin_token and token != settings.admin_token:
+        return ExplainRead(
+            symbol=sym, metric=metric, content="",
+            facts={}, model_used="none", generated_at=as_of,
+            cached=False, as_of=as_of,
+        )
+
+    # ── Gather facts for this metric ────────────────────────────────────────
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    ticker_name = (ticker_row.name if ticker_row else None) or sym
+
+    from app.services.rv_store import get_latest_rv
+    rv_snapshot = await get_latest_rv(db, sym)
+
+    def _fpct(v: float | None, d: int = 1) -> str:
+        return f"{v * 100:.{d}f}%" if v is not None else "(unavailable)"
+
+    facts: dict = {"symbol": sym, "company_name": ticker_name}
+    metric_label = ""
+
+    if metric == "iv_rv_spread":
+        metric_label = "IV-RV spread"
+        # Need options-read cache for the spread value, plus RV context
+        or_key = f"options_read:{sym}:{today.isoformat()}"
+        or_raw = await _get_meta(db, or_key)
+        spread_pp: float | None = None
+        atm_iv_str = "(unavailable)"
+        if or_raw:
+            try:
+                or_data = json.loads(or_raw)
+                spread_pp = or_data.get("iv_rv_spread_pp")
+                atm_iv_str = or_data.get("facts", {}).get("atm_iv", "(unavailable)")
+            except Exception:
+                pass
+
+        rv_20d = float(rv_snapshot.rv_20d) if rv_snapshot and rv_snapshot.rv_20d is not None else None
+        rv_rank_val = float(rv_snapshot.rv_rank) if rv_snapshot and rv_snapshot.rv_rank is not None else None
+
+        facts.update({
+            "iv_rv_spread_pp": f"{spread_pp:+.1f}pp" if spread_pp is not None else "(unavailable)",
+            "atm_iv": atm_iv_str,
+            "realized_vol_20d": _fpct(rv_20d),
+            "rv_rank": f"{rv_rank_val:.1f}" if rv_rank_val is not None else "(unavailable)",
+            "interpretation": (
+                "options are priced above recent realized movement" if spread_pp is not None and spread_pp > 5
+                else "options are priced below recent realized movement" if spread_pp is not None and spread_pp < -5
+                else "options pricing roughly matches recent realized movement" if spread_pp is not None
+                else "(unavailable)"
+            ),
+        })
+
+    elif metric == "rv_rank":
+        metric_label = "realized volatility rank"
+        rv_20d = float(rv_snapshot.rv_20d) if rv_snapshot and rv_snapshot.rv_20d is not None else None
+        rv_rank_val = float(rv_snapshot.rv_rank) if rv_snapshot and rv_snapshot.rv_rank is not None else None
+        rv_pctl = float(rv_snapshot.rv_percentile) if rv_snapshot and rv_snapshot.rv_percentile is not None else None
+        rv_min = float(rv_snapshot.rv_min_1y) if rv_snapshot and rv_snapshot.rv_min_1y is not None else None
+        rv_max = float(rv_snapshot.rv_max_1y) if rv_snapshot and rv_snapshot.rv_max_1y is not None else None
+        sample = rv_snapshot.sample_days if rv_snapshot else 0
+
+        tier = (
+            "extreme" if rv_rank_val is not None and rv_rank_val >= 90
+            else "elevated" if rv_rank_val is not None and rv_rank_val >= 70
+            else "normal" if rv_rank_val is not None and rv_rank_val >= 25
+            else "quiet" if rv_rank_val is not None
+            else "(unavailable)"
+        )
+
+        facts.update({
+            "rv_rank": f"{rv_rank_val:.1f}" if rv_rank_val is not None else "(unavailable)",
+            "rv_percentile": f"{rv_pctl:.1f}" if rv_pctl is not None else "(unavailable)",
+            "realized_vol_20d": _fpct(rv_20d),
+            "rv_1yr_range": f"{_fpct(rv_min)} to {_fpct(rv_max)}" if rv_min is not None and rv_max is not None else "(unavailable)",
+            "sample_days": str(sample),
+            "tier": tier,
+        })
+
+    elif metric == "expected_move":
+        metric_label = "expected move"
+        # Read from options bundle cache
+        bundle_key = f"options_read:{sym}:{today.isoformat()}"
+        bundle_raw = await _get_meta(db, bundle_key)
+        if bundle_raw:
+            try:
+                bd = json.loads(bundle_raw)
+                bf = bd.get("facts", {})
+                facts.update({
+                    "expected_move_pct": bf.get("expected_move_pct", "(unavailable)"),
+                    "implied_range": bf.get("implied_range", "(unavailable)"),
+                    "expiration_date": bf.get("expiration_date", "(unavailable)"),
+                    "atm_strike": bf.get("atm_strike", "(unavailable)"),
+                    "straddle_cost": bf.get("expected_move_dollars", "(unavailable)"),
+                    "next_earnings_date": bf.get("next_earnings_date", "(unavailable)"),
+                })
+            except Exception:
+                pass
+        # Supplement with RV context
+        rv_20d = float(rv_snapshot.rv_20d) if rv_snapshot and rv_snapshot.rv_20d is not None else None
+        facts.setdefault("realized_vol_20d", _fpct(rv_20d))
+
+    elif metric == "put_call":
+        metric_label = "put/call ratio"
+        # Compute from fresh chain via bundle cache
+        # We need the chain to compute put/call ratio — fetch from options bundle
+        loop = asyncio.get_event_loop()
+        try:
+            from app.services.yfinance_client import YFinanceClient as YFC
+            expirations = await loop.run_in_executor(None, YFC.get_option_expirations, sym)
+            # Pick nearest weekly
+            week_out = (today + timedelta(days=7)).isoformat()
+            exp = next((e for e in expirations if e >= week_out), expirations[0] if expirations else None)
+            if exp:
+                chain = await loop.run_in_executor(None, YFC.get_option_chain, sym, exp)
+                put_vol = sum(p.get("volume", 0) or 0 for p in chain.get("puts", []))
+                call_vol = sum(c.get("volume", 0) or 0 for c in chain.get("calls", []))
+                ratio = put_vol / call_vol if call_vol > 0 else None
+                facts.update({
+                    "put_call_ratio": f"{ratio:.2f}" if ratio is not None else "(unavailable)",
+                    "put_volume": str(put_vol),
+                    "call_volume": str(call_vol),
+                    "expiration": exp,
+                    "interpretation": (
+                        "put-heavy (more bearish bets)" if ratio is not None and ratio > 1.2
+                        else "call-heavy (more bullish bets)" if ratio is not None and ratio < 0.7
+                        else "balanced" if ratio is not None
+                        else "(unavailable)"
+                    ),
+                })
+        except Exception:
+            facts.update({"put_call_ratio": "(unavailable)"})
+
+    elif metric == "beat_drop_pattern":
+        metric_label = "earnings beat-drop pattern"
+        if ticker_row:
+            from app.models.enums import EarningsOutcome
+            result = await db.execute(
+                select(HistoricalReaction).where(
+                    HistoricalReaction.ticker_id == ticker_row.id,
+                    HistoricalReaction.event_type == "earnings",
+                    HistoricalReaction.pct_change_1d.isnot(None),
+                )
+            )
+            rows = list(result.scalars().all())
+            total = len(rows)
+            beats = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
+            misses = [r for r in rows if r.outcome == EarningsOutcome.MISS]
+            beat_dropped = [r for r in beats if float(r.pct_change_1d) < 0]
+
+            beat_1d = [float(r.pct_change_1d) for r in beats]
+            miss_1d = [float(r.pct_change_1d) for r in misses]
+            all_1d = [abs(float(r.pct_change_1d)) for r in rows]
+
+            facts.update({
+                "total_quarters": str(total),
+                "beat_count": str(len(beats)),
+                "beat_rate_pct": f"{len(beats)/total*100:.0f}%" if total > 0 else "(unavailable)",
+                "beat_but_dropped_count": str(len(beat_dropped)),
+                "beat_drop_rate_pct": f"{len(beat_dropped)/len(beats)*100:.0f}%" if beats else "(unavailable)",
+                "avg_1d_on_beat": f"{mean(beat_1d):+.2f}%" if beat_1d else "(unavailable)",
+                "avg_1d_on_miss": f"{mean(miss_1d):+.2f}%" if miss_1d else "(unavailable)",
+                "avg_abs_1d": f"±{mean(all_1d):.2f}%" if all_1d else "(unavailable)",
+            })
+
+    # ── Check we have enough facts to generate ──────────────────────────────
+    non_meta_facts = {k: v for k, v in facts.items() if k not in ("symbol", "company_name")}
+    if not non_meta_facts or all(v == "(unavailable)" for v in non_meta_facts.values()):
+        return ExplainRead(
+            symbol=sym, metric=metric, content="",
+            facts=facts, model_used="none", generated_at=as_of,
+            cached=False, as_of=as_of,
+        )
+
+    # ── Build prompt ────────────────────────────────────────────────────────
+    facts_block = "\n".join(f"  {k}: {v}" for k, v in facts.items())
+
+    prompt = f"""\
+You are a financial data narrator explaining one specific metric for {sym} ({ticker_name}).
+Write exactly 2-3 sentences in plain English for someone who may have never traded options or studied finance.
+
+SYSTEM RULES (mandatory):
+- You MUST NOT give investment advice. Never use words like "opportunity", "attractive",
+  "consider buying", "consider selling", "you should", "might want to", or any directional suggestion.
+- You MUST copy every number verbatim from the fact block below. Do not round, reformat, or derive figures.
+- Do NOT use em dashes (--) in your output. Use commas or periods instead.
+- Write prose only. No bullets, headers, lists, or markdown.
+- If a fact says "(unavailable)", omit that thread entirely.
+- Do NOT add disclaimers or caveats.
+
+METRIC: {metric_label}
+
+--- FACT BLOCK ---
+{facts_block}
+--- END FACT BLOCK ---
+
+Explain what this metric's current value means specifically for {sym} right now.
+Keep it grounded in the numbers. 40-70 words.\
+"""
+
+    print(f"[explain] Generating {metric} for {sym}", flush=True)
+
+    client = AnthropicClient()
+    try:
+        gen = await client.generate_explain(prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Explain generation failed: {exc}")
+
+    generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
+    print(f"[explain] {sym}/{metric}: {gen['input_tokens']} in / {gen['output_tokens']} out tokens", flush=True)
+
+    # ── Cache ───────────────────────────────────────────────────────────────
+    try:
+        await _set_meta(db, cache_key, json.dumps({
+            "content": gen["content"], "facts": facts,
+            "model_used": gen["model_used"], "generated_at": generated_at,
+        }))
+        await db.commit()
+    except Exception as exc:
+        print(f"[explain] Cache write failed for {sym}/{metric}: {exc}", flush=True)
+
+    return ExplainRead(
+        symbol=sym, metric=metric, content=gen["content"], facts=facts,
+        model_used=gen["model_used"], generated_at=generated_at,
+        cached=False, as_of=as_of,
     )
 
 

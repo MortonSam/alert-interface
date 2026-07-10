@@ -22,6 +22,7 @@ import Tip from "@/components/Tip";
 
 // Extracted components
 import ExpectedMoveCard from "@/components/ticker/ExpectedMoveCard";
+import ExplainTip from "@/components/ticker/ExplainTip";
 import OptionsEducation from "@/components/ticker/OptionsEducation";
 import StrategyExplainer from "@/components/ticker/StrategyExplainer";
 import RealizedVolPanel from "@/components/ticker/RealizedVolPanel";
@@ -155,7 +156,7 @@ function CatalystRow({ event }: { event: Event }) {
 
 // ── Earnings insights panel ───────────────────────────────────────────────────
 
-function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
+function EarningsInsightsPanel({ s, symbol }: { s: ReactionSummary; symbol: string }) {
   const dropRate = s.beat_but_dropped_rate_pct;
   const pricingNote =
     dropRate == null ? null
@@ -174,7 +175,7 @@ function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
     <div className="rounded-lg border bg-card px-5 py-4 space-y-3 mb-3">
       <div>
         <p className="text-sm font-semibold">
-          Beat EPS in {s.beat_count} of {s.total_quarters} quarter{s.total_quarters !== 1 ? "s" : ""}{" "}
+          <ExplainTip term="beat" metric="beat_drop_pattern" symbol={symbol}>Beat EPS</ExplainTip> in {s.beat_count} of {s.total_quarters} quarter{s.total_quarters !== 1 ? "s" : ""}{" "}
           ({s.beat_rate_pct.toFixed(0)}%)
         </p>
         {dropRate != null && s.beat_count > 0 && (
@@ -1108,9 +1109,11 @@ function WhyNowStrip({
 function MetricsRow({
   optionsRead,
   optionsChain,
+  symbol,
 }: {
   optionsRead: OptionsRead | null;
   optionsChain: OptionsChain | null;
+  symbol: string;
 }) {
   const spread = optionsRead?.iv_rv_spread_pp;
 
@@ -1140,7 +1143,9 @@ function MetricsRow({
     <div className="grid grid-cols-2 gap-4 mb-6">
       {spread != null && (
         <div className="rounded-lg border bg-card px-4 py-3">
-          <p className="text-xs text-muted-foreground mb-0.5">IV − RV Spread</p>
+          <p className="text-xs text-muted-foreground mb-0.5">
+            <ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={symbol}>IV − RV Spread</ExplainTip>
+          </p>
           <p className="text-lg font-bold tabular-nums">
             {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
           </p>
@@ -1151,7 +1156,9 @@ function MetricsRow({
       )}
       {pcRatio != null && (
         <div className="rounded-lg border bg-card px-4 py-3">
-          <p className="text-xs text-muted-foreground mb-0.5">Put/Call Ratio</p>
+          <p className="text-xs text-muted-foreground mb-0.5">
+            <ExplainTip term="put/call ratio" metric="put_call" symbol={symbol}>Put/Call Ratio</ExplainTip>
+          </p>
           <p className="text-lg font-bold tabular-nums">{pcRatio.toFixed(2)}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {pcRatio > 1.2 ? "put-heavy" : pcRatio < 0.7 ? "call-heavy" : "balanced"}
@@ -1566,7 +1573,7 @@ export default function TickerPage() {
           {reactionStatus === "done" && reactions.length > 0 && (
             <>
               {reactionSummary && reactionSummary.total_quarters >= 3 && (
-                <EarningsInsightsPanel s={reactionSummary} />
+                <EarningsInsightsPanel s={reactionSummary} symbol={upperSymbol} />
               )}
               <ReactionsTable reactions={reactions} />
             </>
@@ -1607,12 +1614,12 @@ export default function TickerPage() {
           )}
           {rvStatus === "done" && realizedVol && (
             <div className="mb-6">
-              <RealizedVolPanel rv={realizedVol} />
+              <RealizedVolPanel rv={realizedVol} symbol={upperSymbol} />
             </div>
           )}
 
           {/* Metrics row: IV/RV spread + put/call ratio */}
-          <MetricsRow optionsRead={optionsRead} optionsChain={optionsChain} />
+          <MetricsRow optionsRead={optionsRead} optionsChain={optionsChain} symbol={upperSymbol} />
 
           {/* Expected Move */}
           {bundleStatus === "loading" && (
@@ -1636,6 +1643,7 @@ export default function TickerPage() {
               )}
               <ExpectedMoveCard
                 em={expectedMove}
+                symbol={upperSymbol}
                 onSelectExpiration={setSelectedExpiration}
               />
             </div>

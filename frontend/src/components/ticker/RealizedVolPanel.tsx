@@ -2,8 +2,9 @@
 
 import type { RealizedVol } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
+import ExplainTip from "./ExplainTip";
 
-function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
+function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
   const pct = (v: number | null, d = 1) =>
     v == null ? "—" : `${(v * 100).toFixed(d)}%`;
 
@@ -39,7 +40,7 @@ function RealizedVolPanel({ rv }: { rv: RealizedVol }) {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
-            Realized-vol rank
+            <ExplainTip term="rv rank" metric="rv_rank" symbol={symbol}>Realized-vol rank</ExplainTip>
           </p>
           <p className="text-3xl font-bold tabular-nums leading-none">
             {rv.rv_rank?.toFixed(1) ?? "—"}

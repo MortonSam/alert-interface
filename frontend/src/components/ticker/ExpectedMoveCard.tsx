@@ -2,10 +2,10 @@
 
 import { type ExpectedMove } from "@/lib/api";
 import Callout from "@/components/Callout";
-import Tip from "@/components/Tip";
-import { fmtPctDecimal, TIPS } from "./shared";
+import ExplainTip from "./ExplainTip";
+import { fmtPctDecimal } from "./shared";
 
-export default function ExpectedMoveCard({ em, onSelectExpiration }: { em: ExpectedMove; onSelectExpiration?: (exp: string) => void }) {
+export default function ExpectedMoveCard({ em, symbol, onSelectExpiration }: { em: ExpectedMove; symbol: string; onSelectExpiration?: (exp: string) => void }) {
   const emPct = em.expected_move_pct;
   const emDol = em.expected_move_dollars;
   const stats = em.historical_stats;
@@ -75,11 +75,9 @@ export default function ExpectedMoveCard({ em, onSelectExpiration }: { em: Expec
       {/* Implied range */}
       {em.implied_range_low != null && em.implied_range_high != null && (
         <div className="flex items-center gap-3 text-sm">
-          <Tip text={TIPS.impliedRange}>
-            <span className="text-muted-foreground underline decoration-dotted underline-offset-2">
-              Implied range
-            </span>
-          </Tip>
+          <ExplainTip term="implied range" metric="expected_move" symbol={symbol}>
+            <span className="text-muted-foreground">Implied range</span>
+          </ExplainTip>
           <span className="font-semibold tabular-nums">
             ${em.implied_range_low.toFixed(2)}
             <span className="text-muted-foreground mx-2">–</span>
@@ -92,19 +90,15 @@ export default function ExpectedMoveCard({ em, onSelectExpiration }: { em: Expec
       {(em.atm_strike != null || em.straddle_price != null) && (
         <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
           {em.atm_strike != null && (
-            <Tip text={TIPS.atm}>
-              <span className="underline decoration-dotted underline-offset-2">
-                ATM strike ${em.atm_strike}
-              </span>
-            </Tip>
+            <ExplainTip term="atm strike">
+              <span>ATM strike ${em.atm_strike}</span>
+            </ExplainTip>
           )}
           {em.atm_strike != null && em.straddle_price != null && <span>·</span>}
           {em.straddle_price != null && (
-            <Tip text={TIPS.straddle}>
-              <span className="underline decoration-dotted underline-offset-2">
-                straddle ${em.straddle_price.toFixed(2)}
-              </span>
-            </Tip>
+            <ExplainTip term="straddle">
+              <span>straddle ${em.straddle_price.toFixed(2)}</span>
+            </ExplainTip>
           )}
         </p>
       )}

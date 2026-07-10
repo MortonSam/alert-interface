@@ -100,6 +100,19 @@ class OptionsReadRead(BaseModel):
     iv_rv_spread_pp: float | None = None  # IV minus RV in percentage points (positive = options rich)
 
 
+# ── Contextual metric explanation ────────────────────────────────────────────
+
+class ExplainRead(BaseModel):
+    symbol: str
+    metric: str
+    content: str                     # 2–3 sentence contextual explanation
+    facts: dict                      # precomputed fact block injected into the prompt
+    model_used: str
+    generated_at: str
+    cached: bool
+    as_of: str
+
+
 # ── Combined options bundle (single request replaces 3) ─────────────────────
 
 class OptionsBundleRead(BaseModel):
