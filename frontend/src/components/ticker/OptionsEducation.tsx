@@ -23,20 +23,20 @@ export default function OptionsEducation({
   const emPct     = em.expected_move_pct;
   const exp       = em.expiration_used;
 
+  const callHasLiveQuote = atmCall != null && atmCall.bid != null && atmCall.ask != null && atmCall.bid + atmCall.ask > 0;
   const callMid = atmCall
-    ? atmCall.bid != null && atmCall.ask != null && atmCall.bid + atmCall.ask > 0
-      ? (atmCall.bid + atmCall.ask) / 2
-      : atmCall.last_price
+    ? callHasLiveQuote ? (atmCall.bid! + atmCall.ask!) / 2 : atmCall.last_price
     : null;
+  const putHasLiveQuote = atmPut != null && atmPut.bid != null && atmPut.ask != null && atmPut.bid + atmPut.ask > 0;
   const putMid = atmPut
-    ? atmPut.bid != null && atmPut.ask != null && atmPut.bid + atmPut.ask > 0
-      ? (atmPut.bid + atmPut.ask) / 2
-      : atmPut.last_price
+    ? putHasLiveQuote ? (atmPut.bid! + atmPut.ask!) / 2 : atmPut.last_price
     : null;
 
   const callBreakeven = strike != null && callMid != null ? strike + callMid : null;
   const putBreakeven  = strike != null && putMid  != null ? strike - putMid  : null;
-  const callIV        = atmCall?.implied_volatility;
+  // Skip implausibly low IV (< 3%) — stale after-hours data
+  const rawIV = atmCall?.implied_volatility;
+  const callIV = rawIV != null && rawIV >= 0.03 ? rawIV : null;
 
   return (
     <div className="mt-6 rounded-lg border bg-card overflow-visible">
@@ -61,7 +61,9 @@ export default function OptionsEducation({
               no matter how high the stock goes.
               {strike != null && callMid != null && (
                 <> The ${strike} call currently costs about{" "}
-                  <strong className="text-foreground">${callMid.toFixed(2)}</strong> per share.
+                  <strong className="text-foreground">
+                    {callHasLiveQuote ? `$${callMid.toFixed(2)}` : `~$${callMid.toFixed(2)} (last trade)`}
+                  </strong> per share.
                   You profit if {symbol} climbs above{" "}
                   <strong className="text-foreground">
                     ${callBreakeven?.toFixed(2)}
@@ -75,7 +77,9 @@ export default function OptionsEducation({
               right to <em>sell</em> at the strike, useful when you expect the stock to fall.
               {strike != null && putMid != null && (
                 <> The ${strike} put costs about{" "}
-                  <strong className="text-foreground">${putMid.toFixed(2)}</strong>.
+                  <strong className="text-foreground">
+                    {putHasLiveQuote ? `$${putMid.toFixed(2)}` : `~$${putMid.toFixed(2)} (last trade)`}
+                  </strong>.
                   It profits if {symbol} drops below{" "}
                   <strong className="text-foreground">
                     ${putBreakeven?.toFixed(2)}

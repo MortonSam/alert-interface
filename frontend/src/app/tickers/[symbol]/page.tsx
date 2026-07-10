@@ -1207,6 +1207,7 @@ export default function TickerPage() {
   const [expectedMove, setExpectedMove]     = useState<ExpectedMove | null>(null);
   const [optionsChain, setOptionsChain]     = useState<OptionsChain | null>(null);
   const [strategyData, setStrategyData]     = useState<StrategyData | null>(null);
+  const [strikesFallback, setStrikesFallback] = useState(false);
   const [bundleStatus, setBundleStatus]     = useState<"loading" | "done" | "empty" | "error">("loading");
   const [selectedExpiration, setSelectedExpiration] = useState<string | null>(null);
 
@@ -1288,32 +1289,41 @@ export default function TickerPage() {
         setExpectedMove(bundle.expected_move);
         // Derive strikes from chain when backend returns empty strikes
         const sd = bundle.strategy_data;
+        let isFallback = false;
         if (sd.strikes.length === 0 && bundle.chain) {
+          isFallback = true;
+          const spot = bundle.chain.current_price ?? bundle.expected_move.current_price;
           const strikeMap = new Map<number, StrikeData>();
           for (const c of bundle.chain.calls) {
-            const mid = c.bid != null && c.ask != null && c.bid + c.ask > 0
-              ? (c.bid + c.ask) / 2 : c.last_price;
+            // Skip contracts with no usable price or >25% from spot
+            const hasMid = c.bid != null && c.ask != null && c.bid + c.ask > 0;
+            const price = hasMid ? (c.bid! + c.ask!) / 2 : c.last_price;
+            if (price == null || price <= 0) continue;
+            if (spot != null && Math.abs(c.strike - spot) / spot > 0.25) continue;
             strikeMap.set(c.strike, {
-              strike: c.strike, call_mid: mid, put_mid: null,
+              strike: c.strike, call_mid: price, put_mid: null,
               call_iv: c.implied_volatility, put_iv: null, is_atm: c.is_atm,
             });
           }
           for (const p of bundle.chain.puts) {
-            const mid = p.bid != null && p.ask != null && p.bid + p.ask > 0
-              ? (p.bid + p.ask) / 2 : p.last_price;
+            const hasMid = p.bid != null && p.ask != null && p.bid + p.ask > 0;
+            const price = hasMid ? (p.bid! + p.ask!) / 2 : p.last_price;
+            if (price == null || price <= 0) continue;
+            if (spot != null && Math.abs(p.strike - spot) / spot > 0.25) continue;
             const existing = strikeMap.get(p.strike);
             if (existing) {
-              existing.put_mid = mid;
+              existing.put_mid = price;
               existing.put_iv = p.implied_volatility;
             } else {
               strikeMap.set(p.strike, {
-                strike: p.strike, call_mid: null, put_mid: mid,
+                strike: p.strike, call_mid: null, put_mid: price,
                 call_iv: null, put_iv: p.implied_volatility, is_atm: p.is_atm,
               });
             }
           }
           sd.strikes = Array.from(strikeMap.values()).sort((a, b) => a.strike - b.strike);
         }
+        setStrikesFallback(isFallback);
         setStrategyData(sd);
         setOptionsChain(bundle.chain);
         if (bundle.expected_move.expiration_used) {
@@ -1685,6 +1695,11 @@ export default function TickerPage() {
           )}
 
           {/* Strategy explainer */}
+          {bundleStatus === "done" && strategyData && strategyData.strikes.length > 0 && strikesFallback && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-4 mb-1 italic">
+              Prices from last trade — live quotes unavailable (market closed or thin). Treat P&L figures as approximate.
+            </p>
+          )}
           {bundleStatus === "done" && strategyData && strategyData.strikes.length > 0 && (
             <StrategyExplainer data={strategyData} symbol={upperSymbol} />
           )}

@@ -1195,8 +1195,15 @@ async def get_options_read(
                 expected_move_dollars = straddle
                 implied_range_low    = current_price - straddle
                 implied_range_high   = current_price + straddle
-            ivs = [c["impliedVolatility"] for c in [atm_call, atm_put]
-                   if c and c.get("impliedVolatility") is not None]
+            # ATM IV: skip contracts with no_market (bid=ask=0) or implausibly low IV (< 3%)
+            _MIN_IV = 0.03
+            ivs = [
+                c["impliedVolatility"] for c in [atm_call, atm_put]
+                if c
+                and c.get("impliedVolatility") is not None
+                and c["impliedVolatility"] >= _MIN_IV
+                and not ((c.get("bid") or 0) == 0 and (c.get("ask") or 0) == 0)
+            ]
             atm_iv = sum(ivs) / len(ivs) if ivs else None
 
     # RV rank/percentile — prefer precomputed snapshot, fall back to live
@@ -1275,7 +1282,7 @@ async def get_options_read(
         "expiration_date":           chosen_exp or "(unavailable)",
         "days_to_expiration":        str(days_to_exp) if days_to_exp is not None else "(unavailable)",
         "atm_strike":                _fp(atm_strike),
-        "atm_iv":                    _fpct(atm_iv),
+        "atm_iv":                    _fpct(atm_iv) if atm_iv is not None else "(unavailable, market closed)",
         "next_earnings_date":        earnings_str or "(unavailable)",
         "expiration_spans_earnings": str(expiration_spans_earnings),
         "days_exp_past_earnings":    str(days_exp_past_earnings) if days_exp_past_earnings is not None else "N/A",
@@ -1520,19 +1527,36 @@ async def get_explain(
 
     elif metric == "put_call":
         metric_label = "put/call ratio"
-        # Compute from fresh chain via bundle cache
-        # We need the chain to compute put/call ratio — fetch from options bundle
+        # Use the same expiration selection as the options bundle so the ratio
+        # matches what the frontend MetricsRow card displays.
         loop = asyncio.get_event_loop()
         try:
             from app.services.yfinance_client import YFinanceClient as YFC
             expirations = await loop.run_in_executor(None, YFC.get_option_expirations, sym)
-            # Pick nearest weekly
-            week_out = (today + timedelta(days=7)).isoformat()
-            exp = next((e for e in expirations if e >= week_out), expirations[0] if expirations else None)
+            # Earnings-aware expiration pick (mirrors bundle logic)
+            earnings_str_local: str | None = None
+            if ticker_row:
+                ned = (await db.execute(
+                    select(func.min(Event.event_date))
+                    .where(Event.event_type == "earnings", Event.event_date >= today,
+                           Event.ticker_id == ticker_row.id)
+                )).scalar_one_or_none()
+                if ned:
+                    earnings_str_local = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
+
+            exp: str | None = None
+            if expirations:
+                if earnings_str_local:
+                    post = [e for e in expirations if e >= earnings_str_local]
+                    exp = post[0] if post else expirations[-1]
+                else:
+                    week_out = (today + timedelta(days=7)).isoformat()
+                    exp = next((e for e in expirations if e >= week_out), expirations[0])
+
             if exp:
-                chain = await loop.run_in_executor(None, YFC.get_option_chain, sym, exp)
-                put_vol = sum(p.get("volume", 0) or 0 for p in chain.get("puts", []))
-                call_vol = sum(c.get("volume", 0) or 0 for c in chain.get("calls", []))
+                chain_data = await loop.run_in_executor(None, YFC.get_option_chain, sym, exp)
+                put_vol = sum(p.get("volume", 0) or 0 for p in chain_data.get("puts", []))
+                call_vol = sum(c.get("volume", 0) or 0 for c in chain_data.get("calls", []))
                 ratio = put_vol / call_vol if call_vol > 0 else None
                 facts.update({
                     "put_call_ratio": f"{ratio:.2f}" if ratio is not None else "(unavailable)",
