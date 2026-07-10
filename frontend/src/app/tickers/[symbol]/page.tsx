@@ -195,8 +195,8 @@ function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2">
         {(
           [
-            ["Avg T+1 on beats", s.avg_1d_on_beat],
-            ["Avg T+1 on misses", s.avg_1d_on_miss],
+            ["Avg next-day move on beats", s.avg_1d_on_beat],
+            ["Avg next-day move on misses", s.avg_1d_on_miss],
           ] as [string, number | null][]
         ).map(([label, val]) => (
           <div key={label}>
@@ -215,7 +215,7 @@ function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
         ))}
 
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Avg abs move</p>
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Avg move size (any direction)</p>
           <p className="text-sm font-semibold tabular-nums text-foreground">
             {s.avg_abs_1d != null ? `±${s.avg_abs_1d.toFixed(2)}%` : "—"}
           </p>
@@ -224,7 +224,7 @@ function EarningsInsightsPanel({ s }: { s: ReactionSummary }) {
         {s.sector_avg_abs_1d != null && (
           <div>
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-              {s.sector ?? "Sector"} avg move
+              {s.sector ?? "Sector"} avg move size
             </p>
             <p className="text-sm font-semibold tabular-nums text-muted-foreground">
               ±{s.sector_avg_abs_1d.toFixed(2)}%
@@ -1001,13 +1001,29 @@ function SectionNav() {
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
+        // Pick the topmost intersecting section (lowest boundingClientRect.top)
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            setActive(entry.target.id);
+            setActive((prev) => {
+              // Find all currently-intersecting sections and pick the one closest to top
+              const ids = SECTIONS.map((s) => s.id);
+              const topmost = ids.reduce<{ id: string; top: number } | null>((best, id) => {
+                const el = document.getElementById(id);
+                if (!el) return best;
+                const rect = el.getBoundingClientRect();
+                // Section top is within (or above) viewport and bottom is below header+nav (~96px)
+                if (rect.bottom > 96 && (!best || rect.top < best.top)) {
+                  return { id, top: rect.top };
+                }
+                return best;
+              }, null);
+              return topmost ? topmost.id : prev;
+            });
           }
         }
       },
-      { rootMargin: "-80px 0px -60% 0px", threshold: 0 },
+      // 96px = site header (52px) + section nav (~44px)
+      { rootMargin: "-96px 0px -60% 0px", threshold: 0 },
     );
     for (const s of SECTIONS) {
       const el = document.getElementById(s.id);
@@ -1017,7 +1033,7 @@ function SectionNav() {
   }, []);
 
   return (
-    <nav className="sticky top-0 z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8 mb-8">
+    <nav className="sticky top-13 z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8 mb-8">
       <div className="max-w-4xl mx-auto flex gap-1 overflow-x-auto py-2">
         {SECTIONS.map((s) => (
           <a
@@ -1263,7 +1279,35 @@ export default function TickerPage() {
     api.tickers.optionsBundle(upperSymbol)
       .then((bundle: OptionsBundle) => {
         setExpectedMove(bundle.expected_move);
-        setStrategyData(bundle.strategy_data);
+        // Derive strikes from chain when backend returns empty strikes
+        const sd = bundle.strategy_data;
+        if (sd.strikes.length === 0 && bundle.chain) {
+          const strikeMap = new Map<number, StrikeData>();
+          for (const c of bundle.chain.calls) {
+            const mid = c.bid != null && c.ask != null && c.bid + c.ask > 0
+              ? (c.bid + c.ask) / 2 : c.last_price;
+            strikeMap.set(c.strike, {
+              strike: c.strike, call_mid: mid, put_mid: null,
+              call_iv: c.implied_volatility, put_iv: null, is_atm: c.is_atm,
+            });
+          }
+          for (const p of bundle.chain.puts) {
+            const mid = p.bid != null && p.ask != null && p.bid + p.ask > 0
+              ? (p.bid + p.ask) / 2 : p.last_price;
+            const existing = strikeMap.get(p.strike);
+            if (existing) {
+              existing.put_mid = mid;
+              existing.put_iv = p.implied_volatility;
+            } else {
+              strikeMap.set(p.strike, {
+                strike: p.strike, call_mid: null, put_mid: mid,
+                call_iv: null, put_iv: p.implied_volatility, is_atm: p.is_atm,
+              });
+            }
+          }
+          sd.strikes = Array.from(strikeMap.values()).sort((a, b) => a.strike - b.strike);
+        }
+        setStrategyData(sd);
         setOptionsChain(bundle.chain);
         if (bundle.expected_move.expiration_used) {
           setSelectedExpiration(bundle.expected_move.expiration_used);
@@ -1446,7 +1490,7 @@ export default function TickerPage() {
         <SectionNav />
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
-        <section id="catalysts" className="scroll-mt-20">
+        <section id="catalysts" className="scroll-mt-28">
           <h2 className="text-lg font-semibold mb-4">
             Upcoming Catalysts
             {eventStatus === "done" && events.length > 0 && (
@@ -1485,7 +1529,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── HISTORY ─────────────────────────────────────────────────── */}
-        <section id="history" className="mt-10 scroll-mt-20">
+        <section id="history" className="mt-10 scroll-mt-28">
           <h2 className="text-lg font-semibold mb-4">
             Historical Reactions
             {reactionStatus === "done" && reactions.length > 0 && (
@@ -1530,7 +1574,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── MARKET VIEW (RV → Metrics → Expected Move → Options Read → Education → Strategies) ── */}
-        <section id="market-view" className="mt-10 mb-10 scroll-mt-20">
+        <section id="market-view" className="mt-10 mb-10 scroll-mt-28">
           <h2 className="text-lg font-semibold mb-4">Market View</h2>
 
           {/* Realized Volatility */}
@@ -1644,7 +1688,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── RESEARCH NOTE ───────────────────────────────────────────── */}
-        <section id="research" className="mt-10 mb-10 scroll-mt-20">
+        <section id="research" className="mt-10 mb-10 scroll-mt-28">
           <h2 className="text-lg font-semibold mb-4">Research Note</h2>
 
           {noteStatus === "loading" && (

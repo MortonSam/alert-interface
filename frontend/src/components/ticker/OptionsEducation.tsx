@@ -24,12 +24,12 @@ export default function OptionsEducation({
   const exp       = em.expiration_used;
 
   const callMid = atmCall
-    ? atmCall.bid != null && atmCall.ask != null
+    ? atmCall.bid != null && atmCall.ask != null && atmCall.bid + atmCall.ask > 0
       ? (atmCall.bid + atmCall.ask) / 2
       : atmCall.last_price
     : null;
   const putMid = atmPut
-    ? atmPut.bid != null && atmPut.ask != null
+    ? atmPut.bid != null && atmPut.ask != null && atmPut.bid + atmPut.ask > 0
       ? (atmPut.bid + atmPut.ask) / 2
       : atmPut.last_price
     : null;
