@@ -131,7 +131,7 @@ async def get_reaction_summary(
     )
 
 
-@router.get("/", response_model=list[HistoricalReactionRead])
+@router.get("", response_model=list[HistoricalReactionRead])
 async def list_reactions(
     symbol: str | None = Query(None, description="Filter by ticker symbol (e.g. AAPL)"),
     ticker_id: uuid.UUID | None = Query(None),
@@ -152,7 +152,7 @@ async def list_reactions(
     return [_enrich(r) for r in result.scalars().all()]
 
 
-@router.post("/", response_model=HistoricalReactionRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=HistoricalReactionRead, status_code=status.HTTP_201_CREATED)
 async def create_reaction(
     payload: HistoricalReactionCreate,
     db: AsyncSession = Depends(get_db),

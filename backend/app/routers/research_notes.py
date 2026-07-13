@@ -44,7 +44,7 @@ async def verify(
     return await verify_existing_note(db, payload.ticker_id, payload.symbol)
 
 
-@router.get("/", response_model=ResearchNoteRead)
+@router.get("", response_model=ResearchNoteRead)
 async def get_note(
     symbol: str | None = Query(None, description="Ticker symbol, e.g. AAPL"),
     ticker_id: uuid.UUID | None = Query(None),

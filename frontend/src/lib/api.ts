@@ -681,7 +681,7 @@ export const api = {
 
   researchNotes: {
     get: (symbol: string) =>
-      request<ResearchNote>(`/research-notes/?symbol=${encodeURIComponent(symbol)}`),
+      request<ResearchNote>(`/research-notes?symbol=${encodeURIComponent(symbol)}`),
     generate: (symbol: string) =>
       request<ResearchNote>("/research-notes/generate", {
         method: "POST",
@@ -738,13 +738,13 @@ export const api = {
       const params = new URLSearchParams(
         Object.fromEntries(Object.entries(filters ?? {}).filter(([, v]) => v != null)) as Record<string, string>
       );
-      return request<HistoricalReaction[]>(`/reactions/?${params}`);
+      return request<HistoricalReaction[]>(`/reactions?${params}`);
     },
     summary: (symbol: string) =>
       request<ReactionSummary>(`/reactions/summary?symbol=${encodeURIComponent(symbol)}`),
     get: (id: string) => request<HistoricalReaction>(`/reactions/${id}`),
     create: (data: Partial<HistoricalReaction>) =>
-      request<HistoricalReaction>("/reactions/", { method: "POST", body: JSON.stringify(data) }),
+      request<HistoricalReaction>("/reactions", { method: "POST", body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<void>(`/reactions/${id}`, { method: "DELETE" }),
   },
