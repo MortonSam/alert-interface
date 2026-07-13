@@ -34,6 +34,8 @@ const GLOSSARY: Record<string, string> = {
     "The date an options contract expires. After this date the contract is worthless if not exercised.",
   premium:
     "The price paid to buy an option. This is the most you can lose as a buyer.",
+  "ex-dividend":
+    "The date a stock begins trading without its upcoming dividend. Buy before this date to receive the payout.",
 };
 
 export default GLOSSARY;

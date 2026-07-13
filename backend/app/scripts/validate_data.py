@@ -151,22 +151,23 @@ async def check_events_null_title(session) -> CheckResult:
 
 
 async def check_macro_events_with_ticker(session) -> CheckResult:
+    global_types = [EventType.MACRO, EventType.FOMC]
     rows = (await session.execute(
-        select(Event.id, Event.event_date, Event.title, Event.ticker_id)
+        select(Event.id, Event.event_date, Event.title, Event.ticker_id, Event.event_type)
         .where(
-            Event.event_type == EventType.MACRO,
+            Event.event_type.in_(global_types),
             Event.ticker_id.is_not(None),
         )
         .order_by(Event.event_date)
     )).all()
 
     if not rows:
-        return CheckResult("macro_events_with_ticker", PASS, "All macro events have ticker_id = NULL")
+        return CheckResult("macro_events_with_ticker", PASS, "All macro/FOMC events have ticker_id = NULL")
 
-    details = [f"{r.event_date}  {r.title[:50]}  ticker_id={r.ticker_id}" for r in rows]
+    details = [f"{r.event_date}  [{r.event_type}]  {r.title[:50]}  ticker_id={r.ticker_id}" for r in rows]
     return CheckResult(
         "macro_events_with_ticker", WARN,
-        f"{len(rows)} macro event(s) unexpectedly linked to a ticker",
+        f"{len(rows)} macro/FOMC event(s) unexpectedly linked to a ticker",
         details,
     )
 

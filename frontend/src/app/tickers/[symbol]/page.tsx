@@ -92,6 +92,7 @@ const EVENT_STYLES: Record<EventType, { label: string; cls: string }> = {
   fda:            { label: "FDA",            cls: "bg-success/10 text-success" },
   ex_dividend:    { label: "Ex-Div",         cls: "bg-secondary text-muted-foreground" },
   product_launch: { label: "Launch",         cls: "bg-primary/10 text-primary" },
+  fomc:           { label: "FOMC",           cls: "bg-violet/10 text-violet" },
   other:          { label: "Other",          cls: "bg-muted text-muted-foreground" },
 };
 
@@ -143,7 +144,11 @@ function CatalystRow({ event }: { event: Event }) {
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{event.title}</span>
-          <EventTypeBadge type={event.event_type} />
+          {event.event_type === "ex_dividend" ? (
+            <ExplainTip term="ex-dividend"><EventTypeBadge type={event.event_type} /></ExplainTip>
+          ) : (
+            <EventTypeBadge type={event.event_type} />
+          )}
           <DaysBadge days={days} />
         </div>
         {event.description && (
@@ -348,14 +353,16 @@ function upRate(rows: HistoricalReaction[], key: "pct_change_1d" | "pct_change_3
   return `${up} of ${valid.length} (${pct}%)`;
 }
 
-function DistributionPanel({ rows, filter }: { rows: HistoricalReaction[]; filter: OutcomeFilter }) {
+function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: HistoricalReaction[]; filter: OutcomeFilter; mode?: "earnings" | "fed" }) {
   const n = rows.length;
   const s1d = computeStats(pctValues(rows, "pct_change_1d"));
   const s3d = computeStats(pctValues(rows, "pct_change_3d"));
   const s5d = computeStats(pctValues(rows, "pct_change_5d"));
 
   let filterLabel: string;
-  if (filter === "all")  filterLabel = `${n} earning${n === 1 ? "" : "s"}`;
+  if (mode === "fed") {
+    filterLabel = `${n} Fed decision day${n === 1 ? "" : "s"}`;
+  } else if (filter === "all")  filterLabel = `${n} earning${n === 1 ? "" : "s"}`;
   else if (filter === "beat") filterLabel = `${n} beat${n === 1 ? "" : "s"}`;
   else if (filter === "miss") filterLabel = `${n} miss${n === 1 ? "" : "es"}`;
   else filterLabel = `${n} meet${n === 1 ? "" : "s"}`;
@@ -366,9 +373,11 @@ function DistributionPanel({ rows, filter }: { rows: HistoricalReaction[]; filte
         <span className="text-sm font-semibold">Distribution</span>
         <span className="text-xs text-muted-foreground">Based on {filterLabel}</span>
       </div>
-      <p className="text-xs text-muted-foreground italic mb-3">
-        Stats below show stock price moves, not EPS surprise magnitude.
-      </p>
+      {mode === "earnings" && (
+        <p className="text-xs text-muted-foreground italic mb-3">
+          Stats below show stock price moves, not EPS surprise magnitude.
+        </p>
+      )}
 
       {n < 3 ? (
         <p className="text-xs text-muted-foreground italic">
@@ -436,7 +445,7 @@ function revenueOutcome(r: HistoricalReaction): { label: string; cls: string } |
 
 // ── Reactions table (updated headers + revenue column) ────────────────────────
 
-function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
+function ReactionsTable({ reactions, mode = "earnings" }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed" }) {
   const [sort, setSort] = useState<{ key: ReactionSortKey; dir: "asc" | "desc" }>({
     key: "event_date",
     dir: "desc",
@@ -496,30 +505,34 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
     { key: "meet", label: pluralOutcome("meet", counts.meet) },
   ];
 
+  const isFed = mode === "fed";
+
   return (
     <div className="space-y-3">
-      {/* Filter pills */}
-      <div className="flex flex-wrap gap-2">
-        {PILLS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setOutcomeFilter(key)}
-            className={cn(
-              "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
-              outcomeFilter === key
-                ? key === "beat" ? "bg-success/10 text-success"
-                  : key === "miss" ? "bg-destructive/10 text-destructive"
-                  : key === "meet" ? "bg-secondary text-secondary-foreground"
-                  : "bg-foreground text-background"
-                : "bg-muted text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Filter pills — hidden for fed mode (no outcome data) */}
+      {!isFed && (
+        <div className="flex flex-wrap gap-2">
+          {PILLS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setOutcomeFilter(key)}
+              className={cn(
+                "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                outcomeFilter === key
+                  ? key === "beat" ? "bg-success/10 text-success"
+                    : key === "miss" ? "bg-destructive/10 text-destructive"
+                    : key === "meet" ? "bg-secondary text-secondary-foreground"
+                    : "bg-foreground text-background"
+                  : "bg-muted text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      <DistributionPanel rows={filtered} filter={outcomeFilter} />
+      <DistributionPanel rows={filtered} filter={outcomeFilter} mode={mode} />
 
       <div className="rounded-lg border bg-card overflow-hidden">
         <div className="overflow-x-auto">
@@ -527,17 +540,19 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
             <thead>
               <tr className="border-b bg-muted/40">
                 <SortTh label="Date"    col="event_date"    sort={sort} onSort={handleSort} align="left" />
-                <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    Outcome
-                    <span
-                      title="Beat/miss/meet refers to EPS surprise vs. analyst estimate. Stock direction is shown separately by the arrow next to the badge and the 1d/3d/5d columns."
-                      className="cursor-help opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                      ⓘ
+                {!isFed && (
+                  <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      Outcome
+                      <span
+                        title="Beat/miss/meet refers to EPS surprise vs. analyst estimate. Stock direction is shown separately by the arrow next to the badge and the 1d/3d/5d columns."
+                        className="cursor-help opacity-60 hover:opacity-100 transition-opacity"
+                      >
+                        ⓘ
+                      </span>
                     </span>
-                  </span>
-                </th>
+                  </th>
+                )}
                 {hasRevenue && (
                   <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Revenue
@@ -562,24 +577,26 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
                     <td className="px-3 py-2.5 text-sm tabular-nums text-muted-foreground whitespace-nowrap">
                       {formatEventDate(r.event_date)}
                     </td>
-                    <td className="px-3 py-2.5">
-                      <span className="inline-flex items-center gap-1.5 flex-wrap">
-                        <OutcomeBadge outcome={r.outcome} />
-                        {r.eps_surprise_pct != null && (
-                          <span
-                            className={cn(
-                              "text-xs font-medium tabular-nums",
-                              r.eps_surprise_pct > 0
-                                ? "text-green-600 dark:text-green-400"
-                                : "text-red-500 dark:text-red-400",
-                            )}
-                          >
-                            {r.eps_surprise_pct > 0 ? "+" : ""}
-                            {r.eps_surprise_pct.toFixed(1)}%
-                          </span>
-                        )}
-                      </span>
-                    </td>
+                    {!isFed && (
+                      <td className="px-3 py-2.5">
+                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                          <OutcomeBadge outcome={r.outcome} />
+                          {r.eps_surprise_pct != null && (
+                            <span
+                              className={cn(
+                                "text-xs font-medium tabular-nums",
+                                r.eps_surprise_pct > 0
+                                  ? "text-green-600 dark:text-green-400"
+                                  : "text-red-500 dark:text-red-400",
+                              )}
+                            >
+                              {r.eps_surprise_pct > 0 ? "+" : ""}
+                              {r.eps_surprise_pct.toFixed(1)}%
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                    )}
                     {hasRevenue && (
                       <td className="px-3 py-2.5 text-sm">
                         {rev ? (
@@ -603,7 +620,7 @@ function ReactionsTable({ reactions }: { reactions: HistoricalReaction[] }) {
               })}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={hasRevenue ? 8 : 7} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={6 + (isFed ? 0 : 1) + (hasRevenue ? 1 : 0)} className="px-3 py-8 text-center text-sm text-muted-foreground">
                     No rows match the selected filter.
                   </td>
                 </tr>
@@ -1190,6 +1207,10 @@ export default function TickerPage() {
   const [reactionError, setReactionError]     = useState<string | null>(null);
   const [reactionSummary, setReactionSummary] = useState<ReactionSummary | null>(null);
 
+  const [historyView, setHistoryView] = useState<"earnings" | "fed">("earnings");
+  const [fomcReactions, setFomcReactions] = useState<HistoricalReaction[]>([]);
+  const [fomcStatus, setFomcStatus] = useState<SectionStatus>("loading");
+
   const [quote, setQuote]               = useState<TickerQuote | null>(null);
   const [chartPeriod, setChartPeriod]   = useState<ChartPeriod>("1y");
   const [chartStartPrice, setChartStartPrice] = useState<number | null>(null);
@@ -1250,6 +1271,10 @@ export default function TickerPage() {
       .summary(upperSymbol)
       .then(setReactionSummary)
       .catch(() => setReactionSummary(null));
+    api.reactions
+      .list({ symbol: upperSymbol, event_type: "fomc" })
+      .then((rows) => { setFomcReactions(rows); setFomcStatus("done"); })
+      .catch(() => setFomcStatus("done"));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -1546,12 +1571,35 @@ export default function TickerPage() {
 
         {/* ── HISTORY ─────────────────────────────────────────────────── */}
         <section id="history" className="mt-10 scroll-mt-28">
-          <h2 className="text-lg font-semibold mb-4">
-            Historical Reactions
-            {reactionStatus === "done" && reactions.length > 0 && (
-              <span className="ml-2 text-muted-foreground font-normal text-sm">({reactions.length})</span>
-            )}
-          </h2>
+          <h2 className="text-lg font-semibold mb-4">Historical Reactions</h2>
+
+          {/* Toggle pills — only shown when FOMC data exists */}
+          {fomcStatus === "done" && fomcReactions.length > 0 && (
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setHistoryView("earnings")}
+                className={cn(
+                  "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  historyView === "earnings"
+                    ? "bg-cool/10 text-cool"
+                    : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Earnings ({reactions.length})
+              </button>
+              <button
+                onClick={() => setHistoryView("fed")}
+                className={cn(
+                  "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  historyView === "fed"
+                    ? "bg-violet/10 text-violet"
+                    : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Fed days ({fomcReactions.length})
+              </button>
+            </div>
+          )}
 
           {reactionStatus === "loading" && (
             <div className="rounded-lg border bg-card overflow-hidden animate-pulse">
@@ -1574,17 +1622,35 @@ export default function TickerPage() {
               Failed to load reactions: {reactionError}
             </div>
           )}
-          {reactionStatus === "done" && reactions.length === 0 && (
+          {reactionStatus === "done" && reactions.length === 0 && historyView === "earnings" && (
             <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
               No reaction history available for this ticker yet.
             </div>
           )}
-          {reactionStatus === "done" && reactions.length > 0 && (
+
+          {/* Earnings view */}
+          {reactionStatus === "done" && reactions.length > 0 && historyView === "earnings" && (
             <>
               {reactionSummary && reactionSummary.total_quarters >= 3 && (
                 <EarningsInsightsPanel s={reactionSummary} symbol={upperSymbol} />
               )}
               <ReactionsTable reactions={reactions} />
+            </>
+          )}
+
+          {/* Fed days view */}
+          {historyView === "fed" && fomcStatus === "done" && fomcReactions.length > 0 && (
+            <>
+              {reactions.length > 0 && (() => {
+                const fomcAvg = fomcReactions.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d ?? "0")), 0) / fomcReactions.length;
+                const earningsAvg = reactions.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d ?? "0")), 0) / reactions.length;
+                return (
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Avg ±{fomcAvg.toFixed(1)}% on Fed days vs ±{earningsAvg.toFixed(1)}% on earnings days
+                  </p>
+                );
+              })()}
+              <ReactionsTable reactions={fomcReactions} mode="fed" />
             </>
           )}
         </section>
