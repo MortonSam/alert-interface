@@ -14,6 +14,7 @@ import {
   type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult,
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
+  type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
 } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
@@ -1005,15 +1006,14 @@ function Stat({ label, value }: { label: string; value: string | null | undefine
 
 // ── Section nav ──────────────────────────────────────────────────────────────
 
-const SECTIONS = [
+const BASE_SECTIONS = [
   { id: "overview", label: "Overview" },
   { id: "catalysts", label: "Catalysts" },
   { id: "history", label: "History" },
   { id: "market-view", label: "Options" },
-  { id: "research", label: "Research" },
 ] as const;
 
-function SectionNav() {
+function SectionNav({ sections }: { sections: readonly { id: string; label: string }[] }) {
   const [active, setActive] = useState<string>("overview");
 
   useEffect(() => {
@@ -1021,8 +1021,8 @@ function SectionNav() {
     const THRESHOLD = 100;
 
     function computeActive() {
-      let current: string = SECTIONS[0].id;
-      for (const s of SECTIONS) {
+      let current: string = sections[0].id;
+      for (const s of sections) {
         const el = document.getElementById(s.id);
         if (el && el.getBoundingClientRect().top <= THRESHOLD) {
           current = s.id;
@@ -1046,12 +1046,12 @@ function SectionNav() {
       window.removeEventListener("scroll", onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, []);
+  }, [sections]);
 
   return (
     <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8 mb-8">
       <div className="max-w-4xl mx-auto flex gap-1 overflow-x-auto py-2">
-        {SECTIONS.map((s) => (
+        {sections.map((s) => (
           <a
             key={s.id}
             href={`#${s.id}`}
@@ -1239,6 +1239,14 @@ export default function TickerPage() {
   const [newsStatus, setNewsStatus]   = useState<"loading" | "done" | "empty" | "error">("loading");
   const [newsExpanded, setNewsExpanded] = useState(false);
 
+  // Positions (theses)
+  const [theses, setTheses]           = useState<Thesis[]>([]);
+  const [thesesLoaded, setThesesLoaded] = useState(false);
+  const [optionMarks, setOptionMarks] = useState<Record<string, ThesisMarkRead | "loading" | "error">>({});
+  const [stockMarks, setStockMarks]   = useState<Record<string, ThesisStockMarkRead | "loading" | "error">>({});
+  const [marksAsOf, setMarksAsOf]     = useState<Date | null>(null);
+  const [marksRefreshing, setMarksRefreshing] = useState(false);
+
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   // Single-ticker lookup (replaces fetch-all-tickers)
@@ -1419,6 +1427,55 @@ export default function TickerPage() {
     void handleGenerate();
   }
 
+  // ── Theses (positions) ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    api.theses
+      .list({ symbol: upperSymbol })
+      .then((rows) => { setTheses(rows); setThesesLoaded(true); })
+      .catch(() => setThesesLoaded(true));
+  }, [upperSymbol]);
+
+  const fetchMarks = useCallback((thesisList: Thesis[]) => {
+    const open = thesisList.filter((t) => t.status === "open" || t.status === "needs_manual_resolution");
+    if (open.length === 0) { setMarksAsOf(new Date()); return; }
+    setMarksRefreshing(true);
+    const promises = open.map((t) => {
+      const hasOption = t.option_type && t.strike;
+      if (hasOption) {
+        setOptionMarks((prev) => ({ ...prev, [t.id]: "loading" }));
+        return api.theses.mark(t.id)
+          .then((m) => setOptionMarks((prev) => ({ ...prev, [t.id]: m })))
+          .catch(() => setOptionMarks((prev) => ({ ...prev, [t.id]: "error" })));
+      } else {
+        setStockMarks((prev) => ({ ...prev, [t.id]: "loading" }));
+        return api.theses.stockMark(t.id)
+          .then((m) => setStockMarks((prev) => ({ ...prev, [t.id]: m })))
+          .catch(() => setStockMarks((prev) => ({ ...prev, [t.id]: "error" })));
+      }
+    });
+    Promise.allSettled(promises).then(() => {
+      setMarksAsOf(new Date());
+      setMarksRefreshing(false);
+    });
+  }, []);
+
+  // Fetch marks once when theses arrive
+  const marksFetched = useRef(false);
+  useEffect(() => {
+    if (!thesesLoaded || theses.length === 0 || marksFetched.current) return;
+    marksFetched.current = true;
+    fetchMarks(theses);
+  }, [thesesLoaded, theses, fetchMarks]);
+
+  const hasPositions = thesesLoaded && theses.length > 0;
+
+  const sections = useMemo(() => [
+    ...BASE_SECTIONS,
+    ...(hasPositions ? [{ id: "positions", label: "Positions" }] : []),
+    { id: "research", label: "Research" },
+  ], [hasPositions]);
+
   if (tickerStatus === "missing") notFound();
 
   if (tickerStatus === "loading") {
@@ -1528,7 +1585,7 @@ export default function TickerPage() {
         </section>
 
         {/* Section nav */}
-        <SectionNav />
+        <SectionNav sections={sections} />
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
         <section id="catalysts" className="scroll-mt-28">
@@ -1774,6 +1831,197 @@ export default function TickerPage() {
             </p>
           )}
         </section>
+
+        {/* ── POSITIONS ──────────────────────────────────────────────── */}
+        {hasPositions && (() => {
+          const openTheses = theses.filter((t) => t.status === "open" || t.status === "needs_manual_resolution");
+          const resolvedTheses = theses.filter((t) => t.status === "resolved");
+          const resolvedCapped = resolvedTheses.slice(0, 3);
+          const resolvedHidden = resolvedTheses.length - resolvedCapped.length;
+
+          function fmtLeg(t: Thesis): string {
+            if (!t.option_type || !t.strike) {
+              const ep = t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : "—";
+              return `stock from ${ep}`;
+            }
+            const s1 = parseFloat(t.strike).toFixed(0);
+            const exp = t.option_expiration
+              ? formatEventDate(t.option_expiration)
+              : "—";
+            if (t.strike2) {
+              const s2 = parseFloat(t.strike2).toFixed(0);
+              const name = t.option_type === "call" ? "bull call spread" : "bear put spread";
+              return `${name} $${s1}/$${s2} exp ${exp}`;
+            }
+            return `long $${s1} ${t.option_type} exp ${exp}`;
+          }
+
+          function positionPnl(t: Thesis): { str: string; color: string } | null {
+            const hasOption = t.option_type && t.strike;
+            if (hasOption) {
+              const m = optionMarks[t.id];
+              if (!m || m === "loading" || m === "error") return null;
+              if (m.pnl_dollars == null) return null;
+              const dollars = m.pnl_dollars;
+              const pct = m.pnl_pct;
+              const sign = dollars >= 0 ? "+" : "";
+              const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
+              return {
+                str: `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`,
+                color: dollars > 0 ? "text-success" : dollars < 0 ? "text-destructive" : "text-foreground",
+              };
+            } else {
+              const m = stockMarks[t.id];
+              if (!m || m === "loading" || m === "error") return null;
+              if (m.pct_from_entry == null) return null;
+              const pct = m.pct_from_entry;
+              const sign = pct >= 0 ? "+" : "";
+              return {
+                str: `${sign}${pct.toFixed(2)}%`,
+                color: pct > 0 ? "text-success" : pct < 0 ? "text-destructive" : "text-foreground",
+              };
+            }
+          }
+
+          function positionCurrent(t: Thesis): string {
+            const hasOption = t.option_type && t.strike;
+            if (hasOption) {
+              const m = optionMarks[t.id];
+              if (!m || m === "loading" || m === "error") return "—";
+              if (m.current_mid1 == null) return "—";
+              // Spread: show net mid (long − short); single leg: show mid
+              if (t.strike2 && m.current_mid2 != null) {
+                return `$${(m.current_mid1 - m.current_mid2).toFixed(2)}`;
+              }
+              return `$${m.current_mid1.toFixed(2)}`;
+            } else {
+              const m = stockMarks[t.id];
+              if (!m || m === "loading" || m === "error") return "—";
+              if (m.current_price == null) return "—";
+              return `$${m.current_price.toFixed(2)}`;
+            }
+          }
+
+          function statusChip(t: Thesis) {
+            if (t.status === "open") return <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">Open</span>;
+            if (t.status === "needs_manual_resolution") return <span className="text-xs bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded">Due</span>;
+            if (t.status === "resolved") {
+              if (t.target_reached) return <span className="text-xs bg-success/10 text-success px-1.5 py-0.5 rounded">Hit target</span>;
+              if (t.direction_correct === false) return <span className="text-xs bg-destructive/10 text-destructive px-1.5 py-0.5 rounded">Stopped</span>;
+              return <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">Resolved</span>;
+            }
+            return null;
+          }
+
+          const isMarkLoading = (t: Thesis) => {
+            const hasOption = t.option_type && t.strike;
+            if (hasOption) return optionMarks[t.id] === "loading";
+            return stockMarks[t.id] === "loading";
+          };
+
+          function renderThesisRow(t: Thesis, muted = false) {
+            const pnl = positionPnl(t);
+            const loading = isMarkLoading(t);
+            const entryStr = t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : "—";
+            const hasOption = !!(t.option_type && t.strike);
+            let entryLabel = entryStr;
+            if (hasOption && t.entry_premium) {
+              if (t.strike2 && t.entry_premium2) {
+                // Spread: show net debit
+                const net = Math.abs(parseFloat(t.entry_premium) - parseFloat(t.entry_premium2));
+                entryLabel = `$${net.toFixed(2)} net debit`;
+              } else {
+                entryLabel = `$${parseFloat(t.entry_premium).toFixed(2)}`;
+              }
+            }
+            return (
+              <div
+                key={t.id}
+                className={cn(
+                  "rounded-lg border bg-card px-4 py-3 space-y-1",
+                  muted && "opacity-50",
+                )}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={cn(
+                      "text-sm font-medium capitalize",
+                      t.direction === "bullish" ? "text-success" : t.direction === "bearish" ? "text-destructive" : "text-muted-foreground",
+                    )}>
+                      {t.direction}
+                    </span>
+                    <span className="text-sm text-muted-foreground">—</span>
+                    <span className="text-sm">{fmtLeg(t)}</span>
+                    {statusChip(t)}
+                  </div>
+                  {pnl && !muted && (
+                    <span className={cn("text-sm font-mono font-medium tabular-nums", pnl.color)}>
+                      {pnl.str}
+                    </span>
+                  )}
+                  {loading && !muted && (
+                    <span className="text-xs text-muted-foreground animate-pulse">loading...</span>
+                  )}
+                </div>
+                {!muted && (
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span>Entry: <span className="font-mono text-foreground">{entryLabel}</span></span>
+                    <span>Current: <span className="font-mono text-foreground">{positionCurrent(t)}</span></span>
+                    {t.price_target && (
+                      <span>Target: <span className="font-mono text-foreground">${parseFloat(t.price_target).toFixed(2)}</span></span>
+                    )}
+                    <span>By: <span className="font-mono text-foreground">{formatEventDate(t.target_date)}</span></span>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <section id="positions" className="mt-10 scroll-mt-28">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Your Positions</h2>
+                <div className="flex items-center gap-2">
+                  {marksAsOf && (
+                    <span className="text-xs text-muted-foreground">
+                      marks as of {marksAsOf.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => fetchMarks(theses)}
+                    disabled={marksRefreshing}
+                    className={cn(
+                      "text-muted-foreground hover:text-foreground transition-colors p-1 rounded",
+                      marksRefreshing && "animate-spin",
+                    )}
+                    title="Refresh marks"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                      <path d="M3 3v5h5" />
+                      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                      <path d="M16 21h5v-5" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {openTheses.map((t) => renderThesisRow(t))}
+                {resolvedCapped.map((t) => renderThesisRow(t, true))}
+                {resolvedHidden > 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-1">
+                    +{resolvedHidden} more resolved — <Link href="/theses" className="underline hover:text-foreground">view all in Tracker</Link>
+                  </p>
+                )}
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                <Link href={`/build?ticker=${upperSymbol}`} className="hover:text-foreground transition-colors">
+                  Build another trade on {upperSymbol} →
+                </Link>
+              </p>
+            </section>
+          );
+        })()}
 
         {/* ── RESEARCH NOTE ───────────────────────────────────────────── */}
         <section id="research" className="mt-10 mb-10 scroll-mt-28">
