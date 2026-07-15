@@ -7,10 +7,10 @@ Implemented
   get_daily_candles(symbol, days)         → list of DayCandle dicts
   get_company_news(symbol, from_date, to_date) → list of article dicts
   get_basic_financials(symbol)               → raw metric dict from /stock/metric
+  get_earnings_surprises(symbol)             → list of quarterly EPS + revenue surprise dicts
 
 Stubbed (raise NotImplementedError until needed)
 -----------
-  get_earnings_estimates(symbol)
   get_recommendation_trends(symbol)
 
 Finnhub field key reference
@@ -174,11 +174,15 @@ class FinnhubClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def get_earnings_estimates(self, symbol: str) -> dict[str, Any]:
-        """Forward EPS estimates by quarter.
-        Finnhub endpoint: GET /stock/eps-estimate?symbol=
+    async def get_earnings_surprises(self, symbol: str) -> list[dict[str, Any]]:
+        """Historical EPS + revenue surprises per quarter.
+        Finnhub endpoint: GET /stock/earnings?symbol=
+        Each dict: actual, estimate, period, quarter, year,
+        revenueActual, revenueEstimate, surprise, surprisePercent, symbol.
         """
-        raise NotImplementedError
+        resp = await self._client.get("/stock/earnings", params={"symbol": symbol})
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_recommendation_trends(self, symbol: str) -> list[dict[str, Any]]:
         """Monthly analyst buy / hold / sell consensus trends.
