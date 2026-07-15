@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from datetime import date, timedelta
 from decimal import Decimal
@@ -34,6 +35,8 @@ from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.scripts.seed_historical_reactions import _compute_outcome
 from app.services.finnhub_client import FinnhubClient
+
+logger = logging.getLogger(__name__)
 
 # ── Rate-limit tuning ────────────────────────────────────────────────────────
 
@@ -83,6 +86,11 @@ async def _enrich_ticker(
     if not quarters:
         return 0, 0, 0
 
+    # Warn once per ticker if Finnhub returned no revenue for any quarter
+    if not any(q.get("revenueActual") is not None for q in quarters):
+        logger.warning("%s: Finnhub returned all-null revenue across %d quarters",
+                       ticker.symbol, len(quarters))
+
     async with AsyncSessionLocal() as session:
         rows = (
             await session.execute(
@@ -98,7 +106,7 @@ async def _enrich_ticker(
         if not rows:
             return 0, 0, 0
 
-        updated = 0
+        revenue_updated = 0
         unmatched = 0
         eps_backfilled = 0
 
@@ -108,11 +116,18 @@ async def _enrich_ticker(
                 unmatched += 1
                 continue
 
-            # Always write revenue
+            # Write revenue only when non-null
             rev_est = match.get("revenueEstimate")
             rev_act = match.get("revenueActual")
-            row.revenue_estimate = int(rev_est) if rev_est is not None else None
-            row.revenue_actual = int(rev_act) if rev_act is not None else None
+            got_revenue = False
+            if rev_est is not None:
+                row.revenue_estimate = int(rev_est)
+                got_revenue = True
+            if rev_act is not None:
+                row.revenue_actual = int(rev_act)
+                got_revenue = True
+            if got_revenue:
+                revenue_updated += 1
 
             # Backfill EPS only if DB value is NULL
             eps_changed = False
@@ -127,11 +142,9 @@ async def _enrich_ticker(
                 row.outcome = _compute_outcome(row.eps_estimate, row.eps_actual)
                 eps_backfilled += 1
 
-            updated += 1
-
         await session.commit()
 
-    return updated, unmatched, eps_backfilled
+    return revenue_updated, unmatched, eps_backfilled
 
 
 # ── Retry wrapper ─────────────────────────────────────────────────────────────
@@ -215,9 +228,13 @@ async def main() -> int:
                     total_unmatched += unm
                     total_eps += eps
                     total_retries += retries
-                    if upd:
-                        print(f"  {ticker.symbol}: {upd} rows updated"
-                              f"{f', {eps} EPS backfilled' if eps else ''}")
+                    if upd or eps:
+                        parts = []
+                        if upd:
+                            parts.append(f"{upd} revenue rows")
+                        if eps:
+                            parts.append(f"{eps} EPS backfilled")
+                        print(f"  {ticker.symbol}: {', '.join(parts)}")
                 else:
                     failed_count += 1
                     total_retries += retries
