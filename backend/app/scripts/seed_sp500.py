@@ -185,6 +185,7 @@ async def build_skip_set(session) -> set[str]:
     rows = (await session.execute(
         select(Ticker.symbol)
         .where(
+            Ticker.is_active.is_(True),
             Ticker.market_cap.is_not(None),
             Ticker.updated_at >= cutoff,
         )

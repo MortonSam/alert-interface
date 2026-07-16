@@ -195,7 +195,7 @@ async def main() -> int:
         else:
             tickers = list(
                 (await session.execute(
-                    select(Ticker).order_by(Ticker.symbol)
+                    select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
                 )).scalars().all()
             )
 

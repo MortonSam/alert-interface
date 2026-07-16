@@ -315,10 +315,12 @@ async def main_bulk(limit: int | None) -> int:
 
     print(f"Found {len(fomc_dates)} FOMC dates in lookback window.", flush=True)
 
-    # 2. Load all DB tickers
+    # 2. Load all active DB tickers
     async with AsyncSessionLocal() as session:
         all_tickers: list[Ticker] = list(
-            (await session.execute(select(Ticker).order_by(Ticker.symbol))).scalars().all()
+            (await session.execute(
+                select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
+            )).scalars().all()
         )
 
     candidates = all_tickers

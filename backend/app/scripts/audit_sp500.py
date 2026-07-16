@@ -23,6 +23,7 @@ from app.database import AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
+from app.scripts.seed_sp500 import load_sp500_list
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
@@ -361,6 +362,49 @@ async def audit_spot_check(session) -> None:
         print()
 
 
+# ── S&P 500 membership diff ──────────────────────────────────────────────────
+
+async def audit_membership_diff(session) -> None:
+    header("MEMBERSHIP DIFF — DB vs CURRENT S&P 500")
+
+    sp500 = load_sp500_list()
+    sp500_symbols = {r["symbol"] for r in sp500}
+
+    db_rows = (await session.execute(
+        select(Ticker.symbol, Ticker.name, Ticker.is_active)
+        .order_by(Ticker.symbol)
+    )).all()
+    db_active = {r.symbol for r in db_rows if r.is_active}
+    db_all = {r.symbol for r in db_rows}
+    db_name = {r.symbol: r.name for r in db_rows}
+
+    in_db_not_sp500 = sorted(db_active - sp500_symbols)
+    in_sp500_not_db = sorted(sp500_symbols - db_all)
+    inactive = sorted(r.symbol for r in db_rows if not r.is_active)
+
+    subheader(f"Active in DB but NOT in S&P 500: {len(in_db_not_sp500)}  (deactivation candidates)")
+    if in_db_not_sp500:
+        for sym in in_db_not_sp500:
+            print(f"    ⚠ {sym:<8} {(db_name.get(sym) or '')[:45]}")
+    else:
+        print("    ✓ None")
+
+    subheader(f"In S&P 500 but NOT in DB: {len(in_sp500_not_db)}  (seeding candidates)")
+    if in_sp500_not_db:
+        sp500_name = {r["symbol"]: r["name"] for r in sp500}
+        for sym in in_sp500_not_db:
+            print(f"    ⚠ {sym:<8} {(sp500_name.get(sym) or '')[:45]}")
+    else:
+        print("    ✓ None")
+
+    subheader(f"Already deactivated in DB: {len(inactive)}")
+    if inactive:
+        for sym in inactive:
+            print(f"      {sym:<8} {(db_name.get(sym) or '')[:45]}")
+    else:
+        print("    (none)")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
@@ -385,6 +429,7 @@ async def main() -> None:
         await audit_events_monthly_distribution(session)
         await audit_events_today(session)
         await audit_spot_check(session)
+        await audit_membership_diff(session)
 
     print("\n" + "█" * 60)
     print("  AUDIT COMPLETE — review flagged items above")

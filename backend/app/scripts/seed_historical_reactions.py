@@ -434,10 +434,12 @@ async def process_ticker_bulk(ticker: Ticker, loop) -> tuple[bool, int, int, int
 # ── Bulk main ─────────────────────────────────────────────────────────────────
 
 async def main_bulk(retry_only: bool, limit: int | None, force: bool = False) -> int:
-    # 1. Load all DB tickers
+    # 1. Load all active DB tickers
     async with AsyncSessionLocal() as session:
         all_tickers: list[Ticker] = list(
-            (await session.execute(select(Ticker).order_by(Ticker.symbol))).scalars().all()
+            (await session.execute(
+                select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
+            )).scalars().all()
         )
 
     by_symbol = {t.symbol: t for t in all_tickers}

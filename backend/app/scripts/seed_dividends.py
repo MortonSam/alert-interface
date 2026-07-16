@@ -135,7 +135,9 @@ async def main() -> int:
 
     async with AsyncSessionLocal() as session:
         all_tickers: list[Ticker] = list(
-            (await session.execute(select(Ticker).order_by(Ticker.symbol))).scalars().all()
+            (await session.execute(
+                select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
+            )).scalars().all()
         )
 
     candidates = all_tickers
