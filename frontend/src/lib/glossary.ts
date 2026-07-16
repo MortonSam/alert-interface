@@ -38,6 +38,8 @@ const GLOSSARY: Record<string, string> = {
     "The date a stock begins trading without its upcoming dividend. Buy before this date to receive the payout.",
   "stock-split":
     "A corporate action that divides existing shares into multiple new shares, lowering the per-share price proportionally while keeping total market value unchanged.",
+  "index-removal":
+    "This stock was removed from the S&P 500 index. It remains tradable and data continues to update normally.",
 };
 
 export default GLOSSARY;

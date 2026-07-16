@@ -1526,6 +1526,15 @@ export default function TickerPage() {
               {ticker.name && (
                 <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
               )}
+              {!ticker.index_member && (
+                <div className="mt-1.5">
+                  <ExplainTip term="index-removal">
+                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
+                      No longer in the S&amp;P 500
+                    </span>
+                  </ExplainTip>
+                </div>
+              )}
             </div>
             <Link
               href={`/build?ticker=${ticker.symbol}`}

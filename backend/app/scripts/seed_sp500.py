@@ -256,23 +256,25 @@ async def upsert_ticker(session, data: dict) -> Ticker:
     stmt = (
         pg_insert(Ticker)
         .values(
-            symbol     = data["symbol"],
-            name       = data["name"],
-            sector     = data["sector"],
-            industry   = data["industry"],
-            exchange   = data["exchange"],
-            market_cap = data["market_cap"],
-            is_active  = True,
+            symbol       = data["symbol"],
+            name         = data["name"],
+            sector       = data["sector"],
+            industry     = data["industry"],
+            exchange     = data["exchange"],
+            market_cap   = data["market_cap"],
+            is_active    = True,
+            index_member = True,
         )
         .on_conflict_do_update(
             index_elements=["symbol"],
             set_=dict(
-                name       = data["name"],
-                sector     = data["sector"],
-                industry   = data["industry"],
-                exchange   = data["exchange"],
-                market_cap = data["market_cap"],
-                updated_at = datetime.now(timezone.utc),
+                name         = data["name"],
+                sector       = data["sector"],
+                industry     = data["industry"],
+                exchange     = data["exchange"],
+                market_cap   = data["market_cap"],
+                index_member = True,
+                updated_at   = datetime.now(timezone.utc),
             ),
         )
         .returning(Ticker)

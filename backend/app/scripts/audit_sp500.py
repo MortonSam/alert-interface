@@ -370,37 +370,48 @@ async def audit_membership_diff(session) -> None:
     sp500 = load_sp500_list()
     sp500_symbols = {r["symbol"] for r in sp500}
 
-    db_rows = (await session.execute(
-        select(Ticker.symbol, Ticker.name, Ticker.is_active)
-        .order_by(Ticker.symbol)
-    )).all()
-    db_active = {r.symbol for r in db_rows if r.is_active}
-    db_all = {r.symbol for r in db_rows}
-    db_name = {r.symbol: r.name for r in db_rows}
+    db_tickers = (await session.execute(
+        select(Ticker).order_by(Ticker.symbol)
+    )).scalars().all()
+    db_by_symbol = {t.symbol: t for t in db_tickers}
+    db_active_symbols = {t.symbol for t in db_tickers if t.is_active}
+    db_all_symbols = {t.symbol for t in db_tickers}
 
-    in_db_not_sp500 = sorted(db_active - sp500_symbols)
-    in_sp500_not_db = sorted(sp500_symbols - db_all)
-    inactive = sorted(r.symbol for r in db_rows if not r.is_active)
+    leavers = sorted(db_active_symbols - sp500_symbols)
+    missing = sorted(sp500_symbols - db_all_symbols)
+    inactive = sorted(t.symbol for t in db_tickers if not t.is_active)
 
-    subheader(f"Active in DB but NOT in S&P 500: {len(in_db_not_sp500)}  (deactivation candidates)")
-    if in_db_not_sp500:
-        for sym in in_db_not_sp500:
-            print(f"    ⚠ {sym:<8} {(db_name.get(sym) or '')[:45]}")
+    # Tag leavers as index_member=False (keep active)
+    tagged = []
+    for sym in leavers:
+        t = db_by_symbol[sym]
+        if t.index_member:
+            t.index_member = False
+            tagged.append(sym)
+
+    if tagged:
+        await session.commit()
+
+    subheader(f"Not in S&P 500: {len(leavers)}  (tagged index_member=false, still active)")
+    if leavers:
+        for sym in leavers:
+            freshly = " ← newly tagged" if sym in tagged else ""
+            print(f"    ⚠ {sym:<8} {(db_by_symbol[sym].name or '')[:40]}{freshly}")
     else:
         print("    ✓ None")
 
-    subheader(f"In S&P 500 but NOT in DB: {len(in_sp500_not_db)}  (seeding candidates)")
-    if in_sp500_not_db:
+    subheader(f"In S&P 500 but NOT in DB: {len(missing)}  (seeding candidates)")
+    if missing:
         sp500_name = {r["symbol"]: r["name"] for r in sp500}
-        for sym in in_sp500_not_db:
+        for sym in missing:
             print(f"    ⚠ {sym:<8} {(sp500_name.get(sym) or '')[:45]}")
     else:
         print("    ✓ None")
 
-    subheader(f"Already deactivated in DB: {len(inactive)}")
+    subheader(f"Deactivated (is_active=false): {len(inactive)}")
     if inactive:
         for sym in inactive:
-            print(f"      {sym:<8} {(db_name.get(sym) or '')[:45]}")
+            print(f"      {sym:<8} {(db_by_symbol[sym].name or '')[:45]}")
     else:
         print("    (none)")
 

@@ -12,6 +12,7 @@ class TickerBase(BaseModel):
     exchange: str | None = None
     market_cap: int | None = None
     is_active: bool = True
+    index_member: bool = True
 
 
 class TickerCreate(TickerBase):
@@ -25,6 +26,7 @@ class TickerUpdate(BaseModel):
     exchange: str | None = None
     market_cap: int | None = None
     is_active: bool | None = None
+    index_member: bool | None = None
 
 
 class TickerRead(TickerBase):

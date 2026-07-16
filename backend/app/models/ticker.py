@@ -26,6 +26,7 @@ class Ticker(Base):
     exchange: Mapped[str | None] = mapped_column(String(50))
     market_cap: Mapped[int | None] = mapped_column(BigInteger)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    index_member: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
