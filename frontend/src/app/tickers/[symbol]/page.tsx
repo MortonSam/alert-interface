@@ -94,6 +94,7 @@ const EVENT_STYLES: Record<EventType, { label: string; cls: string }> = {
   ex_dividend:    { label: "Ex-Div",         cls: "bg-secondary text-muted-foreground" },
   product_launch: { label: "Launch",         cls: "bg-primary/10 text-primary" },
   fomc:           { label: "FOMC",           cls: "bg-violet/10 text-violet" },
+  split:          { label: "Split",          cls: "bg-orange-500/10 text-orange-500" },
   other:          { label: "Other",          cls: "bg-muted text-muted-foreground" },
 };
 
@@ -145,8 +146,10 @@ function CatalystRow({ event }: { event: Event }) {
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{event.title}</span>
-          {event.event_type === "ex_dividend" ? (
-            <ExplainTip term="ex-dividend"><EventTypeBadge type={event.event_type} /></ExplainTip>
+          {(event.event_type === "ex_dividend" || event.event_type === "split") ? (
+            <ExplainTip term={event.event_type === "ex_dividend" ? "ex-dividend" : "stock-split"}>
+              <EventTypeBadge type={event.event_type} />
+            </ExplainTip>
           ) : (
             <EventTypeBadge type={event.event_type} />
           )}

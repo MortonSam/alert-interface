@@ -36,6 +36,8 @@ const GLOSSARY: Record<string, string> = {
     "The price paid to buy an option. This is the most you can lose as a buyer.",
   "ex-dividend":
     "The date a stock begins trading without its upcoming dividend. Buy before this date to receive the payout.",
+  "stock-split":
+    "A corporate action that divides existing shares into multiple new shares, lowering the per-share price proportionally while keeping total market value unchanged.",
 };
 
 export default GLOSSARY;

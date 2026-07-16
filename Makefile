@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-reactions-all seed-reactions-retry seed-sp500 seed-sp500-retry seed-sp500-force validate research-stats refresh enrich-revenue install run
+.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-reactions-all seed-reactions-retry seed-sp500 seed-sp500-retry seed-sp500-force validate research-stats refresh enrich-revenue seed-splits install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -58,6 +58,9 @@ refresh:
 
 enrich-revenue:
 	docker compose exec backend python -m app.scripts.enrich_revenue
+
+seed-splits:
+	docker compose exec backend python -m app.scripts.seed_splits
 
 research-stats:
 	docker compose exec db psql -U alert -d alertdb -c \
