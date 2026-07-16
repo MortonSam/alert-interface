@@ -1018,12 +1018,14 @@ const BASE_SECTIONS = [
 
 function SectionNav({ sections }: { sections: readonly { id: string; label: string }[] }) {
   const [active, setActive] = useState<string>("overview");
+  const clickLockRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Threshold: header (52px) + nav (~44px) + small buffer
     const THRESHOLD = 100;
 
     function computeActive() {
+      if (clickLockRef.current) return;         // locked during smooth scroll
       let current: string = sections[0].id;
       for (const s of sections) {
         const el = document.getElementById(s.id);
@@ -1043,11 +1045,37 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
       });
     }
 
+    // Release click lock when scrolling settles
+    let debounceTimer = 0;
+    function onScrollEnd() {
+      if (!clickLockRef.current) return;
+      clickLockRef.current = null;
+      computeActive();
+    }
+    function onScrollForDebounce() {
+      if (!clickLockRef.current) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(onScrollEnd, 150);
+    }
+
+    const supportsScrollEnd = "onscrollend" in window;
+
     computeActive();
     window.addEventListener("scroll", onScroll, { passive: true });
+    if (supportsScrollEnd) {
+      window.addEventListener("scrollend", onScrollEnd);
+    } else {
+      window.addEventListener("scroll", onScrollForDebounce, { passive: true });
+    }
     return () => {
       window.removeEventListener("scroll", onScroll);
+      if (supportsScrollEnd) {
+        window.removeEventListener("scrollend", onScrollEnd);
+      } else {
+        window.removeEventListener("scroll", onScrollForDebounce);
+      }
       if (raf) cancelAnimationFrame(raf);
+      clearTimeout(debounceTimer);
     };
   }, [sections]);
 
@@ -1060,6 +1088,7 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
             href={`#${s.id}`}
             onClick={(e) => {
               e.preventDefault();
+              clickLockRef.current = s.id;
               setActive(s.id);
               document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
