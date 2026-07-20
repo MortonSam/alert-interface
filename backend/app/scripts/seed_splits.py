@@ -1,6 +1,7 @@
-"""Seed stock-split dates from yfinance into the events table.
+"""Seed stock-split history from yfinance into the events table.
 
-For each ticker, fetches split info from yfinance's Ticker.info and .splits,
+Fetches the full .splits Series for each active ticker, filters out
+non-split adjustment factors (spinoff ratios where either side > 50),
 and upserts into events with event_type=SPLIT.
 
 CLI
@@ -14,7 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date
 
 import yfinance as yf
 from sqlalchemy import select
@@ -45,55 +46,51 @@ def _is_real_split_ratio(ratio_str: str) -> bool:
         return False
 
 
+def _format_ratio(factor: float) -> str:
+    """Convert yfinance split factor to 'X:1' or '1:X' string."""
+    if factor >= 1:
+        int_factor = int(factor)
+        if factor == int_factor:
+            return f"{int_factor}:1"
+        # Non-integer forward split (rare, e.g., 1.5:1 = 3:2)
+        from fractions import Fraction
+        frac = Fraction(factor).limit_denominator(100)
+        return f"{frac.numerator}:{frac.denominator}"
+    else:
+        # Reverse split: factor < 1, e.g., 0.5 → 1:2
+        inv = 1 / factor
+        int_inv = int(round(inv))
+        return f"1:{int_inv}"
+
+
 # ── yfinance fetch ───────────────────────────────────────────────────────────
 
-def _fetch_split_info_sync(symbol: str) -> dict | None:
-    """Fetch upcoming/recent stock split info from yfinance.
-    Returns dict with keys: split_date, split_ratio, or None if unavailable."""
+def _fetch_all_splits_sync(symbol: str) -> list[dict]:
+    """Fetch full split history from yfinance. Returns list of {split_date, split_ratio}."""
     try:
         ticker = yf.Ticker(symbol)
-        info = ticker.info
-    except Exception:
-        return None
-
-    cutoff = date.today() - timedelta(days=30)
-
-    # Check .info for lastSplitDate and lastSplitFactor
-    split_ts = info.get("lastSplitDate")
-    split_factor = info.get("lastSplitFactor")
-    if split_ts is not None and split_factor:
-        try:
-            split_date = datetime.utcfromtimestamp(split_ts).date()
-        except (TypeError, ValueError, OSError):
-            split_date = None
-
-        if split_date is not None and split_date >= cutoff:
-            ratio_str = str(split_factor)
-            if not _is_real_split_ratio(ratio_str):
-                tqdm.write(f"  ⊘ {symbol}: skipped non-split adjustment factor {ratio_str}")
-                return None
-            return {"split_date": split_date, "split_ratio": ratio_str}
-
-    # Also check .splits Series for any entries within window
-    try:
         splits = ticker.splits
-        if splits is not None and not splits.empty:
-            for ts, ratio in splits.items():
-                try:
-                    split_date = ts.date()
-                except AttributeError:
-                    continue
-                if split_date >= cutoff:
-                    # Format ratio: e.g. 4.0 → "4:1"
-                    ratio_str = f"{int(ratio)}:1" if ratio == int(ratio) else str(ratio)
-                    if not _is_real_split_ratio(ratio_str):
-                        tqdm.write(f"  ⊘ {symbol}: skipped non-split adjustment factor {ratio_str}")
-                        return None
-                    return {"split_date": split_date, "split_ratio": ratio_str}
     except Exception:
-        pass
+        return []
 
-    return None
+    if splits is None or splits.empty:
+        return []
+
+    results = []
+    for ts, factor in splits.items():
+        try:
+            split_date = ts.date()
+        except AttributeError:
+            continue
+
+        ratio_str = _format_ratio(factor)
+        if not _is_real_split_ratio(ratio_str):
+            tqdm.write(f"  ⊘ {symbol}: skipped non-split adjustment factor {ratio_str} on {split_date}")
+            continue
+
+        results.append({"split_date": split_date, "split_ratio": ratio_str})
+
+    return results
 
 
 # ── DB upsert ────────────────────────────────────────────────────────────────
@@ -130,21 +127,22 @@ async def _upsert_split_event(
 
 # ── Per-ticker bulk processing ───────────────────────────────────────────────
 
-async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, bool]:
-    """Fetch + upsert with retries. Returns (ok, inserted)."""
+async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
+    """Fetch + upsert all splits with retries. Returns (ok, inserted_count)."""
     last_exc: Exception | None = None
     for attempt, delay in enumerate(RETRY_DELAYS, start=1):
         try:
-            info = await loop.run_in_executor(
-                None, _fetch_split_info_sync, ticker.symbol
+            splits = await loop.run_in_executor(
+                None, _fetch_all_splits_sync, ticker.symbol
             )
-            if info is None:
-                return True, False  # ok but no split data
+            if not splits:
+                return True, 0
 
+            inserted = 0
             async with AsyncSessionLocal() as session:
-                inserted = await _upsert_split_event(
-                    session, ticker, info["split_date"], info["split_ratio"]
-                )
+                for s in splits:
+                    if await _upsert_split_event(session, ticker, s["split_date"], s["split_ratio"]):
+                        inserted += 1
                 await session.commit()
             return True, inserted
         except Exception as exc:
@@ -153,13 +151,13 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, bool]:
                 await asyncio.sleep(delay)
 
     tqdm.write(f"  ✗ {ticker.symbol}: failed after {len(RETRY_DELAYS)} attempts — {last_exc}")
-    return False, False
+    return False, 0
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed stock-split dates from yfinance")
+    parser = argparse.ArgumentParser(description="Seed stock-split history from yfinance")
     parser.add_argument("--limit", type=int, default=None, metavar="N",
                         help="Cap the candidate list at N (for testing)")
     args = parser.parse_args()
@@ -182,7 +180,7 @@ async def main() -> int:
 
     loop = asyncio.get_event_loop()
     succeeded = 0
-    inserted_count = 0
+    inserted_total = 0
     failed_list: list[str] = []
 
     batches = [candidates[i:i + BATCH_SIZE] for i in range(0, len(candidates), BATCH_SIZE)]
@@ -195,19 +193,18 @@ async def main() -> int:
             for ticker, (ok, inserted) in zip(batch, results):
                 if ok:
                     succeeded += 1
-                    if inserted:
-                        inserted_count += 1
+                    inserted_total += inserted
                 else:
                     failed_list.append(ticker.symbol)
                 bar.update(1)
-                bar.set_postfix(ok=succeeded, new=inserted_count, fail=len(failed_list))
+                bar.set_postfix(ok=succeeded, new=inserted_total, fail=len(failed_list))
 
             if batch_idx < len(batches) - 1:
                 await asyncio.sleep(BATCH_SLEEP)
 
     print()
     print(f"{'─' * 50}")
-    print(f"  ✓ {succeeded} tickers processed  📊 {inserted_count} split events inserted  ✗ {len(failed_list)} failed")
+    print(f"  ✓ {succeeded} tickers processed  📊 {inserted_total} split events inserted  ✗ {len(failed_list)} failed")
     if failed_list:
         print(f"\n  Failed: {', '.join(failed_list)}")
     print(f"{'─' * 50}")

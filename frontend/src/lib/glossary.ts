@@ -40,6 +40,8 @@ const GLOSSARY: Record<string, string> = {
     "A corporate action that divides existing shares into multiple new shares, lowering the per-share price proportionally while keeping total market value unchanged.",
   "index-removal":
     "This stock was removed from the S&P 500 index. It remains tradable and data continues to update normally.",
+  "analyst-action":
+    "A Wall Street analyst changed their rating, price target, or coverage status on this stock.",
 };
 
 export default GLOSSARY;

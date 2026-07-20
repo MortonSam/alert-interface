@@ -31,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── Domain types (mirrors Pydantic schemas) ───────────────────────────────────
 
-export type EventType = "earnings" | "macro" | "fda" | "ex_dividend" | "product_launch" | "fomc" | "split" | "other";
+export type EventType = "earnings" | "macro" | "fda" | "ex_dividend" | "product_launch" | "fomc" | "split" | "analyst_action" | "other";
 export type DataSource = "yfinance" | "edgar" | "fred" | "fda" | "polygon" | "manual";
 
 export interface Ticker {

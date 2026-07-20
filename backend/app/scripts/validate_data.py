@@ -174,7 +174,8 @@ async def check_macro_events_with_ticker(session) -> CheckResult:
 
 async def check_ticker_events_null_ticker(session) -> CheckResult:
     ticker_types = [
-        EventType.EARNINGS, EventType.FDA, EventType.EX_DIVIDEND, EventType.PRODUCT_LAUNCH,
+        EventType.EARNINGS, EventType.FDA, EventType.EX_DIVIDEND,
+        EventType.PRODUCT_LAUNCH, EventType.SPLIT, EventType.ANALYST_ACTION,
     ]
     rows = (await session.execute(
         select(Event.id, Event.event_date, Event.title, Event.event_type)

@@ -9,6 +9,7 @@ class EventType(str, enum.Enum):
     PRODUCT_LAUNCH = "product_launch"
     FOMC = "fomc"
     SPLIT = "split"
+    ANALYST_ACTION = "analyst_action"
     OTHER = "other"
 
 

@@ -95,6 +95,7 @@ const EVENT_STYLES: Record<EventType, { label: string; cls: string }> = {
   product_launch: { label: "Launch",         cls: "bg-primary/10 text-primary" },
   fomc:           { label: "FOMC",           cls: "bg-violet/10 text-violet" },
   split:          { label: "Split",          cls: "bg-orange-500/10 text-orange-500" },
+  analyst_action: { label: "Analyst",       cls: "bg-sky-500/10 text-sky-500" },
   other:          { label: "Other",          cls: "bg-muted text-muted-foreground" },
 };
 

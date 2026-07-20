@@ -1,3 +1,4 @@
+import statistics
 import uuid
 from decimal import Decimal
 
@@ -6,10 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.schemas.historical_reaction import (
+    AnalystReactionStatsRead,
+    ConditionalEarningsRead,
     HistoricalReactionCreate,
     HistoricalReactionRead,
     ReactionSummaryRead,
@@ -129,6 +133,154 @@ async def get_reaction_summary(
         sector_avg_abs_1d=sector_avg,
         sector_peer_count=peer_count,
     )
+
+
+# ── Conditional earnings intelligence ────────────────────────────────────────
+
+MIN_QUARTERS = 8
+
+
+def _continuation_stats(
+    subset: list,
+) -> tuple[float | None, float | None, int]:
+    """Compute avg 5d move and continuation rate for a subset of reactions.
+
+    Continuation = sign(pct_change_5d) matches sign(pct_change_1d).
+    Returns (avg_5d, continuation_rate_pct, sample_size).
+    """
+    with_5d = [
+        (float(r.pct_change_1d), float(r.pct_change_5d))
+        for r in subset
+        if r.pct_change_5d is not None
+    ]
+    if not with_5d:
+        return None, None, 0
+    avg_5d = round(sum(d5 for _, d5 in with_5d) / len(with_5d), 2)
+    continued = sum(1 for d1, d5 in with_5d if (d1 >= 0) == (d5 >= 0))
+    rate = round(continued / len(with_5d) * 100, 1)
+    return avg_5d, rate, len(with_5d)
+
+
+@router.get("/conditional", response_model=ConditionalEarningsRead)
+async def get_conditional_earnings(
+    symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
+    db: AsyncSession = Depends(get_db),
+) -> ConditionalEarningsRead:
+    """Conditional earnings stats: beat/miss move profiles, follow-through, magnitude trend."""
+    sym = symbol.upper()
+
+    ticker = await db.scalar(select(Ticker).where(Ticker.symbol == sym))
+    if not ticker:
+        raise HTTPException(status_code=404, detail="Ticker not found")
+
+    result = await db.execute(
+        select(HistoricalReaction)
+        .where(
+            HistoricalReaction.ticker_id == ticker.id,
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.pct_change_1d.isnot(None),
+        )
+        .order_by(HistoricalReaction.event_date.asc())
+    )
+    rows = list(result.scalars().all())
+    total = len(rows)
+    sufficient = total >= MIN_QUARTERS
+
+    beats = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
+    misses = [r for r in rows if r.outcome == EarningsOutcome.MISS]
+    meets = [r for r in rows if r.outcome == EarningsOutcome.MEET]
+    unknowns = [r for r in rows if r.outcome not in (EarningsOutcome.BEAT, EarningsOutcome.MISS, EarningsOutcome.MEET)]
+
+    # Insufficient history — return skeleton with counts only
+    if not sufficient:
+        return ConditionalEarningsRead(
+            symbol=sym,
+            total_quarters=total,
+            has_sufficient_history=False,
+            beat_count=len(beats), miss_count=len(misses),
+            meet_count=len(meets), unknown_count=len(unknowns),
+            avg_1d_on_beat=None, median_1d_on_beat=None,
+            avg_1d_on_miss=None, median_1d_on_miss=None,
+            beat_avg_5d=None, beat_continuation_rate_pct=None, beat_5d_sample=0,
+            miss_avg_5d=None, miss_continuation_rate_pct=None, miss_5d_sample=0,
+            recent_avg_abs_1d=None, prior_avg_abs_1d=None, magnitude_trend=None,
+        )
+
+    # ── Conditional 1d moves ─────────────────────────────────────────────────
+    beat_1d = [float(r.pct_change_1d) for r in beats]
+    miss_1d = [float(r.pct_change_1d) for r in misses]
+
+    avg_1d_beat = round(sum(beat_1d) / len(beat_1d), 2) if beat_1d else None
+    median_1d_beat = round(statistics.median(beat_1d), 2) if beat_1d else None
+    avg_1d_miss = round(sum(miss_1d) / len(miss_1d), 2) if miss_1d else None
+    median_1d_miss = round(statistics.median(miss_1d), 2) if miss_1d else None
+
+    # ── Follow-through ───────────────────────────────────────────────────────
+    beat_avg_5d, beat_cont, beat_5d_n = _continuation_stats(beats)
+    miss_avg_5d, miss_cont, miss_5d_n = _continuation_stats(misses)
+
+    # ── Magnitude trend: last 4 prints vs prior 4 ───────────────────────────
+    abs_1d_all = [abs(float(r.pct_change_1d)) for r in rows]
+    recent_4 = abs_1d_all[-4:]
+    prior_4 = abs_1d_all[-8:-4] if total >= 8 else None
+
+    recent_avg = round(sum(recent_4) / 4, 2) if len(recent_4) == 4 else None
+    prior_avg = (
+        round(sum(prior_4) / 4, 2)
+        if prior_4 and len(prior_4) == 4
+        else None
+    )
+
+    magnitude_trend: str | None = None
+    if recent_avg is not None and prior_avg is not None:
+        if prior_avg < 0.01:
+            magnitude_trend = "stable"
+        else:
+            pct_change = (recent_avg - prior_avg) / prior_avg
+            if pct_change > 0.20:
+                magnitude_trend = "increasing"
+            elif pct_change < -0.20:
+                magnitude_trend = "decreasing"
+            else:
+                magnitude_trend = "stable"
+
+    return ConditionalEarningsRead(
+        symbol=sym,
+        total_quarters=total,
+        has_sufficient_history=sufficient,
+        beat_count=len(beats),
+        miss_count=len(misses),
+        meet_count=len(meets),
+        unknown_count=len(unknowns),
+        avg_1d_on_beat=avg_1d_beat,
+        median_1d_on_beat=median_1d_beat,
+        avg_1d_on_miss=avg_1d_miss,
+        median_1d_on_miss=median_1d_miss,
+        beat_avg_5d=beat_avg_5d,
+        beat_continuation_rate_pct=beat_cont,
+        beat_5d_sample=beat_5d_n,
+        miss_avg_5d=miss_avg_5d,
+        miss_continuation_rate_pct=miss_cont,
+        miss_5d_sample=miss_5d_n,
+        recent_avg_abs_1d=recent_avg,
+        prior_avg_abs_1d=prior_avg,
+        magnitude_trend=magnitude_trend,
+    )
+
+
+@router.get("/analyst-stats", response_model=AnalystReactionStatsRead)
+async def get_analyst_reaction_stats(
+    symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
+    db: AsyncSession = Depends(get_db),
+) -> AnalystReactionStatsRead:
+    """Precomputed stats: how does this stock react to analyst upgrades/downgrades?"""
+    sym = symbol.upper()
+    row = await db.scalar(
+        select(AnalystReactionStats).where(AnalystReactionStats.symbol == sym)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No analyst reaction stats for this ticker")
+    return AnalystReactionStatsRead.model_validate(row)
 
 
 @router.get("", response_model=list[HistoricalReactionRead])
