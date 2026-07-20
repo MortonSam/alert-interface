@@ -111,6 +111,46 @@ export interface ReactionSummary {
   sector_peer_count: number;
 }
 
+export interface ConditionalEarningsRead {
+  symbol: string;
+  total_quarters: number;
+  has_sufficient_history: boolean;
+  beat_count: number;
+  miss_count: number;
+  meet_count: number;
+  unknown_count: number;
+  avg_1d_on_beat: number | null;
+  median_1d_on_beat: number | null;
+  avg_1d_on_miss: number | null;
+  median_1d_on_miss: number | null;
+  beat_avg_5d: number | null;
+  beat_continuation_rate_pct: number | null;
+  beat_5d_sample: number;
+  miss_avg_5d: number | null;
+  miss_continuation_rate_pct: number | null;
+  miss_5d_sample: number;
+  recent_avg_abs_1d: number | null;
+  prior_avg_abs_1d: number | null;
+  magnitude_trend: string | null;
+}
+
+export interface AnalystReactionStatsRead {
+  symbol: string;
+  computed_at: string | null;
+  upgrade_count: number;
+  avg_1d_upgrade: number | null;
+  median_1d_upgrade: number | null;
+  avg_5d_upgrade: number | null;
+  upgrade_5d_continuation_pct: number | null;
+  upgrade_5d_sample: number;
+  downgrade_count: number;
+  avg_1d_downgrade: number | null;
+  median_1d_downgrade: number | null;
+  avg_5d_downgrade: number | null;
+  downgrade_5d_continuation_pct: number | null;
+  downgrade_5d_sample: number;
+}
+
 export interface WatchlistTicker {
   id: string;
   ticker_id: string;
@@ -743,6 +783,10 @@ export const api = {
     },
     summary: (symbol: string) =>
       request<ReactionSummary>(`/reactions/summary?symbol=${encodeURIComponent(symbol)}`),
+    conditional: (symbol: string) =>
+      request<ConditionalEarningsRead>(`/reactions/conditional?symbol=${encodeURIComponent(symbol)}`),
+    analystStats: (symbol: string) =>
+      request<AnalystReactionStatsRead>(`/reactions/analyst-stats?symbol=${encodeURIComponent(symbol)}`),
     get: (id: string) => request<HistoricalReaction>(`/reactions/${id}`),
     create: (data: Partial<HistoricalReaction>) =>
       request<HistoricalReaction>("/reactions", { method: "POST", body: JSON.stringify(data) }),

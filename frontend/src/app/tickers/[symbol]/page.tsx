@@ -11,7 +11,8 @@ import {
 import {
   api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker,
   type Event, type EventType, type EarningsOutcome, type HistoricalReaction,
-  type ReactionSummary, type ResearchNote, type VerificationClaim, type VerificationResult,
+  type ReactionSummary, type ConditionalEarningsRead, type AnalystReactionStatsRead,
+  type ResearchNote, type VerificationClaim, type VerificationResult,
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
@@ -1235,6 +1236,15 @@ export default function TickerPage() {
   const [eventStatus, setEventStatus]   = useState<SectionStatus>("loading");
   const [eventError, setEventError]     = useState<string | null>(null);
 
+  // Catalyst redesign state
+  const [conditionalEarnings, setConditionalEarnings] = useState<ConditionalEarningsRead | null>(null);
+  const [conditionalStatus, setConditionalStatus] = useState<"loading" | "done">("loading");
+  const [analystStats, setAnalystStats] = useState<AnalystReactionStatsRead | null>(null);
+  const [analystStatsStatus, setAnalystStatsStatus] = useState<"loading" | "done">("loading");
+  const [recentAnalystActions, setRecentAnalystActions] = useState<Event[]>([]);
+  const [analystActionsStatus, setAnalystActionsStatus] = useState<"loading" | "done">("loading");
+  const [pastHeroEvent, setPastHeroEvent] = useState<Event | null>(null);
+
   const [reactions, setReactions]             = useState<HistoricalReaction[]>([]);
   const [reactionStatus, setReactionStatus]   = useState<SectionStatus>("loading");
   const [reactionError, setReactionError]     = useState<string | null>(null);
@@ -1302,6 +1312,55 @@ export default function TickerPage() {
       })
       .catch((e: Error) => { setEventError(e.message); setEventStatus("error"); });
   }, [upperSymbol]);
+
+  // Catalyst redesign fetches
+  useEffect(() => {
+    setConditionalEarnings(null); setConditionalStatus("loading");
+    setAnalystStats(null); setAnalystStatsStatus("loading");
+    setPastHeroEvent(null);
+    api.reactions.conditional(upperSymbol)
+      .then(d => { setConditionalEarnings(d); setConditionalStatus("done"); })
+      .catch(() => { setConditionalEarnings(null); setConditionalStatus("done"); });
+    api.reactions.analystStats(upperSymbol)
+      .then(d => { setAnalystStats(d); setAnalystStatsStatus("done"); })
+      .catch(() => { setAnalystStats(null); setAnalystStatsStatus("done"); });
+  }, [upperSymbol]);
+
+  useEffect(() => {
+    if (!ticker) return;
+    setRecentAnalystActions([]); setAnalystActionsStatus("loading");
+    api.events.list({ ticker_id: ticker.id, event_type: "analyst_action" })
+      .then(evts => {
+        const sorted = [...evts].sort((a, b) => b.event_date.localeCompare(a.event_date));
+        setRecentAnalystActions(sorted.slice(0, 3));
+        setAnalystActionsStatus("done");
+      })
+      .catch(() => setAnalystActionsStatus("done"));
+  }, [ticker]);
+
+  // Derived: split upcoming events into hero candidate and macro
+  const heroEligibleTypes = new Set<string>(["earnings", "ex_dividend", "split"]);
+  const macroTypes = new Set<string>(["macro", "fomc"]);
+  const { heroEvent, macroEvents } = useMemo(() => {
+    if (eventStatus !== "done") return { heroEvent: null as Event | null, macroEvents: [] as Event[] };
+    const heroCandidate = events.find(e => e.ticker_id && heroEligibleTypes.has(e.event_type)) ?? null;
+    const macro = events.filter(e => macroTypes.has(e.event_type));
+    return { heroEvent: heroCandidate, macroEvents: macro };
+  }, [events, eventStatus]);
+
+  // Past-event fallback: only fetch if no upcoming hero-eligible event
+  useEffect(() => {
+    if (eventStatus !== "done" || heroEvent || !ticker) return;
+    const today = new Date().toISOString().slice(0, 10);
+    api.events.list({ ticker_id: ticker.id, to_date: today })
+      .then(evts => {
+        const past = evts
+          .filter(e => e.ticker_id && heroEligibleTypes.has(e.event_type))
+          .sort((a, b) => b.event_date.localeCompare(a.event_date));
+        setPastHeroEvent(past[0] ?? null);
+      })
+      .catch(() => null);
+  }, [eventStatus, heroEvent, ticker]);
 
   useEffect(() => {
     api.reactions
@@ -1631,39 +1690,286 @@ export default function TickerPage() {
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
         <section id="catalysts" className="scroll-mt-28">
-          <h2 className="text-lg font-semibold mb-4">
-            Upcoming Catalysts
-            {eventStatus === "done" && events.length > 0 && (
-              <span className="ml-2 text-muted-foreground font-normal text-sm">({events.length})</span>
-            )}
-          </h2>
+          <h2 className="text-lg font-semibold mb-4">Catalysts</h2>
 
+          {/* 1. HERO — Next Catalyst */}
           {eventStatus === "loading" && (
-            <div className="rounded-lg border bg-card p-5 space-y-5 animate-pulse">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="flex gap-4">
-                  <div className="h-4 bg-muted rounded w-12 shrink-0 mt-0.5" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-muted rounded w-2/3" />
-                    <div className="h-3 bg-muted rounded w-1/2" />
+            <div className="rounded-lg border bg-card p-5 space-y-3 animate-pulse mb-4">
+              <div className="flex items-center justify-between">
+                <div className="h-5 bg-muted rounded w-48" />
+                <div className="h-5 bg-muted rounded-full w-20" />
+              </div>
+              <div className="h-4 bg-muted rounded w-32" />
+              <div className="border-t pt-3 grid grid-cols-3 gap-4">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="space-y-1">
+                    <div className="h-3 bg-muted rounded w-20" />
+                    <div className="h-4 bg-muted rounded w-16" />
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
           {eventStatus === "error" && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive mb-4">
               Failed to load events: {eventError}
             </div>
           )}
-          {eventStatus === "done" && events.length === 0 && (
-            <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
-              No events in the next 60 days.
+          {eventStatus === "done" && (() => {
+            const displayEvent = heroEvent ?? pastHeroEvent;
+            const isPast = !heroEvent && !!pastHeroEvent;
+            if (!displayEvent) {
+              return (
+                <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground mb-4">
+                  No upcoming catalysts
+                </div>
+              );
+            }
+            const days = daysFromToday(displayEvent.event_date);
+            // For past events, find realized 1d and 5d reactions
+            let realized1d: number | null = null;
+            let realized5d: number | null = null;
+            if (isPast) {
+              if (displayEvent.event_type === "earnings") {
+                const match = reactions.find(r => r.event_date === displayEvent.event_date);
+                if (match?.pct_change_1d != null) realized1d = Number(match.pct_change_1d);
+                if (match?.pct_change_5d != null) realized5d = Number(match.pct_change_5d);
+              } else {
+                if (displayEvent.metadata_?.pct_1d != null) realized1d = Number(displayEvent.metadata_.pct_1d);
+                if (displayEvent.metadata_?.pct_5d != null) realized5d = Number(displayEvent.metadata_.pct_5d);
+              }
+            }
+            // Priced-in insight logic (reuses EarningsInsightsPanel approach)
+            const dropRate = reactionSummary?.beat_but_dropped_rate_pct ?? null;
+            const pricingNote =
+              dropRate == null ? null
+              : dropRate >= 50 ? "beats appear largely priced in"
+              : dropRate >= 25 ? "beats partially priced in"
+              : "beats tend to drive the stock higher";
+            const showContextStrip = displayEvent.event_type === "earnings" && conditionalEarnings?.has_sufficient_history && reactionSummary;
+
+            return (
+              <div className="rounded-lg border bg-card px-5 py-4 mb-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-base font-semibold">{displayEvent.title}</span>
+                      <EventTypeBadge type={displayEvent.event_type} />
+                      {isPast && (
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
+                          Past
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-0.5">{formatEventDate(displayEvent.event_date)}</p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-3">
+                    {isPast ? (
+                      <>
+                        {realized1d != null && (
+                          <span className="text-right">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground block">1d</span>
+                            <span className={cn(
+                              "text-sm font-semibold tabular-nums",
+                              realized1d > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                            )}>
+                              {realized1d > 0 ? "+" : ""}{realized1d.toFixed(2)}%
+                            </span>
+                          </span>
+                        )}
+                        {realized5d != null && (
+                          <span className="text-right">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground block">5d</span>
+                            <span className={cn(
+                              "text-sm font-semibold tabular-nums",
+                              realized5d > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                            )}>
+                              {realized5d > 0 ? "+" : ""}{realized5d.toFixed(2)}%
+                            </span>
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <DaysBadge days={days} />
+                    )}
+                  </div>
+                </div>
+
+                {showContextStrip && (() => {
+                  const ce = conditionalEarnings!;
+                  const beatHasAvg = ce.beat_count >= 3 && ce.avg_1d_on_beat != null;
+                  const missHasAvg = ce.miss_count >= 3 && ce.avg_1d_on_miss != null;
+                  return (
+                    <div className="mt-3 pt-3 border-t">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Earnings track record</p>
+                          <p className="text-sm font-semibold tabular-nums">
+                            Beat {ce.beat_count} of {ce.total_quarters}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+                            {beatHasAvg ? "Avg move on beats" : "Beats"}
+                          </p>
+                          {beatHasAvg ? (
+                            <p className={cn(
+                              "text-sm font-semibold tabular-nums",
+                              ce.avg_1d_on_beat! > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                            )}>
+                              {ce.avg_1d_on_beat! > 0 ? "+" : ""}{ce.avg_1d_on_beat!.toFixed(2)}%
+                            </p>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              {ce.beat_count} in {ce.total_quarters} quarters
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+                            {missHasAvg ? "Avg move on misses" : "Misses"}
+                          </p>
+                          {missHasAvg ? (
+                            <p className={cn(
+                              "text-sm font-semibold tabular-nums",
+                              ce.avg_1d_on_miss! > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                            )}>
+                              {ce.avg_1d_on_miss! > 0 ? "+" : ""}{ce.avg_1d_on_miss!.toFixed(2)}%
+                            </p>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              {ce.miss_count} in {ce.total_quarters} quarters
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {pricingNote && reactionSummary!.beat_count >= 3 && (
+                        <p className={cn(
+                          "text-xs mt-2",
+                          dropRate != null && dropRate >= 50 ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+                        )}>
+                          Stock fell next day in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
+                          {" "}({dropRate!.toFixed(0)}%) — {pricingNote}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
+          {/* 2. STREET PULSE — Analyst Activity */}
+          {(analystActionsStatus === "loading" || analystStatsStatus === "loading") && (
+            <div className="rounded-lg border bg-card p-5 space-y-3 animate-pulse mb-4">
+              <div className="h-3 bg-muted rounded w-24" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className="flex gap-2">
+                      <div className="h-4 bg-muted rounded w-4" />
+                      <div className="h-4 bg-muted rounded w-32" />
+                      <div className="h-4 bg-muted rounded w-16 ml-auto" />
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  <div className="h-3 bg-muted rounded w-20" />
+                  <div className="h-5 bg-muted rounded w-28" />
+                  <div className="h-3 bg-muted rounded w-20" />
+                  <div className="h-5 bg-muted rounded w-28" />
+                </div>
+              </div>
             </div>
           )}
-          {eventStatus === "done" && events.length > 0 && (
-            <div className="rounded-lg border bg-card px-5 divide-y divide-border">
-              {events.map((event) => <CatalystRow key={event.id} event={event} />)}
+          {analystActionsStatus === "done" && analystStatsStatus === "done" && (
+            recentAnalystActions.length > 0 || analystStats != null
+          ) && (
+            <div className="rounded-lg border bg-card px-5 py-4 mb-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-3">Street Pulse</p>
+              <div className={cn(
+                "grid gap-6",
+                analystStats && (analystStats.median_1d_upgrade != null || analystStats.median_1d_downgrade != null)
+                  ? "grid-cols-1 md:grid-cols-2"
+                  : "grid-cols-1",
+              )}>
+                {/* Left: Recent Actions */}
+                <div>
+                  {recentAnalystActions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No analyst coverage</p>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {recentAnalystActions.map((evt) => {
+                        const action = evt.metadata_?.action as string | undefined;
+                        const firm = evt.metadata_?.firm as string | undefined;
+                        const toGrade = evt.metadata_?.to_grade as string | undefined;
+                        const pt = evt.metadata_?.price_target as number | undefined;
+                        return (
+                          <div key={evt.id} className="flex items-center gap-2 py-1.5">
+                            <span className={cn(
+                              "text-sm shrink-0",
+                              action === "up" ? "text-green-700 dark:text-green-400"
+                              : action === "down" ? "text-red-600 dark:text-red-400"
+                              : "text-muted-foreground",
+                            )}>
+                              {action === "up" ? "▲" : action === "down" ? "▼" : "→"}
+                            </span>
+                            <span className="text-sm font-medium truncate">{firm ?? "Unknown"}</span>
+                            {toGrade && <span className="text-xs text-muted-foreground shrink-0">→ {toGrade}</span>}
+                            {pt != null && <span className="text-xs tabular-nums text-muted-foreground shrink-0">${pt}</span>}
+                            <span className="text-xs text-muted-foreground ml-auto shrink-0">{formatEventDate(evt.event_date)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Aggregate Stats */}
+                {analystStats && (analystStats.median_1d_upgrade != null || analystStats.median_1d_downgrade != null) && (
+                  <div className="space-y-3">
+                    {analystStats.median_1d_upgrade != null && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On upgrades</p>
+                        <p className={cn(
+                          "text-sm font-semibold tabular-nums",
+                          analystStats.median_1d_upgrade > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                        )}>
+                          {analystStats.median_1d_upgrade > 0 ? "+" : ""}{analystStats.median_1d_upgrade.toFixed(1)}% median next-day
+                        </p>
+                        <p className="text-xs text-muted-foreground">{analystStats.upgrade_count} in 5 yr</p>
+                      </div>
+                    )}
+                    {analystStats.median_1d_downgrade != null && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On downgrades</p>
+                        <p className={cn(
+                          "text-sm font-semibold tabular-nums",
+                          analystStats.median_1d_downgrade > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
+                        )}>
+                          {analystStats.median_1d_downgrade > 0 ? "+" : ""}{analystStats.median_1d_downgrade.toFixed(1)}% median next-day
+                        </p>
+                        <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 3. MACRO STRIP */}
+          {eventStatus === "done" && macroEvents.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-2">Macro Calendar</p>
+              <div className="flex flex-wrap gap-2">
+                {macroEvents.map((evt) => (
+                  <span key={evt.id} className="inline-flex items-center rounded-full px-2.5 py-1 text-xs bg-muted text-muted-foreground gap-1.5">
+                    <span className="truncate max-w-[10rem]">{evt.title}</span>
+                    <span className="tabular-nums shrink-0">{formatEventDate(evt.event_date)}</span>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </section>
