@@ -5,7 +5,8 @@ import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  LineChart, Line, BarChart, Bar, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
 import {
@@ -165,16 +166,14 @@ function CatalystRow({ event }: { event: Event }) {
   );
 }
 
-// ── Earnings insights panel ───────────────────────────────────────────────────
+// ── History insights panel (replaces EarningsInsightsPanel) ──────────────────
 
-function EarningsInsightsPanel({ s, symbol }: { s: ReactionSummary; symbol: string }) {
-  const dropRate = s.beat_but_dropped_rate_pct;
-  const pricingNote =
-    dropRate == null ? null
-    : dropRate >= 50 ? "beats appear largely priced in"
-    : dropRate >= 25 ? "beats partially priced in"
-    : "beats tend to drive the stock higher";
-
+function HistoryInsightsPanel({
+  s, ce,
+}: {
+  s: ReactionSummary;
+  ce: ConditionalEarningsRead | null;
+}) {
   const sectorVsOwn =
     s.sector_avg_abs_1d != null && s.avg_abs_1d != null
       ? s.avg_abs_1d < s.sector_avg_abs_1d * 0.85 ? "smaller than"
@@ -182,76 +181,153 @@ function EarningsInsightsPanel({ s, symbol }: { s: ReactionSummary; symbol: stri
       : "similar to"
       : null;
 
+  const showSector = sectorVsOwn != null && s.avg_abs_1d != null && s.sector_avg_abs_1d != null;
+  const showBeatFollow = ce != null && ce.beat_continuation_rate_pct != null && ce.beat_5d_sample >= 3;
+  const showMissFollow = ce != null && ce.miss_continuation_rate_pct != null && ce.miss_5d_sample >= 3;
+  const showMagnitude = ce != null && ce.magnitude_trend != null && ce.recent_avg_abs_1d != null && ce.prior_avg_abs_1d != null;
+
+  if (!showSector && !showBeatFollow && !showMissFollow && !showMagnitude) return null;
+
   return (
-    <div className="rounded-lg border bg-card px-5 py-4 space-y-3 mb-3">
-      <div>
-        <p className="text-sm font-semibold">
-          <ExplainTip term="beat" metric="beat_drop_pattern" symbol={symbol}>Beat EPS</ExplainTip> in {s.beat_count} of {s.total_quarters} quarter{s.total_quarters !== 1 ? "s" : ""}{" "}
-          ({s.beat_rate_pct.toFixed(0)}%)
-        </p>
-        {dropRate != null && s.beat_count > 0 && (
-          <p
-            className={cn(
-              "text-sm mt-0.5",
-              dropRate >= 50
-                ? "text-amber-700 dark:text-amber-400"
-                : "text-muted-foreground",
-            )}
-          >
-            Stock fell next day in {s.beat_but_dropped_count} of {s.beat_count} beats
-            {" "}({dropRate.toFixed(0)}%){pricingNote ? ` — ${pricingNote}` : ""}
-          </p>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2">
-        {(
-          [
-            ["Avg next-day move on beats", s.avg_1d_on_beat],
-            ["Avg next-day move on misses", s.avg_1d_on_miss],
-          ] as [string, number | null][]
-        ).map(([label, val]) => (
-          <div key={label}>
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{label}</p>
-            <p
-              className={cn(
-                "text-sm font-semibold tabular-nums",
-                val == null ? "text-muted-foreground"
-                : val > 0 ? "text-green-700 dark:text-green-400"
-                : "text-red-600 dark:text-red-400",
-              )}
-            >
-              {val == null ? "—" : `${val > 0 ? "+" : ""}${val.toFixed(2)}%`}
-            </p>
-          </div>
-        ))}
-
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Avg move size (any direction)</p>
-          <p className="text-sm font-semibold tabular-nums text-foreground">
-            {s.avg_abs_1d != null ? `±${s.avg_abs_1d.toFixed(2)}%` : "—"}
-          </p>
-        </div>
-
-        {s.sector_avg_abs_1d != null && (
-          <div>
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-              {s.sector ?? "Sector"} avg move size
-            </p>
-            <p className="text-sm font-semibold tabular-nums text-muted-foreground">
-              ±{s.sector_avg_abs_1d.toFixed(2)}%
-            </p>
-          </div>
-        )}
-      </div>
-
-      {sectorVsOwn != null && s.avg_abs_1d != null && s.sector_avg_abs_1d != null && (
+    <div className="rounded-lg border bg-card px-5 py-4 space-y-1.5 mb-3">
+      {showSector && (
         <p className="text-xs text-muted-foreground">
-          Typical earnings move (±{s.avg_abs_1d.toFixed(2)}%) is{" "}
+          Typical earnings move (±{s.avg_abs_1d!.toFixed(2)}%) is{" "}
           <span className="font-medium">{sectorVsOwn}</span> the{" "}
-          {s.sector ?? "sector"} peer average (±{s.sector_avg_abs_1d.toFixed(2)}%){" "}
+          {s.sector ?? "sector"} peer average (±{s.sector_avg_abs_1d!.toFixed(2)}%){" "}
           across {s.sector_peer_count} peers
         </p>
+      )}
+      {showBeatFollow && (
+        <p className="text-xs text-muted-foreground">
+          Beats held direction through day 5 in{" "}
+          <span className="font-medium">{ce!.beat_continuation_rate_pct!.toFixed(0)}%</span> of cases
+          {" "}({Math.round(ce!.beat_continuation_rate_pct! / 100 * ce!.beat_5d_sample)} of {ce!.beat_5d_sample})
+        </p>
+      )}
+      {showMissFollow && (
+        <p className="text-xs text-muted-foreground">
+          Misses held direction through day 5 in{" "}
+          <span className="font-medium">{ce!.miss_continuation_rate_pct!.toFixed(0)}%</span> of cases
+          {" "}({Math.round(ce!.miss_continuation_rate_pct! / 100 * ce!.miss_5d_sample)} of {ce!.miss_5d_sample})
+        </p>
+      )}
+      {showMagnitude && (
+        <p className={cn(
+          "text-xs",
+          ce!.magnitude_trend === "heating_up" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+        )}>
+          Recent prints moving ±{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
+          {" "}— reactions{" "}
+          <span className="font-medium">
+            {ce!.magnitude_trend === "heating_up" ? "heating up"
+              : ce!.magnitude_trend === "cooling_down" ? "cooling"
+              : "stable"}
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Reaction bar chart ───────────────────────────────────────────────────────
+
+function ReactionChartTooltip({ active, payload, mode }: { active?: boolean; payload?: any[]; mode?: string }) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  const isFed = mode === "fed";
+  return (
+    <div className="rounded-md border bg-white dark:bg-zinc-900 px-3 py-2 text-xs shadow-md">
+      <p className="font-medium">{formatEventDate(d.date)}</p>
+      {!isFed && <p className="capitalize text-muted-foreground">{d.outcome}</p>}
+      {!isFed && d.epsActual != null && d.epsEstimate != null && (
+        <p>EPS ${parseFloat(d.epsActual).toFixed(2)} vs est ${parseFloat(d.epsEstimate).toFixed(2)}</p>
+      )}
+      <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
+        1d: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
+      </p>
+      {d.pct5d != null && (
+        <p className={cn(d.pct5d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
+          5d: {d.pct5d > 0 ? "+" : ""}{d.pct5d.toFixed(2)}%
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ReactionChart({ reactions, mode = "earnings" }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed" }) {
+  const isFed = mode === "fed";
+  const data = useMemo(() => {
+    const chronological = [...reactions].sort((a, b) => a.event_date.localeCompare(b.event_date));
+    const recent = chronological.slice(-20);
+    return recent.map(r => ({
+      date: r.event_date,
+      pct1d: r.pct_change_1d != null ? parseFloat(r.pct_change_1d) : 0,
+      pct5d: r.pct_change_5d != null ? parseFloat(r.pct_change_5d) : null,
+      outcome: r.outcome,
+      epsEstimate: r.eps_estimate,
+      epsActual: r.eps_actual,
+      epsSurprise: r.eps_surprise_pct,
+    }));
+  }, [reactions]);
+
+  // Track first tick of each year for x-axis labeling
+  const firstTickOfYear = useMemo(() => {
+    const seen = new Set<string>();
+    const result = new Set<string>();
+    for (const d of data) {
+      const year = d.date.slice(0, 4);
+      if (!seen.has(year)) {
+        seen.add(year);
+        result.add(d.date);
+      }
+    }
+    return result;
+  }, [data]);
+
+  if (data.length === 0) return null;
+
+  return (
+    <div className="mb-4">
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={(d: string) =>
+              firstTickOfYear.has(d) ? `${d.slice(5)} '${d.slice(2, 4)}` : d.slice(5)
+            }
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false} tickLine={false}
+          />
+          <YAxis
+            tickFormatter={(v: number) => `${v > 0 ? "+" : ""}${v.toFixed(0)}%`}
+            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+            axisLine={false} tickLine={false}
+            width={40}
+          />
+          <ReferenceLine y={0} stroke="hsl(var(--border))" />
+          <Tooltip content={<ReactionChartTooltip mode={mode} />} />
+          <Bar dataKey="pct1d" radius={[2, 2, 0, 0]}>
+            {data.map((entry, i) => (
+              <Cell
+                key={i}
+                fill={entry.pct1d >= 0 ? "#22c55e" : "#ef4444"}
+                fillOpacity={isFed ? 1.0 : entry.outcome === "beat" ? 1.0 : entry.outcome === "miss" ? 0.7 : 0.5}
+                stroke={!isFed && entry.outcome === "miss" ? "#ef4444" : "none"}
+                strokeWidth={!isFed && entry.outcome === "miss" ? 1.5 : 0}
+                strokeDasharray={!isFed && entry.outcome === "miss" ? "3 2" : ""}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      {!isFed && (
+        <div className="flex items-center gap-4 mt-1 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500" /> Beat</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500 opacity-70 border border-dashed border-red-500" /> Miss</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-gray-400 opacity-50" /> Meet</span>
+        </div>
       )}
     </div>
   );
@@ -457,6 +533,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
     dir: "desc",
   });
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
+  const [collapsed, setCollapsed] = useState(true);
 
   function handleSort(col: ReactionSortKey) {
     setSort((prev) =>
@@ -515,130 +592,143 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
 
   return (
     <div className="space-y-3">
-      {/* Filter pills — hidden for fed mode (no outcome data) */}
-      {!isFed && (
-        <div className="flex flex-wrap gap-2">
-          {PILLS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setOutcomeFilter(key)}
-              className={cn(
-                "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                outcomeFilter === key
-                  ? key === "beat" ? "bg-success/10 text-success"
-                    : key === "miss" ? "bg-destructive/10 text-destructive"
-                    : key === "meet" ? "bg-secondary text-secondary-foreground"
-                    : "bg-foreground text-background"
-                  : "bg-muted text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-
       <DistributionPanel rows={filtered} filter={outcomeFilter} mode={mode} />
 
-      <div className="rounded-lg border bg-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <SortTh label="Date"    col="event_date"    sort={sort} onSort={handleSort} align="left" />
-                {!isFed && (
-                  <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      Outcome
-                      <span
-                        title="Beat/miss/meet refers to EPS surprise vs. analyst estimate. Stock direction is shown separately by the arrow next to the badge and the 1d/3d/5d columns."
-                        className="cursor-help opacity-60 hover:opacity-100 transition-opacity"
-                      >
-                        ⓘ
-                      </span>
-                    </span>
-                  </th>
-                )}
-                {hasRevenue && (
-                  <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Revenue
-                  </th>
-                )}
-                <th className="px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Close Before
-                </th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Close After
-                </th>
-                <SortTh label="1-Day"  col="pct_change_1d" sort={sort} onSort={handleSort} />
-                <SortTh label="3-Day"  col="pct_change_3d" sort={sort} onSort={handleSort} />
-                <SortTh label="5-Day"  col="pct_change_5d" sort={sort} onSort={handleSort} />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {sorted.map((r) => {
-                const rev = revenueOutcome(r);
-                return (
-                  <tr key={r.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-3 py-2.5 text-sm tabular-nums text-muted-foreground whitespace-nowrap">
-                      {formatEventDate(r.event_date)}
-                    </td>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+      >
+        {collapsed
+          ? `Show all ${isFed ? "prints" : "prints"} (${reactions.length}) ▾`
+          : "Hide prints ▴"}
+      </button>
+
+      {!collapsed && (
+        <>
+          {/* Filter pills — hidden for fed mode (no outcome data) */}
+          {!isFed && (
+            <div className="flex flex-wrap gap-2">
+              {PILLS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setOutcomeFilter(key)}
+                  className={cn(
+                    "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                    outcomeFilter === key
+                      ? key === "beat" ? "bg-success/10 text-success"
+                        : key === "miss" ? "bg-destructive/10 text-destructive"
+                        : key === "meet" ? "bg-secondary text-secondary-foreground"
+                        : "bg-foreground text-background"
+                      : "bg-muted text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="rounded-lg border bg-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <SortTh label="Date"    col="event_date"    sort={sort} onSort={handleSort} align="left" />
                     {!isFed && (
-                      <td className="px-3 py-2.5">
-                        <span className="inline-flex items-center gap-1.5 flex-wrap">
-                          <OutcomeBadge outcome={r.outcome} />
-                          {r.eps_surprise_pct != null && (
-                            <span
-                              className={cn(
-                                "text-xs font-medium tabular-nums",
-                                r.eps_surprise_pct > 0
-                                  ? "text-green-600 dark:text-green-400"
-                                  : "text-red-500 dark:text-red-400",
-                              )}
-                            >
-                              {r.eps_surprise_pct > 0 ? "+" : ""}
-                              {r.eps_surprise_pct.toFixed(1)}%
-                            </span>
-                          )}
+                      <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          Outcome
+                          <span
+                            title="Beat/miss/meet refers to EPS surprise vs. analyst estimate. Stock direction is shown separately by the arrow next to the badge and the 1d/3d/5d columns."
+                            className="cursor-help opacity-60 hover:opacity-100 transition-opacity"
+                          >
+                            ⓘ
+                          </span>
                         </span>
-                      </td>
+                      </th>
                     )}
                     {hasRevenue && (
-                      <td className="px-3 py-2.5 text-sm">
-                        {rev ? (
-                          <span className={cn("text-xs font-medium", rev.cls)}>{rev.label}</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
+                      <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Revenue
+                      </th>
                     )}
-                    <td className="px-3 py-2.5 text-right text-sm tabular-nums">
-                      {formatPrice(r.close_before)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-sm tabular-nums">
-                      {formatPrice(r.close_after)}
-                    </td>
-                    <PctCell value={r.pct_change_1d} />
-                    <PctCell value={r.pct_change_3d} />
-                    <PctCell value={r.pct_change_5d} />
+                    <th className="px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Close Before
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Close After
+                    </th>
+                    <SortTh label="1-Day"  col="pct_change_1d" sort={sort} onSort={handleSort} />
+                    <SortTh label="3-Day"  col="pct_change_3d" sort={sort} onSort={handleSort} />
+                    <SortTh label="5-Day"  col="pct_change_5d" sort={sort} onSort={handleSort} />
                   </tr>
-                );
-              })}
-              {sorted.length === 0 && (
-                <tr>
-                  <td colSpan={6 + (isFed ? 0 : 1) + (hasRevenue ? 1 : 0)} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                    No rows match the selected filter.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
-          Moves measured from event-day close. Days are calendar days, rolling forward to next
-          trading day on weekends/holidays.
-        </p>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sorted.map((r) => {
+                    const rev = revenueOutcome(r);
+                    return (
+                      <tr key={r.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-3 py-2.5 text-sm tabular-nums text-muted-foreground whitespace-nowrap">
+                          {formatEventDate(r.event_date)}
+                        </td>
+                        {!isFed && (
+                          <td className="px-3 py-2.5">
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              <OutcomeBadge outcome={r.outcome} />
+                              {r.eps_surprise_pct != null && (
+                                <span
+                                  className={cn(
+                                    "text-xs font-medium tabular-nums",
+                                    r.eps_surprise_pct > 0
+                                      ? "text-green-600 dark:text-green-400"
+                                      : "text-red-500 dark:text-red-400",
+                                  )}
+                                >
+                                  {r.eps_surprise_pct > 0 ? "+" : ""}
+                                  {r.eps_surprise_pct.toFixed(1)}%
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        )}
+                        {hasRevenue && (
+                          <td className="px-3 py-2.5 text-sm">
+                            {rev ? (
+                              <span className={cn("text-xs font-medium", rev.cls)}>{rev.label}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                        )}
+                        <td className="px-3 py-2.5 text-right text-sm tabular-nums">
+                          {formatPrice(r.close_before)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm tabular-nums">
+                          {formatPrice(r.close_after)}
+                        </td>
+                        <PctCell value={r.pct_change_1d} />
+                        <PctCell value={r.pct_change_3d} />
+                        <PctCell value={r.pct_change_5d} />
+                      </tr>
+                    );
+                  })}
+                  {sorted.length === 0 && (
+                    <tr>
+                      <td colSpan={6 + (isFed ? 0 : 1) + (hasRevenue ? 1 : 0)} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                        No rows match the selected filter.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
+              Moves measured from event-day close. Days are calendar days, rolling forward to next
+              trading day on weekends/holidays.
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1348,6 +1438,34 @@ export default function TickerPage() {
     return { heroEvent: heroCandidate, macroEvents: macro };
   }, [events, eventStatus]);
 
+  // Derived: Street Pulse insight line
+  const analystInsight = useMemo(() => {
+    if (!analystStats) return null;
+    const { median_1d_upgrade, median_1d_downgrade,
+      upgrade_5d_continuation_pct, downgrade_5d_continuation_pct,
+      upgrade_count, downgrade_count } = analystStats;
+    const upSignal = median_1d_upgrade != null && upgrade_count >= 3;
+    const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
+    if (!upSignal && !dnSignal) return null;
+    if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
+      const med = median_1d_downgrade!;
+      const sign = med > 0 ? "+" : "";
+      let line = `Downgrades tend to hit — median ${sign}${med.toFixed(1)}% next day`;
+      if (downgrade_5d_continuation_pct != null) {
+        line += `, still lower a week later ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
+      }
+      return line + ".";
+    } else {
+      const med = median_1d_upgrade!;
+      const sign = med > 0 ? "+" : "";
+      let line = `Upgrades tend to lift — median ${sign}${med.toFixed(1)}% next day`;
+      if (upgrade_5d_continuation_pct != null) {
+        line += `, still higher a week later ${upgrade_5d_continuation_pct.toFixed(0)}% of the time`;
+      }
+      return line + ".";
+    }
+  }, [analystStats]);
+
   // Past-event fallback: only fetch if no upcoming hero-eligible event
   useEffect(() => {
     if (eventStatus !== "done" || heroEvent || !ticker) return;
@@ -1739,7 +1857,7 @@ export default function TickerPage() {
                 if (displayEvent.metadata_?.pct_5d != null) realized5d = Number(displayEvent.metadata_.pct_5d);
               }
             }
-            // Priced-in insight logic (reuses EarningsInsightsPanel approach)
+            // Priced-in insight logic
             const dropRate = reactionSummary?.beat_but_dropped_rate_pct ?? null;
             const pricingNote =
               dropRate == null ? null
@@ -1955,6 +2073,9 @@ export default function TickerPage() {
                   </div>
                 )}
               </div>
+              {analystInsight && (
+                <p className="text-xs text-muted-foreground mt-3 pt-3 border-t">{analystInsight}</p>
+              )}
             </div>
           )}
 
@@ -2036,8 +2157,9 @@ export default function TickerPage() {
           {/* Earnings view */}
           {reactionStatus === "done" && reactions.length > 0 && historyView === "earnings" && (
             <>
+              <ReactionChart reactions={reactions} />
               {reactionSummary && reactionSummary.total_quarters >= 3 && (
-                <EarningsInsightsPanel s={reactionSummary} symbol={upperSymbol} />
+                <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} />
               )}
               <ReactionsTable reactions={reactions} />
             </>
@@ -2046,11 +2168,12 @@ export default function TickerPage() {
           {/* Fed days view */}
           {historyView === "fed" && fomcStatus === "done" && fomcReactions.length > 0 && (
             <>
+              <ReactionChart reactions={fomcReactions} mode="fed" />
               {reactions.length > 0 && (() => {
                 const fomcAvg = fomcReactions.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d ?? "0")), 0) / fomcReactions.length;
                 const earningsAvg = reactions.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d ?? "0")), 0) / reactions.length;
                 return (
-                  <p className="text-sm text-muted-foreground mb-3">
+                  <p className="text-sm text-muted-foreground mb-3 mt-3">
                     Avg ±{fomcAvg.toFixed(1)}% on Fed days vs ±{earningsAvg.toFixed(1)}% on earnings days
                   </p>
                 );
