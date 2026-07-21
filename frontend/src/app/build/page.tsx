@@ -248,10 +248,15 @@ function DraftDisplay({
       : null;
 
   // Breakeven — derived from already-computed mids, never re-looked-up
+  // Bull call spread: long call strike + net debit (breakeven above long leg)
+  // Bear put spread:  long put strike − net debit (breakeven below long leg)
   const breakeven: number | null = (() => {
     if (draft.suggested_strike == null) return null;
     if (isSpread) {
-      return netDebit != null ? draft.suggested_strike + netDebit : null;
+      if (netDebit == null) return null;
+      return draft.direction === "bullish"
+        ? draft.suggested_strike + netDebit
+        : draft.suggested_strike - netDebit;
     }
     if (leg1Mid == null) return null;
     return draft.direction === "bullish"
@@ -451,6 +456,21 @@ function DraftDisplay({
         <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "—"}%</span></span>
         <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "—"}%</span></span>
         <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="font-mono text-foreground">—</span>}</span>
+        <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : "—"}</span></span>
+        {draft.vol_regime && (
+          <span>
+            Vol regime:{" "}
+            <span className={cn(
+              "font-mono font-medium",
+              draft.vol_regime === "iv_rich" ? "text-amber-600 dark:text-amber-400" :
+              draft.vol_regime === "iv_cheap" ? "text-green-600 dark:text-green-400" :
+              "text-foreground"
+            )}>
+              {draft.vol_regime === "iv_rich" ? "IV Rich" :
+               draft.vol_regime === "iv_cheap" ? "IV Cheap" : "IV Fair"}
+            </span>
+          </span>
+        )}
       </div>
 
       {/* H) Position cost & risk */}
@@ -996,7 +1016,7 @@ function BuildTradePageContent() {
                 >
                   <GiBull aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
                   <div className="text-base font-bold">Bullish</div>
-                  <div className="text-xs opacity-60 mt-1">expecting it to rise</div>
+                  <div className="text-xs opacity-60 mt-1">expecting the stock price to rise</div>
                 </button>
 
                 <button
@@ -1011,7 +1031,7 @@ function BuildTradePageContent() {
                 >
                   <GiBearFace aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
                   <div className="text-base font-bold">Bearish</div>
-                  <div className="text-xs opacity-60 mt-1">expecting it to fall</div>
+                  <div className="text-xs opacity-60 mt-1">expecting the stock price to fall</div>
                 </button>
               </div>
 

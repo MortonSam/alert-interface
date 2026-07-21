@@ -560,6 +560,7 @@ export interface ThesisDraftRead {
   strategy: string | null;
   reasoning: string;
   realism_flag: string | null;
+  vol_regime: string | null;  // "iv_rich" | "iv_cheap" | "iv_fair" | null
   fact_block: {
     current_price: number;
     atm_strike: number | null;

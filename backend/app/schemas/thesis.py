@@ -135,6 +135,7 @@ class ThesisDraftRead(BaseModel):
     strategy: str | None                   # e.g. "Long $315 call ($5.80 mid)"
     reasoning: str
     realism_flag: str | None               # non-null when target is beyond data support
+    vol_regime: str | None = None          # "iv_rich" | "iv_cheap" | "iv_fair" | None
     fact_block: dict                       # all injected facts (for transparency/verification)
     model_used: str
     generated_at: str

@@ -3,7 +3,7 @@ import json
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from statistics import mean
+from statistics import mean, median
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import require_admin
 from app.database import get_db
+from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
@@ -313,6 +314,40 @@ async def draft_thesis(
     beat_drops = [r for r in beats if float(r.pct_change_1d) < 0]
     bbd_rate: float | None = len(beat_drops) / len(beats) * 100 if beats else None
 
+    # ── 2b. Conditional earnings stats (reuses reactions from 2a) ───────────
+    ce_misses = [r for r in reactions if r.outcome == EarningsOutcome.MISS]
+
+    avg_1d_on_beat = round(mean([float(r.pct_change_1d) for r in beats]), 2) if len(beats) >= 3 else None
+    median_1d_on_beat = round(median([float(r.pct_change_1d) for r in beats]), 2) if len(beats) >= 3 else None
+    avg_1d_on_miss = round(mean([float(r.pct_change_1d) for r in ce_misses]), 2) if len(ce_misses) >= 3 else None
+    median_1d_on_miss = round(median([float(r.pct_change_1d) for r in ce_misses]), 2) if len(ce_misses) >= 3 else None
+
+    def _cont_stats(subset):
+        with_5d = [(float(r.pct_change_1d), float(r.pct_change_5d)) for r in subset if r.pct_change_5d is not None]
+        if len(with_5d) < 3:
+            return None, None, len(with_5d)
+        avg_5d = round(sum(d5 for _, d5 in with_5d) / len(with_5d), 2)
+        cont = sum(1 for d1, d5 in with_5d if (d1 >= 0) == (d5 >= 0))
+        return avg_5d, round(cont / len(with_5d) * 100, 1), len(with_5d)
+
+    beat_avg_5d, beat_cont_pct, beat_5d_n = _cont_stats(beats)
+    miss_avg_5d, miss_cont_pct, miss_5d_n = _cont_stats(ce_misses)
+
+    abs_1d_sorted = [abs(float(r.pct_change_1d)) for r in sorted(reactions, key=lambda r: r.event_date)]
+    recent_4 = abs_1d_sorted[-4:] if len(abs_1d_sorted) >= 4 else []
+    prior_4 = abs_1d_sorted[-8:-4] if len(abs_1d_sorted) >= 8 else []
+    recent_avg_abs = round(mean(recent_4), 2) if len(recent_4) == 4 else None
+    prior_avg_abs = round(mean(prior_4), 2) if len(prior_4) == 4 else None
+    magnitude_trend: str | None = None
+    if recent_avg_abs and prior_avg_abs and prior_avg_abs > 0.01:
+        pct_chg = (recent_avg_abs - prior_avg_abs) / prior_avg_abs
+        magnitude_trend = "increasing" if pct_chg > 0.20 else ("decreasing" if pct_chg < -0.20 else "stable")
+
+    # ── 2c. Analyst reaction stats ──────────────────────────────────────────
+    analyst_row = await db.scalar(
+        select(AnalystReactionStats).where(AnalystReactionStats.symbol == sym)
+    )
+
     # ── 3. Choose expiration ──────────────────────────────────────────────────
     chosen_exp: str | None = None
     if expirations:
@@ -370,6 +405,16 @@ async def draft_thesis(
         round((atm_iv - current_rv) * 100, 1)
         if atm_iv is not None and current_rv is not None else None
     )
+
+    # ── 5b. Vol-regime classification ───────────────────────────────────────
+    vol_regime: str | None = None
+    if iv_rv_spread_pp is not None:
+        if iv_rv_spread_pp > 8:
+            vol_regime = "iv_rich"
+        elif iv_rv_spread_pp < -4:
+            vol_regime = "iv_cheap"
+        else:
+            vol_regime = "iv_fair"
 
     # ── 6. Build quality-filtered strike lists ────────────────────────────────
     if direction == "bullish":
@@ -436,6 +481,24 @@ async def draft_thesis(
         "rv_20d_pct":                round(current_rv * 100, 1) if current_rv else None,
         "rv_rank":                   rv_rank,
         "iv_rv_spread_pp":           iv_rv_spread_pp,
+        "vol_regime":                vol_regime,
+        # Conditional earnings
+        "avg_1d_on_beat":            avg_1d_on_beat,
+        "median_1d_on_beat":         median_1d_on_beat,
+        "avg_1d_on_miss":            avg_1d_on_miss,
+        "median_1d_on_miss":         median_1d_on_miss,
+        "beat_continuation_5d_pct":  beat_cont_pct,
+        "beat_5d_sample":            beat_5d_n,
+        "miss_continuation_5d_pct":  miss_cont_pct,
+        "miss_5d_sample":            miss_5d_n,
+        "magnitude_trend":           magnitude_trend,
+        # Analyst reaction stats
+        "upgrade_count":             analyst_row.upgrade_count if analyst_row else 0,
+        "median_1d_upgrade":         float(analyst_row.median_1d_upgrade) if analyst_row and analyst_row.median_1d_upgrade is not None else None,
+        "upgrade_5d_cont_pct":       float(analyst_row.upgrade_5d_continuation_pct) if analyst_row and analyst_row.upgrade_5d_continuation_pct is not None else None,
+        "downgrade_count":           analyst_row.downgrade_count if analyst_row else 0,
+        "median_1d_downgrade":       float(analyst_row.median_1d_downgrade) if analyst_row and analyst_row.median_1d_downgrade is not None else None,
+        "downgrade_5d_cont_pct":     float(analyst_row.downgrade_5d_continuation_pct) if analyst_row and analyst_row.downgrade_5d_continuation_pct is not None else None,
         "primary_strikes":           primary_rows,
         "secondary_strikes":         secondary_rows,
     }
@@ -449,6 +512,51 @@ async def draft_thesis(
     t1x_display = f"${target_1x:.2f}" if target_1x else "(unavailable)"
     thmax_display = f"${target_hist_max:.2f} ({target_hist_max_label}, based on hist max ±{hist_max*100:.1f}%)" if hist_max else "(unavailable)"
 
+    # Vol-regime display string
+    if vol_regime == "iv_rich":
+        vol_regime_display = f"IV RICH (IV {iv_rv_spread_pp:+.1f}pp above RV)"
+    elif vol_regime == "iv_cheap":
+        vol_regime_display = f"IV CHEAP (IV {iv_rv_spread_pp:+.1f}pp vs RV)"
+    elif vol_regime == "iv_fair":
+        vol_regime_display = f"IV FAIR (IV {iv_rv_spread_pp:+.1f}pp vs RV)"
+    else:
+        vol_regime_display = "(unavailable)"
+
+    # Conditional earnings profile section
+    ce_lines = []
+    if len(beats) >= 3 and avg_1d_on_beat is not None:
+        line = f"  On beats (N={len(beats)}): avg 1d {avg_1d_on_beat:+.2f}%, median {median_1d_on_beat:+.2f}%"
+        if beat_cont_pct is not None:
+            line += f"\n    Follow-through: direction held at day 5 in {beat_cont_pct:.0f}% of cases (N={beat_5d_n})"
+        ce_lines.append(line)
+    if len(ce_misses) >= 3 and avg_1d_on_miss is not None:
+        line = f"  On misses (N={len(ce_misses)}): avg 1d {avg_1d_on_miss:+.2f}%, median {median_1d_on_miss:+.2f}%"
+        if miss_cont_pct is not None:
+            line += f"\n    Follow-through: direction held at day 5 in {miss_cont_pct:.0f}% of cases (N={miss_5d_n})"
+        ce_lines.append(line)
+    if magnitude_trend:
+        ce_lines.append(f"  Magnitude trend: {magnitude_trend}")
+    ce_section = ""
+    if ce_lines:
+        ce_section = f"\nCONDITIONAL EARNINGS PROFILE ({hist_sample} quarters):\n" + "\n".join(ce_lines) + "\n"
+
+    # Analyst reaction stats section
+    analyst_section = ""
+    if analyst_row:
+        a_lines = []
+        if analyst_row.upgrade_count >= 3 and analyst_row.median_1d_upgrade is not None:
+            line = f"  Upgrades (N={analyst_row.upgrade_count}): median 1d move {float(analyst_row.median_1d_upgrade):+.2f}%"
+            if analyst_row.upgrade_5d_continuation_pct is not None:
+                line += f", 5d continuation {float(analyst_row.upgrade_5d_continuation_pct):.0f}%"
+            a_lines.append(line)
+        if analyst_row.downgrade_count >= 3 and analyst_row.median_1d_downgrade is not None:
+            line = f"  Downgrades (N={analyst_row.downgrade_count}): median 1d move {float(analyst_row.median_1d_downgrade):+.2f}%"
+            if analyst_row.downgrade_5d_continuation_pct is not None:
+                line += f", 5d continuation {float(analyst_row.downgrade_5d_continuation_pct):.0f}%"
+            a_lines.append(line)
+        if a_lines:
+            analyst_section = "\nANALYST REACTION STATS:\n" + "\n".join(a_lines) + "\n"
+
     prompt = f"""\
 You are a financial data assistant. Your role: translate a user's {direction} view on {sym} into data-grounded thesis parameters. The user has already decided the direction — you calibrate the HOW (target, strike, strategy), not the WHAT.
 
@@ -459,6 +567,7 @@ CRITICAL RULES (violating any is an error):
 4. "realism_flag" MUST be a non-null string (with specific numbers) whenever the target exceeds the REALISM THRESHOLDS
 5. "Aggressive" means ambitious but data-supported. A target beyond historical max moves is a lottery ticket — label it as such with context
 6. Frame everything as a data-grounded suggestion to review, not a prediction or advice
+7. The "reasoning" MUST cite: (a) the vol regime and its implication for structure choice, (b) at least one historical-reaction or conditional-earnings fact, and (c) analyst-reaction data when available (N≥3)
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
@@ -479,13 +588,19 @@ HISTORICAL EARNINGS (1-day reactions, {hist_sample} quarters):
   Beat rate:          {_n(beat_rate)}%
   Beat-but-dropped:   {_n(bbd_rate)}% (price fell after beating this % of the time)
   NOTE: These are 1-day earnings-day reactions; the expiration above covers the full period.
-
+{ce_section}\
 VOLATILITY:
   ATM implied vol:    {_pct(atm_iv)}
   20-day realized vol:{_pct(current_rv)}
   RV rank (0–100):    {_n(rv_rank)} (0=1yr low, 100=1yr high)
   IV−RV spread:       {f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"}
+  Vol regime:         {vol_regime_display}
 
+VOL-REGIME RULES (binding — override aggressiveness defaults when applicable):
+  • iv_rich (IV−RV > +8pp): Prefer vertical spreads (bull call spread / bear put spread) to cap premium outlay. Long calls/puts are acceptable ONLY at aggressive level. State in reasoning: "IV is Xpp above RV — using a spread to reduce vol drag."
+  • iv_cheap (IV−RV < −4pp): Long calls/puts are attractive — premium is discounted relative to realized movement. State in reasoning: "IV is Xpp below RV — long premium is well-priced."
+  • iv_fair (−4pp ≤ IV−RV ≤ +8pp): No vol-regime override — follow the aggressiveness guide as-is.
+{analyst_section}\
 AVAILABLE STRIKES — {primary_label}:
 {primary_text}
 
@@ -497,7 +612,7 @@ AGGRESSIVENESS REQUESTED: {aggressiveness}
 
 AGGRESSIVENESS GUIDE:
   conservative → target within 0.5–0.8× implied move from current price (${current_price:.2f}); ITM or ATM strike; consider spread to cap premium outlay
-  moderate     → target ~1× implied move edge ({t1x_display}); ATM or first OTM strike; long call/put OK
+  moderate     → target ~1× implied move edge ({t1x_display}); ATM or first OTM strike; long call/put OK unless vol regime says otherwise
   aggressive   → target 1.5–2× implied move ({f"${current_price + 1.5*(expected_move_dollars or 0):.2f}" if direction == "bullish" else f"${current_price - 1.5*(expected_move_dollars or 0):.2f}"}); 2–4 strikes OTM; MUST flag if beyond historical max
 
 REALISM THRESHOLDS (pre-computed — enforce these):
@@ -520,6 +635,7 @@ Return ONLY this JSON object (no other text):
         f"price=${current_price:.2f} "
         f"em=±{f'{expected_move_pct*100:.1f}%' if expected_move_pct is not None else 'N/A'} "
         f"hist_max=±{f'{hist_max*100:.1f}%' if hist_max is not None else 'N/A'} "
+        f"vol_regime={vol_regime or 'N/A'} "
         f"primary_strikes={len(primary_rows)}",
         flush=True,
     )
@@ -566,6 +682,7 @@ Return ONLY this JSON object (no other text):
         strategy=strategy,
         reasoning=reasoning,
         realism_flag=realism_flag,
+        vol_regime=vol_regime,
         fact_block=fact_block,
         model_used=gen["model_used"],
         generated_at=generated_at,
