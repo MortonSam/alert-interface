@@ -20,6 +20,7 @@ from app.models.historical_reaction import HistoricalReaction
 from app.models.thesis import Thesis, ThesisStatus
 from app.models.ticker import Ticker
 from app.schemas.thesis import (
+    AlertPickLedgerItem,
     AlertPickRead,
     AlertPickRequest,
     SignalLean,
@@ -798,6 +799,21 @@ async def alert_pick(
     sym = payload.symbol.upper()
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
+    # ── Duplicate refusal: one open pick per symbol ────────────────────────
+    existing = (await db.execute(
+        select(AlertPick).where(AlertPick.symbol == sym, AlertPick.status == "open")
+        .order_by(AlertPick.generated_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if existing:
+        return AlertPickRead(
+            symbol=existing.symbol,
+            picked_direction=existing.picked_direction,
+            leans=[SignalLean(**l) for l in existing.leans],
+            draft=None,
+            generated_at=existing.generated_at.isoformat(),
+            existing_pick=True,
+        )
+
     data = await _gather_draft_data(sym, db)
 
     earnings_str = data["earnings_str"]
@@ -985,6 +1001,70 @@ async def alert_pick(
         generated_at=generated_at,
     )
 
+
+
+# ── Alert-picks ledger ─────────────────────────────────────────────────────────
+
+@router.get("/alert-picks", response_model=list[AlertPickLedgerItem], dependencies=[Depends(require_admin)])
+async def list_alert_picks(
+    db: AsyncSession = Depends(get_db),
+) -> list[AlertPickLedgerItem]:
+    """List all alert picks newest-first, with live price marks."""
+    rows = (await db.execute(
+        select(AlertPick).order_by(AlertPick.generated_at.desc())
+    )).scalars().all()
+
+    if not rows:
+        return []
+
+    # Fetch live prices for all symbols in one batch
+    symbols = list({r.symbol for r in rows})
+    finnhub = FinnhubClient()
+    try:
+        raw_quotes = await asyncio.gather(
+            *(finnhub.get_quote(s) for s in symbols),
+            return_exceptions=True,
+        )
+    finally:
+        await finnhub.close()
+
+    price_map: dict[str, float | None] = {}
+    for sym, q in zip(symbols, raw_quotes):
+        if isinstance(q, BaseException):
+            price_map[sym] = None
+        else:
+            price_map[sym] = float(q.get("c") or 0) or None
+
+    items = []
+    for r in rows:
+        entry = float(r.entry_price)
+        current = price_map.get(r.symbol)
+        unrealized = round(((current - entry) / entry) * 100, 2) if current and entry else None
+
+        items.append(AlertPickLedgerItem(
+            id=str(r.id),
+            symbol=r.symbol,
+            picked_direction=r.picked_direction,
+            strategy=r.strategy,
+            suggested_strike=float(r.suggested_strike) if r.suggested_strike else None,
+            suggested_spread_strike=float(r.suggested_spread_strike) if r.suggested_spread_strike else None,
+            suggested_target=float(r.suggested_target) if r.suggested_target else None,
+            expiration=r.expiration,
+            entry_price=entry,
+            current_price=current,
+            unrealized_move_pct=unrealized,
+            cost_to_enter=float(r.cost_to_enter) if r.cost_to_enter else None,
+            max_loss=float(r.max_loss) if r.max_loss else None,
+            max_gain=float(r.max_gain) if r.max_gain else None,
+            vol_regime=r.vol_regime,
+            algo_version=r.algo_version,
+            leans=[SignalLean(**l) for l in r.leans],
+            reasoning=r.reasoning,
+            generated_at=r.generated_at.isoformat(),
+            status=r.status,
+        ))
+
+    return items
 
 
 # ── Budget-constrained alternative endpoint ────────────────────────────────────

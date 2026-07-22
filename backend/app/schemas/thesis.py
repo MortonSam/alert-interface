@@ -167,6 +167,30 @@ class AlertPickRead(BaseModel):
     leans: list[SignalLean]
     draft: ThesisDraftRead | None      # None when mixed_evidence
     generated_at: str
+    existing_pick: bool = False        # True when returning an existing open pick (duplicate refusal)
+
+
+class AlertPickLedgerItem(BaseModel):
+    id: str
+    symbol: str
+    picked_direction: str
+    strategy: str | None
+    suggested_strike: float | None
+    suggested_spread_strike: float | None
+    suggested_target: float | None
+    expiration: str | None
+    entry_price: float
+    current_price: float | None           # live mark
+    unrealized_move_pct: float | None     # stock % change from entry_price
+    cost_to_enter: float | None
+    max_loss: float | None
+    max_gain: float | None
+    vol_regime: str | None
+    algo_version: str
+    leans: list[SignalLean]
+    reasoning: str | None
+    generated_at: str
+    status: str
 
 
 class ThesisDraftAlternativeRead(BaseModel):

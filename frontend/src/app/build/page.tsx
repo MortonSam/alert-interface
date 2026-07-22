@@ -392,14 +392,8 @@ function DraftDisplay({
             </span>
           )}
           {fb.expiration_used && (
-            <span className="text-lg font-normal text-muted-foreground ml-2">
-              · exp {(() => {
-                const d = new Date(fb.expiration_used + "T12:00:00");
-                const now = new Date();
-                const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-                if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
-                return d.toLocaleDateString("en-US", opts);
-              })()}
+            <span className="font-mono text-foreground">
+              {" "}· {new Date(fb.expiration_used + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
           )}
         </h2>
@@ -824,7 +818,11 @@ function BuildTradePageContent() {
     try {
       const result = await api.theses.alertPick({ symbol: selectedTicker.symbol });
       setAlertPick(result);
-      if (result.picked_direction === "mixed_evidence") {
+      if (result.existing_pick) {
+        // Duplicate refusal — show existing pick info, don't generate
+        setStep("pick_direction");
+        setDirection(null);
+      } else if (result.picked_direction === "mixed_evidence") {
         setStep("pick_direction");
         setDirection(null);         // reset so user can pick manually
       } else {
@@ -1046,8 +1044,19 @@ function BuildTradePageContent() {
             <section className="space-y-4">
               <StepHeader n={2} label="Pick a direction" done={!!direction && step !== "pick_direction"} />
 
+              {/* Duplicate-refusal — Alert already has an open pick on this symbol */}
+              {alertPick?.existing_pick && (
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 px-5 py-4 space-y-3 mb-4">
+                  <p className="text-sm font-medium">
+                    Alert already has an open {alertPick.picked_direction} pick on {alertPick.symbol} from{" "}
+                    {new Date(alertPick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </p>
+                  <p className="text-xs text-muted-foreground">One open pick per symbol. Pick a direction manually below, or close the existing pick first.</p>
+                </div>
+              )}
+
               {/* Mixed-evidence fallback — shown when Alert couldn't pick */}
-              {alertPick?.picked_direction === "mixed_evidence" && (
+              {alertPick?.picked_direction === "mixed_evidence" && !alertPick?.existing_pick && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4">
                   <p className="text-sm font-medium">Evidence conflicts — Alert can&apos;t pick a clear direction</p>
                   <div className="text-xs text-muted-foreground space-y-1.5">
@@ -1069,7 +1078,7 @@ function BuildTradePageContent() {
                 </div>
               )}
 
-              <div className={cn("grid gap-4", alertPick?.picked_direction === "mixed_evidence" ? "grid-cols-2" : "grid-cols-3")}>
+              <div className={cn("grid gap-4", (alertPick?.picked_direction === "mixed_evidence" || alertPick?.existing_pick) ? "grid-cols-2" : "grid-cols-3")}>
                 <button
                   type="button"
                   onClick={() => pickDirection("bullish")}
@@ -1100,8 +1109,8 @@ function BuildTradePageContent() {
                   <div className="text-xs opacity-60 mt-1">expecting the stock price to fall</div>
                 </button>
 
-                {/* "Let Alert decide" — hidden after mixed_evidence fallback */}
-                {alertPick?.picked_direction !== "mixed_evidence" && (
+                {/* "Let Alert decide" — hidden after mixed_evidence or duplicate refusal */}
+                {alertPick?.picked_direction !== "mixed_evidence" && !alertPick?.existing_pick && (
                   <button
                     type="button"
                     onClick={() => { setDirection("auto"); handleAlertPick(); }}

@@ -32,3 +32,6 @@ class AlertPick(Base):
     entry_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default="open")
+    algo_version: Mapped[str] = mapped_column(String(20), nullable=False, default="v1", server_default="v1")
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)

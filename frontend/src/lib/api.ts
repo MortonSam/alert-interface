@@ -610,6 +610,30 @@ export interface AlertPickRead {
   leans: SignalLean[];
   draft: ThesisDraftRead | null;
   generated_at: string;
+  existing_pick?: boolean;
+}
+
+export interface AlertPickLedgerItem {
+  id: string;
+  symbol: string;
+  picked_direction: string;
+  strategy: string | null;
+  suggested_strike: number | null;
+  suggested_spread_strike: number | null;
+  suggested_target: number | null;
+  expiration: string | null;
+  entry_price: number;
+  current_price: number | null;
+  unrealized_move_pct: number | null;
+  cost_to_enter: number | null;
+  max_loss: number | null;
+  max_gain: number | null;
+  vol_regime: string | null;
+  algo_version: string;
+  leans: SignalLean[];
+  reasoning: string | null;
+  generated_at: string;
+  status: string;
 }
 
 export interface ThesisDraftAlternativeRead {
@@ -774,6 +798,8 @@ export const api = {
       request<ThesisDraftAlternativeRead>("/theses/draft-alternative", { method: "POST", body: JSON.stringify(data) }),
     alertPick: (data: { symbol: string }) =>
       request<AlertPickRead>("/theses/alert-pick", { method: "POST", body: JSON.stringify(data) }),
+    alertPicks: () =>
+      request<AlertPickLedgerItem[]>("/theses/alert-picks"),
     mark: (id: string) =>
       request<ThesisMarkRead>(`/theses/${id}/mark`),
     stockMark: (id: string) =>
