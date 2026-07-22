@@ -151,6 +151,24 @@ class ThesisDraftAlternativeRequest(BaseModel):
     best_cost: float                         # cost of best play per contract (context only)
 
 
+class SignalLean(BaseModel):
+    signal: str         # "earnings" | "analyst" | "momentum"
+    direction: str      # "bullish" | "bearish" | "neutral"
+    justification: str  # one-line human-readable
+
+
+class AlertPickRequest(BaseModel):
+    symbol: str
+
+
+class AlertPickRead(BaseModel):
+    symbol: str
+    picked_direction: str              # "bullish" | "bearish" | "mixed_evidence"
+    leans: list[SignalLean]
+    draft: ThesisDraftRead | None      # None when mixed_evidence
+    generated_at: str
+
+
 class ThesisDraftAlternativeRead(BaseModel):
     fits: bool                    # True if a good affordable alternative was found
     strategy: str | None          # e.g. "Bull call spread $305/$320 ($8.10 net debit)" — null if fits=False

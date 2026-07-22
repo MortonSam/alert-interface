@@ -598,6 +598,20 @@ export interface ThesisDraftAlternativeRequest {
   best_cost: number;
 }
 
+export interface SignalLean {
+  signal: string;    // "earnings" | "analyst" | "momentum"
+  direction: string; // "bullish" | "bearish" | "neutral"
+  justification: string;
+}
+
+export interface AlertPickRead {
+  symbol: string;
+  picked_direction: string; // "bullish" | "bearish" | "mixed_evidence"
+  leans: SignalLean[];
+  draft: ThesisDraftRead | null;
+  generated_at: string;
+}
+
 export interface ThesisDraftAlternativeRead {
   fits: boolean;
   strategy: string | null;
@@ -758,6 +772,8 @@ export const api = {
       request<ThesisDraftRead>("/theses/draft", { method: "POST", body: JSON.stringify(data) }),
     draftAlternative: (data: ThesisDraftAlternativeRequest) =>
       request<ThesisDraftAlternativeRead>("/theses/draft-alternative", { method: "POST", body: JSON.stringify(data) }),
+    alertPick: (data: { symbol: string }) =>
+      request<AlertPickRead>("/theses/alert-pick", { method: "POST", body: JSON.stringify(data) }),
     mark: (id: string) =>
       request<ThesisMarkRead>(`/theses/${id}/mark`),
     stockMark: (id: string) =>

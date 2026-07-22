@@ -193,6 +193,11 @@ class YFinanceClient:
             if not rolling_rv.empty:
                 rv_series = [float(v) for v in rolling_rv.iloc[-252:]]
 
+        # 20-day price return for momentum signal
+        pct_change_20d = None
+        if len(closes) >= 21:
+            pct_change_20d = round(((closes.iloc[-1] / closes.iloc[-21]) - 1) * 100, 2)
+
         return {
             "current_rv": metrics["rv_20d"],
             "rv_series": rv_series,
@@ -202,6 +207,7 @@ class YFinanceClient:
             "rv_min": metrics["rv_min"],
             "rv_max": metrics["rv_max"],
             "status": metrics["status"],
+            "pct_change_20d": pct_change_20d,
         }
 
     @staticmethod

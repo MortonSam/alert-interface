@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   api,
+  type AlertPickRead,
   type Ticker,
   type TickerQuote,
   type ThesisDraftRead,
@@ -16,6 +17,7 @@ import { cn, rvRankShort } from "@/lib/utils";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
 import { GiBull, GiBearFace } from "react-icons/gi";
+import { HiSparkles } from "react-icons/hi2";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 
@@ -379,7 +381,7 @@ function DraftDisplay({
         </Callout>
       )}
 
-      {/* C) Headline — strategy name + strikes in font-mono */}
+      {/* C) Headline — strategy name + strikes + expiration in font-mono */}
       <div className="space-y-1.5">
         <h2 className="text-3xl md:text-4xl font-display font-bold tracking-tight">
           {shortName}
@@ -387,6 +389,17 @@ function DraftDisplay({
             <span className="font-mono text-foreground">
               {" "}${draft.suggested_strike}
               {draft.suggested_spread_strike != null && ` / $${draft.suggested_spread_strike}`}
+            </span>
+          )}
+          {fb.expiration_used && (
+            <span className="text-lg font-normal text-muted-foreground ml-2">
+              · exp {(() => {
+                const d = new Date(fb.expiration_used + "T12:00:00");
+                const now = new Date();
+                const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+                if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+                return d.toLocaleDateString("en-US", opts);
+              })()}
             </span>
           )}
         </h2>
@@ -714,8 +727,9 @@ function BuildTradePageContent() {
   const [quoteLoading, setQuoteLoading] = useState(false);
 
   // Step 2 — direction
-  const [direction, setDirection] = useState<"bullish" | "bearish" | null>(null);
+  const [direction, setDirection] = useState<"bullish" | "bearish" | "auto" | null>(null);
   const [aggressiveness, setAggressiveness] = useState<"conservative" | "moderate" | "aggressive">("moderate");
+  const [alertPick, setAlertPick] = useState<AlertPickRead | null>(null);
 
   // Step 3 — draft
   const [draft, setDraft] = useState<ThesisDraftRead | null>(null);
@@ -774,11 +788,13 @@ function BuildTradePageContent() {
     setDirection(null);
     setDraft(null);
     setDraftError(null);
+    setAlertPick(null);
     setStep("pick_stock");
   }
 
   function pickDirection(d: "bullish" | "bearish") {
     setDirection(d);
+    setAlertPick(null);
     // Reset draft if user changes direction after seeing it
     if (step === "review_draft" || step === "confirm") {
       setStep("pick_direction");
@@ -791,12 +807,35 @@ function BuildTradePageContent() {
     setStep("generating");
     setDraftError(null);
     try {
-      const d = await api.theses.draft({ symbol: selectedTicker.symbol, direction, aggressiveness });
+      const d = await api.theses.draft({ symbol: selectedTicker.symbol, direction: direction as "bullish" | "bearish", aggressiveness });
       setDraft(d);
       setStep("review_draft");
     } catch (err) {
       setDraftError(err instanceof Error ? err.message : "Generation failed — please try again");
       setStep("pick_direction");
+    }
+  }
+
+  async function handleAlertPick() {
+    if (!selectedTicker) return;
+    setStep("generating");
+    setDraftError(null);
+    setAlertPick(null);
+    try {
+      const result = await api.theses.alertPick({ symbol: selectedTicker.symbol });
+      setAlertPick(result);
+      if (result.picked_direction === "mixed_evidence") {
+        setStep("pick_direction");
+        setDirection(null);         // reset so user can pick manually
+      } else {
+        setDirection(result.picked_direction as "bullish" | "bearish");
+        setDraft(result.draft);
+        setStep("review_draft");
+      }
+    } catch (err) {
+      setDraftError(err instanceof Error ? err.message : "Generation failed");
+      setStep("pick_direction");
+      setDirection(null);
     }
   }
 
@@ -808,6 +847,9 @@ function BuildTradePageContent() {
 
   async function handleSave() {
     if (!selectedTicker || !direction) return;
+    // Resolve "auto" direction to the actual picked direction for saving
+    const saveDirection: "bullish" | "bearish" =
+      direction === "auto" && alertPick ? (alertPick.picked_direction as "bullish" | "bearish") : (direction as "bullish" | "bearish");
     setStep("saving");
     setSaveError(null);
     try {
@@ -824,7 +866,7 @@ function BuildTradePageContent() {
           : {};
       const thesis = await api.theses.create({
         symbol: selectedTicker.symbol,
-        direction,
+        direction: saveDirection,
         conviction,
         target_date: targetDate,
         ...(priceTarget ? { price_target: parseFloat(priceTarget) } : {}),
@@ -848,6 +890,7 @@ function BuildTradePageContent() {
     setDirection(null);
     setDraft(null);
     setDraftError(null);
+    setAlertPick(null);
     setConviction(3);
     setTargetDate(defaultTargetDate());
     setPriceTarget("");
@@ -875,7 +918,7 @@ function BuildTradePageContent() {
             <div className="text-5xl">✓</div>
             <h2 className="text-2xl font-bold">Trade thesis saved</h2>
             <p className="text-muted-foreground text-sm max-w-sm mx-auto leading-relaxed">
-              {direction === "bullish" ? "Bullish" : "Bearish"} thesis on{" "}
+              {(direction === "auto" && alertPick ? alertPick.picked_direction : direction) === "bullish" ? "Bullish" : "Bearish"} thesis on{" "}
               <span className="font-semibold text-foreground">{selectedTicker?.symbol}</span>{" "}
               has been added to your tracker.
               {optionLeg?.strike != null && (
@@ -1003,7 +1046,30 @@ function BuildTradePageContent() {
             <section className="space-y-4">
               <StepHeader n={2} label="Pick a direction" done={!!direction && step !== "pick_direction"} />
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Mixed-evidence fallback — shown when Alert couldn't pick */}
+              {alertPick?.picked_direction === "mixed_evidence" && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4">
+                  <p className="text-sm font-medium">Evidence conflicts — Alert can&apos;t pick a clear direction</p>
+                  <div className="text-xs text-muted-foreground space-y-1.5">
+                    {alertPick.leans.map((lean) => (
+                      <div key={lean.signal} className="flex items-start gap-2">
+                        <span className={cn(
+                          "mt-0.5 w-2 h-2 rounded-full shrink-0",
+                          lean.direction === "bullish" ? "bg-green-500" :
+                          lean.direction === "bearish" ? "bg-red-500" : "bg-zinc-400"
+                        )} />
+                        <span>
+                          <span className="font-medium capitalize">{lean.signal}:</span>{" "}
+                          {lean.justification}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Pick a direction manually below.</p>
+                </div>
+              )}
+
+              <div className={cn("grid gap-4", alertPick?.picked_direction === "mixed_evidence" ? "grid-cols-2" : "grid-cols-3")}>
                 <button
                   type="button"
                   onClick={() => pickDirection("bullish")}
@@ -1033,10 +1099,29 @@ function BuildTradePageContent() {
                   <div className="text-base font-bold">Bearish</div>
                   <div className="text-xs opacity-60 mt-1">expecting the stock price to fall</div>
                 </button>
+
+                {/* "Let Alert decide" — hidden after mixed_evidence fallback */}
+                {alertPick?.picked_direction !== "mixed_evidence" && (
+                  <button
+                    type="button"
+                    onClick={() => { setDirection("auto"); handleAlertPick(); }}
+                    disabled={step === "generating"}
+                    className={cn(
+                      "py-8 rounded-[var(--radius)] border text-center transition-all select-none",
+                      direction === "auto"
+                        ? "bg-orange-500/10 border-orange-500 text-orange-600 dark:text-orange-400"
+                        : "border-border text-muted-foreground hover:border-orange-500/50 hover:bg-orange-500/5",
+                    )}
+                  >
+                    <HiSparkles aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
+                    <div className="text-base font-bold">Let Alert decide</div>
+                    <div className="text-xs opacity-60 mt-1">Alert picks from the data</div>
+                  </button>
+                )}
               </div>
 
-              {/* Aggressiveness + generate */}
-              {direction && (step === "pick_direction" || step === "generating") && (
+              {/* Aggressiveness + generate (only for manual direction picks) */}
+              {direction && direction !== "auto" && (step === "pick_direction" || step === "generating") && (
                 <div className="flex items-center gap-4 flex-wrap pt-1">
                   <div className="flex gap-1.5">
                     {(["conservative", "moderate", "aggressive"] as const).map((a) => (
@@ -1066,6 +1151,11 @@ function BuildTradePageContent() {
                 </div>
               )}
 
+              {/* Generating spinner for auto mode */}
+              {direction === "auto" && step === "generating" && (
+                <p className="text-sm text-muted-foreground animate-pulse">Analyzing signals and generating trade…</p>
+              )}
+
               {draftError && (
                 <p className="text-sm text-red-500">{draftError}</p>
               )}
@@ -1076,11 +1166,38 @@ function BuildTradePageContent() {
           {step === "review_draft" && draft && (
             <section className="space-y-4">
               <StepHeader n={3} label="Review the suggestion" />
+
+              {/* Alert's Pick leans panel */}
+              {alertPick && alertPick.picked_direction !== "mixed_evidence" && (
+                <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 px-5 py-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+                      Alert&apos;s Pick · {alertPick.picked_direction}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1.5">
+                    {alertPick.leans.map((lean) => (
+                      <div key={lean.signal} className="flex items-start gap-2">
+                        <span className={cn(
+                          "mt-0.5 w-2 h-2 rounded-full shrink-0",
+                          lean.direction === "bullish" ? "bg-green-500" :
+                          lean.direction === "bearish" ? "bg-red-500" : "bg-zinc-400"
+                        )} />
+                        <span>
+                          <span className="font-medium capitalize">{lean.signal}:</span>{" "}
+                          {lean.justification}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-2xl border bg-card px-6 py-6">
                 <DraftDisplay
                   draft={draft}
                   onAccept={handleAcceptDraft}
-                  onRegenerate={() => { setStep("pick_direction"); setDraft(null); }}
+                  onRegenerate={() => { setStep("pick_direction"); setDraft(null); setAlertPick(null); }}
                 />
               </div>
             </section>

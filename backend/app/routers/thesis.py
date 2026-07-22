@@ -12,13 +12,17 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import require_admin
 from app.database import get_db
+from app.models.alert_pick import AlertPick
 from app.models.analyst_reaction_stats import AnalystReactionStats
-from app.models.enums import EarningsOutcome
+from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.thesis import Thesis, ThesisStatus
 from app.models.ticker import Ticker
 from app.schemas.thesis import (
+    AlertPickRead,
+    AlertPickRequest,
+    SignalLean,
     ThesisCreate,
     ThesisDraftAlternativeRead,
     ThesisDraftAlternativeRequest,
@@ -245,24 +249,11 @@ async def _compute_option_mark(
     )
 
 
-# ── Draft endpoint ─────────────────────────────────────────────────────────────
+# ── Shared data pipeline ───────────────────────────────────────────────────────
 
-@router.post("/draft", response_model=ThesisDraftRead, dependencies=[Depends(require_admin)])
-async def draft_thesis(
-    payload: ThesisDraftRequest,
-    db: AsyncSession = Depends(get_db),
-) -> ThesisDraftRead:
-    """AI-assisted thesis parameter drafting.
-
-    Gathers current price, expected move, options chain, historical reactions, and RV.
-    Injects these as authoritative facts into a strict prompt; the model synthesises
-    realistic targets / strikes / strategy — it never invents numbers.
-    """
-    sym = payload.symbol.upper()
-    direction = payload.direction.lower()
-    aggressiveness = payload.aggressiveness.lower()
+async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
+    """Fetch all market data + DB state needed by both draft and alert-pick endpoints."""
     loop = asyncio.get_event_loop()
-    generated_at = datetime.now(tz=timezone.utc).isoformat()
 
     # ── 1. Parallel market data fetch ─────────────────────────────────────────
     finnhub = FinnhubClient()
@@ -302,7 +293,6 @@ async def draft_thesis(
         )
     )).scalars().all()
 
-    # pct_change_1d stored as full pct (e.g. 2.77 = 2.77%) — convert to decimal for internal math
     abs_moves_dec = [abs(float(r.pct_change_1d)) / 100 for r in reactions]
     hist_avg: float | None = mean(abs_moves_dec) if abs_moves_dec else None
     hist_max: float | None = max(abs_moves_dec) if abs_moves_dec else None
@@ -314,7 +304,7 @@ async def draft_thesis(
     beat_drops = [r for r in beats if float(r.pct_change_1d) < 0]
     bbd_rate: float | None = len(beat_drops) / len(beats) * 100 if beats else None
 
-    # ── 2b. Conditional earnings stats (reuses reactions from 2a) ───────────
+    # ── 2b. Conditional earnings stats ───────────────────────────────────────
     ce_misses = [r for r in reactions if r.outcome == EarningsOutcome.MISS]
 
     avg_1d_on_beat = round(mean([float(r.pct_change_1d) for r in beats]), 2) if len(beats) >= 3 else None
@@ -416,6 +406,94 @@ async def draft_thesis(
         else:
             vol_regime = "iv_fair"
 
+    return {
+        "sym": sym,
+        "current_price": current_price,
+        "ticker_row": ticker_row,
+        "earnings_str": earnings_str,
+        "reactions": reactions,
+        "hist_avg": hist_avg,
+        "hist_max": hist_max,
+        "hist_min": hist_min,
+        "hist_sample": hist_sample,
+        "beats": beats,
+        "ce_misses": ce_misses,
+        "beat_rate": beat_rate,
+        "bbd_rate": bbd_rate,
+        "avg_1d_on_beat": avg_1d_on_beat,
+        "median_1d_on_beat": median_1d_on_beat,
+        "avg_1d_on_miss": avg_1d_on_miss,
+        "median_1d_on_miss": median_1d_on_miss,
+        "beat_cont_pct": beat_cont_pct,
+        "beat_5d_n": beat_5d_n,
+        "miss_cont_pct": miss_cont_pct,
+        "miss_5d_n": miss_5d_n,
+        "magnitude_trend": magnitude_trend,
+        "analyst_row": analyst_row,
+        "chosen_exp": chosen_exp,
+        "days_to_exp": days_to_exp,
+        "calls_raw": calls_raw,
+        "puts_raw": puts_raw,
+        "atm_strike": atm_strike,
+        "expected_move_pct": expected_move_pct,
+        "expected_move_dollars": expected_move_dollars,
+        "implied_range_low": implied_range_low,
+        "implied_range_high": implied_range_high,
+        "atm_iv": atm_iv,
+        "current_rv": current_rv,
+        "rv_rank": rv_rank,
+        "iv_rv_spread_pp": iv_rv_spread_pp,
+        "vol_regime": vol_regime,
+        "rv_raw": rv_raw,
+    }
+
+
+async def _run_draft_generation(
+    data: dict,
+    direction: str,
+    aggressiveness: str,
+    proposed_target: float | None = None,
+    extra_prompt_section: str = "",
+) -> ThesisDraftRead:
+    """Build prompt from gathered data, call AI, parse, and return ThesisDraftRead."""
+    sym = data["sym"]
+    current_price = data["current_price"]
+    earnings_str = data["earnings_str"]
+    hist_avg = data["hist_avg"]
+    hist_max = data["hist_max"]
+    hist_min = data["hist_min"]
+    hist_sample = data["hist_sample"]
+    beats = data["beats"]
+    ce_misses = data["ce_misses"]
+    beat_rate = data["beat_rate"]
+    bbd_rate = data["bbd_rate"]
+    avg_1d_on_beat = data["avg_1d_on_beat"]
+    median_1d_on_beat = data["median_1d_on_beat"]
+    avg_1d_on_miss = data["avg_1d_on_miss"]
+    median_1d_on_miss = data["median_1d_on_miss"]
+    beat_cont_pct = data["beat_cont_pct"]
+    beat_5d_n = data["beat_5d_n"]
+    miss_cont_pct = data["miss_cont_pct"]
+    miss_5d_n = data["miss_5d_n"]
+    magnitude_trend = data["magnitude_trend"]
+    analyst_row = data["analyst_row"]
+    chosen_exp = data["chosen_exp"]
+    days_to_exp = data["days_to_exp"]
+    calls_raw = data["calls_raw"]
+    puts_raw = data["puts_raw"]
+    atm_strike = data["atm_strike"]
+    expected_move_pct = data["expected_move_pct"]
+    expected_move_dollars = data["expected_move_dollars"]
+    implied_range_low = data["implied_range_low"]
+    implied_range_high = data["implied_range_high"]
+    atm_iv = data["atm_iv"]
+    current_rv = data["current_rv"]
+    rv_rank = data["rv_rank"]
+    iv_rv_spread_pp = data["iv_rv_spread_pp"]
+    vol_regime = data["vol_regime"]
+
+    generated_at = datetime.now(tz=timezone.utc).isoformat()
+
     # ── 6. Build quality-filtered strike lists ────────────────────────────────
     if direction == "bullish":
         primary_raw, secondary_raw = calls_raw, puts_raw
@@ -437,8 +515,8 @@ async def draft_thesis(
 
     # ── 7. Realism pre-check ──────────────────────────────────────────────────
     realism_precheck = ""
-    if payload.proposed_target is not None:
-        pt = payload.proposed_target
+    if proposed_target is not None:
+        pt = proposed_target
         move_req = abs(pt - current_price) / current_price
         realism_precheck = f"\nUSER-PROPOSED TARGET: ${pt:.2f} (requires a {move_req*100:.1f}% move from ${current_price:.2f})\n"
         if hist_max and move_req > hist_max:
@@ -619,7 +697,8 @@ REALISM THRESHOLDS (pre-computed — enforce these):
   1× implied move target:      {t1x_display}
   Historical max-move target:  {thmax_display}
   Any target beyond {thmax_display} REQUIRES a non-null realism_flag explaining the data context.
-{realism_precheck}
+{realism_precheck}\
+{extra_prompt_section}\
 Return ONLY this JSON object (no other text):
 {{
   "suggested_target": <float — price target in dollars, data-grounded>,
@@ -687,6 +766,225 @@ Return ONLY this JSON object (no other text):
         model_used=gen["model_used"],
         generated_at=generated_at,
     )
+
+
+# ── Draft endpoint ─────────────────────────────────────────────────────────────
+
+@router.post("/draft", response_model=ThesisDraftRead, dependencies=[Depends(require_admin)])
+async def draft_thesis(
+    payload: ThesisDraftRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ThesisDraftRead:
+    """AI-assisted thesis parameter drafting."""
+    data = await _gather_draft_data(payload.symbol.upper(), db)
+    return await _run_draft_generation(
+        data,
+        payload.direction.lower(),
+        payload.aggressiveness.lower(),
+        proposed_target=payload.proposed_target,
+    )
+
+
+# ── Alert-pick endpoint ───────────────────────────────────────────────────────
+
+@router.post("/alert-pick", response_model=AlertPickRead, dependencies=[Depends(require_admin)])
+async def alert_pick(
+    payload: AlertPickRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AlertPickRead:
+    """Evidence-based auto-direction: compute signal leans, pick direction when
+    signals agree (or decline when they conflict), draft at moderate aggressiveness,
+    and persist every pick to alert_picks."""
+    sym = payload.symbol.upper()
+    generated_at = datetime.now(tz=timezone.utc).isoformat()
+
+    data = await _gather_draft_data(sym, db)
+
+    earnings_str = data["earnings_str"]
+    hist_sample = data["hist_sample"]
+    beat_rate = data["beat_rate"]
+    median_1d_on_beat = data["median_1d_on_beat"]
+    median_1d_on_miss = data["median_1d_on_miss"]
+    analyst_row = data["analyst_row"]
+    ticker_row = data["ticker_row"]
+    rv_raw = data["rv_raw"]
+    current_price = data["current_price"]
+    vol_regime = data["vol_regime"]
+    chosen_exp = data["chosen_exp"]
+
+    # ── Earnings lean ────────────────────────────────────────────────────────
+    if earnings_str and hist_sample >= 8 and beat_rate is not None:
+        med_beat = median_1d_on_beat or 0.0
+        med_miss = median_1d_on_miss or 0.0
+        br = beat_rate / 100
+        weighted = br * med_beat + (1 - br) * med_miss
+        if weighted > 0.5:
+            earnings_lean = SignalLean(
+                signal="earnings", direction="bullish",
+                justification=f"Beats {beat_rate:.0f}% of the time (median +{med_beat:.1f}%); weighted expected 1d: {weighted:+.1f}%",
+            )
+        elif weighted < -0.5:
+            earnings_lean = SignalLean(
+                signal="earnings", direction="bearish",
+                justification=f"Weighted expected 1d: {weighted:+.1f}% (beat rate {beat_rate:.0f}%, median on beat {med_beat:+.1f}%, on miss {med_miss:+.1f}%)",
+            )
+        else:
+            earnings_lean = SignalLean(
+                signal="earnings", direction="neutral",
+                justification=f"Weighted expected 1d near zero ({weighted:+.1f}%); no clear earnings edge",
+            )
+    else:
+        earnings_lean = SignalLean(
+            signal="earnings", direction="neutral",
+            justification="No upcoming earnings or insufficient history",
+        )
+
+    # ── Analyst lean ─────────────────────────────────────────────────────────
+    today = date.today()
+    cutoff = today - timedelta(days=90)
+    recent_actions = (await db.execute(
+        select(Event).where(
+            Event.ticker_id == ticker_row.id,
+            Event.event_type == EventType.ANALYST_ACTION,
+            Event.event_date >= cutoff,
+        )
+    )).scalars().all()
+    recent_ups = sum(1 for e in recent_actions if e.metadata_.get("action") == "up")
+    recent_downs = sum(1 for e in recent_actions if e.metadata_.get("action") == "down")
+
+    if recent_ups + recent_downs < 3:
+        analyst_lean = SignalLean(
+            signal="analyst", direction="neutral",
+            justification=f"Only {recent_ups + recent_downs} analyst actions in 90 days; insufficient",
+        )
+    elif recent_ups > recent_downs:
+        med_str = f", upgrades historically lift {float(analyst_row.median_1d_upgrade):+.1f}% median" if analyst_row and analyst_row.median_1d_upgrade else ""
+        analyst_lean = SignalLean(
+            signal="analyst", direction="bullish",
+            justification=f"{recent_ups} upgrades vs {recent_downs} downgrades in 90 days{med_str}",
+        )
+    elif recent_downs > recent_ups:
+        med_str = f", downgrades historically hit {float(analyst_row.median_1d_downgrade):+.1f}% median" if analyst_row and analyst_row.median_1d_downgrade else ""
+        analyst_lean = SignalLean(
+            signal="analyst", direction="bearish",
+            justification=f"{recent_downs} downgrades vs {recent_ups} upgrades in 90 days{med_str}",
+        )
+    else:
+        analyst_lean = SignalLean(
+            signal="analyst", direction="neutral",
+            justification=f"Evenly split: {recent_ups} upgrades, {recent_downs} downgrades in 90 days",
+        )
+
+    # ── Momentum lean ────────────────────────────────────────────────────────
+    pct_20d = rv_raw.get("pct_change_20d")
+    if pct_20d is None:
+        momentum_lean = SignalLean(
+            signal="momentum", direction="neutral",
+            justification="Price data unavailable",
+        )
+    elif pct_20d > 5:
+        momentum_lean = SignalLean(
+            signal="momentum", direction="bullish",
+            justification=f"Up {pct_20d:+.1f}% over 20 trading days",
+        )
+    elif pct_20d < -5:
+        momentum_lean = SignalLean(
+            signal="momentum", direction="bearish",
+            justification=f"Down {pct_20d:+.1f}% over 20 trading days",
+        )
+    else:
+        momentum_lean = SignalLean(
+            signal="momentum", direction="neutral",
+            justification=f"Flat ({pct_20d:+.1f}% over 20 days); no clear trend",
+        )
+
+    # ── Decision rule ────────────────────────────────────────────────────────
+    leans = [earnings_lean, analyst_lean, momentum_lean]
+    bullish_count = sum(1 for l in leans if l.direction == "bullish")
+    bearish_count = sum(1 for l in leans if l.direction == "bearish")
+
+    if bullish_count >= 2 and bearish_count == 0:
+        picked_direction = "bullish"
+    elif bearish_count >= 2 and bullish_count == 0:
+        picked_direction = "bearish"
+    else:
+        picked_direction = "mixed_evidence"
+
+    print(
+        f"[alert-pick] {sym} | earnings={earnings_lean.direction} analyst={analyst_lean.direction} "
+        f"momentum={momentum_lean.direction} → {picked_direction}",
+        flush=True,
+    )
+
+    # ── On clear direction: run draft engine ─────────────────────────────────
+    draft_read: ThesisDraftRead | None = None
+    if picked_direction != "mixed_evidence":
+        lean_lines = "\n".join(
+            f"  - {l.signal}: {l.direction} — {l.justification}" for l in leans
+        )
+        extra_prompt = (
+            f"\nALERT-PICK MODE:\n"
+            f"Alert selected {picked_direction} based on the following signal analysis:\n"
+            f"{lean_lines}\n"
+            f"In your reasoning, explicitly state which signals drove this direction choice.\n"
+        )
+        draft_read = await _run_draft_generation(
+            data, picked_direction, "moderate", extra_prompt_section=extra_prompt,
+        )
+
+        # ── Persist to alert_picks ───────────────────────────────────────────
+        primary_rows = draft_read.fact_block.get("primary_strikes", [])
+        secondary_rows = draft_read.fact_block.get("secondary_strikes", [])
+        suggested_strike = draft_read.suggested_strike
+        spread_strike = draft_read.suggested_spread_strike
+
+        leg1_mid = next((s["mid"] for s in primary_rows if s["strike"] == suggested_strike), None) if suggested_strike else None
+        # Vertical spreads: both legs are same side (both calls or both puts) → check primary_rows first
+        leg2_mid = next((s["mid"] for s in primary_rows if s["strike"] == spread_strike), None) if spread_strike else None
+        if leg2_mid is None and spread_strike:
+            leg2_mid = next((s["mid"] for s in secondary_rows if s["strike"] == spread_strike), None)
+
+        if spread_strike and leg1_mid and leg2_mid:
+            cost_to_enter = round(leg1_mid - leg2_mid, 4)
+            spread_width = abs(suggested_strike - spread_strike)
+            max_loss = round(cost_to_enter * 100, 2)
+            max_gain = round((spread_width - cost_to_enter) * 100, 2)
+        elif leg1_mid:
+            cost_to_enter = leg1_mid
+            max_loss = round(leg1_mid * 100, 2)
+            max_gain = None  # unlimited for single leg
+        else:
+            cost_to_enter = None
+            max_loss = None
+            max_gain = None
+
+        pick = AlertPick(
+            symbol=sym,
+            picked_direction=picked_direction,
+            leans=[l.model_dump() for l in leans],
+            strategy=draft_read.strategy,
+            suggested_strike=suggested_strike,
+            suggested_spread_strike=spread_strike,
+            suggested_target=draft_read.suggested_target,
+            expiration=chosen_exp,
+            cost_to_enter=cost_to_enter,
+            max_loss=max_loss,
+            max_gain=max_gain,
+            vol_regime=vol_regime,
+            reasoning=draft_read.reasoning,
+            entry_price=current_price,
+        )
+        db.add(pick)
+        await db.commit()
+
+    return AlertPickRead(
+        symbol=sym,
+        picked_direction=picked_direction,
+        leans=leans,
+        draft=draft_read,
+        generated_at=generated_at,
+    )
+
 
 
 # ── Budget-constrained alternative endpoint ────────────────────────────────────
