@@ -56,11 +56,32 @@ class YFinanceClient:
 
     @staticmethod
     def get_option_chain(symbol: str, expiration: str) -> dict:
-        try:
-            chain = yf.Ticker(symbol).option_chain(expiration)
-            return {"calls": _parse_option_df(chain.calls), "puts": _parse_option_df(chain.puts), "expiration": expiration}
-        except Exception:
-            return {"calls": [], "puts": [], "expiration": expiration}
+        import time
+        empty = {"calls": [], "puts": [], "expiration": expiration, "chain_last_trade": None}
+        for attempt in range(3):
+            try:
+                chain = yf.Ticker(symbol).option_chain(expiration)
+                calls = _parse_option_df(chain.calls)
+                puts = _parse_option_df(chain.puts)
+                if calls or puts:
+                    # Most-recent lastTradeDate across both sides
+                    chain_last_trade = None
+                    for df in (chain.calls, chain.puts):
+                        if "lastTradeDate" in df.columns and not df.empty:
+                            max_dt = df["lastTradeDate"].dropna().max()
+                            if pd.notna(max_dt):
+                                dt = pd.Timestamp(max_dt).date()
+                                if chain_last_trade is None or dt > chain_last_trade:
+                                    chain_last_trade = dt
+                    return {
+                        "calls": calls, "puts": puts, "expiration": expiration,
+                        "chain_last_trade": chain_last_trade.isoformat() if chain_last_trade else None,
+                    }
+            except Exception:
+                pass
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+        return empty
 
     @staticmethod
     def get_close_on_date(symbol: str, date_str: str) -> float | None:

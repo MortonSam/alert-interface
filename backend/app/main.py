@@ -56,6 +56,16 @@ async def health_check() -> dict:
             # RV last-run summary
             rv_summary = await get_value(session, "rv_last_run")
             result["rv_last_run"] = rv_summary
+
+            # Per-step health timestamps
+            step_rows = await session.execute(
+                sa.text("SELECT key, value FROM system_metadata WHERE key LIKE 'step:%'")
+            )
+            steps = {}
+            for row in step_rows:
+                label = row[0].replace("step:", "").replace(":last_success", "")
+                steps[label] = row[1]
+            result["step_health"] = steps
     except Exception:
         result["status"] = "degraded"
 

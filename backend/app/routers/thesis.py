@@ -356,6 +356,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
 
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
+    chain_last_trade: str | None = chain.get("chain_last_trade")
 
     atm_strike: float | None = None
     expected_move_pct: float | None = None
@@ -446,6 +447,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
         "iv_rv_spread_pp": iv_rv_spread_pp,
         "vol_regime": vol_regime,
         "rv_raw": rv_raw,
+        "chain_last_trade": chain_last_trade,
     }
 
 
@@ -492,8 +494,31 @@ async def _run_draft_generation(
     rv_rank = data["rv_rank"]
     iv_rv_spread_pp = data["iv_rv_spread_pp"]
     vol_regime = data["vol_regime"]
+    chain_last_trade = data.get("chain_last_trade")
 
     generated_at = datetime.now(tz=timezone.utc).isoformat()
+
+    # ── Options-age guard (primary) ──────────────────────────────────────
+    # Refuse the draft when the most-recent trade in the chain is > 2
+    # trading days old — the quotes are stale regardless of strike count.
+    if chain_last_trade:
+        trade_date = date.fromisoformat(chain_last_trade)
+        today = date.today()
+        trading_days = 0
+        d = trade_date
+        while d < today:
+            d += timedelta(days=1)
+            if d.weekday() < 5:
+                trading_days += 1
+        if trading_days > 2:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Options data for {sym} is as of {chain_last_trade} — "
+                    f"drafting paused until fresh chains load."
+                ),
+            )
+    options_as_of = chain_last_trade or generated_at
 
     # ── 6. Build quality-filtered strike lists ────────────────────────────────
     if direction == "bullish":
@@ -511,6 +536,19 @@ async def _run_draft_generation(
 
     primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, current_price)
     secondary_text, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, current_price, limit=8)
+
+    # ── Quality-strike guard ─────────────────────────────────────────────
+    MIN_QUALITY_STRIKES = 3
+    if len(primary_rows) < MIN_QUALITY_STRIKES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Options data for {sym} is stale or unavailable — only "
+                f"{len(primary_rows)} liquid strike(s) found (need "
+                f"{MIN_QUALITY_STRIKES}). Drafting paused until markets "
+                f"provide live quotes."
+            ),
+        )
 
     valid_primary_strikes = {r["strike"] for r in primary_rows}
 
@@ -580,6 +618,7 @@ async def _run_draft_generation(
         "downgrade_5d_cont_pct":     float(analyst_row.downgrade_5d_continuation_pct) if analyst_row and analyst_row.downgrade_5d_continuation_pct is not None else None,
         "primary_strikes":           primary_rows,
         "secondary_strikes":         secondary_rows,
+        "options_as_of":             options_as_of,
     }
 
     # ── 9. Build prompt ───────────────────────────────────────────────────────
@@ -654,6 +693,7 @@ CURRENT PRICE:      ${current_price:.2f}
 ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
 NEXT EARNINGS DATE: {earnings_str or "(unknown)"}
 EXPIRATION USED:    {chosen_exp or "(none)"} ({_n(days_to_exp, "d")} days out)
+Options chain fetched: {options_as_of}
 
 EXPECTED MOVE (ATM straddle):
   Implied move:     {em_display}
@@ -743,6 +783,25 @@ Return ONLY this JSON object (no other text):
     realism_flag     = parsed.get("realism_flag")
 
     suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
+
+    # ── Intrinsic-bound sanity check ─────────────────────────────────────
+    if suggested_strike is not None:
+        strike_row = next((r for r in primary_rows if r["strike"] == suggested_strike), None)
+        if strike_row:
+            mid = strike_row["mid"]
+            if direction == "bullish":
+                intrinsic = max(current_price - suggested_strike, 0)
+            else:
+                intrinsic = max(suggested_strike - current_price, 0)
+            if intrinsic > 0 and mid < intrinsic * 0.98:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Options data for {sym} appears stale — "
+                        f"${suggested_strike:.0f} {'put' if direction == 'bearish' else 'call'} "
+                        f"mid ${mid:.2f} is below intrinsic ${intrinsic:.2f}. Drafting paused."
+                    ),
+                )
 
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (

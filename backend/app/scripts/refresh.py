@@ -38,6 +38,20 @@ STEPS: list[tuple[str, list[str]]] = [
 WIDTH = 42
 
 
+def _record_step_success(label: str) -> None:
+    """Write step:<label>:last_success to system_metadata."""
+    import asyncio as _aio
+    async def _write():
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with AsyncSessionLocal() as session:
+            await set_value(session, f"step:{label}:last_success", now_iso)
+            await session.commit()
+    try:
+        _aio.run(_write())
+    except Exception:
+        pass  # metadata write failure must not crash the pipeline
+
+
 def _run_step(label: str, cmd: list[str]) -> bool:
     """Run a subprocess step, streaming its output. Returns True on success."""
     print(f"\n{'─' * 60}")
@@ -47,6 +61,8 @@ def _run_step(label: str, cmd: list[str]) -> bool:
     ok = result.returncode == 0
     status = "PASS" if ok else "FAIL"
     print(f"\n  [{status}] {label} (exit {result.returncode})")
+    if ok:
+        _record_step_success(label)
     return ok
 
 
