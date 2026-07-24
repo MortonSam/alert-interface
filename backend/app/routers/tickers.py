@@ -157,7 +157,7 @@ def _build_contracts(chain_side, atm_strike, current_price: float | None = None,
     ) for c in chain_side]
 
 
-@router.get("/", response_model=list[TickerRead])
+@router.get("", response_model=list[TickerRead])
 async def list_tickers(
     active_only: bool = True,
     db: AsyncSession = Depends(get_db),
@@ -187,7 +187,7 @@ async def list_tickers(
     return enriched
 
 
-@router.post("/", response_model=TickerRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TickerRead, status_code=status.HTTP_201_CREATED)
 async def create_ticker(payload: TickerCreate, db: AsyncSession = Depends(get_db)) -> Ticker:
     ticker = Ticker(**payload.model_dump())
     ticker.symbol = ticker.symbol.upper()

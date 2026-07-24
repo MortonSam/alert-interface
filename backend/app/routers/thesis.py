@@ -705,7 +705,7 @@ Return ONLY this JSON object (no other text):
   "suggested_target": <float — price target in dollars, data-grounded>,
   "suggested_strike": <float — MUST be a value from AVAILABLE STRIKES list above>,
   "suggested_spread_strike": <float or null — second leg for spread, else null>,
-  "strategy": "<e.g. 'Long $315 call ($5.80 mid)' or 'Bull call spread $315/$325 ($X.XX net debit)'>",
+  "strategy": "<e.g. 'Long $315 call ($5.80 mid)' or 'Bull call spread $315/$325 ($X.XX net debit)' — do NOT include the expiration date, DTE, or target in this field>",
   "reasoning": "<2–4 sentences citing specific figures from the fact block>",
   "realism_flag": "<string with specific numbers, or null if target is within data support>"
 }}"""
@@ -1005,11 +1005,46 @@ async def alert_pick(
 
 # ── Alert-picks ledger ─────────────────────────────────────────────────────────
 
-@router.get("/alert-picks", response_model=list[AlertPickLedgerItem], dependencies=[Depends(require_admin)])
+@router.get("/alert-picks", response_model=list[AlertPickLedgerItem])
+_EXP_TAIL_RE = re.compile(
+    r"\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_exp_tail(strategy: str | None) -> str | None:
+    if not strategy:
+        return strategy
+    return _EXP_TAIL_RE.sub("", strategy)
+
+
+def _compute_option_pnl(
+    close: float,
+    strike: float,
+    spread_strike: float | None,
+    cost: float,
+    direction: str,
+) -> tuple[float, float]:
+    """Compute (pnl_dollars, pnl_pct) for a closed pick at expiration."""
+    is_bullish = direction == "bullish"
+    if is_bullish:
+        intrinsic = max(close - strike, 0)
+    else:
+        intrinsic = max(strike - close, 0)
+
+    if spread_strike is not None:
+        width = abs(strike - spread_strike)
+        intrinsic = min(intrinsic, width)
+
+    pnl_dollars = round((intrinsic - cost) * 100, 2)
+    pnl_pct = round(((intrinsic - cost) / cost) * 100, 2) if cost else 0.0
+    return pnl_dollars, pnl_pct
+
+
 async def list_alert_picks(
     db: AsyncSession = Depends(get_db),
 ) -> list[AlertPickLedgerItem]:
-    """List all alert picks newest-first, with live price marks."""
+    """List all alert picks newest-first, with live price marks and scoring."""
     rows = (await db.execute(
         select(AlertPick).order_by(AlertPick.generated_at.desc())
     )).scalars().all()
@@ -1017,35 +1052,57 @@ async def list_alert_picks(
     if not rows:
         return []
 
-    # Fetch live prices for all symbols in one batch
-    symbols = list({r.symbol for r in rows})
-    finnhub = FinnhubClient()
-    try:
-        raw_quotes = await asyncio.gather(
-            *(finnhub.get_quote(s) for s in symbols),
-            return_exceptions=True,
-        )
-    finally:
-        await finnhub.close()
-
+    # Only fetch live prices for open picks
+    open_symbols = list({r.symbol for r in rows if r.status == "open"})
     price_map: dict[str, float | None] = {}
-    for sym, q in zip(symbols, raw_quotes):
-        if isinstance(q, BaseException):
-            price_map[sym] = None
-        else:
-            price_map[sym] = float(q.get("c") or 0) or None
+    if open_symbols:
+        finnhub = FinnhubClient()
+        try:
+            raw_quotes = await asyncio.gather(
+                *(finnhub.get_quote(s) for s in open_symbols),
+                return_exceptions=True,
+            )
+        finally:
+            await finnhub.close()
+
+        for sym, q in zip(open_symbols, raw_quotes):
+            if isinstance(q, BaseException):
+                price_map[sym] = None
+            else:
+                price_map[sym] = float(q.get("c") or 0) or None
 
     items = []
     for r in rows:
         entry = float(r.entry_price)
-        current = price_map.get(r.symbol)
+        is_closed = r.status == "closed"
+        close_price = float(r.close_price) if r.close_price is not None else None
+
+        # For closed picks use close_price; for open use live mark
+        current = close_price if is_closed else price_map.get(r.symbol)
         unrealized = round(((current - entry) / entry) * 100, 2) if current and entry else None
+
+        # Scoring (closed picks only)
+        direction_hit: bool | None = None
+        option_pnl_dollars: float | None = None
+        option_pnl_pct: float | None = None
+
+        if is_closed and close_price is not None:
+            is_bullish = r.picked_direction == "bullish"
+            direction_hit = close_price > entry if is_bullish else close_price < entry
+
+            strike = float(r.suggested_strike) if r.suggested_strike else None
+            spread = float(r.suggested_spread_strike) if r.suggested_spread_strike else None
+            cost = float(r.cost_to_enter) if r.cost_to_enter else None
+            if strike is not None and cost is not None and cost > 0:
+                option_pnl_dollars, option_pnl_pct = _compute_option_pnl(
+                    close_price, strike, spread, cost, r.picked_direction,
+                )
 
         items.append(AlertPickLedgerItem(
             id=str(r.id),
             symbol=r.symbol,
             picked_direction=r.picked_direction,
-            strategy=r.strategy,
+            strategy=_strip_exp_tail(r.strategy),
             suggested_strike=float(r.suggested_strike) if r.suggested_strike else None,
             suggested_spread_strike=float(r.suggested_spread_strike) if r.suggested_spread_strike else None,
             suggested_target=float(r.suggested_target) if r.suggested_target else None,
@@ -1062,6 +1119,11 @@ async def list_alert_picks(
             reasoning=r.reasoning,
             generated_at=r.generated_at.isoformat(),
             status=r.status,
+            close_price=close_price,
+            closed_at=r.closed_at.isoformat() if r.closed_at else None,
+            direction_hit=direction_hit,
+            option_pnl_dollars=option_pnl_dollars,
+            option_pnl_pct=option_pnl_pct,
         ))
 
     return items
@@ -1346,7 +1408,7 @@ Return ONLY this JSON object (no other text):
 # ── CRUD routes ────────────────────────────────────────────────────────────────
 
 
-@router.get("/", response_model=list[ThesisRead])
+@router.get("", response_model=list[ThesisRead])
 async def list_theses(
     symbol: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
@@ -1366,7 +1428,7 @@ async def list_theses(
     return [_to_read(t) for t in result.scalars().all()]
 
 
-@router.post("/", response_model=ThesisRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ThesisRead, status_code=status.HTTP_201_CREATED)
 async def create_thesis(
     payload: ThesisCreate,
     db: AsyncSession = Depends(get_db),

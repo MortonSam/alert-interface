@@ -17,13 +17,13 @@ def _load_items(q):
     return q.options(selectinload(Watchlist.items).selectinload(WatchlistTicker.ticker))
 
 
-@router.get("/", response_model=list[WatchlistRead])
+@router.get("", response_model=list[WatchlistRead])
 async def list_watchlists(db: AsyncSession = Depends(get_db)) -> list[Watchlist]:
     result = await db.execute(_load_items(select(Watchlist).order_by(Watchlist.name)))
     return list(result.scalars().all())
 
 
-@router.post("/", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED)
 async def create_watchlist(payload: WatchlistCreate, db: AsyncSession = Depends(get_db)) -> Watchlist:
     wl = Watchlist(**payload.model_dump())
     db.add(wl)

@@ -47,7 +47,7 @@ async def upcoming_events(
     return list(result.scalars().all())
 
 
-@router.get("/", response_model=list[EventRead])
+@router.get("", response_model=list[EventRead])
 async def list_events(
     ticker_id: uuid.UUID | None = None,
     event_type: EventType | None = None,
@@ -68,7 +68,7 @@ async def list_events(
     return list(result.scalars().all())
 
 
-@router.post("/", response_model=EventRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED)
 async def create_event(payload: EventCreate, db: AsyncSession = Depends(get_db)) -> Event:
     data = payload.model_dump()
     # Map Pydantic alias back to column name

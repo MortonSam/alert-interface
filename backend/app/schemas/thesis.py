@@ -191,6 +191,11 @@ class AlertPickLedgerItem(BaseModel):
     reasoning: str | None
     generated_at: str
     status: str
+    close_price: float | None = None
+    closed_at: str | None = None
+    direction_hit: bool | None = None
+    option_pnl_dollars: float | None = None
+    option_pnl_pct: float | None = None
 
 
 class ThesisDraftAlternativeRead(BaseModel):

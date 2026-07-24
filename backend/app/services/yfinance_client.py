@@ -63,6 +63,21 @@ class YFinanceClient:
             return {"calls": [], "puts": [], "expiration": expiration}
 
     @staticmethod
+    def get_close_on_date(symbol: str, date_str: str) -> float | None:
+        """Official close on a specific date. Returns None if not a trading day."""
+        from datetime import datetime, timedelta
+        target = datetime.strptime(date_str, "%Y-%m-%d").date()
+        start = (target - timedelta(days=5)).isoformat()
+        end = (target + timedelta(days=1)).isoformat()
+        hist = yf.Ticker(symbol).history(start=start, end=end, auto_adjust=True)
+        if hist is None or hist.empty:
+            return None
+        for idx, close in zip(hist.index, hist["Close"]):
+            if idx.date() == target:
+                return round(float(close), 4)
+        return None
+
+    @staticmethod
     def get_daily_closes(symbol: str, period: str = "1mo") -> list[dict[str, Any]]:
         """Daily close prices for charting / sparklines.
 

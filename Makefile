@@ -1,4 +1,4 @@
-.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-reactions-all seed-reactions-retry seed-sp500 seed-sp500-retry seed-sp500-force validate research-stats refresh enrich-revenue seed-splits seed-analyst-actions compute-analyst-reactions audit install run
+.PHONY: up down logs shell db-shell migrate migration rollback seed seed-macro seed-reactions seed-reactions-all seed-reactions-retry seed-sp500 seed-sp500-retry seed-sp500-force validate research-stats refresh enrich-revenue seed-splits seed-analyst-actions compute-analyst-reactions audit close-picks install run
 
 # ── Docker ────────────────────────────────────────────────
 up:
@@ -70,6 +70,9 @@ compute-analyst-reactions:
 
 audit:
 	docker compose exec backend python -m app.scripts.audit_sp500
+
+close-picks:
+	docker compose exec backend python -m app.scripts.close_alert_picks
 
 research-stats:
 	docker compose exec db psql -U alert -d alertdb -c \

@@ -31,6 +31,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Analyst reaction stats",         ["python", "-m", "app.scripts.compute_analyst_reactions"]),
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
+    ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 

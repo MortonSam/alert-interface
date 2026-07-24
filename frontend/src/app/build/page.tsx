@@ -1051,7 +1051,7 @@ function BuildTradePageContent() {
                     Alert already has an open {alertPick.picked_direction} pick on {alertPick.symbol} from{" "}
                     {new Date(alertPick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                   </p>
-                  <p className="text-xs text-muted-foreground">One open pick per symbol. Pick a direction manually below, or close the existing pick first.</p>
+                  <p className="text-xs text-muted-foreground">Alert holds one pick per symbol until it expires.</p>
                 </div>
               )}
 

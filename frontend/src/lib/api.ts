@@ -634,6 +634,11 @@ export interface AlertPickLedgerItem {
   reasoning: string | null;
   generated_at: string;
   status: string;
+  close_price: number | null;
+  closed_at: string | null;
+  direction_hit: boolean | null;
+  option_pnl_dollars: number | null;
+  option_pnl_pct: number | null;
 }
 
 export interface ThesisDraftAlternativeRead {
@@ -685,7 +690,7 @@ export interface Watchlist {
 export const api = {
   tickers: {
     list: (activeOnly = true) =>
-      request<Ticker[]>(`/tickers/?active_only=${activeOnly}`),
+      request<Ticker[]>(`/tickers?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),
     bySymbol: (symbol: string) => request<Ticker>(`/tickers/by-symbol/${symbol}`),
     quote: (symbol: string) => request<TickerQuote>(`/tickers/quote/${symbol}`),
@@ -696,7 +701,7 @@ export const api = {
     chart: (symbol: string, period = "1y") =>
       request<TickerChart>(`/tickers/chart/${symbol}?period=${period}`),
     create: (data: Partial<Ticker>) =>
-      request<Ticker>("/tickers/", { method: "POST", body: JSON.stringify(data) }),
+      request<Ticker>("/tickers", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Partial<Ticker>) =>
       request<Ticker>(`/tickers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
@@ -722,10 +727,10 @@ export const api = {
   },
 
   watchlists: {
-    list: () => request<Watchlist[]>("/watchlists/"),
+    list: () => request<Watchlist[]>("/watchlists"),
     get: (id: string) => request<Watchlist>(`/watchlists/${id}`),
     create: (data: Pick<Watchlist, "name" | "description">) =>
-      request<Watchlist>("/watchlists/", { method: "POST", body: JSON.stringify(data) }),
+      request<Watchlist>("/watchlists", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Partial<Watchlist>) =>
       request<Watchlist>(`/watchlists/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
@@ -748,11 +753,11 @@ export const api = {
     },
     list: (filters?: { ticker_id?: string; event_type?: EventType; from_date?: string; to_date?: string }) => {
       const params = new URLSearchParams(filters as Record<string, string>);
-      return request<Event[]>(`/events/?${params}`);
+      return request<Event[]>(`/events?${params}`);
     },
     get: (id: string) => request<Event>(`/events/${id}`),
     create: (data: Partial<Event>) =>
-      request<Event>("/events/", { method: "POST", body: JSON.stringify(data) }),
+      request<Event>("/events", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Partial<Event>) =>
       request<Event>(`/events/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
@@ -783,11 +788,11 @@ export const api = {
       const params = new URLSearchParams(
         Object.fromEntries(Object.entries(filters ?? {}).filter(([, v]) => v != null)) as Record<string, string>
       );
-      return request<Thesis[]>(`/theses/?${params}`);
+      return request<Thesis[]>(`/theses?${params}`);
     },
     get: (id: string) => request<Thesis>(`/theses/${id}`),
     create: (data: ThesisCreate) =>
-      request<Thesis>("/theses/", { method: "POST", body: JSON.stringify(data) }),
+      request<Thesis>("/theses", { method: "POST", body: JSON.stringify(data) }),
     resolve: (id: string, data: ThesisResolve) =>
       request<Thesis>(`/theses/${id}/resolve`, { method: "POST", body: JSON.stringify(data) }),
     delete: (id: string) =>
