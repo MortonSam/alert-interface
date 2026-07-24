@@ -1005,7 +1005,6 @@ async def alert_pick(
 
 # ── Alert-picks ledger ─────────────────────────────────────────────────────────
 
-@router.get("/alert-picks", response_model=list[AlertPickLedgerItem])
 _EXP_TAIL_RE = re.compile(
     r"\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$",
     re.IGNORECASE,
@@ -1041,6 +1040,7 @@ def _compute_option_pnl(
     return pnl_dollars, pnl_pct
 
 
+@router.get("/alert-picks", response_model=list[AlertPickLedgerItem])
 async def list_alert_picks(
     db: AsyncSession = Depends(get_db),
 ) -> list[AlertPickLedgerItem]:
