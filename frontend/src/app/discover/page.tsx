@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import DiscoverCard from "@/components/DiscoverCard";
 import {
   api,
   type ReportingSoonItem,
@@ -9,6 +10,7 @@ import {
   type SuggestionItem,
   type UnusuallyActiveItem,
   type BatchQuote,
+  type LatestPickItem,
 } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,6 +100,15 @@ function SectionSkeleton() {
   );
 }
 
+// ── Section accent configs ──────────────────────────────────────────────────
+
+const ACCENT = {
+  reportingSoon: { border: "hover:border-foreground/20", text: "group-hover:text-foreground" },
+  justReported: { border: "hover:border-cool/40", text: "group-hover:text-cool" },
+  suggestions: { border: "hover:border-primary/40", text: "group-hover:text-primary" },
+  unusuallyActive: { border: "hover:border-violet/40", text: "group-hover:text-violet" },
+} as const;
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const LIMIT = 12;
@@ -113,6 +124,7 @@ export default function DiscoverPage() {
   } | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [unusuallyActive, setUnusuallyActive] = useState<UnusuallyActiveItem[] | null>(null);
+  const [latestPick, setLatestPick] = useState<LatestPickItem | null | undefined>(undefined);
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -134,11 +146,13 @@ export default function DiscoverPage() {
       api.discover.justReported(5, LIMIT),
       api.discover.suggestions(5),
       api.discover.unusuallyActive(LIMIT),
-    ]).then(([rs, jr, sg, ua]) => {
+      api.discover.latestPick().catch(() => ({ pick: null })),
+    ]).then(([rs, jr, sg, ua, lp]) => {
       setReportingSoon(rs);
       setJustReported(jr);
       setSuggestions(sg.items);
       setUnusuallyActive(ua.items);
+      setLatestPick(lp.pick);
       setLoading(false);
 
       // Batch-fetch quotes for all displayed symbols
@@ -148,6 +162,7 @@ export default function DiscoverPage() {
         ...sg.items.map((i) => i.symbol),
         ...ua.items.map((i) => i.symbol),
       ];
+      if (lp.pick) allSymbols.push(lp.pick.symbol);
       const unique = [...new Set(allSymbols)];
       if (unique.length > 0) {
         api.tickers
@@ -187,6 +202,65 @@ export default function DiscoverPage() {
             What&apos;s worth researching across your universe right now.
           </p>
         </div>
+
+        {/* ── Alert's Pick strip ──────────────────────────── */}
+        {!loading && latestPick && (
+          <Link
+            href="/alerts-trades"
+            className="flex items-center gap-3 rounded-lg border border-border bg-card/50 px-4 py-2.5 mb-8 hover:border-foreground/20 transition-colors group"
+          >
+            <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+              Alert&apos;s Pick
+            </span>
+            <span className="font-display text-sm font-bold text-foreground">
+              {latestPick.symbol}
+            </span>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide ${
+              latestPick.picked_direction === "bullish"
+                ? "bg-success/10 text-success"
+                : "bg-destructive/10 text-destructive"
+            }`}>
+              {latestPick.picked_direction === "bullish" ? "Bullish" : "Bearish"}
+            </span>
+            {latestPick.strategy && (
+              <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                {latestPick.strategy}
+              </span>
+            )}
+            <span className="text-xs text-muted-foreground font-mono">
+              {fmtPrice(latestPick.entry_price)}
+            </span>
+            {latestPick.current_price != null && (
+              <>
+                <span className="text-[11px] text-muted-foreground">{"\u2192"}</span>
+                <span className="text-xs font-mono text-muted-foreground">
+                  {fmtPrice(latestPick.current_price)}
+                </span>
+              </>
+            )}
+            {latestPick.unrealized_move_pct != null && (
+              <span className={`text-xs font-mono font-semibold ${
+                latestPick.unrealized_move_pct > 0 ? "text-success" : latestPick.unrealized_move_pct < 0 ? "text-destructive" : "text-muted-foreground"
+              }`}>
+                {latestPick.unrealized_move_pct > 0 ? "+" : ""}{latestPick.unrealized_move_pct.toFixed(1)}%
+              </span>
+            )}
+            {latestPick.status === "closed" && latestPick.option_pnl_pct != null && (
+              <span className={`text-[10px] font-semibold ${
+                latestPick.option_pnl_pct >= 0 ? "text-success" : "text-destructive"
+              }`}>
+                P&L {latestPick.option_pnl_pct > 0 ? "+" : ""}{latestPick.option_pnl_pct.toFixed(0)}%
+              </span>
+            )}
+            <span className={`ml-auto text-[10px] font-medium rounded-full px-2 py-0.5 ${
+              latestPick.status === "open"
+                ? "bg-cool/10 text-cool"
+                : "bg-muted text-muted-foreground"
+            }`}>
+              {latestPick.status}
+            </span>
+          </Link>
+        )}
 
         <div className="space-y-12">
           {/* ── Fetch error ──────────────────────────────── */}
@@ -254,29 +328,21 @@ export default function DiscoverPage() {
                           ? "EPS in 1d"
                           : `EPS in ${days}d`;
                     return (
-                      <Link
+                      <DiscoverCard
                         key={item.symbol}
-                        href={`/tickers/${item.symbol}`}
-                        className="rounded-xl border border-border bg-card p-4 hover:border-foreground/20 transition-colors group"
-                      >
-                        <div className="flex items-start justify-between mb-1">
-                          <span className="font-display text-base font-bold text-foreground group-hover:text-foreground transition-colors">
-                            {item.symbol}
+                        symbol={item.symbol}
+                        name={item.name}
+                        price={q?.price != null ? fmtPrice(q.price) : undefined}
+                        accent={ACCENT.reportingSoon}
+                        insight={item.insight}
+                        volRegime={item.vol_regime}
+                        badge={
+                          <span className={`inline-flex items-center gap-1.5 rounded-full ${urg.bg} ${urg.text} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
+                            <span className="text-[8px]">{"\u25CF"}</span>
+                            {tagLabel}
                           </span>
-                          {q?.price != null && (
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {fmtPrice(q.price)}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate mb-3">
-                          {item.name ?? "\u2014"}
-                        </p>
-                        <span className={`inline-flex items-center gap-1.5 rounded-full ${urg.bg} ${urg.text} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
-                          <span className="text-[8px]">{"\u25CF"}</span>
-                          {tagLabel}
-                        </span>
-                      </Link>
+                        }
+                      />
                     );
                   })}
                 </div>
@@ -314,7 +380,6 @@ export default function DiscoverPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {justReported?.items.map((item) => {
-                    const q = quotes.get(item.symbol);
                     const move = item.pct_change_1d;
                     const outcomeLabel =
                       item.outcome === "beat"
@@ -336,32 +401,24 @@ export default function DiscoverPage() {
                         : "";
 
                     return (
-                      <Link
+                      <DiscoverCard
                         key={item.symbol}
-                        href={`/tickers/${item.symbol}`}
-                        className="rounded-xl border border-border bg-card p-4 hover:border-cool/40 transition-colors group"
-                      >
-                        <div className="flex items-start justify-between mb-1">
-                          <span className="font-display text-base font-bold text-foreground group-hover:text-cool transition-colors">
-                            {item.symbol}
+                        symbol={item.symbol}
+                        name={item.name}
+                        price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                        accent={ACCENT.justReported}
+                        insight={item.insight}
+                        volRegime={item.vol_regime}
+                        badge={
+                          <span className="inline-flex items-center gap-2 rounded-full bg-cool/10 text-cool px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                            <span className="text-[8px]">{"\u25CF"}</span>
+                            {outcomeLabel}
+                            {moveStr && (
+                              <span className={moveColor}>{moveStr}</span>
+                            )}
                           </span>
-                          {q?.price != null && (
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {fmtPrice(q.price)}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate mb-3">
-                          {item.name ?? "\u2014"}
-                        </p>
-                        <span className="inline-flex items-center gap-2 rounded-full bg-cool/10 text-cool px-2.5 py-1 text-[11px] font-semibold tracking-wide">
-                          <span className="text-[8px]">{"\u25CF"}</span>
-                          {outcomeLabel}
-                          {moveStr && (
-                            <span className={moveColor}>{moveStr}</span>
-                          )}
-                        </span>
-                      </Link>
+                        }
+                      />
                     );
                   })}
                 </div>
@@ -394,30 +451,17 @@ export default function DiscoverPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {suggestions?.map((item) => {
-                    const q = quotes.get(item.symbol);
-                    return (
-                      <Link
-                        key={item.symbol}
-                        href={`/tickers/${item.symbol}`}
-                        className="rounded-xl border border-border bg-card p-4 hover:border-primary/40 transition-colors group"
-                      >
-                        <div className="flex items-start justify-between mb-1">
-                          <span className="font-display text-base font-bold text-foreground group-hover:text-primary transition-colors">
-                            {item.symbol}
-                          </span>
-                          {q?.price != null && (
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {fmtPrice(q.price)}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {item.name ?? "\u2014"}
-                        </p>
-                      </Link>
-                    );
-                  })}
+                  {suggestions?.map((item) => (
+                    <DiscoverCard
+                      key={item.symbol}
+                      symbol={item.symbol}
+                      name={item.name}
+                      price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                      accent={ACCENT.suggestions}
+                      insight={item.insight}
+                      volRegime={item.vol_regime}
+                    />
+                  ))}
                 </div>
               )}
             </section>
@@ -445,32 +489,23 @@ export default function DiscoverPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {unusuallyActive.map((item) => {
-                  const q = quotes.get(item.symbol);
                   const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${item.tier}`;
                   return (
-                    <Link
+                    <DiscoverCard
                       key={item.symbol}
-                      href={`/tickers/${item.symbol}`}
-                      className="rounded-xl border border-border bg-card p-4 hover:border-violet/40 transition-colors group"
-                    >
-                      <div className="flex items-start justify-between mb-1">
-                        <span className="font-display text-base font-bold text-foreground group-hover:text-violet transition-colors">
-                          {item.symbol}
+                      symbol={item.symbol}
+                      name={item.name}
+                      price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                      accent={ACCENT.unusuallyActive}
+                      insight={item.insight}
+                      volRegime={item.vol_regime}
+                      badge={
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet/10 text-violet px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                          <span className="text-[8px]">{"\u25CF"}</span>
+                          {tagLabel}
                         </span>
-                        {q?.price != null && (
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {fmtPrice(q.price)}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate mb-3">
-                        {item.name ?? "\u2014"}
-                      </p>
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet/10 text-violet px-2.5 py-1 text-[11px] font-semibold tracking-wide">
-                        <span className="text-[8px]">{"\u25CF"}</span>
-                        {tagLabel}
-                      </span>
-                    </Link>
+                      }
+                    />
                   );
                 })}
               </div>

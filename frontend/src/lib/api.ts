@@ -389,6 +389,8 @@ export interface ReportingSoonItem {
   name: string | null;
   earnings_date: string;
   is_confirmed: boolean;
+  insight: string | null;
+  vol_regime: string | null;
 }
 
 export interface ReportingSoonResponse {
@@ -402,6 +404,8 @@ export interface JustReportedItem {
   event_date: string;
   pct_change_1d: number | null;
   outcome: EarningsOutcome;
+  insight: string | null;
+  vol_regime: string | null;
 }
 
 export interface JustReportedResponse {
@@ -418,6 +422,8 @@ export interface SuggestionItem {
   recent_move_5d: number | null;
   recent_outcome: EarningsOutcome | null;
   event_date: string | null;  // ISO date of the reaction's report
+  insight: string | null;
+  vol_regime: string | null;
 }
 
 export interface SuggestionsResponse {
@@ -430,6 +436,27 @@ export interface UnusuallyActiveItem {
   rv_rank: number;
   rv_20d: number;
   tier: "extreme" | "elevated";
+  insight: string | null;
+  vol_regime: string | null;
+}
+
+export interface LatestPickItem {
+  id: string;
+  symbol: string;
+  picked_direction: string;
+  strategy: string | null;
+  entry_price: number;
+  current_price: number | null;
+  unrealized_move_pct: number | null;
+  status: string;
+  generated_at: string;
+  expiration: string | null;
+  direction_hit: boolean | null;
+  option_pnl_pct: number | null;
+}
+
+export interface LatestPickResponse {
+  pick: LatestPickItem | null;
 }
 
 export interface UnusuallyActiveResponse {
@@ -827,6 +854,8 @@ export const api = {
       request<SuggestionsResponse>(`/discover/suggestions?limit=${limit}`),
     unusuallyActive: (limit = 12) =>
       request<UnusuallyActiveResponse>(`/discover/unusually-active?limit=${limit}`),
+    latestPick: () =>
+      request<LatestPickResponse>(`/discover/latest-pick`),
   },
 
   reactions: {
