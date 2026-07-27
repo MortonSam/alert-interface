@@ -1,0 +1,235 @@
+"""Fetch options chains from a residential IP and push to the hosted backend.
+
+yfinance works reliably from residential IPs but may return stale/empty
+data from datacenter IPs (Yahoo rate-limits or blocks them).  This script
+bridges the gap: run it from your laptop before drafting to ensure the
+hosted backend has fresh chain data.
+
+CLI
+---
+    ADMIN_TOKEN=xxx python -m app.scripts.chain_courier --base-url https://your-app.up.railway.app
+    ADMIN_TOKEN=xxx python -m app.scripts.chain_courier --base-url https://your-app.up.railway.app --tickers AAPL,NKE,NVDA
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from datetime import date, timedelta
+
+import httpx
+import yfinance as yf
+
+# ── Marquee tickers (edit before each pitch) ──────────────────────────────────
+
+MARQUEE_TICKERS = [
+    "AAPL", "NVDA", "MSFT", "AMZN", "META", "GOOGL", "TSLA",
+    "JPM", "COST", "WMT", "PANW", "NFLX", "AMD", "AVGO", "LLY",
+]
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+POST_TIMEOUT = 30.0
+INTER_TICKER_DELAY = 2.0
+MIN_DAYS_OUT = 14  # pick expiration at least this many days out
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _headers(token: str) -> dict[str, str]:
+    return {"Content-Type": "application/json", "X-Admin-Token": token}
+
+
+def _parse_option_df(df) -> list[dict]:
+    """Mirror of the backend _parse_option_df — keep shapes identical."""
+    import pandas as pd
+
+    rows = []
+    for _, row in df.iterrows():
+        iv_raw = row["impliedVolatility"]
+        iv = None if pd.isna(iv_raw) else (float(iv_raw) if 0 < float(iv_raw) <= 3.0 else None)
+        vol_raw = row["volume"]
+        vol = None if pd.isna(vol_raw) else int(vol_raw)
+        oi_raw = row["openInterest"]
+        oi = None if pd.isna(oi_raw) else int(oi_raw)
+        def _f(v): return None if pd.isna(v) else float(v)
+        rows.append({
+            "strike": float(row["strike"]),
+            "bid": _f(row["bid"]), "ask": _f(row["ask"]),
+            "lastPrice": _f(row["lastPrice"]),
+            "volume": vol, "openInterest": oi, "impliedVolatility": iv,
+        })
+    return rows
+
+
+def _fetch_chain(symbol: str, expiration: str) -> dict:
+    """Fetch one chain with retry, matching backend get_option_chain shape."""
+    import pandas as pd
+
+    empty: dict = {"calls": [], "puts": [], "expiration": expiration, "chain_last_trade": None}
+    for attempt in range(3):
+        try:
+            chain = yf.Ticker(symbol).option_chain(expiration)
+            calls = _parse_option_df(chain.calls)
+            puts = _parse_option_df(chain.puts)
+            if calls or puts:
+                chain_last_trade = None
+                for df in (chain.calls, chain.puts):
+                    if "lastTradeDate" in df.columns and not df.empty:
+                        max_dt = df["lastTradeDate"].dropna().max()
+                        if pd.notna(max_dt):
+                            dt = pd.Timestamp(max_dt).date()
+                            if chain_last_trade is None or dt > chain_last_trade:
+                                chain_last_trade = dt
+                return {
+                    "calls": calls, "puts": puts, "expiration": expiration,
+                    "chain_last_trade": chain_last_trade.isoformat() if chain_last_trade else None,
+                }
+        except Exception:
+            pass
+        if attempt < 2:
+            time.sleep(1.5 * (attempt + 1))
+    return empty
+
+
+def _pick_expiration(symbol: str) -> str | None:
+    """Choose the nearest expiration >= MIN_DAYS_OUT from today."""
+    try:
+        exps = list(yf.Ticker(symbol).options)
+    except Exception:
+        return None
+    if not exps:
+        return None
+    cutoff = (date.today() + timedelta(days=MIN_DAYS_OUT)).isoformat()
+    return next((e for e in exps if e >= cutoff), exps[-1])
+
+
+# ── Per-ticker processing ────────────────────────────────────────────────────
+
+def process_ticker(
+    client: httpx.Client,
+    base: str,
+    token: str,
+    symbol: str,
+) -> dict:
+    """Fetch chain locally and push to the hosted ingest endpoint."""
+    t0 = time.monotonic()
+    result = {
+        "symbol": symbol,
+        "action": "failed",
+        "strikes": 0,
+        "chain_last_trade": "—",
+        "elapsed": 0.0,
+    }
+
+    try:
+        exp = _pick_expiration(symbol)
+        if not exp:
+            result["action"] = "no-expirations"
+            result["elapsed"] = time.monotonic() - t0
+            return result
+
+        chain = _fetch_chain(symbol, exp)
+        quality = [c for c in chain.get("calls", [])
+                   if (c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0]
+        result["strikes"] = len(quality)
+        result["chain_last_trade"] = chain.get("chain_last_trade") or "—"
+
+        if not quality:
+            result["action"] = "empty-chain"
+            result["elapsed"] = time.monotonic() - t0
+            return result
+
+        # Push to backend
+        payload = {"chains": [{
+            "symbol": symbol,
+            "expiration": exp,
+            "calls": chain["calls"],
+            "puts": chain["puts"],
+            "chain_last_trade": chain.get("chain_last_trade"),
+        }]}
+        r = client.post(
+            f"{base}/api/v1/admin/ingest-options-chains",
+            json=payload,
+            headers=_headers(token),
+            timeout=POST_TIMEOUT,
+        )
+        r.raise_for_status()
+        result["action"] = "pushed"
+
+    except httpx.HTTPStatusError as exc:
+        result["action"] = f"HTTP {exc.response.status_code}"
+    except Exception as exc:
+        result["action"] = str(exc)[:40]
+
+    result["elapsed"] = time.monotonic() - t0
+    return result
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Fetch options chains locally and push to hosted backend"
+    )
+    parser.add_argument("--base-url", required=True,
+                        help="Hosted backend URL (e.g. https://your-app.up.railway.app)")
+    parser.add_argument("--tickers", default=None,
+                        help="Comma-separated ticker list (default: marquee list)")
+    args = parser.parse_args()
+
+    token = os.environ.get("ADMIN_TOKEN", "")
+    if not token:
+        print("ERROR: ADMIN_TOKEN env var is required.", file=sys.stderr)
+        return 1
+
+    base = args.base_url.rstrip("/")
+    tickers = [s.strip().upper() for s in args.tickers.split(",")] if args.tickers else MARQUEE_TICKERS
+
+    print(f"Chain courier → {base}")
+    print(f"Tickers: {', '.join(tickers)}")
+    print(f"{'─' * 70}")
+
+    results: list[dict] = []
+    client = httpx.Client()
+
+    for i, symbol in enumerate(tickers):
+        print(f"[{i + 1}/{len(tickers)}] {symbol} ...", end=" ", flush=True)
+
+        result = process_ticker(client, base, token, symbol)
+
+        # One retry on failure
+        if result["action"] == "failed":
+            print("retrying ...", end=" ", flush=True)
+            time.sleep(INTER_TICKER_DELAY)
+            result = process_ticker(client, base, token, symbol)
+
+        print(f"{result['action']} ({result['strikes']} strikes, {result['elapsed']:.1f}s)")
+        results.append(result)
+
+        if i < len(tickers) - 1:
+            time.sleep(INTER_TICKER_DELAY)
+
+    client.close()
+
+    # Summary table
+    pushed = sum(1 for r in results if r["action"] == "pushed")
+    failed = sum(1 for r in results if r["action"] not in ("pushed",))
+
+    print(f"\n{'═' * 70}")
+    print(f"  {'Ticker':<8} {'Action':<16} {'Strikes':>8} {'Last Trade':<12} {'Time':>6}")
+    print(f"  {'─' * 8} {'─' * 16} {'─' * 8} {'─' * 12} {'─' * 6}")
+    for r in results:
+        print(f"  {r['symbol']:<8} {r['action']:<16} {r['strikes']:>8} {r['chain_last_trade']:<12} {r['elapsed']:>5.1f}s")
+
+    print(f"{'═' * 70}")
+    print(f"  Pushed: {pushed}  |  Failed: {failed}")
+    print(f"{'═' * 70}")
+
+    return 1 if failed > 0 else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

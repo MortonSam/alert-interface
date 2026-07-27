@@ -20,8 +20,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${detail}`);
+    let message: string;
+    try {
+      const body = await res.json();
+      message = typeof body.detail === "string" ? body.detail : `API ${res.status}: ${JSON.stringify(body)}`;
+    } catch {
+      const text = await res.text().catch(() => res.statusText);
+      message = `API ${res.status}: ${text}`;
+    }
+    throw new Error(message);
   }
   if (res.status === 204 || res.headers.get("content-length") === "0") {
     return undefined as T;

@@ -37,6 +37,7 @@ from app.schemas.thesis import (
 from app.services.anthropic_client import AnthropicClient
 from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
+from app.services.system_metadata_service import get_value
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/theses", tags=["theses"])
@@ -349,10 +350,14 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
             week_out = (today + timedelta(days=7)).isoformat()
             chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
 
-    # ── 4. Options chain ──────────────────────────────────────────────────────
+    # ── 4. Options chain (prefer ingested courier data, fall back to yfinance)
     chain: dict = {"calls": [], "puts": []}
     if chosen_exp:
-        chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+        ingested_raw = await get_value(db, f"chain:{sym}:{chosen_exp}")
+        if ingested_raw:
+            chain = json.loads(ingested_raw)
+        else:
+            chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
 
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
