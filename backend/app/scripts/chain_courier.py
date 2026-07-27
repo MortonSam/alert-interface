@@ -31,8 +31,9 @@ MARQUEE_TICKERS = [
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-POST_TIMEOUT = 30.0
+POST_TIMEOUT = httpx.Timeout(connect=15.0, read=60.0, write=60.0, pool=15.0)
 INTER_TICKER_DELAY = 2.0
+RETRY_DELAY = 5.0
 MIN_DAYS_OUT = 14  # pick expiration at least this many days out
 
 
@@ -160,9 +161,10 @@ def process_ticker(
         result["action"] = "pushed"
 
     except httpx.HTTPStatusError as exc:
-        result["action"] = f"HTTP {exc.response.status_code}"
+        body = exc.response.text[:120] if exc.response else ""
+        result["action"] = f"HTTP {exc.response.status_code}: {body}"[:60]
     except Exception as exc:
-        result["action"] = str(exc)[:40]
+        result["action"] = str(exc)[:60]
 
     result["elapsed"] = time.monotonic() - t0
     return result
@@ -200,10 +202,10 @@ def main() -> int:
 
         result = process_ticker(client, base, token, symbol)
 
-        # One retry on failure
-        if result["action"] == "failed":
-            print("retrying ...", end=" ", flush=True)
-            time.sleep(INTER_TICKER_DELAY)
+        # One retry on transport / server errors
+        if result["action"] not in ("pushed", "empty-chain", "no-expirations"):
+            print(f"({result['action']}) retrying ...", end=" ", flush=True)
+            time.sleep(RETRY_DELAY)
             result = process_ticker(client, base, token, symbol)
 
         print(f"{result['action']} ({result['strikes']} strikes, {result['elapsed']:.1f}s)")
