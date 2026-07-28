@@ -1,6 +1,7 @@
 import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import AsyncSessionLocal
@@ -38,15 +39,16 @@ app.include_router(admin.router, prefix="/api/v1")
 
 @app.get("/health", tags=["meta"])
 @app.get("/api/v1/health", tags=["meta"])
-async def health_check() -> dict:
+async def health_check():
     """Rich health probe — safe on empty DB, no auth required.
 
-    Degraded means the DB query partially failed, but we still return
-    every field (with None/empty defaults) so callers always get the
-    full shape.
+    Performs a real ``SELECT 1`` to catch credential / connection breaks.
+    Returns non-200 when the DB is unreachable so Railway's healthcheck
+    flags the deploy instead of showing green.
     """
     result: dict = {
         "status": "ok",
+        "db": "ok",
         "refresh_in_progress": _startup._refresh_in_progress,
         "last_refreshed_at": None,
         "rv_latest_date": None,
@@ -56,6 +58,10 @@ async def health_check() -> dict:
 
     try:
         async with AsyncSessionLocal() as session:
+            # Real DB connectivity check — catches bad credentials / dead connections
+            await session.execute(sa.text("SELECT 1"))
+            result["db"] = "ok"
+
             result["last_refreshed_at"] = await get_value(session, "last_refreshed_at")
 
             try:
@@ -84,6 +90,8 @@ async def health_check() -> dict:
             except Exception:
                 result["status"] = "degraded"
     except Exception:
-        result["status"] = "degraded"
+        result["status"] = "error"
+        result["db"] = "error"
+        return JSONResponse(content=result, status_code=503)
 
     return result

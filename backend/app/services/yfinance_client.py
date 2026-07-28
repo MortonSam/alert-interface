@@ -7,6 +7,29 @@ from typing import Any
 import pandas as pd
 import yfinance as yf
 
+# ── Timeout-aware session ────────────────────────────────────────────────────
+# yfinance uses curl_cffi under the hood.  Without an explicit timeout a hung
+# Yahoo response can block the executor thread (and the request) indefinitely.
+
+_YF_TIMEOUT = 10  # seconds — connect + read
+
+
+def _ticker(symbol: str) -> yf.Ticker:
+    """Create a yfinance Ticker backed by a session with connect/read timeouts."""
+    try:
+        from curl_cffi.requests import Session  # type: ignore[import-untyped]
+        session = Session(timeout=_YF_TIMEOUT, impersonate="chrome")
+    except ImportError:
+        import requests as _req
+
+        class _TimeoutSession(_req.Session):
+            def request(self, *a, **kw):  # type: ignore[override]
+                kw.setdefault("timeout", _YF_TIMEOUT)
+                return super().request(*a, **kw)
+
+        session = _TimeoutSession()
+    return yf.Ticker(symbol, session=session)
+
 
 def _parse_option_df(df) -> list[dict]:
     rows = []
@@ -30,27 +53,27 @@ def _parse_option_df(df) -> list[dict]:
 class YFinanceClient:
     @staticmethod
     def get_info(symbol: str) -> dict[str, Any]:
-        return yf.Ticker(symbol).info or {}
+        return _ticker(symbol).info or {}
 
     @staticmethod
     def get_earnings_calendar(symbol: str) -> dict[str, Any]:
         """Returns the next earnings date and any available estimates."""
-        return yf.Ticker(symbol).calendar or {}
+        return _ticker(symbol).calendar or {}
 
     @staticmethod
     def get_price_history(symbol: str, period: str = "1y") -> Any:
         """Returns a pandas DataFrame of OHLCV data."""
-        return yf.Ticker(symbol).history(period=period)
+        return _ticker(symbol).history(period=period)
 
     @staticmethod
     def get_ex_dividend_date(symbol: str) -> str | None:
-        info = yf.Ticker(symbol).info
+        info = _ticker(symbol).info
         return info.get("exDividendDate")
 
     @staticmethod
     def get_option_expirations(symbol: str) -> list[str]:
         try:
-            return list(yf.Ticker(symbol).options)
+            return list(_ticker(symbol).options)
         except Exception:
             return []
 
@@ -60,7 +83,7 @@ class YFinanceClient:
         empty = {"calls": [], "puts": [], "expiration": expiration, "chain_last_trade": None}
         for attempt in range(3):
             try:
-                chain = yf.Ticker(symbol).option_chain(expiration)
+                chain = _ticker(symbol).option_chain(expiration)
                 calls = _parse_option_df(chain.calls)
                 puts = _parse_option_df(chain.puts)
                 if calls or puts:
@@ -90,7 +113,7 @@ class YFinanceClient:
         target = datetime.strptime(date_str, "%Y-%m-%d").date()
         start = (target - timedelta(days=5)).isoformat()
         end = (target + timedelta(days=1)).isoformat()
-        hist = yf.Ticker(symbol).history(start=start, end=end, auto_adjust=True)
+        hist = _ticker(symbol).history(start=start, end=end, auto_adjust=True)
         if hist is None or hist.empty:
             return None
         for idx, close in zip(hist.index, hist["Close"]):
@@ -108,7 +131,7 @@ class YFinanceClient:
         Returns list of {"date": "YYYY-MM-DD", "close": float}, oldest first.
         Returns [] if no data is available.
         """
-        hist = yf.Ticker(symbol).history(period=period, auto_adjust=True)
+        hist = _ticker(symbol).history(period=period, auto_adjust=True)
         if hist is None or hist.empty:
             return []
         return [
@@ -131,7 +154,7 @@ class YFinanceClient:
         Intraday dates are UTC ISO-8601 strings ("YYYY-MM-DDTHH:MM:SSZ").
         Daily dates are "YYYY-MM-DD".
         """
-        ticker = yf.Ticker(symbol)
+        ticker = _ticker(symbol)
 
         if period == "1d":
             intraday = ticker.history(period="1d", interval="1m", auto_adjust=True)
@@ -212,7 +235,7 @@ class YFinanceClient:
 
         from app.services.rv_math import compute_rv_metrics
 
-        hist = yf.Ticker(symbol).history(period="3y", interval="1d", auto_adjust=True)
+        hist = _ticker(symbol).history(period="3y", interval="1d", auto_adjust=True)
         if hist is None or hist.empty:
             return {"current_rv": None, "rv_series": [], "sample_days": 0,
                     "rv_rank": None, "rv_percentile": None, "status": "no_data"}
@@ -254,7 +277,7 @@ class YFinanceClient:
         Returns a dict with keys: atm_iv, current_price, atm_strike (all may be None).
         """
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _ticker(symbol)
 
             # Current price via recent daily history (more robust than .info in batch)
             hist = ticker.history(period="2d", interval="1d", auto_adjust=True)
