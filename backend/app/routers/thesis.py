@@ -152,17 +152,6 @@ async def _compute_option_mark(
 
     # ── Stock price ────────────────────────────────────────────────────────────
     current_price: float | None = stock_price_override
-    if current_price is None:
-        finnhub = FinnhubClient()
-        try:
-            quote = await finnhub.get_quote(sym)
-            p = quote.get("c")
-            if p and float(p) > 0:
-                current_price = float(p)
-        except Exception:
-            pass
-        finally:
-            await finnhub.close()
 
     current_mid1: float | None = None
     current_mid2: float | None = None
@@ -170,21 +159,57 @@ async def _compute_option_mark(
     mark_note: str | None = None
 
     if is_expired:
-        # Settle at intrinsic value
+        # Freeze at the official close on expiration day (same source as close_alert_picks)
+        if current_price is None:
+            exp_str_for_close = exp_date.isoformat()
+            settlement = await loop.run_in_executor(
+                None, YFinanceClient.get_close_on_date, sym, exp_str_for_close,
+            )
+            if settlement is not None:
+                current_price = settlement
+                mark_basis = "settled"
+                mark_note = f"Expired {exp_date.isoformat()} — settled at official close"
+                as_of = f"{exp_date.isoformat()}T20:00:00Z"
+            else:
+                # Fallback: live quote with "intrinsic" label (history unavailable)
+                finnhub = FinnhubClient()
+                try:
+                    quote = await finnhub.get_quote(sym)
+                    p = quote.get("c")
+                    if p and float(p) > 0:
+                        current_price = float(p)
+                except Exception:
+                    pass
+                finally:
+                    await finnhub.close()
+                mark_basis = "intrinsic"
+                mark_note = f"Expired {exp_date.isoformat()} — expiration-day close unavailable, using live price"
+
         if current_price is not None:
-            if thesis.option_type == "call":
-                current_mid1 = max(0.0, current_price - strike1)
-                if strike2 is not None:
-                    current_mid2 = max(0.0, current_price - strike2)
-            else:  # put
-                current_mid1 = max(0.0, strike1 - current_price)
-                if strike2 is not None:
-                    current_mid2 = max(0.0, strike2 - current_price)
-            mark_basis = "intrinsic"
-            mark_note = f"Expired {exp_date.isoformat()} — settled at intrinsic value"
+            current_mid1, current_mid2 = compute_intrinsic_mids(
+                thesis.option_type, current_price, strike1, strike2,
+            )
+            if mark_basis == "not_found":
+                # stock_price_override was provided
+                mark_basis = "settled"
+                mark_note = f"Expired {exp_date.isoformat()} — settled at official close"
+                as_of = f"{exp_date.isoformat()}T20:00:00Z"
         else:
             mark_note = f"Expired {exp_date.isoformat()} — could not fetch stock price for intrinsic"
     else:
+        # Live quotes for unexpired options
+        if current_price is None:
+            finnhub = FinnhubClient()
+            try:
+                quote = await finnhub.get_quote(sym)
+                p = quote.get("c")
+                if p and float(p) > 0:
+                    current_price = float(p)
+            except Exception:
+                pass
+            finally:
+                await finnhub.close()
+
         # Fetch live chain (cached)
         exp_str = exp_date.isoformat()
         try:
@@ -214,22 +239,15 @@ async def _compute_option_mark(
     pnl_dollars: float | None = None
     pnl_pct: float | None     = None
 
-    if entry_prem1 is not None:
+    if entry_prem1 is not None and current_mid1 is not None:
         if strike2 is None:
-            # Single leg: (current_mid - entry) × contracts × 100
-            if current_mid1 is not None:
-                pnl_dollars = (current_mid1 - entry_prem1) * contracts * 100
-                if entry_prem1 > 0:
-                    pnl_pct = (current_mid1 - entry_prem1) / entry_prem1
-        else:
-            # Spread: long leg1, short leg2
-            # net_current = mid1 - mid2;  net_entry = entry1 - entry2
-            if current_mid1 is not None and current_mid2 is not None and entry_prem2 is not None:
-                net_current = current_mid1 - current_mid2
-                net_entry   = entry_prem1 - entry_prem2
-                pnl_dollars = (net_current - net_entry) * contracts * 100
-                if net_entry > 0:
-                    pnl_pct = (net_current - net_entry) / net_entry
+            pnl_dollars, pnl_pct = compute_spread_pnl_from_mids(
+                current_mid1, None, entry_prem1, None, contracts,
+            )
+        elif current_mid2 is not None and entry_prem2 is not None:
+            pnl_dollars, pnl_pct = compute_spread_pnl_from_mids(
+                current_mid1, current_mid2, entry_prem1, entry_prem2, contracts,
+            )
 
     return ThesisMarkRead(
         thesis_id=thesis.id,
@@ -242,8 +260,8 @@ async def _compute_option_mark(
         entry_premium=entry_prem1,
         entry_premium2=entry_prem2,
         contracts=contracts,
-        pnl_dollars=round(pnl_dollars, 2) if pnl_dollars is not None else None,
-        pnl_pct=round(pnl_pct, 4) if pnl_pct is not None else None,
+        pnl_dollars=pnl_dollars,
+        pnl_pct=pnl_pct,
         mark_basis=mark_basis,
         is_expired=is_expired,
         mark_note=mark_note,
@@ -1081,27 +1099,13 @@ def _strip_exp_tail(strategy: str | None) -> str | None:
     return _EXP_TAIL_RE.sub("", strategy)
 
 
-def _compute_option_pnl(
-    close: float,
-    strike: float,
-    spread_strike: float | None,
-    cost: float,
-    direction: str,
-) -> tuple[float, float]:
-    """Compute (pnl_dollars, pnl_pct) for a closed pick at expiration."""
-    is_bullish = direction == "bullish"
-    if is_bullish:
-        intrinsic = max(close - strike, 0)
-    else:
-        intrinsic = max(strike - close, 0)
-
-    if spread_strike is not None:
-        width = abs(strike - spread_strike)
-        intrinsic = min(intrinsic, width)
-
-    pnl_dollars = round((intrinsic - cost) * 100, 2)
-    pnl_pct = round(((intrinsic - cost) / cost) * 100, 2) if cost else 0.0
-    return pnl_dollars, pnl_pct
+from app.services.pnl_math import (
+    compute_option_pnl_at_expiry as _compute_option_pnl,
+    compute_spread_pnl_from_mids,
+    compute_intrinsic_mids,
+    direction_correct as _direction_correct,
+    target_reached as _target_reached,
+)
 
 
 @router.get("/alert-picks", response_model=list[AlertPickLedgerItem])
@@ -1492,6 +1496,81 @@ async def list_theses(
     return [_to_read(t) for t in result.scalars().all()]
 
 
+@router.get("/context")
+async def thesis_context(
+    symbols: str = Query(..., description="Comma-separated symbols"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Batch context for thesis cards: earnings proximity, vol regime, insight."""
+    from app.routers.discover import (
+        _batch_conditional_stats,
+        _batch_vol_regime,
+        _reporting_soon_insight,
+        _suggestion_insight,
+    )
+
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        return {}
+
+    today = date.today()
+
+    # Next earnings event per symbol (within 30 days)
+    cutoff = today + timedelta(days=30)
+    event_stmt = (
+        select(Ticker.symbol, Event.event_date, Event.is_confirmed)
+        .join(Event, Event.ticker_id == Ticker.id)
+        .where(
+            Ticker.symbol.in_(sym_list),
+            Event.event_type == EventType.EARNINGS,
+            Event.event_date >= today,
+            Event.event_date <= cutoff,
+        )
+        .distinct(Ticker.symbol)
+        .order_by(Ticker.symbol, Event.event_date)
+    )
+    event_result = await db.execute(event_stmt)
+    earnings_map: dict[str, tuple[date, bool]] = {}
+    for r in event_result.all():
+        if r.symbol not in earnings_map:
+            earnings_map[r.symbol] = (r.event_date, r.is_confirmed)
+
+    cond_map = await _batch_conditional_stats(db, sym_list)
+    vol_map = await _batch_vol_regime(db, sym_list)
+
+    out: dict[str, dict] = {}
+    for sym in sym_list:
+        # Earnings proximity label
+        prox: str | None = None
+        if sym in earnings_map:
+            ev_date, confirmed = earnings_map[sym]
+            days = (ev_date - today).days
+            if days == 0:
+                prox = "EPS today"
+            elif days == 1:
+                prox = "EPS tomorrow"
+            else:
+                prox = f"EPS in {days}d"
+
+        # Vol regime
+        vol = vol_map.get(sym)
+        regime = vol["vol_regime"] if vol else None
+
+        # Insight: use reporting-soon style if upcoming earnings, else suggestion style
+        cond = cond_map.get(sym)
+        if prox:
+            insight = _reporting_soon_insight(cond)
+        else:
+            insight = _suggestion_insight(cond, None)
+
+        out[sym] = {
+            "earnings_proximity": prox,
+            "vol_regime": regime,
+            "insight": insight,
+        }
+    return out
+
+
 @router.post("", response_model=ThesisRead, status_code=status.HTTP_201_CREATED)
 async def create_thesis(
     payload: ThesisCreate,
@@ -1666,22 +1745,12 @@ async def stock_mark_thesis(
     auto_resolved = False
     if thesis.status == ThesisStatus.OPEN and thesis.target_date < date.today():
         if current_price is not None and entry is not None:
-            direction_correct: bool | None = None
-            target_reached:    bool | None = None
-
             direction = thesis.direction
-            if direction == "bullish":
-                direction_correct = current_price > entry
-                target_reached    = bool(target is not None and current_price >= target)
-            elif direction == "bearish":
-                direction_correct = current_price < entry
-                target_reached    = bool(target is not None and current_price <= target)
-            else:  # neutral — stayed within ±5%
-                pct_chg           = abs(current_price - entry) / entry if entry else 0
-                direction_correct = pct_chg <= 0.05
-                target_reached    = (
-                    bool(target is not None and abs(current_price - entry) <= abs(target - entry))
-                )
+            direction_correct = _direction_correct(direction, entry, current_price)
+            target_reached = (
+                _target_reached(direction, entry, current_price, target)
+                if target is not None else None
+            )
 
             thesis.status              = ThesisStatus.RESOLVED
             thesis.resolved_at         = datetime.now(timezone.utc)
@@ -1763,23 +1832,11 @@ async def resolve_thesis(
     if resolution_price is not None and thesis.entry_price is not None:
         entry     = float(thesis.entry_price)
         direction = thesis.direction
-
-        if direction == "bullish":
-            direction_correct = resolution_price > entry
-        elif direction == "bearish":
-            direction_correct = resolution_price < entry
-        else:  # neutral — stayed within ±5%
-            pct_change = abs(resolution_price - entry) / entry if entry else 0
-            direction_correct = pct_change <= 0.05
+        direction_correct = _direction_correct(direction, entry, resolution_price)
 
         if thesis.price_target is not None:
             target = float(thesis.price_target)
-            if direction == "bullish":
-                target_reached = resolution_price >= target
-            elif direction == "bearish":
-                target_reached = resolution_price <= target
-            else:
-                target_reached = abs(resolution_price - entry) <= abs(target - entry)
+            target_reached = _target_reached(direction, entry, resolution_price, target)
 
     # ── Option P&L at resolution ───────────────────────────────────────────────
     option_pnl_dollars: float | None = None

@@ -36,6 +36,21 @@ function fmtDate(d: string | null): string {
   });
 }
 
+function earningsProximity(d: string): { label: string; full: string } {
+  const [y, m, day] = d.split("-").map(Number);
+  const eventDate = new Date(y, m - 1, day);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffMs = eventDate.getTime() - today.getTime();
+  const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  const full = eventDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+  if (days < 0) return { label: `${Math.abs(days)}d ago`, full };
+  if (days === 0) return { label: "Today", full };
+  if (days === 1) return { label: "1d", full };
+  return { label: `${days}d`, full };
+}
+
 // ── Small sub-components ──────────────────────────────────────────────────────
 
 function Skeleton({ w = "w-16" }: { w?: string }) {
@@ -135,12 +150,17 @@ function WatchlistRow({
         {status === "loading" ? (
           <Skeleton w="w-16" />
         ) : data?.earnings_date ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 bg-amber-500/10 px-1 py-0.5 rounded">
-              EPS
-            </span>
-            <span className="text-muted-foreground">{fmtDate(data.earnings_date)}</span>
-          </span>
+          (() => {
+            const prox = earningsProximity(data.earnings_date);
+            return (
+              <span className="inline-flex items-center gap-1.5" title={prox.full}>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 bg-amber-500/10 px-1 py-0.5 rounded">
+                  EPS
+                </span>
+                <span className="text-muted-foreground font-medium">{prox.label}</span>
+              </span>
+            );
+          })()
         ) : (
           <span className="text-muted-foreground text-xs">—</span>
         )}

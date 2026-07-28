@@ -8,6 +8,7 @@ import {
   api,
   type Thesis,
   type ThesisCreate,
+  type ThesisContextItem,
   type ThesisDraftRead,
   type ThesisMarkRead,
   type ThesisStockMarkRead,
@@ -859,6 +860,7 @@ function ThesisCard({
   mark,
   stockMark,
   refreshing,
+  ctx,
   onResolved,
   onDeleted,
 }: {
@@ -866,6 +868,7 @@ function ThesisCard({
   mark?: ThesisMarkRead | "loading" | "error";
   stockMark?: ThesisStockMarkRead | "loading" | "error";
   refreshing?: boolean;
+  ctx?: ThesisContextItem;
   onResolved: (t: Thesis) => void;
   onDeleted: (id: string) => void;
 }) {
@@ -937,6 +940,32 @@ function ThesisCard({
 
       {deleteError && (
         <p className="text-xs text-destructive">Delete failed: {deleteError}</p>
+      )}
+
+      {/* ── Context chips (open theses only) ──────────────────────────── */}
+      {isOpen && ctx && (ctx.earnings_proximity || ctx.vol_regime || ctx.insight) && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {ctx.earnings_proximity && (
+            <span className="inline-flex items-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5 text-[10px] font-semibold tracking-wide">
+              {ctx.earnings_proximity}
+            </span>
+          )}
+          {ctx.vol_regime === "iv_rich" && (
+            <span className="inline-flex items-center rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 px-2 py-0.5 text-[10px] font-semibold tracking-wide">
+              IV Rich
+            </span>
+          )}
+          {ctx.vol_regime === "iv_cheap" && (
+            <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-[10px] font-semibold tracking-wide">
+              IV Cheap
+            </span>
+          )}
+          {ctx.insight && (
+            <span className="text-[11px] text-muted-foreground/70 leading-snug">
+              {ctx.insight}
+            </span>
+          )}
+        </div>
       )}
 
       {/* ── Option P&L headline (option theses only) ───────────────────── */}
@@ -1098,6 +1127,7 @@ export default function ThesesPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "resolved">("all");
   const [marks, setMarks] = useState<Record<string, ThesisMarkRead | "loading" | "error">>({});
   const [stockMarks, setStockMarks] = useState<Record<string, ThesisStockMarkRead | "loading" | "error">>({});
+  const [context, setContext] = useState<Record<string, ThesisContextItem>>({});
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set());
   const [stockRefreshing, setStockRefreshing] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
@@ -1114,6 +1144,16 @@ export default function ThesesPage() {
     api.theses.list().then(data => {
       setTheses(data);
       setLoading(false);
+      // Fetch context for open thesis symbols
+      const openSymbols = [...new Set(
+        data
+          .filter(t => t.status === "open" || t.status === "needs_manual_resolution")
+          .map(t => t.ticker_symbol)
+          .filter(Boolean) as string[]
+      )];
+      if (openSymbols.length > 0) {
+        api.theses.context(openSymbols).then(setContext).catch(() => {});
+      }
     }).catch(() => setLoading(false));
   }, []);
 
@@ -1369,6 +1409,7 @@ export default function ThesesPage() {
                 mark={thesis.status !== "resolved" ? marks[thesis.id] : undefined}
                 stockMark={thesis.status !== "resolved" ? stockMarks[thesis.id] : undefined}
                 refreshing={refreshing.has(thesis.id) || stockRefreshing.has(thesis.id)}
+                ctx={thesis.ticker_symbol ? context[thesis.ticker_symbol] : undefined}
                 onResolved={handleResolved}
                 onDeleted={handleDeleted}
               />

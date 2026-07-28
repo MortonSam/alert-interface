@@ -17,6 +17,7 @@ import {
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
+  type Watchlist,
 } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
@@ -1380,6 +1381,11 @@ export default function TickerPage() {
   const [marksAsOf, setMarksAsOf]     = useState<Date | null>(null);
   const [marksRefreshing, setMarksRefreshing] = useState(false);
 
+  // Watchlist
+  const [watched, setWatched] = useState<boolean | null>(null); // null = loading
+  const [watchlistId, setWatchlistId] = useState<string | null>(null);
+  const [watchlistBusy, setWatchlistBusy] = useState(false);
+
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   // Single-ticker lookup (replaces fetch-all-tickers)
@@ -1392,6 +1398,18 @@ export default function TickerPage() {
         else { setTickerError(e.message); setTickerStatus("error"); }
       });
   }, [upperSymbol]);
+
+  // Check if ticker is on the watchlist
+  useEffect(() => {
+    if (!ticker) return;
+    api.watchlists.list().then(wls => {
+      if (wls.length === 0) { setWatched(false); return; }
+      const wl = wls[0]; // use first watchlist
+      setWatchlistId(wl.id);
+      const onIt = wl.items.some(i => i.ticker.symbol === ticker.symbol);
+      setWatched(onIt);
+    }).catch(() => setWatched(false));
+  }, [ticker]);
 
   useEffect(() => {
     api.events
@@ -1743,12 +1761,41 @@ export default function TickerPage() {
                 </div>
               )}
             </div>
-            <Link
-              href={`/build?ticker=${ticker.symbol}`}
-              className="shrink-0 self-center rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors"
-            >
-              Build a trade on {ticker.symbol} →
-            </Link>
+            <div className="flex items-center gap-2 shrink-0 self-center">
+              {watched !== null && watchlistId && (
+                <button
+                  onClick={async () => {
+                    if (watchlistBusy || !ticker) return;
+                    setWatchlistBusy(true);
+                    try {
+                      if (watched) {
+                        await api.watchlists.removeTicker(watchlistId, ticker.id);
+                        setWatched(false);
+                      } else {
+                        await api.watchlists.addTicker(watchlistId, ticker.id);
+                        setWatched(true);
+                      }
+                    } catch { /* silent */ }
+                    setWatchlistBusy(false);
+                  }}
+                  disabled={watchlistBusy}
+                  className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
+                    watched
+                      ? "border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/20"
+                  } disabled:opacity-50`}
+                  title={watched ? "Remove from watchlist" : "Add to watchlist"}
+                >
+                  {watched ? "★" : "☆"}
+                </button>
+              )}
+              <Link
+                href={`/build?ticker=${ticker.symbol}`}
+                className="rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                Build a trade on {ticker.symbol} →
+              </Link>
+            </div>
           </div>
 
           {/* "Why now" strip */}

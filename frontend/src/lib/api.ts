@@ -703,6 +703,12 @@ export interface ThesisStockMarkRead {
   auto_resolved: boolean;
 }
 
+export interface ThesisContextItem {
+  earnings_proximity: string | null;  // "EPS in 3d", "EPS today", null
+  vol_regime: string | null;          // "iv_rich" | "iv_cheap" | null
+  insight: string | null;             // conditional-stats one-liner
+}
+
 export interface SystemStatus {
   last_refreshed_at: string | null;
   total_tickers: number;
@@ -843,6 +849,8 @@ export const api = {
       request<ThesisMarkRead>(`/theses/${id}/mark`),
     stockMark: (id: string) =>
       request<ThesisStockMarkRead>(`/theses/${id}/stock-mark`),
+    context: (symbols: string[]) =>
+      request<Record<string, ThesisContextItem>>(`/theses/context?symbols=${symbols.join(",")}`),
   },
 
   discover: {
