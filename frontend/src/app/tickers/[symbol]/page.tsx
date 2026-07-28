@@ -2061,7 +2061,7 @@ export default function TickerPage() {
                 {/* Left: Recent Actions */}
                 <div>
                   {recentAnalystActions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No analyst coverage</p>
+                    <p className="text-sm text-muted-foreground">No analyst actions in the last 5 years</p>
                   ) : (
                     <div className="space-y-0.5">
                       {recentAnalystActions.map((evt) => {

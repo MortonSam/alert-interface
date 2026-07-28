@@ -139,10 +139,11 @@ def _compute_outcome(
 ) -> EarningsOutcome:
     if eps_estimate is None or eps_actual is None:
         return EarningsOutcome.UNKNOWN
-    diff = eps_actual - eps_estimate
-    if abs(diff) <= Decimal("0.01"):
-        return EarningsOutcome.MEET
-    return EarningsOutcome.BEAT if diff > 0 else EarningsOutcome.MISS
+    if eps_actual > eps_estimate:
+        return EarningsOutcome.BEAT
+    if eps_actual < eps_estimate:
+        return EarningsOutcome.MISS
+    return EarningsOutcome.MEET
 
 
 def _fetch_earnings_dates(t: yf.Ticker) -> list[tuple[date, Decimal | None, Decimal | None]]:
