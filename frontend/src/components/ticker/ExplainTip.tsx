@@ -133,10 +133,10 @@ export default function ExplainTip({
         tabIndex={0}
         role="button"
         aria-expanded={open}
-        className="inline-flex items-center gap-0.5 cursor-help decoration-dotted underline underline-offset-2 decoration-muted-foreground/50"
+        className="inline-flex items-center gap-0.5 cursor-help decoration-dotted underline underline-offset-2 decoration-muted-foreground/40"
       >
         {children}
-        <span className="text-muted-foreground/50 text-[10px] leading-none select-none" aria-hidden>
+        <span className="text-muted-foreground/70 text-[10px] leading-none select-none" aria-hidden>
           &#9432;
         </span>
       </span>

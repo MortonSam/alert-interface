@@ -267,7 +267,12 @@ async def _batch_analyst_stats(
 # ── Insight-line builders ────────────────────────────────────────────────────
 
 
-def _reporting_soon_insight(cond: dict | None) -> str | None:
+def _sym_variant(symbol: str, n: int) -> int:
+    """Deterministic variant index from symbol hash — stable per ticker."""
+    return sum(ord(c) for c in symbol) % n
+
+
+def _reporting_soon_insight(cond: dict | None, symbol: str = "") -> str | None:
     """Build insight for a Reporting Soon card from conditional earnings stats."""
     if not cond or cond["total"] < _MIN_QUARTERS:
         return None
@@ -275,28 +280,44 @@ def _reporting_soon_insight(cond: dict | None) -> str | None:
     total = cond["total"]
     beat_count = cond["beat_count"]
     bbd = cond["bbd_count"]
+    v = _sym_variant(symbol, 3)
 
     if beat_count >= 3:
         beat_rate = beat_count / total
         if bbd >= 2 and beat_count >= 4:
             bbd_pct = round(bbd / beat_count * 100)
-            return f"Beat {beat_count} of {total} — {bbd_pct}% of beats dropped"
+            templates = [
+                f"Beat {beat_count} of {total} — {bbd_pct}% of beats dropped",
+                f"{beat_count}/{total} beats but stock fell {bbd_pct}% of the time",
+                f"Beats in {beat_count} of {total}q — {bbd_pct}% sold off anyway",
+            ]
+            return templates[v]
         if beat_rate >= 0.75:
             avg = cond["avg_1d_on_beat"]
             if avg is not None:
                 sign = "+" if avg >= 0 else ""
-                return f"Beat {beat_count} of {total} — avg {sign}{avg:.1f}% on beats"
+                templates = [
+                    f"Beat {beat_count} of {total} — avg {sign}{avg:.1f}% on beats",
+                    f"{beat_count}/{total} beats, typically {sign}{avg:.1f}% next day",
+                    f"Topped estimates {beat_count} of {total}q — avg {sign}{avg:.1f}% reaction",
+                ]
+                return templates[v]
             return f"Beat {beat_count} of {total}"
 
     avg_abs = cond["avg_abs_1d"]
     if avg_abs is not None:
-        return f"Avg move {chr(0xB1)}{avg_abs:.1f}% on earnings ({total}q)"
+        templates = [
+            f"Avg move {chr(0xB1)}{avg_abs:.1f}% on earnings ({total}q)",
+            f"Typically swings {chr(0xB1)}{avg_abs:.1f}% around earnings ({total}q)",
+            f"Earnings move averages {chr(0xB1)}{avg_abs:.1f}% over {total} quarters",
+        ]
+        return templates[v]
 
     return None
 
 
 def _just_reported_insight(
-    pct_1d: float | None, outcome: str, cond: dict | None,
+    pct_1d: float | None, outcome: str, cond: dict | None, symbol: str = "",
 ) -> str | None:
     """Build insight for a Just Reported card: realized vs typical."""
     if pct_1d is None:
@@ -310,21 +331,34 @@ def _just_reported_insight(
 
     sign = "+" if pct_1d >= 0 else ""
     move_str = f"{sign}{pct_1d:.1f}%"
+    v = _sym_variant(symbol, 3)
 
     if outcome in ("beat", "miss"):
         key = "avg_1d_on_beat" if outcome == "beat" else "avg_1d_on_miss"
         typical = cond.get(key)
         if typical is not None:
             t_sign = "+" if typical >= 0 else ""
-            return f"Moved {move_str} vs {t_sign}{typical:.1f}% typical {outcome}"
+            templates = [
+                f"Moved {move_str} vs {t_sign}{typical:.1f}% typical {outcome}",
+                f"{move_str} reaction — {outcome}s average {t_sign}{typical:.1f}%",
+                f"Reacted {move_str} (typical {outcome}: {t_sign}{typical:.1f}%)",
+            ]
+            return templates[v]
 
-    return f"Moved {move_str} vs {chr(0xB1)}{avg_abs:.1f}% typical"
+    templates = [
+        f"Moved {move_str} vs {chr(0xB1)}{avg_abs:.1f}% typical",
+        f"{move_str} post-earnings — avg swing is {chr(0xB1)}{avg_abs:.1f}%",
+        f"Reacted {move_str} against a {chr(0xB1)}{avg_abs:.1f}% typical move",
+    ]
+    return templates[v]
 
 
 def _suggestion_insight(
-    cond: dict | None, analyst: dict | None,
+    cond: dict | None, analyst: dict | None, symbol: str = "",
 ) -> str | None:
     """Build strongest single lean for a Suggestion card."""
+    v = _sym_variant(symbol, 3)
+
     # Priority 1: analyst skew (if sample >= 3)
     if analyst:
         up = analyst["upgrade_count"]
@@ -350,28 +384,44 @@ def _suggestion_insight(
 
         if beat_count >= 4 and bbd >= 2:
             bbd_pct = round(bbd / beat_count * 100)
-            return f"Beat {beat_count} of {total} but dropped {bbd_pct}% of the time"
+            templates = [
+                f"Beat {beat_count} of {total} but dropped {bbd_pct}% of the time",
+                f"{beat_count}/{total} beats — stock sold off {bbd_pct}% of the time",
+                f"Topped estimates {beat_count} of {total}q, yet fell {bbd_pct}% post-beat",
+            ]
+            return templates[v]
 
         avg_beat = cond["avg_1d_on_beat"]
         avg_miss = cond["avg_1d_on_miss"]
         if avg_beat is not None and avg_miss is not None:
             if abs(avg_miss) > abs(avg_beat) * 1.5 and cond["miss_count"] >= 2:
-                return f"Misses punished {abs(avg_miss):.1f}% avg vs +{abs(avg_beat):.1f}% on beats"
+                templates = [
+                    f"Misses punished {abs(avg_miss):.1f}% avg vs +{abs(avg_beat):.1f}% on beats",
+                    f"Miss penalty {abs(avg_miss):.1f}% vs +{abs(avg_beat):.1f}% beat reward",
+                    f"Downside skew: misses cost {abs(avg_miss):.1f}% avg, beats gain {abs(avg_beat):.1f}%",
+                ]
+                return templates[v]
 
         avg_abs = cond["avg_abs_1d"]
         if avg_abs is not None:
-            return f"Avg earnings move {chr(0xB1)}{avg_abs:.1f}% ({total}q)"
+            templates = [
+                f"Avg earnings move {chr(0xB1)}{avg_abs:.1f}% ({total}q)",
+                f"Typically swings {chr(0xB1)}{avg_abs:.1f}% on earnings ({total}q)",
+                f"Earnings reactions average {chr(0xB1)}{avg_abs:.1f}% over {total}q",
+            ]
+            return templates[v]
 
     return None
 
 
-def _unusually_active_insight(vol: dict | None) -> str | None:
+def _unusually_active_insight(vol: dict | None, symbol: str = "") -> str | None:
     """Build insight for Unusually Active: IV-RV context."""
     if not vol:
         return None
     spread = vol.get("iv_rv_spread_pp")
     regime = vol.get("vol_regime")
     rv_rank = vol.get("rv_rank")
+    v = _sym_variant(symbol, 3)
 
     if spread is not None and rv_rank is not None:
         label = ""
@@ -380,12 +430,21 @@ def _unusually_active_insight(vol: dict | None) -> str | None:
         elif regime == "iv_cheap":
             label = "IV cheap"
 
-        if label:
-            sign = "+" if spread >= 0 else ""
-            return f"{label} {sign}{spread:.0f}pp spread — RV rank {rv_rank:.0f}"
-        # Fair regime — still show the spread context
         sign = "+" if spread >= 0 else ""
-        return f"IV-RV spread {sign}{spread:.0f}pp — RV rank {rv_rank:.0f}"
+        if label:
+            templates = [
+                f"{label} {sign}{spread:.0f}pp spread — RV rank {rv_rank:.0f}",
+                f"{label}: {sign}{spread:.0f}pp vs realized, rank {rv_rank:.0f}",
+                f"Options {label.lower()} ({sign}{spread:.0f}pp) — RV rank {rv_rank:.0f}",
+            ]
+            return templates[v]
+        # Fair regime — still show the spread context
+        templates = [
+            f"IV-RV spread {sign}{spread:.0f}pp — RV rank {rv_rank:.0f}",
+            f"IV {sign}{spread:.0f}pp vs realized — rank {rv_rank:.0f}",
+            f"Implied-realized gap {sign}{spread:.0f}pp, RV rank {rv_rank:.0f}",
+        ]
+        return templates[v]
 
     if rv_rank is not None:
         return f"RV rank {rv_rank:.0f}"
@@ -453,7 +512,7 @@ async def reporting_soon(
             name=r.name,
             earnings_date=r.event_date.isoformat(),
             is_confirmed=r.is_confirmed,
-            insight=_reporting_soon_insight(cond),
+            insight=_reporting_soon_insight(cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,
         )
         for r, cond, vol, _ in raw_items[:limit]
@@ -524,7 +583,7 @@ async def just_reported(
             event_date=r.event_date.isoformat(),
             pct_change_1d=round(pct, 2) if pct else None,
             outcome=outcome,
-            insight=_just_reported_insight(pct, outcome, cond),
+            insight=_just_reported_insight(pct, outcome, cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,
         )
         for r, cond, vol, pct, outcome in raw_items[:limit]
@@ -662,7 +721,7 @@ async def suggestions(
             recent_outcome=t.get("recent_outcome"),
             event_date=t.get("event_date"),
             insight=_suggestion_insight(
-                cond_stats.get(sym), analyst_stats.get(sym),
+                cond_stats.get(sym), analyst_stats.get(sym), sym,
             ),
             vol_regime=vol_data.get(sym, {}).get("vol_regime"),
         )
@@ -708,7 +767,7 @@ async def unusually_active(
             rv_rank=float(row.rv_rank),
             rv_20d=float(row.rv_20d),
             tier="extreme" if float(row.rv_rank) >= 93 else "elevated",
-            insight=_unusually_active_insight(vol_data.get(row.symbol)),
+            insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol),
             vol_regime=vol_data.get(row.symbol, {}).get("vol_regime"),
         )
         for row in rows

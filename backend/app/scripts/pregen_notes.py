@@ -47,6 +47,10 @@ def _parse_ts(iso: str | None) -> datetime | None:
     if not iso:
         return None
     try:
+        # Pydantic v2 serialises UTC datetimes with trailing 'Z' which
+        # Python < 3.11 cannot parse via fromisoformat.
+        if iso.endswith("Z"):
+            iso = iso[:-1] + "+00:00"
         return datetime.fromisoformat(iso)
     except (TypeError, ValueError):
         return None

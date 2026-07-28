@@ -1559,9 +1559,9 @@ async def thesis_context(
         # Insight: use reporting-soon style if upcoming earnings, else suggestion style
         cond = cond_map.get(sym)
         if prox:
-            insight = _reporting_soon_insight(cond)
+            insight = _reporting_soon_insight(cond, sym)
         else:
-            insight = _suggestion_insight(cond, None)
+            insight = _suggestion_insight(cond, None, sym)
 
         out[sym] = {
             "earnings_proximity": prox,
