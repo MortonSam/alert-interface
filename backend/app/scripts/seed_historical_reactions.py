@@ -257,6 +257,24 @@ async def upsert_reaction(
     data: dict,
 ) -> bool:
     """Upsert on (ticker_id, event_date, event_type). Returns True if inserted."""
+    # Check for pre-existence — also used to freeze settled estimates.
+    existing = await session.execute(
+        select(HistoricalReaction.id, HistoricalReaction.eps_actual).where(
+            HistoricalReaction.ticker_id  == ticker.id,
+            HistoricalReaction.event_date == event_date,
+            HistoricalReaction.event_type == EventType.EARNINGS,
+        )
+    )
+    row = existing.first()
+
+    # Once a quarter has an actual, its estimates and outcome are frozen
+    # facts — refreshes only update price reactions and volumes.
+    _FROZEN_KEYS = {"eps_estimate", "revenue_estimate", "outcome"}
+    if row is not None and row.eps_actual is not None:
+        update_data = {k: v for k, v in data.items() if k not in _FROZEN_KEYS}
+    else:
+        update_data = data
+
     stmt = (
         pg_insert(HistoricalReaction)
         .values(
@@ -267,21 +285,12 @@ async def upsert_reaction(
         )
         .on_conflict_do_update(
             constraint = "uq_hist_reaction_ticker_date_type",
-            set_       = data,
+            set_       = update_data,
         )
         .returning(HistoricalReaction.id)
     )
-    # pg_insert returns a scalar — we can't easily tell insert vs update here,
-    # so we check for pre-existence first.
-    existing = await session.scalar(
-        select(HistoricalReaction.id).where(
-            HistoricalReaction.ticker_id  == ticker.id,
-            HistoricalReaction.event_date == event_date,
-            HistoricalReaction.event_type == EventType.EARNINGS,
-        )
-    )
     await session.execute(stmt)
-    return existing is None
+    return row is None
 
 
 # ── Failed-ticker cache ───────────────────────────────────────────────────────
