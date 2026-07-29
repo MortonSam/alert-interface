@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { TickerGrid } from "./ticker-grid";
+import { IvyCard } from "./ivy-card";
 
 // ── Static sample data for the note preview ──────────────────────────────────
 
@@ -329,6 +330,11 @@ export default function Home() {
         <NotePreview />
       </section>
 
+      {/* ── Meet Ivy ───────────────────────────────────────── */}
+      <section className="max-w-3xl mx-auto px-8 pb-20">
+        <IvyCard />
+      </section>
+
       {/* ── Market grid ──────────────────────────────────────── */}
       <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
         <SectionHeading
@@ -365,6 +371,12 @@ export default function Home() {
               className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
             >
               Build a trade →
+            </Link>
+            <Link
+              href="/ivy"
+              className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
+            >
+              Meet Ivy →
             </Link>
           </div>
         </div>
