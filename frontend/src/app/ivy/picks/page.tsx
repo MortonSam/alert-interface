@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DiscoverCard from "@/components/DiscoverCard";
 import { api, type SuggestionItem } from "@/lib/api";
 
@@ -11,20 +11,16 @@ export default function IvyPicksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await api.discover.suggestions(12);
-        if (!cancelled) setSuggestions(data.items);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadSuggestions = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api.discover.suggestions(10)
+      .then((data) => setSuggestions(data.items))
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { loadSuggestions(); }, [loadSuggestions]);
 
   if (loading) {
     return (
@@ -45,8 +41,16 @@ export default function IvyPicksPage() {
 
   if (error) {
     return (
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
-        {error}
+      <div className="rounded-xl border border-border bg-card px-6 py-10 text-center space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Couldn&apos;t load Ivy&apos;s Picks right now.
+        </p>
+        <button
+          onClick={() => { setError(null); setLoading(true); loadSuggestions(); }}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }
