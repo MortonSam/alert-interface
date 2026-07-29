@@ -437,8 +437,8 @@ export default function DiscoverPage() {
                   </span>
                 }
                 iconBg="bg-primary/10"
-                title="AI suggestions"
-                descriptor="Stocks worth a look right now"
+                title="Ivy's Picks"
+                descriptor="Stocks Ivy thinks are worth a look right now"
                 total={null}
                 limit={LIMIT}
               />
