@@ -206,7 +206,7 @@ export default function DiscoverPage() {
         {/* ── Alert's Pick strip ──────────────────────────── */}
         {!loading && latestPick && (
           <Link
-            href="/alerts-trades"
+            href="/ivy/trades"
             className="flex items-center gap-3 rounded-lg border border-border bg-card/50 px-4 py-2.5 mb-8 hover:border-foreground/20 transition-colors group"
           >
             <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
