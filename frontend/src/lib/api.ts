@@ -716,6 +716,15 @@ export interface SystemStatus {
   most_recent_reaction_date: string | null;
 }
 
+export interface HealthStatus {
+  status: string;
+  refresh_in_progress: boolean;
+  last_refreshed_at: string | null;
+  rv_latest_date: string | null;
+  rv_last_run: string | null;
+  step_health: Record<string, string | null>;
+}
+
 export interface Watchlist {
   id: string;
   name: string;
@@ -821,6 +830,7 @@ export const api = {
 
   system: {
     status: () => request<SystemStatus>("/system/status"),
+    health: () => request<HealthStatus>("/health"),
   },
 
   theses: {
