@@ -1048,17 +1048,17 @@ function BuildTradePageContent() {
               {alertPick?.existing_pick && (
                 <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 px-5 py-4 space-y-3 mb-4">
                   <p className="text-sm font-medium">
-                    Alert already has an open {alertPick.picked_direction} pick on {alertPick.symbol} from{" "}
+                    Ivy already has an open {alertPick.picked_direction} pick on {alertPick.symbol} from{" "}
                     {new Date(alertPick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                   </p>
-                  <p className="text-xs text-muted-foreground">Alert holds one pick per symbol until it expires.</p>
+                  <p className="text-xs text-muted-foreground">Ivy holds one pick per symbol until it expires.</p>
                 </div>
               )}
 
               {/* Mixed-evidence fallback — shown when Alert couldn't pick */}
               {alertPick?.picked_direction === "mixed_evidence" && !alertPick?.existing_pick && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4">
-                  <p className="text-sm font-medium">Evidence conflicts — Alert can&apos;t pick a clear direction</p>
+                  <p className="text-sm font-medium">Evidence conflicts — Ivy can&apos;t pick a clear direction</p>
                   <div className="text-xs text-muted-foreground space-y-1.5">
                     {alertPick.leans.map((lean) => (
                       <div key={lean.signal} className="flex items-start gap-2">
@@ -1123,8 +1123,8 @@ function BuildTradePageContent() {
                     )}
                   >
                     <HiSparkles aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
-                    <div className="text-base font-bold">Let Alert decide</div>
-                    <div className="text-xs opacity-60 mt-1">Alert picks from the data</div>
+                    <div className="text-base font-bold">Let Ivy decide</div>
+                    <div className="text-xs opacity-60 mt-1">Ivy picks from the data</div>
                   </button>
                 )}
               </div>
@@ -1181,7 +1181,7 @@ function BuildTradePageContent() {
                 <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 px-5 py-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                      Alert&apos;s Pick · {alertPick.picked_direction}
+                      Ivy&apos;s Pick · {alertPick.picked_direction}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground space-y-1.5">

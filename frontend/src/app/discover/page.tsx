@@ -210,7 +210,7 @@ export default function DiscoverPage() {
             className="flex items-center gap-3 rounded-lg border border-border bg-card/50 px-4 py-2.5 mb-8 hover:border-foreground/20 transition-colors group"
           >
             <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-              Alert&apos;s Pick
+              Ivy&apos;s Pick
             </span>
             <span className="font-display text-sm font-bold text-foreground">
               {latestPick.symbol}

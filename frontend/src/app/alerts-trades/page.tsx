@@ -230,9 +230,9 @@ export default function AlertsTradesPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-8 py-8 px-4">
       <div>
-        <h1 className="text-3xl font-display font-bold tracking-tight">Alert&apos;s Trades</h1>
+        <h1 className="text-3xl font-display font-bold tracking-tight">Ivy&apos;s Trades</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Every pick Alert has made, scored against the market.
+          Every pick Ivy has made, scored against the market.
         </p>
       </div>
 
@@ -316,7 +316,7 @@ export default function AlertsTradesPage() {
           <p className="text-lg font-medium">No picks yet</p>
           <p className="text-sm text-muted-foreground mt-1">
             Go to <a href="/build" className="underline hover:text-foreground">Build a Trade</a> and
-            let Alert decide on a ticker.
+            let Ivy decide on a ticker.
           </p>
         </div>
       )}

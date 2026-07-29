@@ -1022,7 +1022,7 @@ async def alert_pick(
         )
         extra_prompt = (
             f"\nALERT-PICK MODE:\n"
-            f"Alert selected {picked_direction} based on the following signal analysis:\n"
+            f"Ivy selected {picked_direction} based on the following signal analysis:\n"
             f"{lean_lines}\n"
             f"In your reasoning, explicitly state which signals drove this direction choice.\n"
         )
