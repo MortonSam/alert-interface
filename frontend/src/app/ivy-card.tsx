@@ -9,9 +9,11 @@ export function IvyCard() {
   const [avgUnrealized, setAvgUnrealized] = useState<number | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     api.theses
       .alertPicks()
       .then((picks: AlertPickLedgerItem[]) => {
+        if (cancelled) return;
         const open = picks.filter((p) => p.status === "open");
         if (open.length === 0) return;
         setOpenCount(open.length);
@@ -23,7 +25,10 @@ export function IvyCard() {
           setAvgUnrealized(avg);
         }
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) console.error("[IvyCard] failed to load picks:", e);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   return (
