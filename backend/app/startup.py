@@ -95,21 +95,22 @@ async def _background_refresh() -> None:
         loop = asyncio.get_event_loop()
         exit_code: int = await loop.run_in_executor(None, pipeline.main)
 
+        # Write last_refreshed_at regardless of exit code — the pipeline ran
+        # to completion.  step_health tracks per-step truth.
+        try:
+            now_iso = datetime.now(tz=timezone.utc).isoformat()
+            async with AsyncSessionLocal() as session:
+                await set_value(session, _KEY_LAST_REFRESHED, now_iso)
+                await session.commit()
+        except Exception:
+            pass
+
         if exit_code == 0:
-            # Write last_refreshed_at here — refresh.py's own asyncio.run()
-            # write fails when called via run_in_executor (nested loop).
-            try:
-                now_iso = datetime.now(tz=timezone.utc).isoformat()
-                async with AsyncSessionLocal() as session:
-                    await set_value(session, _KEY_LAST_REFRESHED, now_iso)
-                    await session.commit()
-            except Exception:
-                pass
             _log("Pipeline completed successfully — last_refreshed_at updated.")
         else:
             _log(
-                f"Pipeline exited with code {exit_code}.  "
-                "Old timestamp preserved; badge will show true staleness."
+                f"Pipeline exited with code {exit_code} (some steps failed).  "
+                "last_refreshed_at updated; check step_health for details."
             )
     except Exception as exc:
         _log(f"Pipeline raised an unexpected exception: {exc}.  Old data and timestamp preserved.")

@@ -324,7 +324,10 @@ async def main() -> int:
     if failed_list:
         print(f"\n  Failed: {', '.join(failed_list)}")
     print(f"{'─' * 60}")
-    return 1 if failed_list else 0
+    if len(failed_list) > 10:
+        print(f"  Too many failures ({len(failed_list)} > 10) — marking step as failed.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

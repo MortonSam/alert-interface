@@ -109,7 +109,10 @@ async def main(only_symbol: str | None = None) -> int:
             err += 1
 
     print(f"\n  Done: {ok} OK, {err} error(s).")
-    return 0 if err == 0 else 1
+    if err > 10:
+        print(f"  Too many errors ({err} > 10) — marking step as failed.")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

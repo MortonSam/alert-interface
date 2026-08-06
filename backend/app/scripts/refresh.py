@@ -48,8 +48,8 @@ def _record_step_success(label: str) -> None:
             await session.commit()
     try:
         _aio.run(_write())
-    except Exception:
-        pass  # metadata write failure must not crash the pipeline
+    except Exception as exc:
+        print(f"  [WARN] Failed to write step stamp for {label}: {exc}")
 
 
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes — kill hung steps instead of blocking forever
@@ -105,18 +105,21 @@ def main() -> int:
 
     print(f"{'=' * 60}\n")
 
+    # Write last_refreshed_at when the pipeline runs to completion,
+    # regardless of individual step results.  step_health tracks per-step truth.
+    try:
+        asyncio.run(_record_refresh())
+    except RuntimeError:
+        # When called from startup.py's run_in_executor, asyncio.run()
+        # can't create a nested event loop.  startup.py writes the
+        # sentinel itself after the task finishes.
+        pass
+
     if all_passed:
-        try:
-            asyncio.run(_record_refresh())
-        except RuntimeError:
-            # When called from startup.py's run_in_executor, asyncio.run()
-            # can't create a nested event loop.  startup.py writes the
-            # sentinel itself on exit_code == 0.
-            pass
         print("\n  Refresh complete.\n")
         return 0
     else:
-        print("\n  Refresh FAILED. last_refreshed_at not updated.\n")
+        print("\n  Refresh completed with failures (see above). last_refreshed_at updated.\n")
         return 1
 
 

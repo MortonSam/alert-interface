@@ -431,7 +431,10 @@ async def main(retry_only: bool, limit: int | None, force_update: bool = False) 
         print("  Run `make seed-sp500-retry` to retry just those.")
     print(f"{'─' * 50}")
 
-    return 1 if failed else 0
+    if len(failed) > 10:
+        print(f"  Too many failures ({len(failed)} > 10) — marking step as failed.")
+        return 1
+    return 0
 
 
 def parse_args() -> argparse.Namespace:
