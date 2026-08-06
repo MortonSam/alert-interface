@@ -3,12 +3,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from datetime import datetime, timezone
+
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.routers import admin, discover, events, historical_reactions, research_notes, system, tickers, watchlists, thesis
 from app.services.system_metadata_service import get_value
-from app.startup import lifespan
-import app.startup as _startup
+from app.startup import lifespan, REFRESH_SENTINEL_MAX_MINUTES
 
 app = FastAPI(
     title="Alert Interface API",
@@ -49,7 +50,7 @@ async def health_check():
     result: dict = {
         "status": "ok",
         "db": "ok",
-        "refresh_in_progress": _startup._refresh_in_progress,
+        "refresh_in_progress": False,
         "last_refreshed_at": None,
         "rv_latest_date": None,
         "rv_last_run": None,
@@ -61,6 +62,16 @@ async def health_check():
             # Real DB connectivity check — catches bad credentials / dead connections
             await session.execute(sa.text("SELECT 1"))
             result["db"] = "ok"
+
+            # Derive refresh_in_progress from the DB sentinel with staleness rule
+            sentinel_raw = await get_value(session, "refresh_in_progress_since")
+            if sentinel_raw and sentinel_raw != "done":
+                try:
+                    started_at = datetime.fromisoformat(sentinel_raw)
+                    age_minutes = (datetime.now(timezone.utc) - started_at).total_seconds() / 60
+                    result["refresh_in_progress"] = age_minutes < REFRESH_SENTINEL_MAX_MINUTES
+                except ValueError:
+                    pass  # unparseable sentinel — treat as not in progress
 
             result["last_refreshed_at"] = await get_value(session, "last_refreshed_at")
 

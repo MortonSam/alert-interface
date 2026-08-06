@@ -194,6 +194,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         yield
         return
 
+    # ── Stale-flag recovery ──────────────────────────────────────────────────
+    # On a fresh start the process flag is always False, but the DB sentinel
+    # may be left over from a previous process that died mid-run.  Clear it
+    # up front so the staleness check below starts from a clean state.
+    try:
+        _, old_sentinel = await _read_sentinel()
+        if old_sentinel and old_sentinel != "done":
+            try:
+                started_at = datetime.fromisoformat(old_sentinel)
+                age_minutes = (datetime.now(timezone.utc) - started_at).total_seconds() / 60
+                if age_minutes >= REFRESH_SENTINEL_MAX_MINUTES:
+                    _log(
+                        f"Clearing stale DB sentinel ({age_minutes:.0f}m old) "
+                        "from a previous process that never finished."
+                    )
+                    await _write_sentinel("done")
+            except ValueError:
+                await _write_sentinel("done")
+        _refresh_in_progress = False
+    except Exception as exc:
+        _log(f"Stale-flag recovery failed ({exc}) — continuing.")
+
     # ── Startup staleness check ───────────────────────────────────────────────
     try:
         last_raw, sentinel_raw = await _read_sentinel()

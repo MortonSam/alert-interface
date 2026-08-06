@@ -52,12 +52,19 @@ def _record_step_success(label: str) -> None:
         pass  # metadata write failure must not crash the pipeline
 
 
+STEP_TIMEOUT_SECONDS = 600  # 10 minutes — kill hung steps instead of blocking forever
+
+
 def _run_step(label: str, cmd: list[str]) -> bool:
     """Run a subprocess step, streaming its output. Returns True on success."""
     print(f"\n{'─' * 60}")
     print(f"  STEP: {label}")
     print(f"{'─' * 60}")
-    result = subprocess.run(cmd, check=False)
+    try:
+        result = subprocess.run(cmd, check=False, timeout=STEP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        print(f"\n  [FAIL] {label} (killed after {STEP_TIMEOUT_SECONDS}s timeout)")
+        return False
     ok = result.returncode == 0
     status = "PASS" if ok else "FAIL"
     print(f"\n  [{status}] {label} (exit {result.returncode})")
