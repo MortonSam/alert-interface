@@ -1601,7 +1601,7 @@ async def thesis_context(
     return out
 
 
-@router.post("", response_model=ThesisRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ThesisRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def create_thesis(
     payload: ThesisCreate,
     db: AsyncSession = Depends(get_db),
@@ -1828,7 +1828,7 @@ async def get_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -
     return _to_read(thesis)
 
 
-@router.post("/{thesis_id}/resolve", response_model=ThesisRead)
+@router.post("/{thesis_id}/resolve", response_model=ThesisRead, dependencies=[Depends(require_admin)])
 async def resolve_thesis(
     thesis_id: uuid.UUID,
     payload: ThesisResolve,
@@ -1902,7 +1902,7 @@ async def resolve_thesis(
     return _to_read(result.scalar_one())
 
 
-@router.delete("/{thesis_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{thesis_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def delete_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
     thesis = await db.get(Thesis, thesis_id)
     if not thesis:

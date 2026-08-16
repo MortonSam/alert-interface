@@ -187,7 +187,7 @@ async def list_tickers(
     return enriched
 
 
-@router.post("", response_model=TickerRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TickerRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def create_ticker(payload: TickerCreate, db: AsyncSession = Depends(get_db)) -> Ticker:
     ticker = Ticker(**payload.model_dump())
     ticker.symbol = ticker.symbol.upper()
@@ -1755,7 +1755,7 @@ async def get_ticker(ticker_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -
     return ticker
 
 
-@router.patch("/{ticker_id}", response_model=TickerRead)
+@router.patch("/{ticker_id}", response_model=TickerRead, dependencies=[Depends(require_admin)])
 async def update_ticker(
     ticker_id: uuid.UUID,
     payload: TickerUpdate,
@@ -1771,7 +1771,7 @@ async def update_ticker(
     return ticker
 
 
-@router.delete("/{ticker_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{ticker_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def delete_ticker(ticker_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
     ticker = await db.get(Ticker, ticker_id)
     if not ticker:

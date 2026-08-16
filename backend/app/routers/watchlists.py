@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth import require_admin
 from app.database import get_db
 from app.models.ticker import Ticker
 from app.models.watchlist import Watchlist, WatchlistTicker
@@ -23,7 +24,7 @@ async def list_watchlists(db: AsyncSession = Depends(get_db)) -> list[Watchlist]
     return list(result.scalars().all())
 
 
-@router.post("", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def create_watchlist(payload: WatchlistCreate, db: AsyncSession = Depends(get_db)) -> Watchlist:
     wl = Watchlist(**payload.model_dump())
     db.add(wl)
@@ -41,7 +42,7 @@ async def get_watchlist(watchlist_id: uuid.UUID, db: AsyncSession = Depends(get_
     return wl
 
 
-@router.patch("/{watchlist_id}", response_model=WatchlistRead)
+@router.patch("/{watchlist_id}", response_model=WatchlistRead, dependencies=[Depends(require_admin)])
 async def update_watchlist(
     watchlist_id: uuid.UUID,
     payload: WatchlistUpdate,
@@ -57,7 +58,7 @@ async def update_watchlist(
     return result.scalar_one()
 
 
-@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def delete_watchlist(watchlist_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
     wl = await db.get(Watchlist, watchlist_id)
     if not wl:
@@ -68,7 +69,7 @@ async def delete_watchlist(watchlist_id: uuid.UUID, db: AsyncSession = Depends(g
 
 # ── Watchlist members ─────────────────────────────────────────────────────────
 
-@router.post("/{watchlist_id}/tickers", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED)
+@router.post("/{watchlist_id}/tickers", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def add_ticker_to_watchlist(
     watchlist_id: uuid.UUID,
     payload: WatchlistTickerAdd,
@@ -87,7 +88,7 @@ async def add_ticker_to_watchlist(
     return result.scalar_one()
 
 
-@router.delete("/{watchlist_id}/tickers/{ticker_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{watchlist_id}/tickers/{ticker_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def remove_ticker_from_watchlist(
     watchlist_id: uuid.UUID,
     ticker_id: uuid.UUID,

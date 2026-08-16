@@ -14,4 +14,4 @@ async def require_admin(token: str | None = Depends(_get_admin_token)) -> None:
     if not settings.admin_token:
         return  # no token configured → open access (dev mode)
     if token != settings.admin_token:
-        raise HTTPException(status_code=403, detail="Invalid or missing admin token")
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")

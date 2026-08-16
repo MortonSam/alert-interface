@@ -26,6 +26,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
         {children}
+        <footer className="text-[11px] text-muted-foreground/70 text-center py-6">
+          Alert Interface is an educational research tool. Nothing here is investment advice. Options involve substantial risk.
+        </footer>
       </body>
     </html>
   );

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_admin
 from app.database import get_db
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
@@ -304,7 +305,7 @@ async def list_reactions(
     return [_enrich(r) for r in result.scalars().all()]
 
 
-@router.post("", response_model=HistoricalReactionRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=HistoricalReactionRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def create_reaction(
     payload: HistoricalReactionCreate,
     db: AsyncSession = Depends(get_db),
@@ -324,7 +325,7 @@ async def get_reaction(reaction_id: uuid.UUID, db: AsyncSession = Depends(get_db
     return _enrich(r)
 
 
-@router.delete("/{reaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{reaction_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def delete_reaction(reaction_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
     r = await db.get(HistoricalReaction, reaction_id)
     if not r:

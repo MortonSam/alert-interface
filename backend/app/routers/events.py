@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_admin
 from app.database import get_db
 from app.models.enums import EventType
 from app.models.event import Event
@@ -68,7 +69,7 @@ async def list_events(
     return list(result.scalars().all())
 
 
-@router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def create_event(payload: EventCreate, db: AsyncSession = Depends(get_db)) -> Event:
     data = payload.model_dump()
     # Map Pydantic alias back to column name
@@ -88,7 +89,7 @@ async def get_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> 
     return event
 
 
-@router.patch("/{event_id}", response_model=EventRead)
+@router.patch("/{event_id}", response_model=EventRead, dependencies=[Depends(require_admin)])
 async def update_event(
     event_id: uuid.UUID,
     payload: EventUpdate,
@@ -104,7 +105,7 @@ async def update_event(
     return event
 
 
-@router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 async def delete_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
     event = await db.get(Event, event_id)
     if not event:
