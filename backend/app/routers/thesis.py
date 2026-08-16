@@ -35,6 +35,7 @@ from app.schemas.thesis import (
     ThesisStockMarkRead,
 )
 from app.services.anthropic_client import AnthropicClient
+from app.services import quote_cache
 from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
 from app.services.system_metadata_service import get_value
@@ -123,10 +124,12 @@ async def _compute_option_mark(
     thesis: Thesis,
     loop: asyncio.AbstractEventLoop,
     stock_price_override: float | None = None,
+    use_quote_cache: bool = True,
 ) -> ThesisMarkRead:
     """Compute mark-to-market P&L for the option leg.
 
     stock_price_override: skip Finnhub fetch when price is already known (e.g. at resolution).
+    use_quote_cache: when False, bypass cache reads (write paths that need fresh prices).
     """
     as_of = datetime.now(tz=timezone.utc).isoformat()
 
@@ -172,16 +175,23 @@ async def _compute_option_mark(
                 as_of = f"{exp_date.isoformat()}T20:00:00Z"
             else:
                 # Fallback: live quote with "intrinsic" label (history unavailable)
-                finnhub = FinnhubClient()
-                try:
-                    quote = await finnhub.get_quote(sym)
-                    p = quote.get("c")
-                    if p and float(p) > 0:
-                        current_price = float(p)
-                except Exception:
-                    pass
-                finally:
-                    await finnhub.close()
+                cached = quote_cache.get(sym) if use_quote_cache else None
+                if cached is not None and cached.get("price"):
+                    current_price = cached["price"]
+                else:
+                    finnhub = FinnhubClient()
+                    try:
+                        quote = await finnhub.get_quote(sym)
+                        p = quote.get("c")
+                        if p and float(p) > 0:
+                            current_price = float(p)
+                            change = float(quote.get("d")) if quote.get("d") is not None else None
+                            change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
+                            quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct})
+                    except Exception:
+                        pass
+                    finally:
+                        await finnhub.close()
                 mark_basis = "intrinsic"
                 mark_note = f"Expired {exp_date.isoformat()} — expiration-day close unavailable, using live price"
 
@@ -199,16 +209,23 @@ async def _compute_option_mark(
     else:
         # Live quotes for unexpired options
         if current_price is None:
-            finnhub = FinnhubClient()
-            try:
-                quote = await finnhub.get_quote(sym)
-                p = quote.get("c")
-                if p and float(p) > 0:
-                    current_price = float(p)
-            except Exception:
-                pass
-            finally:
-                await finnhub.close()
+            cached = quote_cache.get(sym) if use_quote_cache else None
+            if cached is not None and cached.get("price"):
+                current_price = cached["price"]
+            else:
+                finnhub = FinnhubClient()
+                try:
+                    quote = await finnhub.get_quote(sym)
+                    p = quote.get("c")
+                    if p and float(p) > 0:
+                        current_price = float(p)
+                        change = float(quote.get("d")) if quote.get("d") is not None else None
+                        change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
+                        quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct})
+                except Exception:
+                    pass
+                finally:
+                    await finnhub.close()
 
         # Fetch live chain (cached)
         exp_str = exp_date.isoformat()
@@ -1120,24 +1137,37 @@ async def list_alert_picks(
     if not rows:
         return []
 
-    # Only fetch live prices for open picks
+    # Only fetch live prices for open picks (60s quote cache)
     open_symbols = list({r.symbol for r in rows if r.status == "open"})
     price_map: dict[str, float | None] = {}
     if open_symbols:
-        finnhub = FinnhubClient()
-        try:
-            raw_quotes = await asyncio.gather(
-                *(finnhub.get_quote(s) for s in open_symbols),
-                return_exceptions=True,
-            )
-        finally:
-            await finnhub.close()
-
-        for sym, q in zip(open_symbols, raw_quotes):
-            if isinstance(q, BaseException):
-                price_map[sym] = None
+        to_fetch: list[str] = []
+        for sym in open_symbols:
+            cached = quote_cache.get(sym)
+            if cached is not None:
+                price_map[sym] = cached.get("price")
             else:
-                price_map[sym] = float(q.get("c") or 0) or None
+                to_fetch.append(sym)
+
+        if to_fetch:
+            finnhub = FinnhubClient()
+            try:
+                raw_quotes = await asyncio.gather(
+                    *(finnhub.get_quote(s) for s in to_fetch),
+                    return_exceptions=True,
+                )
+            finally:
+                await finnhub.close()
+
+            for sym, q in zip(to_fetch, raw_quotes):
+                if isinstance(q, BaseException):
+                    price_map[sym] = None
+                else:
+                    price = float(q.get("c") or 0) or None
+                    change = float(q.get("d")) if q.get("d") is not None else None
+                    change_pct = float(q.get("dp")) if q.get("dp") is not None else None
+                    quote_cache.set(sym, {"price": price, "change": change, "change_pct": change_pct})
+                    price_map[sym] = price
 
     items = []
     for r in rows:
@@ -1695,18 +1725,25 @@ async def stock_mark_thesis(
     sym   = thesis.ticker.symbol
     as_of = datetime.now(tz=timezone.utc).isoformat()
 
-    # ── Fetch live stock price (separate from option chain) ────────────────────
+    # ── Fetch live stock price (60s quote cache) ───────────────────────────────
     current_price: float | None = None
-    finnhub = FinnhubClient()
-    try:
-        quote = await finnhub.get_quote(sym)
-        p = quote.get("c")
-        if p and float(p) > 0:
-            current_price = float(p)
-    except Exception:
-        pass
-    finally:
-        await finnhub.close()
+    cached = quote_cache.get(sym)
+    if cached is not None and cached.get("price"):
+        current_price = cached["price"]
+    else:
+        finnhub = FinnhubClient()
+        try:
+            quote = await finnhub.get_quote(sym)
+            p = quote.get("c")
+            if p and float(p) > 0:
+                current_price = float(p)
+                change = float(quote.get("d")) if quote.get("d") is not None else None
+                change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
+                quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct})
+        except Exception:
+            pass
+        finally:
+            await finnhub.close()
 
     entry  = float(thesis.entry_price)  if thesis.entry_price  else None
     target = float(thesis.price_target) if thesis.price_target else None
@@ -1843,7 +1880,7 @@ async def resolve_thesis(
     option_pnl_pct: float | None = None
     if thesis.option_type:
         loop = asyncio.get_event_loop()
-        mark = await _compute_option_mark(thesis, loop, stock_price_override=resolution_price)
+        mark = await _compute_option_mark(thesis, loop, stock_price_override=resolution_price, use_quote_cache=False)
         option_pnl_dollars = mark.pnl_dollars
         option_pnl_pct     = mark.pnl_pct
 

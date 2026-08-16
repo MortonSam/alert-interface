@@ -826,10 +826,24 @@ async def latest_pick(
     elif entry:
         # For open picks: try to get current price from Finnhub
         try:
+            from app.services import quote_cache
             from app.services.finnhub_client import FinnhubClient
-            q = await FinnhubClient.get_quote(pick.symbol)
-            if q and q.get("c"):
-                current_price = round(float(q["c"]), 2)
+            cached = quote_cache.get(pick.symbol)
+            if cached is not None:
+                cp = cached.get("price")
+            else:
+                finnhub = FinnhubClient()
+                try:
+                    q = await finnhub.get_quote(pick.symbol)
+                    cp = float(q.get("c") or 0) or None
+                    if cp:
+                        change = float(q.get("d")) if q.get("d") is not None else None
+                        change_pct = float(q.get("dp")) if q.get("dp") is not None else None
+                        quote_cache.set(pick.symbol, {"price": cp, "change": change, "change_pct": change_pct})
+                finally:
+                    await finnhub.close()
+            if cp:
+                current_price = round(cp, 2)
                 unrealized_move_pct = round(
                     (current_price - entry) / entry * 100, 2,
                 )
