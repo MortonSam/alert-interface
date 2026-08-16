@@ -240,7 +240,8 @@ export default function DiscoverPage() {
             )}
             {latestPick.unrealized_move_pct != null && (
               <span className={`text-xs font-mono font-semibold ${
-                latestPick.unrealized_move_pct > 0 ? "text-success" : latestPick.unrealized_move_pct < 0 ? "text-destructive" : "text-muted-foreground"
+                latestPick.unrealized_move_pct === 0 ? "text-muted-foreground" :
+                (latestPick.picked_direction === "bullish" ? latestPick.unrealized_move_pct > 0 : latestPick.unrealized_move_pct < 0) ? "text-success" : "text-destructive"
               }`}>
                 {latestPick.unrealized_move_pct > 0 ? "+" : ""}{latestPick.unrealized_move_pct.toFixed(1)}%
               </span>

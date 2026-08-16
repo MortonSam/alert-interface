@@ -242,7 +242,7 @@ export default function IvyTradesPage() {
           </div>
           {avgUnrealized !== null && (
             <div>
-              <span className="text-muted-foreground">Avg unrealized</span>{" "}
+              <span className="text-muted-foreground">Avg stock move (open)</span>{" "}
               <span
                 className={cn(
                   "font-semibold font-mono",

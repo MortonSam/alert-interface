@@ -50,7 +50,7 @@ export function IvyCard() {
           {avgUnrealized != null && (
             <>
               {" · "}avg {avgUnrealized >= 0 ? "+" : ""}
-              {avgUnrealized.toFixed(1)}% unrealized
+              {avgUnrealized.toFixed(1)}% stock move
             </>
           )}
         </p>
