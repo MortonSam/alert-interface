@@ -243,13 +243,7 @@ export default function IvyTradesPage() {
           {avgUnrealized !== null && (
             <div>
               <span className="text-muted-foreground">Avg stock move (open)</span>{" "}
-              <span
-                className={cn(
-                  "font-semibold font-mono",
-                  avgUnrealized > 0 ? "text-green-600 dark:text-green-400" :
-                  avgUnrealized < 0 ? "text-red-600 dark:text-red-400" : ""
-                )}
-              >
+              <span className="font-semibold font-mono text-muted-foreground">
                 {avgUnrealized >= 0 ? "+" : ""}{avgUnrealized.toFixed(2)}%
               </span>
             </div>
