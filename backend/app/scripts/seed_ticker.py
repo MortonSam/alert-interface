@@ -18,7 +18,7 @@ import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.ticker import Ticker

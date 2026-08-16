@@ -16,7 +16,7 @@ import sys
 
 from sqlalchemy import text
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 
 
 async def fix(dry_run: bool) -> int:

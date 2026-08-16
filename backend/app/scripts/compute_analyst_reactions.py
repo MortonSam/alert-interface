@@ -34,7 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EventType
 from app.models.event import Event

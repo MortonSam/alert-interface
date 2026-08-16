@@ -23,7 +23,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select, text
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction

@@ -33,7 +33,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import select
 
 from app.config import settings
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
 

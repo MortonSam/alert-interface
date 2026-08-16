@@ -24,7 +24,7 @@ from datetime import date
 
 import sqlalchemy as sa
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
 from app.services.yfinance_client import YFinanceClient
 

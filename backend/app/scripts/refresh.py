@@ -15,7 +15,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.services.system_metadata_service import set_value
 
 # ── Steps ─────────────────────────────────────────────────────────────────────

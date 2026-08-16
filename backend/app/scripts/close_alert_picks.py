@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick
 from app.services.yfinance_client import YFinanceClient
 

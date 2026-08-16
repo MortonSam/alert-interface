@@ -20,7 +20,7 @@ from datetime import date, timedelta
 import sqlalchemy as sa
 import yfinance as yf
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
 from app.services.rv_math import compute_rv_metrics
 from app.services.system_metadata_service import set_value

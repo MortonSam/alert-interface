@@ -1,3 +1,5 @@
+import asyncio
+
 import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,7 +62,15 @@ async def health_check():
     try:
         async with AsyncSessionLocal() as session:
             # Real DB connectivity check — catches bad credentials / dead connections
-            await session.execute(sa.text("SELECT 1"))
+            try:
+                await asyncio.wait_for(
+                    session.execute(sa.text("SELECT 1")),
+                    timeout=2.0,
+                )
+            except (asyncio.TimeoutError, sa.exc.TimeoutError):
+                result["status"] = "degraded"
+                result["db"] = "slow"
+                return JSONResponse(content=result, status_code=503)
             result["db"] = "ok"
 
             # Derive refresh_in_progress from the DB sentinel with staleness rule

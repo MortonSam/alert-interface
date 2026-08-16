@@ -29,7 +29,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker

@@ -52,7 +52,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EarningsOutcome, EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker

@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import JSONB
 from tqdm import tqdm
 
-from app.database import AsyncSessionLocal
+from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
