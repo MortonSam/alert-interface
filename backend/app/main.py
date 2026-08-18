@@ -66,6 +66,7 @@ async def health_check():
         "rv_latest_date": None,
         "rv_last_run": None,
         "step_health": {},
+        "step_outcomes": {},
     }
 
     try:
@@ -117,6 +118,13 @@ async def health_check():
                     label = row[0].replace("step:", "").replace(":last_success", "")
                     steps[label] = row[1]
                 result["step_health"] = steps
+            except Exception:
+                result["status"] = "degraded"
+
+            try:
+                import json as _json
+                raw = await get_value(session, "step_outcomes")
+                result["step_outcomes"] = _json.loads(raw) if raw else {}
             except Exception:
                 result["status"] = "degraded"
     except Exception:

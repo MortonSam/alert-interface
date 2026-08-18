@@ -11,12 +11,15 @@ Usage
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
-from app.services.system_metadata_service import set_value
+from app.services.system_metadata_service import get_value, set_value
 
 # ── Steps ─────────────────────────────────────────────────────────────────────
 
@@ -55,19 +58,51 @@ def _record_step_success(label: str) -> None:
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes — kill hung steps instead of blocking forever
 
 
+def _record_step_outcome(label: str, exit_code: int, seconds: float) -> None:
+    """Append this step's outcome to the durable step_outcomes JSON blob."""
+    import asyncio as _aio
+    async def _write():
+        async with AsyncSessionLocal() as session:
+            raw = await get_value(session, "step_outcomes")
+            outcomes = json.loads(raw) if raw else {}
+            outcomes[label] = {
+                "exit": exit_code,
+                "seconds": round(seconds, 1),
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+            await set_value(session, "step_outcomes", json.dumps(outcomes))
+            await session.commit()
+    try:
+        _aio.run(_write())
+    except Exception as exc:
+        print(f"  [WARN] Failed to write step outcome for {label}: {exc}")
+
+
+def _step_env() -> dict[str, str]:
+    """Subprocess environment with tqdm progress bars disabled."""
+    env = os.environ.copy()
+    env["TQDM_DISABLE"] = "1"
+    return env
+
+
 def _run_step(label: str, cmd: list[str]) -> bool:
     """Run a subprocess step, streaming its output. Returns True on success."""
     print(f"\n{'─' * 60}")
     print(f"  STEP: {label}")
     print(f"{'─' * 60}")
+    t0 = time.monotonic()
     try:
-        result = subprocess.run(cmd, check=False, timeout=STEP_TIMEOUT_SECONDS)
+        result = subprocess.run(cmd, check=False, timeout=STEP_TIMEOUT_SECONDS, env=_step_env())
     except subprocess.TimeoutExpired:
+        elapsed = time.monotonic() - t0
         print(f"\n  [FAIL] {label} (killed after {STEP_TIMEOUT_SECONDS}s timeout)")
+        _record_step_outcome(label, exit_code=-1, seconds=elapsed)
         return False
+    elapsed = time.monotonic() - t0
     ok = result.returncode == 0
     status = "PASS" if ok else "FAIL"
-    print(f"\n  [{status}] {label} (exit {result.returncode})")
+    print(f"\n  [{status}] {label} (exit {result.returncode}, {elapsed:.0f}s)")
+    _record_step_outcome(label, exit_code=result.returncode, seconds=elapsed)
     if ok:
         _record_step_success(label)
     return ok
