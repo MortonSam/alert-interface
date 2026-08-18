@@ -120,7 +120,7 @@ function NotePreview() {
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/90 backdrop-blur-sm px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
           <span className="text-[8px] text-success">{"\u25CF"}</span>
-          An actual research note — grounded, explained, verified
+          What a research note looks like — grounded, explained, verified
         </span>
       </div>
     </div>

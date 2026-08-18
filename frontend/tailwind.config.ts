@@ -55,6 +55,10 @@ const config: Config = {
           DEFAULT: "hsl(var(--violet) / <alpha-value>)",
           foreground: "hsl(var(--violet-foreground))",
         },
+        warning: {
+          DEFAULT: "hsl(var(--warning) / <alpha-value>)",
+          foreground: "hsl(var(--warning-foreground))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

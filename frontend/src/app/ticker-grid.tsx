@@ -194,9 +194,7 @@ export function TickerGrid() {
     return (
       <section className="mt-8">
         <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
-          No tickers found. Seed some with{" "}
-          <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">seed_ticker.py</code>{" "}
-          to get started.
+          No tickers available right now. Check back shortly.
         </div>
       </section>
     );
@@ -214,7 +212,7 @@ export function TickerGrid() {
           <span
             className={`text-xs px-2 py-0.5 rounded-full ${
               isStale(systemStatus.last_refreshed_at)
-                ? "bg-amber-500/10 text-amber-500"
+                ? "bg-warning/10 text-warning"
                 : "text-muted-foreground"
             }`}
           >
