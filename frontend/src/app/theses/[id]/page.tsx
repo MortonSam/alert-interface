@@ -313,7 +313,7 @@ export default function ThesisDetailPage() {
     return (
       <div className="max-w-3xl mx-auto px-4 py-10">
         <Link href="/theses" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Back to Tracker
+          ← Back to My Trades
         </Link>
         <p className="mt-4 text-sm text-destructive">{thesisError ?? "Thesis not found."}</p>
       </div>
@@ -324,7 +324,7 @@ export default function ThesisDetailPage() {
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
       <Link href="/theses" className="text-sm text-muted-foreground hover:text-foreground">
-        ← Back to Tracker
+        ← Back to My Trades
       </Link>
 
       {/* ── Hero Card ──────────────────────────────────────────────────────── */}

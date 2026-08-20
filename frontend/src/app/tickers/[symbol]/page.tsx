@@ -1114,8 +1114,8 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
   const clickLockRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Threshold: header (52px) + nav (~44px) + small buffer
-    const THRESHOLD = 100;
+    // Threshold: header (52px) + nav (~44px) + buffer to clear scroll-mt-28 (112px)
+    const THRESHOLD = 116;
 
     function computeActive() {
       if (clickLockRef.current) return;         // locked during smooth scroll
@@ -2528,7 +2528,7 @@ export default function TickerPage() {
                 {resolvedCapped.map((t) => renderThesisRow(t, true))}
                 {resolvedHidden > 0 && (
                   <p className="text-xs text-muted-foreground text-center py-1">
-                    +{resolvedHidden} more resolved — <Link href="/theses" className="underline hover:text-foreground">view all in Tracker</Link>
+                    +{resolvedHidden} more resolved — <Link href="/theses" className="underline hover:text-foreground">view all in My Trades</Link>
                   </p>
                 )}
               </div>

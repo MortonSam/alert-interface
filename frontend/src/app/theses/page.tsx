@@ -1352,7 +1352,7 @@ export default function ThesesPage() {
       <div className="max-w-3xl mx-auto">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Thesis Tracker</h1>
+            <h1 className="text-2xl font-bold tracking-tight">My Trades</h1>
             <p className="text-muted-foreground text-sm mt-0.5">
               {openCount} open{dueCount > 0 ? ` · ${dueCount} due for resolution` : ""}
             </p>

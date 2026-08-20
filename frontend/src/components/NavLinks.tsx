@@ -7,7 +7,7 @@ const links = [
   { href: "/discover", label: "Discover" },
   { href: "/build", label: "Build a Trade" },
   { href: "/ivy", label: "Ivy" },
-  { href: "/theses", label: "Tracker" },
+  { href: "/theses", label: "My Trades" },
   { href: "/watchlist", label: "Watchlists" },
 ];
 
