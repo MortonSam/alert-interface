@@ -41,6 +41,7 @@ from app.scripts.seed_historical_reactions import (
     BULK_BATCH_SIZE,
     BULK_BATCH_SLEEP,
     BULK_RETRY_DELAYS,
+    FETCH_TIMEOUT,
     SKIP_MIN_REACTIONS,
     SKIP_WITHIN_DAYS,
     _build_date_cache,
@@ -262,7 +263,13 @@ async def _seed_ticker_bulk(
     loop,
 ) -> tuple[int, int, int]:
     """Seed one ticker in bulk mode. Returns (inserted, updated, no_price_data)."""
-    hist = await loop.run_in_executor(None, _fetch_price_sync, ticker.symbol)
+    # wait_for abandons the worker thread rather than killing it, which is
+    # acceptable because the executor pool is large and the subprocess dies
+    # at step end anyway.
+    hist = await asyncio.wait_for(
+        loop.run_in_executor(None, _fetch_price_sync, ticker.symbol),
+        timeout=FETCH_TIMEOUT,
+    )
     if hist.empty:
         return 0, 0, 0
 

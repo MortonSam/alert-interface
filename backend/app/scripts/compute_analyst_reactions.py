@@ -40,6 +40,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.scripts.seed_historical_reactions import (
+    FETCH_TIMEOUT,
     _build_date_cache,
     _close_on_date,
     _close_strictly_before,
@@ -169,7 +170,13 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
             return True, 0
 
         # 2. Fetch price history (sync, in executor)
-        hist = await loop.run_in_executor(None, _fetch_history_sync, symbol)
+        # wait_for abandons the worker thread rather than killing it, which is
+        # acceptable because the executor pool is large and the subprocess dies
+        # at step end anyway.
+        hist = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_history_sync, symbol),
+            timeout=FETCH_TIMEOUT,
+        )
         if hist.empty:
             return True, 0
 

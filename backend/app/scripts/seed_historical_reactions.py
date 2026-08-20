@@ -72,6 +72,7 @@ FAILED_REACTIONS_CACHE = CACHE_DIR / "failed_reactions.json"
 BULK_BATCH_SIZE    = 5
 BULK_BATCH_SLEEP   = 3.0          # seconds between batches
 BULK_RETRY_DELAYS  = (3, 8, 15)   # seconds for retry 1, 2, 3
+FETCH_TIMEOUT      = 45           # per-ticker yfinance fetch timeout (seconds)
 SKIP_MIN_REACTIONS = 15           # skip if ticker already has at least this many ...
 SKIP_WITHIN_DAYS   = 14           # ... AND the most recent is within this many days
 
@@ -398,8 +399,12 @@ def _fetch_ticker_data_sync(symbol: str) -> tuple[list, pd.DataFrame]:
 async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
     """Seed one ticker in bulk mode. Returns (inserted, updated, no_price_data).
     Raises on any error so the retry wrapper can catch it."""
-    earnings_entries, hist = await loop.run_in_executor(
-        None, _fetch_ticker_data_sync, ticker.symbol
+    # wait_for abandons the worker thread rather than killing it, which is
+    # acceptable because the executor pool is large and the subprocess dies
+    # at step end anyway.
+    earnings_entries, hist = await asyncio.wait_for(
+        loop.run_in_executor(None, _fetch_ticker_data_sync, ticker.symbol),
+        timeout=FETCH_TIMEOUT,
     )
     if not earnings_entries or hist.empty:
         return 0, 0, 0
