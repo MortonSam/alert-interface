@@ -12,16 +12,11 @@ interface DiscoverCardProps {
   insight?: string | null;
   /** IV Rich / IV Cheap chip */
   volRegime?: string | null;
-  /** Accent color for hover border and symbol hover color */
-  accent: {
-    border: string;   // e.g. "hover:border-amber-500/40"
-    text: string;     // e.g. "group-hover:text-amber-500"
-  };
 }
 
 const VOL_REGIME_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  iv_rich: { bg: "bg-orange-500/10", text: "text-orange-600 dark:text-orange-400", label: "IV Rich" },
-  iv_cheap: { bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400", label: "IV Cheap" },
+  iv_rich: { bg: "bg-warning/10", text: "text-warning", label: "IV Rich" },
+  iv_cheap: { bg: "bg-success/10", text: "text-success", label: "IV Cheap" },
 };
 
 export default function DiscoverCard({
@@ -31,18 +26,17 @@ export default function DiscoverCard({
   badge,
   insight,
   volRegime,
-  accent,
 }: DiscoverCardProps) {
   const volChip = volRegime ? VOL_REGIME_STYLES[volRegime] : null;
 
   return (
     <Link
       href={`/tickers/${symbol}`}
-      className={`rounded-xl border border-border bg-card p-4 ${accent.border} transition-colors group`}
+      className="rounded-xl border border-border/60 bg-transparent p-4 hover:border-primary/40 transition-colors group"
     >
       {/* Row 1: symbol + price */}
       <div className="flex items-start justify-between mb-1">
-        <span className={`font-display text-base font-bold text-foreground ${accent.text} transition-colors`}>
+        <span className="font-display text-base font-bold text-foreground group-hover:text-primary transition-colors">
           {symbol}
         </span>
         {price && (
@@ -71,7 +65,7 @@ export default function DiscoverCard({
 
       {/* Row 4: insight line */}
       {insight && (
-        <p className="text-[11px] text-muted-foreground/70 truncate leading-snug mt-1">
+        <p className="text-xs text-muted-foreground truncate leading-snug mt-1">
           {insight}
         </p>
       )}

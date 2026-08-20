@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { SectionKicker } from "@/components/SectionKicker";
 import { api, type HealthStatus, type SystemStatus } from "@/lib/api";
 
 function timeAgo(iso: string): string {
@@ -28,17 +29,6 @@ function fmtRvDate(iso: string): string {
   )
     return "Today";
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function SectionKicker({ index, label }: { index: string; label: string }) {
-  return (
-    <p className="flex items-center gap-2 mb-4">
-      <span className="font-mono text-xs text-muted-foreground/50">{index}</span>
-      <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-        {label}
-      </span>
-    </p>
-  );
 }
 
 function StatRow({ label, value }: { label: string; value: string }) {

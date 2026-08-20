@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverCard from "@/components/DiscoverCard";
+import { SectionKicker } from "@/components/SectionKicker";
 import {
   api,
   type ReportingSoonItem,
@@ -30,47 +31,15 @@ function fmtPrice(n: number | null | undefined): string {
 /** Map days-until-earnings → color classes for the proximity tag. */
 function earningsUrgency(days: number): { bg: string; text: string } {
   if (days <= 1) return { bg: "bg-primary/10", text: "text-primary" };       // orange — imminent
-  if (days <= 3) return { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400" }; // amber — soon
-  return { bg: "bg-cool/10", text: "text-cool" };                            // azure — further out
-}
-
-// ── Section header ──────────────────────────────────────────────────────────
-
-function SectionHeader({
-  icon,
-  iconBg,
-  title,
-  descriptor,
-}: {
-  icon: React.ReactNode;
-  iconBg: string;
-  title: string;
-  descriptor: string;
-  total?: number | null;
-  limit?: number;
-}) {
-  return (
-    <div className="flex items-center gap-3 mb-4">
-      <div
-        className={`flex items-center justify-center h-8 w-8 rounded-lg ${iconBg}`}
-      >
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <h2 className="font-display text-lg font-bold text-foreground">
-          {title}
-        </h2>
-        <p className="text-xs text-muted-foreground">{descriptor}</p>
-      </div>
-    </div>
-  );
+  if (days <= 3) return { bg: "bg-warning/10", text: "text-warning" };       // amber — soon
+  return { bg: "bg-muted", text: "text-muted-foreground" };                  // neutral — further out
 }
 
 // ── Skeletons ────────────────────────────────────────────────────────────────
 
 function CardSkeleton() {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 animate-pulse">
+    <div className="rounded-xl border border-border/60 p-4 animate-pulse">
       <div className="flex items-start justify-between mb-2">
         <div className="h-5 w-16 bg-muted rounded" />
         <div className="h-4 w-14 bg-muted rounded" />
@@ -83,13 +52,11 @@ function CardSkeleton() {
 
 function SectionSkeleton() {
   return (
-    <div>
-      <div className="flex items-center gap-3 mb-4">
-        <div className="h-8 w-8 rounded-lg bg-muted animate-pulse" />
-        <div>
-          <div className="h-5 w-32 bg-muted rounded mb-1 animate-pulse" />
-          <div className="h-3 w-48 bg-muted rounded animate-pulse" />
-        </div>
+    <div className="border-t border-border py-10">
+      <div className="mb-4">
+        <div className="h-3 w-32 bg-muted rounded mb-3 animate-pulse" />
+        <div className="h-5 w-48 bg-muted rounded mb-1 animate-pulse" />
+        <div className="h-3 w-64 bg-muted rounded animate-pulse" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[1, 2, 3, 4].map((i) => (
@@ -99,15 +66,6 @@ function SectionSkeleton() {
     </div>
   );
 }
-
-// ── Section accent configs ──────────────────────────────────────────────────
-
-const ACCENT = {
-  reportingSoon: { border: "hover:border-foreground/20", text: "group-hover:text-foreground" },
-  justReported: { border: "hover:border-cool/40", text: "group-hover:text-cool" },
-  suggestions: { border: "hover:border-primary/40", text: "group-hover:text-primary" },
-  unusuallyActive: { border: "hover:border-violet/40", text: "group-hover:text-violet" },
-} as const;
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
@@ -195,7 +153,7 @@ export default function DiscoverPage() {
               &larr; Home
             </Link>
           </div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
+          <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-foreground">
             Discover
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -203,305 +161,116 @@ export default function DiscoverPage() {
           </p>
         </div>
 
-        {/* ── Alert's Pick strip ──────────────────────────── */}
-        {!loading && latestPick && (
-          <Link
-            href="/ivy/trades"
-            className="flex items-center gap-3 rounded-lg border border-border bg-card/50 px-4 py-2.5 mb-8 hover:border-foreground/20 transition-colors group"
-          >
-            <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-              Ivy&apos;s Pick
-            </span>
-            <span className="font-display text-sm font-bold text-foreground">
-              {latestPick.symbol}
-            </span>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide ${
-              latestPick.picked_direction === "bullish"
-                ? "bg-success/10 text-success"
-                : "bg-destructive/10 text-destructive"
-            }`}>
-              {latestPick.picked_direction === "bullish" ? "Bullish" : "Bearish"}
-            </span>
-            {latestPick.strategy && (
-              <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                {latestPick.strategy}
-              </span>
-            )}
-            <span className="text-xs text-muted-foreground font-mono">
-              {fmtPrice(latestPick.entry_price)}
-            </span>
-            {latestPick.current_price != null && (
-              <>
-                <span className="text-[11px] text-muted-foreground">{"\u2192"}</span>
-                <span className="text-xs font-mono text-muted-foreground">
-                  {fmtPrice(latestPick.current_price)}
-                </span>
-              </>
-            )}
-            {latestPick.unrealized_move_pct != null && (
-              <span className={`text-xs font-mono font-semibold ${
-                latestPick.unrealized_move_pct === 0 ? "text-muted-foreground" :
-                (latestPick.picked_direction === "bullish" ? latestPick.unrealized_move_pct > 0 : latestPick.unrealized_move_pct < 0) ? "text-success" : "text-destructive"
-              }`}>
-                {latestPick.unrealized_move_pct > 0 ? "+" : ""}{latestPick.unrealized_move_pct.toFixed(1)}%
-              </span>
-            )}
-            {latestPick.status === "closed" && latestPick.option_pnl_pct != null && (
-              <span className={`text-[10px] font-semibold ${
-                latestPick.option_pnl_pct >= 0 ? "text-success" : "text-destructive"
-              }`}>
-                P&L {latestPick.option_pnl_pct > 0 ? "+" : ""}{latestPick.option_pnl_pct.toFixed(0)}%
-              </span>
-            )}
-            <span className={`ml-auto text-[10px] font-medium rounded-full px-2 py-0.5 ${
-              latestPick.status === "open"
-                ? "bg-cool/10 text-cool"
-                : "bg-muted text-muted-foreground"
-            }`}>
-              {latestPick.status}
-            </span>
-          </Link>
+        {/* ── Fetch error ──────────────────────────────── */}
+        {fetchError && (
+          <div className="border-t border-border py-10 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Couldn&apos;t load Discover right now.
+            </p>
+            <button
+              onClick={loadDiscover}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         )}
 
-        <div className="space-y-12">
-          {/* ── Fetch error ──────────────────────────────── */}
-          {fetchError && (
-            <div className="rounded-xl border border-border bg-card px-6 py-10 text-center space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Couldn&apos;t load Discover right now.
-              </p>
-              <button
-                onClick={loadDiscover}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-
-          {/* ── Reporting soon ─────────────────────────────── */}
-          {!fetchError && loading ? (
-            <SectionSkeleton />
-          ) : !fetchError ? (
-            <section>
-              <SectionHeader
-                icon={
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="text-amber-500"
-                  >
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <line x1="16" y1="2" x2="16" y2="6" />
-                    <line x1="8" y1="2" x2="8" y2="6" />
-                    <line x1="3" y1="10" x2="21" y2="10" />
-                  </svg>
-                }
-                iconBg="bg-amber-500/10"
-                title="Reporting soon"
-                descriptor="Earnings in the next 7 days"
-                total={reportingSoon?.total ?? null}
-                limit={LIMIT}
-              />
-
-              {reportingSoon && reportingSoon.items.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Nothing reporting in the next 7 days.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {reportingSoon?.items.map((item) => {
-                    const days = daysUntil(item.earnings_date);
-                    const q = quotes.get(item.symbol);
-                    const urg = earningsUrgency(days);
-                    const tagLabel =
-                      days <= 0
-                        ? "EPS today"
-                        : days === 1
-                          ? "EPS in 1d"
-                          : `EPS in ${days}d`;
-                    return (
-                      <DiscoverCard
-                        key={item.symbol}
-                        symbol={item.symbol}
-                        name={item.name}
-                        price={q?.price != null ? fmtPrice(q.price) : undefined}
-                        accent={ACCENT.reportingSoon}
-                        insight={item.insight}
-                        volRegime={item.vol_regime}
-                        badge={
-                          <span className={`inline-flex items-center gap-1.5 rounded-full ${urg.bg} ${urg.text} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
-                            <span className="text-[8px]">{"\u25CF"}</span>
-                            {tagLabel}
-                          </span>
-                        }
-                      />
-                    );
-                  })}
-                </div>
+        {/* ── 01 · Ivy's Pick ──────────────────────────── */}
+        {!loading && latestPick && (
+          <section className="border-t border-border py-10">
+            <SectionKicker index="01" label="From the ledger" />
+            <Link
+              href="/ivy/trades"
+              className="flex items-center gap-3 hover:opacity-80 transition-opacity group"
+            >
+              <span className="font-display text-sm font-bold text-foreground">
+                {latestPick.symbol}
+              </span>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide ${
+                latestPick.picked_direction === "bullish"
+                  ? "bg-success/10 text-success"
+                  : "bg-destructive/10 text-destructive"
+              }`}>
+                {latestPick.picked_direction === "bullish" ? "Bullish" : "Bearish"}
+              </span>
+              {latestPick.strategy && (
+                <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                  {latestPick.strategy}
+                </span>
               )}
-            </section>
-          ) : null}
-
-          {/* ── Just reported (hidden when empty) ────────── */}
-          {!fetchError && loading ? (
-            <SectionSkeleton />
-          ) : !fetchError && justReported && justReported.items.length === 0 ? null : !fetchError ? (
-            <section>
-              <SectionHeader
-                icon={
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="text-cool"
-                  >
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                  </svg>
-                }
-                iconBg="bg-cool/10"
-                title="Just reported"
-                descriptor="Notable earnings reaction in the last 5 days"
-                total={justReported?.total ?? null}
-                limit={LIMIT}
-              />
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {justReported?.items.map((item) => {
-                    const move = item.pct_change_1d;
-                    const outcomeLabel =
-                      item.outcome === "beat"
-                        ? "Beat"
-                        : item.outcome === "miss"
-                          ? "Missed"
-                          : item.outcome === "meet"
-                            ? "Met"
-                            : "\u2014";
-                    const moveColor =
-                      move != null && move > 0
-                        ? "text-success"
-                        : move != null && move < 0
-                          ? "text-destructive"
-                          : "text-muted-foreground";
-                    const moveStr =
-                      move != null
-                        ? `${move > 0 ? "+" : ""}${move.toFixed(1)}%`
-                        : "";
-
-                    return (
-                      <DiscoverCard
-                        key={item.symbol}
-                        symbol={item.symbol}
-                        name={item.name}
-                        price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                        accent={ACCENT.justReported}
-                        insight={item.insight}
-                        volRegime={item.vol_regime}
-                        badge={
-                          <span className="inline-flex items-center gap-2 rounded-full bg-cool/10 text-cool px-2.5 py-1 text-[11px] font-semibold tracking-wide">
-                            <span className="text-[8px]">{"\u25CF"}</span>
-                            {outcomeLabel}
-                            {moveStr && (
-                              <span className={moveColor}>{moveStr}</span>
-                            )}
-                          </span>
-                        }
-                      />
-                    );
-                  })}
-                </div>
-            </section>
-          ) : null}
-
-          {/* ── AI suggestions (hidden when all picks duplicate Reporting soon) */}
-          {!fetchError && loading ? (
-            <SectionSkeleton />
-          ) : !fetchError && suggestionsAddValue ? (
-            <section>
-              <SectionHeader
-                icon={
-                  <span className="text-primary text-sm leading-none">
-                    {"\u2726"}
+              <span className="text-xs text-muted-foreground font-mono">
+                {fmtPrice(latestPick.entry_price)}
+              </span>
+              {latestPick.current_price != null && (
+                <>
+                  <span className="text-[11px] text-muted-foreground">{"\u2192"}</span>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {fmtPrice(latestPick.current_price)}
                   </span>
-                }
-                iconBg="bg-primary/10"
-                title="Ivy's Picks"
-                descriptor="Stocks Ivy thinks are worth a look right now"
-                total={null}
-                limit={LIMIT}
-              />
-
-              {suggestions && suggestions.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    No standout setups right now.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {suggestions?.map((item) => (
-                    <DiscoverCard
-                      key={item.symbol}
-                      symbol={item.symbol}
-                      name={item.name}
-                      price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                      accent={ACCENT.suggestions}
-                      insight={item.insight}
-                      volRegime={item.vol_regime}
-                    />
-                  ))}
-                </div>
+                </>
               )}
-            </section>
-          ) : null}
+              {latestPick.unrealized_move_pct != null && (
+                <span className={`text-xs font-mono font-semibold ${
+                  latestPick.unrealized_move_pct === 0 ? "text-muted-foreground" :
+                  (latestPick.picked_direction === "bullish" ? latestPick.unrealized_move_pct > 0 : latestPick.unrealized_move_pct < 0) ? "text-success" : "text-destructive"
+                }`}>
+                  {latestPick.unrealized_move_pct > 0 ? "+" : ""}{latestPick.unrealized_move_pct.toFixed(1)}%
+                </span>
+              )}
+              {latestPick.status === "closed" && latestPick.option_pnl_pct != null && (
+                <span className={`text-[10px] font-semibold ${
+                  latestPick.option_pnl_pct >= 0 ? "text-success" : "text-destructive"
+                }`}>
+                  P&L {latestPick.option_pnl_pct > 0 ? "+" : ""}{latestPick.option_pnl_pct.toFixed(0)}%
+                </span>
+              )}
+              <span className={`ml-auto text-[10px] font-medium rounded-full px-2 py-0.5 ${
+                latestPick.status === "open"
+                  ? "bg-cool/10 text-cool"
+                  : "bg-muted text-muted-foreground"
+              }`}>
+                {latestPick.status}
+              </span>
+            </Link>
+          </section>
+        )}
 
-          {/* ── Unusually active (hidden when empty) ────────── */}
-          {!fetchError && loading ? (
-            <SectionSkeleton />
-          ) : !fetchError && unusuallyActive && unusuallyActive.length > 0 ? (
-            <section>
-              <SectionHeader
-                icon={
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                    strokeLinejoin="round" className="text-violet">
-                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                  </svg>
-                }
-                iconBg="bg-violet/10"
-                title="Unusually active"
-                descriptor="Volatility high vs. their own norm"
-                total={null}
-                limit={LIMIT}
-              />
+        {/* ── 02 · Reporting soon ─────────────────────── */}
+        {!fetchError && loading ? (
+          <SectionSkeleton />
+        ) : !fetchError ? (
+          <section className="border-t border-border py-10">
+            <SectionKicker index="02" label="The calendar" />
+            <h2 className="font-display text-xl font-bold text-foreground">Reporting soon</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings in the next 7 days</p>
 
+            {reportingSoon && reportingSoon.items.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing reporting in the next 7 days.
+              </p>
+            ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {unusuallyActive.map((item) => {
-                  const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${item.tier}`;
+                {reportingSoon?.items.map((item) => {
+                  const days = daysUntil(item.earnings_date);
+                  const q = quotes.get(item.symbol);
+                  const urg = earningsUrgency(days);
+                  const tagLabel =
+                    days <= 0
+                      ? "EPS today"
+                      : days === 1
+                        ? "EPS in 1d"
+                        : `EPS in ${days}d`;
                   return (
                     <DiscoverCard
                       key={item.symbol}
                       symbol={item.symbol}
                       name={item.name}
-                      price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                      accent={ACCENT.unusuallyActive}
+                      price={q?.price != null ? fmtPrice(q.price) : undefined}
                       insight={item.insight}
                       volRegime={item.vol_regime}
                       badge={
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet/10 text-violet px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full ${urg.bg} ${urg.text} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
                           <span className="text-[8px]">{"\u25CF"}</span>
                           {tagLabel}
                         </span>
@@ -510,9 +279,126 @@ export default function DiscoverPage() {
                   );
                 })}
               </div>
-            </section>
-          ) : null}
-        </div>
+            )}
+          </section>
+        ) : null}
+
+        {/* ── 03 · Just reported (hidden when empty) ──── */}
+        {!fetchError && loading ? (
+          <SectionSkeleton />
+        ) : !fetchError && justReported && justReported.items.length === 0 ? null : !fetchError ? (
+          <section className="border-t border-border py-10">
+            <SectionKicker index="03" label="The results" />
+            <h2 className="font-display text-xl font-bold text-foreground">Just reported</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">Notable earnings reaction in the last 5 days</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {justReported?.items.map((item) => {
+                  const move = item.pct_change_1d;
+                  const outcomeLabel =
+                    item.outcome === "beat"
+                      ? "Beat"
+                      : item.outcome === "miss"
+                        ? "Missed"
+                        : item.outcome === "meet"
+                          ? "Met"
+                          : "\u2014";
+                  const moveColor =
+                    move != null && move > 0
+                      ? "text-success"
+                      : move != null && move < 0
+                        ? "text-destructive"
+                        : "text-muted-foreground";
+                  const moveStr =
+                    move != null
+                      ? `${move > 0 ? "+" : ""}${move.toFixed(1)}%`
+                      : "";
+
+                  return (
+                    <DiscoverCard
+                      key={item.symbol}
+                      symbol={item.symbol}
+                      name={item.name}
+                      price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                      insight={item.insight}
+                      volRegime={item.vol_regime}
+                      badge={
+                        <span className="inline-flex items-center gap-2 rounded-full bg-muted text-foreground px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                          {outcomeLabel}
+                          {moveStr && (
+                            <span className={moveColor}>{moveStr}</span>
+                          )}
+                        </span>
+                      }
+                    />
+                  );
+                })}
+              </div>
+          </section>
+        ) : null}
+
+        {/* ── 04 · Ivy's Picks (hidden when all picks duplicate Reporting soon) */}
+        {!fetchError && loading ? (
+          <SectionSkeleton />
+        ) : !fetchError && suggestionsAddValue ? (
+          <section className="border-t border-border py-10">
+            <SectionKicker index="04" label="From Ivy" />
+            <h2 className="font-display text-xl font-bold text-foreground">Ivy&apos;s Picks</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">Stocks Ivy thinks are worth a look right now</p>
+
+            {suggestions && suggestions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No standout setups right now.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {suggestions?.map((item) => (
+                  <DiscoverCard
+                    key={item.symbol}
+                    symbol={item.symbol}
+                    name={item.name}
+                    price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    insight={item.insight}
+                    volRegime={item.vol_regime}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {/* ── 05 · Unusually active (hidden when empty) ── */}
+        {!fetchError && loading ? (
+          <SectionSkeleton />
+        ) : !fetchError && unusuallyActive && unusuallyActive.length > 0 ? (
+          <section className="border-t border-border py-10">
+            <SectionKicker index="05" label="The tape" />
+            <h2 className="font-display text-xl font-bold text-foreground">Unusually active</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">Volatility high vs. their own norm</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {unusuallyActive.map((item) => {
+                const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${item.tier}`;
+                return (
+                  <DiscoverCard
+                    key={item.symbol}
+                    symbol={item.symbol}
+                    name={item.name}
+                    price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    insight={item.insight}
+                    volRegime={item.vol_regime}
+                    badge={
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted text-foreground px-2.5 py-1 text-[11px] font-semibold tracking-wide">
+                        <span className="text-[8px]">{"\u25CF"}</span>
+                        {tagLabel}
+                      </span>
+                    }
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
       </div>
     </main>
   );

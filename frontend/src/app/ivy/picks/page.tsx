@@ -4,8 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import DiscoverCard from "@/components/DiscoverCard";
 import { api, type SuggestionItem } from "@/lib/api";
 
-const ACCENT = { border: "hover:border-primary/40", text: "group-hover:text-primary" } as const;
-
 export default function IvyPicksPage() {
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +71,6 @@ export default function IvyPicksPage() {
           key={item.symbol}
           symbol={item.symbol}
           name={item.name}
-          accent={ACCENT}
           insight={item.insight}
           volRegime={item.vol_regime}
         />
