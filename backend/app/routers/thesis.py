@@ -595,9 +595,13 @@ async def _run_draft_generation(
     valid_primary_strikes = {r["strike"] for r in primary_rows}
 
     # ── Intrinsic-bound pre-check (catch stale chains before LLM call) ────
+    # Only consider near-ATM strikes (within 15% of current price) with
+    # positive mid — deep ITM stale bids should not block drafting.
     for _row in primary_rows:
         _strike = _row["strike"]
         _mid = _row["mid"]
+        if _mid <= 0 or abs(_strike - current_price) / current_price > 0.15:
+            continue
         if direction == "bullish":
             _intrinsic = max(current_price - _strike, 0)
         else:
