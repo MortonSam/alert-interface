@@ -269,14 +269,12 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
         for r in rows
     ]
     rate = len(rows) / total * 100 if total else 0
-    # Friday events (T+1 and T+3 both resolve to Monday) guarantee ~3-4% matches,
-    # so the ERROR threshold must sit above that natural baseline.
-    level = ERROR if rate > 5.0 else WARN
+    level = ERROR if rate > 1.0 else WARN
     return CheckResult(
         "reactions_1d_equals_3d", level,
         f"{len(rows)} row(s) ({rate:.2f}%) with identical pct_change_1d and pct_change_3d"
-        + (" (weekend/holiday trading-day collapse)" if level == WARN
-           else " (>5% of rows affected — possible computation bug)"),
+        + (" (coincidental price equality)" if level == WARN
+           else " (>1% of rows affected — possible stale price data)"),
         details,
     )
 

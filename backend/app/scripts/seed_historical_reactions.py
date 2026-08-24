@@ -6,13 +6,12 @@ and compute price moves relative to the open on the event day:
   open_after   : open price on event day T  (the baseline)
   close_after  : close price on event day T
   close_before : close price on the last trading day before T
-  pct_change_1d: (close on first trading day >= T+1 - open_T) / open_T * 100
-  pct_change_3d: (close on first trading day >= T+3 - open_T) / open_T * 100
-  pct_change_5d: (close on first trading day >= T+5 - open_T) / open_T * 100
+  pct_change_1d: (close on 1st trading day after T - open_T) / open_T * 100
+  pct_change_3d: (close on 3rd trading day after T - open_T) / open_T * 100
+  pct_change_5d: (close on 5th trading day after T - open_T) / open_T * 100
   volume_after : volume on event day T
 
-"T+N" counts calendar days from event_date and rolls forward to the next
-trading day when the target falls on a weekend or market holiday.
+"T+N" counts trading days using the price history rows as the calendar.
 
 Upserts match on (ticker_id, event_date, event_type).
 
@@ -82,16 +81,6 @@ SKIP_WITHIN_DAYS   = 14           # ... AND the most recent is within this many 
 def _build_date_cache(hist: pd.DataFrame) -> np.ndarray:
     """Return numpy array of Python date objects parallel to hist rows."""
     return hist.index.map(lambda ts: ts.date()).values
-
-
-def _close_on_or_after(
-    hist: pd.DataFrame, dates: np.ndarray, target: date
-) -> float | None:
-    """Close on the first trading day on or after target."""
-    mask = dates >= target
-    if not mask.any():
-        return None
-    return float(hist["Close"].iloc[int(np.argmax(mask))])
 
 
 def _resolved_date_on_or_after(dates: np.ndarray, target: date) -> date | None:
@@ -196,6 +185,14 @@ def _fetch_price_history(t: yf.Ticker, lookback: date) -> pd.DataFrame:
 
 # ── Reaction computation ──────────────────────────────────────────────────────
 
+def _close_at_offset(hist: pd.DataFrame, t_idx: int, offset: int) -> float | None:
+    """Close on the Nth trading day after t_idx (1-indexed offset)."""
+    target_idx = t_idx + offset
+    if target_idx >= len(hist):
+        return None
+    return float(hist["Close"].iloc[target_idx])
+
+
 def _compute(
     hist: pd.DataFrame,
     dates: np.ndarray,
@@ -208,7 +205,8 @@ def _compute(
     if open_t == 0:
         return None
 
-    actual_t_date = dates[int(np.argmax(dates >= event_date))]
+    t_idx = int(np.argmax(dates >= event_date))
+    actual_t_date = dates[t_idx]
 
     def d2(v: float | None) -> Decimal | None:
         return Decimal(str(round(v, 4))) if v is not None else None
@@ -218,25 +216,13 @@ def _compute(
             return None
         return Decimal(str(round((close - open_t) / open_t * 100, 4)))
 
-    close_t      = _close_on_or_after(hist, dates, event_date)
+    close_t      = float(hist["Close"].iloc[t_idx])
     close_before = _close_strictly_before(hist, dates, actual_t_date)
 
-    # Resolve T+1 and T+3 normally: first trading day on or after the calendar target.
-    t1_date = _resolved_date_on_or_after(dates, event_date + timedelta(days=1))
-    t3_date = _resolved_date_on_or_after(dates, event_date + timedelta(days=3))
-
-    # T+5: roll forward to the first trading day on or after (event_date + 5), BUT
-    # it must be strictly later than T+3's resolved date.  Without this guard,
-    # Wednesday earnings collapse T+3 and T+5 onto the same Monday
-    # (Sat→Mon for +3 and Mon→Mon for +5).
-    t5_calendar = event_date + timedelta(days=5)
-    if t3_date is not None:
-        t5_calendar = max(t5_calendar, t3_date + timedelta(days=1))
-    t5_date = _resolved_date_on_or_after(dates, t5_calendar)
-
-    close_t1 = _close_on_date(hist, dates, t1_date) if t1_date else None
-    close_t3 = _close_on_date(hist, dates, t3_date) if t3_date else None
-    close_t5 = _close_on_date(hist, dates, t5_date) if t5_date else None
+    # Trading-day offsets: 1st, 3rd, 5th trading day after event day T.
+    close_t1 = _close_at_offset(hist, t_idx, 1)
+    close_t3 = _close_at_offset(hist, t_idx, 3)
+    close_t5 = _close_at_offset(hist, t_idx, 5)
 
     return dict(
         close_before  = d2(close_before),
