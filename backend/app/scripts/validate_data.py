@@ -410,6 +410,42 @@ async def check_tickers_uniform_outcome(session) -> CheckResult:
     )
 
 
+async def check_frozen_price_history(session) -> CheckResult:
+    """Flag active tickers whose last 10 price rows all share the same close."""
+    rows = (await session.execute(text("""
+        WITH recent AS (
+            SELECT ticker_id, close_after,
+                   ROW_NUMBER() OVER (PARTITION BY ticker_id ORDER BY event_date DESC) AS rn
+            FROM historical_reactions
+            WHERE close_after IS NOT NULL
+        ),
+        uniform AS (
+            SELECT r.ticker_id,
+                   COUNT(*) AS n,
+                   COUNT(DISTINCT r.close_after) AS distinct_closes
+            FROM recent r
+            WHERE r.rn <= 10
+            GROUP BY r.ticker_id
+            HAVING COUNT(*) >= 5 AND COUNT(DISTINCT r.close_after) = 1
+        )
+        SELECT t.symbol, u.n, u.distinct_closes
+        FROM uniform u
+        JOIN tickers t ON t.id = u.ticker_id
+        WHERE t.is_active = true
+        ORDER BY t.symbol
+    """))).all()
+
+    if not rows:
+        return CheckResult("frozen_price_history", PASS, "No active tickers with frozen close prices in recent reactions")
+
+    details = [f"{r.symbol}  last {r.n} closes all identical" for r in rows]
+    return CheckResult(
+        "frozen_price_history", WARN,
+        f"{len(rows)} active ticker(s) with frozen close prices (delisted or halted?)",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -417,6 +453,7 @@ CHECKS = [
     check_ticker_missing_metadata,
     check_ticker_market_cap,
     check_ticker_duplicate_symbols,
+    check_frozen_price_history,
     # Events
     check_events_stale_past,
     check_events_null_title,

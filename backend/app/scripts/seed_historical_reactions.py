@@ -237,13 +237,19 @@ def _compute(
     close_t3 = _close_at_offset(hist, t_idx, 3)
     close_t5 = _close_at_offset(hist, t_idx, 5)
 
+    # Frozen-price guard: if all available closes are identical to the event-day
+    # close, the price data is stale (halted/delisted ticker).  Return price
+    # metadata but null out the pct_change windows.
+    closes = [c for c in (close_t1, close_t3, close_t5) if c is not None]
+    frozen = closes and all(c == close_t for c in closes)
+
     return dict(
         close_before  = d2(close_before),
         open_after    = d2(open_t),
         close_after   = d2(close_t),
-        pct_change_1d = pct(close_t1),
-        pct_change_3d = pct(close_t3),
-        pct_change_5d = pct(close_t5),
+        pct_change_1d = None if frozen else pct(close_t1),
+        pct_change_3d = None if frozen else pct(close_t3),
+        pct_change_5d = None if frozen else pct(close_t5),
         volume_after  = vol_t,
     )
 
@@ -385,13 +391,12 @@ async def seed(symbol: str) -> None:
 
 def _fetch_ticker_data_sync(symbol: str) -> tuple[list, pd.DataFrame]:
     """Sync yfinance fetch — called via run_in_executor.
-    Returns (earnings_entries, hist_df); raises on hard failure."""
+    Returns (earnings_entries, hist_df); raises on hard failure.
+    Always fetches price history (needed for stale-data deletion)."""
     yf_ticker = yf.Ticker(symbol)
-    earnings_entries = _fetch_earnings_dates(yf_ticker)
-    if not earnings_entries:
-        return [], pd.DataFrame()
     lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
     hist = _fetch_price_history(yf_ticker, lookback)
+    earnings_entries = _fetch_earnings_dates(yf_ticker)
     return earnings_entries, hist
 
 
@@ -405,7 +410,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
         loop.run_in_executor(None, _fetch_ticker_data_sync, ticker.symbol),
         timeout=FETCH_TIMEOUT,
     )
-    if not earnings_entries or hist.empty:
+    if hist.empty:
         return 0, 0, 0
 
     dates_cache = _build_date_cache(hist)
@@ -423,6 +428,10 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
         n_deleted = del_result.rowcount
         if n_deleted:
             tqdm.write(f"  🗑 {ticker.symbol}: deleted {n_deleted} reaction(s) before {first_hist_date}")
+
+        if not earnings_entries:
+            await session.commit()
+            return 0, 0, 0
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             data = _compute(hist, dates_cache, event_date)

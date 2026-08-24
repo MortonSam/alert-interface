@@ -313,6 +313,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     if not ticker_row:
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
+    if not ticker_row.is_active:
+        raise HTTPException(status_code=422, detail=f"{sym} is no longer actively traded")
 
     today = date.today()
     ned_val = (await db.execute(
@@ -1270,6 +1272,8 @@ async def draft_alternative(
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     if not ticker_row:
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
+    if not ticker_row.is_active:
+        raise HTTPException(status_code=422, detail=f"{sym} is no longer actively traded")
 
     today = date.today()
     ned_val = (await db.execute(
