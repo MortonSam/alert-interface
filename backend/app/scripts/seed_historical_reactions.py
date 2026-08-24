@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
@@ -186,9 +186,13 @@ def _fetch_price_history(t: yf.Ticker, lookback: date) -> pd.DataFrame:
 # ── Reaction computation ──────────────────────────────────────────────────────
 
 def _close_at_offset(hist: pd.DataFrame, t_idx: int, offset: int) -> float | None:
-    """Close on the Nth trading day after t_idx (1-indexed offset)."""
+    """Close on the Nth trading day after t_idx (1-indexed offset).
+    Returns None if the target row has zero or NaN volume (halted/stale)."""
     target_idx = t_idx + offset
     if target_idx >= len(hist):
+        return None
+    vol = hist["Volume"].iloc[target_idx]
+    if vol == 0 or (isinstance(vol, float) and np.isnan(vol)):
         return None
     return float(hist["Close"].iloc[target_idx])
 
@@ -198,6 +202,10 @@ def _compute(
     dates: np.ndarray,
     event_date: date,
 ) -> dict | None:
+    # If the price history starts after the event, we have no coverage.
+    if dates[0] > event_date:
+        return None
+
     ov = _open_vol_on_or_after(hist, dates, event_date)
     if ov is None:
         return None
@@ -206,6 +214,11 @@ def _compute(
         return None
 
     t_idx = int(np.argmax(dates >= event_date))
+
+    # Event-day row with zero volume means the ticker was halted/stale.
+    if vol_t == 0 or (isinstance(vol_t, float) and np.isnan(vol_t)):
+        return None
+
     actual_t_date = dates[t_idx]
 
     def d2(v: float | None) -> Decimal | None:
@@ -396,9 +409,21 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
         return 0, 0, 0
 
     dates_cache = _build_date_cache(hist)
+    first_hist_date = dates_cache[0]
     inserted = updated = no_price = 0
 
     async with AsyncSessionLocal() as session:
+        # Delete reactions whose event_date precedes available price history.
+        del_result = await session.execute(
+            sa_delete(HistoricalReaction).where(
+                HistoricalReaction.ticker_id == ticker.id,
+                HistoricalReaction.event_date < first_hist_date,
+            )
+        )
+        n_deleted = del_result.rowcount
+        if n_deleted:
+            tqdm.write(f"  🗑 {ticker.symbol}: deleted {n_deleted} reaction(s) before {first_hist_date}")
+
         for event_date, eps_estimate, eps_actual in earnings_entries:
             data = _compute(hist, dates_cache, event_date)
             if data is None:
