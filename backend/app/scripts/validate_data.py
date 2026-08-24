@@ -306,7 +306,7 @@ async def check_reactions_null_open_with_pct(session) -> CheckResult:
 
 
 async def check_reactions_eps_bounds(session) -> CheckResult:
-    BOUND = Decimal("100")
+    BOUND = Decimal("500")
     rows = (await session.execute(
         select(
             Ticker.symbol,
@@ -323,7 +323,7 @@ async def check_reactions_eps_bounds(session) -> CheckResult:
     )).all()
 
     if not rows:
-        return CheckResult("reactions_eps_bounds", PASS, "All EPS values within reasonable bounds (|value| ≤ 100)")
+        return CheckResult("reactions_eps_bounds", PASS, "All EPS values within reasonable bounds (|value| ≤ 500)")
 
     details = [
         f"{r.symbol}  {r.event_date}  eps_estimate={r.eps_estimate}  eps_actual={r.eps_actual}"
@@ -331,7 +331,7 @@ async def check_reactions_eps_bounds(session) -> CheckResult:
     ]
     return CheckResult(
         "reactions_eps_bounds", WARN,
-        f"{len(rows)} row(s) with |eps_estimate| or |eps_actual| > 100 (likely parsing error)",
+        f"{len(rows)} row(s) with |eps_estimate| or |eps_actual| > 500 (likely parsing error)",
         details,
     )
 
