@@ -10,12 +10,13 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import traceback
 from datetime import date, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
@@ -26,6 +27,50 @@ from app.routers.thesis import compute_alert_pick
 
 MAX_NEW_PER_NIGHT = 3
 MAX_OPEN_TOTAL = 10
+MAX_DRAFT_ATTEMPTS = 6
+
+
+def _trading_days_since(trade_date_str: str) -> int:
+    """Count trading days (Mon–Fri) between trade_date and today."""
+    trade_date = date.fromisoformat(trade_date_str)
+    today = date.today()
+    count = 0
+    d = trade_date
+    while d < today:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            count += 1
+    return count
+
+
+async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
+    """Check if a fresh options chain exists for sym in system_metadata.
+
+    Returns (is_fresh, chain_last_trade_or_none).
+    Fresh means: chain exists AND chain_last_trade is ≤ 2 trading days old.
+    """
+    row = (await session.execute(
+        text(
+            "SELECT value FROM system_metadata "
+            "WHERE key LIKE :pattern ORDER BY updated_at DESC LIMIT 1"
+        ),
+        {"pattern": f"chain:{sym}:%"},
+    )).first()
+
+    if not row:
+        return False, None
+
+    try:
+        chain = json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return False, None
+
+    chain_last_trade = chain.get("chain_last_trade")
+    if not chain_last_trade:
+        return False, None
+
+    stale = _trading_days_since(chain_last_trade) > 2
+    return (not stale), chain_last_trade
 
 
 async def _run(dry_run: bool = False) -> int:
@@ -63,6 +108,7 @@ async def _run(dry_run: bool = False) -> int:
         print(f"[auto-pick] {len(candidates)} candidates, {open_count} open picks, dry_run={dry_run}")
 
         new_picks = 0
+        draft_attempts = 0
         for row in candidates:
             sym = row.symbol
             next_earnings = row.next_earnings
@@ -80,6 +126,21 @@ async def _run(dry_run: bool = False) -> int:
                 print(f"  {sym} (earnings {next_earnings}): cap_reached (total)")
                 continue
 
+            if draft_attempts >= MAX_DRAFT_ATTEMPTS:
+                if not dry_run:
+                    _log_evaluation(session, sym, "cap_reached", note="draft attempts")
+                print(f"  {sym} (earnings {next_earnings}): cap_reached (draft attempts)")
+                continue
+
+            # ── Chain freshness pre-check ─────────────────────────────────────
+            is_fresh, chain_as_of = await _check_chain_freshness(session, sym)
+            if not is_fresh:
+                note = f"as_of={chain_as_of}" if chain_as_of else "no chain"
+                if not dry_run:
+                    _log_evaluation(session, sym, "no_fresh_chain", note=note)
+                print(f"  {sym} (earnings {next_earnings}): no_fresh_chain ({note})")
+                continue
+
             # ── Evaluate ──────────────────────────────────────────────────────
             try:
                 result = await compute_alert_pick(sym, session, source="nightly", dry_run=dry_run)
@@ -88,8 +149,13 @@ async def _run(dry_run: bool = False) -> int:
                 pick_id = result.get("pick_id")
                 note = result.get("note")
 
+                # Count any candidate that reached the LLM stage
                 if outcome == "picked":
                     new_picks += 1
+                    draft_attempts += 1
+                elif outcome != "mixed_evidence" and outcome != "open_pick_exists":
+                    # errored during draft — still counts as a draft attempt
+                    draft_attempts += 1
 
                 if not dry_run:
                     leans_dump = [l.model_dump() for l in leans] if leans else None
@@ -102,12 +168,15 @@ async def _run(dry_run: bool = False) -> int:
                 print(f"  {sym} (earnings {next_earnings}): {outcome} [{leans_summary}]")
 
             except HTTPException as exc:
+                # Draft-path errors (422 stale chain, 502 AI failure) count as draft attempts
+                draft_attempts += 1
                 if not dry_run:
                     _log_evaluation(session, sym, "error", note=f"HTTP {exc.status_code}: {exc.detail}")
                 print(f"  {sym} (earnings {next_earnings}): error — {exc.detail}")
 
             except Exception as exc:
                 tb = traceback.format_exc()
+                draft_attempts += 1
                 if not dry_run:
                     _log_evaluation(session, sym, "error", note=f"{type(exc).__name__}: {exc}")
                 print(f"  {sym} (earnings {next_earnings}): error — {exc}\n{tb}")
@@ -119,7 +188,8 @@ async def _run(dry_run: bool = False) -> int:
         print(
             f"\n[auto-pick] Done. {new_picks} new picks, "
             f"{open_count + new_picks} total open, "
-            f"{len(candidates)} evaluated."
+            f"{len(candidates)} evaluated, "
+            f"{draft_attempts} draft attempts."
         )
     return 0
 

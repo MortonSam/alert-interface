@@ -594,6 +594,24 @@ async def _run_draft_generation(
 
     valid_primary_strikes = {r["strike"] for r in primary_rows}
 
+    # ── Intrinsic-bound pre-check (catch stale chains before LLM call) ────
+    for _row in primary_rows:
+        _strike = _row["strike"]
+        _mid = _row["mid"]
+        if direction == "bullish":
+            _intrinsic = max(current_price - _strike, 0)
+        else:
+            _intrinsic = max(_strike - current_price, 0)
+        if _intrinsic > 0 and _mid < _intrinsic * 0.98:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Options data for {sym} appears stale — "
+                    f"${_strike:.0f} {'put' if direction == 'bearish' else 'call'} "
+                    f"mid ${_mid:.2f} is below intrinsic ${_intrinsic:.2f}. Drafting paused."
+                ),
+            )
+
     # ── 7. Realism pre-check ──────────────────────────────────────────────────
     realism_precheck = ""
     if proposed_target is not None:
@@ -825,25 +843,6 @@ Return ONLY this JSON object (no other text):
     realism_flag     = parsed.get("realism_flag")
 
     suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
-
-    # ── Intrinsic-bound sanity check ─────────────────────────────────────
-    if suggested_strike is not None:
-        strike_row = next((r for r in primary_rows if r["strike"] == suggested_strike), None)
-        if strike_row:
-            mid = strike_row["mid"]
-            if direction == "bullish":
-                intrinsic = max(current_price - suggested_strike, 0)
-            else:
-                intrinsic = max(suggested_strike - current_price, 0)
-            if intrinsic > 0 and mid < intrinsic * 0.98:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Options data for {sym} appears stale — "
-                        f"${suggested_strike:.0f} {'put' if direction == 'bearish' else 'call'} "
-                        f"mid ${mid:.2f} is below intrinsic ${intrinsic:.2f}. Drafting paused."
-                    ),
-                )
 
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (
