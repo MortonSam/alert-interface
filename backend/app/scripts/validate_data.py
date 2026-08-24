@@ -198,6 +198,12 @@ async def check_ticker_events_null_ticker(session) -> CheckResult:
 
 
 async def check_reactions_3d_equals_5d(session) -> CheckResult:
+    total = await session.scalar(
+        select(func.count(HistoricalReaction.id)).where(
+            HistoricalReaction.pct_change_3d.is_not(None),
+            HistoricalReaction.pct_change_5d.is_not(None),
+        )
+    )
     rows = (await session.execute(
         select(
             Ticker.symbol,
@@ -221,20 +227,24 @@ async def check_reactions_3d_equals_5d(session) -> CheckResult:
         f"{r.symbol}  {r.event_date}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
         for r in rows
     ]
-    # ≤ 50 matches at 5-year/503-ticker scale is coincidental price equality (stock
-    # barely moved between T+3 and T+5 trading days).  A systematic rollforward bug
-    # would produce hundreds of matches.  Escalate to ERROR only if widespread.
-    level = ERROR if len(rows) > 50 else WARN
+    rate = len(rows) / total * 100 if total else 0
+    level = ERROR if rate > 1.0 else WARN
     return CheckResult(
         "reactions_3d_equals_5d", level,
-        f"{len(rows)} row(s) with identical pct_change_3d and pct_change_5d"
-        + (" (likely coincidental price equality — verify no systematic pattern)" if level == WARN
-           else " (rollforward bug — systematic pattern detected)"),
+        f"{len(rows)} row(s) ({rate:.2f}%) with identical pct_change_3d and pct_change_5d"
+        + (" (coincidental price equality)" if level == WARN
+           else " (rollforward bug — >1% of rows affected)"),
         details,
     )
 
 
 async def check_reactions_1d_equals_3d(session) -> CheckResult:
+    total = await session.scalar(
+        select(func.count(HistoricalReaction.id)).where(
+            HistoricalReaction.pct_change_1d.is_not(None),
+            HistoricalReaction.pct_change_3d.is_not(None),
+        )
+    )
     rows = (await session.execute(
         select(
             Ticker.symbol,
@@ -258,9 +268,15 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
         f"{r.symbol}  {r.event_date}  1d={r.pct_change_1d}  3d={r.pct_change_3d}"
         for r in rows
     ]
+    rate = len(rows) / total * 100 if total else 0
+    # Friday events (T+1 and T+3 both resolve to Monday) guarantee ~3-4% matches,
+    # so the ERROR threshold must sit above that natural baseline.
+    level = ERROR if rate > 5.0 else WARN
     return CheckResult(
-        "reactions_1d_equals_3d", WARN,
-        f"{len(rows)} row(s) with identical pct_change_1d and pct_change_3d (possible short trading window)",
+        "reactions_1d_equals_3d", level,
+        f"{len(rows)} row(s) ({rate:.2f}%) with identical pct_change_1d and pct_change_3d"
+        + (" (weekend/holiday trading-day collapse)" if level == WARN
+           else " (>5% of rows affected — possible computation bug)"),
         details,
     )
 
