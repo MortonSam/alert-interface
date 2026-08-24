@@ -143,9 +143,3 @@ async def health_check():
         return JSONResponse(content=result, status_code=503)
 
     return result
-
-
-# TODO: Remove after verifying Sentry captures errors end-to-end.
-@app.get("/sentry-debug", tags=["meta"])
-async def sentry_debug():
-    return 1 / 0
