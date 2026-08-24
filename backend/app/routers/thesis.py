@@ -887,17 +887,23 @@ async def draft_thesis(
     )
 
 
-# ── Alert-pick endpoint ───────────────────────────────────────────────────────
+# ── Alert-pick service function ───────────────────────────────────────────────
 
-@router.post("/alert-pick", response_model=AlertPickRead, dependencies=[Depends(require_admin)])
-async def alert_pick(
-    payload: AlertPickRequest,
-    db: AsyncSession = Depends(get_db),
-) -> AlertPickRead:
-    """Evidence-based auto-direction: compute signal leans, pick direction when
-    signals agree (or decline when they conflict), draft at moderate aggressiveness,
-    and persist every pick to alert_picks."""
-    sym = payload.symbol.upper()
+async def compute_alert_pick(
+    sym: str,
+    db: AsyncSession,
+    source: str = "manual",
+    dry_run: bool = False,
+) -> dict:
+    """Core alert-pick logic, callable from both the route and scripts.
+
+    Returns dict with:
+        outcome:  "picked" | "mixed_evidence" | "open_pick_exists"
+        leans:    list[SignalLean] | None
+        pick_id:  uuid | None
+        note:     str | None
+    Raises on data-fetch errors (HTTPException from _gather_draft_data).
+    """
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
     # ── Duplicate refusal: one open pick per symbol ────────────────────────
@@ -906,14 +912,15 @@ async def alert_pick(
         .order_by(AlertPick.generated_at.desc()).limit(1)
     )).scalar_one_or_none()
     if existing:
-        return AlertPickRead(
-            symbol=existing.symbol,
-            picked_direction=existing.picked_direction,
-            leans=[SignalLean(**l) for l in existing.leans],
-            draft=None,
-            generated_at=existing.generated_at.isoformat(),
-            existing_pick=True,
-        )
+        return {
+            "outcome": "open_pick_exists",
+            "leans": [SignalLean(**l) for l in existing.leans],
+            "pick_id": existing.id,
+            "note": f"Existing open pick {existing.id}",
+            "generated_at": existing.generated_at.isoformat(),
+            "existing_pick": True,
+            "draft": None,
+        }
 
     data = await _gather_draft_data(sym, db)
 
@@ -1035,7 +1042,8 @@ async def alert_pick(
 
     # ── On clear direction: run draft engine ─────────────────────────────────
     draft_read: ThesisDraftRead | None = None
-    if picked_direction != "mixed_evidence":
+    pick_id = None
+    if picked_direction != "mixed_evidence" and not dry_run:
         lean_lines = "\n".join(
             f"  - {l.signal}: {l.direction} — {l.justification}" for l in leans
         )
@@ -1090,16 +1098,44 @@ async def alert_pick(
             vol_regime=vol_regime,
             reasoning=draft_read.reasoning,
             entry_price=current_price,
+            source=source,
         )
         db.add(pick)
         await db.commit()
+        await db.refresh(pick)
+        pick_id = pick.id
 
+    outcome = "picked" if picked_direction != "mixed_evidence" else "mixed_evidence"
+    return {
+        "outcome": outcome,
+        "leans": leans,
+        "pick_id": pick_id,
+        "picked_direction": picked_direction,
+        "note": None,
+        "generated_at": generated_at,
+        "existing_pick": False,
+        "draft": draft_read,
+    }
+
+
+# ── Alert-pick endpoint ───────────────────────────────────────────────────────
+
+@router.post("/alert-pick", response_model=AlertPickRead, dependencies=[Depends(require_admin)])
+async def alert_pick(
+    payload: AlertPickRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AlertPickRead:
+    """Evidence-based auto-direction: compute signal leans, pick direction when
+    signals agree (or decline when they conflict), draft at moderate aggressiveness,
+    and persist every pick to alert_picks."""
+    result = await compute_alert_pick(payload.symbol.upper(), db, source="manual")
     return AlertPickRead(
-        symbol=sym,
-        picked_direction=picked_direction,
-        leans=leans,
-        draft=draft_read,
-        generated_at=generated_at,
+        symbol=payload.symbol.upper(),
+        picked_direction=result.get("picked_direction", result["outcome"]),
+        leans=result["leans"] or [],
+        draft=result["draft"],
+        generated_at=result["generated_at"],
+        existing_pick=result["existing_pick"],
     )
 
 

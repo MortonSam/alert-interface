@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Index, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,5 +33,19 @@ class AlertPick(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default="open")
     algo_version: Mapped[str] = mapped_column(String(20), nullable=False, default="v1", server_default="v1")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual", server_default="manual")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+
+
+class AlertPickEvaluation(Base):
+    __tablename__ = "alert_pick_evaluations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    leans: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    alert_pick_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("alert_picks.id"), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)

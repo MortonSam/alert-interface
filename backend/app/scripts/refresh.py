@@ -63,6 +63,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
+    ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 
@@ -72,6 +73,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Historical reactions (--all)": 1200,
     "FOMC reactions": 900,
     "Analyst actions": 900,
+    "Auto-pick": 600,
 }
 
 
