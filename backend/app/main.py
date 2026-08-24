@@ -1,7 +1,17 @@
 import asyncio
+import os
 
+import sentry_sdk
 import sqlalchemy as sa
 from fastapi import FastAPI, Request
+
+if os.getenv("SENTRY_DSN"):
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN"),
+        environment=os.getenv("RAILWAY_ENVIRONMENT", "local"),
+        send_default_pii=False,
+        traces_sample_rate=0.0,
+    )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -133,3 +143,9 @@ async def health_check():
         return JSONResponse(content=result, status_code=503)
 
     return result
+
+
+# TODO: Remove after verifying Sentry captures errors end-to-end.
+@app.get("/sentry-debug", tags=["meta"])
+async def sentry_debug():
+    return 1 / 0
