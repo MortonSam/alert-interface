@@ -29,6 +29,7 @@ class Ticker(Base):
     index_member: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    market_cap_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     events: Mapped[list["Event"]] = relationship(back_populates="ticker")
     historical_reactions: Mapped[list["HistoricalReaction"]] = relationship(back_populates="ticker")

@@ -8,10 +8,18 @@ Implemented
   get_company_news(symbol, from_date, to_date) → list of article dicts
   get_basic_financials(symbol)               → raw metric dict from /stock/metric
   get_earnings_surprises(symbol)             → list of quarterly EPS + revenue surprise dicts
+  get_profile2(symbol)                       → company profile {name, marketCapitalization, ...}
+  get_earnings_calendar(from_date, to_date)  → earnings calendar {earningsCalendar: [...]}
 
 Stubbed (raise NotImplementedError until needed)
 -----------
   get_recommendation_trends(symbol)
+
+Rate limiting
+-------------
+  Module-level async limiter enforces 1.05s minimum spacing between calls
+  (fits comfortably under Finnhub free tier's 60/min).  On 429 the request
+  is retried once after a 5s pause.
 
 Finnhub field key reference
 ---------------------------
@@ -20,6 +28,7 @@ Finnhub field key reference
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -28,6 +37,25 @@ import httpx
 from app.config import settings
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
+
+# ── Module-level rate limiter ─────────────────────────────────────────────────
+# Shared across all FinnhubClient instances within a process.
+
+_rate_lock = asyncio.Lock()
+_last_call_at: float = 0.0
+MIN_SPACING = 1.05  # seconds between Finnhub API calls
+
+
+async def _throttle() -> None:
+    """Enforce minimum spacing between Finnhub calls."""
+    global _last_call_at
+    async with _rate_lock:
+        loop = asyncio.get_event_loop()
+        now = loop.time()
+        wait = MIN_SPACING - (now - _last_call_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_call_at = asyncio.get_event_loop().time()
 
 
 class FinnhubClient:
@@ -38,6 +66,22 @@ class FinnhubClient:
             params={"token": settings.finnhub_api_key},
             timeout=10.0,
         )
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """Rate-limited HTTP request with one retry on 429."""
+        await _throttle()
+        resp = await self._client.request(method, path, params=params)
+        if resp.status_code == 429:
+            await asyncio.sleep(5.0)
+            await _throttle()
+            resp = await self._client.request(method, path, params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     # ── Quote ──────────────────────────────────────────────────────────────────
 
@@ -57,9 +101,7 @@ class FinnhubClient:
                 "t":  1716912000 # Unix timestamp
             }
         """
-        resp = await self._client.get("/quote", params={"symbol": symbol})
-        resp.raise_for_status()
-        return resp.json()
+        return await self._request("GET", "/quote", params={"symbol": symbol})
 
     # ── Candles ────────────────────────────────────────────────────────────────
 
@@ -88,7 +130,8 @@ class FinnhubClient:
                 "s": "ok"     # status — "no_data" when no bars exist
             }
         """
-        resp = await self._client.get(
+        return await self._request(
+            "GET",
             "/stock/candle",
             params={
                 "symbol": symbol,
@@ -97,8 +140,6 @@ class FinnhubClient:
                 "to": to_ts,
             },
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_daily_candles(
         self,
@@ -140,9 +181,38 @@ class FinnhubClient:
             )
         ]
 
-    # ── Future endpoints ───────────────────────────────────────────────────────
-    # These are stubbed so callers know the intended signatures and Finnhub
-    # endpoints before implementation.  Uncomment / fill in when needed.
+    # ── Company profile ────────────────────────────────────────────────────────
+
+    async def get_profile2(self, symbol: str) -> dict[str, Any]:
+        """Company profile from Finnhub.
+        Finnhub endpoint: GET /stock/profile2?symbol=
+
+        Returns dict with: country, currency, exchange, finnhubIndustry, ipo,
+        logo, marketCapitalization (in millions USD), name, phone, shareOutstanding,
+        ticker, weburl.
+        """
+        return await self._request("GET", "/stock/profile2", params={"symbol": symbol})
+
+    # ── Earnings calendar ──────────────────────────────────────────────────────
+
+    async def get_earnings_calendar(
+        self,
+        from_date: str,   # "YYYY-MM-DD"
+        to_date: str,     # "YYYY-MM-DD"
+    ) -> dict[str, Any]:
+        """Earnings calendar for a date range.
+        Finnhub endpoint: GET /calendar/earnings?from=&to=
+
+        Returns dict with earningsCalendar list of:
+        {date, epsActual, epsEstimate, hour, quarter, revenueActual,
+         revenueEstimate, symbol, year}.
+        """
+        return await self._request(
+            "GET", "/calendar/earnings",
+            params={"from": from_date, "to": to_date},
+        )
+
+    # ── News ───────────────────────────────────────────────────────────────────
 
     async def get_company_news(
         self,
@@ -156,23 +226,19 @@ class FinnhubClient:
         Each dict has: category, datetime (unix s), headline, id, image,
         related, source, summary, url.
         """
-        resp = await self._client.get(
-            "/company-news",
+        return await self._request(
+            "GET", "/company-news",
             params={"symbol": symbol, "from": from_date, "to": to_date},
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_basic_financials(self, symbol: str) -> dict[str, Any]:
         """Basic financials / key metrics for a symbol.
         Finnhub endpoint: GET /stock/metric?symbol=&metric=all
         """
-        resp = await self._client.get(
-            "/stock/metric",
+        return await self._request(
+            "GET", "/stock/metric",
             params={"symbol": symbol, "metric": "all"},
         )
-        resp.raise_for_status()
-        return resp.json()
 
     async def get_earnings_surprises(self, symbol: str) -> list[dict[str, Any]]:
         """Historical EPS + revenue surprises per quarter.
@@ -180,9 +246,7 @@ class FinnhubClient:
         Each dict: actual, estimate, period, quarter, year,
         revenueActual, revenueEstimate, surprise, surprisePercent, symbol.
         """
-        resp = await self._client.get("/stock/earnings", params={"symbol": symbol})
-        resp.raise_for_status()
-        return resp.json()
+        return await self._request("GET", "/stock/earnings", params={"symbol": symbol})
 
     async def get_recommendation_trends(self, symbol: str) -> list[dict[str, Any]]:
         """Monthly analyst buy / hold / sell consensus trends.

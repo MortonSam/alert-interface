@@ -52,8 +52,10 @@ def _db_get(key: str) -> str | None:
 # ── Steps ─────────────────────────────────────────────────────────────────────
 
 STEPS: list[tuple[str, list[str]]] = [
-    ("Ticker data (seed_sp500)",        ["python", "-m", "app.scripts.seed_sp500"]),
-    ("Macro calendar (seed_macro)",     ["python", "-m", "app.scripts.seed_macro"]),
+    ("Ticker data (seed_sp500)",              ["python", "-m", "app.scripts.seed_sp500"]),
+    ("Refresh profiles (Finnhub)",            ["python", "-m", "app.scripts.refresh_profiles"]),
+    ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
+    ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
     ("Historical reactions (--all)",    ["python", "-m", "app.scripts.seed_historical_reactions", "--all"]),
     ("FOMC reactions",                  ["python", "-m", "app.scripts.seed_fomc_reactions"]),
     ("Dividend calendar",              ["python", "-m", "app.scripts.seed_dividends"]),
@@ -70,6 +72,8 @@ STEPS: list[tuple[str, list[str]]] = [
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 
 STEP_TIMEOUTS: dict[str, int] = {
+    "Refresh profiles (Finnhub)": 300,
+    "Refresh earnings calendar (Finnhub)": 300,
     "Historical reactions (--all)": 1200,
     "FOMC reactions": 900,
     "Analyst actions": 1200,
