@@ -191,11 +191,24 @@ class AlertPickLedgerItem(BaseModel):
     reasoning: str | None
     generated_at: str
     status: str
+    source: str = "manual"
     close_price: float | None = None
     closed_at: str | None = None
     direction_hit: bool | None = None
     option_pnl_dollars: float | None = None
     option_pnl_pct: float | None = None
+
+
+class IvyActivityRead(BaseModel):
+    run_date: str | None = None
+    evaluated: int = 0
+    picked: int = 0
+    picked_symbols: list[str] = []
+    mixed_evidence: int = 0
+    no_fresh_chain: int = 0
+    open_pick_exists: int = 0
+    cap_reached: int = 0
+    error: int = 0
 
 
 class ThesisDraftAlternativeRead(BaseModel):

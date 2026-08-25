@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { api, type AlertPickLedgerItem } from "@/lib/api";
+import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
 
 const EXP_TAIL_RE = /\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$/i;
 
@@ -69,8 +69,13 @@ function PickCard({
             </span>
           )}
         </div>
-        <span className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">
           {pick.algo_version}
+          {pick.source === "nightly" && (
+            <span className="inline-flex items-center rounded-full bg-cool/10 text-cool px-2 py-0.5 text-[10px] font-semibold tracking-wide">
+              nightly
+            </span>
+          )}
         </span>
       </div>
 
@@ -192,6 +197,7 @@ function PickCard({
 
 export default function IvyTradesPage() {
   const [picks, setPicks] = useState<AlertPickLedgerItem[]>([]);
+  const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -200,8 +206,14 @@ export default function IvyTradesPage() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.theses.alertPicks();
-        if (!cancelled) setPicks(data);
+        const [data, act] = await Promise.all([
+          api.theses.alertPicks(),
+          api.theses.ivyActivity(),
+        ]);
+        if (!cancelled) {
+          setPicks(data);
+          setActivity(act);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load picks");
       } finally {
@@ -283,6 +295,29 @@ export default function IvyTradesPage() {
             </>
           )}
         </div>
+      )}
+
+      {/* Nightly evaluation summary */}
+      {!loading && !error && activity?.run_date && (
+        <p className="text-sm text-muted-foreground">
+          {(() => {
+            const rd = new Date(activity.run_date + "T12:00:00");
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const diff = Math.round((today.getTime() - new Date(rd.getFullYear(), rd.getMonth(), rd.getDate()).getTime()) / 86400000);
+            if (diff <= 1) return "Last night";
+            return `On ${rd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+          })()} Ivy evaluated {activity.evaluated} {activity.evaluated === 1 ? "name" : "names"}, passed on {activity.evaluated - activity.picked}, picked {activity.picked}.
+          {(() => {
+            const parts: string[] = [];
+            if (activity.no_fresh_chain > 0) parts.push(`no fresh options data on ${activity.no_fresh_chain}`);
+            if (activity.mixed_evidence > 0) parts.push(`mixed evidence on ${activity.mixed_evidence}`);
+            if (activity.open_pick_exists > 0) parts.push(`open pick exists on ${activity.open_pick_exists}`);
+            if (activity.cap_reached > 0) parts.push(`cap reached on ${activity.cap_reached}`);
+            if (activity.error > 0) parts.push(`errors on ${activity.error}`);
+            return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+          })()}
+        </p>
       )}
 
       {/* Loading */}

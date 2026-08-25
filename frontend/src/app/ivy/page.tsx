@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SectionKicker } from "@/components/SectionKicker";
-import { api, type HealthStatus, type SystemStatus } from "@/lib/api";
+import { api, type HealthStatus, type IvyActivity, type SystemStatus } from "@/lib/api";
 
 function timeAgo(iso: string): string {
   const seconds = Math.floor(
@@ -43,15 +43,17 @@ function StatRow({ label, value }: { label: string; value: string }) {
 export default function MeetIvyPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.system.health(), api.system.status()])
-      .then(([h, s]) => {
-        setHealth(h);
-        setStatus(s);
-      })
-      .catch(() => setError(true));
+    Promise.allSettled([api.system.health(), api.system.status(), api.theses.ivyActivity()])
+      .then(([hResult, sResult, aResult]) => {
+        if (hResult.status === "fulfilled") setHealth(hResult.value);
+        if (sResult.status === "fulfilled") setStatus(sResult.value);
+        if (aResult.status === "fulfilled") setActivity(aResult.value);
+        if (hResult.status === "rejected" && sResult.status === "rejected") setError(true);
+      });
   }, []);
 
   const loading = !health && !status && !error;
@@ -72,6 +74,10 @@ export default function MeetIvyPage() {
     }
     if (health?.rv_latest_date) {
       rows.push({ label: "RV snapshot", value: fmtRvDate(health.rv_latest_date) });
+    }
+    if (activity?.run_date) {
+      const datePart = fmtRvDate(activity.run_date);
+      rows.push({ label: "Last evaluation", value: `${datePart} · ${activity.evaluated} names` });
     }
   }
 

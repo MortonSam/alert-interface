@@ -293,8 +293,14 @@ async def batch_enrich(
     ).scalars().all()
     ticker_by_sym: dict[str, Ticker] = {t.symbol: t for t in ticker_rows}
 
+    inactive_syms: set[str] = set()
+    for sym in syms:
+        t = ticker_by_sym.get(sym)
+        if t and not t.is_active:
+            inactive_syms.add(sym)
+
     earnings_by_sym: dict[str, str] = {}
-    ticker_ids = [t.id for t in ticker_rows]
+    ticker_ids = [t.id for t in ticker_rows if t.is_active]
     if ticker_ids:
         earnings_q = (
             select(Event.ticker_id, func.min(Event.event_date))
@@ -404,7 +410,16 @@ async def batch_enrich(
                 current_rv=current_rv,
             )
 
-    return list(await asyncio.gather(*(_enrich(s) for s in syms)))
+    results: list[BatchEnrichRead] = []
+    active_syms = [s for s in syms if s not in inactive_syms]
+    enriched = list(await asyncio.gather(*(_enrich(s) for s in active_syms)))
+    enriched_map = {e.symbol: e for e in enriched}
+    for s in syms:
+        if s in inactive_syms:
+            results.append(BatchEnrichRead(symbol=s, inactive=True))
+        else:
+            results.append(enriched_map.get(s, BatchEnrichRead(symbol=s)))
+    return results
 
 
 @router.get("/{symbol}/news", response_model=NewsRead)

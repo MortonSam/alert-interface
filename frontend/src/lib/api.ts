@@ -664,6 +664,7 @@ export interface AlertPickLedgerItem {
   max_gain: number | null;
   vol_regime: string | null;
   algo_version: string;
+  source: string;
   leans: SignalLean[];
   reasoning: string | null;
   generated_at: string;
@@ -673,6 +674,18 @@ export interface AlertPickLedgerItem {
   direction_hit: boolean | null;
   option_pnl_dollars: number | null;
   option_pnl_pct: number | null;
+}
+
+export interface IvyActivity {
+  run_date: string | null;
+  evaluated: number;
+  picked: number;
+  picked_symbols: string[];
+  mixed_evidence: number;
+  no_fresh_chain: number;
+  open_pick_exists: number;
+  cap_reached: number;
+  error: number;
 }
 
 export interface ThesisDraftAlternativeRead {
@@ -855,6 +868,8 @@ export const api = {
       request<AlertPickRead>("/theses/alert-pick", { method: "POST", body: JSON.stringify(data) }),
     alertPicks: () =>
       request<AlertPickLedgerItem[]>("/theses/alert-picks"),
+    ivyActivity: () =>
+      request<IvyActivity>("/theses/ivy-activity"),
     mark: (id: string) =>
       request<ThesisMarkRead>(`/theses/${id}/mark`),
     stockMark: (id: string) =>

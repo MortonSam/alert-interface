@@ -72,7 +72,7 @@ STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 STEP_TIMEOUTS: dict[str, int] = {
     "Historical reactions (--all)": 1200,
     "FOMC reactions": 900,
-    "Analyst actions": 900,
+    "Analyst actions": 1200,
     "Auto-pick": 600,
 }
 

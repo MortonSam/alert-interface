@@ -95,6 +95,7 @@ class BatchEnrichRead(BaseModel):
     earnings_date: str | None = None
     rv_rank: float | None = None
     current_rv: float | None = None
+    inactive: bool = False
 
 
 # ── Company news (Finnhub) ───────────────────────────────────────────────────

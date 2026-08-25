@@ -6,13 +6,13 @@ from datetime import date, datetime, timedelta, timezone
 from statistics import mean, median
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import require_admin
 from app.database import get_db
-from app.models.alert_pick import AlertPick
+from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
@@ -23,6 +23,7 @@ from app.schemas.thesis import (
     AlertPickLedgerItem,
     AlertPickRead,
     AlertPickRequest,
+    IvyActivityRead,
     SignalLean,
     ThesisCreate,
     ThesisDraftAlternativeRead,
@@ -1166,6 +1167,44 @@ from app.services.pnl_math import (
 )
 
 
+@router.get("/ivy-activity", response_model=IvyActivityRead)
+async def ivy_activity(
+    db: AsyncSession = Depends(get_db),
+) -> IvyActivityRead:
+    """Latest nightly evaluation batch summary."""
+    # Find the max evaluated_at date for nightly runs
+    max_date_row = (await db.execute(
+        select(func.max(func.cast(AlertPickEvaluation.evaluated_at, SADate)))
+        .where(AlertPickEvaluation.source == "nightly")
+    )).scalar()
+
+    if max_date_row is None:
+        return IvyActivityRead()
+
+    # Fetch all rows from that batch date
+    rows = (await db.execute(
+        select(AlertPickEvaluation)
+        .where(AlertPickEvaluation.source == "nightly")
+        .where(func.cast(AlertPickEvaluation.evaluated_at, SADate) == max_date_row)
+    )).scalars().all()
+
+    if not rows:
+        return IvyActivityRead()
+
+    outcomes = [r.outcome for r in rows]
+    return IvyActivityRead(
+        run_date=max_date_row.isoformat(),
+        evaluated=len(rows),
+        picked=outcomes.count("picked"),
+        picked_symbols=[r.symbol for r in rows if r.outcome == "picked"],
+        mixed_evidence=outcomes.count("mixed_evidence"),
+        no_fresh_chain=outcomes.count("no_fresh_chain"),
+        open_pick_exists=outcomes.count("open_pick_exists"),
+        cap_reached=outcomes.count("cap_reached"),
+        error=outcomes.count("error"),
+    )
+
+
 @router.get("/alert-picks", response_model=list[AlertPickLedgerItem])
 async def list_alert_picks(
     db: AsyncSession = Depends(get_db),
@@ -1254,6 +1293,7 @@ async def list_alert_picks(
             max_gain=float(r.max_gain) if r.max_gain else None,
             vol_regime=r.vol_regime,
             algo_version=r.algo_version,
+            source=r.source,
             leans=[SignalLean(**l) for l in r.leans],
             reasoning=r.reasoning,
             generated_at=r.generated_at.isoformat(),
