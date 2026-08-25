@@ -25,8 +25,14 @@ import yfinance as yf
 # ── Marquee tickers (edit before each pitch) ──────────────────────────────────
 
 MARQUEE_TICKERS = [
+    # Core holdings
     "AAPL", "NVDA", "MSFT", "AMZN", "META", "GOOGL", "TSLA",
     "JPM", "COST", "WMT", "PANW", "NFLX", "AMD", "AVGO", "LLY",
+    # Earnings Aug-Oct 2026 (by market cap)
+    "ORCL", "DELL", "MRVL", "PEP", "CRWD", "MDT", "ACN", "ADBE",
+    "INTU", "CTAS", "SNPS", "HPE", "NKE", "ADSK", "CIEN", "WDAY",
+    "PAYX", "A", "VEEV", "NTAP", "CCL", "JBL", "CASY", "CPRT",
+    "WSM", "DG", "DLTR", "DRI", "STZ", "ULTA",
 ]
 
 # ── Constants ─────────────────────────────────────────────────────────────────
