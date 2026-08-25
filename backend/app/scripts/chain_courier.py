@@ -17,7 +17,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import httpx
 import yfinance as yf
@@ -101,7 +101,51 @@ def _fetch_chain(symbol: str, expiration: str) -> dict:
     return empty
 
 
-def _pick_expirations(symbol: str) -> tuple[list[str], str | None]:
+def _get_next_earnings(symbol: str, base_url: str) -> date | None:
+    """Fetch next earnings date from our backend, fall back to yfinance calendar."""
+    today = date.today()
+
+    # Primary: our backend
+    try:
+        r = httpx.get(f"{base_url}/api/v1/tickers/by-symbol/{symbol}", timeout=10.0)
+        if r.status_code == 200:
+            ned = r.json().get("next_earnings_date")
+            if ned:
+                earnings_date = date.fromisoformat(ned)
+                if earnings_date >= today:
+                    return earnings_date
+    except Exception:
+        pass
+
+    # Fallback: yfinance calendar
+    try:
+        cal = yf.Ticker(symbol).calendar
+        if cal is not None:
+            if isinstance(cal, dict):
+                ed = cal.get("Earnings Date")
+                if isinstance(ed, list) and ed:
+                    ed = ed[0]
+            else:
+                ed = cal.iloc[0, 0] if hasattr(cal, "iloc") and cal.size > 0 else None
+            if ed is not None:
+                if isinstance(ed, date) and not isinstance(ed, datetime):
+                    earnings_date = ed
+                elif isinstance(ed, str):
+                    earnings_date = date.fromisoformat(ed)
+                elif hasattr(ed, "date"):
+                    import pandas as pd
+                    earnings_date = pd.Timestamp(ed).date()
+                else:
+                    return None
+                if earnings_date >= today:
+                    return earnings_date
+    except Exception:
+        pass
+
+    return None
+
+
+def _pick_expirations(symbol: str, base_url: str) -> tuple[list[str], str | None]:
     """Return (distinct expirations to fetch, next_earnings_str | None).
 
     Two targets:
@@ -109,9 +153,8 @@ def _pick_expirations(symbol: str) -> tuple[list[str], str | None]:
       (b) earn_exp  — nearest chain expiry ≥ next earnings + 14 days (if earnings known)
     Returns deduplicated list (1 or 2 items) and the earnings date string.
     """
-    ticker = yf.Ticker(symbol)
     try:
-        exps = list(ticker.options)
+        exps = list(yf.Ticker(symbol).options)
     except Exception:
         return [], None
     if not exps:
@@ -121,33 +164,14 @@ def _pick_expirations(symbol: str) -> tuple[list[str], str | None]:
     base_cutoff = (today + timedelta(days=MIN_DAYS_OUT)).isoformat()
     base_exp = next((e for e in exps if e >= base_cutoff), exps[-1])
 
-    # Try to get next earnings date
     earnings_str: str | None = None
     earn_exp: str | None = None
-    try:
-        cal = ticker.calendar
-        if cal is not None:
-            # yfinance calendar can be a dict or DataFrame
-            if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if isinstance(ed, list) and ed:
-                    ed = ed[0]
-            else:
-                ed = cal.iloc[0, 0] if hasattr(cal, "iloc") and cal.size > 0 else None
-            if ed is not None:
-                import pandas as pd
-                if isinstance(ed, str):
-                    earnings_date = date.fromisoformat(ed)
-                elif hasattr(ed, "date"):
-                    earnings_date = pd.Timestamp(ed).date()
-                else:
-                    earnings_date = None
-                if earnings_date and earnings_date >= today:
-                    earnings_str = earnings_date.isoformat()
-                    earn_cutoff = (earnings_date + timedelta(days=14)).isoformat()
-                    earn_exp = next((e for e in exps if e >= earn_cutoff), exps[-1])
-    except Exception:
-        pass
+    earnings_date = _get_next_earnings(symbol, base_url)
+    if earnings_date:
+        earnings_str = earnings_date.isoformat()
+        earn_cutoff = (earnings_date + timedelta(days=14)).isoformat()
+        earn_exp = next((e for e in exps if e >= earn_cutoff), exps[-1])
+        print(f"  {symbol} earnings={earnings_str} → earn_exp={earn_exp}")
 
     targets = [base_exp]
     if earn_exp and earn_exp != base_exp:
@@ -180,7 +204,7 @@ def process_ticker(
     }
 
     try:
-        target_exps, earnings_str = _pick_expirations(symbol)
+        target_exps, earnings_str = _pick_expirations(symbol, base)
         if not target_exps:
             result["action"] = "no-expirations"
             result["elapsed"] = time.monotonic() - t0
