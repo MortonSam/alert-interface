@@ -448,6 +448,32 @@ async def check_duplicate_future_earnings(session) -> CheckResult:
     )
 
 
+async def check_iv_history_out_of_band(session) -> CheckResult:
+    """Flag iv_history rows in last 7 days with atm_iv < 0.05 or > 4.0."""
+    cutoff = date.today() - timedelta(days=7)
+    rows = (await session.execute(
+        text("""
+            SELECT symbol, date, atm_iv
+            FROM iv_history
+            WHERE date >= :cutoff
+              AND atm_iv IS NOT NULL
+              AND (atm_iv < 0.05 OR atm_iv > 4.0)
+            ORDER BY date DESC, symbol
+        """),
+        {"cutoff": cutoff}
+    )).all()
+
+    if not rows:
+        return CheckResult("iv_history_out_of_band", PASS, "No out-of-band ATM IV values in last 7 days")
+
+    details = [f"{r.symbol}  {r.date}  atm_iv={float(r.atm_iv):.4f}" for r in rows]
+    return CheckResult(
+        "iv_history_out_of_band", WARN,
+        f"{len(rows)} iv_history row(s) with atm_iv outside [0.05, 4.0] in last 7 days",
+        details,
+    )
+
+
 async def check_frozen_price_history(session) -> CheckResult:
     """Flag active tickers whose last 10 price rows all share the same close."""
     rows = (await session.execute(text("""
@@ -505,6 +531,8 @@ CHECKS = [
     check_reactions_eps_bounds,
     check_tickers_no_reactions,
     check_tickers_uniform_outcome,
+    # IV history
+    check_iv_history_out_of_band,
 ]
 
 
