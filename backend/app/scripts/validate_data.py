@@ -410,6 +410,44 @@ async def check_tickers_uniform_outcome(session) -> CheckResult:
     )
 
 
+async def check_duplicate_future_earnings(session) -> CheckResult:
+    """Flag tickers with 2+ future earnings events within 45 days of each other."""
+    today = date.today()
+    rows = (await session.execute(
+        select(Ticker.symbol, Event.event_date)
+        .join(Ticker, Event.ticker_id == Ticker.id)
+        .where(
+            Ticker.is_active.is_(True),
+            Event.event_type == EventType.EARNINGS,
+            Event.event_date >= today,
+        )
+        .order_by(Ticker.symbol, Event.event_date)
+    )).all()
+
+    from collections import defaultdict
+    by_sym: dict[str, list[date]] = defaultdict(list)
+    for sym, edate in rows:
+        by_sym[sym].append(edate)
+
+    dupes: list[str] = []
+    for sym, dates in sorted(by_sym.items()):
+        if len(dates) < 2:
+            continue
+        for i in range(len(dates) - 1):
+            if (dates[i + 1] - dates[i]).days <= 45:
+                dupes.append(f"{sym}  {', '.join(d.isoformat() for d in dates)}")
+                break
+
+    if not dupes:
+        return CheckResult("duplicate_future_earnings", PASS, "No tickers with duplicate future earnings within 45 days")
+
+    return CheckResult(
+        "duplicate_future_earnings", ERROR,
+        f"{len(dupes)} ticker(s) with 2+ future earnings events within 45 days",
+        dupes,
+    )
+
+
 async def check_frozen_price_history(session) -> CheckResult:
     """Flag active tickers whose last 10 price rows all share the same close."""
     rows = (await session.execute(text("""
@@ -454,6 +492,7 @@ CHECKS = [
     check_ticker_market_cap,
     check_ticker_duplicate_symbols,
     check_frozen_price_history,
+    check_duplicate_future_earnings,
     # Events
     check_events_stale_past,
     check_events_null_title,
