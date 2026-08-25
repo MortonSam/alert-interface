@@ -101,16 +101,58 @@ def _fetch_chain(symbol: str, expiration: str) -> dict:
     return empty
 
 
-def _pick_expiration(symbol: str) -> str | None:
-    """Choose the nearest expiration >= MIN_DAYS_OUT from today."""
+def _pick_expirations(symbol: str) -> tuple[list[str], str | None]:
+    """Return (distinct expirations to fetch, next_earnings_str | None).
+
+    Two targets:
+      (a) base_exp  — nearest chain expiry ≥ today + 14 days
+      (b) earn_exp  — nearest chain expiry ≥ next earnings + 14 days (if earnings known)
+    Returns deduplicated list (1 or 2 items) and the earnings date string.
+    """
+    ticker = yf.Ticker(symbol)
     try:
-        exps = list(yf.Ticker(symbol).options)
+        exps = list(ticker.options)
     except Exception:
-        return None
+        return [], None
     if not exps:
-        return None
-    cutoff = (date.today() + timedelta(days=MIN_DAYS_OUT)).isoformat()
-    return next((e for e in exps if e >= cutoff), exps[-1])
+        return [], None
+
+    today = date.today()
+    base_cutoff = (today + timedelta(days=MIN_DAYS_OUT)).isoformat()
+    base_exp = next((e for e in exps if e >= base_cutoff), exps[-1])
+
+    # Try to get next earnings date
+    earnings_str: str | None = None
+    earn_exp: str | None = None
+    try:
+        cal = ticker.calendar
+        if cal is not None:
+            # yfinance calendar can be a dict or DataFrame
+            if isinstance(cal, dict):
+                ed = cal.get("Earnings Date")
+                if isinstance(ed, list) and ed:
+                    ed = ed[0]
+            else:
+                ed = cal.iloc[0, 0] if hasattr(cal, "iloc") and cal.size > 0 else None
+            if ed is not None:
+                import pandas as pd
+                if isinstance(ed, str):
+                    earnings_date = date.fromisoformat(ed)
+                elif hasattr(ed, "date"):
+                    earnings_date = pd.Timestamp(ed).date()
+                else:
+                    earnings_date = None
+                if earnings_date and earnings_date >= today:
+                    earnings_str = earnings_date.isoformat()
+                    earn_cutoff = (earnings_date + timedelta(days=14)).isoformat()
+                    earn_exp = next((e for e in exps if e >= earn_cutoff), exps[-1])
+    except Exception:
+        pass
+
+    targets = [base_exp]
+    if earn_exp and earn_exp != base_exp:
+        targets.append(earn_exp)
+    return targets, earnings_str
 
 
 # ── Per-ticker processing ────────────────────────────────────────────────────
@@ -121,42 +163,85 @@ def process_ticker(
     token: str,
     symbol: str,
 ) -> dict:
-    """Fetch chain locally and push to the hosted ingest endpoint."""
+    """Fetch chain(s) locally and push to the hosted ingest endpoint.
+
+    Computes two target expirations (base ≥ today+14d, earnings ≥ earnings+14d)
+    and pushes a chain for each distinct one.
+    """
     t0 = time.monotonic()
     result = {
         "symbol": symbol,
         "action": "failed",
         "strikes": 0,
         "chain_last_trade": "—",
+        "base_exp": "—",
+        "earn_exp": "—",
         "elapsed": 0.0,
     }
 
     try:
-        exp = _pick_expiration(symbol)
-        if not exp:
+        target_exps, earnings_str = _pick_expirations(symbol)
+        if not target_exps:
             result["action"] = "no-expirations"
             result["elapsed"] = time.monotonic() - t0
             return result
 
-        chain = _fetch_chain(symbol, exp)
-        quality = [c for c in chain.get("calls", [])
-                   if (c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0]
-        result["strikes"] = len(quality)
-        result["chain_last_trade"] = chain.get("chain_last_trade") or "—"
+        result["base_exp"] = target_exps[0]
+        if len(target_exps) > 1:
+            result["earn_exp"] = target_exps[1]
+        elif earnings_str:
+            result["earn_exp"] = target_exps[0]  # coincides with base
 
-        if not quality:
+        # ── After-hours guard (check once using first chain) ─────────────
+        try:
+            spot = yf.Ticker(symbol).fast_info["lastPrice"]
+        except Exception:
+            spot = None
+
+        chains_to_push: list[dict] = []
+        total_strikes = 0
+
+        for exp in target_exps:
+            chain = _fetch_chain(symbol, exp)
+            quality = [c for c in chain.get("calls", [])
+                       if (c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0]
+            total_strikes += len(quality)
+            if not chain.get("chain_last_trade"):
+                result["chain_last_trade"] = "—"
+            else:
+                result["chain_last_trade"] = chain["chain_last_trade"]
+
+            if not quality:
+                continue
+
+            # After-hours guard per chain
+            if spot and spot > 0:
+                near_atm = [c for c in chain.get("calls", [])
+                            if abs(c["strike"] - spot) / spot <= 0.15]
+                if near_atm:
+                    zero_bids = sum(1 for c in near_atm if not c.get("bid"))
+                    if zero_bids > len(near_atm) / 2:
+                        result["action"] = "after-hours, skipped"
+                        result["strikes"] = total_strikes
+                        result["elapsed"] = time.monotonic() - t0
+                        return result
+
+            chains_to_push.append({
+                "symbol": symbol,
+                "expiration": exp,
+                "calls": chain["calls"],
+                "puts": chain["puts"],
+                "chain_last_trade": chain.get("chain_last_trade"),
+            })
+
+        result["strikes"] = total_strikes
+        if not chains_to_push:
             result["action"] = "empty-chain"
             result["elapsed"] = time.monotonic() - t0
             return result
 
-        # Push to backend
-        payload = {"chains": [{
-            "symbol": symbol,
-            "expiration": exp,
-            "calls": chain["calls"],
-            "puts": chain["puts"],
-            "chain_last_trade": chain.get("chain_last_trade"),
-        }]}
+        # Push all chains in one request
+        payload = {"chains": chains_to_push}
         r = client.post(
             f"{base}/api/v1/admin/ingest-options-chains",
             json=payload,
@@ -164,7 +249,8 @@ def process_ticker(
             timeout=POST_TIMEOUT,
         )
         r.raise_for_status()
-        result["action"] = "pushed"
+        n = len(chains_to_push)
+        result["action"] = f"pushed({n})" if n > 1 else "pushed"
 
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:120] if exc.response else ""
@@ -209,7 +295,8 @@ def main() -> int:
         result = process_ticker(client, base, token, symbol)
 
         # One retry on transport / server errors
-        if result["action"] not in ("pushed", "empty-chain", "no-expirations"):
+        non_retry = ("pushed", "empty-chain", "no-expirations", "after-hours, skipped")
+        if result["action"] not in non_retry and not result["action"].startswith("pushed("):
             print(f"({result['action']}) retrying ...", end=" ", flush=True)
             time.sleep(RETRY_DELAY)
             result = process_ticker(client, base, token, symbol)
@@ -223,18 +310,22 @@ def main() -> int:
     client.close()
 
     # Summary table
-    pushed = sum(1 for r in results if r["action"] == "pushed")
-    failed = sum(1 for r in results if r["action"] not in ("pushed",))
+    pushed = sum(1 for r in results if r["action"].startswith("pushed"))
+    failed = sum(1 for r in results if not r["action"].startswith("pushed"))
 
-    print(f"\n{'═' * 70}")
-    print(f"  {'Ticker':<8} {'Action':<16} {'Strikes':>8} {'Last Trade':<12} {'Time':>6}")
-    print(f"  {'─' * 8} {'─' * 16} {'─' * 8} {'─' * 12} {'─' * 6}")
+    print(f"\n{'═' * 90}")
+    print(f"  {'Ticker':<8} {'Action':<20} {'Strikes':>8} {'Base Exp':<12} {'Earn Exp':<12} {'Last Trade':<12} {'Time':>6}")
+    print(f"  {'─' * 8} {'─' * 20} {'─' * 8} {'─' * 12} {'─' * 12} {'─' * 12} {'─' * 6}")
     for r in results:
-        print(f"  {r['symbol']:<8} {r['action']:<16} {r['strikes']:>8} {r['chain_last_trade']:<12} {r['elapsed']:>5.1f}s")
+        print(
+            f"  {r['symbol']:<8} {r['action']:<20} {r['strikes']:>8} "
+            f"{r.get('base_exp', '—'):<12} {r.get('earn_exp', '—'):<12} "
+            f"{r['chain_last_trade']:<12} {r['elapsed']:>5.1f}s"
+        )
 
-    print(f"{'═' * 70}")
+    print(f"{'═' * 90}")
     print(f"  Pushed: {pushed}  |  Failed: {failed}")
-    print(f"{'═' * 70}")
+    print(f"{'═' * 90}")
 
     return 1 if failed > 0 else 0
 

@@ -39,6 +39,7 @@ from app.services.anthropic_client import AnthropicClient
 from app.services import quote_cache
 from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
+from app.models.system_metadata import SystemMetadata
 from app.services.system_metadata_service import get_value
 from app.services.yfinance_client import YFinanceClient
 
@@ -289,7 +290,20 @@ async def _compute_option_mark(
 
 # ── Shared data pipeline ───────────────────────────────────────────────────────
 
-async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
+async def _get_ingested_expirations(db: AsyncSession, sym: str) -> list[str]:
+    """Return sorted expiration date strings from ingested chain keys like 'chain:SYM:2026-09-18'."""
+    rows = (await db.execute(
+        select(SystemMetadata.key).where(SystemMetadata.key.like(f"chain:{sym}:%"))
+    )).scalars().all()
+    exps = []
+    for key in rows:
+        parts = key.split(":")
+        if len(parts) == 3:
+            exps.append(parts[2])
+    return sorted(exps)
+
+
+async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual") -> dict:
     """Fetch all market data + DB state needed by both draft and alert-pick endpoints."""
     loop = asyncio.get_event_loop()
 
@@ -378,15 +392,27 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
         select(AnalystReactionStats).where(AnalystReactionStats.symbol == sym)
     )
 
-    # ── 3. Choose expiration ──────────────────────────────────────────────────
+    # ── 3. Choose expiration (prefer ingested chains) ──────────────────────
+    ingested_exps = await _get_ingested_expirations(db, sym)
+
     chosen_exp: str | None = None
-    if expirations:
-        if earnings_str:
-            post = [e for e in expirations if e >= earnings_str]
-            chosen_exp = post[0] if post else expirations[-1]
+    chain_from_ingested: bool = False
+    if earnings_str:
+        min_exp = (date.fromisoformat(earnings_str) + timedelta(days=14)).isoformat()
+    else:
+        min_exp = (today + timedelta(days=7)).isoformat()
+
+    # Try ingested expirations first
+    ingested_match = [e for e in ingested_exps if e >= min_exp]
+    if ingested_match:
+        chosen_exp = ingested_match[0]
+    elif expirations:
+        # Fall back to yfinance expirations
+        yf_match = [e for e in expirations if e >= min_exp]
+        if yf_match:
+            chosen_exp = yf_match[0]
         else:
-            week_out = (today + timedelta(days=7)).isoformat()
-            chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+            chosen_exp = expirations[-1]  # farthest available
 
     # ── 4. Options chain (prefer ingested courier data, fall back to yfinance)
     chain: dict = {"calls": [], "puts": []}
@@ -394,6 +420,10 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
         ingested_raw = await get_value(db, f"chain:{sym}:{chosen_exp}")
         if ingested_raw:
             chain = json.loads(ingested_raw)
+            chain_from_ingested = True
+        elif source == "nightly":
+            # Nightly picks never fall back to yfinance for chains
+            pass
         else:
             chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
 
@@ -491,6 +521,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession) -> dict:
         "vol_regime": vol_regime,
         "rv_raw": rv_raw,
         "chain_last_trade": chain_last_trade,
+        "chain_from_ingested": chain_from_ingested,
     }
 
 
@@ -562,6 +593,20 @@ async def _run_draft_generation(
                 ),
             )
     options_as_of = chain_last_trade or generated_at
+
+    # ── Pre-LLM guard: expiration must be ≥ earnings + 14 days ────────────
+    if earnings_str and chosen_exp:
+        earnings_date = date.fromisoformat(earnings_str)
+        chosen_exp_date = date.fromisoformat(chosen_exp)
+        gap = (chosen_exp_date - earnings_date).days
+        if gap < 14:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"strategy out of policy: expiration {chosen_exp} is only "
+                    f"{gap} days after earnings {earnings_str} (min 14)"
+                ),
+            )
 
     # ── 6. Build quality-filtered strike lists ────────────────────────────────
     if direction == "bullish":
@@ -751,6 +796,7 @@ CRITICAL RULES (violating any is an error):
 5. "Aggressive" means ambitious but data-supported. A target beyond historical max moves is a lottery ticket — label it as such with context
 6. Frame everything as a data-grounded suggestion to review, not a prediction or advice
 7. The "reasoning" MUST cite: (a) the vol regime and its implication for structure choice, (b) at least one historical-reaction or conditional-earnings fact, and (c) analyst-reaction data when available (N≥3)
+8. For single-leg options (no spread): suggested_strike MUST be within 10% of the current price.
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
@@ -825,29 +871,60 @@ Return ONLY this JSON object (no other text):
         flush=True,
     )
 
-    # ── 10. Generate ──────────────────────────────────────────────────────────
+    # ── 10. Generate (with post-LLM strike guardrail retry) ────────────────
     client = AnthropicClient()
-    try:
-        gen = await client.generate_thesis_draft(prompt)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
+    current_prompt = prompt
+    for attempt in range(2):
+        try:
+            gen = await client.generate_thesis_draft(current_prompt)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
 
-    print(f"[thesis-draft] {sym}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
+        print(f"[thesis-draft] {sym} attempt={attempt}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
 
-    # ── 11. Parse + validate ──────────────────────────────────────────────────
-    try:
-        parsed = _extract_json(gen["content"])
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}")
+        # ── 11. Parse + validate ──────────────────────────────────────────────
+        try:
+            parsed = _extract_json(gen["content"])
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}")
 
-    suggested_target = parsed.get("suggested_target")
-    suggested_strike = parsed.get("suggested_strike")
-    spread_strike    = parsed.get("suggested_spread_strike")
-    strategy         = parsed.get("strategy")
-    reasoning        = parsed.get("reasoning", "")
-    realism_flag     = parsed.get("realism_flag")
+        suggested_target = parsed.get("suggested_target")
+        suggested_strike = parsed.get("suggested_strike")
+        spread_strike    = parsed.get("suggested_spread_strike")
+        strategy         = parsed.get("strategy")
+        reasoning        = parsed.get("reasoning", "")
+        realism_flag     = parsed.get("realism_flag")
 
-    suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
+        suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
+
+        # ── Post-LLM strike distance check (single-leg only) ─────────────
+        strike_violation: str | None = None
+        if (
+            spread_strike is None
+            and suggested_strike is not None
+            and current_price > 0
+        ):
+            dist = abs(suggested_strike - current_price) / current_price
+            if dist > 0.10:
+                strike_violation = (
+                    f"suggested_strike ${suggested_strike:.2f} is {dist*100:.1f}% from "
+                    f"current price ${current_price:.2f} (max 10% for single-leg)"
+                )
+
+        if strike_violation:
+            if attempt == 0:
+                print(f"[thesis-draft] {sym}: strike violation on attempt 0, retrying: {strike_violation}", flush=True)
+                current_prompt = prompt + (
+                    f"\n\nCORRECTION REQUIRED: Your previous suggestion violated rule 8. "
+                    f"{strike_violation}. Pick a strike within 10% of the current price."
+                )
+                continue
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"strategy out of policy: {strike_violation}",
+                )
+        break  # no violation, exit loop
 
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (
@@ -926,7 +1003,19 @@ async def compute_alert_pick(
             "draft": None,
         }
 
-    data = await _gather_draft_data(sym, db)
+    data = await _gather_draft_data(sym, db, source=source)
+
+    # ── Provenance guard: nightly picks require ingested chain ────────────
+    if source == "nightly" and not data["chain_from_ingested"] and data["chosen_exp"]:
+        return {
+            "outcome": "no_fresh_chain",
+            "leans": None,
+            "pick_id": None,
+            "note": f"no ingested chain for {data['chosen_exp']}",
+            "generated_at": generated_at,
+            "existing_pick": False,
+            "draft": None,
+        }
 
     earnings_str = data["earnings_str"]
     hist_sample = data["hist_sample"]
