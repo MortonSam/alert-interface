@@ -199,6 +199,11 @@ class AlertPickLedgerItem(BaseModel):
     option_pnl_pct: float | None = None
 
 
+class IvySampleRefusal(BaseModel):
+    symbol: str
+    leans: list[SignalLean]
+
+
 class IvyActivityRead(BaseModel):
     run_date: str | None = None
     evaluated: int = 0
@@ -209,6 +214,7 @@ class IvyActivityRead(BaseModel):
     open_pick_exists: int = 0
     cap_reached: int = 0
     error: int = 0
+    sample_refusal: IvySampleRefusal | None = None
 
 
 class ThesisDraftAlternativeRead(BaseModel):

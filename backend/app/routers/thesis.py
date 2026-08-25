@@ -24,6 +24,7 @@ from app.schemas.thesis import (
     AlertPickRead,
     AlertPickRequest,
     IvyActivityRead,
+    IvySampleRefusal,
     SignalLean,
     ThesisCreate,
     ThesisDraftAlternativeRead,
@@ -1281,6 +1282,19 @@ async def ivy_activity(
         return IvyActivityRead()
 
     outcomes = [r.outcome for r in rows]
+
+    # Most recent mixed_evidence refusal with leans
+    sample_refusal: IvySampleRefusal | None = None
+    mixed_rows = [r for r in rows if r.outcome == "mixed_evidence" and r.leans]
+    if mixed_rows:
+        mr = mixed_rows[-1]
+        leans_list = mr.leans if isinstance(mr.leans, list) else []
+        if leans_list:
+            sample_refusal = IvySampleRefusal(
+                symbol=mr.symbol,
+                leans=[SignalLean(**l) for l in leans_list],
+            )
+
     return IvyActivityRead(
         run_date=max_date_row.isoformat(),
         evaluated=len(rows),
@@ -1291,6 +1305,7 @@ async def ivy_activity(
         open_pick_exists=outcomes.count("open_pick_exists"),
         cap_reached=outcomes.count("cap_reached"),
         error=outcomes.count("error"),
+        sample_refusal=sample_refusal,
     )
 
 

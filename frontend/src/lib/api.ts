@@ -676,6 +676,11 @@ export interface AlertPickLedgerItem {
   option_pnl_pct: number | null;
 }
 
+export interface IvySampleRefusal {
+  symbol: string;
+  leans: { signal: string; direction: string; justification: string }[];
+}
+
 export interface IvyActivity {
   run_date: string | null;
   evaluated: number;
@@ -686,6 +691,7 @@ export interface IvyActivity {
   open_pick_exists: number;
   cap_reached: number;
   error: number;
+  sample_refusal: IvySampleRefusal | null;
 }
 
 export interface ThesisDraftAlternativeRead {

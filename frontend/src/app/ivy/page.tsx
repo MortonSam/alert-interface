@@ -62,7 +62,7 @@ function StatsBlock({
 
       {loading && (
         <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3].map((i) => (
             <div key={i} className="flex justify-between border-b border-border/60 py-2.5">
               <div className="h-3 w-28 animate-pulse rounded bg-muted" />
               <div className="h-5 w-14 animate-pulse rounded bg-muted" />
@@ -82,9 +82,24 @@ function StatsBlock({
   );
 }
 
+function LeanDot({ direction }: { direction: string }) {
+  return (
+    <span
+      className={
+        "w-2 h-2 rounded-full inline-block " +
+        (direction === "bullish"
+          ? "bg-green-500"
+          : direction === "bearish"
+            ? "bg-red-500"
+            : "bg-zinc-400")
+      }
+    />
+  );
+}
+
 function GutterNumber({ n }: { n: string }) {
   return (
-    <span className="font-mono text-xs text-muted-foreground/50">{n}</span>
+    <span className="font-mono text-xs text-muted-foreground">{n}</span>
   );
 }
 
@@ -114,66 +129,92 @@ export default function MeetIvyPage() {
 
   const loading = !health && !status && !error;
 
-  const rows: { label: string; value: string }[] = [];
+  // Rail rows (reduced set)
+  const railRows: { label: string; value: string }[] = [];
   if (!loading && !error) {
     if (health?.refresh_in_progress) {
-      rows.push({ label: "Data refreshed", value: "Now" });
+      railRows.push({ label: "Data refreshed", value: "Now" });
     } else if (health?.last_refreshed_at) {
-      rows.push({ label: "Data refreshed", value: timeAgo(health.last_refreshed_at) });
-    }
-    if (status?.total_tickers != null) {
-      rows.push({ label: "Tickers tracked", value: status.total_tickers.toLocaleString() });
-    }
-    if (status?.total_reactions != null) {
-      rows.push({ label: "Reactions scanned", value: status.total_reactions.toLocaleString() });
+      railRows.push({ label: "Data refreshed", value: timeAgo(health.last_refreshed_at) });
     }
     if (health?.rv_latest_date) {
-      rows.push({ label: "RV snapshot", value: fmtRvDate(health.rv_latest_date) });
+      railRows.push({ label: "RV snapshot", value: fmtRvDate(health.rv_latest_date) });
     }
     if (activity?.run_date) {
       const datePart = fmtRvDate(activity.run_date);
-      rows.push({ label: "Last evaluation", value: `${datePart} · ${activity.evaluated} names` });
+      railRows.push({ label: "Last evaluation", value: `${datePart} · ${activity.evaluated} names` });
     }
   }
 
+  // Hero proof numerals
+  const proofNumerals: { value: string; label: string }[] = [];
+  if (!loading && !error) {
+    if (status?.total_tickers != null) {
+      proofNumerals.push({ value: status.total_tickers.toLocaleString(), label: "Tickers tracked" });
+    }
+    if (status?.total_reactions != null) {
+      proofNumerals.push({ value: status.total_reactions.toLocaleString(), label: "Reactions scanned" });
+    }
+    if (activity?.evaluated != null && activity.evaluated > 0) {
+      proofNumerals.push({ value: activity.evaluated.toLocaleString(), label: "Evaluated last night" });
+    }
+  }
+
+  const refusal = activity?.sample_refusal ?? null;
+
   return (
     <div className="pb-14">
-      {/* ── Mobile/tablet: stats block first ─────────────────── */}
+      {/* Mobile/tablet: stats block first */}
       <div className="lg:hidden mb-8 border-t border-border pt-8">
-        <StatsBlock loading={loading} error={error} rows={rows} />
+        <StatsBlock loading={loading} error={error} rows={railRows} />
       </div>
 
-      {/* ── 3-column grid (lg+) / single column (below) ──────── */}
+      {/* 3-column grid (lg+) / single column (below) */}
       <div className="lg:grid lg:grid-cols-[96px_1fr_320px] lg:gap-x-10">
 
-        {/* ── Right rail (sticky, desktop only) ──────────────── */}
+        {/* Right rail (sticky, desktop only) */}
         <aside className="hidden lg:block lg:col-start-3 lg:row-start-1 lg:row-span-5">
-          <div className="sticky top-[5rem] border-t border-border pt-8">
-            <StatsBlock loading={loading} error={error} rows={rows} />
+          <div className="sticky top-[5rem] border-t border-border pt-10">
+            <StatsBlock loading={loading} error={error} rows={railRows} />
           </div>
         </aside>
 
-        {/* ── 01 Who she is ──────────────────────────────────── */}
-        <div className="hidden lg:block border-t border-border pt-8">
+        {/* 01 Who she is */}
+        <div className="hidden lg:block border-t border-border pt-10">
           <GutterNumber n="01" />
         </div>
-        <section className="border-t border-border pt-8 pb-16 lg:border-t">
+        <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="Who she is" />
-          <h2 className="font-display text-4xl font-bold text-foreground leading-tight text-balance">
+          <h2 className="font-display text-5xl font-bold text-foreground leading-tight text-balance">
             The analyst inside Alert Interface
           </h2>
+          <p className="text-lg text-muted-foreground leading-relaxed mt-2 max-w-prose">
+            She reads the tape overnight, makes a call only when the evidence agrees, and keeps score in public.
+          </p>
           <p className="text-base text-muted-foreground leading-relaxed mt-4 max-w-prose">
             Ivy reads earnings history, live options data, and analyst moves for
             every ticker she tracks. She synthesizes the numbers into a direction,
             picks a strategy, and shows her reasoning on every call.
           </p>
+
+          {/* Proof row */}
+          {proofNumerals.length > 0 && (
+            <div className="border-t border-b border-border mt-8 py-6 flex gap-10 flex-wrap">
+              {proofNumerals.map((n) => (
+                <div key={n.label}>
+                  <span className="font-display text-5xl tabular-nums text-foreground">{n.value}</span>
+                  <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground mt-1">{n.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
-        {/* ── 02 How she decides ─────────────────────────────── */}
-        <div className="hidden lg:block border-t border-border pt-8">
+        {/* 02 How she decides */}
+        <div className="hidden lg:block border-t border-border pt-10">
           <GutterNumber n="02" />
         </div>
-        <section className="border-t border-border pt-8 pb-16">
+        <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="How she decides" />
           <h2 className="font-display text-2xl font-bold text-foreground">
             Grounded in data she can verify
@@ -184,13 +225,32 @@ export default function MeetIvyPage() {
             magnitudes, and the options-implied expected move before committing to a
             direction.
           </p>
+
+          {/* Lean legend */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-6">
+            <div className="flex items-center gap-1.5">
+              <LeanDot direction="bullish" />
+              <span className="text-xs text-muted-foreground">Earnings</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <LeanDot direction="bearish" />
+              <span className="text-xs text-muted-foreground">Analyst</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <LeanDot direction="neutral" />
+              <span className="text-xs text-muted-foreground">Momentum</span>
+            </div>
+            <span className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
+              Two must agree. None may oppose.
+            </span>
+          </div>
         </section>
 
-        {/* ── 03 What she won't do ───────────────────────────── */}
-        <div className="hidden lg:block border-t border-border pt-8">
+        {/* 03 What she won't do */}
+        <div className="hidden lg:block border-t border-border pt-10">
           <GutterNumber n="03" />
         </div>
-        <section className="border-t border-border pt-8 pb-16">
+        <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="What she won&apos;t do" />
           <h2 className="font-display text-2xl font-bold text-foreground">
             No pick without a clear signal
@@ -200,25 +260,40 @@ export default function MeetIvyPage() {
             symbol, no stacking. And she never quietly edits her record; every
             call stays on the ledger exactly as she made it.
           </p>
+
+          {/* Sample refusal receipt */}
+          {refusal && (
+            <p className="text-sm text-muted-foreground mt-6">
+              Last night she passed on {refusal.symbol}.{" "}
+              {refusal.leans.map((l, i) => (
+                <span key={l.signal} className="inline-flex items-center gap-1">
+                  {i > 0 && ", "}
+                  <LeanDot direction={l.direction} />
+                  <span className="capitalize">{l.signal}</span>
+                  {" "}{l.direction}
+                </span>
+              ))}.
+            </p>
+          )}
         </section>
 
-        {/* ── 04 CTA row ─────────────────────────────────────── */}
-        <div className="hidden lg:block border-t border-border pt-8" />
-        <section className="border-t border-border pt-8 pb-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <h3 className="font-display text-xl font-bold text-foreground">
+        {/* 04 CTA row */}
+        <div className="hidden lg:block border-t border-border pt-10" />
+        <section className="border-t border-border pt-10 pb-4">
+          <div className="flex items-center justify-between gap-6">
+            <h3 className="font-display text-xl font-bold text-foreground whitespace-nowrap">
               See what Ivy&apos;s working on
             </h3>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex gap-3">
               <Link
                 href="/ivy/picks"
-                className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:opacity-90 transition-opacity"
+                className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:opacity-90 transition-opacity whitespace-nowrap"
               >
                 See her current picks →
               </Link>
               <Link
                 href="/ivy/trades"
-                className="border border-border text-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:border-foreground/40 transition-colors"
+                className="border border-border text-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:border-foreground/40 transition-colors whitespace-nowrap"
               >
                 Her full record →
               </Link>
