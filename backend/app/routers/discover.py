@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 
 import sqlalchemy as sa
@@ -9,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
@@ -264,6 +266,192 @@ async def _batch_analyst_stats(
     return out
 
 
+# ── Buy-share delta helper ───────────────────────────────────────────────────
+
+
+async def _batch_buy_share_delta(
+    db: AsyncSession, symbols: list[str],
+) -> dict[str, dict]:
+    """Compute buy-share delta (latest vs ~3 months ago) from analyst_recommendations.
+
+    Returns {symbol: {buy_share, delta, total}}.
+    """
+    if not symbols:
+        return {}
+
+    # Get ticker_ids for the symbols
+    ticker_q = await db.execute(
+        select(Ticker.id, Ticker.symbol).where(Ticker.symbol.in_(symbols))
+    )
+    ticker_map = {row.id: row.symbol for row in ticker_q.all()}
+    if not ticker_map:
+        return {}
+
+    # Fetch all recommendation rows for these tickers
+    recs = (await db.execute(
+        select(AnalystRecommendation)
+        .where(AnalystRecommendation.ticker_id.in_(list(ticker_map.keys())))
+        .order_by(AnalystRecommendation.period.desc())
+    )).scalars().all()
+
+    # Group by ticker
+    by_ticker: dict[str, list] = {}
+    for r in recs:
+        sym = ticker_map.get(r.ticker_id)
+        if sym:
+            by_ticker.setdefault(sym, []).append(r)
+
+    out: dict[str, dict] = {}
+    for sym, rows in by_ticker.items():
+        if not rows:
+            continue
+        latest = rows[0]
+        earlier = None
+        for r in rows:
+            if (latest.period - r.period).days >= 60:
+                earlier = r
+                break
+
+        def bs(r):
+            tot = r.strong_buy + r.buy + r.hold + r.sell + r.strong_sell
+            return ((r.strong_buy + r.buy) / tot, tot) if tot else (0, 0)
+
+        ls, lt = bs(latest)
+        if earlier is None or lt < 5:
+            continue
+        es, et = bs(earlier)
+        if et < 5:
+            continue
+        out[sym] = {"buy_share": ls, "delta": ls - es, "total": lt}
+
+    return out
+
+
+# ── Universe base rates ──────────────────────────────────────────────────────
+
+_base_rates_cache: dict | None = None
+_base_rates_date: date | None = None
+
+
+async def _get_base_rates(db: AsyncSession) -> dict:
+    """Compute universe-wide base rates for z-score insight selection.
+
+    Cached per calendar day (one DB pass per day of server uptime).
+    Returns medians and standard deviations for each generator's key metric.
+    """
+    global _base_rates_cache, _base_rates_date
+    today = date.today()
+    if _base_rates_cache is not None and _base_rates_date == today:
+        return _base_rates_cache
+
+    # 1) Beat rates and avg_abs_1d per ticker
+    stmt = (
+        select(
+            Ticker.symbol,
+            HistoricalReaction.outcome,
+            HistoricalReaction.pct_change_1d,
+        )
+        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.pct_change_1d.isnot(None),
+            Ticker.is_active.is_(True),
+        )
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    by_sym: dict[str, list[tuple]] = {}
+    for r in rows:
+        by_sym.setdefault(r.symbol, []).append((r.outcome, float(r.pct_change_1d)))
+
+    beat_rates: list[float] = []
+    bbd_rates: list[float] = []
+    avg_abs_moves: list[float] = []
+    miss_ratios: list[float] = []  # |avg_miss| / |avg_beat|
+
+    for sym, quarters in by_sym.items():
+        total = len(quarters)
+        if total < _MIN_QUARTERS:
+            continue
+        beat_moves = [m for o, m in quarters if o and o.value == "beat"]
+        miss_moves = [m for o, m in quarters if o and o.value == "miss"]
+        bc = len(beat_moves)
+
+        if bc > 0:
+            beat_rates.append(bc / total)
+        if bc >= 4:
+            bbd = sum(1 for m in beat_moves if m < 0)
+            bbd_rates.append(bbd / bc)
+
+        all_abs = [abs(m) for _, m in quarters]
+        avg_abs_moves.append(sum(all_abs) / len(all_abs))
+
+        avg_beat = sum(beat_moves) / bc if bc else None
+        mc = len(miss_moves)
+        avg_miss = sum(miss_moves) / mc if mc else None
+        if avg_beat is not None and avg_miss is not None and abs(avg_beat) > 0:
+            miss_ratios.append(abs(avg_miss) / abs(avg_beat))
+
+    # 2) Buy-share deltas from analyst_recommendations
+    rec_stmt = (
+        select(AnalystRecommendation)
+        .join(Ticker, Ticker.id == AnalystRecommendation.ticker_id)
+        .where(Ticker.is_active.is_(True))
+        .order_by(AnalystRecommendation.ticker_id, AnalystRecommendation.period.desc())
+    )
+    rec_rows = (await db.execute(rec_stmt)).scalars().all()
+
+    rec_by_ticker: dict[str, list] = {}
+    for r in rec_rows:
+        rec_by_ticker.setdefault(str(r.ticker_id), []).append(r)
+
+    buy_deltas: list[float] = []
+    for rows_list in rec_by_ticker.values():
+        if not rows_list:
+            continue
+        latest = rows_list[0]
+        earlier = None
+        for r in rows_list:
+            if (latest.period - r.period).days >= 60:
+                earlier = r
+                break
+        if earlier is None:
+            continue
+        def _bs(r):
+            tot = r.strong_buy + r.buy + r.hold + r.sell + r.strong_sell
+            return ((r.strong_buy + r.buy) / tot, tot) if tot else (0, 0)
+        ls, lt = _bs(latest)
+        es, et = _bs(earlier)
+        if lt >= 5 and et >= 5:
+            buy_deltas.append(ls - es)
+
+    def _stats(vals: list[float]) -> tuple[float, float]:
+        if len(vals) < 3:
+            return (0.0, 1.0)
+        vals_s = sorted(vals)
+        med = vals_s[len(vals_s) // 2]
+        variance = sum((v - med) ** 2 for v in vals_s) / len(vals_s)
+        sd = math.sqrt(variance) if variance > 0 else 1.0
+        return (med, sd)
+
+    br_med, br_sd = _stats(beat_rates)
+    bbd_med, bbd_sd = _stats(bbd_rates)
+    am_med, am_sd = _stats(avg_abs_moves)
+    mr_med, mr_sd = _stats(miss_ratios)
+    bd_med, bd_sd = _stats(buy_deltas)
+
+    _base_rates_cache = {
+        "beat_rate": {"med": br_med, "sd": br_sd},
+        "bbd_rate": {"med": bbd_med, "sd": bbd_sd},
+        "avg_abs_move": {"med": am_med, "sd": am_sd},
+        "miss_ratio": {"med": mr_med, "sd": mr_sd},
+        "buy_delta": {"med": bd_med, "sd": bd_sd},
+    }
+    _base_rates_date = today
+    return _base_rates_cache
+
+
 # ── Insight-line builders ────────────────────────────────────────────────────
 
 
@@ -287,9 +475,9 @@ def _reporting_soon_insight(cond: dict | None, symbol: str = "") -> str | None:
         if bbd >= 2 and beat_count >= 4:
             bbd_pct = round(bbd / beat_count * 100)
             templates = [
-                f"Beat {beat_count} of {total} — {bbd_pct}% of beats dropped",
+                f"Beat {beat_count} of {total}, but {bbd_pct}% of beats dropped",
                 f"{beat_count}/{total} beats but stock fell {bbd_pct}% of the time",
-                f"Beats in {beat_count} of {total}q — {bbd_pct}% sold off anyway",
+                f"Beats in {beat_count} of {total}q, yet {bbd_pct}% sold off anyway",
             ]
             return templates[v]
         if beat_rate >= 0.75:
@@ -297,9 +485,9 @@ def _reporting_soon_insight(cond: dict | None, symbol: str = "") -> str | None:
             if avg is not None:
                 sign = "+" if avg >= 0 else ""
                 templates = [
-                    f"Beat {beat_count} of {total} — avg {sign}{avg:.1f}% on beats",
+                    f"Beat {beat_count} of {total} with avg {sign}{avg:.1f}% on beats",
                     f"{beat_count}/{total} beats, typically {sign}{avg:.1f}% next day",
-                    f"Topped estimates {beat_count} of {total}q — avg {sign}{avg:.1f}% reaction",
+                    f"Topped estimates {beat_count} of {total}q, avg {sign}{avg:.1f}% reaction",
                 ]
                 return templates[v]
             return f"Beat {beat_count} of {total}"
@@ -340,78 +528,120 @@ def _just_reported_insight(
             t_sign = "+" if typical >= 0 else ""
             templates = [
                 f"Moved {move_str} vs {t_sign}{typical:.1f}% typical {outcome}",
-                f"{move_str} reaction — {outcome}s average {t_sign}{typical:.1f}%",
+                f"{move_str} reaction, {outcome}s average {t_sign}{typical:.1f}%",
                 f"Reacted {move_str} (typical {outcome}: {t_sign}{typical:.1f}%)",
             ]
             return templates[v]
 
     templates = [
         f"Moved {move_str} vs {chr(0xB1)}{avg_abs:.1f}% typical",
-        f"{move_str} post-earnings — avg swing is {chr(0xB1)}{avg_abs:.1f}%",
+        f"{move_str} post-earnings, avg swing is {chr(0xB1)}{avg_abs:.1f}%",
         f"Reacted {move_str} against a {chr(0xB1)}{avg_abs:.1f}% typical move",
     ]
     return templates[v]
 
 
 def _suggestion_insight(
-    cond: dict | None, analyst: dict | None, symbol: str = "",
-) -> str | None:
-    """Build strongest single lean for a Suggestion card."""
-    v = _sym_variant(symbol, 3)
+    cond: dict | None, analyst: dict | None,
+    buy_share: dict | None, base: dict | None,
+    symbol: str = "",
+) -> tuple[str | None, str | None, float]:
+    """Pick the most distinctive insight by |z-score| vs universe base rates.
 
-    # Priority 1: analyst skew (if sample >= 3)
-    if analyst:
-        up = analyst["upgrade_count"]
-        down = analyst["downgrade_count"]
-        if down >= 3 and up <= 1:
-            cont = analyst.get("downgrade_5d_cont")
-            tail = ""
-            if cont is not None and cont >= 60:
-                tail = " — downgrades historically stick"
-            return f"{down} downgrades, {up} upgrade(s) in 5y{tail}"
-        if up >= 3 and down <= 1:
-            cont = analyst.get("upgrade_5d_cont")
-            tail = ""
-            if cont is not None and cont >= 60:
-                tail = " — upgrades historically stick"
-            return f"{up} upgrades, {down} downgrade(s) in 5y{tail}"
+    Returns (insight_line, generator_name, abs_z).
+    """
+    candidates: list[tuple[str, float, str]] = []  # (line, |z|, generator_name)
 
-    # Priority 2: conditional earnings pattern
+    if base is None:
+        base = {}
+
+    # ── Generator: beat_rate ─────────────────────────────────────────────────
+    if cond and cond["total"] >= _MIN_QUARTERS and cond["beat_count"] > 0:
+        beat_rate = cond["beat_count"] / cond["total"]
+        br = base.get("beat_rate", {})
+        z = abs(beat_rate - br.get("med", 0)) / br.get("sd", 1)
+        pct = round(beat_rate * 100)
+        med_pct = round(br.get("med", 0) * 100)
+        candidates.append((
+            f"Beats estimates {pct}% of the time, versus {med_pct}% across the S&P",
+            z, "beat_rate",
+        ))
+
+    # ── Generator: priced_in (beat-but-dropped rate) ─────────────────────────
+    if cond and cond["total"] >= _MIN_QUARTERS and cond["beat_count"] >= 4 and cond["bbd_count"] >= 2:
+        bbd_rate = cond["bbd_count"] / cond["beat_count"]
+        bb = base.get("bbd_rate", {})
+        z = abs(bbd_rate - bb.get("med", 0)) / bb.get("sd", 1)
+        pct = round(bbd_rate * 100)
+        med_pct = round(bb.get("med", 0) * 100)
+        candidates.append((
+            f"Sells off after {pct}% of beats, versus {med_pct}% across the S&P",
+            z, "priced_in",
+        ))
+
+    # ── Generator: avg_move (average absolute earnings move) ─────────────────
+    if cond and cond["total"] >= _MIN_QUARTERS and cond.get("avg_abs_1d") is not None:
+        avg = cond["avg_abs_1d"]
+        am = base.get("avg_abs_move", {})
+        z = abs(avg - am.get("med", 0)) / am.get("sd", 1)
+        med = am.get("med", 0)
+        if med > 0 and avg >= med * 1.8:
+            ratio = f"{avg / med:.1f}x the index median"
+        else:
+            ratio = f"versus {chr(0xB1)}{med:.1f}% across the S&P"
+        candidates.append((
+            f"Averages a {chr(0xB1)}{avg:.1f}% earnings move, {ratio}",
+            z, "avg_move",
+        ))
+
+    # ── Generator: miss_skew (miss penalty vs beat reward asymmetry) ─────────
     if cond and cond["total"] >= _MIN_QUARTERS:
-        beat_count = cond["beat_count"]
-        bbd = cond["bbd_count"]
-        total = cond["total"]
+        avg_beat = cond.get("avg_1d_on_beat")
+        avg_miss = cond.get("avg_1d_on_miss")
+        if avg_beat is not None and avg_miss is not None and abs(avg_beat) > 0 and cond["miss_count"] >= 2:
+            ratio = abs(avg_miss) / abs(avg_beat)
+            mr = base.get("miss_ratio", {})
+            z = abs(ratio - mr.get("med", 0)) / mr.get("sd", 1)
+            candidates.append((
+                f"Misses cost {abs(avg_miss):.1f}% avg vs +{abs(avg_beat):.1f}% on beats",
+                z, "miss_skew",
+            ))
 
-        if beat_count >= 4 and bbd >= 2:
-            bbd_pct = round(bbd / beat_count * 100)
-            templates = [
-                f"Beat {beat_count} of {total} but dropped {bbd_pct}% of the time",
-                f"{beat_count}/{total} beats — stock sold off {bbd_pct}% of the time",
-                f"Topped estimates {beat_count} of {total}q, yet fell {bbd_pct}% post-beat",
-            ]
-            return templates[v]
+    # ── Generator: buy_delta (analyst buy-share shift) ───────────────────────
+    if buy_share:
+        delta = buy_share["delta"]
+        share = buy_share["buy_share"]
+        total = buy_share["total"]
+        bd = base.get("buy_delta", {})
+        z = abs(delta - bd.get("med", 0)) / bd.get("sd", 1)
+        share_pct = round(share * 100)
+        if delta >= 0:
+            candidates.append((
+                f"Buy share {share_pct}% of {total} analysts, up {abs(delta):.0%} in 3 months",
+                z, "buy_delta",
+            ))
+        else:
+            candidates.append((
+                f"Buy share {share_pct}% of {total} analysts, down {abs(delta):.0%} in 3 months",
+                z, "buy_delta",
+            ))
 
-        avg_beat = cond["avg_1d_on_beat"]
-        avg_miss = cond["avg_1d_on_miss"]
-        if avg_beat is not None and avg_miss is not None:
-            if abs(avg_miss) > abs(avg_beat) * 1.5 and cond["miss_count"] >= 2:
-                templates = [
-                    f"Misses punished {abs(avg_miss):.1f}% avg vs +{abs(avg_beat):.1f}% on beats",
-                    f"Miss penalty {abs(avg_miss):.1f}% vs +{abs(avg_beat):.1f}% beat reward",
-                    f"Downside skew: misses cost {abs(avg_miss):.1f}% avg, beats gain {abs(avg_beat):.1f}%",
-                ]
-                return templates[v]
+    if not candidates:
+        return None, None, 0.0
 
-        avg_abs = cond["avg_abs_1d"]
-        if avg_abs is not None:
-            templates = [
-                f"Avg earnings move {chr(0xB1)}{avg_abs:.1f}% ({total}q)",
-                f"Typically swings {chr(0xB1)}{avg_abs:.1f}% on earnings ({total}q)",
-                f"Earnings reactions average {chr(0xB1)}{avg_abs:.1f}% over {total}q",
-            ]
-            return templates[v]
+    # Pick the highest |z|; ties fall back to insertion order (old priority)
+    candidates.sort(key=lambda x: -x[1])
+    line, z, gen = candidates[0]
 
-    return None
+    # If best |z| < 0.5, fall back to priority order (first candidate added)
+    if z < 0.5:
+        line, z, gen = candidates[0]  # already sorted, but use first-added as tiebreak
+        # Re-sort to original insertion order for sub-0.5 ties
+        for orig_line, orig_z, orig_gen in candidates:
+            line, z, gen = orig_line, orig_z, orig_gen
+            break
+
+    return line, gen, z
 
 
 def _unusually_active_insight(vol: dict | None, symbol: str = "") -> str | None:
@@ -433,15 +663,14 @@ def _unusually_active_insight(vol: dict | None, symbol: str = "") -> str | None:
         sign = "+" if spread >= 0 else ""
         if label:
             templates = [
-                f"{label} {sign}{spread:.0f}pp spread — RV rank {rv_rank:.0f}",
+                f"{label} at {sign}{spread:.0f}pp spread, RV rank {rv_rank:.0f}",
                 f"{label}: {sign}{spread:.0f}pp vs realized, rank {rv_rank:.0f}",
-                f"Options {label.lower()} ({sign}{spread:.0f}pp) — RV rank {rv_rank:.0f}",
+                f"Options {label.lower()} ({sign}{spread:.0f}pp), RV rank {rv_rank:.0f}",
             ]
             return templates[v]
-        # Fair regime — still show the spread context
         templates = [
-            f"IV-RV spread {sign}{spread:.0f}pp — RV rank {rv_rank:.0f}",
-            f"IV {sign}{spread:.0f}pp vs realized — rank {rv_rank:.0f}",
+            f"IV-RV spread {sign}{spread:.0f}pp, RV rank {rv_rank:.0f}",
+            f"IV {sign}{spread:.0f}pp vs realized, rank {rv_rank:.0f}",
             f"Implied-realized gap {sign}{spread:.0f}pp, RV rank {rv_rank:.0f}",
         ]
         return templates[v]
@@ -708,7 +937,9 @@ async def suggestions(
     top_syms = [sym for sym, _, _ in top]
     cond_stats = await _batch_conditional_stats(db, top_syms)
     analyst_stats = await _batch_analyst_stats(db, top_syms)
+    buy_share_stats = await _batch_buy_share_delta(db, top_syms)
     vol_data = await _batch_vol_regime(db, top_syms)
+    base = await _get_base_rates(db)
 
     items = [
         SuggestionItem(
@@ -721,8 +952,9 @@ async def suggestions(
             recent_outcome=t.get("recent_outcome"),
             event_date=t.get("event_date"),
             insight=_suggestion_insight(
-                cond_stats.get(sym), analyst_stats.get(sym), sym,
-            ),
+                cond_stats.get(sym), analyst_stats.get(sym),
+                buy_share_stats.get(sym), base, sym,
+            )[0],
             vol_regime=vol_data.get(sym, {}).get("vol_regime"),
         )
         for sym, t, total in top
