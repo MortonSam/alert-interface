@@ -9,4 +9,8 @@
 
 ## Backend Import Check
 
-**After any backend edit, run `docker compose exec backend python -c "import app.main"` before committing.** Python syntax errors and decorator misordering only surface at import time — a bad push crashes production at boot with no fallback.
+**After any backend edit, run `docker compose exec backend python -c "import app.main"` before committing.** Python syntax errors and decorator misordering only surface at import time. A bad push crashes production at boot with no fallback.
+
+## Data Integrity Rule
+
+Nothing wrong reaches the screen silently. Every displayed number must come from a stored, dated source (never a live fetch that can fail or return padded values); a missing value is shown as absent, never estimated; every metric has a sanity band enforced in validate_data; and any change to how a number is computed bumps the relevant version so history stays comparable.
