@@ -10,3 +10,4 @@ from app.models.rv_snapshot import RVSnapshot  # noqa: F401
 from app.models.thesis import Thesis  # noqa: F401
 from app.models.analyst_reaction_stats import AnalystReactionStats  # noqa: F401
 from app.models.alert_pick import AlertPick  # noqa: F401
+from app.models.analyst_recommendation import AnalystRecommendation  # noqa: F401

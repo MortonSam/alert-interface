@@ -15,14 +15,13 @@ CLI
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import math
 import sys
 from datetime import date
 
 import yfinance as yf
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from tqdm import tqdm
 
@@ -194,22 +193,31 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed analyst actions from yfinance")
-    parser.add_argument("--limit", type=int, default=None, metavar="N",
-                        help="Cap the candidate list at N (for testing)")
-    args = parser.parse_args()
+    ROTATION_LIMIT = 120
 
     async with AsyncSessionLocal() as session:
-        all_tickers: list[Ticker] = list(
+        # Subquery: latest analyst action event_date per ticker
+        latest_action = (
+            select(
+                Event.ticker_id,
+                func.max(Event.event_date).label("max_date"),
+            )
+            .where(Event.event_type == EventType.ANALYST_ACTION)
+            .group_by(Event.ticker_id)
+            .subquery()
+        )
+
+        candidates: list[Ticker] = list(
             (await session.execute(
-                select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
+                select(Ticker)
+                .outerjoin(latest_action, Ticker.id == latest_action.c.ticker_id)
+                .where(Ticker.is_active.is_(True))
+                .order_by(latest_action.c.max_date.asc().nulls_first())
+                .limit(ROTATION_LIMIT)
             )).scalars().all()
         )
 
-    candidates = all_tickers
-    if args.limit is not None:
-        candidates = candidates[:args.limit]
-        print(f"--limit {args.limit}: processing first {len(candidates)} tickers.", flush=True)
+    print(f"Processing {len(candidates)} tickers (oldest-first rotation).", flush=True)
 
     if not candidates:
         print("No tickers in database.")

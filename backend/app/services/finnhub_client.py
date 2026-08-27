@@ -11,9 +11,7 @@ Implemented
   get_profile2(symbol)                       → company profile {name, marketCapitalization, ...}
   get_earnings_calendar(from_date, to_date)  → earnings calendar {earningsCalendar: [...]}
 
-Stubbed (raise NotImplementedError until needed)
------------
-  get_recommendation_trends(symbol)
+  get_recommendation_trends(symbol)       → list of monthly consensus dicts
 
 Rate limiting
 -------------
@@ -252,7 +250,7 @@ class FinnhubClient:
         """Monthly analyst buy / hold / sell consensus trends.
         Finnhub endpoint: GET /stock/recommendation?symbol=
         """
-        raise NotImplementedError
+        return await self._request("GET", "/stock/recommendation", params={"symbol": symbol})
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 

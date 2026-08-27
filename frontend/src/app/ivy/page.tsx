@@ -181,10 +181,10 @@ export default function MeetIvyPage() {
             Grounded in data she can verify
           </h2>
           <p className="text-base text-muted-foreground leading-relaxed mt-3 max-w-prose">
-            Every pick gets a thesis, an entry mark, and a permanent score against
-            the market. She weighs earnings surprise rates, historical move
-            magnitudes, and the options-implied expected move before committing to a
-            direction.
+            She checks whether a company beats or misses earnings more often, and
+            how big those moves tend to be. She tracks the shift in street
+            recommendation trends over the past three months. She measures
+            20-day price momentum to confirm direction before committing.
           </p>
         </section>
 

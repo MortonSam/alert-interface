@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import require_admin
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
+from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
@@ -1059,41 +1060,68 @@ async def compute_alert_pick(
             justification="No upcoming earnings or insufficient history",
         )
 
-    # ── Analyst lean ─────────────────────────────────────────────────────────
-    today = date.today()
-    cutoff = today - timedelta(days=90)
-    recent_actions = (await db.execute(
-        select(Event).where(
-            Event.ticker_id == ticker_row.id,
-            Event.event_type == EventType.ANALYST_ACTION,
-            Event.event_date >= cutoff,
-        )
+    # ── Analyst lean (Finnhub recommendation trends) ───────────────────────
+    rec_rows = (await db.execute(
+        select(AnalystRecommendation)
+        .where(AnalystRecommendation.ticker_id == ticker_row.id)
+        .order_by(AnalystRecommendation.period.desc())
     )).scalars().all()
-    recent_ups = sum(1 for e in recent_actions if e.metadata_.get("action") == "up")
-    recent_downs = sum(1 for e in recent_actions if e.metadata_.get("action") == "down")
 
-    if recent_ups + recent_downs < 3:
+    if not rec_rows:
         analyst_lean = SignalLean(
             signal="analyst", direction="neutral",
-            justification=f"Only {recent_ups + recent_downs} analyst actions in 90 days; insufficient",
-        )
-    elif recent_ups > recent_downs:
-        med_str = f", upgrades historically lift {float(analyst_row.median_1d_upgrade):+.1f}% median" if analyst_row and analyst_row.median_1d_upgrade else ""
-        analyst_lean = SignalLean(
-            signal="analyst", direction="bullish",
-            justification=f"{recent_ups} upgrades vs {recent_downs} downgrades in 90 days{med_str}",
-        )
-    elif recent_downs > recent_ups:
-        med_str = f", downgrades historically hit {float(analyst_row.median_1d_downgrade):+.1f}% median" if analyst_row and analyst_row.median_1d_downgrade else ""
-        analyst_lean = SignalLean(
-            signal="analyst", direction="bearish",
-            justification=f"{recent_downs} downgrades vs {recent_ups} upgrades in 90 days{med_str}",
+            justification="No recommendation data yet",
         )
     else:
-        analyst_lean = SignalLean(
-            signal="analyst", direction="neutral",
-            justification=f"Evenly split: {recent_ups} upgrades, {recent_downs} downgrades in 90 days",
-        )
+        latest = rec_rows[0]
+        # Find a row whose period is >= 2 months earlier than latest
+        earlier = None
+        for r in rec_rows:
+            if (latest.period - r.period).days >= 60:
+                earlier = r
+                break
+
+        def _buy_share(row):
+            total = row.strong_buy + row.buy + row.hold + row.sell + row.strong_sell
+            return ((row.strong_buy + row.buy) / total, total) if total else (0, 0)
+
+        latest_share, latest_total = _buy_share(latest)
+
+        if earlier is None:
+            if latest_total < 5:
+                analyst_lean = SignalLean(
+                    signal="analyst", direction="neutral",
+                    justification=f"Fewer than 5 analysts covering ({latest_total})",
+                )
+            else:
+                analyst_lean = SignalLean(
+                    signal="analyst", direction="neutral",
+                    justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, but no earlier period for comparison",
+                )
+        else:
+            earlier_share, earlier_total = _buy_share(earlier)
+            if latest_total < 5 or earlier_total < 5:
+                analyst_lean = SignalLean(
+                    signal="analyst", direction="neutral",
+                    justification=f"Fewer than 5 analysts covering",
+                )
+            else:
+                delta = latest_share - earlier_share
+                if delta >= 0.03:
+                    analyst_lean = SignalLean(
+                        signal="analyst", direction="bullish",
+                        justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, up from {earlier_share:.0%} three months ago",
+                    )
+                elif delta <= -0.03:
+                    analyst_lean = SignalLean(
+                        signal="analyst", direction="bearish",
+                        justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, down from {earlier_share:.0%} three months ago",
+                    )
+                else:
+                    analyst_lean = SignalLean(
+                        signal="analyst", direction="neutral",
+                        justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, stable vs {earlier_share:.0%} three months ago",
+                    )
 
     # ── Momentum lean ────────────────────────────────────────────────────────
     pct_20d = rv_raw.get("pct_change_20d")
@@ -1182,6 +1210,7 @@ async def compute_alert_pick(
         pick = AlertPick(
             symbol=sym,
             picked_direction=picked_direction,
+            algo_version="v1.1",
             leans=[l.model_dump() for l in leans],
             strategy=draft_read.strategy,
             suggested_strike=suggested_strike,
