@@ -17,6 +17,7 @@ from app.models.event import Event
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
 from app.schemas.options import ExplainRead, ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
+from app.models.system_metadata import SystemMetadata
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
@@ -24,6 +25,35 @@ from app.services.finnhub_client import FinnhubClient
 from app.services.options_cache import fetch_chain
 from app.services import news_cache, quote_cache
 from app.services.yfinance_client import YFinanceClient
+
+# ── Shared helpers ─────────────────────────────────────────────────────────
+
+# Tokens stripped when building a distinctive company-name token for news filtering.
+_CORP_SUFFIXES = {"inc", "corp", "corporation", "company", "co", "ltd", "llc", "plc", "group", "holdings"}
+
+
+def _distinctive_token(name: str | None) -> str | None:
+    """First word of company name minus generic suffixes, lowercased."""
+    if not name:
+        return None
+    first = name.split()[0].strip(",").lower() if name.split() else None
+    if first and first not in _CORP_SUFFIXES and len(first) > 1:
+        return first
+    return None
+
+
+def _article_relevant(headline: str, summary: str, symbol: str, name_token: str | None) -> bool:
+    """Return True if the article actually mentions this ticker or company."""
+    hl = headline.lower()
+    sm = summary.lower()
+    sym_lower = symbol.lower()
+    # Direct symbol mention
+    if sym_lower in hl or sym_lower in sm:
+        return True
+    # Distinctive company name token
+    if name_token and (name_token in hl or name_token in sm):
+        return True
+    return False
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
 
@@ -73,11 +103,11 @@ def _build_plain_summary(
             ratio = expected_move_pct / avg if avg > 0 else 1.0
             if ratio > 1.25:
                 parts.append(
-                    f"That's a wider-than-usual range — the historical average 1-day earnings move is {hist_str}."
+                    f"That's a wider-than-usual range. The historical average 1-day earnings move is {hist_str}."
                 )
             elif ratio < 0.80:
                 parts.append(
-                    f"That's a narrower-than-usual range — the historical average 1-day earnings move is {hist_str}."
+                    f"That's a narrower-than-usual range. The historical average 1-day earnings move is {hist_str}."
                 )
             else:
                 parts.append(
@@ -423,13 +453,24 @@ async def batch_enrich(
 
 
 @router.get("/{symbol}/news", response_model=NewsRead)
-async def get_company_news(symbol: str) -> NewsRead:
-    """Recent company news (last 48h) from Finnhub, cached 10 min."""
+async def get_company_news(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+) -> NewsRead:
+    """Recent company news (last 48h) from Finnhub, cached 10 min.
+
+    Filters out index roundups and articles that don't mention the ticker
+    symbol or a distinctive token of the company name.
+    """
     sym = symbol.upper()
 
     cached = news_cache.get(sym)
     if cached is not None:
         return NewsRead(**cached)
+
+    # Look up company name for relevance filtering
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    name_token = _distinctive_token(ticker_row.name if ticker_row else None)
 
     now = dt_datetime.now(tz=timezone.utc)
     to_date = now.strftime("%Y-%m-%d")
@@ -449,12 +490,15 @@ async def get_company_news(symbol: str) -> NewsRead:
         url = article.get("url")
         if not headline or not url:
             continue
+        summary = article.get("summary", "")
+        if not _article_relevant(headline, summary, sym, name_token):
+            continue
         items.append(NewsItem(
             headline=headline,
             source=article.get("source", ""),
             url=url,
             datetime=article.get("datetime", 0),
-            summary=article.get("summary", ""),
+            summary=summary,
         ))
 
     items.sort(key=lambda x: x.datetime, reverse=True)
@@ -923,35 +967,56 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
         if ned:
             earnings_str = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
 
-    # ── Pick expiration (same logic as expected-move) ─────────────────────────
+    # ── Ingested expirations (chain:{SYM}:{EXP} keys in system_metadata) ─────
+    ingested_rows = (await db.execute(
+        select(SystemMetadata.key).where(SystemMetadata.key.like(f"chain:{sym}:%"))
+    )).scalars().all()
+    ingested_exps = sorted(k.split(":")[2] for k in ingested_rows if len(k.split(":")) == 3)
+
+    # ── Pick expiration ────────────────────────────────────────────────────────
     data_quality_note: str | None = None
     days_expiration_past_earnings: int | None = None
+    min_exp = (today + timedelta(days=7)).isoformat()
 
     if earnings_str:
-        post_earnings = [e for e in expirations if e >= earnings_str]
-        if post_earnings:
-            chosen_exp = post_earnings[0]
-        else:
-            chosen_exp = expirations[-1]
-            data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
+        min_exp = earnings_str  # at least covers earnings
+
+    # Prefer ingested expirations, fall back to yfinance
+    all_exps = sorted(set(ingested_exps) | set(expirations))
+    post = [e for e in all_exps if e >= min_exp]
+    if post:
+        chosen_exp = post[0]
+    elif all_exps:
+        chosen_exp = all_exps[-1]
+    else:
+        chosen_exp = expirations[0]
+
+    if earnings_str:
         earnings_date_obj = date.fromisoformat(earnings_str)
         exp_date_obj = date.fromisoformat(chosen_exp)
         days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
-        if days_expiration_past_earnings > 7 and data_quality_note is None:
+        if exp_date_obj < earnings_date_obj:
+            data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
+        elif days_expiration_past_earnings > 7:
             data_quality_note = (
                 f"Nearest available expiration ({chosen_exp}) is "
                 f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
                 f"The implied move covers the full period to expiration, not just the earnings event."
             )
-    else:
-        week_out = (today + timedelta(days=7)).isoformat()
-        chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
-        data_quality_note = "No earnings date found; using nearest weekly expiration."
 
-    # ── Fetch chain ONCE ──────────────────────────────────────────────────────
-    chain_entry = await fetch_chain(sym, chosen_exp, loop)
-    chain = chain_entry.chain
-    as_of = chain_entry.fetched_at.isoformat()
+    # ── Fetch chain (prefer ingested, fall back to yfinance) ──────────────────
+    chain_from_ingested = False
+    ingested_raw = await _get_meta(db, f"chain:{sym}:{chosen_exp}")
+    if ingested_raw:
+        chain = json.loads(ingested_raw)
+        chain_from_ingested = True
+        chain_last_trade = chain.get("chain_last_trade")
+        as_of_label = f"chain as of {chain_last_trade}" if chain_last_trade else "ingested chain"
+    else:
+        chain_entry = await fetch_chain(sym, chosen_exp, loop)
+        chain = chain_entry.chain
+        as_of_label = "live estimate"
+    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
     calls_raw = chain.get("calls", [])
     puts_raw = chain.get("puts", [])
@@ -1076,7 +1141,8 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
         symbol=sym, expiration=chosen_exp, current_price=current_price,
         calls=_build_contracts(filtered_calls, atm_strike, current_price=current_price, is_call=True),
         puts=_build_contracts(filtered_puts, atm_strike, current_price=current_price, is_call=False),
-        available_expirations=expirations, as_of=as_of,
+        available_expirations=sorted(set(ingested_exps) | set(expirations)),
+        as_of=as_of_label,
     )
 
     return OptionsBundleRead(expected_move=em, strategy_data=sd, chain=chain_resp)
@@ -1170,20 +1236,30 @@ async def get_options_read(
         if ned:
             earnings_str = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
 
-    # Pick expiration (same logic as expected-move endpoint)
-    chosen_exp: str | None = None
-    if expirations:
-        if earnings_str:
-            post = [e for e in expirations if e >= earnings_str]
-            chosen_exp = post[0] if post else expirations[-1]
-        else:
-            week_out = (today + timedelta(days=7)).isoformat()
-            chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+    # Ingested expirations
+    ingested_rows = (await db.execute(
+        select(SystemMetadata.key).where(SystemMetadata.key.like(f"chain:{sym}:%"))
+    )).scalars().all()
+    ingested_exps = sorted(k.split(":")[2] for k in ingested_rows if len(k.split(":")) == 3)
 
-    # Options chain
+    # Pick expiration (prefer ingested, then yfinance)
+    chosen_exp: str | None = None
+    all_exps = sorted(set(ingested_exps) | set(expirations))
+    if all_exps:
+        min_exp = (today + timedelta(days=7)).isoformat()
+        if earnings_str:
+            min_exp = earnings_str
+        post = [e for e in all_exps if e >= min_exp]
+        chosen_exp = post[0] if post else all_exps[-1]
+
+    # Options chain (prefer ingested, fall back to yfinance)
     chain: dict = {"calls": [], "puts": []}
     if chosen_exp:
-        chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+        ingested_raw = await _get_meta(db, f"chain:{sym}:{chosen_exp}")
+        if ingested_raw:
+            chain = json.loads(ingested_raw)
+        else:
+            chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
 
     calls = chain.get("calls", [])
     puts  = chain.get("puts", [])
@@ -1297,7 +1373,7 @@ async def get_options_read(
         "expiration_date":           chosen_exp or "(unavailable)",
         "days_to_expiration":        str(days_to_exp) if days_to_exp is not None else "(unavailable)",
         "atm_strike":                _fp(atm_strike),
-        "atm_iv":                    _fpct(atm_iv) if atm_iv is not None else "(unavailable, market closed)",
+        "atm_iv":                    _fpct(atm_iv) if atm_iv is not None else "(unavailable)",
         "next_earnings_date":        earnings_str or "(unavailable)",
         "expiration_spans_earnings": str(expiration_spans_earnings),
         "days_exp_past_earnings":    str(days_exp_past_earnings) if days_exp_past_earnings is not None else "N/A",
@@ -1319,16 +1395,16 @@ async def get_options_read(
             f"period through expiration, not just the earnings reaction."
         )
     else:
-        earnings_window_note = "(unavailable — expiration does not span the next earnings date)"
+        earnings_window_note = "(unavailable, expiration does not span the next earnings date)"
 
     # ── Prompt ────────────────────────────────────────────────────────────────
     prompt = f"""\
 You are a senior options trader narrating what you see on the screen for {sym} ({ticker_name}).
 Write exactly 2–4 tight sentences of interpretive prose for a sophisticated reader of a financial research tool.
 
-INJECTED FACTS — use ONLY these exact strings verbatim for every number you state.
+INJECTED FACTS: use ONLY these exact strings verbatim for every number you state.
 Do NOT derive, approximate, recompute, or restate any figure differently from what appears below.
-If a fact says "(unavailable)", omit that thread entirely — do not guess or fabricate.
+If a fact says "(unavailable)", omit that thread entirely. Do not guess or fabricate.
 
 --- FACT BLOCK ---
 Symbol / Company:           {sym} / {ticker_name}
@@ -1358,15 +1434,15 @@ HISTORICAL EARNINGS (from actual past reactions):
 
 STRICT RULES:
 1. Every number you write MUST be copied verbatim from the fact block. No rounding, reformatting, or paraphrasing of figures.
-2. Write PROSE ONLY — no bullets, headers, lists, or markdown.
+2. Write PROSE ONLY. No bullets, headers, lists, or markdown. No em dashes.
 3. Cover these threads in a natural flow across 2–4 sentences:
    a. What the market is pricing: state the implied move, implied range, and expiration.
-   b. The vol context: connect the RV rank and the IV−RV spread — is implied vol historically cheap or rich vs what the stock has recently delivered? Be specific about what this looks like from each side of the trade.
-   c. If expiration spans earnings (True): use the earnings window note verbatim or paraphrase it — note the expiration extends past earnings.
+   b. The vol context: connect the RV rank and the IV-RV spread. Is implied vol historically cheap or rich vs what the stock has recently delivered? Be specific about what this looks like from each side of the trade.
+   c. If expiration spans earnings (True): use the earnings window note verbatim or paraphrase it, noting the expiration extends past earnings.
    d. If available: briefly note the historical average earnings-day move for comparison.
-4. You MAY describe the setup descriptively from a premium-seller or premium-buyer perspective — but NO trade recommendations, no "you should buy/sell," no price targets.
+4. You MAY describe the setup descriptively from a premium-seller or premium-buyer perspective, but NO trade recommendations, no "you should buy/sell," no price targets.
 5. Omit any thread where the fact says "(unavailable)".
-6. Do NOT add disclaimers or caveats — the UI handles that.
+6. Do NOT add disclaimers or caveats. The UI handles that.
 7. Target 60–100 words. Be specific and grounded; no generic filler.\
 """
 

@@ -45,7 +45,7 @@ export default function OptionsEducation({
         className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-medium hover:bg-muted/30 transition-colors text-left"
         aria-expanded={open}
       >
-        <span>How options work — applied to {symbol}</span>
+        <span>How options work, applied to {symbol}</span>
         <span className="text-muted-foreground text-xs shrink-0 ml-4">{open ? "▲ Collapse" : "▼ Expand"}</span>
       </button>
 
@@ -57,7 +57,7 @@ export default function OptionsEducation({
             <h3 className="font-semibold">Calls & Puts</h3>
             <p className="text-muted-foreground">
               A <strong className="text-foreground">call option</strong> gives you the right to{" "}
-              <em>buy</em> {symbol} at a fixed price (the <em>strike</em>) by the expiration date —
+              <em>buy</em> {symbol} at a fixed price (the <em>strike</em>) by the expiration date,
               no matter how high the stock goes.
               {strike != null && callMid != null && (
                 <> The ${strike} call currently costs about{" "}
@@ -68,12 +68,12 @@ export default function OptionsEducation({
                   <strong className="text-foreground">
                     ${callBreakeven?.toFixed(2)}
                   </strong>{" "}
-                  by {exp} — that's the strike plus the option's cost (your breakeven).
+                  by {exp}. That's the strike plus the option's cost (your breakeven).
                 </>
               )}
             </p>
             <p className="text-muted-foreground">
-              A <strong className="text-foreground">put option</strong> is the mirror image — the
+              A <strong className="text-foreground">put option</strong> is the mirror image: the
               right to <em>sell</em> at the strike, useful when you expect the stock to fall.
               {strike != null && putMid != null && (
                 <> The ${strike} put costs about{" "}
@@ -90,7 +90,7 @@ export default function OptionsEducation({
             </p>
             <p className="text-muted-foreground">
               Options expire worthless if the stock never reaches the breakeven. You can also sell
-              them before expiry — if the stock moves your way, the option gains value even before
+              them before expiry. If the stock moves your way, the option gains value even before
               expiration.
             </p>
           </section>
@@ -99,7 +99,7 @@ export default function OptionsEducation({
           <section className="px-5 py-4 space-y-2 text-sm leading-relaxed">
             <h3 className="font-semibold">The Expected Move</h3>
             <p className="text-muted-foreground">
-              The "expected move" comes from adding the ATM call and put prices together — a
+              The "expected move" comes from adding the ATM call and put prices together, a
               position called a <em>straddle</em>.
               {em.straddle_price != null && strike != null && (
                 <> The ${strike} straddle costs{" "}
@@ -150,7 +150,7 @@ export default function OptionsEducation({
                 <strong className="text-foreground">
                   {((callIV / Math.sqrt(252)) * 100).toFixed(1)}% per day
                 </strong>
-                . Whether that's high or low <em>for {symbol} specifically</em> is called IV Rank — a
+                . Whether that's high or low <em>for {symbol} specifically</em> is called IV Rank, a
                 future feature.
               </p>
             )}
@@ -167,10 +167,10 @@ export default function OptionsEducation({
             </p>
             <p className="text-muted-foreground">
               <strong className="text-foreground">Bid/Ask:</strong> the prices market makers will
-              buy/sell at — the fair value is usually the midpoint.{" "}
+              buy/sell at. The fair value is usually the midpoint.{" "}
               <strong className="text-foreground">IV</strong> is color-coded: warmer (orange) means
               higher implied volatility, cooler (blue) means lower. Notice that put IV is often
-              higher than call IV at the same strike — this is called <em>volatility skew</em>,
+              higher than call IV at the same strike. This is called <em>volatility skew</em>,
               reflecting the market's greater fear of sharp drops than sharp rallies.
             </p>
           </section>

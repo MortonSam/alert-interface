@@ -219,7 +219,7 @@ function HistoryInsightsPanel({
           ce!.magnitude_trend === "heating_up" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
         )}>
           Recent prints moving ±{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
-          {" "}— reactions{" "}
+          {" "}, reactions{" "}
           <span className="font-medium">
             {ce!.magnitude_trend === "heating_up" ? "heating up"
               : ce!.magnitude_trend === "cooling_down" ? "cooling"
@@ -464,7 +464,7 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
 
       {n < 3 ? (
         <p className="text-xs text-muted-foreground italic">
-          Limited sample size — interpret with caution.
+          Limited sample size. Interpret with caution.
         </p>
       ) : (
         <>
@@ -1468,7 +1468,7 @@ export default function TickerPage() {
     if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
       const med = median_1d_downgrade!;
       const sign = med > 0 ? "+" : "";
-      let line = `Downgrades tend to hit — median ${sign}${med.toFixed(1)}% next day`;
+      let line = `Downgrades tend to hit, median ${sign}${med.toFixed(1)}% next day`;
       if (downgrade_5d_continuation_pct != null) {
         line += `, still lower a week later ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
       }
@@ -1476,7 +1476,7 @@ export default function TickerPage() {
     } else {
       const med = median_1d_upgrade!;
       const sign = med > 0 ? "+" : "";
-      let line = `Upgrades tend to lift — median ${sign}${med.toFixed(1)}% next day`;
+      let line = `Upgrades tend to lift, median ${sign}${med.toFixed(1)}% next day`;
       if (upgrade_5d_continuation_pct != null) {
         line += `, still higher a week later ${upgrade_5d_continuation_pct.toFixed(0)}% of the time`;
       }
@@ -2014,7 +2014,7 @@ export default function TickerPage() {
                           dropRate != null && dropRate >= 50 ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
                         )}>
                           Stock fell next day in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
-                          {" "}({dropRate!.toFixed(0)}%) — {pricingNote}
+                          {" "}({dropRate!.toFixed(0)}%). {pricingNote}
                         </p>
                       )}
                     </div>
@@ -2312,7 +2312,7 @@ export default function TickerPage() {
             <div className="rounded-lg border bg-card px-5 py-4 mb-6 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  AI read — options setup
+                  AI read, options setup
                 </span>
                 <span className="text-[10px] text-muted-foreground/70">
                   · educational interpretation · not investment advice
@@ -2337,7 +2337,7 @@ export default function TickerPage() {
           {/* Strategy explainer */}
           {bundleStatus === "done" && strategyData && strategyData.strikes.length > 0 && strikesFallback && (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-4 mb-1 italic">
-              Prices from last trade — live quotes unavailable (market closed or thin). Treat P&L figures as approximate.
+              Prices from last trade. Live quotes unavailable (market closed or thin). Treat P&L figures as approximate.
             </p>
           )}
           {bundleStatus === "done" && strategyData && strategyData.strikes.length > 0 && (
@@ -2528,7 +2528,7 @@ export default function TickerPage() {
                 {resolvedCapped.map((t) => renderThesisRow(t, true))}
                 {resolvedHidden > 0 && (
                   <p className="text-xs text-muted-foreground text-center py-1">
-                    +{resolvedHidden} more resolved — <Link href="/theses" className="underline hover:text-foreground">view all in My Trades</Link>
+                    +{resolvedHidden} more resolved. <Link href="/theses" className="underline hover:text-foreground">View all in My Trades</Link>
                   </p>
                 )}
               </div>
@@ -2595,7 +2595,7 @@ export default function TickerPage() {
               {note.source_filings.length === 0 && (
                 <Callout severity="caution" banner>
                   <strong>Generated without SEC filing.</strong>{" "}
-                  This note is based on general knowledge and earnings history only — not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                  This note is based on general knowledge and earnings history only, not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
                 </Callout>
               )}
               <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
@@ -2649,7 +2649,7 @@ export default function TickerPage() {
               {note.source_filings.length === 0 && (
                 <Callout severity="caution" banner>
                   <strong>Generated without SEC filing.</strong>{" "}
-                  This note is based on general knowledge and earnings history only — not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                  This note is based on general knowledge and earnings history only, not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
                 </Callout>
               )}
               {note.verification && note.verification.summary.contradicted > 0 && (
@@ -2703,7 +2703,7 @@ export default function TickerPage() {
               ) : (
                 <>
                   <div className="border-t px-6 py-3 text-xs text-muted-foreground">
-                    Verification unavailable — claims in this note have not been checked against source data.
+                    Verification unavailable. Claims in this note have not been checked against source data.
                     <button
                       onClick={() => {
                         void (async () => {

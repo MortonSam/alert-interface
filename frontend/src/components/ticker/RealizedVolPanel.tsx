@@ -13,21 +13,21 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
   const { text: interp, color: interpColor } =
     rank < 25
       ? {
-          text: "Vol is quieter than usual for this stock — it\u2019s moving less than its own norm over the past year.",
+          text: "Vol is quieter than usual for this stock, moving less than its own norm over the past year.",
           color: "text-muted-foreground",
         }
       : rank < 70
       ? {
-          text: "Vol is normal for this stock — near its typical level over the past year.",
+          text: "Vol is normal for this stock, near its typical level over the past year.",
           color: "text-muted-foreground",
         }
       : rank < 90
       ? {
-          text: "Vol is elevated for this stock — it\u2019s moving more than its own norm over the past year.",
+          text: "Vol is elevated for this stock, moving more than its own norm over the past year.",
           color: "text-amber-600 dark:text-amber-400",
         }
       : {
-          text: "Vol is extreme for this stock — it\u2019s moving much more than usual compared to its own past year.",
+          text: "Vol is extreme for this stock, moving much more than usual compared to its own past year.",
           color: "text-primary",
         };
 
@@ -66,8 +66,8 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
           />
         </div>
         <div className="flex justify-between text-[10px] text-muted-foreground">
-          <span>0 — quiet for this stock</span>
-          <span>100 — extreme for this stock</span>
+          <span>0, quiet for this stock</span>
+          <span>100, extreme for this stock</span>
         </div>
       </div>
 
@@ -93,10 +93,10 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
       {/* Honest disclaimer */}
       <p className="text-[11px] text-muted-foreground border-t pt-3 leading-relaxed">
         <strong>Realized (historical) volatility</strong> measures how much the stock has actually
-        moved — annualized standard deviation of daily log returns over a {rv.window_days}-trading-day
+        moved, annualized standard deviation of daily log returns over a {rv.window_days}-trading-day
         window, ranked against the trailing {rv.sample_days} trading days.{" "}
         <em>This is not implied volatility.</em> IV Rank (what the options market expects) requires
-        daily IV snapshots — collection started today and will appear once enough history accrues
+        daily IV snapshots. Collection started today and will appear once enough history accrues
         (~3–6 months).
       </p>
     </div>

@@ -20,14 +20,14 @@ export default function StrategyExplainer({ data, symbol }: { data: StrategyData
         className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-medium hover:bg-muted/30 transition-colors text-left"
         aria-expanded={open}
       >
-        <span>Directional strategy explainer — {symbol}</span>
+        <span>Directional strategy explainer for {symbol}</span>
         <span className="text-muted-foreground text-xs shrink-0 ml-4">{open ? "\u25b2 Collapse" : "\u25bc Expand"}</span>
       </button>
 
       {open && (
         <div className="border-t px-5 py-4 space-y-5">
           <p className="text-xs text-muted-foreground italic leading-relaxed">
-            Educational only — not investment advice. Payoff diagrams show at-expiration outcomes
+            Educational only, not investment advice. Payoff diagrams show at-expiration outcomes
             per share using real bid/ask mid-prices from the {data.expiration} expiration.
             Options are leveraged instruments; actual outcomes depend on timing, assignment, and
             transaction costs.
