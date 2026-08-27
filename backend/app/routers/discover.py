@@ -615,32 +615,18 @@ def _suggestion_insight(
         bd = base.get("buy_delta", {})
         z = abs(delta - bd.get("med", 0)) / bd.get("sd", 1)
         share_pct = round(share * 100)
-        if delta >= 0:
-            candidates.append((
-                f"Buy share {share_pct}% of {total} analysts, up {abs(delta):.0%} in 3 months",
-                z, "buy_delta",
-            ))
-        else:
-            candidates.append((
-                f"Buy share {share_pct}% of {total} analysts, down {abs(delta):.0%} in 3 months",
-                z, "buy_delta",
-            ))
+        delta_pp = round(abs(delta) * 100)
+        direction = "up" if delta >= 0 else "down"
+        candidates.append((
+            f"Buy share {share_pct}% of {total} analysts, {direction} {delta_pp} points in 3 months",
+            z, "buy_delta",
+        ))
 
     if not candidates:
         return None, None, 0.0
 
-    # Pick the highest |z|; ties fall back to insertion order (old priority)
     candidates.sort(key=lambda x: -x[1])
     line, z, gen = candidates[0]
-
-    # If best |z| < 0.5, fall back to priority order (first candidate added)
-    if z < 0.5:
-        line, z, gen = candidates[0]  # already sorted, but use first-added as tiebreak
-        # Re-sort to original insertion order for sub-0.5 ties
-        for orig_line, orig_z, orig_gen in candidates:
-            line, z, gen = orig_line, orig_z, orig_gen
-            break
-
     return line, gen, z
 
 
