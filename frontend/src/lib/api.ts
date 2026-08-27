@@ -681,6 +681,20 @@ export interface IvySampleRefusal {
   leans: { signal: string; direction: string; justification: string }[];
 }
 
+export interface IvyWorksheetPick {
+  strategy: string | null;
+  expiration: string | null;
+}
+
+export interface IvyWorksheetRow {
+  symbol: string;
+  earnings_date: string | null;
+  outcome: string;
+  leans: SignalLean[] | null;
+  note: string | null;
+  pick: IvyWorksheetPick | null;
+}
+
 export interface IvyActivity {
   run_date: string | null;
   evaluated: number;
@@ -692,6 +706,7 @@ export interface IvyActivity {
   cap_reached: number;
   error: number;
   sample_refusal: IvySampleRefusal | null;
+  rows: IvyWorksheetRow[];
 }
 
 export interface ThesisDraftAlternativeRead {

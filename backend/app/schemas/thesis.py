@@ -204,6 +204,20 @@ class IvySampleRefusal(BaseModel):
     leans: list[SignalLean]
 
 
+class IvyWorksheetPick(BaseModel):
+    strategy: str | None
+    expiration: str | None
+
+
+class IvyWorksheetRow(BaseModel):
+    symbol: str
+    earnings_date: str | None
+    outcome: str
+    leans: list[SignalLean] | None
+    note: str | None
+    pick: IvyWorksheetPick | None
+
+
 class IvyActivityRead(BaseModel):
     run_date: str | None = None
     evaluated: int = 0
@@ -215,6 +229,7 @@ class IvyActivityRead(BaseModel):
     cap_reached: int = 0
     error: int = 0
     sample_refusal: IvySampleRefusal | None = None
+    rows: list[IvyWorksheetRow] = []
 
 
 class ThesisDraftAlternativeRead(BaseModel):

@@ -21,7 +21,7 @@ function timeAgo(iso: string): string {
 
 const tabs = [
   { href: "/ivy", label: "Meet Ivy" },
-  { href: "/ivy/picks", label: "Ivy's Picks" },
+  { href: "/ivy/desk", label: "Ivy's Desk" },
   { href: "/ivy/trades", label: "Ivy's Trades" },
 ];
 
@@ -42,8 +42,8 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
     stripText = `Data as of ${timeAgo(health.last_refreshed_at)}`;
   }
 
-  const isMeetIvy = pathname === "/ivy";
-  const widthClass = isMeetIvy ? "max-w-6xl" : "max-w-4xl";
+  const isWide = pathname === "/ivy" || pathname === "/ivy/desk";
+  const widthClass = isWide ? "max-w-6xl" : "max-w-4xl";
 
   return (
     <div className={`mx-auto ${widthClass} px-4`}>

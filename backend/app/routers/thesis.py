@@ -25,6 +25,8 @@ from app.schemas.thesis import (
     AlertPickRequest,
     IvyActivityRead,
     IvySampleRefusal,
+    IvyWorksheetPick,
+    IvyWorksheetRow,
     SignalLean,
     ThesisCreate,
     ThesisDraftAlternativeRead,
@@ -1295,6 +1297,55 @@ async def ivy_activity(
                 leans=[SignalLean(**l) for l in leans_list],
             )
 
+    # Batch-fetch earnings dates for all evaluated symbols
+    syms = list({r.symbol for r in rows})
+    earnings_map: dict[str, str] = {}
+    if syms:
+        today = date.today()
+        all_earn = (await db.execute(
+            select(Ticker.symbol, Event.event_date)
+            .join(Event, Event.ticker_id == Ticker.id)
+            .where(Event.event_type == EventType.EARNINGS)
+            .where(Ticker.symbol.in_(syms))
+            .order_by(Ticker.symbol, Event.event_date)
+        )).all()
+        sym_dates: dict[str, list[date]] = {}
+        for sym, edate in all_earn:
+            sym_dates.setdefault(sym, []).append(edate)
+        for sym, dates in sym_dates.items():
+            future = [d for d in dates if d >= today]
+            if future:
+                earnings_map[sym] = future[0].isoformat()
+            elif dates:
+                earnings_map[sym] = dates[-1].isoformat()
+
+    # Batch-fetch picks for rows with alert_pick_id
+    pick_ids = [r.alert_pick_id for r in rows if r.alert_pick_id]
+    pick_map: dict[uuid.UUID, AlertPick] = {}
+    if pick_ids:
+        picks_result = (await db.execute(
+            select(AlertPick).where(AlertPick.id.in_(pick_ids))
+        )).scalars().all()
+        pick_map = {p.id: p for p in picks_result}
+
+    # Build worksheet rows
+    worksheet_rows = []
+    for r in rows:
+        leans_list = [SignalLean(**l) for l in r.leans] if isinstance(r.leans, list) else None
+        pick_obj = None
+        if r.alert_pick_id and r.alert_pick_id in pick_map:
+            p = pick_map[r.alert_pick_id]
+            pick_obj = IvyWorksheetPick(strategy=p.strategy, expiration=p.expiration)
+        worksheet_rows.append(IvyWorksheetRow(
+            symbol=r.symbol,
+            earnings_date=earnings_map.get(r.symbol),
+            outcome=r.outcome,
+            leans=leans_list,
+            note=r.note,
+            pick=pick_obj,
+        ))
+    worksheet_rows.sort(key=lambda r: (r.earnings_date or "9999", r.symbol))
+
     return IvyActivityRead(
         run_date=max_date_row.isoformat(),
         evaluated=len(rows),
@@ -1306,6 +1357,7 @@ async def ivy_activity(
         cap_reached=outcomes.count("cap_reached"),
         error=outcomes.count("error"),
         sample_refusal=sample_refusal,
+        rows=worksheet_rows,
     )
 
 

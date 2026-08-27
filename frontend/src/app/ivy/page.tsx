@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, type HealthStatus, type IvyActivity, type SystemStatus } from "@/lib/api";
+import { api, type HealthStatus, type IvyActivity } from "@/lib/api";
 
 function timeAgo(iso: string): string {
   const seconds = Math.floor(
@@ -82,21 +82,6 @@ function StatsBlock({
   );
 }
 
-function LeanDot({ direction }: { direction: string }) {
-  return (
-    <span
-      className={
-        "w-2 h-2 rounded-full inline-block " +
-        (direction === "bullish"
-          ? "bg-green-500"
-          : direction === "bearish"
-            ? "bg-red-500"
-            : "bg-zinc-400")
-      }
-    />
-  );
-}
-
 function GutterNumber({ n }: { n: string }) {
   return (
     <span className="font-mono text-xs text-muted-foreground">{n}</span>
@@ -113,21 +98,19 @@ function SectionLabel({ label }: { label: string }) {
 
 export default function MeetIvyPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [status, setStatus] = useState<SystemStatus | null>(null);
   const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    Promise.allSettled([api.system.health(), api.system.status(), api.theses.ivyActivity()])
-      .then(([hResult, sResult, aResult]) => {
+    Promise.allSettled([api.system.health(), api.theses.ivyActivity()])
+      .then(([hResult, aResult]) => {
         if (hResult.status === "fulfilled") setHealth(hResult.value);
-        if (sResult.status === "fulfilled") setStatus(sResult.value);
         if (aResult.status === "fulfilled") setActivity(aResult.value);
-        if (hResult.status === "rejected" && sResult.status === "rejected") setError(true);
+        if (hResult.status === "rejected") setError(true);
       });
   }, []);
 
-  const loading = !health && !status && !error;
+  const loading = !health && !activity && !error;
 
   // Rail rows (reduced set)
   const railRows: { label: string; value: string }[] = [];
@@ -145,22 +128,6 @@ export default function MeetIvyPage() {
       railRows.push({ label: "Last evaluation", value: `${datePart} · ${activity.evaluated} names` });
     }
   }
-
-  // Hero proof numerals
-  const proofNumerals: { value: string; label: string }[] = [];
-  if (!loading && !error) {
-    if (status?.total_tickers != null) {
-      proofNumerals.push({ value: status.total_tickers.toLocaleString(), label: "Tickers tracked" });
-    }
-    if (status?.total_reactions != null) {
-      proofNumerals.push({ value: status.total_reactions.toLocaleString(), label: "Reactions scanned" });
-    }
-    if (activity?.evaluated != null && activity.evaluated > 0) {
-      proofNumerals.push({ value: activity.evaluated.toLocaleString(), label: "Evaluated last night" });
-    }
-  }
-
-  const refusal = activity?.sample_refusal ?? null;
 
   return (
     <div className="pb-14">
@@ -196,18 +163,12 @@ export default function MeetIvyPage() {
             every ticker she tracks. She synthesizes the numbers into a direction,
             picks a strategy, and shows her reasoning on every call.
           </p>
-
-          {/* Proof row */}
-          {proofNumerals.length > 0 && (
-            <div className="border-t border-b border-border mt-8 py-6 flex gap-10 flex-wrap">
-              {proofNumerals.map((n) => (
-                <div key={n.label}>
-                  <span className="font-display text-5xl tabular-nums text-foreground">{n.value}</span>
-                  <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground mt-1">{n.label}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          <Link
+            href="/ivy/desk"
+            className="inline-block text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
+          >
+            See last night&apos;s worksheet →
+          </Link>
         </section>
 
         {/* 02 How she decides */}
@@ -225,25 +186,6 @@ export default function MeetIvyPage() {
             magnitudes, and the options-implied expected move before committing to a
             direction.
           </p>
-
-          {/* Lean legend */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-6">
-            <div className="flex items-center gap-1.5">
-              <LeanDot direction="bullish" />
-              <span className="text-xs text-muted-foreground">Earnings</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <LeanDot direction="bearish" />
-              <span className="text-xs text-muted-foreground">Analyst</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <LeanDot direction="neutral" />
-              <span className="text-xs text-muted-foreground">Momentum</span>
-            </div>
-            <span className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
-              Two must agree. None may oppose.
-            </span>
-          </div>
         </section>
 
         {/* 03 What she won't do */}
@@ -260,21 +202,6 @@ export default function MeetIvyPage() {
             symbol, no stacking. And she never quietly edits her record; every
             call stays on the ledger exactly as she made it.
           </p>
-
-          {/* Sample refusal receipt */}
-          {refusal && (
-            <p className="text-sm text-muted-foreground mt-6">
-              Last night she passed on {refusal.symbol}.{" "}
-              {refusal.leans.map((l, i) => (
-                <span key={l.signal} className="inline-flex items-center gap-1">
-                  {i > 0 && ", "}
-                  <LeanDot direction={l.direction} />
-                  <span className="capitalize">{l.signal}</span>
-                  {" "}{l.direction}
-                </span>
-              ))}.
-            </p>
-          )}
         </section>
 
         {/* 04 CTA row */}
@@ -286,10 +213,10 @@ export default function MeetIvyPage() {
             </h3>
             <div className="flex gap-3">
               <Link
-                href="/ivy/picks"
+                href="/ivy/desk"
                 className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:opacity-90 transition-opacity whitespace-nowrap"
               >
-                See her current picks →
+                See what&apos;s on her desk →
               </Link>
               <Link
                 href="/ivy/trades"
