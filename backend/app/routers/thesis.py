@@ -177,7 +177,7 @@ async def _compute_option_mark(
             if settlement is not None:
                 current_price = settlement
                 mark_basis = "settled"
-                mark_note = f"Expired {exp_date.isoformat()} — settled at official close"
+                mark_note = f"Expired {exp_date.isoformat()}, settled at official close"
                 as_of = f"{exp_date.isoformat()}T20:00:00Z"
             else:
                 # Fallback: live quote with "intrinsic" label (history unavailable)
@@ -199,7 +199,7 @@ async def _compute_option_mark(
                     finally:
                         await finnhub.close()
                 mark_basis = "intrinsic"
-                mark_note = f"Expired {exp_date.isoformat()} — expiration-day close unavailable, using live price"
+                mark_note = f"Expired {exp_date.isoformat()}, expiration-day close unavailable, using live price"
 
         if current_price is not None:
             current_mid1, current_mid2 = compute_intrinsic_mids(
@@ -208,10 +208,10 @@ async def _compute_option_mark(
             if mark_basis == "not_found":
                 # stock_price_override was provided
                 mark_basis = "settled"
-                mark_note = f"Expired {exp_date.isoformat()} — settled at official close"
+                mark_note = f"Expired {exp_date.isoformat()}, settled at official close"
                 as_of = f"{exp_date.isoformat()}T20:00:00Z"
         else:
-            mark_note = f"Expired {exp_date.isoformat()} — could not fetch stock price for intrinsic"
+            mark_note = f"Expired {exp_date.isoformat()}, could not fetch stock price for intrinsic"
     else:
         # Live quotes for unexpired options
         if current_price is None:

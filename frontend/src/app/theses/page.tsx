@@ -88,7 +88,7 @@ function pctChange(entry: string | null, resolution: string | null): string {
 
 function fmtPnl(dollars: number | null, pct: number | null): { str: string; color: string } {
   if (dollars == null) return { str: "n/a", color: "text-muted-foreground" };
-  const sign = dollars >= 0 ? "+" : "";
+  const sign = dollars >= 0 ? "+" : "-";
   const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
   const absStr = `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`;
   const color =
