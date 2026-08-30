@@ -60,6 +60,14 @@ class YFinanceClient:
         """Returns the next earnings date and any available estimates."""
         return _ticker(symbol).calendar or {}
 
+    # ACCEPTED EXCEPTION (data integrity rule): Yahoo price *history* is not
+    # padded after hours and works from datacenter IPs.  Daily candles only.
+    # Do not add options, quotes, or fundamentals here; those come from
+    # ingested/courier data.  Remove this exception at Polygon migration.
+    #
+    # Covered methods: get_price_history, get_close_on_date, get_daily_closes,
+    # get_chart_history.
+
     @staticmethod
     def get_price_history(symbol: str, period: str = "1y") -> Any:
         """Returns a pandas DataFrame of OHLCV data."""
@@ -106,6 +114,7 @@ class YFinanceClient:
                 time.sleep(1.5 * (attempt + 1))
         return empty
 
+    # ACCEPTED EXCEPTION — see get_price_history.
     @staticmethod
     def get_close_on_date(symbol: str, date_str: str) -> float | None:
         """Official close on a specific date. Returns None if not a trading day."""
@@ -121,6 +130,7 @@ class YFinanceClient:
                 return round(float(close), 4)
         return None
 
+    # ACCEPTED EXCEPTION — see get_price_history.
     @staticmethod
     def get_daily_closes(symbol: str, period: str = "1mo") -> list[dict[str, Any]]:
         """Daily close prices for charting / sparklines.
@@ -142,6 +152,7 @@ class YFinanceClient:
             for idx, close in zip(hist.index, hist["Close"])
         ]
 
+    # ACCEPTED EXCEPTION — see get_price_history.
     @staticmethod
     def get_chart_history(symbol: str, period: str) -> dict[str, Any]:
         """Price history for the interactive chart, supporting intraday and daily ranges.
