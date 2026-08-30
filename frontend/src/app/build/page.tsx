@@ -117,7 +117,7 @@ function TickerPicker({ tickers, onSelect }: { tickers: Ticker[]; onSelect: (t: 
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
-        placeholder="Type a symbol or company name — e.g. AAPL, Microsoft…"
+        placeholder="Type a symbol or company name, e.g. AAPL, Microsoft..."
         className="w-full h-12 rounded-xl border bg-background px-4 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         autoComplete="off"
         autoCorrect="off"
@@ -369,7 +369,7 @@ function DraftDisplay({
       {/* A) Header */}
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          AI Draft — {draft.aggressiveness} · {draft.direction}
+          AI Draft · {draft.aggressiveness} · {draft.direction}
         </p>
         <span className="font-mono text-xs text-muted-foreground">{draft.model_used}</span>
       </div>
@@ -441,29 +441,29 @@ function DraftDisplay({
       </div>
 
       {/* G) Fact grid */}
-      <div className="bg-secondary border border-border rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
+      <div className="border border-border/60 bg-transparent rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
         <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span></span>
         <span>
           Implied move:{" "}
           <span className="font-mono text-foreground">
-            ±{fb.expected_move_pct?.toFixed(1) ?? "—"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "—"})
+            ±{fb.expected_move_pct?.toFixed(1) ?? "n/a"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "n/a"})
           </span>
         </span>
         <span>
           Range:{" "}
           <span className="font-mono text-foreground">
-            ${fb.implied_range_low?.toFixed(2) ?? "—"} – ${fb.implied_range_high?.toFixed(2) ?? "—"}
+            ${fb.implied_range_low?.toFixed(2) ?? "n/a"} – ${fb.implied_range_high?.toFixed(2) ?? "n/a"}
           </span>
         </span>
-        <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ?? "—"}</span></span>
+        <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ?? "n/a"}</span></span>
         <span>
           Hist avg ±:{" "}
-          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span>
+          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span>
         </span>
-        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "—"}%</span></span>
-        <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "—"}%</span></span>
-        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="font-mono text-foreground">—</span>}</span>
-        <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : "—"}</span></span>
+        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "n/a"}%</span></span>
+        <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "n/a"}%</span></span>
+        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="font-mono text-foreground">n/a</span>}</span>
+        <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : "n/a"}</span></span>
         {draft.vol_regime && (
           <span>
             Vol regime:{" "}
@@ -487,29 +487,29 @@ function DraftDisplay({
             Position cost &amp; risk · per contract
           </p>
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-secondary border border-border rounded-md p-5">
+            <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
               <p className="font-mono text-3xl font-semibold tabular-nums">
-                {costPerContract != null ? `$${Math.round(costPerContract)}` : "—"}
+                {costPerContract != null ? `$${Math.round(costPerContract)}` : "n/a"}
               </p>
             </div>
-            <div className="bg-secondary border border-border rounded-md p-5">
+            <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Max loss</p>
               <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
-                {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "—"}
+                {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "n/a"}
               </p>
             </div>
-            <div className="bg-secondary border border-border rounded-md p-5">
+            <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Max gain</p>
               {isSpread ? (
                 <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "—"}
+                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "n/a"}
                 </p>
               ) : draft.direction === "bullish" ? (
                 <p className="text-xl font-semibold text-success">Unlimited</p>
               ) : (
                 <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "—"}
+                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "n/a"}
                 </p>
               )}
             </div>
@@ -521,7 +521,7 @@ function DraftDisplay({
           )}
           {leg1Mid == null && (
             <Callout severity="caution" compact>
-              Cost unavailable — strike not found in current chain data
+              Cost unavailable: strike not found in current chain data
             </Callout>
           )}
         </div>
@@ -578,7 +578,7 @@ function DraftDisplay({
 
               {altError && (
                 <p className="text-xs text-muted-foreground">
-                  Couldn&apos;t generate an alternative — try again.
+                  Couldn&apos;t generate an alternative. Try again.
                 </p>
               )}
 
@@ -592,25 +592,25 @@ function DraftDisplay({
                     <p className="text-lg font-bold text-foreground">{altResult.strategy}</p>
                   )}
                   <div className="grid grid-cols-3 gap-4 pt-0.5">
-                    <div className="bg-secondary border border-border rounded-md p-5">
+                    <div className="border border-border/60 bg-transparent rounded-md p-5">
                       <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
                       <p className="font-mono text-3xl font-semibold tabular-nums">
-                        {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "—"}
+                        {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "n/a"}
                       </p>
                     </div>
-                    <div className="bg-secondary border border-border rounded-md p-5">
+                    <div className="border border-border/60 bg-transparent rounded-md p-5">
                       <p className="text-xs text-muted-foreground mb-2">Max loss</p>
                       <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
-                        {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "—"}
+                        {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "n/a"}
                       </p>
                     </div>
-                    <div className="bg-secondary border border-border rounded-md p-5">
+                    <div className="border border-border/60 bg-transparent rounded-md p-5">
                       <p className="text-xs text-muted-foreground mb-2">Max gain</p>
                       {altIsUnlimited ? (
                         <p className="text-xl font-semibold text-success">Unlimited</p>
                       ) : (
                         <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                          {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "—"}
+                          {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "n/a"}
                         </p>
                       )}
                     </div>
@@ -645,7 +645,7 @@ function DraftDisplay({
       )}
 
       <p className="text-xs text-muted-foreground italic">
-        Data-grounded suggestion — not a recommendation. Review carefully before saving.
+        Data-grounded suggestion. Not a recommendation. Review carefully before saving.
       </p>
 
       {/* K) CTA row */}
@@ -805,7 +805,7 @@ function BuildTradePageContent() {
       setDraft(d);
       setStep("review_draft");
     } catch (err) {
-      setDraftError(err instanceof Error ? err.message : "Generation failed — please try again");
+      setDraftError(err instanceof Error ? err.message : "Generation failed. Please try again.");
       setStep("pick_direction");
     }
   }
@@ -876,7 +876,7 @@ function BuildTradePageContent() {
       setSavedThesis(thesis);
       setStep("done");
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Save failed — please try again");
+      setSaveError(err instanceof Error ? err.message : "Save failed. Please try again.");
       setStep("confirm");
     }
   }
@@ -912,7 +912,7 @@ function BuildTradePageContent() {
               ← Home
             </Link>
           </div>
-          <div className="rounded-2xl border bg-card px-8 py-12 text-center space-y-5">
+          <div className="rounded-xl border border-border/60 bg-transparent px-8 py-12 text-center space-y-5">
             <div className="text-5xl">✓</div>
             <h2 className="text-2xl font-bold">Trade thesis saved</h2>
             <p className="text-muted-foreground text-sm max-w-sm mx-auto leading-relaxed">
@@ -962,7 +962,7 @@ function BuildTradePageContent() {
           <Link href="/" className="text-sm text-muted-foreground hover:text-foreground mb-5 inline-block">
             ← Home
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">Build a Trade</h1>
+          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
             AI-drafted idea grounded in live options data, earnings history, and volatility.
             Not financial advice.
@@ -1010,7 +1010,7 @@ function BuildTradePageContent() {
                 </div>
               )
             ) : (
-              <div className="flex items-center justify-between rounded-[var(--radius)] border border-border bg-card px-5 py-3.5">
+              <div className="flex items-center justify-between rounded-[var(--radius)] border border-border/60 bg-transparent px-5 py-3.5">
                 <div className="flex items-center gap-4 min-w-0">
                   <span className="text-2xl font-display font-bold tracking-tight text-foreground">{selectedTicker.symbol}</span>
                   {selectedTicker.name && (
@@ -1058,7 +1058,7 @@ function BuildTradePageContent() {
               {/* Mixed-evidence fallback — shown when Alert couldn't pick */}
               {alertPick?.picked_direction === "mixed_evidence" && !alertPick?.existing_pick && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4">
-                  <p className="text-sm font-medium">Evidence conflicts — Ivy can&apos;t pick a clear direction</p>
+                  <p className="text-sm font-medium">Evidence conflicts: Ivy can&apos;t pick a clear direction</p>
                   <div className="text-xs text-muted-foreground space-y-1.5">
                     {alertPick.leans.map((lean) => (
                       <div key={lean.signal} className="flex items-start gap-2">
@@ -1202,7 +1202,7 @@ function BuildTradePageContent() {
                 </div>
               )}
 
-              <div className="rounded-2xl border bg-card px-6 py-6">
+              <div className="rounded-xl border border-border/60 bg-transparent px-6 py-6">
                 <DraftDisplay
                   draft={draft}
                   onAccept={handleAcceptDraft}
@@ -1230,7 +1230,7 @@ function BuildTradePageContent() {
           {(step === "confirm" || step === "saving") && (
             <section className="space-y-4">
               <StepHeader n={4} label="Confirm &amp; save" />
-              <div className="rounded-2xl border bg-card px-6 py-6 space-y-5">
+              <div className="rounded-xl border border-border/60 bg-transparent px-6 py-6 space-y-5">
 
                 <div className="grid grid-cols-2 gap-5">
                   <div>
@@ -1260,7 +1260,7 @@ function BuildTradePageContent() {
                       step="0.01"
                       value={priceTarget}
                       onChange={(e) => setPriceTarget(e.target.value)}
-                      placeholder="—"
+                      placeholder=""
                       className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
                     />
                   </div>

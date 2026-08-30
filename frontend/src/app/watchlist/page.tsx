@@ -43,11 +43,11 @@ function fmtQuoteTime(unix: number | null | undefined): string {
 }
 
 function fmtPrice(n: number | null): string {
-  return n == null ? "—" : `$${n.toFixed(2)}`;
+  return n == null ? "n/a" : `$${n.toFixed(2)}`;
 }
 
 function fmtDate(d: string | null): string {
-  if (!d) return "—";
+  if (!d) return "n/a";
   const [y, m, day] = d.split("-").map(Number);
   return new Date(y, m - 1, day).toLocaleDateString("en-US", {
     month: "short",
@@ -79,7 +79,7 @@ function Skeleton({ w = "w-16" }: { w?: string }) {
 function ChangeCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-14" />;
   if (!data || data.change_pct == null)
-    return <span className="text-muted-foreground text-xs">—</span>;
+    return <span className="text-muted-foreground text-xs">n/a</span>;
   const pct = data.change_pct;
   const color =
     pct > 0
@@ -88,7 +88,7 @@ function ChangeCell({ data, status }: { data: BatchEnrichItem | null; status: st
       ? "text-destructive"
       : "text-muted-foreground";
   return (
-    <span className={`font-medium ${color}`}>
+    <span className={`font-medium tabular-nums ${color}`}>
       {pct > 0 ? "+" : ""}
       {pct.toFixed(2)}%
     </span>
@@ -98,9 +98,9 @@ function ChangeCell({ data, status }: { data: BatchEnrichItem | null; status: st
 function ImpliedMoveCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-12" />;
   if (!data || data.expected_move_pct == null)
-    return <span className="text-muted-foreground text-xs">—</span>;
+    return <span className="text-muted-foreground text-xs">n/a</span>;
   return (
-    <span className="font-mono text-sm">
+    <span className="font-mono text-sm tabular-nums">
       ±{(data.expected_move_pct * 100).toFixed(1)}%
     </span>
   );
@@ -109,7 +109,7 @@ function ImpliedMoveCell({ data, status }: { data: BatchEnrichItem | null; statu
 function RVRankCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-12" />;
   if (!data || data.rv_rank == null)
-    return <span className="text-muted-foreground text-xs">—</span>;
+    return <span className="text-muted-foreground text-xs">n/a</span>;
   const rank = data.rv_rank;
   const { tag, colorClass } = rvRankShort(rank);
   return (
@@ -153,9 +153,9 @@ function WatchlistRow({
         </Link>
       </td>
       <td className="py-3 px-4 text-sm text-muted-foreground">
-        <span className="line-clamp-1 max-w-[180px] block">{ticker.name ?? "—"}</span>
+        <span className="line-clamp-1 max-w-[180px] block">{ticker.name ?? "n/a"}</span>
       </td>
-      <td className="py-3 px-4 font-mono text-sm">
+      <td className="py-3 px-4 font-mono text-sm tabular-nums">
         {status === "loading" ? (
           <Skeleton w="w-16" />
         ) : (
@@ -188,7 +188,7 @@ function WatchlistRow({
             );
           })()
         ) : (
-          <span className="text-muted-foreground text-xs">—</span>
+          <span className="text-muted-foreground text-xs">n/a</span>
         )}
       </td>
       <td className="py-3 px-4 text-sm">
@@ -444,7 +444,7 @@ export default function WatchlistPage() {
                 ← Home
               </Link>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">Watchlist</h1>
+            <h1 className="text-2xl font-display font-bold tracking-tight">Watchlist</h1>
             {health?.last_refreshed_at && (
               <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
                 Data as of {timeAgo(health.last_refreshed_at)}
@@ -471,7 +471,7 @@ export default function WatchlistPage() {
 
         {/* Create watchlist form */}
         {showCreate && (
-          <div className="mb-6 rounded-lg border bg-card px-5 py-4 flex items-center gap-3">
+          <div className="mb-6 rounded-lg border border-border/60 bg-transparent px-5 py-4 flex items-center gap-3">
             <input
               type="text"
               value={newWlName}
@@ -515,7 +515,7 @@ export default function WatchlistPage() {
 
         {/* Empty state — no watchlists */}
         {wlStatus === "done" && watchlists.length === 0 && !showCreate && (
-          <div className="rounded-lg border bg-card px-8 py-12 text-center">
+          <div className="rounded-lg border border-border/60 bg-transparent px-8 py-12 text-center">
             <p className="text-muted-foreground mb-4">No watchlists yet.</p>
             <button
               onClick={() => setShowCreate(true)}
@@ -580,7 +580,7 @@ export default function WatchlistPage() {
                     setAddError(null);
                   }}
                   onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                  placeholder="Add ticker — type symbol (e.g. AAPL)"
+                  placeholder="Add ticker, e.g. AAPL"
                   className="rounded-md border bg-background px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-ring font-mono"
                 />
                 <datalist id="ticker-symbols">
@@ -613,8 +613,8 @@ export default function WatchlistPage() {
 
             {/* Empty watchlist */}
             {activeWatchlist.items.length === 0 && rows.length === 0 && (
-              <div className="rounded-lg border bg-card px-8 py-10 text-center text-muted-foreground text-sm">
-                No tickers yet — add one above.
+              <div className="rounded-lg border border-border/60 bg-transparent px-8 py-10 text-center text-muted-foreground text-sm">
+                No tickers yet. Add one above.
               </div>
             )}
 
@@ -672,7 +672,7 @@ export default function WatchlistPage() {
 
                 <div className="px-4 py-3 bg-muted/20 border-t border-border">
                   <p className="text-[11px] text-muted-foreground/60">
-                    Prices via Finnhub — may be delayed up to 15 min. Implied move derived from near-term options straddle.
+                    Prices via Finnhub. May be delayed up to 15 min. Implied move derived from near-term options straddle.
                     RV rank: where this stock&apos;s current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute).
                   </p>
                 </div>

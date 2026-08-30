@@ -60,9 +60,9 @@ function fmtAsOf(isoStr: string): string {
 }
 
 function fmtPrice(v: string | null | undefined): string {
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   const n = parseFloat(v);
-  return isNaN(n) ? "—" : `$${n.toFixed(2)}`;
+  return isNaN(n) ? "n/a" : `$${n.toFixed(2)}`;
 }
 
 function fmtDate(v: string): string {
@@ -87,7 +87,7 @@ function pctChange(entry: string | null, resolution: string | null): string {
 }
 
 function fmtPnl(dollars: number | null, pct: number | null): { str: string; color: string } {
-  if (dollars == null) return { str: "—", color: "text-muted-foreground" };
+  if (dollars == null) return { str: "n/a", color: "text-muted-foreground" };
   const sign = dollars >= 0 ? "+" : "";
   const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
   const absStr = `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`;
@@ -101,7 +101,7 @@ function fmtPnl(dollars: number | null, pct: number | null): { str: string; colo
 function fmtOptionLeg(thesis: Thesis): string | null {
   if (!thesis.option_type || !thesis.strike) return null;
   const s1 = parseFloat(thesis.strike);
-  const exp = thesis.option_expiration ? fmtDateShort(thesis.option_expiration) : "—";
+  const exp = thesis.option_expiration ? fmtDateShort(thesis.option_expiration) : "n/a";
   if (thesis.strike2) {
     const s2 = parseFloat(thesis.strike2);
     const name = thesis.option_type === "call" ? "Bull call spread" : "Bear put spread";
@@ -278,15 +278,15 @@ function StockPriceMark({
       {/* Headline: current price + % from entry */}
       <div className="flex items-center gap-2 flex-wrap text-sm">
         {current_price != null && (
-          <span className="font-mono font-medium text-foreground">${current_price.toFixed(2)}</span>
+          <span className="font-mono font-medium tabular-nums text-foreground">${current_price.toFixed(2)}</span>
         )}
         {pct_from_entry != null && (
-          <span className={`font-mono ${pctColor}`}>
+          <span className={`font-mono tabular-nums ${pctColor}`}>
             {pctSign}{pct_from_entry.toFixed(2)}% from entry
           </span>
         )}
         {pctToDisplay != null && (
-          <span className="font-mono text-muted-foreground text-xs">
+          <span className="font-mono tabular-nums text-muted-foreground text-xs">
             · {pctToDisplay}% to target
           </span>
         )}
@@ -353,7 +353,7 @@ function DraftPanel({
     <div className="rounded-lg border bg-muted/30 p-4 space-y-3 text-sm">
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          AI Draft — {draft.aggressiveness} {draft.direction}
+          AI Draft · {draft.aggressiveness} {draft.direction}
         </p>
         <span className="text-xs text-muted-foreground">{draft.model_used}</span>
       </div>
@@ -383,17 +383,17 @@ function DraftPanel({
 
       <div className="rounded-md bg-background border px-3 py-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
         <span>Price: <span className="text-foreground">${fb.current_price.toFixed(2)}</span></span>
-        <span>Implied move: <span className="text-foreground">±{fb.expected_move_pct?.toFixed(1) ?? "—"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "—"})</span></span>
-        <span>Implied range: <span className="text-foreground">${fb.implied_range_low?.toFixed(2) ?? "—"} – ${fb.implied_range_high?.toFixed(2) ?? "—"}</span></span>
-        <span>Earnings: <span className="text-foreground">{fb.earnings_date ?? "—"}</span></span>
-        <span>Hist avg: <span className="text-foreground">±{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
-        <span>Hist max: <span className="text-foreground">±{fb.hist_max_abs_move_pct?.toFixed(2) ?? "—"}%</span></span>
-        <span>Beat rate: <span className="text-foreground">{fb.beat_rate_pct?.toFixed(1) ?? "—"}%</span></span>
-        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="text-foreground">—</span>}</span>
+        <span>Implied move: <span className="text-foreground">±{fb.expected_move_pct?.toFixed(1) ?? "n/a"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "n/a"})</span></span>
+        <span>Implied range: <span className="text-foreground">${fb.implied_range_low?.toFixed(2) ?? "n/a"} – ${fb.implied_range_high?.toFixed(2) ?? "n/a"}</span></span>
+        <span>Earnings: <span className="text-foreground">{fb.earnings_date ?? "n/a"}</span></span>
+        <span>Hist avg: <span className="text-foreground">±{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span></span>
+        <span>Hist max: <span className="text-foreground">±{fb.hist_max_abs_move_pct?.toFixed(2) ?? "n/a"}%</span></span>
+        <span>Beat rate: <span className="text-foreground">{fb.beat_rate_pct?.toFixed(1) ?? "n/a"}%</span></span>
+        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="text-foreground">n/a</span>}</span>
       </div>
 
       <p className="text-xs text-muted-foreground italic">
-        Data-grounded suggestion — not a recommendation. Review and edit before saving.
+        Data-grounded suggestion. Not a recommendation. Review and edit before saving.
       </p>
 
       <button
@@ -503,7 +503,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-5 space-y-4 max-w-xl">
+    <form onSubmit={handleSubmit} className="rounded-lg border border-border/60 bg-transparent p-5 space-y-4 max-w-xl">
       <h3 className="font-semibold text-base">New Thesis</h3>
 
       <div className="grid grid-cols-2 gap-3">
@@ -902,12 +902,12 @@ function ThesisCard({
   }
 
   return (
-    <div className={`rounded-lg border bg-card p-4 space-y-2 ${deleting ? "opacity-40" : ""}`}>
+    <div className={`border-b border-border/40 pb-4 space-y-2 ${deleting ? "opacity-40" : ""}`}>
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <Link href={`/tickers/${thesis.ticker_symbol}`} className="font-semibold hover:underline">
-            {thesis.ticker_symbol ?? "—"}
+            {thesis.ticker_symbol ?? "n/a"}
           </Link>
           <span className={`text-sm font-medium capitalize ${DIRECTION_COLOR[thesis.direction]}`}>
             {thesis.direction}
@@ -976,11 +976,11 @@ function ThesisCard({
 
       {/* ── Compact fact row ───────────────────────────────────────────── */}
       <div className="flex items-center gap-3 text-sm flex-wrap text-muted-foreground">
-        <span>Entry: <span className="font-mono text-foreground font-medium">{fmtPrice(thesis.entry_price)}</span></span>
+        <span>Entry: <span className="font-mono tabular-nums text-foreground font-medium">{fmtPrice(thesis.entry_price)}</span></span>
         {thesis.price_target && (
-          <span>→ Target: <span className="font-mono text-foreground font-medium">{fmtPrice(thesis.price_target)}</span></span>
+          <span>→ Target: <span className="font-mono tabular-nums text-foreground font-medium">{fmtPrice(thesis.price_target)}</span></span>
         )}
-        <span>By: <span className="font-mono text-foreground">{fmtDate(thesis.target_date)}</span></span>
+        <span>By: <span className="font-mono tabular-nums text-foreground">{fmtDate(thesis.target_date)}</span></span>
         {thesis.catalyst && (
           <span className="text-muted-foreground">· {thesis.catalyst}</span>
         )}
@@ -990,7 +990,7 @@ function ThesisCard({
       {thesis.entry_premium && (
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-xs text-muted-foreground">
-            Option entry: <span className="font-mono text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
+            Option entry: <span className="font-mono tabular-nums text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
             {thesis.contracts > 1 && ` · ${thesis.contracts} contracts`}
           </p>
           <Link
@@ -1352,7 +1352,7 @@ export default function ThesesPage() {
       <div className="max-w-3xl mx-auto">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">My Trades</h1>
+            <h1 className="text-2xl font-display font-bold tracking-tight">My Trades</h1>
             <p className="text-muted-foreground text-sm mt-0.5">
               {openCount} open{dueCount > 0 ? ` · ${dueCount} due for resolution` : ""}
             </p>
@@ -1389,7 +1389,7 @@ export default function ThesesPage() {
         {loading ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => (
-              <div key={i} className="rounded-lg border bg-card p-4 animate-pulse space-y-2">
+              <div key={i} className="border-b border-border/40 pb-4 animate-pulse space-y-2">
                 <div className="h-4 bg-muted rounded w-32" />
                 <div className="h-3 bg-muted rounded w-48" />
                 <div className="h-3 bg-muted rounded w-64" />
