@@ -20,17 +20,13 @@ import {
   type Watchlist,
   type HealthStatus,
 } from "@/lib/api";
-import { cn, rvRankShort } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import Callout from "@/components/Callout";
+import { SectionKicker } from "@/components/SectionKicker";
 import StructuredNoteView from "@/components/StructuredNoteView";
-import Tip from "@/components/Tip";
 
 // Extracted components
-import ExpectedMoveCard from "@/components/ticker/ExpectedMoveCard";
 import ExplainTip from "@/components/ticker/ExplainTip";
-import OptionsEducation from "@/components/ticker/OptionsEducation";
-import StrategyExplainer from "@/components/ticker/StrategyExplainer";
-import RealizedVolPanel from "@/components/ticker/RealizedVolPanel";
 
 // ── Date / number helpers ─────────────────────────────────────────────────────
 
@@ -1096,24 +1092,14 @@ function PriceChart({
   );
 }
 
-// ── Stat strip ────────────────────────────────────────────────────────────────
-
-function Stat({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value ?? "—"}</span>
-    </div>
-  );
-}
-
 // ── Section nav ──────────────────────────────────────────────────────────────
 
 const BASE_SECTIONS = [
-  { id: "overview", label: "Overview" },
-  { id: "catalysts", label: "Catalysts" },
-  { id: "history", label: "History" },
-  { id: "market-view", label: "Options" },
+  { id: "overview",  label: "OVERVIEW" },
+  { id: "catalysts", label: "CATALYSTS" },
+  { id: "evidence",  label: "EVIDENCE" },
+  { id: "options",   label: "OPTIONS" },
+  { id: "research",  label: "RESEARCH" },
 ] as const;
 
 function SectionNav({ sections }: { sections: readonly { id: string; label: string }[] }) {
@@ -1180,8 +1166,8 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
   }, [sections]);
 
   return (
-    <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8 mb-8">
-      <div className="max-w-4xl mx-auto flex gap-1 overflow-x-auto py-2">
+    <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8">
+      <div className="max-w-6xl mx-auto flex gap-6 overflow-x-auto py-3">
         {sections.map((s) => (
           <a
             key={s.id}
@@ -1193,10 +1179,10 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
               document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
             className={cn(
-              "px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors",
+              "font-mono text-xs uppercase tracking-widest whitespace-nowrap transition-colors",
               active === s.id
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                ? "text-foreground"
+                : "text-muted-foreground/50 hover:text-muted-foreground",
             )}
           >
             {s.label}
@@ -1248,71 +1234,6 @@ function WhyNowStrip({
           {c.label}
         </span>
       ))}
-    </div>
-  );
-}
-
-// ── Metrics row (IV/RV spread + put/call ratio) ──────────────────────────────
-
-function MetricsRow({
-  optionsRead,
-  optionsChain,
-  symbol,
-}: {
-  optionsRead: OptionsRead | null;
-  optionsChain: OptionsChain | null;
-  symbol: string;
-}) {
-  const spread = optionsRead?.iv_rv_spread_pp;
-
-  const pcRatio = useMemo(() => {
-    if (!optionsChain) return null;
-    const putVol = optionsChain.puts.reduce((s, p) => s + (p.volume ?? 0), 0);
-    const callVol = optionsChain.calls.reduce((s, c) => s + (c.volume ?? 0), 0);
-    if (callVol === 0) return null;
-    return putVol / callVol;
-  }, [optionsChain]);
-
-  if (spread == null && pcRatio == null) return null;
-
-  const spreadLabel =
-    spread == null ? null
-    : spread > 10 ? "options rich vs realized"
-    : spread < -10 ? "options cheap vs realized"
-    : "in line";
-
-  const spreadColor =
-    spread == null ? ""
-    : spread > 10 ? "text-amber-600 dark:text-amber-400"
-    : spread < -10 ? "text-green-700 dark:text-green-400"
-    : "text-muted-foreground";
-
-  return (
-    <div className="grid grid-cols-2 gap-4 mb-6">
-      {spread != null && (
-        <div className="rounded-lg border bg-card px-4 py-3">
-          <p className="text-xs text-muted-foreground mb-0.5">
-            <ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={symbol}>IV − RV Spread</ExplainTip>
-          </p>
-          <p className="text-lg font-bold tabular-nums">
-            {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
-          </p>
-          {spreadLabel && (
-            <p className={cn("text-xs font-medium mt-0.5", spreadColor)}>{spreadLabel}</p>
-          )}
-        </div>
-      )}
-      {pcRatio != null && (
-        <div className="rounded-lg border bg-card px-4 py-3">
-          <p className="text-xs text-muted-foreground mb-0.5">
-            <ExplainTip term="put/call ratio" metric="put_call" symbol={symbol}>Put/Call Ratio</ExplainTip>
-          </p>
-          <p className="text-lg font-bold tabular-nums">{pcRatio.toFixed(2)}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {pcRatio > 1.2 ? "put-heavy" : pcRatio < 0.7 ? "call-heavy" : "balanced"}
-          </p>
-        </div>
-      )}
     </div>
   );
 }
@@ -1388,6 +1309,9 @@ export default function TickerPage() {
   const [stockMarks, setStockMarks]   = useState<Record<string, ThesisStockMarkRead | "loading" | "error">>({});
   const [marksAsOf, setMarksAsOf]     = useState<Date | null>(null);
   const [marksRefreshing, setMarksRefreshing] = useState(false);
+
+  // Insight
+  const [insight, setInsight] = useState<string | null>(null);
 
   // Watchlist
   const [watched, setWatched] = useState<boolean | null>(null); // null = loading
@@ -1524,6 +1448,7 @@ export default function TickerPage() {
   useEffect(() => {
     api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
     api.system.health().then(setHealth).catch(() => {});
+    api.discover.insight(upperSymbol).then(r => setInsight(r.insight)).catch(() => {});
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -1709,16 +1634,14 @@ export default function TickerPage() {
 
   const sections = useMemo(() => [
     ...BASE_SECTIONS,
-    ...(hasPositions ? [{ id: "positions", label: "Positions" }] : []),
-    { id: "research", label: "Research" },
-  ], [hasPositions]);
+  ], []);
 
   if (tickerStatus === "missing") notFound();
 
   if (tickerStatus === "loading") {
     return (
       <main className="min-h-screen p-8">
-        <div className="max-w-4xl mx-auto animate-pulse space-y-4">
+        <div className="max-w-6xl mx-auto animate-pulse space-y-4">
           <div className="h-4 bg-muted rounded w-16" />
           <div className="h-14 bg-muted rounded w-40 mt-6" />
           <div className="h-5 bg-muted rounded w-72" />
@@ -1733,7 +1656,7 @@ export default function TickerPage() {
   if (tickerStatus === "error") {
     return (
       <main className="min-h-screen p-8">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             Failed to load ticker: {tickerError}
           </div>
@@ -1746,7 +1669,7 @@ export default function TickerPage() {
 
   return (
     <main className="min-h-screen p-8">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← All tickers
         </Link>
@@ -1756,7 +1679,7 @@ export default function TickerPage() {
           {/* Header */}
           <div className="mt-6 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-5xl font-bold tracking-tight">{ticker.symbol}</h1>
+              <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
               {ticker.name && (
                 <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
               )}
@@ -1864,21 +1787,25 @@ export default function TickerPage() {
             impliedRangeHigh={expectedMove?.implied_range_high}
           />
 
-          {/* Stats strip */}
-          <div className="mt-8 flex flex-wrap gap-x-10 gap-y-4 rounded-lg border bg-card p-5">
-            <Stat label="Sector"     value={ticker.sector} />
-            <Stat label="Industry"   value={ticker.industry} />
-            <Stat label="Exchange"   value={ticker.exchange} />
-            <Stat label="Market Cap" value={ticker.market_cap != null ? formatMarketCap(ticker.market_cap) : null} />
-          </div>
+          <p className="font-mono text-xs text-muted-foreground mt-6">
+            {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
+            {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
+            {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
+          </p>
+
+          <SectionKicker index="01" label="Overview" />
+
+          {insight && (
+            <p className="text-lg text-foreground/80 leading-relaxed mb-6">{insight}</p>
+          )}
         </section>
 
         {/* Section nav */}
         <SectionNav sections={sections} />
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
-        <section id="catalysts" className="scroll-mt-28">
-          <h2 className="text-lg font-semibold mb-4">Catalysts</h2>
+        <section id="catalysts" className="mt-10 scroll-mt-28">
+          <SectionKicker index="02" label="Catalysts" />
 
           {/* 1. HERO — Next Catalyst */}
           {eventStatus === "loading" && (
@@ -1908,9 +1835,9 @@ export default function TickerPage() {
             const isPast = !heroEvent && !!pastHeroEvent;
             if (!displayEvent) {
               return (
-                <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground mb-4">
+                <p className="text-sm text-muted-foreground mb-4">
                   No upcoming catalysts
-                </div>
+                </p>
               );
             }
             const days = daysFromToday(displayEvent.event_date);
@@ -1937,21 +1864,17 @@ export default function TickerPage() {
             const showContextStrip = displayEvent.event_type === "earnings" && conditionalEarnings?.has_sufficient_history && reactionSummary;
 
             return (
-              <div className="rounded-lg border bg-card px-5 py-4 mb-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-base font-semibold">{displayEvent.title}</span>
-                      <EventTypeBadge type={displayEvent.event_type} />
-                      {isPast && (
-                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
-                          Past
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-0.5">{formatEventDate(displayEvent.event_date)}</p>
-                  </div>
-                  <div className="shrink-0 flex items-center gap-3">
+              <div className="mb-4">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-base font-semibold">{displayEvent.title}</span>
+                  <span className="text-sm text-muted-foreground">{formatEventDate(displayEvent.event_date)}</span>
+                  <EventTypeBadge type={displayEvent.event_type} />
+                  {isPast && (
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
+                      Past
+                    </span>
+                  )}
+                  <div className="flex items-center gap-3 ml-auto">
                     {isPast ? (
                       <>
                         {realized1d != null && (
@@ -2049,31 +1972,23 @@ export default function TickerPage() {
 
           {/* 2. STREET PULSE — Analyst Activity */}
           {(analystActionsStatus === "loading" || analystStatsStatus === "loading") && (
-            <div className="rounded-lg border bg-card p-5 space-y-3 animate-pulse mb-4">
+            <div className="border-t pt-6 mt-6 space-y-3 animate-pulse mb-4">
               <div className="h-3 bg-muted rounded w-24" />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  {[0, 1, 2].map(i => (
-                    <div key={i} className="flex gap-2">
-                      <div className="h-4 bg-muted rounded w-4" />
-                      <div className="h-4 bg-muted rounded w-32" />
-                      <div className="h-4 bg-muted rounded w-16 ml-auto" />
-                    </div>
-                  ))}
-                </div>
-                <div className="space-y-3">
-                  <div className="h-3 bg-muted rounded w-20" />
-                  <div className="h-5 bg-muted rounded w-28" />
-                  <div className="h-3 bg-muted rounded w-20" />
-                  <div className="h-5 bg-muted rounded w-28" />
-                </div>
+              <div className="space-y-3">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="flex gap-2">
+                    <div className="h-4 bg-muted rounded w-4" />
+                    <div className="h-4 bg-muted rounded w-32" />
+                    <div className="h-4 bg-muted rounded w-16 ml-auto" />
+                  </div>
+                ))}
               </div>
             </div>
           )}
           {analystActionsStatus === "done" && analystStatsStatus === "done" && (
             recentAnalystActions.length > 0 || analystStats != null
           ) && (
-            <div className="rounded-lg border bg-card px-5 py-4 mb-4">
+            <div className="border-t pt-6 mt-6 mb-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-3">Street Pulse</p>
               <div className={cn(
                 "grid gap-6",
@@ -2151,23 +2066,15 @@ export default function TickerPage() {
 
           {/* 3. MACRO STRIP */}
           {eventStatus === "done" && macroEvents.length > 0 && (
-            <div className="mb-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-2">Macro Calendar</p>
-              <div className="flex flex-wrap gap-2">
-                {macroEvents.map((evt) => (
-                  <span key={evt.id} className="inline-flex items-center rounded-full px-2.5 py-1 text-xs bg-muted text-muted-foreground gap-1.5">
-                    <span className="truncate max-w-[10rem]">{evt.title}</span>
-                    <span className="tabular-nums shrink-0">{formatEventDate(evt.event_date)}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
+            <p className="font-mono text-xs text-muted-foreground mt-6">
+              {macroEvents.map(e => `${e.title} ${formatEventDate(e.event_date)}`).join(" \u00B7 ")}
+            </p>
           )}
         </section>
 
-        {/* ── HISTORY ─────────────────────────────────────────────────── */}
-        <section id="history" className="mt-10 scroll-mt-28">
-          <h2 className="text-lg font-semibold mb-4">Historical Reactions</h2>
+        {/* ── EVIDENCE ─────────────────────────────────────────────────── */}
+        <section id="evidence" className="mt-10 scroll-mt-28">
+          <SectionKicker index="03" label="Evidence" />
 
           {/* Toggle pills — only shown when FOMC data exists */}
           {fomcStatus === "done" && fomcReactions.length > 0 && (
@@ -2253,52 +2160,15 @@ export default function TickerPage() {
           )}
         </section>
 
-        {/* ── MARKET VIEW (RV → Metrics → Expected Move → Options Read → Education → Strategies) ── */}
-        <section id="market-view" className="mt-10 mb-10 scroll-mt-28">
-          <h2 className="text-lg font-semibold mb-4">Market View</h2>
+        {/* ── OPTIONS ─────────────────────────────────────────────────── */}
+        <section id="options" className="mt-10 mb-10 scroll-mt-28">
+          <SectionKicker index="04" label="Options" />
 
-          {/* Realized Volatility */}
-          {rvStatus === "loading" && (
-            <div className="rounded-lg border bg-card px-5 py-4 space-y-4 animate-pulse mb-6">
-              <div className="flex justify-between">
-                <div className="space-y-2">
-                  <div className="h-3 bg-muted rounded w-36" />
-                  <div className="h-8 bg-muted rounded w-24" />
-                </div>
-                <div className="space-y-2 text-right">
-                  <div className="h-3 bg-muted rounded w-24 ml-auto" />
-                  <div className="h-6 bg-muted rounded w-16 ml-auto" />
-                </div>
-              </div>
-              <div className="h-2 bg-muted rounded-full" />
-              <div className="grid grid-cols-3 gap-3">
-                {[0,1,2].map(i => <div key={i} className="h-10 bg-muted rounded" />)}
-              </div>
-              <div className="h-3 bg-muted rounded w-3/4" />
-            </div>
-          )}
-          {rvStatus === "error" && (
-            <p className="text-sm text-muted-foreground mb-6">Could not load volatility data.</p>
-          )}
-          {rvStatus === "empty" && (
-            <p className="text-sm text-muted-foreground mb-6">
-              Insufficient price history for volatility analysis.
-            </p>
-          )}
-          {rvStatus === "done" && realizedVol && (
-            <div className="mb-6">
-              <RealizedVolPanel rv={realizedVol} symbol={upperSymbol} />
-            </div>
-          )}
-
-          {/* Metrics row: IV/RV spread + put/call ratio */}
-          <MetricsRow optionsRead={optionsRead} optionsChain={optionsChain} symbol={upperSymbol} />
-
-          {/* Expected Move */}
+          {/* Implied move lead display */}
           {bundleStatus === "loading" && (
             <div className="animate-pulse space-y-3 mb-6">
-              <div className="h-6 bg-muted rounded w-3/4 mb-4" />
-              <div className="h-28 bg-muted rounded-lg" />
+              <div className="h-8 bg-muted rounded w-40" />
+              <div className="h-4 bg-muted rounded w-64" />
             </div>
           )}
           {bundleStatus === "error" && (
@@ -2307,74 +2177,131 @@ export default function TickerPage() {
           {bundleStatus === "empty" && (
             <p className="text-sm text-muted-foreground mb-6">No options data available for {upperSymbol}.</p>
           )}
-          {bundleStatus === "done" && expectedMove && (
-            <div className="mb-6">
-              {expectedMove.plain_summary && (
-                <p className="text-base text-foreground leading-relaxed mb-4">
-                  {expectedMove.plain_summary}
+          {bundleStatus === "done" && expectedMove && (() => {
+            const emPct = expectedMove.expected_move_pct;
+            const emDol = expectedMove.expected_move_dollars;
+            const low = expectedMove.implied_range_low;
+            const high = expectedMove.implied_range_high;
+            const hist = expectedMove.historical_stats;
+            return (
+              <div className="mb-6">
+                <p className="text-3xl font-bold tabular-nums">
+                  {emPct != null ? `\u00B1${emPct.toFixed(1)}%` : ""}
+                  {emDol != null && <span className="text-xl text-muted-foreground ml-2">(${emDol.toFixed(2)})</span>}
                 </p>
-              )}
-              <ExpectedMoveCard
-                em={expectedMove}
-                symbol={upperSymbol}
-                onSelectExpiration={setSelectedExpiration}
-              />
-              {optionsChain?.as_of && (
-                <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
-                  chain as of {optionsChain.as_of.replace(/T.*$/, "")}
-                </p>
-              )}
-            </div>
-          )}
+                {expectedMove.plain_summary && (
+                  <p className="text-sm text-muted-foreground mt-1">{expectedMove.plain_summary}</p>
+                )}
+                {low != null && high != null && (
+                  <p className="text-sm mt-3">
+                    <span className="text-muted-foreground">Implied range</span>{" "}
+                    <span className="font-semibold tabular-nums">${low.toFixed(2)} - ${high.toFixed(2)}</span>
+                  </p>
+                )}
+                {expectedMove.straddle_price != null && expectedMove.atm_strike != null && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    ATM ${expectedMove.atm_strike.toFixed(0)} straddle at ${expectedMove.straddle_price.toFixed(2)}
+                    {expectedMove.expiration_used && ` exp ${expectedMove.expiration_used}`}
+                  </p>
+                )}
+                {hist && hist.sample_size >= 3 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Historical: avg \u00B1{hist.avg_abs_move_pct.toFixed(1)}% over {hist.sample_size} prints,
+                    above implied {hist.above_expected} / below {hist.below_expected}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* RV rank + IV/RV spread + Put/Call as StatRows */}
+          {(() => {
+            const rvRk = realizedVol?.rv_rank ?? null;
+            const spread = optionsRead?.iv_rv_spread_pp ?? null;
+            const pcRatio = optionsChain
+              ? (() => {
+                  const putVol = optionsChain.puts.reduce((s, p) => s + (p.volume ?? 0), 0);
+                  const callVol = optionsChain.calls.reduce((s, c) => s + (c.volume ?? 0), 0);
+                  return callVol > 0 ? putVol / callVol : null;
+                })()
+              : null;
+
+            if (rvRk == null && spread == null && pcRatio == null) return null;
+
+            const rvColor = rvRk != null && rvRk >= 90
+              ? "text-primary" : rvRk != null && rvRk >= 75
+              ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground";
+            const rvTag = rvRk != null
+              ? rvRk >= 90 ? "extreme" : rvRk >= 75 ? "elevated" : "normal"
+              : "";
+            const spreadColor = spread != null && spread > 10
+              ? "text-amber-600 dark:text-amber-400"
+              : spread != null && spread < -10
+              ? "text-green-700 dark:text-green-400"
+              : "text-muted-foreground";
+            const spreadLabel = spread != null
+              ? spread > 10 ? "options rich" : spread < -10 ? "options cheap" : "in line"
+              : "";
+            const pcLabel = pcRatio != null
+              ? pcRatio > 1.2 ? "put-heavy" : pcRatio < 0.7 ? "call-heavy" : "balanced"
+              : "";
+
+            return (
+              <div className="space-y-2 mb-6">
+                {rvRk != null && (
+                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                    <span className="text-sm text-muted-foreground">RV rank</span>
+                    <span className="font-mono text-sm font-medium tabular-nums">
+                      {rvRk.toFixed(1)} <span className={rvColor}>{rvTag}</span>
+                    </span>
+                  </div>
+                )}
+                {spread != null && (
+                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                    <span className="text-sm text-muted-foreground">IV - RV spread</span>
+                    <span className="font-mono text-sm font-medium tabular-nums">
+                      {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
+                      <span className={spreadColor}> {spreadLabel}</span>
+                    </span>
+                  </div>
+                )}
+                {pcRatio != null && (
+                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                    <span className="text-sm text-muted-foreground">Put/Call ratio</span>
+                    <span className="font-mono text-sm font-medium tabular-nums">
+                      {pcRatio.toFixed(2)} <span className="text-muted-foreground">{pcLabel}</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* AI options read */}
           {orStatus === "loading" && (
-            <div className="rounded-lg border bg-card px-5 py-4 mb-6 animate-pulse space-y-2">
+            <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6 animate-pulse space-y-2">
               <div className="h-3 bg-muted rounded w-40" />
               <div className="h-4 bg-muted rounded w-full" />
-              <div className="h-4 bg-muted rounded w-11/12" />
               <div className="h-4 bg-muted rounded w-4/5" />
             </div>
           )}
           {orStatus === "done" && optionsRead && optionsRead.model_used !== "none" && (
-            <div className="rounded-lg border bg-card px-5 py-4 mb-6 space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  AI read, options setup
-                </span>
-                <span className="text-[10px] text-muted-foreground/70">
-                  · educational interpretation · not investment advice
-                </span>
-              </div>
+            <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6">
+              <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-2">
+                AI read, options setup
+              </p>
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
-              <p className="text-[10px] text-muted-foreground/60">
+              <p className="text-[10px] text-muted-foreground/60 mt-2">
                 {optionsRead.model_used} · {optionsRead.cached ? "cached" : "generated"} {timeAgo(optionsRead.generated_at)}
                 {optionsRead.as_of && ` · chain as of ${optionsRead.as_of.replace(/T.*$/, "")}`}
               </p>
             </div>
           )}
 
-          {/* Options Education */}
-          {bundleStatus === "done" && expectedMove && optionsChain && (
-            <OptionsEducation
-              em={expectedMove}
-              chain={optionsChain}
-              symbol={upperSymbol}
-            />
-          )}
-
-          {/* Strategy explainer */}
-          {bundleStatus === "done" && strategyData && strategyData.strikes.length > 0 && strikesFallback && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-4 mb-1 italic">
-              Prices from last trade. Live quotes unavailable (market closed or thin). Treat P&L figures as approximate.
-            </p>
-          )}
-          {bundleStatus === "done" && strategyData && strategyData.strikes.length > 0 && (
-            <StrategyExplainer data={strategyData} symbol={upperSymbol} />
-          )}
-          {bundleStatus === "done" && strategyData && strategyData.strikes.length === 0 && (
-            <p className="text-sm text-muted-foreground mt-4">
-              Options strategy analysis unavailable for {upperSymbol}.
+          {/* Chain as-of */}
+          {optionsChain?.as_of && (
+            <p className="text-[10px] font-mono text-muted-foreground/50 mb-4">
+              chain as of {optionsChain.as_of.replace(/T.*$/, "")}
             </p>
           )}
         </section>
@@ -2388,13 +2315,13 @@ export default function TickerPage() {
 
           function fmtLeg(t: Thesis): string {
             if (!t.option_type || !t.strike) {
-              const ep = t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : "—";
+              const ep = t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : "n/a";
               return `stock from ${ep}`;
             }
             const s1 = parseFloat(t.strike).toFixed(0);
             const exp = t.option_expiration
               ? formatEventDate(t.option_expiration)
-              : "—";
+              : "n/a";
             if (t.strike2) {
               const s2 = parseFloat(t.strike2).toFixed(0);
               const name = t.option_type === "call" ? "bull call spread" : "bear put spread";
@@ -2434,17 +2361,17 @@ export default function TickerPage() {
             const hasOption = t.option_type && t.strike;
             if (hasOption) {
               const m = optionMarks[t.id];
-              if (!m || m === "loading" || m === "error") return "—";
-              if (m.current_mid1 == null) return "—";
-              // Spread: show net mid (long − short); single leg: show mid
+              if (!m || m === "loading" || m === "error") return "n/a";
+              if (m.current_mid1 == null) return "n/a";
+              // Spread: show net mid (long - short); single leg: show mid
               if (t.strike2 && m.current_mid2 != null) {
                 return `$${(m.current_mid1 - m.current_mid2).toFixed(2)}`;
               }
               return `$${m.current_mid1.toFixed(2)}`;
             } else {
               const m = stockMarks[t.id];
-              if (!m || m === "loading" || m === "error") return "—";
-              if (m.current_price == null) return "—";
+              if (!m || m === "loading" || m === "error") return "n/a";
+              if (m.current_price == null) return "n/a";
               return `$${m.current_price.toFixed(2)}`;
             }
           }
@@ -2469,7 +2396,7 @@ export default function TickerPage() {
           function renderThesisRow(t: Thesis, muted = false) {
             const pnl = positionPnl(t);
             const loading = isMarkLoading(t);
-            const entryStr = t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : "—";
+            const entryStr = t.entry_price ? `$${parseFloat(t.entry_price).toFixed(2)}` : "n/a";
             const hasOption = !!(t.option_type && t.strike);
             let entryLabel = entryStr;
             if (hasOption && t.entry_premium) {
@@ -2497,7 +2424,7 @@ export default function TickerPage() {
                     )}>
                       {t.direction}
                     </span>
-                    <span className="text-sm text-muted-foreground">—</span>
+                    <span className="text-sm text-muted-foreground">&middot;</span>
                     <span className="text-sm">{fmtLeg(t)}</span>
                     {statusChip(t)}
                   </div>
@@ -2570,9 +2497,9 @@ export default function TickerPage() {
           );
         })()}
 
-        {/* ── RESEARCH NOTE ───────────────────────────────────────────── */}
+        {/* ── RESEARCH ────────────────────────────────────────────────── */}
         <section id="research" className="mt-10 mb-10 scroll-mt-28">
-          <h2 className="text-lg font-semibold mb-4">Research Note</h2>
+          <SectionKicker index="05" label="Research" />
 
           {noteStatus === "loading" && (
             <div className="rounded-lg border bg-card p-6 animate-pulse space-y-3">
@@ -2752,79 +2679,73 @@ export default function TickerPage() {
               )}
             </div>
           )}
-        </section>
+          {/* Recent News */}
+          <div className="border-t pt-6 mt-8">
+            <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-4">Recent News</p>
 
-        {/* ── NEWS ────────────────────────────────────────────────────── */}
-        <div className="mt-10 mb-10">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold">Recent News</h2>
-            <p className="text-xs text-muted-foreground/60 mt-0.5">
-              Live · from news sources · not verified
-            </p>
-          </div>
-
-          {newsStatus === "loading" && (
-            <div className="space-y-3 animate-pulse">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="rounded-lg border bg-card px-4 py-3 space-y-2">
-                  <div className="h-4 bg-muted rounded w-3/4" />
-                  <div className="h-3 bg-muted rounded w-1/2" />
-                </div>
-              ))}
-            </div>
-          )}
-          {newsStatus === "empty" && (
-            <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
-          )}
-          {newsStatus === "error" && (
-            <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
-          )}
-          {newsStatus === "done" && news && (() => {
-            const visible = newsExpanded ? news.items : news.items.slice(0, 3);
-            const hasMore = news.items.length > 3;
-            return (
-              <div className="space-y-2">
-                {visible.map((item) => (
-                  <div
-                    key={item.datetime + item.headline.slice(0, 20)}
-                    className="rounded-lg border border-border/60 bg-card px-4 py-3"
-                  >
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
-                    >
-                      {item.headline}
-                    </a>
-                    <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
-                      <span>{item.source}</span>
-                      <span>·</span>
-                      <span>{timeAgoUnix(item.datetime)}</span>
-                    </div>
-                    {item.summary && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-                        {item.summary}
-                      </p>
-                    )}
+            {newsStatus === "loading" && (
+              <div className="space-y-3 animate-pulse">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="h-4 bg-muted rounded w-3/4" />
+                    <div className="h-3 bg-muted rounded w-1/2" />
                   </div>
                 ))}
-                {hasMore && (
-                  <button
-                    type="button"
-                    onClick={() => setNewsExpanded((o) => !o)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
-                  >
-                    <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
-                    {newsExpanded
-                      ? "Show less"
-                      : `Show ${news.items.length - 3} more stories`}
-                  </button>
-                )}
               </div>
-            );
-          })()}
-        </div>
+            )}
+            {newsStatus === "empty" && (
+              <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
+            )}
+            {newsStatus === "error" && (
+              <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
+            )}
+            {newsStatus === "done" && news && (() => {
+              const visible = newsExpanded ? news.items : news.items.slice(0, 3);
+              const hasMore = news.items.length > 3;
+              return (
+                <div className="space-y-2">
+                  {visible.map((item) => (
+                    <div
+                      key={item.datetime + item.headline.slice(0, 20)}
+                      className="rounded-lg border border-border/60 bg-card px-4 py-3"
+                    >
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
+                      >
+                        {item.headline}
+                      </a>
+                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
+                        <span>{item.source}</span>
+                        <span>·</span>
+                        <span>{timeAgoUnix(item.datetime)}</span>
+                      </div>
+                      {item.summary && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                          {item.summary}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {hasMore && (
+                    <button
+                      type="button"
+                      onClick={() => setNewsExpanded((o) => !o)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
+                    >
+                      <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
+                      {newsExpanded
+                        ? "Show less"
+                        : `Show ${news.items.length - 3} more stories`}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </section>
 
       </div>
     </main>

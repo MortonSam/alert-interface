@@ -85,6 +85,10 @@ class UnusuallyActiveResponse(BaseModel):
     items: list[UnusuallyActiveItem]
 
 
+class InsightResponse(BaseModel):
+    insight: str | None = None
+
+
 class LatestPickItem(BaseModel):
     id: str
     symbol: str
@@ -1084,3 +1088,27 @@ async def latest_pick(
             option_pnl_pct=option_pnl_pct,
         ),
     )
+
+
+@router.get("/insight/{symbol}", response_model=InsightResponse)
+async def ticker_insight(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+) -> InsightResponse:
+    """Single-ticker insight line using the suggestion insight generator."""
+    upper = symbol.upper()
+    # Verify ticker exists
+    ticker_q = await db.execute(
+        select(Ticker).where(Ticker.symbol == upper)
+    )
+    ticker = ticker_q.scalar_one_or_none()
+    if ticker is None:
+        return InsightResponse(insight=None)
+
+    cond = await _batch_conditional_stats(db, [upper])
+    buy_share = await _batch_buy_share_delta(db, [upper])
+    base = await _get_base_rates(db)
+    line, _, _ = _suggestion_insight(
+        cond.get(upper), None, buy_share.get(upper), base, upper,
+    )
+    return InsightResponse(insight=line)

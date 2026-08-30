@@ -913,6 +913,8 @@ export const api = {
       request<UnusuallyActiveResponse>(`/discover/unusually-active?limit=${limit}`),
     latestPick: () =>
       request<LatestPickResponse>(`/discover/latest-pick`),
+    insight: (symbol: string) =>
+      request<{ insight: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
   },
 
   reactions: {
