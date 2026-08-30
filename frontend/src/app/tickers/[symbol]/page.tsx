@@ -1628,7 +1628,7 @@ export default function TickerPage() {
         </Link>
 
         {/* Header */}
-          <div className="mt-6 flex items-start justify-between gap-4 flex-wrap">
+          <div id="overview" className="mt-6 flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
               {ticker.name && (
@@ -1747,13 +1747,13 @@ export default function TickerPage() {
         {/* Section nav */}
         <SectionNav sections={sections} />
 
-        {/* ── OVERVIEW ────────────────────────────────────────────────── */}
-        <section id="overview" className="pt-16 pb-24 scroll-mt-28">
+        {/* Overview kicker + insight dek */}
+        <div className="mt-10 mb-16">
           <SectionKicker index="01" label="Overview" />
           {insight && (
             <p className="text-2xl font-display text-foreground/80 leading-relaxed">{insight}</p>
           )}
-        </section>
+        </div>
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
         <section id="catalysts" className="border-t pt-16 pb-24 scroll-mt-28">
