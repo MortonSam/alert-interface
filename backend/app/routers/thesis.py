@@ -10,7 +10,7 @@ from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import require_admin
+from app.auth import check_ownership, get_current_user, get_optional_user
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_recommendation import AnalystRecommendation
@@ -930,9 +930,10 @@ Return ONLY this JSON object (no other text):
 
 # ── Draft endpoint ─────────────────────────────────────────────────────────────
 
-@router.post("/draft", response_model=ThesisDraftRead, dependencies=[Depends(require_admin)])
+@router.post("/draft", response_model=ThesisDraftRead)
 async def draft_thesis(
     payload: ThesisDraftRequest,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftRead:
     """AI-assisted thesis parameter drafting."""
@@ -1218,9 +1219,10 @@ async def compute_alert_pick(
 
 # ── Alert-pick endpoint ───────────────────────────────────────────────────────
 
-@router.post("/alert-pick", response_model=AlertPickRead, dependencies=[Depends(require_admin)])
+@router.post("/alert-pick", response_model=AlertPickRead)
 async def alert_pick(
     payload: AlertPickRequest,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AlertPickRead:
     """Evidence-based auto-direction: compute signal leans, pick direction when
@@ -1473,9 +1475,10 @@ async def list_alert_picks(
 
 # ── Budget-constrained alternative endpoint ────────────────────────────────────
 
-@router.post("/draft-alternative", response_model=ThesisDraftAlternativeRead, dependencies=[Depends(require_admin)])
+@router.post("/draft-alternative", response_model=ThesisDraftAlternativeRead)
 async def draft_alternative(
     payload: ThesisDraftAlternativeRequest,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftAlternativeRead:
     """Generate a budget-constrained alternative to the best trade draft.
@@ -1748,6 +1751,7 @@ Return ONLY this JSON object (no other text):
 async def list_theses(
     symbol: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
+    user_id: str | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ThesisRead]:
     q = (
@@ -1755,6 +1759,10 @@ async def list_theses(
         .options(selectinload(Thesis.ticker))
         .order_by(Thesis.created_at.desc())
     )
+    if user_id is not None:
+        q = q.where(Thesis.user_id == user_id)
+    else:
+        q = q.where(Thesis.user_id == "admin-local")
     if symbol:
         ticker_sq = select(Ticker.id).where(Ticker.symbol == symbol.upper()).scalar_subquery()
         q = q.where(Thesis.ticker_id == ticker_sq)
@@ -1839,9 +1847,10 @@ async def thesis_context(
     return out
 
 
-@router.post("", response_model=ThesisRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
+@router.post("", response_model=ThesisRead, status_code=status.HTTP_201_CREATED)
 async def create_thesis(
     payload: ThesisCreate,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisRead:
     sym = payload.symbol.upper()
@@ -1886,6 +1895,7 @@ async def create_thesis(
     opt_exp = date.fromisoformat(payload.option_expiration) if payload.option_expiration else None
 
     thesis = Thesis(
+        user_id=user_id,
         ticker_id=ticker.id,
         direction=payload.direction,
         conviction=payload.conviction,
@@ -2064,10 +2074,11 @@ async def get_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -
     return _to_read(thesis)
 
 
-@router.post("/{thesis_id}/resolve", response_model=ThesisRead, dependencies=[Depends(require_admin)])
+@router.post("/{thesis_id}/resolve", response_model=ThesisRead)
 async def resolve_thesis(
     thesis_id: uuid.UUID,
     payload: ThesisResolve,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisRead:
     result = await db.execute(
@@ -2076,6 +2087,7 @@ async def resolve_thesis(
     thesis = result.scalar_one_or_none()
     if not thesis:
         raise HTTPException(status_code=404, detail="Thesis not found")
+    check_ownership(thesis.user_id, user_id)
     if thesis.status == ThesisStatus.RESOLVED:
         raise HTTPException(status_code=400, detail="Thesis is already resolved")
 
@@ -2138,10 +2150,15 @@ async def resolve_thesis(
     return _to_read(result.scalar_one())
 
 
-@router.delete("/{thesis_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-async def delete_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
+@router.delete("/{thesis_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_thesis(
+    thesis_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
     thesis = await db.get(Thesis, thesis_id)
     if not thesis:
         raise HTTPException(status_code=404, detail="Thesis not found")
+    check_ownership(thesis.user_id, user_id)
     await db.delete(thesis)
     await db.commit()

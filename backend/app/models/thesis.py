@@ -37,6 +37,7 @@ class Thesis(Base):
     __tablename__ = "theses"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     ticker_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tickers.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # ── Bet fields ─────────────────────────────────────────────────────────────

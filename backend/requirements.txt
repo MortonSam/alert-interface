@@ -30,5 +30,8 @@ tqdm>=4.66.0
 # Error tracking
 sentry-sdk[fastapi]>=2.0.0
 
+# Auth
+PyJWT[crypto]>=2.8.0
+
 # AI
 anthropic>=0.40.0

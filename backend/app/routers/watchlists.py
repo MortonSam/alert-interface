@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import require_admin
+from app.auth import check_ownership, get_current_user, get_optional_user
 from app.database import get_db
 from app.models.ticker import Ticker
 from app.models.watchlist import Watchlist, WatchlistTicker
@@ -19,14 +19,26 @@ def _load_items(q):
 
 
 @router.get("", response_model=list[WatchlistRead])
-async def list_watchlists(db: AsyncSession = Depends(get_db)) -> list[Watchlist]:
-    result = await db.execute(_load_items(select(Watchlist).order_by(Watchlist.name)))
+async def list_watchlists(
+    user_id: str | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[Watchlist]:
+    q = select(Watchlist).order_by(Watchlist.name)
+    if user_id is not None:
+        q = q.where(Watchlist.user_id == user_id)
+    else:
+        q = q.where(Watchlist.user_id == "admin-local")
+    result = await db.execute(_load_items(q))
     return list(result.scalars().all())
 
 
-@router.post("", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
-async def create_watchlist(payload: WatchlistCreate, db: AsyncSession = Depends(get_db)) -> Watchlist:
-    wl = Watchlist(**payload.model_dump())
+@router.post("", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED)
+async def create_watchlist(
+    payload: WatchlistCreate,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Watchlist:
+    wl = Watchlist(**payload.model_dump(), user_id=user_id)
     db.add(wl)
     await db.commit()
     result = await db.execute(_load_items(select(Watchlist).where(Watchlist.id == wl.id)))
@@ -42,15 +54,17 @@ async def get_watchlist(watchlist_id: uuid.UUID, db: AsyncSession = Depends(get_
     return wl
 
 
-@router.patch("/{watchlist_id}", response_model=WatchlistRead, dependencies=[Depends(require_admin)])
+@router.patch("/{watchlist_id}", response_model=WatchlistRead)
 async def update_watchlist(
     watchlist_id: uuid.UUID,
     payload: WatchlistUpdate,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Watchlist:
     wl = await db.get(Watchlist, watchlist_id)
     if not wl:
         raise HTTPException(status_code=404, detail="Watchlist not found")
+    check_ownership(wl.user_id, user_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(wl, field, value)
     await db.commit()
@@ -58,26 +72,33 @@ async def update_watchlist(
     return result.scalar_one()
 
 
-@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-async def delete_watchlist(watchlist_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> None:
+@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_watchlist(
+    watchlist_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
     wl = await db.get(Watchlist, watchlist_id)
     if not wl:
         raise HTTPException(status_code=404, detail="Watchlist not found")
+    check_ownership(wl.user_id, user_id)
     await db.delete(wl)
     await db.commit()
 
 
 # ── Watchlist members ─────────────────────────────────────────────────────────
 
-@router.post("/{watchlist_id}/tickers", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
+@router.post("/{watchlist_id}/tickers", response_model=WatchlistRead, status_code=status.HTTP_201_CREATED)
 async def add_ticker_to_watchlist(
     watchlist_id: uuid.UUID,
     payload: WatchlistTickerAdd,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Watchlist:
     wl = await db.get(Watchlist, watchlist_id)
     if not wl:
         raise HTTPException(status_code=404, detail="Watchlist not found")
+    check_ownership(wl.user_id, user_id)
     ticker = await db.get(Ticker, payload.ticker_id)
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")
@@ -88,12 +109,17 @@ async def add_ticker_to_watchlist(
     return result.scalar_one()
 
 
-@router.delete("/{watchlist_id}/tickers/{ticker_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+@router.delete("/{watchlist_id}/tickers/{ticker_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_ticker_from_watchlist(
     watchlist_id: uuid.UUID,
     ticker_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    wl = await db.get(Watchlist, watchlist_id)
+    if not wl:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+    check_ownership(wl.user_id, user_id)
     result = await db.execute(
         select(WatchlistTicker).where(
             WatchlistTicker.watchlist_id == watchlist_id,

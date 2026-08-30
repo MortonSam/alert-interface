@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     admin_token: str = ""  # if set, gates AI-powered endpoints
     refresh_enabled: bool = True  # startup + loop refresh pipeline
 
+    # Clerk auth (empty = disabled, admin-token-only mode)
+    clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json
+    clerk_authorized_party: str = ""    # http://localhost:3000
+
     # External APIs
     anthropic_api_key: str = ""
     finnhub_api_key: str = ""
