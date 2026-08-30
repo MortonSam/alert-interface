@@ -193,7 +193,7 @@ function HistoryInsightsPanel({
   if (!showSector && !showBeatFollow && !showMissFollow && !showMagnitude) return null;
 
   return (
-    <div className="rounded-lg border bg-card px-5 py-4 space-y-1.5 mb-3">
+    <div className="space-y-1.5 mb-3">
       {showSector && (
         <p className="text-xs text-muted-foreground">
           Typical earnings move (±{s.avg_abs_1d!.toFixed(2)}%) is{" "}
@@ -217,10 +217,7 @@ function HistoryInsightsPanel({
         </p>
       )}
       {showMagnitude && (
-        <p className={cn(
-          "text-xs",
-          ce!.magnitude_trend === "heating_up" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
-        )}>
+        <p className="text-xs text-muted-foreground">
           Recent prints moving ±{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
           {" "}, reactions{" "}
           <span className="font-medium">
@@ -359,42 +356,19 @@ function pctValues(rows: HistoricalReaction[], key: "pct_change_1d" | "pct_chang
 
 function PctCell({ value }: { value: string | null }) {
   if (value == null) {
-    return <td className="px-3 py-2.5 text-right text-sm text-muted-foreground tabular-nums">—</td>;
+    return <td className="px-3 py-2.5 text-right text-sm text-muted-foreground tabular-nums">n/a</td>;
   }
   const n = parseFloat(value);
   return (
-    <td
-      className={cn(
-        "px-3 py-2.5 text-right text-sm font-medium tabular-nums",
-        n > 0 && "text-green-700 dark:text-green-400",
-        n < 0 && "text-red-600 dark:text-red-400",
-        n === 0 && "text-muted-foreground",
-      )}
-    >
-      <span
-        className={cn(
-          "inline-block rounded px-1",
-          n > 0 && "bg-green-50 dark:bg-green-900/20",
-          n < 0 && "bg-red-50 dark:bg-red-900/20",
-        )}
-      >
-        {n > 0 ? "+" : ""}
-        {n.toFixed(2)}%
-      </span>
+    <td className="px-3 py-2.5 text-right text-sm font-medium tabular-nums text-foreground">
+      {n > 0 ? "+" : ""}{n.toFixed(2)}%
     </td>
   );
 }
 
 function StatNum({ value }: { value: number }) {
   return (
-    <span
-      className={cn(
-        "tabular-nums font-medium text-sm",
-        value > 0 && "text-green-700 dark:text-green-400",
-        value < 0 && "text-red-600 dark:text-red-400",
-        value === 0 && "text-muted-foreground",
-      )}
-    >
+    <span className="tabular-nums font-medium text-sm text-foreground">
       {value > 0 ? "+" : ""}
       {value.toFixed(2)}%
     </span>
@@ -454,9 +428,9 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
   else filterLabel = `${n} meet${n === 1 ? "" : "s"}`;
 
   return (
-    <div className="rounded-lg border bg-card px-5 py-4">
+    <div className="py-4">
       <div className="flex items-baseline gap-2 mb-0.5">
-        <span className="text-sm font-semibold">Distribution</span>
+        <span className="text-xs font-mono uppercase tracking-wide text-muted-foreground">Distribution</span>
         <span className="text-xs text-muted-foreground">Based on {filterLabel}</span>
       </div>
       {mode === "earnings" && (
@@ -474,12 +448,12 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr>
-                  <th className="text-left font-medium text-muted-foreground pb-2 pr-4 w-8" />
-                  <th className="text-right font-medium text-muted-foreground pb-2 pr-4">Avg</th>
-                  <th className="text-right font-medium text-muted-foreground pb-2 pr-4">Median</th>
-                  <th className="text-right font-medium text-muted-foreground pb-2 pr-4">Max</th>
-                  <th className="text-right font-medium text-muted-foreground pb-2">Min</th>
+                <tr className="border-b border-border/40">
+                  <th className="text-left font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4 w-8" />
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Avg</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Median</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Max</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2">Min</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -524,8 +498,8 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
 function revenueOutcome(r: HistoricalReaction): { label: string; cls: string } | null {
   if (r.revenue_actual == null || r.revenue_estimate == null) return null;
   const ratio = r.revenue_actual / r.revenue_estimate;
-  if (ratio > 1.005) return { label: "Beat", cls: "text-green-700 dark:text-green-400" };
-  if (ratio < 0.995) return { label: "Miss", cls: "text-red-600 dark:text-red-400" };
+  if (ratio > 1.005) return { label: "Beat", cls: "text-foreground" };
+  if (ratio < 0.995) return { label: "Miss", cls: "text-foreground" };
   return { label: "Inline", cls: "text-muted-foreground" };
 }
 
@@ -619,10 +593,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                   className={cn(
                     "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
                     outcomeFilter === key
-                      ? key === "beat" ? "bg-success/10 text-success"
-                        : key === "miss" ? "bg-destructive/10 text-destructive"
-                        : key === "meet" ? "bg-secondary text-secondary-foreground"
-                        : "bg-foreground text-background"
+                      ? "bg-foreground text-background"
                       : "bg-muted text-muted-foreground hover:text-foreground",
                   )}
                 >
@@ -632,11 +603,11 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
             </div>
           )}
 
-          <div className="rounded-lg border bg-card overflow-hidden">
+          <div className="overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/40">
+                  <tr className="border-b">
                     <SortTh label="Date"    col="event_date"    sort={sort} onSort={handleSort} align="left" />
                     {!isFed && (
                       <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -680,14 +651,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                             <span className="inline-flex items-center gap-1.5 flex-wrap">
                               <OutcomeBadge outcome={r.outcome} />
                               {r.eps_surprise_pct != null && (
-                                <span
-                                  className={cn(
-                                    "text-xs font-medium tabular-nums",
-                                    r.eps_surprise_pct > 0
-                                      ? "text-green-600 dark:text-green-400"
-                                      : "text-red-500 dark:text-red-400",
-                                  )}
-                                >
+                                <span className="text-xs font-medium tabular-nums text-muted-foreground">
                                   {r.eps_surprise_pct > 0 ? "+" : ""}
                                   {r.eps_surprise_pct.toFixed(1)}%
                                 </span>
@@ -726,7 +690,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                 </tbody>
               </table>
             </div>
-            <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
+            <p className="px-3 py-2 text-xs text-muted-foreground border-t">
               Moves measured from event-day close. Days are calendar days, rolling forward to next
               trading day on weekends/holidays.
             </p>
@@ -1181,7 +1145,7 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
             className={cn(
               "font-mono text-xs uppercase tracking-widest whitespace-nowrap transition-colors",
               active === s.id
-                ? "text-foreground"
+                ? "text-cool"
                 : "text-muted-foreground/50 hover:text-muted-foreground",
             )}
           >
@@ -1197,10 +1161,8 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
 
 function WhyNowStrip({
   events,
-  realizedVol,
 }: {
   events: Event[];
-  realizedVol: RealizedVol | null;
 }) {
   const chips: { label: string; cls: string }[] = [];
 
@@ -1214,15 +1176,6 @@ function WhyNowStrip({
         cls: "bg-cool/10 text-cool",
       });
     }
-  }
-
-  // Unusually active vol?
-  if (realizedVol?.rv_rank != null && realizedVol.rv_rank >= 85) {
-    const tier = realizedVol.rv_rank >= 90 ? "extreme" : "elevated";
-    chips.push({
-      label: `Volatility: ${tier} vs own history`,
-      cls: tier === "extreme" ? "bg-primary/10 text-primary" : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-    });
   }
 
   if (chips.length === 0) return null;
@@ -1730,8 +1683,20 @@ export default function TickerPage() {
             </div>
           </div>
 
+          <SectionKicker index="01" label="Overview" />
+
+          <p className="font-mono text-xs text-muted-foreground mb-4">
+            {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
+            {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
+            {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
+          </p>
+
+          {insight && (
+            <p className="text-2xl font-display text-foreground/80 leading-relaxed mb-6">{insight}</p>
+          )}
+
           {/* "Why now" strip */}
-          <WhyNowStrip events={events} realizedVol={realizedVol} />
+          <WhyNowStrip events={events} />
 
           {health?.last_refreshed_at && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-2">
@@ -1786,30 +1751,19 @@ export default function TickerPage() {
             impliedRangeLow={expectedMove?.implied_range_low}
             impliedRangeHigh={expectedMove?.implied_range_high}
           />
-
-          <p className="font-mono text-xs text-muted-foreground mt-6">
-            {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
-            {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
-            {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
-          </p>
-
-          <SectionKicker index="01" label="Overview" />
-
-          {insight && (
-            <p className="text-lg text-foreground/80 leading-relaxed mb-6">{insight}</p>
-          )}
         </section>
 
         {/* Section nav */}
         <SectionNav sections={sections} />
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
-        <section id="catalysts" className="mt-10 scroll-mt-28">
+        <div className="border-t my-[120px]" />
+        <section id="catalysts" className="scroll-mt-28">
           <SectionKicker index="02" label="Catalysts" />
 
           {/* 1. HERO — Next Catalyst */}
           {eventStatus === "loading" && (
-            <div className="rounded-lg border bg-card p-5 space-y-3 animate-pulse mb-4">
+            <div className="space-y-3 animate-pulse mb-4">
               <div className="flex items-center justify-between">
                 <div className="h-5 bg-muted rounded w-48" />
                 <div className="h-5 bg-muted rounded-full w-20" />
@@ -1826,7 +1780,7 @@ export default function TickerPage() {
             </div>
           )}
           {eventStatus === "error" && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive mb-4">
+            <div className="text-sm text-destructive mb-4">
               Failed to load events: {eventError}
             </div>
           )}
@@ -1880,10 +1834,7 @@ export default function TickerPage() {
                         {realized1d != null && (
                           <span className="text-right">
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground block">1d</span>
-                            <span className={cn(
-                              "text-sm font-semibold tabular-nums",
-                              realized1d > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
-                            )}>
+                            <span className="text-sm font-semibold tabular-nums">
                               {realized1d > 0 ? "+" : ""}{realized1d.toFixed(2)}%
                             </span>
                           </span>
@@ -1891,10 +1842,7 @@ export default function TickerPage() {
                         {realized5d != null && (
                           <span className="text-right">
                             <span className="text-[10px] uppercase tracking-wide text-muted-foreground block">5d</span>
-                            <span className={cn(
-                              "text-sm font-semibold tabular-nums",
-                              realized5d > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
-                            )}>
+                            <span className="text-sm font-semibold tabular-nums">
                               {realized5d > 0 ? "+" : ""}{realized5d.toFixed(2)}%
                             </span>
                           </span>
@@ -1924,10 +1872,7 @@ export default function TickerPage() {
                             {beatHasAvg ? "Avg move on beats" : "Beats"}
                           </p>
                           {beatHasAvg ? (
-                            <p className={cn(
-                              "text-sm font-semibold tabular-nums",
-                              ce.avg_1d_on_beat! > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
-                            )}>
+                            <p className="text-sm font-semibold tabular-nums">
                               {ce.avg_1d_on_beat! > 0 ? "+" : ""}{ce.avg_1d_on_beat!.toFixed(2)}%
                             </p>
                           ) : (
@@ -1941,10 +1886,7 @@ export default function TickerPage() {
                             {missHasAvg ? "Avg move on misses" : "Misses"}
                           </p>
                           {missHasAvg ? (
-                            <p className={cn(
-                              "text-sm font-semibold tabular-nums",
-                              ce.avg_1d_on_miss! > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
-                            )}>
+                            <p className="text-sm font-semibold tabular-nums">
                               {ce.avg_1d_on_miss! > 0 ? "+" : ""}{ce.avg_1d_on_miss!.toFixed(2)}%
                             </p>
                           ) : (
@@ -1955,10 +1897,7 @@ export default function TickerPage() {
                         </div>
                       </div>
                       {pricingNote && reactionSummary!.beat_count >= 3 && (
-                        <p className={cn(
-                          "text-xs mt-2",
-                          dropRate != null && dropRate >= 50 ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
-                        )}>
+                        <p className="text-xs mt-2 text-muted-foreground">
                           Stock fell next day in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
                           {" "}({dropRate!.toFixed(0)}%). {pricingNote}
                         </p>
@@ -2009,12 +1948,7 @@ export default function TickerPage() {
                         const pt = evt.metadata_?.price_target as number | undefined;
                         return (
                           <div key={evt.id} className="flex items-center gap-2 py-1.5">
-                            <span className={cn(
-                              "text-sm shrink-0",
-                              action === "up" ? "text-green-700 dark:text-green-400"
-                              : action === "down" ? "text-red-600 dark:text-red-400"
-                              : "text-muted-foreground",
-                            )}>
+                            <span className="text-sm shrink-0 text-muted-foreground">
                               {action === "up" ? "▲" : action === "down" ? "▼" : "→"}
                             </span>
                             <span className="text-sm font-medium truncate">{firm ?? "Unknown"}</span>
@@ -2034,10 +1968,7 @@ export default function TickerPage() {
                     {analystStats.median_1d_upgrade != null && (
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On upgrades</p>
-                        <p className={cn(
-                          "text-sm font-semibold tabular-nums",
-                          analystStats.median_1d_upgrade > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
-                        )}>
+                        <p className="text-sm font-semibold tabular-nums">
                           {analystStats.median_1d_upgrade > 0 ? "+" : ""}{analystStats.median_1d_upgrade.toFixed(1)}% median next-day
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.upgrade_count} in 5 yr</p>
@@ -2046,10 +1977,7 @@ export default function TickerPage() {
                     {analystStats.median_1d_downgrade != null && (
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On downgrades</p>
-                        <p className={cn(
-                          "text-sm font-semibold tabular-nums",
-                          analystStats.median_1d_downgrade > 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400",
-                        )}>
+                        <p className="text-sm font-semibold tabular-nums">
                           {analystStats.median_1d_downgrade > 0 ? "+" : ""}{analystStats.median_1d_downgrade.toFixed(1)}% median next-day
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
@@ -2073,7 +2001,8 @@ export default function TickerPage() {
         </section>
 
         {/* ── EVIDENCE ─────────────────────────────────────────────────── */}
-        <section id="evidence" className="mt-10 scroll-mt-28">
+        <div className="border-t my-[120px]" />
+        <section id="evidence" className="scroll-mt-28">
           <SectionKicker index="03" label="Evidence" />
 
           {/* Toggle pills — only shown when FOMC data exists */}
@@ -2105,30 +2034,26 @@ export default function TickerPage() {
           )}
 
           {reactionStatus === "loading" && (
-            <div className="rounded-lg border bg-card overflow-hidden animate-pulse">
-              <div className="h-10 bg-muted/60 border-b" />
+            <div className="animate-pulse space-y-3">
               {[0, 1, 2, 3, 4].map((i) => (
-                <div key={i} className="flex gap-4 px-3 py-3 border-b last:border-0">
+                <div key={i} className="flex gap-4 py-2 border-b border-border/40">
                   <div className="h-4 bg-muted rounded w-16" />
                   <div className="h-4 bg-muted rounded w-14" />
                   <div className="h-4 bg-muted rounded w-16 ml-auto" />
                   <div className="h-4 bg-muted rounded w-14" />
-                  <div className="h-4 bg-muted rounded w-14" />
-                  <div className="h-4 bg-muted rounded w-14" />
-                  <div className="h-4 bg-muted rounded w-16" />
                 </div>
               ))}
             </div>
           )}
           {reactionStatus === "error" && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            <p className="text-sm text-destructive">
               Failed to load reactions: {reactionError}
-            </div>
+            </p>
           )}
           {reactionStatus === "done" && reactions.length === 0 && historyView === "earnings" && (
-            <div className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               No reaction history available for this ticker yet.
-            </div>
+            </p>
           )}
 
           {/* Earnings view */}
@@ -2161,7 +2086,8 @@ export default function TickerPage() {
         </section>
 
         {/* ── OPTIONS ─────────────────────────────────────────────────── */}
-        <section id="options" className="mt-10 mb-10 scroll-mt-28">
+        <div className="border-t my-[120px]" />
+        <section id="options" className="scroll-mt-28">
           <SectionKicker index="04" label="Options" />
 
           {/* Implied move lead display */}
@@ -2234,11 +2160,6 @@ export default function TickerPage() {
             const rvTag = rvRk != null
               ? rvRk >= 90 ? "extreme" : rvRk >= 75 ? "elevated" : "normal"
               : "";
-            const spreadColor = spread != null && spread > 10
-              ? "text-amber-600 dark:text-amber-400"
-              : spread != null && spread < -10
-              ? "text-green-700 dark:text-green-400"
-              : "text-muted-foreground";
             const spreadLabel = spread != null
               ? spread > 10 ? "options rich" : spread < -10 ? "options cheap" : "in line"
               : "";
@@ -2250,7 +2171,9 @@ export default function TickerPage() {
               <div className="space-y-2 mb-6">
                 {rvRk != null && (
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                    <span className="text-sm text-muted-foreground">RV rank</span>
+                    <span className="text-sm text-muted-foreground">
+                      <ExplainTip term="rv rank" metric="rv_rank" symbol={upperSymbol}>RV rank</ExplainTip>
+                    </span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {rvRk.toFixed(1)} <span className={rvColor}>{rvTag}</span>
                     </span>
@@ -2261,7 +2184,7 @@ export default function TickerPage() {
                     <span className="text-sm text-muted-foreground">IV - RV spread</span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
-                      <span className={spreadColor}> {spreadLabel}</span>
+                      <span className="text-muted-foreground"> {spreadLabel}</span>
                     </span>
                   </div>
                 )}
@@ -2307,6 +2230,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── POSITIONS ──────────────────────────────────────────────── */}
+        {hasPositions && (<div className="border-t my-[120px]" />)}
         {hasPositions && (() => {
           const openTheses = theses.filter((t) => t.status === "open" || t.status === "needs_manual_resolution");
           const resolvedTheses = theses.filter((t) => t.status === "resolved");
@@ -2412,7 +2336,7 @@ export default function TickerPage() {
               <div
                 key={t.id}
                 className={cn(
-                  "rounded-lg border bg-card px-4 py-3 space-y-1",
+                  "border-b border-border/40 px-0 py-3 space-y-1",
                   muted && "opacity-50",
                 )}
               >
@@ -2452,7 +2376,7 @@ export default function TickerPage() {
           }
 
           return (
-            <section id="positions" className="mt-10 scroll-mt-28">
+            <section id="positions" className="scroll-mt-28">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Your Positions</h2>
                 <div className="flex items-center gap-2">
@@ -2498,11 +2422,12 @@ export default function TickerPage() {
         })()}
 
         {/* ── RESEARCH ────────────────────────────────────────────────── */}
-        <section id="research" className="mt-10 mb-10 scroll-mt-28">
+        <div className="border-t my-[120px]" />
+        <section id="research" className="scroll-mt-28 mb-10">
           <SectionKicker index="05" label="Research" />
 
           {noteStatus === "loading" && (
-            <div className="rounded-lg border bg-card p-6 animate-pulse space-y-3">
+            <div className="animate-pulse space-y-3">
               <div className="h-4 bg-muted rounded w-1/3" />
               <div className="h-4 bg-muted rounded w-full" />
               <div className="h-4 bg-muted rounded w-5/6" />
@@ -2511,7 +2436,7 @@ export default function TickerPage() {
           )}
 
           {noteStatus === "error" && (
-            <div className="rounded-lg border bg-card px-6 py-10 text-center">
+            <div className="py-6">
               <p className="text-sm text-muted-foreground mb-4">Could not load research note.</p>
               <button
                 onClick={() => void handleGenerate()}
@@ -2523,7 +2448,7 @@ export default function TickerPage() {
           )}
 
           {noteStatus === "empty" && (
-            <div className="rounded-lg border bg-card px-6 py-10 text-center">
+            <div className="py-6">
               <p className="text-sm font-medium mb-1">No research note generated yet.</p>
               <p className="text-xs text-muted-foreground mb-5">
                 AI-generated summary using SEC filings + earnings history. Takes about 40 seconds.
@@ -2538,8 +2463,8 @@ export default function TickerPage() {
           )}
 
           {noteStatus === "done" && note && note.status === "generating" && (
-            <div className="rounded-lg border bg-card px-6 py-10 text-center animate-pulse">
-              <p className="text-sm font-medium mb-1">Generating research note…</p>
+            <div className="py-6 animate-pulse">
+              <p className="text-sm font-medium mb-1">Generating research note...</p>
               <p className="text-xs text-muted-foreground">
                 Analyzing filings and earnings history · ~40 seconds
               </p>
@@ -2547,7 +2472,7 @@ export default function TickerPage() {
           )}
 
           {noteStatus === "done" && note && note.status === "verifying" && (
-            <div className="rounded-lg border bg-card">
+            <div>
               {note.source_filings.length === 0 && (
                 <Callout severity="caution" banner>
                   <strong>Generated without SEC filing.</strong>{" "}
@@ -2601,7 +2526,7 @@ export default function TickerPage() {
           )}
 
           {noteStatus === "done" && note && note.status === "complete" && (
-            <div className="rounded-lg border bg-card">
+            <div>
               {note.source_filings.length === 0 && (
                 <Callout severity="caution" banner>
                   <strong>Generated without SEC filing.</strong>{" "}
@@ -2707,7 +2632,7 @@ export default function TickerPage() {
                   {visible.map((item) => (
                     <div
                       key={item.datetime + item.headline.slice(0, 20)}
-                      className="rounded-lg border border-border/60 bg-card px-4 py-3"
+                      className="border-b border-border/40 py-3"
                     >
                       <a
                         href={item.url}
