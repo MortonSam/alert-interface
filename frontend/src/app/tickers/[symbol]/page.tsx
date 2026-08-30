@@ -1627,9 +1627,7 @@ export default function TickerPage() {
           ← All tickers
         </Link>
 
-        {/* ── OVERVIEW ────────────────────────────────────────────────── */}
-        <section id="overview">
-          {/* Header */}
+        {/* Header */}
           <div className="mt-6 flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
@@ -1683,17 +1681,11 @@ export default function TickerPage() {
             </div>
           </div>
 
-          <SectionKicker index="01" label="Overview" />
-
           <p className="font-mono text-xs text-muted-foreground mb-4">
             {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
             {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
             {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
           </p>
-
-          {insight && (
-            <p className="text-2xl font-display text-foreground/80 leading-relaxed mb-6">{insight}</p>
-          )}
 
           {/* "Why now" strip */}
           <WhyNowStrip events={events} />
@@ -1751,14 +1743,20 @@ export default function TickerPage() {
             impliedRangeLow={expectedMove?.implied_range_low}
             impliedRangeHigh={expectedMove?.implied_range_high}
           />
-        </section>
 
         {/* Section nav */}
         <SectionNav sections={sections} />
 
+        {/* ── OVERVIEW ────────────────────────────────────────────────── */}
+        <section id="overview" className="pt-16 pb-24 scroll-mt-28">
+          <SectionKicker index="01" label="Overview" />
+          {insight && (
+            <p className="text-2xl font-display text-foreground/80 leading-relaxed">{insight}</p>
+          )}
+        </section>
+
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
-        <div className="border-t my-[120px]" />
-        <section id="catalysts" className="scroll-mt-28">
+        <section id="catalysts" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="02" label="Catalysts" />
 
           {/* 1. HERO — Next Catalyst */}
@@ -2001,8 +1999,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── EVIDENCE ─────────────────────────────────────────────────── */}
-        <div className="border-t my-[120px]" />
-        <section id="evidence" className="scroll-mt-28">
+        <section id="evidence" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="03" label="Evidence" />
 
           {/* Toggle pills — only shown when FOMC data exists */}
@@ -2086,8 +2083,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── OPTIONS ─────────────────────────────────────────────────── */}
-        <div className="border-t my-[120px]" />
-        <section id="options" className="scroll-mt-28">
+        <section id="options" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="04" label="Options" />
 
           {/* Implied move lead display */}
@@ -2110,13 +2106,14 @@ export default function TickerPage() {
             const high = expectedMove.implied_range_high;
             const hist = expectedMove.historical_stats;
             return (
-              <div className="mb-6">
-                <p className="text-3xl font-bold tabular-nums">
-                  {emPct != null ? `\u00B1${emPct.toFixed(1)}%` : ""}
-                  {emDol != null && <span className="text-xl text-muted-foreground ml-2">(${emDol.toFixed(2)})</span>}
+              <div className="mb-8">
+                <p className="text-6xl font-bold tabular-nums tracking-tight">
+                  {emPct != null ? `\u00B1${(emPct * 100).toFixed(1)}%` : ""}
                 </p>
-                {expectedMove.plain_summary && (
-                  <p className="text-sm text-muted-foreground mt-1">{expectedMove.plain_summary}</p>
+                {emDol != null && (
+                  <p className="text-xl text-muted-foreground mt-1 tabular-nums">
+                    ${emDol.toFixed(2)} implied move
+                  </p>
                 )}
                 {low != null && high != null && (
                   <p className="text-sm mt-3">
@@ -2132,7 +2129,7 @@ export default function TickerPage() {
                 )}
                 {hist && hist.sample_size >= 3 && (
                   <p className="text-xs text-muted-foreground mt-2">
-                    Historical: avg \u00B1{hist.avg_abs_move_pct.toFixed(1)}% over {hist.sample_size} prints,
+                    Historical: avg ±{(hist.avg_abs_move_pct * 100).toFixed(1)}% over {hist.sample_size} prints,
                     above implied {hist.above_expected} / below {hist.below_expected}
                   </p>
                 )}
@@ -2221,16 +2218,9 @@ export default function TickerPage() {
             </div>
           )}
 
-          {/* Chain as-of */}
-          {optionsChain?.as_of && (
-            <p className="text-[10px] font-mono text-muted-foreground/50 mb-4">
-              chain as of {optionsChain.as_of.replace(/T.*$/, "")}
-            </p>
-          )}
         </section>
 
         {/* ── POSITIONS ──────────────────────────────────────────────── */}
-        {hasPositions && (<div className="border-t my-[120px]" />)}
         {hasPositions && (() => {
           const openTheses = theses.filter((t) => t.status === "open" || t.status === "needs_manual_resolution");
           const resolvedTheses = theses.filter((t) => t.status === "resolved");
@@ -2376,7 +2366,7 @@ export default function TickerPage() {
           }
 
           return (
-            <section id="positions" className="scroll-mt-28">
+            <section id="positions" className="border-t pt-16 pb-24 scroll-mt-28">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Your Positions</h2>
                 <div className="flex items-center gap-2">
@@ -2422,8 +2412,7 @@ export default function TickerPage() {
         })()}
 
         {/* ── RESEARCH ────────────────────────────────────────────────── */}
-        <div className="border-t my-[120px]" />
-        <section id="research" className="scroll-mt-28 mb-10">
+        <section id="research" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="05" label="Research" />
 
           {noteStatus === "loading" && (
