@@ -24,11 +24,15 @@ from decimal import Decimal
 from sqlalchemy import func, select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
+from app.models.alert_pick import AlertPick, AlertPickEvaluation
+from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
+from app.models.rv_snapshot import RVSnapshot
 from app.models.system_metadata import SystemMetadata
 from app.models.ticker import Ticker
+from app.models.watchlist import WatchlistTicker
 from app.services import chain_store
 
 
@@ -512,6 +516,272 @@ async def check_frozen_price_history(session) -> CheckResult:
     )
 
 
+async def check_rv_snapshot_stale(session) -> CheckResult:
+    """ERROR if the latest rv_snapshots date is more than 3 calendar days old."""
+    latest_date = await session.scalar(select(func.max(RVSnapshot.as_of_date)))
+
+    if latest_date is None:
+        return CheckResult("rv_snapshot_stale", ERROR, "No rv_snapshots rows exist")
+
+    age = (date.today() - latest_date).days
+    if age <= 3:
+        return CheckResult(
+            "rv_snapshot_stale", PASS,
+            f"Latest rv_snapshot is {latest_date} ({age} day(s) old)",
+        )
+    return CheckResult(
+        "rv_snapshot_stale", ERROR,
+        f"Latest rv_snapshot is {latest_date} ({age} days old, threshold 3)",
+    )
+
+
+async def check_rv_rank_bounds(session) -> CheckResult:
+    """ERROR listing any rv_rank outside 0-100 or rv_20d outside 0.01-5.0."""
+    bad_filter = (
+        (RVSnapshot.rv_rank.is_not(None) & ((RVSnapshot.rv_rank < 0) | (RVSnapshot.rv_rank > 100))) |
+        (RVSnapshot.rv_20d.is_not(None) & ((RVSnapshot.rv_20d < Decimal("0.01")) | (RVSnapshot.rv_20d > Decimal("5.0"))))
+    )
+    total = await session.scalar(select(func.count(RVSnapshot.id)).where(bad_filter))
+
+    if not total:
+        return CheckResult("rv_rank_bounds", PASS, "All rv_rank in [0, 100] and rv_20d in [0.01, 5.0]")
+
+    rows = (await session.execute(
+        select(RVSnapshot.symbol, RVSnapshot.as_of_date, RVSnapshot.rv_rank, RVSnapshot.rv_20d)
+        .where(bad_filter)
+        .order_by(RVSnapshot.as_of_date.desc(), RVSnapshot.symbol)
+        .limit(50)
+    )).all()
+
+    details = [
+        f"{r.symbol}  {r.as_of_date}  rv_rank={r.rv_rank}  rv_20d={r.rv_20d}"
+        for r in rows
+    ]
+    return CheckResult(
+        "rv_rank_bounds", ERROR,
+        f"{total} row(s) with rv_rank outside [0, 100] or rv_20d outside [0.01, 5.0] (showing first 50)",
+        details,
+    )
+
+
+async def check_recommendations_freshness(session) -> CheckResult:
+    """WARN if fewer than 300 active tickers have a recommendation fetched within 7 days."""
+    cutoff = func.now() - text("interval '7 days'")
+    fresh_count = await session.scalar(
+        select(func.count(func.distinct(AnalystRecommendation.ticker_id)))
+        .join(Ticker, Ticker.id == AnalystRecommendation.ticker_id)
+        .where(Ticker.is_active.is_(True), AnalystRecommendation.fetched_at >= cutoff)
+    )
+    total_active = await session.scalar(
+        select(func.count(Ticker.id)).where(Ticker.is_active.is_(True))
+    )
+
+    if fresh_count >= 300:
+        return CheckResult(
+            "recommendations_freshness", PASS,
+            f"{fresh_count}/{total_active} active tickers have recommendations fetched within 7 days",
+        )
+    return CheckResult(
+        "recommendations_freshness", WARN,
+        f"{fresh_count}/{total_active} active tickers have recommendations fetched within 7 days (below 300 threshold)",
+    )
+
+
+async def check_recommendations_bounds(session) -> CheckResult:
+    """ERROR listing rows where any count is negative or total analysts > 100."""
+    total_col = (
+        AnalystRecommendation.strong_buy + AnalystRecommendation.buy +
+        AnalystRecommendation.hold + AnalystRecommendation.sell +
+        AnalystRecommendation.strong_sell
+    )
+    bad_filter = (
+        (AnalystRecommendation.strong_buy < 0) | (AnalystRecommendation.buy < 0) |
+        (AnalystRecommendation.hold < 0) | (AnalystRecommendation.sell < 0) |
+        (AnalystRecommendation.strong_sell < 0) | (total_col > 100)
+    )
+    total = await session.scalar(select(func.count(AnalystRecommendation.id)).where(bad_filter))
+
+    if not total:
+        return CheckResult("recommendations_bounds", PASS, "All recommendation counts non-negative and total ≤ 100")
+
+    rows = (await session.execute(
+        select(
+            Ticker.symbol, AnalystRecommendation.period,
+            AnalystRecommendation.strong_buy, AnalystRecommendation.buy,
+            AnalystRecommendation.hold, AnalystRecommendation.sell,
+            AnalystRecommendation.strong_sell,
+        )
+        .join(Ticker, Ticker.id == AnalystRecommendation.ticker_id)
+        .where(bad_filter)
+        .order_by(AnalystRecommendation.period.desc(), Ticker.symbol)
+        .limit(50)
+    )).all()
+
+    details = [
+        f"{r.symbol}  {r.period}  SB={r.strong_buy} B={r.buy} H={r.hold} S={r.sell} SS={r.strong_sell}"
+        f" total={r.strong_buy + r.buy + r.hold + r.sell + r.strong_sell}"
+        for r in rows
+    ]
+    return CheckResult(
+        "recommendations_bounds", ERROR,
+        f"{total} row(s) with negative count or total > 100 (showing first 50)",
+        details,
+    )
+
+
+async def check_pick_lifecycle(session) -> CheckResult:
+    """ERROR listing open picks with past expiration or closed picks with null close data."""
+    today_str = date.today().isoformat()
+
+    open_expired = (await session.execute(
+        select(AlertPick.symbol, AlertPick.status, AlertPick.expiration)
+        .where(
+            AlertPick.status == "open",
+            AlertPick.expiration.is_not(None),
+            AlertPick.expiration < today_str,
+        )
+        .order_by(AlertPick.symbol)
+    )).all()
+
+    closed_null = (await session.execute(
+        select(AlertPick.symbol, AlertPick.status, AlertPick.closed_at, AlertPick.close_price)
+        .where(
+            AlertPick.status != "open",
+            (AlertPick.closed_at.is_(None)) | (AlertPick.close_price.is_(None)),
+        )
+        .order_by(AlertPick.symbol)
+    )).all()
+
+    if not open_expired and not closed_null:
+        return CheckResult("pick_lifecycle", PASS, "All picks have consistent status/expiration/close data")
+
+    details: list[str] = []
+    for r in open_expired:
+        details.append(f"{r.symbol}  status=open  expiration={r.expiration} (past)")
+    for r in closed_null:
+        ca = "null" if r.closed_at is None else str(r.closed_at.date())
+        cp = "null" if r.close_price is None else str(r.close_price)
+        details.append(f"{r.symbol}  status={r.status}  closed_at={ca}  close_price={cp}")
+
+    return CheckResult(
+        "pick_lifecycle", ERROR,
+        f"{len(details)} pick(s): {len(open_expired)} open with past expiration, {len(closed_null)} closed with null close data",
+        details,
+    )
+
+
+async def check_inactive_leakage(session) -> CheckResult:
+    """ERROR listing inactive tickers in watchlists, open picks, or today's evaluations."""
+    inactive = (await session.execute(
+        select(Ticker.id, Ticker.symbol).where(Ticker.is_active.is_(False))
+    )).all()
+
+    if not inactive:
+        return CheckResult("inactive_leakage", PASS, "No inactive tickers to check")
+
+    inactive_ids = {r.id for r in inactive}
+    inactive_syms = {r.symbol for r in inactive}
+    id_to_sym = {r.id: r.symbol for r in inactive}
+
+    details: list[str] = []
+
+    # In watchlists
+    wl_tids = (await session.execute(
+        select(func.distinct(WatchlistTicker.ticker_id))
+        .where(WatchlistTicker.ticker_id.in_(inactive_ids))
+    )).scalars().all()
+    for tid in wl_tids:
+        details.append(f"{id_to_sym.get(tid, str(tid))}  in watchlist")
+
+    # In open alert_picks
+    pick_syms = (await session.execute(
+        select(func.distinct(AlertPick.symbol))
+        .where(AlertPick.status == "open", AlertPick.symbol.in_(inactive_syms))
+    )).scalars().all()
+    for sym in pick_syms:
+        details.append(f"{sym}  open alert_pick")
+
+    # In today's evaluations
+    eval_syms = (await session.execute(
+        select(func.distinct(AlertPickEvaluation.symbol))
+        .where(
+            AlertPickEvaluation.symbol.in_(inactive_syms),
+            func.date(AlertPickEvaluation.evaluated_at) == date.today(),
+        )
+    )).scalars().all()
+    for sym in eval_syms:
+        details.append(f"{sym}  in today's evaluations")
+
+    if not details:
+        return CheckResult(
+            "inactive_leakage", PASS,
+            f"No inactive tickers leaking into watchlists, picks, or evaluations ({len(inactive)} inactive checked)",
+        )
+    return CheckResult(
+        "inactive_leakage", ERROR,
+        f"{len(details)} inactive-ticker reference(s) found",
+        sorted(details),
+    )
+
+
+async def check_quote_sanity(session) -> CheckResult:
+    """WARN listing active tickers whose latest stored close is ≤ 0 or moved >60% without a split."""
+    # Part 1: latest iv_history current_price ≤ 0
+    bad_price = (await session.execute(text("""
+        WITH latest AS (
+            SELECT DISTINCT ON (ih.symbol) ih.symbol, ih.date, ih.current_price
+            FROM iv_history ih
+            JOIN tickers t ON t.symbol = ih.symbol AND t.is_active = true
+            WHERE ih.current_price IS NOT NULL
+            ORDER BY ih.symbol, ih.date DESC
+        )
+        SELECT symbol, date, current_price FROM latest WHERE current_price <= 0
+        ORDER BY symbol
+    """))).all()
+
+    # Part 2: >60% day-over-day move in last 30 days without a split event
+    big_moves = (await session.execute(text("""
+        WITH daily AS (
+            SELECT ih.symbol, ih.date, ih.current_price,
+                   LAG(ih.current_price) OVER (PARTITION BY ih.symbol ORDER BY ih.date) AS prev_price
+            FROM iv_history ih
+            JOIN tickers t ON t.symbol = ih.symbol AND t.is_active = true
+            WHERE ih.current_price IS NOT NULL AND ih.current_price > 0
+              AND ih.date >= CURRENT_DATE - 30
+        )
+        SELECT d.symbol, d.date, d.current_price, d.prev_price,
+               ABS(d.current_price - d.prev_price) / d.prev_price AS move_pct
+        FROM daily d
+        WHERE d.prev_price > 0
+          AND ABS(d.current_price - d.prev_price) / d.prev_price > 0.60
+          AND NOT EXISTS (
+              SELECT 1 FROM events e
+              JOIN tickers t2 ON t2.id = e.ticker_id
+              WHERE t2.symbol = d.symbol AND e.event_type = 'split' AND e.event_date = d.date
+          )
+        ORDER BY d.date DESC, d.symbol
+        LIMIT 50
+    """))).all()
+
+    if not bad_price and not big_moves:
+        return CheckResult("quote_sanity", PASS, "All active tickers have positive latest close and no unexplained >60% moves")
+
+    details: list[str] = []
+    for r in bad_price:
+        details.append(f"{r.symbol}  {r.date}  close={float(r.current_price):.2f} (non-positive)")
+    for r in big_moves:
+        details.append(
+            f"{r.symbol}  {r.date}  {float(r.prev_price):.2f} -> {float(r.current_price):.2f}"
+            f" ({float(r.move_pct) * 100:.0f}% move, no split)"
+        )
+
+    return CheckResult(
+        "quote_sanity", WARN,
+        f"{len(bad_price)} non-positive close(s), {len(big_moves)} unexplained >60% move(s)",
+        details,
+    )
+
+
 async def check_chain_coverage(session) -> CheckResult:
     """Percent of active tickers with a chain no older than 2 trading days."""
     active_syms = (await session.execute(
@@ -561,6 +831,8 @@ CHECKS = [
     check_ticker_duplicate_symbols,
     check_frozen_price_history,
     check_duplicate_future_earnings,
+    check_inactive_leakage,
+    check_quote_sanity,
     # Events
     check_events_stale_past,
     check_events_null_title,
@@ -573,6 +845,14 @@ CHECKS = [
     check_reactions_eps_bounds,
     check_tickers_no_reactions,
     check_tickers_uniform_outcome,
+    # RV snapshots
+    check_rv_snapshot_stale,
+    check_rv_rank_bounds,
+    # Analyst recommendations
+    check_recommendations_freshness,
+    check_recommendations_bounds,
+    # Alert picks
+    check_pick_lifecycle,
     # IV history
     check_iv_history_out_of_band,
     # Options chains
