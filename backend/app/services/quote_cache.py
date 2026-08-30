@@ -1,7 +1,8 @@
 """In-process quote cache.
 
-Keyed by symbol (uppercase).  Stores {price, change, change_pct} dicts with
-a 60-second TTL so the home grid doesn't hammer Finnhub on every page view.
+Keyed by symbol (uppercase).  Stores {price, change, change_pct, timestamp}
+dicts with a 60-second TTL so the home grid doesn't hammer Finnhub on every
+page view.  ``timestamp`` is the exchange Unix-UTC value from Finnhub.
 """
 from __future__ import annotations
 

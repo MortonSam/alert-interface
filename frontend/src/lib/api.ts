@@ -279,6 +279,7 @@ export interface BatchQuote {
   price: number | null;
   change: number | null;
   change_pct: number | null;
+  timestamp: number | null;
 }
 
 export interface NewsItem {
@@ -468,6 +469,7 @@ export interface BatchEnrichItem {
   price: number | null;
   change: number | null;
   change_pct: number | null;
+  quote_ts: number | null;
   expected_move_pct: number | null;
   earnings_date: string | null;
   rv_rank: number | null;
@@ -658,6 +660,7 @@ export interface AlertPickLedgerItem {
   expiration: string | null;
   entry_price: number;
   current_price: number | null;
+  quote_ts: number | null;
   unrealized_move_pct: number | null;
   cost_to_enter: number | null;
   max_loss: number | null;

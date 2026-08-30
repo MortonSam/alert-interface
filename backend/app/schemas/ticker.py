@@ -83,6 +83,7 @@ class BatchQuoteRead(BaseModel):
     price: float | None
     change: float | None
     change_pct: float | None
+    timestamp: int | None = None  # Unix UTC (exchange last-trade time)
 
 
 class BatchEnrichRead(BaseModel):
@@ -91,6 +92,7 @@ class BatchEnrichRead(BaseModel):
     price: float | None = None
     change: float | None = None
     change_pct: float | None = None
+    quote_ts: int | None = None       # Unix UTC (exchange last-trade time)
     expected_move_pct: float | None = None
     earnings_date: str | None = None
     rv_rank: float | None = None

@@ -1378,12 +1378,14 @@ async def list_alert_picks(
     # Only fetch live prices for open picks (60s quote cache)
     open_symbols = list({r.symbol for r in rows if r.status == "open"})
     price_map: dict[str, float | None] = {}
+    ts_map: dict[str, int | None] = {}
     if open_symbols:
         to_fetch: list[str] = []
         for sym in open_symbols:
             cached = quote_cache.get(sym)
             if cached is not None:
                 price_map[sym] = cached.get("price")
+                ts_map[sym] = cached.get("timestamp")
             else:
                 to_fetch.append(sym)
 
@@ -1404,8 +1406,10 @@ async def list_alert_picks(
                     price = float(q.get("c") or 0) or None
                     change = float(q.get("d")) if q.get("d") is not None else None
                     change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-                    quote_cache.set(sym, {"price": price, "change": change, "change_pct": change_pct})
+                    ts = int(q["t"]) if q.get("t") else None
+                    quote_cache.set(sym, {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts})
                     price_map[sym] = price
+                    ts_map[sym] = ts
 
     items = []
     for r in rows:
@@ -1445,6 +1449,7 @@ async def list_alert_picks(
             expiration=r.expiration,
             entry_price=entry,
             current_price=current,
+            quote_ts=ts_map.get(r.symbol) if not is_closed else None,
             unrealized_move_pct=unrealized,
             cost_to_enter=float(r.cost_to_enter) if r.cost_to_enter else None,
             max_loss=float(r.max_loss) if r.max_loss else None,

@@ -10,6 +10,7 @@ import {
   type WatchlistTicker,
   type BatchEnrichItem,
   type Ticker,
+  type HealthStatus,
 } from "@/lib/api";
 
 // ── Row state ─────────────────────────────────────────────────────────────────
@@ -22,6 +23,24 @@ interface RowState {
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
+
+function timeAgo(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
+}
+
+function fmtQuoteTime(unix: number | null | undefined): string {
+  if (unix == null) return "";
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 
 function fmtPrice(n: number | null): string {
   return n == null ? "—" : `$${n.toFixed(2)}`;
@@ -140,7 +159,14 @@ function WatchlistRow({
         {status === "loading" ? (
           <Skeleton w="w-16" />
         ) : (
-          fmtPrice(data?.price ?? null)
+          <span>
+            {fmtPrice(data?.price ?? null)}
+            {data?.quote_ts != null && (
+              <span className="text-[10px] text-muted-foreground/50 ml-1.5">
+                {fmtQuoteTime(data.quote_ts)}
+              </span>
+            )}
+          </span>
         )}
       </td>
       <td className="py-3 px-4 text-sm">
@@ -205,6 +231,7 @@ export default function WatchlistPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newWlName, setNewWlName] = useState("My Watchlist");
   const [creating, setCreating] = useState(false);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
 
   // Track which wlId we've already initialized rows for (to avoid double-init)
   const initializedRef = useRef<string | null>(null);
@@ -231,6 +258,7 @@ export default function WatchlistPage() {
   // ── Load watchlists + all tickers on mount ──────────────────────────────────
 
   useEffect(() => {
+    api.system.health().then(setHealth).catch(() => {});
     Promise.all([api.watchlists.list(), api.tickers.list(true)]).then(
       ([wls, tickers]) => {
         setWatchlists(wls);
@@ -417,6 +445,11 @@ export default function WatchlistPage() {
               </Link>
             </div>
             <h1 className="text-2xl font-bold tracking-tight">Watchlist</h1>
+            {health?.last_refreshed_at && (
+              <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
+                Data as of {timeAgo(health.last_refreshed_at)}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {rows.length > 0 && (

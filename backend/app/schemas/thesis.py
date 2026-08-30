@@ -181,6 +181,7 @@ class AlertPickLedgerItem(BaseModel):
     expiration: str | None
     entry_price: float
     current_price: float | None           # live mark
+    quote_ts: int | None = None           # Unix UTC (exchange last-trade time)
     unrealized_move_pct: float | None     # stock % change from entry_price
     cost_to_enter: float | None
     max_loss: float | None

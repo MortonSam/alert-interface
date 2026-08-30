@@ -6,6 +6,12 @@ import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
 
 const EXP_TAIL_RE = /\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$/i;
 
+function fmtQuoteTime(unix: number | null | undefined): string {
+  if (unix == null) return "";
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 function stripExpTail(strategy: string | null): string | null {
   if (!strategy) return strategy;
   return strategy.replace(EXP_TAIL_RE, "");
@@ -101,6 +107,11 @@ function PickCard({
           <div>
             <span className="text-muted-foreground">{isClosed ? "Close" : "Now"}</span>{" "}
             <span className="font-mono font-medium">${pick.current_price.toFixed(2)}</span>
+            {!isClosed && pick.quote_ts != null && (
+              <span className="text-[10px] text-muted-foreground/50 ml-1">
+                {fmtQuoteTime(pick.quote_ts)}
+              </span>
+            )}
           </div>
         )}
         {move != null && (

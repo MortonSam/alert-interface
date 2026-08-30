@@ -229,35 +229,52 @@ async def create_ticker(payload: TickerCreate, db: AsyncSession = Depends(get_db
 
 @router.get("/quote/{symbol}", response_model=TickerQuoteRead)
 async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
-    """Real-time quote (Finnhub) + 30-day daily sparkline (yfinance)."""
+    """Real-time quote (Finnhub, shared 60s cache) + 30-day daily sparkline (yfinance)."""
     sym = symbol.upper()
-    finnhub = FinnhubClient()
     loop = asyncio.get_event_loop()
-    try:
-        quote, candles = await asyncio.gather(
-            finnhub.get_quote(sym),
-            # yfinance is sync; run in a thread so we don't block the event loop
-            loop.run_in_executor(None, YFinanceClient.get_daily_closes, sym, "1mo"),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Quote fetch failed: {exc}")
-    finally:
-        await finnhub.close()
 
-    def _f(val: object) -> float | None:
-        """Float or None; 0.0 from Finnhub means no data (market closed / unknown)."""
-        return float(val) if val is not None else None
+    # Check shared quote cache first; fetch from Finnhub on miss
+    cached = quote_cache.get(sym)
+    if cached is not None:
+        quote_data = cached
+        candles = await loop.run_in_executor(None, YFinanceClient.get_daily_closes, sym, "1mo")
+    else:
+        finnhub = FinnhubClient()
+        try:
+            raw_quote, candles = await asyncio.gather(
+                finnhub.get_quote(sym),
+                loop.run_in_executor(None, YFinanceClient.get_daily_closes, sym, "1mo"),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Quote fetch failed: {exc}")
+        finally:
+            await finnhub.close()
+
+        def _f(val: object) -> float | None:
+            return float(val) if val is not None else None
+
+        quote_data = {
+            "price": _f(raw_quote.get("c")) or None,
+            "change": _f(raw_quote.get("d")),
+            "change_pct": _f(raw_quote.get("dp")),
+            "high": _f(raw_quote.get("h")) or None,
+            "low": _f(raw_quote.get("l")) or None,
+            "open": _f(raw_quote.get("o")) or None,
+            "prev_close": _f(raw_quote.get("pc")) or None,
+            "timestamp": int(raw_quote["t"]) if raw_quote.get("t") else None,
+        }
+        quote_cache.set(sym, quote_data)
 
     return TickerQuoteRead(
         symbol=sym,
-        price=_f(quote.get("c")) or None,
-        change=_f(quote.get("d")),
-        change_pct=_f(quote.get("dp")),
-        high=_f(quote.get("h")) or None,
-        low=_f(quote.get("l")) or None,
-        open=_f(quote.get("o")) or None,
-        prev_close=_f(quote.get("pc")) or None,
-        timestamp=int(quote["t"]) if quote.get("t") else None,
+        price=quote_data.get("price"),
+        change=quote_data.get("change"),
+        change_pct=quote_data.get("change_pct"),
+        high=quote_data.get("high"),
+        low=quote_data.get("low"),
+        open=quote_data.get("open"),
+        prev_close=quote_data.get("prev_close"),
+        timestamp=quote_data.get("timestamp"),
         sparkline=[SparklinePoint(date=c["date"], close=c["close"]) for c in candles],
     )
 
@@ -296,7 +313,8 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
             price = float(q.get("c") or 0) or None
             change = float(q.get("d")) if q.get("d") is not None else None
             change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-            data = {"price": price, "change": change, "change_pct": change_pct}
+            ts = int(q["t"]) if q.get("t") else None
+            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts}
             quote_cache.set(sym, data)
             results[sym] = BatchQuoteRead(symbol=sym, **data)
 
@@ -371,7 +389,8 @@ async def batch_enrich(
             price = float(q.get("c") or 0) or None
             change = float(q.get("d")) if q.get("d") is not None else None
             change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-            data = {"price": price, "change": change, "change_pct": change_pct}
+            ts = int(q["t"]) if q.get("t") else None
+            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts}
             quote_cache.set(sym, data)
             quotes[sym] = data
 
@@ -427,6 +446,7 @@ async def batch_enrich(
                 price=q.get("price"),
                 change=q.get("change"),
                 change_pct=q.get("change_pct"),
+                quote_ts=q.get("timestamp"),
                 expected_move_pct=em_pct,
                 earnings_date=earnings_str,
                 rv_rank=rv_rank,

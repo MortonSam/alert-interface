@@ -12,9 +12,28 @@ import {
   type UnusuallyActiveItem,
   type BatchQuote,
   type LatestPickItem,
+  type HealthStatus,
 } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function timeAgo(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
+}
+
+function fmtQuoteTime(unix: number | null | undefined): string {
+  if (unix == null) return "";
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -84,6 +103,7 @@ export default function DiscoverPage() {
   const [unusuallyActive, setUnusuallyActive] = useState<UnusuallyActiveItem[] | null>(null);
   const [latestPick, setLatestPick] = useState<LatestPickItem | null | undefined>(undefined);
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
+  const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
 
@@ -138,7 +158,10 @@ export default function DiscoverPage() {
     });
   }
 
-  useEffect(() => { loadDiscover(); }, []);
+  useEffect(() => {
+    loadDiscover();
+    api.system.health().then(setHealth).catch(() => {});
+  }, []);
 
   return (
     <main className="min-h-screen p-8">
@@ -159,6 +182,17 @@ export default function DiscoverPage() {
           <p className="text-sm text-muted-foreground mt-1">
             What&apos;s worth researching across your universe right now.
           </p>
+          {(health?.last_refreshed_at || quotes.size > 0) && (
+            <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">
+              {health?.last_refreshed_at && <>Data as of {timeAgo(health.last_refreshed_at)}</>}
+              {health?.last_refreshed_at && quotes.size > 0 && " · "}
+              {quotes.size > 0 && (() => {
+                const ts = [...quotes.values()].map(q => q.timestamp).filter(Boolean);
+                const latest = ts.length > 0 ? Math.max(...(ts as number[])) : null;
+                return latest ? <>Quotes as of {fmtQuoteTime(latest)}</> : null;
+              })()}
+            </p>
+          )}
         </div>
 
         {/* ── Fetch error ──────────────────────────────── */}

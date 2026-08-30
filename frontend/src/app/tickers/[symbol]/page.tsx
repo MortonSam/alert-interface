@@ -18,6 +18,7 @@ import {
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
   type Watchlist,
+  type HealthStatus,
 } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
 import Callout from "@/components/Callout";
@@ -86,6 +87,12 @@ function timeAgo(iso: string): string {
 
 function timeAgoUnix(secs: number): string {
   return timeAgo(new Date(secs * 1000).toISOString());
+}
+
+function fmtQuoteTime(unix: number | null | undefined): string {
+  if (unix == null) return "";
+  const d = new Date(unix * 1000);
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 // ── Catalyst section helpers ──────────────────────────────────────────────────
@@ -1345,6 +1352,7 @@ export default function TickerPage() {
   const [fomcReactions, setFomcReactions] = useState<HistoricalReaction[]>([]);
   const [fomcStatus, setFomcStatus] = useState<SectionStatus>("loading");
 
+  const [health, setHealth]             = useState<HealthStatus | null>(null);
   const [quote, setQuote]               = useState<TickerQuote | null>(null);
   const [chartPeriod, setChartPeriod]   = useState<ChartPeriod>("1y");
   const [chartStartPrice, setChartStartPrice] = useState<number | null>(null);
@@ -1515,6 +1523,7 @@ export default function TickerPage() {
 
   useEffect(() => {
     api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
+    api.system.health().then(setHealth).catch(() => {});
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -1801,6 +1810,12 @@ export default function TickerPage() {
           {/* "Why now" strip */}
           <WhyNowStrip events={events} realizedVol={realizedVol} />
 
+          {health?.last_refreshed_at && (
+            <p className="text-[11px] font-mono text-muted-foreground/60 mt-2">
+              Data as of {timeAgo(health.last_refreshed_at)}
+            </p>
+          )}
+
           {/* Live price header */}
           {quote && quote.price != null && (
             <div className="mt-5 flex items-center gap-5 flex-wrap">
@@ -1826,6 +1841,14 @@ export default function TickerPage() {
               {quote.high != null && quote.low != null && (
                 <span className="text-xs text-muted-foreground ml-auto">
                   H&nbsp;{quote.high.toFixed(2)} · L&nbsp;{quote.low.toFixed(2)}
+                  {quote.timestamp != null && (
+                    <span className="text-muted-foreground/50 ml-2">as of {fmtQuoteTime(quote.timestamp)}</span>
+                  )}
+                </span>
+              )}
+              {(quote.high == null || quote.low == null) && quote.timestamp != null && (
+                <span className="text-xs text-muted-foreground/50 ml-auto">
+                  as of {fmtQuoteTime(quote.timestamp)}
                 </span>
               )}
             </div>
@@ -2296,6 +2319,11 @@ export default function TickerPage() {
                 symbol={upperSymbol}
                 onSelectExpiration={setSelectedExpiration}
               />
+              {optionsChain?.as_of && (
+                <p className="text-[10px] font-mono text-muted-foreground/50 mt-2">
+                  chain as of {optionsChain.as_of.replace(/T.*$/, "")}
+                </p>
+              )}
             </div>
           )}
 
@@ -2321,6 +2349,7 @@ export default function TickerPage() {
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
               <p className="text-[10px] text-muted-foreground/60">
                 {optionsRead.model_used} · {optionsRead.cached ? "cached" : "generated"} {timeAgo(optionsRead.generated_at)}
+                {optionsRead.as_of && ` · chain as of ${optionsRead.as_of.replace(/T.*$/, "")}`}
               </p>
             </div>
           )}
