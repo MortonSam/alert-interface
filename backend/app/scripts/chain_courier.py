@@ -22,18 +22,33 @@ from datetime import date, datetime, timedelta
 import httpx
 import yfinance as yf
 
-# ── Marquee tickers (edit before each pitch) ──────────────────────────────────
+# ── Fallback tickers (used only if the API is unreachable) ────────────────────
 
-MARQUEE_TICKERS = [
-    # Core holdings
+FALLBACK_TICKERS = [
     "AAPL", "NVDA", "MSFT", "AMZN", "META", "GOOGL", "TSLA",
-    "JPM", "COST", "WMT", "PANW", "NFLX", "AMD", "AVGO", "LLY",
-    # Earnings Aug-Oct 2026 (by market cap)
-    "ORCL", "DELL", "MRVL", "PEP", "CRWD", "MDT", "ACN", "ADBE",
-    "INTU", "CTAS", "SNPS", "HPE", "NKE", "ADSK", "CIEN", "WDAY",
-    "PAYX", "A", "VEEV", "NTAP", "CCL", "JBL", "CASY", "CPRT",
-    "WSM", "DG", "DLTR", "DRI", "STZ", "ULTA",
+    "JPM", "COST", "WMT", "NFLX", "AMD", "AVGO", "LLY",
 ]
+
+
+def _fetch_active_tickers(base_url: str, token: str) -> list[str]:
+    """Fetch all active ticker symbols from the backend API.
+
+    Falls back to FALLBACK_TICKERS if the request fails.
+    """
+    try:
+        r = httpx.get(
+            f"{base_url}/api/v1/tickers",
+            params={"active_only": "true"},
+            headers={"X-Admin-Token": token},
+            timeout=15.0,
+        )
+        r.raise_for_status()
+        symbols = [t["symbol"] for t in r.json() if t.get("symbol")]
+        if symbols:
+            return sorted(symbols)
+    except Exception as exc:
+        print(f"  (API ticker fetch failed: {exc} — using fallback list)")
+    return list(FALLBACK_TICKERS)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -304,10 +319,16 @@ def main() -> int:
         return 1
 
     base = args.base_url.rstrip("/")
-    tickers = [s.strip().upper() for s in args.tickers.split(",")] if args.tickers else MARQUEE_TICKERS
+    tickers = (
+        [s.strip().upper() for s in args.tickers.split(",")]
+        if args.tickers
+        else _fetch_active_tickers(base, token)
+    )
+
+    t_start = time.monotonic()
 
     print(f"Chain courier → {base}")
-    print(f"Tickers: {', '.join(tickers)}")
+    print(f"Tickers: {len(tickers)} ({', '.join(tickers[:10])}{'…' if len(tickers) > 10 else ''})")
     print(f"{'─' * 70}")
 
     results: list[dict] = []
@@ -347,8 +368,9 @@ def main() -> int:
             f"{r['chain_last_trade']:<12} {r['elapsed']:>5.1f}s"
         )
 
+    elapsed_total = time.monotonic() - t_start
     print(f"{'═' * 90}")
-    print(f"  Pushed: {pushed}  |  Failed: {failed}")
+    print(f"  Pushed: {pushed}  |  Failed: {failed}  |  Runtime: {elapsed_total:.0f}s")
     print(f"{'═' * 90}")
 
     return 1 if failed > 0 else 0

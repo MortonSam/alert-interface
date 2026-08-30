@@ -27,7 +27,9 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
+from app.models.system_metadata import SystemMetadata
 from app.models.ticker import Ticker
+from app.services import chain_store
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
@@ -510,6 +512,46 @@ async def check_frozen_price_history(session) -> CheckResult:
     )
 
 
+async def check_chain_coverage(session) -> CheckResult:
+    """Percent of active tickers with a chain no older than 2 trading days."""
+    active_syms = (await session.execute(
+        select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
+    )).scalars().all()
+
+    if not active_syms:
+        return CheckResult("chain_coverage", PASS, "No active tickers")
+
+    stale: list[str] = []
+    for sym in active_syms:
+        exps = await chain_store.get_ingested_expirations(session, sym)
+        fresh = False
+        for exp in reversed(exps):
+            result = await chain_store.get_chain(session, sym, exp)
+            if result:
+                _, chain_last_trade = result
+                if chain_store.is_fresh(chain_last_trade):
+                    fresh = True
+                    break
+        if not fresh:
+            stale.append(sym)
+
+    covered = len(active_syms) - len(stale)
+    pct = covered / len(active_syms) * 100
+
+    if pct >= 90:
+        return CheckResult(
+            "chain_coverage", PASS,
+            f"{covered}/{len(active_syms)} active tickers ({pct:.0f}%) have a fresh chain",
+        )
+
+    details = [f"{sym}  no fresh chain" for sym in stale]
+    return CheckResult(
+        "chain_coverage", WARN,
+        f"{covered}/{len(active_syms)} ({pct:.0f}%) active tickers have a fresh chain (below 90% threshold)",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -533,6 +575,8 @@ CHECKS = [
     check_tickers_uniform_outcome,
     # IV history
     check_iv_history_out_of_band,
+    # Options chains
+    check_chain_coverage,
 ]
 
 

@@ -22,6 +22,7 @@ class OptionsChainRead(BaseModel):
     puts: list[OptionContractRead]
     available_expirations: list[str]
     as_of: str   # ISO UTC
+    data_quality_note: str | None = None
 
 
 class HistoricalMoveStats(BaseModel):
@@ -71,6 +72,7 @@ class StrategyDataRead(BaseModel):
     implied_range_high: float | None
     strikes: list[StrikeData]        # only strikes with at least one valid mid-price
     as_of: str
+    data_quality_note: str | None = None
 
 
 # ── Realized volatility rank / percentile ──────────────────────────────────────

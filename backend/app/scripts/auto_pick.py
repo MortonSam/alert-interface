@@ -10,13 +10,12 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import traceback
 from datetime import date, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
@@ -24,23 +23,11 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.routers.thesis import compute_alert_pick
+from app.services import chain_store
 
 MAX_NEW_PER_NIGHT = 3
 MAX_OPEN_TOTAL = 10
 MAX_DRAFT_ATTEMPTS = 6
-
-
-def _trading_days_since(trade_date_str: str) -> int:
-    """Count trading days (Mon–Fri) between trade_date and today."""
-    trade_date = date.fromisoformat(trade_date_str)
-    today = date.today()
-    count = 0
-    d = trade_date
-    while d < today:
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            count += 1
-    return count
 
 
 async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
@@ -49,28 +36,17 @@ async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
     Returns (is_fresh, chain_last_trade_or_none).
     Fresh means: chain exists AND chain_last_trade is ≤ 2 trading days old.
     """
-    row = (await session.execute(
-        text(
-            "SELECT value FROM system_metadata "
-            "WHERE key LIKE :pattern ORDER BY updated_at DESC LIMIT 1"
-        ),
-        {"pattern": f"chain:{sym}:%"},
-    )).first()
-
-    if not row:
+    exps = await chain_store.get_ingested_expirations(session, sym)
+    if not exps:
         return False, None
 
-    try:
-        chain = json.loads(row[0])
-    except (json.JSONDecodeError, TypeError):
-        return False, None
-
-    chain_last_trade = chain.get("chain_last_trade")
-    if not chain_last_trade:
-        return False, None
-
-    stale = _trading_days_since(chain_last_trade) > 2
-    return (not stale), chain_last_trade
+    # Check the most recent expiration's chain
+    for exp in reversed(exps):
+        result = await chain_store.get_chain(session, sym, exp)
+        if result:
+            _, chain_last_trade = result
+            return chain_store.is_fresh(chain_last_trade), chain_last_trade
+    return False, None
 
 
 async def _run(dry_run: bool = False) -> int:

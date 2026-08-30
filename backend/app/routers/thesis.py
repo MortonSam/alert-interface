@@ -40,9 +40,8 @@ from app.schemas.thesis import (
     ThesisStockMarkRead,
 )
 from app.services.anthropic_client import AnthropicClient
-from app.services import quote_cache
+from app.services import chain_store, quote_cache
 from app.services.finnhub_client import FinnhubClient
-from app.services.options_cache import fetch_chain
 from app.models.system_metadata import SystemMetadata
 from app.services.system_metadata_service import get_value
 from app.services.yfinance_client import YFinanceClient
@@ -129,6 +128,7 @@ def _canonicalize_spread(
 async def _compute_option_mark(
     thesis: Thesis,
     loop: asyncio.AbstractEventLoop,
+    db: AsyncSession | None = None,
     stock_price_override: float | None = None,
     use_quote_cache: bool = True,
 ) -> ThesisMarkRead:
@@ -233,15 +233,20 @@ async def _compute_option_mark(
                 finally:
                     await finnhub.close()
 
-        # Fetch live chain (cached)
+        # Mark from ingested chain
         exp_str = exp_date.isoformat()
-        try:
-            chain_entry = await fetch_chain(sym, exp_str, loop)
-            chain = chain_entry.chain
-            as_of = chain_entry.fetched_at.isoformat()
-        except Exception as exc:
-            mark_note = f"Chain fetch failed: {exc}"
-            chain = {"calls": [], "puts": []}
+        chain: dict = {"calls": [], "puts": []}
+        if db is not None:
+            chain_result = await chain_store.get_chain(db, sym, exp_str)
+            if chain_result and chain_store.is_fresh(chain_result[1]):
+                chain = chain_result[0]
+                as_of = f"chain as of {chain_result[1]}"
+            elif chain_result:
+                mark_note = f"Mark unavailable, chain as of {chain_result[1]}"
+            else:
+                mark_note = f"Mark unavailable, no ingested chain for {exp_str}"
+        else:
+            mark_note = f"Mark unavailable, no database session"
 
         side = chain.get("calls") if thesis.option_type == "call" else chain.get("puts", [])
         c1 = next((c for c in side if c["strike"] == strike1), None) if side else None
@@ -254,9 +259,9 @@ async def _compute_option_mark(
                 current_mid2 = _mid_or_last(c2.get("bid"), c2.get("ask"), c2.get("lastPrice"))
 
         if current_mid1 is not None:
-            mark_basis = "live_chain"
-        else:
-            mark_note = mark_note or f"Strike ${strike1:.2f} not found in {exp_str} chain"
+            mark_basis = "ingested_chain"
+        elif mark_note is None:
+            mark_note = f"Strike ${strike1:.2f} not found in {exp_str} chain"
 
     # ── P&L ───────────────────────────────────────────────────────────────────
     pnl_dollars: float | None = None
@@ -294,19 +299,6 @@ async def _compute_option_mark(
 
 # ── Shared data pipeline ───────────────────────────────────────────────────────
 
-async def _get_ingested_expirations(db: AsyncSession, sym: str) -> list[str]:
-    """Return sorted expiration date strings from ingested chain keys like 'chain:SYM:2026-09-18'."""
-    rows = (await db.execute(
-        select(SystemMetadata.key).where(SystemMetadata.key.like(f"chain:{sym}:%"))
-    )).scalars().all()
-    exps = []
-    for key in rows:
-        parts = key.split(":")
-        if len(parts) == 3:
-            exps.append(parts[2])
-    return sorted(exps)
-
-
 async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual") -> dict:
     """Fetch all market data + DB state needed by both draft and alert-pick endpoints."""
     loop = asyncio.get_event_loop()
@@ -314,9 +306,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     # ── 1. Parallel market data fetch ─────────────────────────────────────────
     finnhub = FinnhubClient()
     try:
-        quote, expirations, rv_raw = await asyncio.gather(
+        quote, rv_raw = await asyncio.gather(
             finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
             loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym),
         )
     except Exception as exc:
@@ -396,40 +387,22 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         select(AnalystReactionStats).where(AnalystReactionStats.symbol == sym)
     )
 
-    # ── 3. Choose expiration (prefer ingested chains) ──────────────────────
-    ingested_exps = await _get_ingested_expirations(db, sym)
-
-    chosen_exp: str | None = None
-    chain_from_ingested: bool = False
+    # ── 3. Choose expiration from ingested chains ──────────────────────────
     if earnings_str:
         min_exp = (date.fromisoformat(earnings_str) + timedelta(days=14)).isoformat()
     else:
         min_exp = (today + timedelta(days=7)).isoformat()
 
-    # Try ingested expirations first
-    ingested_match = [e for e in ingested_exps if e >= min_exp]
-    if ingested_match:
-        chosen_exp = ingested_match[0]
-    elif expirations:
-        # Fall back to yfinance expirations
-        yf_match = [e for e in expirations if e >= min_exp]
-        if yf_match:
-            chosen_exp = yf_match[0]
-        else:
-            chosen_exp = expirations[-1]  # farthest available
+    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
+    chain_from_ingested: bool = False
 
-    # ── 4. Options chain (prefer ingested courier data, fall back to yfinance)
+    # ── 4. Options chain from ingested store ──────────────────────────────────
     chain: dict = {"calls": [], "puts": []}
     if chosen_exp:
-        ingested_raw = await get_value(db, f"chain:{sym}:{chosen_exp}")
-        if ingested_raw:
-            chain = json.loads(ingested_raw)
+        chain_result = await chain_store.get_chain(db, sym, chosen_exp)
+        if chain_result:
+            chain = chain_result[0]
             chain_from_ingested = True
-        elif source == "nightly":
-            # Nightly picks never fall back to yfinance for chains
-            pass
-        else:
-            chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
 
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
@@ -1513,16 +1486,12 @@ async def draft_alternative(
     direction = payload.direction.lower()
     aggressiveness = payload.aggressiveness.lower()
     budget = payload.budget
-    loop = asyncio.get_event_loop()
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
-    # ── 1. Parallel market data fetch ─────────────────────────────────────────
+    # ── 1. Finnhub quote ─────────────────────────────────────────────────────
     finnhub = FinnhubClient()
     try:
-        quote, expirations = await asyncio.gather(
-            finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-        )
+        quote = await finnhub.get_quote(sym)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Market data fetch failed: {exc}")
     finally:
@@ -1549,20 +1518,16 @@ async def draft_alternative(
         ned_val.isoformat() if ned_val and hasattr(ned_val, "isoformat") else (str(ned_val) if ned_val else None)
     )
 
-    # ── 3. Choose expiration (same logic as draft_thesis) ─────────────────────
-    chosen_exp: str | None = None
-    if expirations:
-        if earnings_str:
-            post = [e for e in expirations if e >= earnings_str]
-            chosen_exp = post[0] if post else expirations[-1]
-        else:
-            week_out = (today + timedelta(days=7)).isoformat()
-            chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+    # ── 3. Choose expiration from ingested chains ─────────────────────────────
+    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
+    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
 
-    # ── 4. Options chain ──────────────────────────────────────────────────────
+    # ── 4. Options chain from ingested store ──────────────────────────────────
     chain: dict = {"calls": [], "puts": []}
     if chosen_exp:
-        chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+        chain_result = await chain_store.get_chain(db, sym, chosen_exp)
+        if chain_result and chain_store.is_fresh(chain_result[1]):
+            chain = chain_result[0]
 
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
@@ -1880,8 +1845,6 @@ async def create_thesis(
     if not ticker:
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
 
-    loop = asyncio.get_event_loop()
-
     # ── Capture entry_price from live quote ───────────────────────────────────
     entry_price: float | None = None
     finnhub = FinnhubClient()
@@ -1901,17 +1864,17 @@ async def create_thesis(
 
     if payload.option_type and payload.strike and payload.option_expiration:
         try:
-            chain = await loop.run_in_executor(
-                None, YFinanceClient.get_option_chain, sym, payload.option_expiration
-            )
-            side = chain.get("calls") if payload.option_type == "call" else chain.get("puts", [])
-            c1 = next((c for c in side if c["strike"] == float(payload.strike)), None) if side else None
-            if c1:
-                entry_premium = _mid_or_last(c1.get("bid"), c1.get("ask"), c1.get("lastPrice"))
-            if payload.strike2 is not None:
-                c2 = next((c for c in side if c["strike"] == float(payload.strike2)), None) if side else None
-                if c2:
-                    entry_premium2 = _mid_or_last(c2.get("bid"), c2.get("ask"), c2.get("lastPrice"))
+            chain_result = await chain_store.get_chain(db, sym, payload.option_expiration)
+            if chain_result and chain_store.is_fresh(chain_result[1]):
+                chain_data = chain_result[0]
+                side = chain_data.get("calls") if payload.option_type == "call" else chain_data.get("puts", [])
+                c1 = next((c for c in side if c["strike"] == float(payload.strike)), None) if side else None
+                if c1:
+                    entry_premium = _mid_or_last(c1.get("bid"), c1.get("ask"), c1.get("lastPrice"))
+                if payload.strike2 is not None:
+                    c2 = next((c for c in side if c["strike"] == float(payload.strike2)), None) if side else None
+                    if c2:
+                        entry_premium2 = _mid_or_last(c2.get("bid"), c2.get("ask"), c2.get("lastPrice"))
         except Exception:
             pass  # graceful: thesis created without option premium
 
@@ -1958,7 +1921,7 @@ async def mark_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) 
         raise HTTPException(status_code=404, detail="Thesis not found")
 
     loop = asyncio.get_event_loop()
-    return await _compute_option_mark(thesis, loop)
+    return await _compute_option_mark(thesis, loop, db=db)
 
 
 @router.get("/{thesis_id}/stock-mark", response_model=ThesisStockMarkRead)
@@ -2148,7 +2111,7 @@ async def resolve_thesis(
     option_pnl_pct: float | None = None
     if thesis.option_type:
         loop = asyncio.get_event_loop()
-        mark = await _compute_option_mark(thesis, loop, stock_price_override=resolution_price, use_quote_cache=False)
+        mark = await _compute_option_mark(thesis, loop, db=db, stock_price_override=resolution_price, use_quote_cache=False)
         option_pnl_dollars = mark.pnl_dollars
         option_pnl_pct     = mark.pnl_pct
 

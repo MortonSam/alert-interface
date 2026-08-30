@@ -21,8 +21,8 @@ from app.models.system_metadata import SystemMetadata
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
+from app.services import chain_store
 from app.services.finnhub_client import FinnhubClient
-from app.services.options_cache import fetch_chain
 from app.services import news_cache, quote_cache
 from app.services.yfinance_client import YFinanceClient
 
@@ -314,7 +314,6 @@ async def batch_enrich(
     if not syms:
         return []
 
-    loop = asyncio.get_event_loop()
     today = date.today()
 
     # ── 1. Batch DB lookups ──────────────────────────────────────────────────
@@ -390,34 +389,28 @@ async def batch_enrich(
             current_price = q.get("price")
             earnings_str = earnings_by_sym.get(sym)
 
-            # — Expected move (straddle / price) ——————————————————————————————
+            # — Expected move from ingested chain ——————————————————————————————
             em_pct: float | None = None
             try:
-                expirations: list[str] = await loop.run_in_executor(
-                    None, YFinanceClient.get_option_expirations, sym,
-                )
-                if expirations and current_price:
-                    # Pick expiration: nearest post-earnings, or ≥7d out
-                    if earnings_str:
-                        post = [e for e in expirations if e >= earnings_str]
-                        chosen = post[0] if post else expirations[-1]
-                    else:
-                        week_out = (today + timedelta(days=7)).isoformat()
-                        chosen = next((e for e in expirations if e >= week_out), expirations[0])
-
-                    chain_entry = await fetch_chain(sym, chosen, loop)
-                    chain = chain_entry.chain
-                    calls = chain.get("calls", [])
-                    puts = chain.get("puts", [])
-                    common = {c["strike"] for c in calls} & {p["strike"] for p in puts}
-                    if common:
-                        atm = min(common, key=lambda s: abs(s - current_price))
-                        c = next((x for x in calls if x["strike"] == atm), None)
-                        p = next((x for x in puts if x["strike"] == atm), None)
-                        cp = _mid_or_last(c["bid"], c["ask"], c["lastPrice"]) if c else None
-                        pp = _mid_or_last(p["bid"], p["ask"], p["lastPrice"]) if p else None
-                        if cp is not None and pp is not None:
-                            em_pct = (cp + pp) / current_price
+                if current_price:
+                    min_date = earnings_str or (today + timedelta(days=7)).isoformat()
+                    chosen = await chain_store.pick_expiration(db, sym, min_date)
+                    if chosen:
+                        result = await chain_store.get_chain(db, sym, chosen)
+                        if result:
+                            chain, clt = result
+                            if chain_store.is_fresh(clt):
+                                calls = chain.get("calls", [])
+                                puts = chain.get("puts", [])
+                                common = {c["strike"] for c in calls} & {p["strike"] for p in puts}
+                                if common:
+                                    atm = min(common, key=lambda s: abs(s - current_price))
+                                    c = next((x for x in calls if x["strike"] == atm), None)
+                                    p = next((x for x in puts if x["strike"] == atm), None)
+                                    cp = _mid_or_last(c["bid"], c["ask"], c["lastPrice"]) if c else None
+                                    pp = _mid_or_last(p["bid"], p["ask"], p["lastPrice"]) if p else None
+                                    if cp is not None and pp is not None:
+                                        em_pct = (cp + pp) / current_price
             except Exception:
                 pass
 
@@ -564,37 +557,19 @@ async def get_ticker_chart(
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
 async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> ExpectedMoveRead:
     sym = symbol.upper()
-    finnhub = FinnhubClient()
-    loop = asyncio.get_event_loop()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+    today = date.today()
 
+    # Finnhub quote for current price
+    finnhub = FinnhubClient()
     try:
-        quote, expirations = await asyncio.gather(
-            finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-        )
+        quote = await finnhub.get_quote(sym)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
     finally:
         await finnhub.close()
 
     current_price = float(quote.get("c") or 0) or None
-
-    if not expirations:
-        return ExpectedMoveRead(
-            symbol=sym, current_price=current_price,
-            expected_move_pct=None, expected_move_dollars=None,
-            implied_range_low=None, implied_range_high=None,
-            expiration_used=None, earnings_date=None,
-            days_expiration_past_earnings=None,
-            straddle_price=None, atm_strike=None,
-            historical_stats=None,
-            plain_summary=None,
-            data_quality_note="No options expirations available for this symbol.",
-            as_of=as_of,
-        )
-
-    today = date.today()
 
     # Look up ticker + next earnings
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -609,39 +584,55 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         if ned_result:
             earnings_str = ned_result.isoformat() if hasattr(ned_result, "isoformat") else str(ned_result)
 
+    # Pick expiration from ingested chains
     data_quality_note: str | None = None
-    chosen_exp: str | None = None
     days_expiration_past_earnings: int | None = None
 
-    if earnings_str:
-        # Pick the expiration CLOSEST to (but not before) earnings — minimises extra vol
-        post_earnings = [e for e in expirations if e >= earnings_str]
-        if post_earnings:
-            chosen_exp = post_earnings[0]  # expirations are already sorted ascending
-        else:
-            chosen_exp = expirations[-1]
-            data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
+    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
+    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
 
-        if chosen_exp and earnings_str:
-            earnings_date_obj = date.fromisoformat(earnings_str)
-            exp_date_obj = date.fromisoformat(chosen_exp)
-            days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
-            if days_expiration_past_earnings > 7 and data_quality_note is None:
-                data_quality_note = (
-                    f"Nearest available expiration ({chosen_exp}) is "
-                    f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
-                    f"The implied move covers the full period to expiration, not just the earnings event."
-                )
+    if not chosen_exp:
+        return ExpectedMoveRead(
+            symbol=sym, current_price=current_price,
+            expected_move_pct=None, expected_move_dollars=None,
+            implied_range_low=None, implied_range_high=None,
+            expiration_used=None, earnings_date=earnings_str,
+            days_expiration_past_earnings=None,
+            straddle_price=None, atm_strike=None,
+            historical_stats=None, plain_summary=None,
+            data_quality_note=f"No fresh options data for {sym}",
+            as_of=as_of,
+        )
+
+    if earnings_str:
+        earnings_date_obj = date.fromisoformat(earnings_str)
+        exp_date_obj = date.fromisoformat(chosen_exp)
+        days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
+        if days_expiration_past_earnings > 7:
+            data_quality_note = (
+                f"Nearest available expiration ({chosen_exp}) is "
+                f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
+                f"The implied move covers the full period to expiration, not just the earnings event."
+            )
     else:
-        week_out = (today + timedelta(days=7)).isoformat()
-        chosen_exp = next((e for e in expirations if e >= week_out), None)
-        if chosen_exp is None:
-            chosen_exp = expirations[0]
         data_quality_note = "No earnings date found; using nearest weekly expiration."
 
-    chain_entry = await fetch_chain(sym, chosen_exp, loop)
-    chain = chain_entry.chain
-    as_of = chain_entry.fetched_at.isoformat()
+    chain_result = await chain_store.get_chain(db, sym, chosen_exp)
+    if not chain_result or not chain_store.is_fresh(chain_result[1]):
+        return ExpectedMoveRead(
+            symbol=sym, current_price=current_price,
+            expected_move_pct=None, expected_move_dollars=None,
+            implied_range_low=None, implied_range_high=None,
+            expiration_used=chosen_exp, earnings_date=earnings_str,
+            days_expiration_past_earnings=days_expiration_past_earnings,
+            straddle_price=None, atm_strike=None,
+            historical_stats=None, plain_summary=None,
+            data_quality_note=f"No fresh options data for {sym}",
+            as_of=as_of,
+        )
+
+    chain, chain_last_trade = chain_result
+    as_of = f"chain as of {chain_last_trade}" if chain_last_trade else as_of
 
     calls = chain.get("calls", [])
     puts = chain.get("puts", [])
@@ -727,15 +718,12 @@ async def get_options_chain(
     db: AsyncSession = Depends(get_db),
 ) -> OptionsChainRead:
     sym = symbol.upper()
-    finnhub = FinnhubClient()
-    loop = asyncio.get_event_loop()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
+    # Finnhub quote for current price
+    finnhub = FinnhubClient()
     try:
-        quote, available = await asyncio.gather(
-            finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-        )
+        quote = await finnhub.get_quote(sym)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
     finally:
@@ -743,16 +731,25 @@ async def get_options_chain(
 
     current_price = float(quote.get("c") or 0) or None
 
+    available = await chain_store.get_ingested_expirations(db, sym)
     if not available:
         return OptionsChainRead(
             symbol=sym, expiration="", current_price=current_price,
-            calls=[], puts=[], available_expirations=[], as_of=as_of,
+            calls=[], puts=[], available_expirations=[],
+            as_of=as_of, data_quality_note=f"No fresh options data for {sym}",
         )
 
     chosen = expiration if (expiration and expiration in available) else available[0]
-    chain_entry = await fetch_chain(sym, chosen, loop)
-    chain = chain_entry.chain
-    as_of = chain_entry.fetched_at.isoformat()
+    chain_result = await chain_store.get_chain(db, sym, chosen)
+    if not chain_result or not chain_store.is_fresh(chain_result[1]):
+        return OptionsChainRead(
+            symbol=sym, expiration=chosen, current_price=current_price,
+            calls=[], puts=[], available_expirations=available,
+            as_of=as_of, data_quality_note=f"No fresh options data for {sym}",
+        )
+
+    chain, chain_last_trade = chain_result
+    as_of = f"chain as of {chain_last_trade}" if chain_last_trade else as_of
 
     calls_raw = chain.get("calls", [])
     puts_raw = chain.get("puts", [])
@@ -793,23 +790,19 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
     so the frontend always works with real, trustworthy premiums.
     """
     sym = symbol.upper()
-    finnhub = FinnhubClient()
-    loop = asyncio.get_event_loop()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
+    # Finnhub quote for current price
+    finnhub = FinnhubClient()
     try:
-        quote, expirations = await asyncio.gather(
-            finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-        )
+        quote = await finnhub.get_quote(sym)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
     finally:
         await finnhub.close()
 
     current_price = float(quote.get("c") or 0) or None
-
-    if not expirations or not current_price:
+    if not current_price:
         return StrategyDataRead(
             symbol=sym, current_price=current_price, expiration=None,
             implied_range_low=None, implied_range_high=None,
@@ -818,7 +811,7 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
 
     today = date.today()
 
-    # Next earnings (same logic as expected-move)
+    # Next earnings
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     earnings_str: str | None = None
     if ticker_row:
@@ -831,17 +824,29 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         if ned_result:
             earnings_str = ned_result.isoformat() if hasattr(ned_result, "isoformat") else str(ned_result)
 
-    # Pick expiration
-    if earnings_str:
-        post = [e for e in expirations if e >= earnings_str]
-        chosen_exp: str = post[0] if post else expirations[-1]
-    else:
-        week_out = (today + timedelta(days=7)).isoformat()
-        chosen_exp = next((e for e in expirations if e >= week_out), expirations[0])
+    # Pick expiration from ingested chains
+    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
+    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
 
-    chain_entry = await fetch_chain(sym, chosen_exp, loop)
-    chain = chain_entry.chain
-    as_of = chain_entry.fetched_at.isoformat()
+    if not chosen_exp:
+        return StrategyDataRead(
+            symbol=sym, current_price=current_price, expiration=None,
+            implied_range_low=None, implied_range_high=None,
+            strikes=[], as_of=as_of,
+            data_quality_note=f"No fresh options data for {sym}",
+        )
+
+    chain_result = await chain_store.get_chain(db, sym, chosen_exp)
+    if not chain_result or not chain_store.is_fresh(chain_result[1]):
+        return StrategyDataRead(
+            symbol=sym, current_price=current_price, expiration=chosen_exp,
+            implied_range_low=None, implied_range_high=None,
+            strikes=[], as_of=as_of,
+            data_quality_note=f"No fresh options data for {sym}",
+        )
+
+    chain, chain_last_trade = chain_result
+    as_of = f"chain as of {chain_last_trade}" if chain_last_trade else as_of
     calls_raw = chain.get("calls", [])
     puts_raw  = chain.get("puts",  [])
 
@@ -911,50 +916,23 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
 async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) -> OptionsBundleRead:
     """Consolidated expected-move + strategy-data + chain in a single request.
 
-    Fetches the yfinance chain once and computes all three responses from it,
-    saving 2 HTTP round-trips and eliminating redundant external calls.
+    Sources chain exclusively from ingested courier data. Returns null options
+    fields with a note when no fresh chain exists.
     """
     sym = symbol.upper()
-    finnhub = FinnhubClient()
-    loop = asyncio.get_event_loop()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
+    today = date.today()
 
+    # Finnhub quote for current price
+    finnhub = FinnhubClient()
     try:
-        quote, expirations = await asyncio.gather(
-            finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-        )
+        quote = await finnhub.get_quote(sym)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
     finally:
         await finnhub.close()
 
     current_price = float(quote.get("c") or 0) or None
-    today = date.today()
-
-    # ── Empty-options fallback ────────────────────────────────────────────────
-    if not expirations:
-        empty_em = ExpectedMoveRead(
-            symbol=sym, current_price=current_price,
-            expected_move_pct=None, expected_move_dollars=None,
-            implied_range_low=None, implied_range_high=None,
-            expiration_used=None, earnings_date=None,
-            days_expiration_past_earnings=None,
-            straddle_price=None, atm_strike=None,
-            historical_stats=None, plain_summary=None,
-            data_quality_note="No options expirations available for this symbol.",
-            as_of=as_of,
-        )
-        empty_sd = StrategyDataRead(
-            symbol=sym, current_price=current_price, expiration=None,
-            implied_range_low=None, implied_range_high=None,
-            strikes=[], as_of=as_of,
-        )
-        empty_chain = OptionsChainRead(
-            symbol=sym, expiration="", current_price=current_price,
-            calls=[], puts=[], available_expirations=[], as_of=as_of,
-        )
-        return OptionsBundleRead(expected_move=empty_em, strategy_data=empty_sd, chain=empty_chain)
 
     # ── Ticker + next earnings ────────────────────────────────────────────────
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -967,29 +945,40 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
         if ned:
             earnings_str = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
 
-    # ── Ingested expirations (chain:{SYM}:{EXP} keys in system_metadata) ─────
-    ingested_rows = (await db.execute(
-        select(SystemMetadata.key).where(SystemMetadata.key.like(f"chain:{sym}:%"))
-    )).scalars().all()
-    ingested_exps = sorted(k.split(":")[2] for k in ingested_rows if len(k.split(":")) == 3)
+    # ── Ingested expirations ──────────────────────────────────────────────────
+    ingested_exps = await chain_store.get_ingested_expirations(db, sym)
 
     # ── Pick expiration ────────────────────────────────────────────────────────
     data_quality_note: str | None = None
     days_expiration_past_earnings: int | None = None
-    min_exp = (today + timedelta(days=7)).isoformat()
+    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
 
-    if earnings_str:
-        min_exp = earnings_str  # at least covers earnings
+    post = [e for e in ingested_exps if e >= min_exp]
+    chosen_exp: str | None = post[0] if post else (ingested_exps[-1] if ingested_exps else None)
 
-    # Prefer ingested expirations, fall back to yfinance
-    all_exps = sorted(set(ingested_exps) | set(expirations))
-    post = [e for e in all_exps if e >= min_exp]
-    if post:
-        chosen_exp = post[0]
-    elif all_exps:
-        chosen_exp = all_exps[-1]
-    else:
-        chosen_exp = expirations[0]
+    if not chosen_exp:
+        no_data_note = f"No fresh options data for {sym}"
+        empty_em = ExpectedMoveRead(
+            symbol=sym, current_price=current_price,
+            expected_move_pct=None, expected_move_dollars=None,
+            implied_range_low=None, implied_range_high=None,
+            expiration_used=None, earnings_date=earnings_str,
+            days_expiration_past_earnings=None,
+            straddle_price=None, atm_strike=None,
+            historical_stats=None, plain_summary=None,
+            data_quality_note=no_data_note, as_of=as_of,
+        )
+        empty_sd = StrategyDataRead(
+            symbol=sym, current_price=current_price, expiration=None,
+            implied_range_low=None, implied_range_high=None,
+            strikes=[], as_of=as_of, data_quality_note=no_data_note,
+        )
+        empty_chain = OptionsChainRead(
+            symbol=sym, expiration="", current_price=current_price,
+            calls=[], puts=[], available_expirations=[],
+            as_of=as_of, data_quality_note=no_data_note,
+        )
+        return OptionsBundleRead(expected_move=empty_em, strategy_data=empty_sd, chain=empty_chain)
 
     if earnings_str:
         earnings_date_obj = date.fromisoformat(earnings_str)
@@ -1004,18 +993,34 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
                 f"The implied move covers the full period to expiration, not just the earnings event."
             )
 
-    # ── Fetch chain (prefer ingested, fall back to yfinance) ──────────────────
-    chain_from_ingested = False
-    ingested_raw = await _get_meta(db, f"chain:{sym}:{chosen_exp}")
-    if ingested_raw:
-        chain = json.loads(ingested_raw)
-        chain_from_ingested = True
-        chain_last_trade = chain.get("chain_last_trade")
-        as_of_label = f"chain as of {chain_last_trade}" if chain_last_trade else "ingested chain"
-    else:
-        chain_entry = await fetch_chain(sym, chosen_exp, loop)
-        chain = chain_entry.chain
-        as_of_label = "live estimate"
+    # ── Fetch chain from ingested store ───────────────────────────────────────
+    chain_result = await chain_store.get_chain(db, sym, chosen_exp)
+    if not chain_result or not chain_store.is_fresh(chain_result[1]):
+        no_data_note = f"No fresh options data for {sym}"
+        empty_em = ExpectedMoveRead(
+            symbol=sym, current_price=current_price,
+            expected_move_pct=None, expected_move_dollars=None,
+            implied_range_low=None, implied_range_high=None,
+            expiration_used=chosen_exp, earnings_date=earnings_str,
+            days_expiration_past_earnings=days_expiration_past_earnings,
+            straddle_price=None, atm_strike=None,
+            historical_stats=None, plain_summary=None,
+            data_quality_note=no_data_note, as_of=as_of,
+        )
+        empty_sd = StrategyDataRead(
+            symbol=sym, current_price=current_price, expiration=chosen_exp,
+            implied_range_low=None, implied_range_high=None,
+            strikes=[], as_of=as_of, data_quality_note=no_data_note,
+        )
+        empty_chain = OptionsChainRead(
+            symbol=sym, expiration=chosen_exp, current_price=current_price,
+            calls=[], puts=[], available_expirations=ingested_exps,
+            as_of=as_of, data_quality_note=no_data_note,
+        )
+        return OptionsBundleRead(expected_move=empty_em, strategy_data=empty_sd, chain=empty_chain)
+
+    chain, chain_last_trade = chain_result
+    as_of_label = f"chain as of {chain_last_trade}" if chain_last_trade else "ingested chain"
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
     calls_raw = chain.get("calls", [])
@@ -1141,7 +1146,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
         symbol=sym, expiration=chosen_exp, current_price=current_price,
         calls=_build_contracts(filtered_calls, atm_strike, current_price=current_price, is_call=True),
         puts=_build_contracts(filtered_puts, atm_strike, current_price=current_price, is_call=False),
-        available_expirations=sorted(set(ingested_exps) | set(expirations)),
+        available_expirations=ingested_exps,
         as_of=as_of_label,
     )
 
@@ -1199,13 +1204,9 @@ async def get_options_read(
 
     rv_snapshot_row = await get_latest_rv(db, sym)
 
-    # ── Gather data in parallel ───────────────────────────────────────────────
+    # ── Finnhub quote + live RV (only if no snapshot) ─────────────────────────
     finnhub = FinnhubClient()
-    coros: list = [
-        finnhub.get_quote(sym),
-        loop.run_in_executor(None, YFinanceClient.get_option_expirations, sym),
-    ]
-    # Only fetch live RV if no fresh snapshot
+    coros: list = [finnhub.get_quote(sym)]
     if rv_snapshot_row is None:
         coros.append(loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym))
 
@@ -1217,8 +1218,7 @@ async def get_options_read(
         await finnhub.close()
 
     quote = results[0]
-    expirations = results[1]
-    rv_raw: dict = results[2] if len(results) > 2 else {}
+    rv_raw: dict = results[1] if len(results) > 1 else {}
 
     current_price: float | None = float(quote.get("c") or 0) or None
 
@@ -1236,30 +1236,16 @@ async def get_options_read(
         if ned:
             earnings_str = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
 
-    # Ingested expirations
-    ingested_rows = (await db.execute(
-        select(SystemMetadata.key).where(SystemMetadata.key.like(f"chain:{sym}:%"))
-    )).scalars().all()
-    ingested_exps = sorted(k.split(":")[2] for k in ingested_rows if len(k.split(":")) == 3)
+    # Pick expiration from ingested chains
+    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
+    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
 
-    # Pick expiration (prefer ingested, then yfinance)
-    chosen_exp: str | None = None
-    all_exps = sorted(set(ingested_exps) | set(expirations))
-    if all_exps:
-        min_exp = (today + timedelta(days=7)).isoformat()
-        if earnings_str:
-            min_exp = earnings_str
-        post = [e for e in all_exps if e >= min_exp]
-        chosen_exp = post[0] if post else all_exps[-1]
-
-    # Options chain (prefer ingested, fall back to yfinance)
+    # Options chain from ingested store
     chain: dict = {"calls": [], "puts": []}
     if chosen_exp:
-        ingested_raw = await _get_meta(db, f"chain:{sym}:{chosen_exp}")
-        if ingested_raw:
-            chain = json.loads(ingested_raw)
-        else:
-            chain = await loop.run_in_executor(None, YFinanceClient.get_option_chain, sym, chosen_exp)
+        chain_result = await chain_store.get_chain(db, sym, chosen_exp)
+        if chain_result and chain_store.is_fresh(chain_result[1]):
+            chain = chain_result[0]
 
     calls = chain.get("calls", [])
     puts  = chain.get("puts", [])
@@ -1618,12 +1604,7 @@ async def get_explain(
 
     elif metric == "put_call":
         metric_label = "put/call ratio"
-        # Use the same expiration selection as the options bundle so the ratio
-        # matches what the frontend MetricsRow card displays.
-        loop = asyncio.get_event_loop()
         try:
-            from app.services.yfinance_client import YFinanceClient as YFC
-            expirations = await loop.run_in_executor(None, YFC.get_option_expirations, sym)
             # Earnings-aware expiration pick (mirrors bundle logic)
             earnings_str_local: str | None = None
             if ticker_row:
@@ -1635,32 +1616,32 @@ async def get_explain(
                 if ned:
                     earnings_str_local = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
 
-            exp: str | None = None
-            if expirations:
-                if earnings_str_local:
-                    post = [e for e in expirations if e >= earnings_str_local]
-                    exp = post[0] if post else expirations[-1]
-                else:
-                    week_out = (today + timedelta(days=7)).isoformat()
-                    exp = next((e for e in expirations if e >= week_out), expirations[0])
+            min_date = earnings_str_local or (today + timedelta(days=7)).isoformat()
+            exp = await chain_store.pick_expiration(db, sym, min_date)
 
             if exp:
-                chain_data = await loop.run_in_executor(None, YFC.get_option_chain, sym, exp)
-                put_vol = sum(p.get("volume", 0) or 0 for p in chain_data.get("puts", []))
-                call_vol = sum(c.get("volume", 0) or 0 for c in chain_data.get("calls", []))
-                ratio = put_vol / call_vol if call_vol > 0 else None
-                facts.update({
-                    "put_call_ratio": f"{ratio:.2f}" if ratio is not None else "(unavailable)",
-                    "put_volume": str(put_vol),
-                    "call_volume": str(call_vol),
-                    "expiration": exp,
-                    "interpretation": (
-                        "put-heavy (more bearish bets)" if ratio is not None and ratio > 1.2
-                        else "call-heavy (more bullish bets)" if ratio is not None and ratio < 0.7
-                        else "balanced" if ratio is not None
-                        else "(unavailable)"
-                    ),
-                })
+                chain_result = await chain_store.get_chain(db, sym, exp)
+                if chain_result and chain_store.is_fresh(chain_result[1]):
+                    chain_data = chain_result[0]
+                    put_vol = sum(p.get("volume", 0) or 0 for p in chain_data.get("puts", []))
+                    call_vol = sum(c.get("volume", 0) or 0 for c in chain_data.get("calls", []))
+                    ratio = put_vol / call_vol if call_vol > 0 else None
+                    facts.update({
+                        "put_call_ratio": f"{ratio:.2f}" if ratio is not None else "(unavailable)",
+                        "put_volume": str(put_vol),
+                        "call_volume": str(call_vol),
+                        "expiration": exp,
+                        "interpretation": (
+                            "put-heavy (more bearish bets)" if ratio is not None and ratio > 1.2
+                            else "call-heavy (more bullish bets)" if ratio is not None and ratio < 0.7
+                            else "balanced" if ratio is not None
+                            else "(unavailable)"
+                        ),
+                    })
+                else:
+                    facts.update({"put_call_ratio": "(unavailable)"})
+            else:
+                facts.update({"put_call_ratio": "(unavailable)"})
         except Exception:
             facts.update({"put_call_ratio": "(unavailable)"})
 
