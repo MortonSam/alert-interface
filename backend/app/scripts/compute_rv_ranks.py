@@ -29,6 +29,17 @@ BATCH_SIZE = 100
 STRAGGLER_BACKOFF = (2, 5, 12)
 
 
+def _last_trading_day(d: date | None = None) -> date:
+    """Roll weekends back to Friday.  Mon-Fri pass through unchanged."""
+    d = d or date.today()
+    wd = d.weekday()
+    if wd == 5:
+        return d - timedelta(days=1)
+    if wd == 6:
+        return d - timedelta(days=2)
+    return d
+
+
 async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
     stmt = sa.text("""
         INSERT INTO rv_snapshots
@@ -123,7 +134,7 @@ def _fetch_single(symbol: str):
 
 
 async def main(only_symbol: str | None = None) -> int:
-    today = date.today()
+    today = _last_trading_day()
     t0 = time.time()
     print(f"\nRV Rank Precompute — {today}")
     print("─" * 60)

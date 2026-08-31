@@ -11,6 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+# Any single-day |log return| above this threshold indicates a failed split
+# adjustment or corrupt bar.  ln(1.50) ≈ 0.405 → a 50% price move.
+_RETURN_THRESHOLD = 0.405
+
 _EMPTY: dict = {
     "rv_20d": None,
     "rv_rank": None,
@@ -41,12 +45,29 @@ def compute_rv_metrics(closes: pd.Series, rv_window: int = 20) -> dict:
         rv_min       – float | None, trailing 252-day min RV
         rv_max       – float | None, trailing 252-day max RV
         sample_days  – int, number of trailing RV observations (max 252)
-        status       – str, one of "ok", "insufficient", "degenerate", "no_data"
+        status       – str, one of "ok", "insufficient", "degenerate", "no_data",
+                       "data_error"
     """
     if closes is None or len(closes) < rv_window + 2:
         return dict(_EMPTY)
 
     log_returns = np.log(closes / closes.shift(1)).dropna()
+
+    # Guard: reject the entire series if any return in the trailing window
+    # exceeds the threshold — the data contains a bad split adjustment or
+    # corrupt bar, and any number we produce would be wrong.
+    trailing_returns = log_returns.iloc[-(252 + rv_window):]  # generous lookback
+    if (trailing_returns.abs() > _RETURN_THRESHOLD).any():
+        return {
+            "rv_20d": None,
+            "rv_rank": None,
+            "rv_percentile": None,
+            "rv_min": None,
+            "rv_max": None,
+            "sample_days": 0,
+            "status": "data_error",
+        }
+
     rolling_rv = (log_returns.rolling(window=rv_window).std() * np.sqrt(252)).dropna()
 
     if rolling_rv.empty:

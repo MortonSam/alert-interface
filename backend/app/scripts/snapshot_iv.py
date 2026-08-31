@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import sys
 from datetime import date, timedelta
 
@@ -39,12 +40,26 @@ _IV_MIN = 0.05
 _IV_MAX = 4.0
 
 
+def _last_trading_day(d: date | None = None) -> date:
+    """Roll weekends back to Friday.  Mon-Fri pass through unchanged."""
+    d = d or date.today()
+    wd = d.weekday()  # 0=Mon … 6=Sun
+    if wd == 5:       # Saturday → Friday
+        return d - timedelta(days=1)
+    if wd == 6:       # Sunday → Friday
+        return d - timedelta(days=2)
+    return d
+
+
 def _get_current_price(symbol: str) -> float | None:
     """Current price from yfinance daily history (reliable from any IP)."""
     try:
         hist = YFinanceClient.get_price_history(symbol, period="2d")
         if hist is not None and not hist.empty:
-            return float(hist["Close"].iloc[-1])
+            price = float(hist["Close"].iloc[-1])
+            if math.isnan(price):
+                return None
+            return price
     except Exception:
         pass
     return None
@@ -221,7 +236,7 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
 
 
 async def main(only_symbol: str | None = None, backfill: bool = False) -> int:
-    today = date.today()
+    today = _last_trading_day()
     print(f"\nIV Snapshot — {today}")
     print("─" * 60)
 

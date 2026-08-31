@@ -564,6 +564,32 @@ async def check_rv_rank_bounds(session) -> CheckResult:
     )
 
 
+async def check_rv_data_error_tickers(session) -> CheckResult:
+    """WARN listing tickers whose latest rv_snapshot has status='data_error' (extreme returns)."""
+    # Subquery: latest as_of_date per symbol
+    latest_sq = (
+        select(RVSnapshot.symbol, func.max(RVSnapshot.as_of_date).label("max_date"))
+        .group_by(RVSnapshot.symbol)
+        .subquery()
+    )
+    rows = (await session.execute(
+        select(RVSnapshot.symbol, RVSnapshot.as_of_date)
+        .join(latest_sq, (RVSnapshot.symbol == latest_sq.c.symbol) & (RVSnapshot.as_of_date == latest_sq.c.max_date))
+        .where(RVSnapshot.status == "data_error")
+        .order_by(RVSnapshot.symbol)
+    )).all()
+
+    if not rows:
+        return CheckResult("rv_data_error_tickers", PASS, "No tickers excluded for extreme returns")
+
+    details = [f"{r.symbol}  as_of={r.as_of_date}" for r in rows]
+    return CheckResult(
+        "rv_data_error_tickers", WARN,
+        f"{len(rows)} ticker(s) excluded from RV (extreme returns, likely bad split adjustment)",
+        details,
+    )
+
+
 async def check_recommendations_freshness(session) -> CheckResult:
     """WARN if fewer than 300 active tickers have a recommendation fetched within 7 days."""
     cutoff = func.now() - text("interval '7 days'")
@@ -848,6 +874,7 @@ CHECKS = [
     # RV snapshots
     check_rv_snapshot_stale,
     check_rv_rank_bounds,
+    check_rv_data_error_tickers,
     # Analyst recommendations
     check_recommendations_freshness,
     check_recommendations_bounds,
