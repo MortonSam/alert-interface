@@ -391,7 +391,7 @@ export default function ThesisDetailPage() {
         {/* No option leg fallback */}
         {!hasOption && (
           <p className="text-sm text-muted-foreground">
-            Stock-only thesis — no option leg tracked.
+            Stock-only thesis, no option leg tracked.
           </p>
         )}
 

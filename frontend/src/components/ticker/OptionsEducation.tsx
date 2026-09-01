@@ -114,7 +114,7 @@ export default function OptionsEducation({
                 <strong className="text-foreground">±{(emPct * 100).toFixed(1)}%</strong>, which
                 puts the implied range at{" "}
                 <strong className="text-foreground">
-                  ${em.implied_range_low.toFixed(2)}–${em.implied_range_high.toFixed(2)}
+                  ${em.implied_range_low.toFixed(2)}-${em.implied_range_high.toFixed(2)}
                 </strong>{" "}
                 by {exp}. Any option struck <em>outside</em> that range is a bet that {symbol} moves
                 more than the market currently expects.

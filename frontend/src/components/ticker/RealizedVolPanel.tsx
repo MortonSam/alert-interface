@@ -97,7 +97,7 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
         window, ranked against the trailing {rv.sample_days} trading days.{" "}
         <em>This is not implied volatility.</em> IV Rank (what the options market expects) requires
         daily IV snapshots. Collection started today and will appear once enough history accrues
-        (~3–6 months).
+        (~3-6 months).
       </p>
     </div>
   );

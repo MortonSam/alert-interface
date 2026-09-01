@@ -206,7 +206,7 @@ export default function StrategyCard({
               return (
                 <option key={s.strike} value={s.strike}>
                   ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}{" "}
-                  — {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "\u2014"}
+                  , {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "n/a"}
                 </option>
               );
             })}
@@ -374,7 +374,7 @@ export default function StrategyCard({
       {showDisclaimer && (
         <Callout severity="info" compact>
           This curve holds today&apos;s implied volatility constant.
-          In practice, IV typically collapses after an earnings release — option values at
+          In practice, IV typically collapses after an earnings release. Option values at
           or around earnings will likely be lower than shown.
         </Callout>
       )}

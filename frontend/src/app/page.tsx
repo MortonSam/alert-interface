@@ -70,8 +70,8 @@ function NotePreview() {
           </div>
           <p className="text-[13px] text-foreground/85 leading-[1.65]">
             Apple designs, manufactures, and markets smartphones, personal computers,
-            tablets, wearables, and accessories. Services — including the App Store,
-            Apple Music, iCloud, and Apple Pay — now represent a growing share of revenue
+            tablets, wearables, and accessories. Services (including the App Store,
+            Apple Music, iCloud, and Apple Pay) now represent a growing share of revenue
             with higher margins than hardware.
           </p>
         </div>
@@ -101,7 +101,7 @@ function NotePreview() {
               </p>
               <p className="text-[13px] text-foreground/80 leading-[1.65] mt-0.5">
                 The consistency of EPS beats suggests conservative guidance and reliable
-                execution — though markets may already price in a beat.
+                execution, though markets may already price in a beat.
               </p>
             </div>
           </div>
@@ -120,7 +120,7 @@ function NotePreview() {
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/90 backdrop-blur-sm px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
           <span className="text-[8px] text-success">{"\u25CF"}</span>
-          What a research note looks like — grounded, explained, verified
+          What a research note looks like: grounded, explained, verified
         </span>
       </div>
     </div>
@@ -292,7 +292,7 @@ export default function Home() {
               </svg>
             }
             title="Grounded in real data"
-            body="Every figure — earnings, margins, valuation — comes straight from filings and market data. The AI writes the analysis; the numbers are exact."
+            body="Every figure (earnings, margins, valuation) comes straight from filings and market data. The AI writes the analysis; the numbers are exact."
           />
           <PropCard
             accent="border-l-violet"
@@ -325,7 +325,7 @@ export default function Home() {
         <SectionHeading
           kicker="See it in action"
           heading="The note does the explaining"
-          sub="Earnings, financials, and risk analysis — with every number you can hover to understand."
+          sub="Earnings, financials, and risk analysis, with every number you can hover to understand."
         />
         <NotePreview />
       </section>
@@ -357,7 +357,7 @@ export default function Home() {
             Know what you&#39;re buying.
           </h2>
           <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
-            Research first. Understand the company, the numbers, and the risk — then decide.
+            Research first. Understand the company, the numbers, and the risk. Then decide.
           </p>
           <div className="flex flex-wrap gap-[13px] justify-center mt-8">
             <Link

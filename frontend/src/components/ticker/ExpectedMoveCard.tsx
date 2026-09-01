@@ -29,7 +29,7 @@ export default function ExpectedMoveCard({ em, symbol, onSelectExpiration }: { e
 
         <p className="text-sm text-muted-foreground mt-0.5">
           {isIsolated
-            ? <>Earnings-day implied move — expiration{" "}
+            ? <>Earnings-day implied move, expiration{" "}
                 {em.expiration_used && (
                   <button
                     className="underline underline-offset-2 hover:text-foreground transition-colors"
@@ -66,7 +66,7 @@ export default function ExpectedMoveCard({ em, symbol, onSelectExpiration }: { e
 
         {windowsMismatched && (
           <Callout severity="info" compact className="mt-1.5">
-            This covers the full period to expiration — <strong>{daysPast} days past the {em.earnings_date} earnings</strong>.
+            This covers the full period to expiration ({daysPast} days past the {em.earnings_date} earnings).
             It reflects total vol over that window, not just the earnings event.
           </Callout>
         )}
@@ -80,7 +80,7 @@ export default function ExpectedMoveCard({ em, symbol, onSelectExpiration }: { e
           </ExplainTip>
           <span className="font-semibold tabular-nums">
             ${em.implied_range_low.toFixed(2)}
-            <span className="text-muted-foreground mx-2">–</span>
+            <span className="text-muted-foreground mx-2">-</span>
             ${em.implied_range_high.toFixed(2)}
           </span>
         </div>
@@ -131,7 +131,7 @@ export default function ExpectedMoveCard({ em, symbol, onSelectExpiration }: { e
             </p>
           ) : (
             <p className="text-xs text-muted-foreground italic">
-              Direct comparison unavailable — the implied ±{fmtPctDecimal(emPct)} covers{" "}
+              Direct comparison unavailable. The implied ±{fmtPctDecimal(emPct)} covers{" "}
               {daysPast != null ? `${daysPast} days past earnings` : "multiple weeks"}, while these
               figures measure the single earnings day only.
             </p>

@@ -10,7 +10,7 @@ const fontMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600
 
 export const metadata: Metadata = {
   title: "Alert Interface",
-  description: "Personal finance research tool — catalyst panel, watchlists, AI research.",
+  description: "Personal finance research tool: catalyst panel, watchlists, AI research.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

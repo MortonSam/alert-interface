@@ -38,11 +38,11 @@ export interface MultiLegStats {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 export const TIPS = {
-  iv: "Implied Volatility — the market's forecast of how much this stock will move, stated as an annualized %. Higher IV = bigger expected swings = pricier options.",
-  atm: "At-The-Money — the strike price closest to where the stock is currently trading. The expected move is anchored here.",
+  iv: "Implied Volatility: the market's forecast of how much this stock will move, stated as an annualized %. Higher IV = bigger expected swings = pricier options.",
+  atm: "At-The-Money: the strike price closest to where the stock is currently trading. The expected move is anchored here.",
   straddle: "A straddle is buying both an ATM call and an ATM put. Its total cost equals the market's best guess at the stock's move in either direction.",
   impliedRange: "The price range the market thinks the stock will stay within by expiration, derived from options pricing. About 68% of outcomes are expected to fall inside this band.",
-  impliedMove: "Derived from the ATM straddle price divided by the stock price. It's what options traders collectively expect the stock to move — in either direction — by expiration.",
+  impliedMove: "Derived from the ATM straddle price divided by the stock price. It's what options traders collectively expect the stock to move (in either direction) by expiration.",
   bid: "The highest price a buyer is currently willing to pay for this option contract.",
   ask: "The lowest price a seller will accept. The fair value is usually near the midpoint between bid and ask.",
   openInterest: "The total number of open option contracts at this strike that haven't been closed or exercised. High open interest means more market participation.",
@@ -52,16 +52,16 @@ export const TIPS = {
 export const STRATEGY_META: Record<StrategyType, StrategyMeta> = {
   long_call: {
     name: "Long Call",
-    oneLiner: "Bullish — pay a premium for the right to buy shares at the strike.",
+    oneLiner: "Bullish: pay a premium for the right to buy shares at the strike.",
     description:
       "A long call profits when the stock rises above your breakeven by expiration. " +
-      "Risk is capped at the premium paid — no matter how far the stock falls, that's " +
+      "Risk is capped at the premium paid. No matter how far the stock falls, that's " +
       "the most you can lose. Upside is theoretically unlimited as the stock moves higher.",
     usesCall: true,
   },
   long_put: {
     name: "Long Put",
-    oneLiner: "Bearish — pay a premium for the right to sell shares at the strike.",
+    oneLiner: "Bearish: pay a premium for the right to sell shares at the strike.",
     description:
       "A long put profits when the stock falls below your breakeven. Risk is limited " +
       "to the premium paid. Maximum gain is the strike minus the premium (approached " +
@@ -70,20 +70,20 @@ export const STRATEGY_META: Record<StrategyType, StrategyMeta> = {
   },
   covered_call: {
     name: "Covered Call",
-    oneLiner: "Mildly bullish or neutral — sell a call against 100 shares you already own.",
+    oneLiner: "Mildly bullish or neutral: sell a call against 100 shares you already own.",
     description:
       "You own 100 shares and sell a call at the chosen strike, collecting the premium " +
       "immediately. If the stock stays below the strike at expiration you keep both the " +
       "shares and the premium, reducing your effective cost basis. If it rises above, " +
-      "your shares get called away at the strike — capping your upside.",
+      "your shares get called away at the strike, capping your upside.",
     usesCall: true,
   },
   csp: {
     name: "Cash-Secured Put",
-    oneLiner: "Neutral to bullish — sell a put with cash set aside to buy shares if assigned.",
+    oneLiner: "Neutral to bullish: sell a put with cash set aside to buy shares if assigned.",
     description:
       "You sell a put and hold enough cash to buy 100 shares if the stock falls to the " +
-      "strike. If it stays above, you keep the premium — your maximum gain. If it falls " +
+      "strike. If it stays above, you keep the premium, your maximum gain. If it falls " +
       "below, you effectively buy the stock at (strike − premium), often below today's price. " +
       "Generates income while expressing willingness to own the stock at a lower price.",
     usesCall: false,
@@ -93,7 +93,7 @@ export const STRATEGY_META: Record<StrategyType, StrategyMeta> = {
 export const MULTI_LEG_META: Record<MultiLegType, MultiLegMeta> = {
   bear_call_spread: {
     name: "Bear Call Spread",
-    oneLiner: "Bearish — sell an OTM call, buy a higher-strike call to cap risk.",
+    oneLiner: "Bearish: sell an OTM call, buy a higher-strike call to cap risk.",
     description:
       "You sell a call at the short strike and buy a higher call (the wing) to limit upside risk. " +
       "You collect a net credit upfront. If the stock stays below the short strike at expiration, " +
@@ -102,16 +102,16 @@ export const MULTI_LEG_META: Record<MultiLegType, MultiLegMeta> = {
   },
   short_strangle: {
     name: "Short Strangle",
-    oneLiner: "Neutral — sell an OTM call and OTM put, profit if the stock stays between the short strikes.",
+    oneLiner: "Neutral: sell an OTM call and OTM put, profit if the stock stays between the short strikes.",
     description:
       "You simultaneously sell an out-of-the-money call and put, collecting both premiums. " +
       "Max gain is the combined credit if the stock expires between the two short strikes. " +
-      "Losses are unlimited in either direction — the call side has no cap, and the put side grows " +
+      "Losses are unlimited in either direction. The call side has no cap, and the put side grows " +
       "as the stock falls toward zero. Thrives in high-IV environments but requires active management.",
   },
   iron_condor: {
     name: "Iron Condor",
-    oneLiner: "Neutral — a short strangle with protective wings on both sides for fully defined risk.",
+    oneLiner: "Neutral: a short strangle with protective wings on both sides for fully defined risk.",
     description:
       "A short call spread plus a short put spread. You collect a net credit and profit if the stock " +
       "stays between the short strikes at expiration. The wings (long options) cap your maximum loss at " +

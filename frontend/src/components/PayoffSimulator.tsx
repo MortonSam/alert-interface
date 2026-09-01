@@ -217,10 +217,10 @@ export default function PayoffSimulator({
         <Callout severity="info" compact>
           <strong>
             {sdFailed
-              ? "Could not load current IV for this strike — simulation uses a 30% default and may be inaccurate."
-              : "IV for one or more strikes not found — simulation uses a 30% default and may be inaccurate."}
+              ? "Could not load current IV for this strike. Simulation uses a 30% default and may be inaccurate."
+              : "IV for one or more strikes not found. Simulation uses a 30% default and may be inaccurate."}
           </strong>{" "}
-          Real IV may differ significantly (e.g. high-vol names can be 50–80%).
+          Real IV may differ significantly (e.g. high-vol names can be 50-80%).
         </Callout>
       )}
 
@@ -419,14 +419,14 @@ export default function PayoffSimulator({
       {showDisclaimer && (
         <Callout severity="info" compact>
           This curve holds today&apos;s implied volatility constant.
-          In practice, IV typically collapses after an earnings release — option values at
+          In practice, IV typically collapses after an earnings release. Option values at
           or around earnings will likely be lower than shown.
         </Callout>
       )}
 
       {/* Footnote — keeps the "not a forecast" label visible at all times */}
       <p className="text-[10px] text-muted-foreground">
-        Simulated values use Black-Scholes with IV held constant — not a forecast.
+        Simulated values use Black-Scholes with IV held constant. Not a forecast.
       </p>
     </div>
   );

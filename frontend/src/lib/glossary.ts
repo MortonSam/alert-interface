@@ -19,7 +19,7 @@ const GLOSSARY: Record<string, string> = {
   percentile:
     "The percentage of past trading days where realized volatility was lower than today's level.",
   iv:
-    "Implied volatility — the market's forecast of future stock movement, priced into options. Higher IV means pricier options.",
+    "Implied volatility: the market's forecast of future stock movement, priced into options. Higher IV means pricier options.",
   "iv/rv spread":
     "The gap between implied volatility and realized volatility. Positive means options are priced above recent actual movement.",
   "put/call ratio":

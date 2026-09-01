@@ -165,20 +165,20 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
 
   const row1 = findRow(draft.suggested_strike);
   if (!row1) return null;
-  let usingIVFallback = row1.iv == null;
+  const simIV = (fb.atm_iv_pct ?? 30) / 100;
+  const usingIVFallback = fb.atm_iv_pct == null;
   const legs: Leg[] = [{
     kind, K: draft.suggested_strike, mid: row1.mid,
-    sigma: (row1.iv ?? fb.atm_iv_pct ?? 30) / 100,
+    sigma: simIV,
     dir: 1, label: `Long $${draft.suggested_strike}`,
   }];
 
   if (draft.suggested_spread_strike != null) {
     const row2 = findRow(draft.suggested_spread_strike);
     if (!row2) return null;
-    usingIVFallback = usingIVFallback || row2.iv == null;
     legs.push({
       kind, K: draft.suggested_spread_strike, mid: row2.mid,
-      sigma: (row2.iv ?? fb.atm_iv_pct ?? 30) / 100,
+      sigma: simIV,
       dir: -1, label: `Short $${draft.suggested_spread_strike}`,
     });
   }
@@ -452,7 +452,7 @@ function DraftDisplay({
         <span>
           Range:{" "}
           <span className="font-mono text-foreground">
-            ${fb.implied_range_low?.toFixed(2) ?? "n/a"} – ${fb.implied_range_high?.toFixed(2) ?? "n/a"}
+            ${fb.implied_range_low?.toFixed(2) ?? "n/a"} - ${fb.implied_range_high?.toFixed(2) ?? "n/a"}
           </span>
         </span>
         <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ?? "n/a"}</span></span>

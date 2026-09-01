@@ -262,7 +262,7 @@ export default function MultiLegStrategyCard({
           >
             {callStrikes.map((s) => (
               <option key={s.strike} value={s.strike}>
-                ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""} — call ${s.call_mid?.toFixed(2) ?? "\u2014"}
+                ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}, call ${s.call_mid?.toFixed(2) ?? "n/a"}
               </option>
             ))}
           </select>
@@ -277,7 +277,7 @@ export default function MultiLegStrategyCard({
             >
               {putStrikes.map((s) => (
                 <option key={s.strike} value={s.strike}>
-                  ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""} — put ${s.put_mid?.toFixed(2) ?? "\u2014"}
+                  ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}, put ${s.put_mid?.toFixed(2) ?? "n/a"}
                 </option>
               ))}
             </select>
@@ -452,7 +452,7 @@ export default function MultiLegStrategyCard({
       {showDisclaimer && (
         <Callout severity="info" compact>
           This curve holds today&apos;s implied volatility constant.
-          It does not model the IV crush that typically follows an earnings release — real
+          It does not model the IV crush that typically follows an earnings release. Real
           post-earnings option values will likely be lower.
         </Callout>
       )}

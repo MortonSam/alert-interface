@@ -55,7 +55,7 @@ export default function StrategyExplainer({ data, symbol }: { data: StrategyData
           {data.implied_range_low != null && data.implied_range_high != null && (
             <p className="text-xs text-muted-foreground">
               <span className="inline-block w-3 h-3 rounded-sm bg-muted opacity-80 mr-1.5 align-middle" />
-              Shaded band = implied range ${data.implied_range_low.toFixed(2)}–${data.implied_range_high.toFixed(2)} by {data.expiration}
+              Shaded band = implied range ${data.implied_range_low.toFixed(2)}-${data.implied_range_high.toFixed(2)} by {data.expiration}
             </p>
           )}
 

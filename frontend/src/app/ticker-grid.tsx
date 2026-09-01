@@ -236,8 +236,8 @@ export function TickerGrid() {
           className="h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value="market_cap">Market Cap ↓</option>
-          <option value="symbol">Symbol A–Z</option>
-          <option value="name">Name A–Z</option>
+          <option value="symbol">Symbol A-Z</option>
+          <option value="name">Name A-Z</option>
           <option value="next_earnings">Next Earnings</option>
         </select>
       </div>

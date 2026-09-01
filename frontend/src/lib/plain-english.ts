@@ -24,7 +24,7 @@ export function buildPlainEnglish(opts: {
 
   if (isSpread && direction === "bullish") {
     // ── Bull call spread ──
-    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a bet the stock rises, with both cost and risk capped.`);
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol}, a bet the stock rises with both cost and risk capped.`);
     if (spreadStrike != null)
       sentences.push(`You buy the $${strike} call and sell the $${spreadStrike} call, paying ${$w(cost)} up front${netDebit != null ? ` (net debit ${$d(netDebit)}/share)` : ""}.`);
     sentences.push(`That ${$w(maxLoss)} is the most you can lose.`);
@@ -36,7 +36,7 @@ export function buildPlainEnglish(opts: {
 
   } else if (isSpread && direction === "bearish") {
     // ── Bear put spread ──
-    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a bet the stock falls, with both cost and risk capped.`);
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol}, a bet the stock falls with both cost and risk capped.`);
     if (spreadStrike != null)
       sentences.push(`You buy the $${strike} put and sell the $${spreadStrike} put, paying ${$w(cost)} up front${netDebit != null ? ` (net debit ${$d(netDebit)}/share)` : ""}.`);
     sentences.push(`That ${$w(maxLoss)} is the most you can lose.`);
@@ -48,16 +48,16 @@ export function buildPlainEnglish(opts: {
 
   } else if (!isSpread && direction === "bullish") {
     // ── Long call (unlimited upside) ──
-    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a leveraged bet the stock rises.`);
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol}, a leveraged bet the stock rises.`);
     sentences.push(`You pay ${$w(cost)} for the $${strike} call. That total cost is the most you can lose.`);
-    sentences.push(`Your upside is uncapped — the higher ${symbol} goes above $${strike}${exp}, the more you make.`);
+    sentences.push(`Your upside is uncapped. The higher ${symbol} goes above $${strike}${exp}, the more you make.`);
     if (breakeven != null)
       sentences.push(`You start making money above ${$d(breakeven)} (breakeven).`);
     sentences.push(`Below $${strike} the call expires worthless and you lose the full ${$w(maxLoss)}.`);
 
   } else {
     // ── Long put ──
-    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol} — a leveraged bet the stock falls.`);
+    sentences.push(`This is a ${shortName.toLowerCase()} on ${symbol}, a leveraged bet the stock falls.`);
     sentences.push(`You pay ${$w(cost)} for the $${strike} put. That total cost is the most you can lose.`);
     if (maxGain != null && maxGain !== "unlimited")
       sentences.push(`If ${symbol} drops to zero${exp}, you make the most you can: ${$w(maxGain)}.`);

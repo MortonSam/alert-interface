@@ -384,7 +384,7 @@ function DraftPanel({
       <div className="rounded-md bg-background border px-3 py-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
         <span>Price: <span className="text-foreground">${fb.current_price.toFixed(2)}</span></span>
         <span>Implied move: <span className="text-foreground">±{fb.expected_move_pct?.toFixed(1) ?? "n/a"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "n/a"})</span></span>
-        <span>Implied range: <span className="text-foreground">${fb.implied_range_low?.toFixed(2) ?? "n/a"} – ${fb.implied_range_high?.toFixed(2) ?? "n/a"}</span></span>
+        <span>Implied range: <span className="text-foreground">${fb.implied_range_low?.toFixed(2) ?? "n/a"} - ${fb.implied_range_high?.toFixed(2) ?? "n/a"}</span></span>
         <span>Earnings: <span className="text-foreground">{fb.earnings_date ?? "n/a"}</span></span>
         <span>Hist avg: <span className="text-foreground">±{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span></span>
         <span>Hist max: <span className="text-foreground">±{fb.hist_max_abs_move_pct?.toFixed(2) ?? "n/a"}%</span></span>
@@ -533,7 +533,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Conviction (1–5)</label>
+          <label className="text-xs text-muted-foreground mb-1 block">Conviction (1-5)</label>
           <input
             type="number" min={1} max={5}
             className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
