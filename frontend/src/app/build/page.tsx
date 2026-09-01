@@ -442,7 +442,7 @@ function DraftDisplay({
 
       {/* G) Fact grid */}
       <div className="border border-border/60 bg-transparent rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
-        <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span></span>
+        <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span>{fb.price_as_of && <span className="text-muted-foreground/60 ml-1">as of {(fb.price_as_of as string).replace(/T.*$/, "")}</span>}</span>
         <span>
           Implied move:{" "}
           <span className="font-mono text-foreground">

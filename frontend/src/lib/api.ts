@@ -599,6 +599,7 @@ export interface ThesisDraftRead {
   vol_regime: string | null;  // "iv_rich" | "iv_cheap" | "iv_fair" | null
   fact_block: {
     current_price: number;
+    price_as_of: string | null;
     atm_strike: number | null;
     earnings_date: string | null;
     expiration_used: string | null;

@@ -279,6 +279,7 @@ def process_ticker(
                 "calls": chain["calls"],
                 "puts": chain["puts"],
                 "chain_last_trade": chain.get("chain_last_trade"),
+                "underlying_price": chain.get("underlying_price"),
             })
 
         result["strikes"] = total_strikes

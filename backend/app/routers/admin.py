@@ -36,6 +36,7 @@ class ChainIngestItem(BaseModel):
     calls: list[dict]
     puts: list[dict]
     chain_last_trade: str | None = None
+    underlying_price: float | None = None
 
 
 class ChainIngestRequest(BaseModel):
@@ -72,6 +73,7 @@ async def ingest_options_chains(
                 "puts": item.puts,
                 "expiration": item.expiration,
                 "chain_last_trade": item.chain_last_trade,
+                "underlying_price": item.underlying_price,
             })
             key = f"chain:{sym}:{item.expiration}"
             await set_value(db, key, json.dumps(chain_dict))

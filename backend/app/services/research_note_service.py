@@ -354,7 +354,7 @@ def _serialize_structured_note(structured: dict, ticker: Ticker) -> str:
     """Render the structured note as readable text for the content column + verification."""
     name = ticker.name or ticker.symbol
     lines = [
-        f"# {ticker.symbol}, {name}",
+        f"# {ticker.symbol} ({name})",
         f"**Rating: {structured['rating'].title()}**",
         "",
         structured["bottom_line"],
