@@ -19,9 +19,16 @@ def _extract_text(msg) -> str:
     raise ValueError("No text block in model response")
 
 
-def _scrub_em_dashes(text: str) -> str:
-    """Replace em dashes with commas (house style)."""
-    return text.replace("\u2014", ",")
+def _scrub_dashes(text: str) -> str:
+    """Replace em/en dashes with commas, preserving clean spacing."""
+    # Spaced dashes first (avoid " , " artifacts)
+    text = text.replace(" \u2014 ", ", ").replace(" \u2013 ", ", ")
+    # Remaining un-spaced dashes
+    text = text.replace("\u2014", ", ").replace("\u2013", ", ")
+    # Collapse any double spaces
+    while "  " in text:
+        text = text.replace("  ", " ")
+    return text
 
 
 class AnthropicClient:
@@ -98,7 +105,7 @@ class AnthropicClient:
             messages=[{"role": "user", "content": prompt}],
         )
         return {
-            "content":       _scrub_em_dashes(_extract_text(msg).strip()),
+            "content":       _scrub_dashes(_extract_text(msg).strip()),
             "model_used":    DRAFT_MODEL,
             "input_tokens":  msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
@@ -117,7 +124,7 @@ class AnthropicClient:
             messages=[{"role": "user", "content": prompt}],
         )
         return {
-            "content":       _scrub_em_dashes(_extract_text(msg).strip()),
+            "content":       _scrub_dashes(_extract_text(msg).strip()),
             "model_used":    DRAFT_MODEL,
             "input_tokens":  msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
