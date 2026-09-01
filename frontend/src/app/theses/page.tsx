@@ -353,9 +353,9 @@ function DraftPanel({
     <div className="rounded-lg border bg-muted/30 p-4 space-y-3 text-sm">
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          AI Draft · {draft.aggressiveness} {draft.direction}
+          Ivy&apos;s Draft · {draft.aggressiveness} {draft.direction}
         </p>
-        <span className="text-xs text-muted-foreground">{draft.model_used}</span>
+        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && <>drafted by Ivy · {draft.model_used}</>}</span>
       </div>
 
       {draft.realism_flag && (
@@ -591,7 +591,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
       {form.direction !== "neutral" && (
         <div className="rounded-md border border-dashed bg-muted/20 px-4 py-3 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Draft with AI</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">Draft with Ivy</span>
             <div className="flex items-center gap-2">
               <select
                 className="rounded-md border bg-background px-2 py-1 text-xs"
@@ -627,7 +627,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
                 }}
                 className="rounded-md bg-secondary text-secondary-foreground px-3 py-1 text-xs font-medium hover:opacity-90 disabled:opacity-50"
               >
-                {drafting ? "Drafting…" : "Generate draft"}
+                {drafting ? "Ivy is drafting…" : "Generate draft"}
               </button>
             </div>
           </div>
@@ -676,7 +676,7 @@ function CreateThesisForm({ onCreated }: { onCreated: (t: Thesis) => void }) {
           />
           Track option position
           {fromAiDraft && optionLegEnabled && (
-            <span className="ml-1 text-cool">(from AI draft)</span>
+            <span className="ml-1 text-cool">(from Ivy&apos;s draft)</span>
           )}
         </label>
         {optionLegEnabled && (
@@ -924,8 +924,8 @@ function ThesisCard({
             </span>
           )}
           {thesis.from_ai_draft && (
-            <span className="text-xs bg-cool/10 text-cool border border-cool/40 px-1.5 py-0.5 rounded">
-              AI
+            <span className="text-xs bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded">
+              Ivy
             </span>
           )}
         </div>

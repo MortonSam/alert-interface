@@ -573,8 +573,9 @@ async def _run_draft_generation(
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Options data for {sym} is as of {chain_last_trade}, "
-                    f"drafting paused until fresh chains load."
+                    f"Ivy won't draft {sym} on stale options data "
+                    f"(as of {chain_last_trade}). "
+                    f"Chains refresh during market hours."
                 ),
             )
     options_as_of = chain_last_trade or generated_at
@@ -616,10 +617,9 @@ async def _run_draft_generation(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Options data for {sym} is stale or unavailable, only "
-                f"{len(primary_rows)} liquid strike(s) found (need "
-                f"{MIN_QUALITY_STRIKES}). Drafting paused until markets "
-                f"provide live quotes."
+                f"Ivy won't draft {sym}: only "
+                f"{len(primary_rows)} liquid strikes found "
+                f"(need {MIN_QUALITY_STRIKES})."
             ),
         )
 
@@ -641,9 +641,10 @@ async def _run_draft_generation(
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Options data for {sym} appears stale: "
+                    f"Ivy won't draft {sym}: the "
                     f"${_strike:.0f} {'put' if direction == 'bearish' else 'call'} "
-                    f"mid ${_mid:.2f} is below intrinsic ${_intrinsic:.2f}. Drafting paused."
+                    f"mid ${_mid:.2f} is below intrinsic ${_intrinsic:.2f}, "
+                    f"so the quotes can't be trusted. Drafting paused."
                 ),
             )
 

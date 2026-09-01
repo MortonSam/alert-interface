@@ -2207,8 +2207,8 @@ export default function TickerPage() {
           )}
           {orStatus === "done" && optionsRead && optionsRead.model_used !== "none" && (
             <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6">
-              <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-2">
-                AI read, options setup
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2">
+                Ivy&apos;s Read
               </p>
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
               <p className="text-[10px] text-muted-foreground/60 mt-2">
@@ -2440,7 +2440,7 @@ export default function TickerPage() {
             <div className="py-6">
               <p className="text-sm font-medium mb-1">No research note generated yet.</p>
               <p className="text-xs text-muted-foreground mb-5">
-                AI-generated summary using SEC filings + earnings history. Takes about 40 seconds.
+                Ivy writes a research note from SEC filings and earnings history. Takes about 40 seconds.
               </p>
               <button
                 onClick={() => void handleGenerate()}

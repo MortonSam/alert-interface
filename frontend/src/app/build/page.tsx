@@ -368,10 +368,10 @@ function DraftDisplay({
 
       {/* A) Header */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          AI Draft · {draft.aggressiveness} · {draft.direction}
+        <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+          Ivy&apos;s Draft · {draft.aggressiveness} · {draft.direction}
         </p>
-        <span className="font-mono text-xs text-muted-foreground">{draft.model_used}</span>
+        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && <>drafted by Ivy · {draft.model_used}</>}</span>
       </div>
 
       {/* B) Realism flag */}
@@ -564,7 +564,7 @@ function DraftDisplay({
                   disabled={altLoading || !altBudgetValid}
                   className="rounded-lg border bg-muted text-foreground px-4 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-50"
                 >
-                  {altLoading ? "Generating…" : "Generate alternative"}
+                  {altLoading ? "Ivy is drafting…" : "Generate alternative"}
                 </button>
                 <button
                   type="button"
@@ -964,7 +964,7 @@ function BuildTradePageContent() {
           </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            AI-drafted idea grounded in live options data, earnings history, and volatility.
+            Ivy drafts the idea from live options data, earnings history, and volatility.
             Not financial advice.
           </p>
         </div>
@@ -1155,14 +1155,14 @@ function BuildTradePageContent() {
                     disabled={step === "generating"}
                     className="rounded-lg bg-primary text-primary-foreground px-6 py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                   >
-                    {step === "generating" ? "Generating…" : "Generate trade →"}
+                    {step === "generating" ? "Ivy is drafting…" : "Generate trade →"}
                   </button>
                 </div>
               )}
 
               {/* Generating spinner for auto mode */}
               {direction === "auto" && step === "generating" && (
-                <p className="text-sm text-muted-foreground animate-pulse">Analyzing signals and generating trade…</p>
+                <p className="text-sm text-muted-foreground animate-pulse">Ivy is drafting…</p>
               )}
 
               {draftError && (

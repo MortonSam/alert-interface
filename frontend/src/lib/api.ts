@@ -668,6 +668,7 @@ export interface AlertPickLedgerItem {
   max_gain: number | null;
   vol_regime: string | null;
   algo_version: string;
+  model_used: string | null;
   source: string;
   leans: SignalLean[];
   reasoning: string | null;
