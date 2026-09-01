@@ -205,8 +205,7 @@ export default function StrategyCard({
               const mid = meta.usesCall ? s.call_mid : s.put_mid;
               return (
                 <option key={s.strike} value={s.strike}>
-                  ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}{" "}
-                  , {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "n/a"}
+                  ${s.strike.toFixed(0)}{s.is_atm ? " (ATM)" : ""}, {meta.usesCall ? "call" : "put"} ${mid?.toFixed(2) ?? "n/a"}
                 </option>
               );
             })}

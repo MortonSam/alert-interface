@@ -227,7 +227,7 @@ export default function PayoffSimulator({
       {/* Hero simulated P&L */}
       <div className="py-1">
         <p className="text-xs text-muted-foreground mb-1.5">
-          {symbol} at ${effectivePrice.toFixed(2)}
+          {symbol} at ${scrubPrice.toFixed(2)}
           {" · "}
           {daysLeft === 0 ? "At expiration" : selectedDateStr}
         </p>
