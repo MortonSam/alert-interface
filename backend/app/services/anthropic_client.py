@@ -6,8 +6,22 @@ from anthropic import AsyncAnthropic
 
 from app.config import settings
 
-GENERATION_MODEL  = "claude-sonnet-4-6"
+GENERATION_MODEL   = "claude-sonnet-4-6"
 VERIFICATION_MODEL = "claude-opus-4-6"
+DRAFT_MODEL        = "claude-fable-5"
+
+
+def _extract_text(msg) -> str:
+    """Extract text content from a response, skipping any thinking blocks."""
+    for block in msg.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError("No text block in model response")
+
+
+def _scrub_em_dashes(text: str) -> str:
+    """Replace em dashes with commas (house style)."""
+    return text.replace("\u2014", ",")
 
 
 class AnthropicClient:
@@ -73,15 +87,19 @@ class AnthropicClient:
 
         Strict JSON output: suggested_target, suggested_strike, strategy, reasoning, realism_flag.
         All numbers must trace to facts injected by the caller — the model only synthesizes.
+
+        Uses DRAFT_MODEL (Fable 5) with high max_tokens to accommodate adaptive
+        thinking budget.  The helper _extract_text skips any thinking blocks in
+        the response, and _scrub_em_dashes enforces house style.
         """
         msg = await self._client.messages.create(
-            model=GENERATION_MODEL,
-            max_tokens=700,
+            model=DRAFT_MODEL,
+            max_tokens=16_000,
             messages=[{"role": "user", "content": prompt}],
         )
         return {
-            "content":       msg.content[0].text.strip(),
-            "model_used":    GENERATION_MODEL,
+            "content":       _scrub_em_dashes(_extract_text(msg).strip()),
+            "model_used":    DRAFT_MODEL,
             "input_tokens":  msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
         }
@@ -89,20 +107,18 @@ class AnthropicClient:
     async def generate_thesis_draft_alternative(self, prompt: str) -> dict:
         """Generate a budget-constrained alternative trade (JSON output).
 
-        Uses a higher token limit (1500) than the main draft because the
-        alternative prompt's cost arithmetic can be verbose before the model
-        settles on the right structure.  The prompt instructs the model to keep
-        any arithmetic compact inside the JSON fields rather than as a prose
-        preamble, but we give headroom in case it needs to check its math.
+        Uses DRAFT_MODEL (Fable 5) with high max_tokens to accommodate adaptive
+        thinking budget.  _extract_text skips thinking blocks; _scrub_em_dashes
+        enforces house style.
         """
         msg = await self._client.messages.create(
-            model=GENERATION_MODEL,
-            max_tokens=1500,
+            model=DRAFT_MODEL,
+            max_tokens=16_000,
             messages=[{"role": "user", "content": prompt}],
         )
         return {
-            "content":       msg.content[0].text.strip(),
-            "model_used":    GENERATION_MODEL,
+            "content":       _scrub_em_dashes(_extract_text(msg).strip()),
+            "model_used":    DRAFT_MODEL,
             "input_tokens":  msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
         }

@@ -188,6 +188,7 @@ class AlertPickLedgerItem(BaseModel):
     max_gain: float | None
     vol_regime: str | None
     algo_version: str
+    model_used: str | None = None
     leans: list[SignalLean]
     reasoning: str | None
     generated_at: str

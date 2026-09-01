@@ -608,7 +608,7 @@ async def _run_draft_generation(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Options data for {sym} is stale or unavailable — only "
+                f"Options data for {sym} is stale or unavailable, only "
                 f"{len(primary_rows)} liquid strike(s) found (need "
                 f"{MIN_QUALITY_STRIKES}). Drafting paused until markets "
                 f"provide live quotes."
@@ -774,6 +774,7 @@ CRITICAL RULES (violating any is an error):
 6. Frame everything as a data-grounded suggestion to review, not a prediction or advice
 7. The "reasoning" MUST cite: (a) the vol regime and its implication for structure choice, (b) at least one historical-reaction or conditional-earnings fact, and (c) analyst-reaction data when available (N≥3)
 8. For single-leg options (no spread): suggested_strike MUST be within 10% of the current price.
+9. Never use em dashes (\u2014) in any text field. Use commas, periods, or parentheses instead.
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
@@ -1185,6 +1186,7 @@ async def compute_alert_pick(
             symbol=sym,
             picked_direction=picked_direction,
             algo_version="v1.1",
+            model_used=draft_read.model_used,
             leans=[l.model_dump() for l in leans],
             strategy=draft_read.strategy,
             suggested_strike=suggested_strike,
@@ -1458,6 +1460,7 @@ async def list_alert_picks(
             max_gain=float(r.max_gain) if r.max_gain else None,
             vol_regime=r.vol_regime,
             algo_version=r.algo_version,
+            model_used=r.model_used,
             source=r.source,
             leans=[SignalLean(**l) for l in r.leans],
             reasoning=r.reasoning,
