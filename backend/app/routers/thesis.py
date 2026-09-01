@@ -408,6 +408,13 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     puts_raw:  list[dict] = chain.get("puts",  [])
     chain_last_trade: str | None = chain.get("chain_last_trade")
 
+    # Snapshot spot: the underlying price captured when the chain was fetched.
+    # Using this (not the live Finnhub quote) for all draft arithmetic ensures
+    # the intrinsic guard, ATM selection, and target math never compare a fresh
+    # quote against stale option mids.
+    snapshot_price: float | None = chain.get("underlying_price")
+    draft_spot: float = snapshot_price if snapshot_price is not None else current_price
+
     atm_strike: float | None = None
     expected_move_pct: float | None = None
     expected_move_dollars: float | None = None
@@ -417,17 +424,17 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
 
     intersection = {c["strike"] for c in calls_raw} & {p["strike"] for p in puts_raw}
     if intersection:
-        atm_strike = min(intersection, key=lambda s: abs(s - current_price))
+        atm_strike = min(intersection, key=lambda s: abs(s - draft_spot))
         atm_call = next((c for c in calls_raw if c["strike"] == atm_strike), None)
         atm_put  = next((p for p in puts_raw  if p["strike"] == atm_strike), None)
         cp = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
         pp = _mid_or_last(atm_put["bid"],  atm_put["ask"],  atm_put["lastPrice"])  if atm_put  else None
         if cp and pp:
             straddle = cp + pp
-            expected_move_pct     = straddle / current_price
+            expected_move_pct     = straddle / draft_spot
             expected_move_dollars = straddle
-            implied_range_low     = current_price - straddle
-            implied_range_high    = current_price + straddle
+            implied_range_low     = draft_spot - straddle
+            implied_range_high    = draft_spot + straddle
         ivs = [c["impliedVolatility"] for c in [atm_call, atm_put]
                if c and c.get("impliedVolatility") is not None]
         atm_iv = sum(ivs) / len(ivs) if ivs else None
@@ -499,6 +506,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "rv_raw": rv_raw,
         "chain_last_trade": chain_last_trade,
         "chain_from_ingested": chain_from_ingested,
+        "draft_spot": draft_spot,
     }
 
 
@@ -511,7 +519,7 @@ async def _run_draft_generation(
 ) -> ThesisDraftRead:
     """Build prompt from gathered data, call AI, parse, and return ThesisDraftRead."""
     sym = data["sym"]
-    current_price = data["current_price"]
+    current_price = data["draft_spot"]  # snapshot spot, not live quote
     earnings_str = data["earnings_str"]
     hist_avg = data["hist_avg"]
     hist_max = data["hist_max"]
@@ -565,7 +573,7 @@ async def _run_draft_generation(
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Options data for {sym} is as of {chain_last_trade} — "
+                    f"Options data for {sym} is as of {chain_last_trade}, "
                     f"drafting paused until fresh chains load."
                 ),
             )
@@ -633,7 +641,7 @@ async def _run_draft_generation(
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Options data for {sym} appears stale — "
+                    f"Options data for {sym} appears stale: "
                     f"${_strike:.0f} {'put' if direction == 'bearish' else 'call'} "
                     f"mid ${_mid:.2f} is below intrinsic ${_intrinsic:.2f}. Drafting paused."
                 ),
@@ -666,6 +674,7 @@ async def _run_draft_generation(
         "direction":                 direction,
         "aggressiveness":            aggressiveness,
         "current_price":             round(current_price, 2),
+        "price_as_of":               options_as_of,
         "atm_strike":                atm_strike,
         "earnings_date":             earnings_str,
         "expiration_used":           chosen_exp,
@@ -713,7 +722,7 @@ async def _run_draft_generation(
     def _pct(v, fmt=".1f"): return f"{v*100:{fmt}}%" if v is not None else "(unavailable)"
 
     em_display  = f"±{expected_move_pct*100:.2f}% (±${expected_move_dollars:.2f})" if expected_move_pct and expected_move_dollars else "(unavailable)"
-    ir_display  = f"${implied_range_low:.2f} – ${implied_range_high:.2f}" if implied_range_low and implied_range_high else "(unavailable)"
+    ir_display  = f"${implied_range_low:.2f} - ${implied_range_high:.2f}" if implied_range_low and implied_range_high else "(unavailable)"
     t1x_display = f"${target_1x:.2f}" if target_1x else "(unavailable)"
     thmax_display = f"${target_hist_max:.2f} ({target_hist_max_label}, based on hist max ±{hist_max*100:.1f}%)" if hist_max else "(unavailable)"
 
@@ -763,14 +772,14 @@ async def _run_draft_generation(
             analyst_section = "\nANALYST REACTION STATS:\n" + "\n".join(a_lines) + "\n"
 
     prompt = f"""\
-You are a financial data assistant. Your role: translate a user's {direction} view on {sym} into data-grounded thesis parameters. The user has already decided the direction — you calibrate the HOW (target, strike, strategy), not the WHAT.
+You are a financial data assistant. Your role: translate a user's {direction} view on {sym} into data-grounded thesis parameters. The user has already decided the direction. You calibrate the HOW (target, strike, strategy), not the WHAT.
 
 CRITICAL RULES (violating any is an error):
-1. Return ONLY a valid JSON object — no prose before or after it, no markdown fences
+1. Return ONLY a valid JSON object, no prose before or after it, no markdown fences
 2. Every figure in "reasoning" and "strategy" MUST appear verbatim in the fact block below
-3. "suggested_strike" MUST be one of the exact float values listed under AVAILABLE STRIKES — never a made-up number
+3. "suggested_strike" MUST be one of the exact float values listed under AVAILABLE STRIKES, never a made-up number
 4. "realism_flag" MUST be a non-null string (with specific numbers) whenever the target exceeds the REALISM THRESHOLDS
-5. "Aggressive" means ambitious but data-supported. A target beyond historical max moves is a lottery ticket — label it as such with context
+5. "Aggressive" means ambitious but data-supported. A target beyond historical max moves is a lottery ticket. Label it as such with context
 6. Frame everything as a data-grounded suggestion to review, not a prediction or advice
 7. The "reasoning" MUST cite: (a) the vol regime and its implication for structure choice, (b) at least one historical-reaction or conditional-earnings fact, and (c) analyst-reaction data when available (N≥3)
 8. For single-leg options (no spread): suggested_strike MUST be within 10% of the current price.
@@ -778,11 +787,10 @@ CRITICAL RULES (violating any is an error):
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
-CURRENT PRICE:      ${current_price:.2f}
+PRICE (as of {options_as_of}): ${current_price:.2f}
 ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
 NEXT EARNINGS DATE: {earnings_str or "(unknown)"}
 EXPIRATION USED:    {chosen_exp or "(none)"} ({_n(days_to_exp, "d")} days out)
-Options chain fetched: {options_as_of}
 
 EXPECTED MOVE (ATM straddle):
   Implied move:     {em_display}
@@ -800,30 +808,30 @@ HISTORICAL EARNINGS (1-day reactions, {hist_sample} quarters):
 VOLATILITY:
   ATM implied vol:    {_pct(atm_iv)}
   20-day realized vol:{_pct(current_rv)}
-  RV rank (0–100):    {_n(rv_rank)} (0=1yr low, 100=1yr high)
-  IV−RV spread:       {f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"}
+  RV rank (0-100):    {_n(rv_rank)} (0=1yr low, 100=1yr high)
+  IV-RV spread:       {f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"}
   Vol regime:         {vol_regime_display}
 
-VOL-REGIME RULES (binding — override aggressiveness defaults when applicable):
-  • iv_rich (IV−RV > +8pp): Prefer vertical spreads (bull call spread / bear put spread) to cap premium outlay. Long calls/puts are acceptable ONLY at aggressive level. State in reasoning: "IV is Xpp above RV — using a spread to reduce vol drag."
-  • iv_cheap (IV−RV < −4pp): Long calls/puts are attractive — premium is discounted relative to realized movement. State in reasoning: "IV is Xpp below RV — long premium is well-priced."
-  • iv_fair (−4pp ≤ IV−RV ≤ +8pp): No vol-regime override — follow the aggressiveness guide as-is.
+VOL-REGIME RULES (binding, override aggressiveness defaults when applicable):
+  * iv_rich (IV-RV > +8pp): Prefer vertical spreads (bull call spread / bear put spread) to cap premium outlay. Long calls/puts are acceptable ONLY at aggressive level. State in reasoning: "IV is Xpp above RV, using a spread to reduce vol drag."
+  * iv_cheap (IV-RV < -4pp): Long calls/puts are attractive, premium is discounted relative to realized movement. State in reasoning: "IV is Xpp below RV, long premium is well-priced."
+  * iv_fair (-4pp <= IV-RV <= +8pp): No vol-regime override. Follow the aggressiveness guide as-is.
 {analyst_section}\
-AVAILABLE STRIKES — {primary_label}:
+AVAILABLE STRIKES ({primary_label}):
 {primary_text}
 
-AVAILABLE STRIKES — {secondary_label}:
+AVAILABLE STRIKES ({secondary_label}):
 {secondary_text}
 ═══════════════════ END FACT BLOCK ═══════════════════════
 
 AGGRESSIVENESS REQUESTED: {aggressiveness}
 
 AGGRESSIVENESS GUIDE:
-  conservative → target within 0.5–0.8× implied move from current price (${current_price:.2f}); ITM or ATM strike; consider spread to cap premium outlay
-  moderate     → target ~1× implied move edge ({t1x_display}); ATM or first OTM strike; long call/put OK unless vol regime says otherwise
-  aggressive   → target 1.5–2× implied move ({f"${current_price + 1.5*(expected_move_dollars or 0):.2f}" if direction == "bullish" else f"${current_price - 1.5*(expected_move_dollars or 0):.2f}"}); 2–4 strikes OTM; MUST flag if beyond historical max
+  conservative: target within 0.5-0.8x implied move from current price (${current_price:.2f}); ITM or ATM strike; consider spread to cap premium outlay
+  moderate:     target ~1x implied move edge ({t1x_display}); ATM or first OTM strike; long call/put OK unless vol regime says otherwise
+  aggressive:   target 1.5-2x implied move ({f"${current_price + 1.5*(expected_move_dollars or 0):.2f}" if direction == "bullish" else f"${current_price - 1.5*(expected_move_dollars or 0):.2f}"}); 2-4 strikes OTM; MUST flag if beyond historical max
 
-REALISM THRESHOLDS (pre-computed — enforce these):
+REALISM THRESHOLDS (pre-computed, enforce these):
   1× implied move target:      {t1x_display}
   Historical max-move target:  {thmax_display}
   Any target beyond {thmax_display} REQUIRES a non-null realism_flag explaining the data context.
@@ -831,11 +839,11 @@ REALISM THRESHOLDS (pre-computed — enforce these):
 {extra_prompt_section}\
 Return ONLY this JSON object (no other text):
 {{
-  "suggested_target": <float — price target in dollars, data-grounded>,
-  "suggested_strike": <float — MUST be a value from AVAILABLE STRIKES list above>,
-  "suggested_spread_strike": <float or null — second leg for spread, else null>,
-  "strategy": "<e.g. 'Long $315 call ($5.80 mid)' or 'Bull call spread $315/$325 ($X.XX net debit)' — do NOT include the expiration date, DTE, or target in this field>",
-  "reasoning": "<2–4 sentences citing specific figures from the fact block>",
+  "suggested_target": <float, price target in dollars, data-grounded>,
+  "suggested_strike": <float, MUST be a value from AVAILABLE STRIKES list above>,
+  "suggested_spread_strike": <float or null, second leg for spread, else null>,
+  "strategy": "<e.g. 'Long $315 call ($5.80 mid)' or 'Bull call spread $315/$325 ($X.XX net debit)'. Do NOT include the expiration date, DTE, or target in this field>",
+  "reasoning": "<2-4 sentences citing specific figures from the fact block>",
   "realism_flag": "<string with specific numbers, or null if target is within data support>"
 }}"""
 
@@ -907,7 +915,7 @@ Return ONLY this JSON object (no other text):
     if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
         note = (
             f"Note: AI suggested strike ${suggested_strike:.2f} was not found in the available chain "
-            f"— verify before trading. Valid nearby strikes: "
+            f"(verify before trading). Valid nearby strikes: "
             f"{', '.join(f'${s:.2f}' for s in sorted(valid_primary_strikes)[:5])}."
         )
         realism_flag = f"{realism_flag} {note}".strip() if realism_flag else note
@@ -1144,7 +1152,7 @@ async def compute_alert_pick(
     pick_id = None
     if picked_direction != "mixed_evidence" and not dry_run:
         lean_lines = "\n".join(
-            f"  - {l.signal}: {l.direction} — {l.justification}" for l in leans
+            f"  - {l.signal}: {l.direction}: {l.justification}" for l in leans
         )
         extra_prompt = (
             f"\nALERT-PICK MODE:\n"
@@ -1198,7 +1206,7 @@ async def compute_alert_pick(
             max_gain=max_gain,
             vol_regime=vol_regime,
             reasoning=draft_read.reasoning,
-            entry_price=current_price,
+            entry_price=data["draft_spot"],
             source=source,
         )
         db.add(pick)
@@ -1543,11 +1551,16 @@ async def draft_alternative(
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
 
+    # Use snapshot spot (underlying price at chain-capture time) for all
+    # arithmetic that touches chain mids, falling back to Finnhub if absent.
+    snapshot_price: float | None = chain.get("underlying_price")
+    draft_spot: float = snapshot_price if snapshot_price is not None else current_price
+
     # ── 5. ATM strike ─────────────────────────────────────────────────────────
     atm_strike: float | None = None
     intersection = {c["strike"] for c in calls_raw} & {p["strike"] for p in puts_raw}
     if intersection:
-        atm_strike = min(intersection, key=lambda s: abs(s - current_price))
+        atm_strike = min(intersection, key=lambda s: abs(s - draft_spot))
 
     # ── 6. Quality-filtered strike lists ──────────────────────────────────────
     if direction == "bullish":
@@ -1559,8 +1572,8 @@ async def draft_alternative(
         primary_label   = "PUTS (for bearish position)"
         secondary_label = "CALLS (for spread second leg)"
 
-    primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, current_price)
-    secondary_text, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, current_price, limit=8)
+    primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, draft_spot)
+    secondary_text, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, draft_spot, limit=8)
 
     valid_primary_strikes = {r["strike"] for r in primary_rows}
 
@@ -1570,7 +1583,7 @@ async def draft_alternative(
             fits=False,
             strategy=None, suggested_strike=None, suggested_spread_strike=None,
             cost_to_enter=None, target=None, tradeoff=None, reasoning=None,
-            note=f"No liquid options found for {sym} — no alternative structure can be constructed.",
+            note=f"No liquid options found for {sym}. No alternative structure can be constructed.",
             model_used="n/a",
             generated_at=generated_at,
         )
@@ -1586,57 +1599,57 @@ You are a financial data assistant. The user wants a {direction} trade on {sym} 
 
 CRITICAL RULES (violating any is an error):
 1. Output ONLY the JSON object. Do not write any reasoning, explanation, or "thinking out loud" text before the JSON. Your response must begin with {{ and end with }}.
-2. You may and should verify your arithmetic, but show any necessary math compactly INSIDE the JSON fields (e.g. in "tradeoff": "Caps max gain at $253 ([$5.00 width − $2.47 debit] × 100)"), NOT as prose before the JSON object.
-3. "suggested_strike" and "suggested_spread_strike" MUST be exact float values listed under AVAILABLE STRIKES — never invent a strike
-4. "cost_to_enter" MUST be <= {budget:.2f} when fits=true. Naked cost = premium × 100; spread cost = net_debit × 100 where net_debit = leg1_mid − leg2_mid
+2. You may and should verify your arithmetic, but show any necessary math compactly INSIDE the JSON fields (e.g. in "tradeoff": "Caps max gain at $253 ([$5.00 width - $2.47 debit] x 100)"), NOT as prose before the JSON object.
+3. "suggested_strike" and "suggested_spread_strike" MUST be exact float values listed under AVAILABLE STRIKES, never invent a strike
+4. "cost_to_enter" MUST be <= {budget:.2f} when fits=true. Naked cost = premium x 100; spread cost = net_debit x 100 where net_debit = leg1_mid - leg2_mid
 5. HONESTY GUARDRAIL: If every structure that fits the budget is far-OTM (more than 3 strikes from ATM) or costs less than $50 per contract for this underlying, it is a lottery ticket. Set fits=false and explain honestly. It is better to report nothing fits than to suggest a low-probability play
-6. Frame as a data-grounded suggestion to review — not financial advice
+6. Frame as a data-grounded suggestion to review, not financial advice
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
-CURRENT PRICE:      ${current_price:.2f}
+PRICE:              ${draft_spot:.2f}
 ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
 EXPIRATION:         {chosen_exp or "(none)"}
 NEXT EARNINGS:      {earnings_str or "(unknown)"}
 AGGRESSIVENESS:     {aggressiveness}
-USER BUDGET:        ${budget:.2f} per contract (hard ceiling — must not exceed)
+USER BUDGET:        ${budget:.2f} per contract (hard ceiling, must not exceed)
 
-BEST PLAY (context only — do NOT suggest this):
+BEST PLAY (context only, do NOT suggest this):
   Structure: {best_play_desc}
-  Cost:      ${payload.best_cost:.0f} per contract — exceeds user budget
+  Cost:      ${payload.best_cost:.0f} per contract (exceeds user budget)
 
-AVAILABLE STRIKES — {primary_label}:
+AVAILABLE STRIKES ({primary_label}):
 {primary_text}
 
-AVAILABLE STRIKES — {secondary_label}:
+AVAILABLE STRIKES ({secondary_label}):
 {secondary_text}
 ═══════════════════ END FACT BLOCK ═══════════════════════
 
 SEARCH ORDER FOR ALTERNATIVES (prefer in this order):
   1. A tighter spread using real strikes where net_debit × 100 <= {budget:.0f}
   2. A further-OTM naked option (1-2 strikes OTM from ATM) where mid × 100 <= {budget:.0f}
-  3. fits=false — if nothing affordable is within 3 strikes of ATM or if all affordable plays cost < $50, report nothing good fits
+  3. fits=false: if nothing affordable is within 3 strikes of ATM or if all affordable plays cost < $50, report nothing good fits
 
-When fits=true, "tradeoff" MUST state what is given up vs {best_play_desc} (e.g. "Caps max gain at $X vs unlimited for the naked call" or "Requires a move to $X vs $Y — lower probability of profit").
+When fits=true, "tradeoff" MUST state what is given up vs {best_play_desc} (e.g. "Caps max gain at $X vs unlimited for the naked call" or "Requires a move to $X vs $Y, lower probability of profit").
 
-SPREAD MAX-GAIN MATH — READ THIS CAREFULLY:
-  MAX GAIN for a vertical spread = (width − net_debit) × 100.
-  Example: $15-wide spread at $6.00 net debit → (15 − 6) × 100 = $900. The max gain is $900, NOT $1,500.
-  $1,500 is the gross spread width × 100 — that figure is WRONG as max gain and must NEVER appear as the max gain.
-  The single max-gain dollar figure you state in "tradeoff" MUST equal (width − net_debit) × 100. State that one number only.
-  SANITY CHECK before you write the tradeoff: does your stated max gain equal (width − net_debit) × 100?
-  If you wrote width × 100 anywhere as the max gain, it is wrong — recompute before responding.
+SPREAD MAX-GAIN MATH (READ THIS CAREFULLY):
+  MAX GAIN for a vertical spread = (width - net_debit) x 100.
+  Example: $15-wide spread at $6.00 net debit: (15 - 6) x 100 = $900. The max gain is $900, NOT $1,500.
+  $1,500 is the gross spread width x 100. That figure is WRONG as max gain and must NEVER appear as the max gain.
+  The single max-gain dollar figure you state in "tradeoff" MUST equal (width - net_debit) x 100. State that one number only.
+  SANITY CHECK before you write the tradeoff: does your stated max gain equal (width - net_debit) x 100?
+  If you wrote width x 100 anywhere as the max gain, it is wrong. Recompute before responding.
 
 Return ONLY this JSON object (no other text):
 {{
   "fits": <true|false>,
-  "strategy": "<description with real strikes and real cost, e.g. 'Bull call spread $305/$320 ($8.10 net debit)' — or null if fits=false>",
-  "suggested_strike": <float — must appear verbatim in AVAILABLE STRIKES, or null if fits=false>,
+  "strategy": "<description with real strikes and real cost, e.g. 'Bull call spread $305/$320 ($8.10 net debit)', or null if fits=false>",
+  "suggested_strike": <float, must appear verbatim in AVAILABLE STRIKES, or null if fits=false>,
   "suggested_spread_strike": <float from AVAILABLE STRIKES or null>,
   "cost_to_enter": <float, must be <= {budget:.2f} if fits=true, else null>,
-  "target": <float — data-grounded price target at {aggressiveness} aggressiveness>,
-  "tradeoff": "<honest comparison to best play — null if fits=false>",
-  "reasoning": "<2-3 sentences citing real strike values and mids from the fact block — null if fits=false>",
+  "target": <float, data-grounded price target at {aggressiveness} aggressiveness>,
+  "tradeoff": "<honest comparison to best play, null if fits=false>",
+  "reasoning": "<2-3 sentences citing real strike values and mids from the fact block, null if fits=false>",
   "note": "<when fits=false: specific reason nothing fits + recommendation (try larger budget or lower-priced underlying); null when fits=true>"
 }}"""
 
@@ -1716,7 +1729,7 @@ Return ONLY this JSON object (no other text):
             failures.append(f"spread strike ${spread_strike:.2f} not in available chain")
 
         if cost_to_enter is None:
-            failures.append("fits=true but cost_to_enter could not be computed — strike mid not found in chain")
+            failures.append("fits=true but cost_to_enter could not be computed (strike mid not found in chain)")
         elif cost_to_enter > budget:
             failures.append(
                 f"cost_to_enter ${cost_to_enter:.2f} exceeds budget ${budget:.2f}"
@@ -1968,7 +1981,7 @@ async def stock_mark_thesis(
     if thesis.option_type:
         raise HTTPException(
             status_code=400,
-            detail="This thesis has an option leg — use GET /theses/{id}/mark instead.",
+            detail="This thesis has an option leg. Use GET /theses/{id}/mark instead.",
         )
 
     sym   = thesis.ticker.symbol

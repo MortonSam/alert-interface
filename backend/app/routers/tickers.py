@@ -77,7 +77,7 @@ def _build_plain_summary(
     if implied_range_low is not None and implied_range_high is not None:
         base = (
             f"{symbol} options are pricing in a {pct_str} move "
-            f"(${implied_range_low:.2f}–${implied_range_high:.2f}) by {expiration_used}."
+            f"(${implied_range_low:.2f}-${implied_range_high:.2f}) by {expiration_used}."
         )
     else:
         base = f"{symbol} options are pricing in a {pct_str} move by {expiration_used}."
@@ -1375,7 +1375,7 @@ async def get_options_read(
         "current_price":             _fp(current_price),
         "expected_move_pct":         f"±{expected_move_pct * 100:.1f}%" if expected_move_pct is not None else "(unavailable)",
         "expected_move_dollars":     f"±{_fp(expected_move_dollars)}" if expected_move_dollars is not None else "(unavailable)",
-        "implied_range":             f"{_fp(implied_range_low)} – {_fp(implied_range_high)}" if implied_range_low is not None and implied_range_high is not None else "(unavailable)",
+        "implied_range":             f"{_fp(implied_range_low)} - {_fp(implied_range_high)}" if implied_range_low is not None and implied_range_high is not None else "(unavailable)",
         "expiration_date":           chosen_exp or "(unavailable)",
         "days_to_expiration":        str(days_to_exp) if days_to_exp is not None else "(unavailable)",
         "atm_strike":                _fp(atm_strike),
@@ -1386,7 +1386,7 @@ async def get_options_read(
         "realized_vol_20d":          _fpct(current_rv),
         "rv_rank":                   f"{rv_rank:.1f}" if rv_rank is not None else "(unavailable)",
         "rv_percentile":             f"{rv_percentile:.1f}" if rv_percentile is not None else "(unavailable)",
-        "rv_1yr_range":              f"{_fpct(rv_min)} – {_fpct(rv_max)}" if rv_min is not None and rv_max is not None else "(unavailable)",
+        "rv_1yr_range":              f"{_fpct(rv_min)} - {_fpct(rv_max)}" if rv_min is not None and rv_max is not None else "(unavailable)",
         "rv_sample_days":            str(rv_sample_days),
         "iv_rv_spread":              (f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"),
         "avg_earnings_1d_move":      f"±{avg_earn_move_pct:.1f}%" if avg_earn_move_pct is not None else "(unavailable)",
@@ -1406,7 +1406,7 @@ async def get_options_read(
     # ── Prompt ────────────────────────────────────────────────────────────────
     prompt = f"""\
 You are a senior options trader narrating what you see on the screen for {sym} ({ticker_name}).
-Write exactly 2–4 tight sentences of interpretive prose for a sophisticated reader of a financial research tool.
+Write exactly 2-4 tight sentences of interpretive prose for a sophisticated reader of a financial research tool.
 
 INJECTED FACTS: use ONLY these exact strings verbatim for every number you state.
 Do NOT derive, approximate, recompute, or restate any figure differently from what appears below.
@@ -1428,10 +1428,10 @@ EARNINGS CONTEXT:
 
 VOLATILITY:
   20-day realized vol:      {facts["realized_vol_20d"]}
-  RV rank (0–100):          {facts["rv_rank"]}   [0=lowest in past year, 100=highest]
+  RV rank (0-100):          {facts["rv_rank"]}   [0=lowest in past year, 100=highest]
   RV percentile:            {facts["rv_percentile"]}   [{facts["rv_percentile"]}% of the past {facts["rv_sample_days"]} trading days had lower realized vol]
   1-yr RV range:            {facts["rv_1yr_range"]}
-  IV − RV spread:           {facts["iv_rv_spread"]}   [positive = options pricing more vol than recently delivered; negative = options cheap vs realized]
+  IV - RV spread:           {facts["iv_rv_spread"]}   [positive = options pricing more vol than recently delivered; negative = options cheap vs realized]
 
 HISTORICAL EARNINGS (from actual past reactions):
   Avg absolute 1-day move:  {facts["avg_earnings_1d_move"]}
@@ -1441,7 +1441,7 @@ HISTORICAL EARNINGS (from actual past reactions):
 STRICT RULES:
 1. Every number you write MUST be copied verbatim from the fact block. No rounding, reformatting, or paraphrasing of figures.
 2. Write PROSE ONLY. No bullets, headers, lists, or markdown. No em dashes.
-3. Cover these threads in a natural flow across 2–4 sentences:
+3. Cover these threads in a natural flow across 2-4 sentences:
    a. What the market is pricing: state the implied move, implied range, and expiration.
    b. The vol context: connect the RV rank and the IV-RV spread. Is implied vol historically cheap or rich vs what the stock has recently delivered? Be specific about what this looks like from each side of the trade.
    c. If expiration spans earnings (True): use the earnings window note verbatim or paraphrase it, noting the expiration extends past earnings.
@@ -1449,7 +1449,7 @@ STRICT RULES:
 4. You MAY describe the setup descriptively from a premium-seller or premium-buyer perspective, but NO trade recommendations, no "you should buy/sell," no price targets.
 5. Omit any thread where the fact says "(unavailable)".
 6. Do NOT add disclaimers or caveats. The UI handles that.
-7. Target 60–100 words. Be specific and grounded; no generic filler.\
+7. Target 60-100 words. Be specific and grounded; no generic filler.\
 """
 
     print(f"[options-read] Generating for {sym} | facts: {json.dumps(facts, indent=2)}", flush=True)

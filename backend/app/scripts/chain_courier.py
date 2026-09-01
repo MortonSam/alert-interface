@@ -93,7 +93,8 @@ def _fetch_chain(symbol: str, expiration: str) -> dict:
     empty: dict = {"calls": [], "puts": [], "expiration": expiration, "chain_last_trade": None}
     for attempt in range(3):
         try:
-            chain = yf.Ticker(symbol).option_chain(expiration)
+            t = yf.Ticker(symbol)
+            chain = t.option_chain(expiration)
             calls = _parse_option_df(chain.calls)
             puts = _parse_option_df(chain.puts)
             if calls or puts:
@@ -105,9 +106,16 @@ def _fetch_chain(symbol: str, expiration: str) -> dict:
                             dt = pd.Timestamp(max_dt).date()
                             if chain_last_trade is None or dt > chain_last_trade:
                                 chain_last_trade = dt
+                # Capture underlying price at chain-snapshot time so the
+                # draft path never mixes a fresh quote against stale mids.
+                try:
+                    underlying_price = float(t.fast_info["lastPrice"])
+                except Exception:
+                    underlying_price = None
                 return {
                     "calls": calls, "puts": puts, "expiration": expiration,
                     "chain_last_trade": chain_last_trade.isoformat() if chain_last_trade else None,
+                    "underlying_price": underlying_price,
                 }
         except Exception:
             pass

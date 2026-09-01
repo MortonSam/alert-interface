@@ -93,7 +93,7 @@ def _stats_block(s: dict) -> str:
         return "(No earnings history available.)"
 
     return f"""\
-PRECOMPUTED STATISTICS (authoritative — use these exact figures, do not recount or recalculate):
+PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount or recalculate):
   Beat/miss/meet  : {s['beat_sentence']}
   1d move avg/max/min : {s['avg_1d']} / {s['max_1d']} / {s['min_1d']}  (n={s['total']})
   3d move avg/max/min : {s['avg_3d']} / {s['max_3d']} / {s['min_3d']}
@@ -239,7 +239,7 @@ def _build_generation_prompt(
             f"--- END FILING ---"
         )
     else:
-        filing_block = "(No SEC filing available — use general knowledge for this company.)"
+        filing_block = "(No SEC filing available. Use general knowledge for this company.)"
 
     stats = _precompute_stats(reactions)
     stats_block = _stats_block(stats)
@@ -247,11 +247,11 @@ def _build_generation_prompt(
     if reactions:
         rows = []
         for r in reactions:
-            eps_est = f"${float(r.eps_estimate):.2f}" if r.eps_estimate else "—"
-            eps_act = f"${float(r.eps_actual):.2f}"   if r.eps_actual   else "—"
-            pct_1d  = f"{float(r.pct_change_1d):+.1f}%" if r.pct_change_1d else "—"
-            pct_3d  = f"{float(r.pct_change_3d):+.1f}%" if r.pct_change_3d else "—"
-            pct_5d  = f"{float(r.pct_change_5d):+.1f}%" if r.pct_change_5d else "—"
+            eps_est = f"${float(r.eps_estimate):.2f}" if r.eps_estimate else "N/A"
+            eps_act = f"${float(r.eps_actual):.2f}"   if r.eps_actual   else "N/A"
+            pct_1d  = f"{float(r.pct_change_1d):+.1f}%" if r.pct_change_1d else "N/A"
+            pct_3d  = f"{float(r.pct_change_3d):+.1f}%" if r.pct_change_3d else "N/A"
+            pct_5d  = f"{float(r.pct_change_5d):+.1f}%" if r.pct_change_5d else "N/A"
             rows.append(
                 f"| {r.event_date} | {r.outcome.value:7} | {eps_est:8} | {eps_act:8} "
                 f"| {pct_1d:7} | {pct_3d:7} | {pct_5d:7} |"
@@ -265,7 +265,7 @@ def _build_generation_prompt(
     return f"""\
 You are a financial research analyst producing a STRUCTURED research note for {ticker.symbol}.
 
-COMPANY: {ticker.symbol} — {name}
+COMPANY: {ticker.symbol}, {name}
 SECTOR: {sector} | INDUSTRY: {industry}
 MARKET CAP: {market_cap}
 
@@ -273,14 +273,14 @@ MARKET CAP: {market_cap}
 
 {stats_block}
 
-EARNINGS TABLE (for qualitative context — do NOT count rows, recompute averages, or derive any statistics; use the precomputed values above for all numerical claims):
+EARNINGS TABLE (for qualitative context, do NOT count rows, recompute averages, or derive any statistics; use the precomputed values above for all numerical claims):
 {table_block}
 
 OUTPUT FORMAT: Return ONLY a valid JSON object with exactly these keys (no markdown fences, no preamble, no text outside the JSON):
 
 {{
   "rating": "bullish" | "neutral" | "bearish",
-  "bottom_line": "One paragraph (3-5 sentences) synthesizing the investment picture — what matters most right now.",
+  "bottom_line": "One paragraph (3-5 sentences) synthesizing the investment picture. What matters most right now.",
   "what_they_do": "2-4 sentences on core business and revenue model.",
   "highlights": [
     {{"lead": "short bold label (2-5 words)", "detail": "1-3 sentence analysis"}},
@@ -304,7 +304,7 @@ RULES:
 - Do NOT make superlative claims ("strongest", "best ever", "largest") unless the precomputed stats unambiguously support them.
 - Only state facts about the business that appear in the filing excerpt or are well-established public knowledge.
 - Do NOT invent revenue figures, margin percentages, ARR, RPO, guidance, or valuation multiples not present in the provided context.
-- Do NOT include a "stats" key — numerical stats are attached separately by the system.
+- Do NOT include a "stats" key. Numerical stats are attached separately by the system.
 - Return ONLY valid JSON. No markdown fences. No preamble. No explanation outside the JSON object.\
 """
 
@@ -354,7 +354,7 @@ def _serialize_structured_note(structured: dict, ticker: Ticker) -> str:
     """Render the structured note as readable text for the content column + verification."""
     name = ticker.name or ticker.symbol
     lines = [
-        f"# {ticker.symbol} — {name}",
+        f"# {ticker.symbol}, {name}",
         f"**Rating: {structured['rating'].title()}**",
         "",
         structured["bottom_line"],
@@ -424,13 +424,13 @@ def _build_verification_prompt(
     return f"""\
 You are a rigorous fact-checker for financial research notes. Verify every factual claim in the note below against the provided evidence sources ONLY.
 
-EVIDENCE SOURCE 1 — SEC FILING TEXT:
+EVIDENCE SOURCE 1 (SEC FILING TEXT):
 {filing_block}
 
-EVIDENCE SOURCE 2 — PRECOMPUTED STATISTICS (these are ground truth for all numerical earnings claims):
+EVIDENCE SOURCE 2 (PRECOMPUTED STATISTICS, ground truth for all numerical earnings claims):
 {stats_block}
 
-EVIDENCE SOURCE 3 — TICKER METADATA (live data from the application database injected at generation time):
+EVIDENCE SOURCE 3 (TICKER METADATA, live data from the application database injected at generation time):
 {ticker_block}
 
 NOTE TO VERIFY:
@@ -442,14 +442,14 @@ CLASSIFICATION RULES:
 - "contradicted": The claim directly conflicts with the filing text, precomputed stats, or ticker metadata. Quote the contradiction in "evidence".
 
 STRICT RULES:
-- Bias toward "unsupported" when in doubt — do NOT use outside knowledge to mark something "supported".
+- Bias toward "unsupported" when in doubt. Do NOT use outside knowledge to mark something "supported".
 - The precomputed stats are the sole ground truth for beat/miss/meet counts, averages, and all move percentages.
 - Ticker metadata (symbol, name, sector, industry, market cap) is ground truth for those fields.
 - Check every specific number, statistic, date, product name, and factual assertion.
 - Skip purely subjective or stylistic phrases that contain no verifiable facts.
 - The summary counts must exactly equal the number of claims in the claims array.
 
-Output ONLY valid JSON — no preamble, no markdown fences, no explanation outside the JSON:
+Output ONLY valid JSON, no preamble, no markdown fences, no explanation outside the JSON:
 {{"claims": [{{"claim": "...", "status": "supported|unsupported|contradicted", "evidence": "..."}}], "summary": {{"supported": N, "unsupported": N, "contradicted": N}}}}\
 """
 
@@ -705,7 +705,7 @@ async def verify_existing_note(
     )
     note = note_row.scalar_one_or_none()
     if note is None:
-        raise HTTPException(status_code=404, detail="No research note found — generate one first")
+        raise HTTPException(status_code=404, detail="No research note found. Generate one first.")
 
     filing, sections, reactions = await _fetch_context(db, ticker)
     try:
