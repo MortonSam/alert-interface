@@ -352,7 +352,7 @@ function DraftPanel({
   return (
     <div className="rounded-lg border bg-muted/30 p-4 space-y-3 text-sm">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
           Ivy&apos;s Draft · {draft.aggressiveness} {draft.direction}
         </p>
         <span className="text-[10px] text-muted-foreground/60">{draft.model_used && <>drafted by Ivy · {draft.model_used}</>}</span>
