@@ -46,7 +46,7 @@ function NotePreview() {
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">EPS</span>
             <span className="font-mono text-sm font-semibold text-foreground">$2.01</span>
-            <span className="text-[11px] text-success">vs 1.94e {"\u00b7"} +3.6%</span>
+            <span className="text-[11px] text-success">vs $1.94 est {"\u00b7"} +3.6%</span>
           </div>
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Beat Streak</span>
@@ -120,7 +120,7 @@ function NotePreview() {
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/90 backdrop-blur-sm px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
           <span className="text-[8px] text-success">{"\u25CF"}</span>
-          What a research note looks like: grounded, explained, verified
+          Sample note from Q2 2026
         </span>
       </div>
     </div>

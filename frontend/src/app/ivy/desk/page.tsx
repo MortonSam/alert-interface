@@ -131,7 +131,7 @@ export default function IvyDeskPage() {
         Overnight worksheet · {fmtDate(activity.run_date)}
       </p>
       <p className="text-lg text-muted-foreground mt-2">
-        Ivy evaluated {activity.evaluated} names last night, picked {pickedCount}, passed on {passedCount}.
+        Ivy evaluated {activity.evaluated} names on {fmtDate(activity.run_date)}, picked {pickedCount}, passed on {passedCount}.
       </p>
 
       <div className="overflow-x-auto mt-6">

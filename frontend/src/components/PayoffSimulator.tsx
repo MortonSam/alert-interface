@@ -396,6 +396,7 @@ export default function PayoffSimulator({
             type="range"
             min={0}
             max={totalDays}
+            step={1}
             value={dateOffset}
             onChange={(e) => setDateOffset(parseInt(e.target.value))}
             className="absolute inset-0 w-full opacity-0 cursor-pointer"

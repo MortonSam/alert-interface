@@ -990,7 +990,11 @@ function ThesisCard({
       {thesis.entry_premium && (
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-xs text-muted-foreground">
-            Option entry: <span className="font-mono tabular-nums text-foreground">${parseFloat(thesis.entry_premium).toFixed(2)} mid</span>
+            Option entry: <span className="font-mono tabular-nums text-foreground">
+              {thesis.strike2 && thesis.entry_premium2
+                ? `$${Math.abs(parseFloat(thesis.entry_premium) - parseFloat(thesis.entry_premium2)).toFixed(2)} net debit`
+                : `$${parseFloat(thesis.entry_premium).toFixed(2)} mid`}
+            </span>
             {thesis.contracts > 1 && ` · ${thesis.contracts} contracts`}
           </p>
           <Link

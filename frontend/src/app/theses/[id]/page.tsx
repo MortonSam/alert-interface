@@ -421,7 +421,7 @@ export default function ThesisDetailPage() {
       </div>
 
       {/* ── Payoff Simulator ───────────────────────────────────────────────── */}
-      {legs && expMs != null && (
+      {legs && expMs != null && !isExpired && (
         <div className="bg-secondary rounded-2xl p-4 space-y-3">
           <span className="inline-block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-background/50 px-2.5 py-0.5 rounded">
             Payoff Simulator

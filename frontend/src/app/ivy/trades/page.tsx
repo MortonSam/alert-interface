@@ -139,8 +139,10 @@ function PickCard({
           )}
           {pick.max_gain != null ? (
             <span>Max gain ${pick.max_gain.toFixed(0)}</span>
-          ) : pick.cost_to_enter != null ? (
+          ) : pick.cost_to_enter != null && pick.picked_direction === "bullish" ? (
             <span>Max gain unlimited</span>
+          ) : pick.cost_to_enter != null && pick.suggested_strike != null ? (
+            <span>Max gain ${((pick.suggested_strike - pick.cost_to_enter) * 100).toFixed(0)}</span>
           ) : null}
         </div>
       </div>
@@ -251,7 +253,8 @@ export default function IvyTradesPage() {
   const scoredClosed = closedPicks.filter((p) => p.direction_hit != null);
   const directionHits = scoredClosed.filter((p) => p.direction_hit).length;
   const directionMisses = scoredClosed.length - directionHits;
-  const totalOptionPnl = closedPicks.reduce((sum, p) => sum + (p.option_pnl_dollars ?? 0), 0);
+  const pnlDollars = closedPicks.filter((p) => p.option_pnl_dollars != null).map((p) => p.option_pnl_dollars!);
+  const totalOptionPnl = pnlDollars.length > 0 ? pnlDollars.reduce((a, b) => a + b, 0) : null;
   const pnlPcts = closedPicks.filter((p) => p.option_pnl_pct != null).map((p) => p.option_pnl_pct!);
   const avgOptionPnlPct = pnlPcts.length > 0 ? pnlPcts.reduce((a, b) => a + b, 0) / pnlPcts.length : null;
 
@@ -282,18 +285,20 @@ export default function IvyTradesPage() {
                 <span className="text-muted-foreground">Direction</span>{" "}
                 <span className="font-semibold">{directionHits}-{directionMisses}</span>
               </div>
-              <div>
-                <span className="text-muted-foreground">Option P&L</span>{" "}
-                <span
-                  className={cn(
-                    "font-semibold font-mono",
-                    totalOptionPnl > 0 ? "text-green-600 dark:text-green-400" :
-                    totalOptionPnl < 0 ? "text-red-600 dark:text-red-400" : ""
-                  )}
-                >
-                  {totalOptionPnl >= 0 ? "+$" : "-$"}{Math.abs(totalOptionPnl).toFixed(2)}
-                </span>
-              </div>
+              {totalOptionPnl !== null && (
+                <div>
+                  <span className="text-muted-foreground">Option P&L</span>{" "}
+                  <span
+                    className={cn(
+                      "font-semibold font-mono",
+                      totalOptionPnl > 0 ? "text-green-600 dark:text-green-400" :
+                      totalOptionPnl < 0 ? "text-red-600 dark:text-red-400" : ""
+                    )}
+                  >
+                    {totalOptionPnl >= 0 ? "+$" : "-$"}{Math.abs(totalOptionPnl).toFixed(2)}
+                  </span>
+                </div>
+              )}
               {avgOptionPnlPct !== null && (
                 <div>
                   <span className="text-muted-foreground">Avg P&L %</span>{" "}

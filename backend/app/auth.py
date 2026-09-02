@@ -117,7 +117,10 @@ async def get_current_user(
         return "admin-local"
 
     # 3. No valid credentials
-    raise HTTPException(status_code=401, detail="Authentication required")
+    raise HTTPException(
+        status_code=401,
+        detail="Drafting is in private beta. Everything else on the site is open, and Ivy's own drafts are in the ledger.",
+    )
 
 
 async def get_optional_user(
