@@ -37,6 +37,8 @@ class AlertPick(Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual", server_default="manual")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    option_pnl_dollars: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    option_pnl_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
 
 
 class AlertPickEvaluation(Base):

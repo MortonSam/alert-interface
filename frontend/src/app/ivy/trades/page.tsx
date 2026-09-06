@@ -17,6 +17,16 @@ function stripExpTail(strategy: string | null): string | null {
   return strategy.replace(EXP_TAIL_RE, "");
 }
 
+function fmtPnlDollars(d: number): string {
+  return d >= 0 ? `+$${d.toFixed(2)}` : `-$${Math.abs(d).toFixed(2)}`;
+}
+function fmtPnlPct(p: number): string {
+  return `${p >= 0 ? "+" : ""}${p.toFixed(1)}%`;
+}
+function fmtMarkDate(d: string): string {
+  return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 function PickCard({
   pick,
   expanded,
@@ -147,10 +157,10 @@ function PickCard({
         </div>
       </div>
 
-      {/* Option P&L line (closed only) */}
+      {/* Option P&L line */}
       {isClosed && pick.option_pnl_dollars != null && pick.option_pnl_pct != null && (
         <div className="text-sm">
-          <span className="text-muted-foreground">Option P&L</span>{" "}
+          <span className="text-muted-foreground">Settled</span>{" "}
           <span
             className={cn(
               "font-mono font-semibold",
@@ -159,9 +169,50 @@ function PickCard({
                 : "text-red-600 dark:text-red-400"
             )}
           >
-            {pick.option_pnl_dollars >= 0 ? "+$" : "-$"}{Math.abs(pick.option_pnl_dollars).toFixed(2)}{" "}
-            ({pick.option_pnl_pct >= 0 ? "+" : ""}{pick.option_pnl_pct.toFixed(1)}%)
+            {fmtPnlDollars(pick.option_pnl_dollars)} ({fmtPnlPct(pick.option_pnl_pct)})
           </span>
+        </div>
+      )}
+      {!isClosed && pick.cost_to_enter != null && (
+        <div className="text-sm">
+          <span className="text-muted-foreground">Option</span>{" "}
+          <span className="font-mono">${pick.cost_to_enter.toFixed(2)} entry</span>
+          {pick.option_mid != null ? (
+            <>
+              <span className="text-muted-foreground"> → </span>
+              <span className="font-mono">${pick.option_mid.toFixed(2)}</span>
+              {pick.option_pnl_dollars != null && pick.option_pnl_pct != null && (
+                <>
+                  {"   "}
+                  <span
+                    className={cn(
+                      "font-mono font-semibold",
+                      pick.option_pnl_dollars >= 0
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-red-600 dark:text-red-400"
+                    )}
+                  >
+                    {fmtPnlDollars(pick.option_pnl_dollars)} ({fmtPnlPct(pick.option_pnl_pct)})
+                  </span>
+                </>
+              )}
+              {pick.option_mark_as_of && (
+                <span className="text-xs text-muted-foreground ml-2">
+                  as of {fmtMarkDate(pick.option_mark_as_of)}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground"> → </span>
+              <span className="text-muted-foreground italic">n/a</span>
+              {pick.option_mark_note && (
+                <span className="text-xs text-muted-foreground ml-2">
+                  {pick.option_mark_note}
+                </span>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -258,6 +309,12 @@ export default function IvyTradesPage() {
   const pnlPcts = closedPicks.filter((p) => p.option_pnl_pct != null).map((p) => p.option_pnl_pct!);
   const avgOptionPnlPct = pnlPcts.length > 0 ? pnlPcts.reduce((a, b) => a + b, 0) / pnlPcts.length : null;
 
+  // Open option P&L (from chain marks)
+  const markedOpen = openPicks.filter((p) => p.option_pnl_dollars != null);
+  const openOptionPnl = markedOpen.length > 0
+    ? markedOpen.reduce((sum, p) => sum + p.option_pnl_dollars!, 0)
+    : null;
+
   return (
     <div className="py-8 space-y-8">
       {/* Summary header */}
@@ -314,6 +371,23 @@ export default function IvyTradesPage() {
                 </div>
               )}
             </>
+          )}
+          {openOptionPnl !== null && (
+            <div>
+              <span className="text-muted-foreground">Open option P&L</span>{" "}
+              <span
+                className={cn(
+                  "font-semibold font-mono",
+                  openOptionPnl > 0 ? "text-green-600 dark:text-green-400" :
+                  openOptionPnl < 0 ? "text-red-600 dark:text-red-400" : ""
+                )}
+              >
+                {fmtPnlDollars(openOptionPnl)}
+              </span>
+              <span className="text-muted-foreground ml-1">
+                {markedOpen.length} of {openPicks.length} marked
+              </span>
+            </div>
           )}
         </div>
       )}

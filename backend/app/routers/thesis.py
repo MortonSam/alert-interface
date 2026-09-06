@@ -1424,6 +1424,69 @@ async def list_alert_picks(
                     price_map[sym] = price
                     ts_map[sym] = ts
 
+    # ── Option marks for open picks via chain_store ──
+    open_option_marks: dict[str, dict] = {}
+    for r in rows:
+        if r.status != "open":
+            continue
+        strike = float(r.suggested_strike) if r.suggested_strike else None
+        cost = float(r.cost_to_enter) if r.cost_to_enter else None
+        if strike is None or cost is None or cost <= 0 or not r.expiration:
+            continue
+
+        result = await chain_store.get_chain(db, r.symbol, r.expiration)
+        if result is None:
+            open_option_marks[str(r.id)] = {"mark_note": f"no chain for {r.expiration}"}
+            continue
+
+        chain_data, chain_last_trade = result
+        fresh = chain_store.is_fresh(chain_last_trade)
+
+        # Pick correct side
+        side_key = "calls" if r.picked_direction == "bullish" else "puts"
+        side = chain_data.get(side_key, [])
+
+        # Find the strike mid
+        mid1 = None
+        for row in side:
+            if row.get("strike") == strike:
+                mid1 = _mid_or_last(row.get("bid"), row.get("ask"), row.get("lastPrice"))
+                break
+
+        if mid1 is None:
+            mark_note = f"strike {strike} not in chain"
+            if chain_last_trade:
+                mark_note += f" as of {chain_last_trade}"
+            open_option_marks[str(r.id)] = {"mark_note": mark_note}
+            continue
+
+        # Spread: find second leg mid
+        spread_strike = float(r.suggested_spread_strike) if r.suggested_spread_strike else None
+        mid2 = None
+        if spread_strike is not None:
+            for row in side:
+                if row.get("strike") == spread_strike:
+                    mid2 = _mid_or_last(row.get("bid"), row.get("ask"), row.get("lastPrice"))
+                    break
+
+        if spread_strike is not None and mid2 is not None:
+            option_mid = round(mid1 - mid2, 4)
+        else:
+            option_mid = round(mid1, 4)
+
+        pnl_d = round((option_mid - cost) * 100, 2)
+        pnl_p = round(((option_mid - cost) / cost) * 100, 2)
+
+        mark = {
+            "option_mid": option_mid,
+            "option_pnl_dollars": pnl_d,
+            "option_pnl_pct": pnl_p,
+            "option_mark_as_of": chain_last_trade,
+        }
+        if not fresh:
+            mark["mark_note"] = f"chain as of {chain_last_trade}"
+        open_option_marks[str(r.id)] = mark
+
     items = []
     for r in rows:
         entry = float(r.entry_price)
@@ -1434,22 +1497,39 @@ async def list_alert_picks(
         current = close_price if is_closed else price_map.get(r.symbol)
         unrealized = round(((current - entry) / entry) * 100, 2) if current and entry else None
 
-        # Scoring (closed picks only)
+        # Scoring
         direction_hit: bool | None = None
         option_pnl_dollars: float | None = None
         option_pnl_pct: float | None = None
+        option_mid: float | None = None
+        option_mark_as_of: str | None = None
+        option_mark_note: str | None = None
 
         if is_closed and close_price is not None:
             is_bullish = r.picked_direction == "bullish"
             direction_hit = close_price > entry if is_bullish else close_price < entry
 
-            strike = float(r.suggested_strike) if r.suggested_strike else None
-            spread = float(r.suggested_spread_strike) if r.suggested_spread_strike else None
-            cost = float(r.cost_to_enter) if r.cost_to_enter else None
-            if strike is not None and cost is not None and cost > 0:
-                option_pnl_dollars, option_pnl_pct = _compute_option_pnl(
-                    close_price, strike, spread, cost, r.picked_direction,
-                )
+            # Prefer stored P&L; fall back to recompute
+            if r.option_pnl_dollars is not None:
+                option_pnl_dollars = float(r.option_pnl_dollars)
+                option_pnl_pct = float(r.option_pnl_pct) if r.option_pnl_pct is not None else None
+            else:
+                strike = float(r.suggested_strike) if r.suggested_strike else None
+                spread = float(r.suggested_spread_strike) if r.suggested_spread_strike else None
+                cost = float(r.cost_to_enter) if r.cost_to_enter else None
+                if strike is not None and cost is not None and cost > 0:
+                    option_pnl_dollars, option_pnl_pct = _compute_option_pnl(
+                        close_price, strike, spread, cost, r.picked_direction,
+                    )
+            option_mark_as_of = r.expiration
+        elif not is_closed:
+            # Open pick: use chain mark
+            mark = open_option_marks.get(str(r.id), {})
+            option_mid = mark.get("option_mid")
+            option_pnl_dollars = mark.get("option_pnl_dollars")
+            option_pnl_pct = mark.get("option_pnl_pct")
+            option_mark_as_of = mark.get("option_mark_as_of")
+            option_mark_note = mark.get("mark_note")
 
         items.append(AlertPickLedgerItem(
             id=str(r.id),
@@ -1480,6 +1560,9 @@ async def list_alert_picks(
             direction_hit=direction_hit,
             option_pnl_dollars=option_pnl_dollars,
             option_pnl_pct=option_pnl_pct,
+            option_mid=option_mid,
+            option_mark_as_of=option_mark_as_of,
+            option_mark_note=option_mark_note,
         ))
 
     return items

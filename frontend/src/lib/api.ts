@@ -679,6 +679,9 @@ export interface AlertPickLedgerItem {
   direction_hit: boolean | null;
   option_pnl_dollars: number | null;
   option_pnl_pct: number | null;
+  option_mid: number | null;
+  option_mark_as_of: string | null;
+  option_mark_note: string | null;
 }
 
 export interface IvySampleRefusal {

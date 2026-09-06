@@ -199,6 +199,9 @@ class AlertPickLedgerItem(BaseModel):
     direction_hit: bool | None = None
     option_pnl_dollars: float | None = None
     option_pnl_pct: float | None = None
+    option_mid: float | None = None
+    option_mark_as_of: str | None = None
+    option_mark_note: str | None = None
 
 
 class IvySampleRefusal(BaseModel):
