@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { TickerGrid } from "./ticker-grid";
 import { IvyCard } from "./ivy-card";
+import { ScrollReveal } from "@/components/ScrollReveal";
+import { CountUp } from "@/components/CountUp";
 
 // ── Static sample data for the note preview ──────────────────────────────────
 
@@ -181,198 +183,229 @@ export default function Home() {
   return (
     <main>
       <style>{`
-        .hero-bg {
-          background-image: url(/hero-cosmos.jpg);
-          background-size: cover;
-          background-position: center;
-          background-repeat: no-repeat;
-          background-color: #070606;
+        @keyframes hero-line-in {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        .hero-scrim {
-          background:
-            radial-gradient(ellipse 720px 560px at 18% 32%, rgba(7,6,6,.62) 0%, rgba(7,6,6,.28) 55%, transparent 75%),
-            linear-gradient(180deg, rgba(7,6,6,.3) 0%, transparent 14%, transparent 44%, rgba(10,10,11,.78) 80%, #0A0A0B 100%);
+        .hero-line {
+          opacity: 0;
+          animation: hero-line-in 300ms ease-out forwards;
         }
-        .hero-eyebrow {
-          letter-spacing: .18em;
-          text-shadow: 0 1px 12px rgba(0,0,0,.85);
+        .hero-line-0 { animation-delay: 0ms; }
+        .hero-line-1 { animation-delay: 150ms; }
+        .hero-line-2 { animation-delay: 300ms; }
+        .hero-fade {
+          opacity: 0;
+          animation: hero-line-in 400ms ease-out forwards;
         }
-        .hero-h1 {
-          font-size: clamp(38px, 7vw, 60px);
-          line-height: 1.02;
-          letter-spacing: -.025em;
-          text-shadow: 0 2px 40px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.85);
-        }
-        .hero-lede {
-          color: #E4DFDB;
-          font-size: 18px;
-          line-height: 1.55;
-          text-shadow: 0 1px 18px rgba(0,0,0,.92);
-          max-width: 30em;
-        }
+        .hero-fade-sub  { animation-delay: 420ms; }
+        .hero-fade-ctas { animation-delay: 520ms; }
+        .hero-fade-cue  { animation-delay: 620ms; }
+
         @keyframes hero-bob {
           0%, 100% { transform: translateY(0); }
-          50%       { transform: translateY(4px); }
+          50%      { transform: translateY(4px); }
         }
         .hero-scroll-cue {
           animation: hero-bob 2.4s ease-in-out infinite;
+          animation-delay: 1.4s;
         }
+
         @media (prefers-reduced-motion: reduce) {
+          .hero-line, .hero-fade { opacity: 1; animation: none; }
           .hero-scroll-cue { animation: none; }
+        }
+
+        .hero-h1 {
+          font-size: clamp(40px, 10vw, 120px);
+          line-height: 1.05;
+          letter-spacing: -.03em;
+        }
+        .stat-number {
+          font-size: clamp(40px, 8vw, 96px);
+          line-height: 1;
+          letter-spacing: -.02em;
         }
       `}</style>
 
       {/* ── Hero ─────────────────────────────────────────────── */}
-      <div className="relative w-full overflow-hidden bg-background aspect-[1375/768] max-h-[86vh]">
-        <div className="hero-bg absolute inset-0" />
-        <div className="hero-scrim absolute inset-0" />
+      <section className="min-h-[100dvh] flex flex-col bg-background">
+        <div className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
+          <p className="hero-line hero-line-0 font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
+            Equity research tool
+          </p>
 
-        <div className="relative z-10 flex flex-col h-full max-w-7xl px-8">
-          <div className="max-w-[700px] pt-[7vh]">
-            <p className="hero-eyebrow font-mono text-xs uppercase text-muted-foreground mb-[14px]">
-              Equity research tool
-            </p>
-
-            <h1 className="hero-h1 font-display font-extrabold text-foreground">
-              Stock research<br />
-              <span className="text-primary">that verifies</span><br />
+          <h1 className="hero-h1 font-display font-extrabold uppercase">
+            <span className="hero-line hero-line-0 block text-foreground">
+              Stock research
+            </span>
+            <span className="hero-line hero-line-1 block text-primary">
+              that verifies
+            </span>
+            <span className="hero-line hero-line-2 block text-foreground">
               itself.
-            </h1>
+            </span>
+          </h1>
 
-            <div className="hero-lede mt-[18px] mb-[22px] space-y-[16px]">
-              <p>
-                Alert Interface brings S&amp;P 500 research into one
-                centralized workspace for retail investors.
-              </p>
-              <p>
-                Every figure is linked to its source, and every AI-written
-                claim is checked against the underlying data before you see it.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-[13px] items-center">
-              <a
-                href="#market"
-                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
-              >
-                Browse the market ↓
-              </a>
-              <Link
-                href="/build"
-                className="bg-black/40 backdrop-blur-sm border border-white/30 text-white font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-white transition-colors"
-              >
-                Build a trade →
-              </Link>
-            </div>
-          </div>
-
-          <p className="hero-scroll-cue mt-auto mb-[30px] font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
-            scroll to explore ↓
+          <p className="hero-fade hero-fade-sub text-foreground/70 text-lg mt-6 max-w-[42em]">
+            One research workspace for the entire S&amp;P 500. Every number
+            explained, every claim checked before you see it.
           </p>
-        </div>
-      </div>
 
-      {/* ── Value props ───────────────────────────────────────── */}
-      <section className="max-w-7xl mx-auto px-8 py-20">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <PropCard
-            accent="border-l-cool"
-            icon={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 3v18h18" />
-                <path d="m7 16 4-8 4 5 5-6" />
-              </svg>
-            }
-            title="Grounded in real data"
-            body="Every figure (earnings, margins, valuation) comes straight from filings and market data. The AI writes the analysis; the numbers are exact."
-          />
-          <PropCard
-            accent="border-l-violet"
-            icon={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-            }
-            title="Explained as you read"
-            body="Jargon decoded in context. See what each metric means for that specific company, not a generic textbook definition."
-          />
-          <PropCard
-            accent="border-l-success"
-            icon={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-                <path d="m9 12 2 2 4-4" />
-              </svg>
-            }
-            title="Claims you can verify"
-            body="A second model cross-checks every statement against the source filing and flags anything it can't support. No confident hallucinations."
-          />
-        </div>
-      </section>
-
-      {/* ── Note preview ──────────────────────────────────────── */}
-      <section className="max-w-3xl mx-auto px-8 pb-20">
-        <SectionHeading
-          kicker="See it in action"
-          heading="The note does the explaining"
-          sub="Earnings, financials, and risk analysis, with every number you can hover to understand."
-        />
-        <NotePreview />
-      </section>
-
-      {/* ── Meet Ivy ───────────────────────────────────────── */}
-      <section className="max-w-3xl mx-auto px-8 pb-20">
-        <IvyCard />
-      </section>
-
-      {/* ── Market grid ──────────────────────────────────────── */}
-      <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
-        <SectionHeading
-          kicker="Start anywhere"
-          heading="Browse the market"
-          sub="Pick a ticker to read its research note, earnings history, and options data."
-        />
-        <TickerGrid />
-      </section>
-
-      {/* ── Closing CTA ──────────────────────────────────────── */}
-      <section className="max-w-7xl mx-auto px-8 pb-20">
-        <div
-          className="relative rounded-2xl border border-border overflow-hidden px-8 py-16 text-center"
-          style={{
-            background: "radial-gradient(ellipse at 50% 40%, hsla(29,100%,55%,.08) 0%, transparent 70%), hsl(var(--card))",
-          }}
-        >
-          <h2 className="font-display text-2xl sm:text-3xl font-bold text-foreground">
-            Know what you&#39;re buying.
-          </h2>
-          <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
-            Research first. Understand the company, the numbers, and the risk. Then decide.
-          </p>
-          <div className="flex flex-wrap gap-[13px] justify-center mt-8">
-            <Link
-              href="/discover"
+          <div className="hero-fade hero-fade-ctas flex flex-wrap gap-[13px] items-center mt-8">
+            <a
+              href="#market"
               className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
             >
-              Discover what&#39;s worth a look →
-            </Link>
+              Browse the market ↓
+            </a>
             <Link
               href="/build"
               className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
             >
               Build a trade →
             </Link>
-            <Link
-              href="/ivy"
-              className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
-            >
-              Meet Ivy →
-            </Link>
           </div>
         </div>
+
+        <p className="hero-fade hero-fade-cue hero-scroll-cue text-center pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
+          scroll to explore ↓
+        </p>
       </section>
+
+      {/* ── Big three numbers ─────────────────────────────────── */}
+      <section className="min-h-[100dvh] flex items-center px-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto">
+          {[
+            { value: 500, suffix: "+", label: "Companies covered" },
+            { value: 31000, suffix: "+", label: "Earnings reactions studied" },
+            { value: 165000, suffix: "+", label: "Analyst actions tracked" },
+          ].map((stat) => (
+            <div key={stat.label}>
+              <CountUp
+                value={stat.value}
+                suffix={stat.suffix}
+                className="stat-number font-display font-bold text-foreground block"
+              />
+              <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mt-3">
+                {stat.label}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Value props ───────────────────────────────────────── */}
+      <ScrollReveal>
+        <section className="max-w-7xl mx-auto px-8 py-20">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <PropCard
+              accent="border-l-cool"
+              icon={
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3v18h18" />
+                  <path d="m7 16 4-8 4 5 5-6" />
+                </svg>
+              }
+              title="Grounded in real data"
+              body="Every figure (earnings, margins, valuation) comes straight from filings and market data. The AI writes the analysis; the numbers are exact."
+            />
+            <PropCard
+              accent="border-l-violet"
+              icon={
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              }
+              title="Explained as you read"
+              body="Jargon decoded in context. See what each metric means for that specific company, not a generic textbook definition."
+            />
+            <PropCard
+              accent="border-l-success"
+              icon={
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+              }
+              title="Claims you can verify"
+              body="A second model cross-checks every statement against the source filing and flags anything it can't support. No confident hallucinations."
+            />
+          </div>
+        </section>
+      </ScrollReveal>
+
+      {/* ── Note preview ──────────────────────────────────────── */}
+      <ScrollReveal>
+        <section className="max-w-3xl mx-auto px-8 pb-20">
+          <SectionHeading
+            kicker="See it in action"
+            heading="The note does the explaining"
+            sub="Earnings, financials, and risk analysis, with every number you can hover to understand."
+          />
+          <NotePreview />
+        </section>
+      </ScrollReveal>
+
+      {/* ── Meet Ivy ───────────────────────────────────────── */}
+      <ScrollReveal>
+        <section className="max-w-3xl mx-auto px-8 pb-20">
+          <IvyCard />
+        </section>
+      </ScrollReveal>
+
+      {/* ── Market grid ──────────────────────────────────────── */}
+      <ScrollReveal>
+        <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
+          <SectionHeading
+            kicker="Start anywhere"
+            heading="Browse the market"
+            sub="Pick a ticker to read its research note, earnings history, and options data."
+          />
+          <TickerGrid />
+        </section>
+      </ScrollReveal>
+
+      {/* ── Closing CTA ──────────────────────────────────────── */}
+      <ScrollReveal>
+        <section className="max-w-7xl mx-auto px-8 pb-20">
+          <div
+            className="relative rounded-2xl border border-border overflow-hidden px-8 py-16 text-center"
+            style={{
+              background: "radial-gradient(ellipse at 50% 40%, hsla(29,100%,55%,.08) 0%, transparent 70%), hsl(var(--card))",
+            }}
+          >
+            <h2 className="font-display text-2xl sm:text-3xl font-bold text-foreground">
+              Know what you&#39;re buying.
+            </h2>
+            <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
+              Research first. Understand the company, the numbers, and the risk. Then decide.
+            </p>
+            <div className="flex flex-wrap gap-[13px] justify-center mt-8">
+              <Link
+                href="/discover"
+                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
+              >
+                Discover what&#39;s worth a look →
+              </Link>
+              <Link
+                href="/build"
+                className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
+              >
+                Build a trade →
+              </Link>
+              <Link
+                href="/ivy"
+                className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
+              >
+                Meet Ivy →
+              </Link>
+            </div>
+          </div>
+        </section>
+      </ScrollReveal>
     </main>
   );
 }
