@@ -848,6 +848,32 @@ async def check_chain_coverage(session) -> CheckResult:
     )
 
 
+async def check_nan_alert_pick_values(session) -> CheckResult:
+    """ERROR if any alert_picks row has NaN in close_price, option_pnl_dollars, or option_pnl_pct."""
+    rows = (await session.execute(text("""
+        SELECT id, symbol, status,
+               close_price, option_pnl_dollars, option_pnl_pct
+        FROM alert_picks
+        WHERE close_price = 'NaN'::numeric
+           OR option_pnl_dollars = 'NaN'::numeric
+           OR option_pnl_pct = 'NaN'::numeric
+        ORDER BY symbol
+    """))).all()
+
+    if not rows:
+        return CheckResult("nan_alert_pick_values", PASS, "No NaN values in alert_picks price/P&L columns")
+
+    details = [
+        f"{r.symbol}  status={r.status}  close={r.close_price}  pnl$={r.option_pnl_dollars}  pnl%={r.option_pnl_pct}"
+        for r in rows
+    ]
+    return CheckResult(
+        "nan_alert_pick_values", ERROR,
+        f"{len(rows)} alert_picks row(s) with NaN in close_price, option_pnl_dollars, or option_pnl_pct",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -884,6 +910,8 @@ CHECKS = [
     check_iv_history_out_of_band,
     # Options chains
     check_chain_coverage,
+    # NaN guard
+    check_nan_alert_pick_values,
 ]
 
 

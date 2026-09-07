@@ -8,15 +8,28 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick
+from app.models.iv_history import IVHistory
 from app.services.pnl_math import compute_option_pnl_at_expiry
 from app.services.yfinance_client import YFinanceClient
+
+
+def _is_valid_price(price) -> bool:
+    """Return True if price is a usable finite number."""
+    if price is None:
+        return False
+    try:
+        f = float(price)
+    except (TypeError, ValueError):
+        return False
+    return not math.isnan(f) and not math.isinf(f) and f > 0
 
 
 def _store_option_pnl(pick: AlertPick, close_price: float) -> None:
@@ -50,8 +63,8 @@ async def _close_picks() -> int:
         closed = 0
         for pick in rows:
             close_price = YFinanceClient.get_close_on_date(pick.symbol, pick.expiration)
-            if close_price is None:
-                print(f"[close-picks] {pick.symbol} exp={pick.expiration}: no close found, skipping")
+            if not _is_valid_price(close_price):
+                print(f"[close-picks] {pick.symbol} exp={pick.expiration}: no valid close, leaving open for retry")
                 continue
 
             pick.status = "closed"
@@ -67,13 +80,36 @@ async def _close_picks() -> int:
         return 0
 
 
+async def _resolve_close_from_iv_history(
+    session, symbol: str, expiration: str,
+) -> float | None:
+    """Look up close price from iv_history, rolling back if expiration was non-trading."""
+    exp_date = date.fromisoformat(expiration)
+    row = (await session.execute(
+        select(IVHistory.current_price)
+        .where(
+            IVHistory.symbol == symbol,
+            IVHistory.date <= exp_date,
+            IVHistory.current_price.is_not(None),
+        )
+        .order_by(IVHistory.date.desc())
+        .limit(1)
+    )).scalar()
+    if _is_valid_price(row):
+        return round(float(row), 4)
+    return None
+
+
 async def _backfill() -> int:
-    """Backfill option P&L for closed picks that are missing it."""
+    """Backfill option P&L for closed picks with missing or NaN values."""
     async with AsyncSessionLocal() as session:
+        # Catch both NULL and NaN rows
         rows = (await session.execute(
             select(AlertPick).where(
                 AlertPick.status == "closed",
-                AlertPick.option_pnl_dollars.is_(None),
+            ).where(
+                AlertPick.option_pnl_dollars.is_(None)
+                | (text("alert_picks.option_pnl_dollars = 'NaN'::numeric"))
             )
         )).scalars().all()
 
@@ -83,10 +119,26 @@ async def _backfill() -> int:
 
         filled = 0
         for pick in rows:
-            if pick.close_price is None:
-                print(f"[backfill] {pick.symbol}: no close_price stored, skipping")
-                continue
-            _store_option_pnl(pick, float(pick.close_price))
+            close_price = pick.close_price
+
+            # Resolve close_price if missing or NaN
+            if not _is_valid_price(close_price):
+                if not pick.expiration:
+                    print(f"[backfill] {pick.symbol}: no close_price and no expiration, skipping")
+                    continue
+                resolved = await _resolve_close_from_iv_history(session, pick.symbol, pick.expiration)
+                if resolved is None:
+                    print(f"[backfill] {pick.symbol}: no close_price in iv_history for {pick.expiration}, skipping")
+                    continue
+                pick.close_price = resolved
+                close_price = resolved
+                print(f"[backfill] {pick.symbol}: resolved close_price=${resolved} from iv_history")
+
+            # Clear any NaN P&L before recomputing
+            pick.option_pnl_dollars = None
+            pick.option_pnl_pct = None
+
+            _store_option_pnl(pick, float(close_price))
             if pick.option_pnl_dollars is not None:
                 filled += 1
                 print(f"[backfill] {pick.symbol}: option_pnl=${pick.option_pnl_dollars} ({pick.option_pnl_pct}%)")
