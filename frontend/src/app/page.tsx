@@ -121,36 +121,6 @@ function NotePreview() {
   );
 }
 
-// ── Value prop card ──────────────────────────────────────────────────────────
-
-function PropCard({
-  accent,
-  icon,
-  title,
-  body,
-}: {
-  accent: string;
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className={`rounded-xl border border-border bg-card/60 p-5 border-l-[3px] ${accent}`}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-secondary text-muted-foreground">
-          {icon}
-        </div>
-        <h3 className="font-display text-[15px] font-bold text-foreground">
-          {title}
-        </h3>
-      </div>
-      <p className="text-[13px] text-foreground/75 leading-[1.65]">
-        {body}
-      </p>
-    </div>
-  );
-}
-
 // ── Section heading ──────────────────────────────────────────────────────────
 
 function SectionHeading({
@@ -183,6 +153,15 @@ export default function Home() {
   return (
     <main>
       <style>{`
+        html {
+          scroll-snap-type: y proximity;
+          scroll-padding-top: 3.25rem;
+        }
+        .snap-stop {
+          scroll-snap-align: start;
+          scroll-snap-stop: normal;
+        }
+
         @keyframes hero-line-in {
           from { opacity: 0; transform: translateY(16px); }
           to   { opacity: 1; transform: translateY(0); }
@@ -211,25 +190,31 @@ export default function Home() {
           animation-delay: 1.4s;
         }
 
-        @media (prefers-reduced-motion: reduce) {
-          .hero-line, .hero-fade { opacity: 1; animation: none; }
-          .hero-scroll-cue { animation: none; }
-        }
-
         .hero-h1 {
           font-size: clamp(40px, 10vw, 120px);
           line-height: 1.05;
           letter-spacing: -.03em;
         }
         .stat-number {
-          font-size: clamp(40px, 8vw, 96px);
+          font-size: clamp(56px, 11vw, 160px);
           line-height: 1;
           letter-spacing: -.02em;
         }
+        .statement-h2 {
+          font-size: clamp(32px, 6vw, 72px);
+          line-height: 1.15;
+          letter-spacing: -.025em;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          html { scroll-snap-type: none; }
+          .hero-line, .hero-fade { opacity: 1; animation: none; }
+          .hero-scroll-cue { animation: none; }
+        }
       `}</style>
 
-      {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="min-h-[100dvh] flex flex-col bg-background">
+      {/* ── 1. Hero ────────────────────────────────────────────── */}
+      <section className="snap-stop min-h-[100dvh] flex flex-col bg-background">
         <div className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
           <p className="hero-line hero-line-0 font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
             Equity research tool
@@ -273,9 +258,9 @@ export default function Home() {
         </p>
       </section>
 
-      {/* ── Big three numbers ─────────────────────────────────── */}
-      <section className="min-h-[100dvh] flex items-center px-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto">
+      {/* ── 2. Big three numbers ──────────────────────────────── */}
+      <section className="snap-stop min-h-[100dvh] flex items-center justify-center px-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
           {[
             { value: 500, suffix: "+", label: "Companies covered" },
             { value: 31000, suffix: "+", label: "Earnings reactions studied" },
@@ -295,51 +280,70 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Value props ───────────────────────────────────────── */}
-      <ScrollReveal>
-        <section className="max-w-7xl mx-auto px-8 py-20">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <PropCard
-              accent="border-l-cool"
-              icon={
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 3v18h18" />
-                  <path d="m7 16 4-8 4 5 5-6" />
-                </svg>
-              }
-              title="Grounded in real data"
-              body="Every figure (earnings, margins, valuation) comes straight from filings and market data. The AI writes the analysis; the numbers are exact."
-            />
-            <PropCard
-              accent="border-l-violet"
-              icon={
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
-              }
-              title="Explained as you read"
-              body="Jargon decoded in context. See what each metric means for that specific company, not a generic textbook definition."
-            />
-            <PropCard
-              accent="border-l-success"
-              icon={
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-                  <path d="m9 12 2 2 4-4" />
-                </svg>
-              }
-              title="Claims you can verify"
-              body="A second model cross-checks every statement against the source filing and flags anything it can't support. No confident hallucinations."
-            />
-          </div>
-        </section>
-      </ScrollReveal>
+      {/* ── 3. The Challenge ──────────────────────────────────── */}
+      <section className="snap-stop min-h-[100dvh] flex items-center justify-center px-8">
+        <div className="text-center">
+          <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+            The challenge
+          </p>
+          <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+            Trading apps hand you confetti. Terminals cost thirty grand a year.
+          </h2>
+          <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
+            In between: forty million retail investors doing serious
+            research across six tabs of guesswork.
+          </p>
+        </div>
+      </section>
 
-      {/* ── Note preview ──────────────────────────────────────── */}
+      {/* ── 4. The Solution ──────────────────────────────────── */}
+      <section className="snap-stop min-h-[100dvh] flex items-center justify-center px-8">
+        <div className="max-w-4xl w-full mx-auto">
+          <div className="text-center">
+            <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
+              The solution
+            </p>
+            <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+              One workspace where every number comes with its meaning
+              attached, and every claim is checked before you see it.
+            </h2>
+          </div>
+
+          <div className="mt-16">
+            <div className="border-t border-border pt-5 pb-6">
+              <h3 className="font-display text-[15px] font-bold text-foreground">
+                Grounded in real data
+              </h3>
+              <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
+                Every figure (earnings, margins, valuation) comes straight from filings
+                and market data. The AI writes the analysis; the numbers are exact.
+              </p>
+            </div>
+            <div className="border-t border-border pt-5 pb-6">
+              <h3 className="font-display text-[15px] font-bold text-foreground">
+                Explained as you read
+              </h3>
+              <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
+                Jargon decoded in context. See what each metric means for that specific
+                company, not a generic textbook definition.
+              </p>
+            </div>
+            <div className="border-t border-border pt-5 pb-6">
+              <h3 className="font-display text-[15px] font-bold text-foreground">
+                Claims you can verify
+              </h3>
+              <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
+                A second model cross-checks every statement against the source filing
+                and flags anything it can&#39;t support. No confident hallucinations.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── 5. Note preview ──────────────────────────────────── */}
       <ScrollReveal>
-        <section className="max-w-3xl mx-auto px-8 pb-20">
+        <section className="max-w-3xl mx-auto px-8 py-20">
           <SectionHeading
             kicker="See it in action"
             heading="The note does the explaining"
@@ -349,14 +353,14 @@ export default function Home() {
         </section>
       </ScrollReveal>
 
-      {/* ── Meet Ivy ───────────────────────────────────────── */}
+      {/* ── 6. Meet Ivy ──────────────────────────────────────── */}
       <ScrollReveal>
         <section className="max-w-3xl mx-auto px-8 pb-20">
           <IvyCard />
         </section>
       </ScrollReveal>
 
-      {/* ── Market grid ──────────────────────────────────────── */}
+      {/* ── 7. Market grid ───────────────────────────────────── */}
       <ScrollReveal>
         <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
           <SectionHeading
@@ -368,7 +372,7 @@ export default function Home() {
         </section>
       </ScrollReveal>
 
-      {/* ── Closing CTA ──────────────────────────────────────── */}
+      {/* ── 8. Closing CTA ───────────────────────────────────── */}
       <ScrollReveal>
         <section className="max-w-7xl mx-auto px-8 pb-20">
           <div
