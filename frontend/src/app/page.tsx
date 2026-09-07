@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { TickerGrid } from "./ticker-grid";
-import { IvyCard } from "./ivy-card";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { CountUp } from "@/components/CountUp";
+import { IvyStatLine } from "@/components/IvyStatLine";
 
 // ── Static sample data for the note preview ──────────────────────────────────
 
@@ -154,7 +154,8 @@ export default function Home() {
     <main>
       <style>{`
         html {
-          scroll-snap-type: y proximity;
+          scroll-snap-type: y mandatory;
+          scroll-behavior: smooth;
           scroll-padding-top: 3.25rem;
         }
         .snap-stop {
@@ -196,7 +197,7 @@ export default function Home() {
           letter-spacing: -.03em;
         }
         .stat-number {
-          font-size: clamp(56px, 11vw, 160px);
+          font-size: clamp(44px, 7vw, 112px);
           line-height: 1;
           letter-spacing: -.02em;
         }
@@ -207,14 +208,14 @@ export default function Home() {
         }
 
         @media (prefers-reduced-motion: reduce) {
-          html { scroll-snap-type: none; }
+          html { scroll-snap-type: none; scroll-behavior: auto; }
           .hero-line, .hero-fade { opacity: 1; animation: none; }
           .hero-scroll-cue { animation: none; }
         }
       `}</style>
 
       {/* ── 1. Hero ────────────────────────────────────────────── */}
-      <section className="snap-stop min-h-[100dvh] flex flex-col bg-background">
+      <section className="snap-stop h-[100dvh] flex flex-col bg-background">
         <div className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
           <p className="hero-line hero-line-0 font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
             Equity research tool
@@ -259,7 +260,7 @@ export default function Home() {
       </section>
 
       {/* ── 2. Big three numbers ──────────────────────────────── */}
-      <section className="snap-stop min-h-[100dvh] flex items-center justify-center px-8">
+      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
           {[
             { value: 500, suffix: "+", label: "Companies covered" },
@@ -270,7 +271,7 @@ export default function Home() {
               <CountUp
                 value={stat.value}
                 suffix={stat.suffix}
-                className="stat-number font-display font-bold text-foreground block"
+                className="stat-number font-display font-bold text-foreground block whitespace-nowrap"
               />
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mt-3">
                 {stat.label}
@@ -281,7 +282,7 @@ export default function Home() {
       </section>
 
       {/* ── 3. The Challenge ──────────────────────────────────── */}
-      <section className="snap-stop min-h-[100dvh] flex items-center justify-center px-8">
+      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
         <div className="text-center">
           <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
             The challenge
@@ -297,7 +298,7 @@ export default function Home() {
       </section>
 
       {/* ── 4. The Solution ──────────────────────────────────── */}
-      <section className="snap-stop min-h-[100dvh] flex items-center justify-center px-8">
+      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
         <div className="max-w-4xl w-full mx-auto">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
@@ -309,8 +310,8 @@ export default function Home() {
             </h2>
           </div>
 
-          <div className="mt-16">
-            <div className="border-t border-border pt-5 pb-6">
+          <div className="mt-12">
+            <div className="border-t border-border pt-4 pb-5">
               <h3 className="font-display text-[15px] font-bold text-foreground">
                 Grounded in real data
               </h3>
@@ -319,7 +320,7 @@ export default function Home() {
                 and market data. The AI writes the analysis; the numbers are exact.
               </p>
             </div>
-            <div className="border-t border-border pt-5 pb-6">
+            <div className="border-t border-border pt-4 pb-5">
               <h3 className="font-display text-[15px] font-bold text-foreground">
                 Explained as you read
               </h3>
@@ -328,7 +329,7 @@ export default function Home() {
                 company, not a generic textbook definition.
               </p>
             </div>
-            <div className="border-t border-border pt-5 pb-6">
+            <div className="border-t border-border pt-4 pb-5">
               <h3 className="font-display text-[15px] font-bold text-foreground">
                 Claims you can verify
               </h3>
@@ -341,7 +342,34 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── 5. Note preview ──────────────────────────────────── */}
+      {/* ── 5. The Analyst ───────────────────────────────────── */}
+      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
+        <div className="text-center">
+          <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+            The analyst
+          </p>
+          <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+            Then Ivy makes the call, and keeps score in public.
+          </h2>
+          <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
+            Every pick she has ever made lives on a ledger she can&#39;t edit.
+            Her losses sit right next to her wins.
+          </p>
+
+          <IvyStatLine className="font-mono text-xs text-muted-foreground mt-6" />
+
+          <div className="mt-8">
+            <Link
+              href="/ivy"
+              className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity inline-block"
+            >
+              Meet Ivy →
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── 6. Note preview ──────────────────────────────────── */}
       <ScrollReveal>
         <section className="max-w-3xl mx-auto px-8 py-20">
           <SectionHeading
@@ -350,13 +378,6 @@ export default function Home() {
             sub="Earnings, financials, and risk analysis, with every number you can hover to understand."
           />
           <NotePreview />
-        </section>
-      </ScrollReveal>
-
-      {/* ── 6. Meet Ivy ──────────────────────────────────────── */}
-      <ScrollReveal>
-        <section className="max-w-3xl mx-auto px-8 pb-20">
-          <IvyCard />
         </section>
       </ScrollReveal>
 
