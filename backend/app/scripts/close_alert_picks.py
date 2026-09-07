@@ -126,13 +126,22 @@ async def _backfill() -> int:
                 if not pick.expiration:
                     print(f"[backfill] {pick.symbol}: no close_price and no expiration, skipping")
                     continue
-                resolved = await _resolve_close_from_iv_history(session, pick.symbol, pick.expiration)
-                if resolved is None:
-                    print(f"[backfill] {pick.symbol}: no close_price in iv_history for {pick.expiration}, skipping")
-                    continue
-                pick.close_price = resolved
-                close_price = resolved
-                print(f"[backfill] {pick.symbol}: resolved close_price=${resolved} from iv_history")
+
+                # Try yfinance first (authoritative)
+                yf_price = YFinanceClient.get_close_on_date(pick.symbol, pick.expiration)
+                if _is_valid_price(yf_price):
+                    pick.close_price = yf_price
+                    close_price = yf_price
+                    print(f"[backfill] {pick.symbol}: resolved close=${yf_price} from yfinance")
+                else:
+                    # Fall back to iv_history
+                    ih_price = await _resolve_close_from_iv_history(session, pick.symbol, pick.expiration)
+                    if ih_price is None:
+                        print(f"[backfill] {pick.symbol}: no valid close from yfinance or iv_history for {pick.expiration}, skipping")
+                        continue
+                    pick.close_price = ih_price
+                    close_price = ih_price
+                    print(f"[backfill] {pick.symbol}: resolved close=${ih_price} from iv_history (yfinance unavailable)")
 
             # Clear any NaN P&L before recomputing
             pick.option_pnl_dollars = None

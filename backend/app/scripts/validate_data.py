@@ -848,6 +848,48 @@ async def check_chain_coverage(session) -> CheckResult:
     )
 
 
+async def check_iv_history_price_drift(session) -> CheckResult:
+    """WARN if any iv_history row from the last 7 days drifts >20% from prior day's close."""
+    cutoff = date.today() - timedelta(days=7)
+    rows = (await session.execute(text("""
+        WITH recent AS (
+            SELECT symbol, date, current_price,
+                   LAG(current_price) OVER (PARTITION BY symbol ORDER BY date) AS prev_price
+            FROM iv_history
+            WHERE current_price IS NOT NULL
+              AND current_price != 'NaN'::numeric
+              AND current_price > 0
+        )
+        SELECT symbol, date, current_price, prev_price,
+               ABS(current_price - prev_price) / prev_price AS drift
+        FROM recent
+        WHERE date >= :cutoff
+          AND prev_price IS NOT NULL AND prev_price > 0
+          AND ABS(current_price - prev_price) / prev_price > 0.20
+          AND NOT EXISTS (
+              SELECT 1 FROM events e
+              JOIN tickers t ON t.id = e.ticker_id
+              WHERE t.symbol = recent.symbol AND e.event_type = 'split' AND e.event_date = recent.date
+          )
+        ORDER BY date DESC, symbol
+        LIMIT 50
+    """), {"cutoff": cutoff})).all()
+
+    if not rows:
+        return CheckResult("iv_history_price_drift", PASS, "No iv_history price drift >20% in last 7 days")
+
+    details = [
+        f"{r.symbol}  {r.date}  {float(r.prev_price):.2f} -> {float(r.current_price):.2f}"
+        f" ({float(r.drift) * 100:.0f}% drift)"
+        for r in rows
+    ]
+    return CheckResult(
+        "iv_history_price_drift", WARN,
+        f"{len(rows)} iv_history row(s) with >20% price drift in last 7 days (corrupt snapshot?)",
+        details,
+    )
+
+
 async def check_nan_alert_pick_values(session) -> CheckResult:
     """ERROR if any alert_picks row has NaN in close_price, option_pnl_dollars, or option_pnl_pct."""
     rows = (await session.execute(text("""
@@ -912,6 +954,8 @@ CHECKS = [
     check_chain_coverage,
     # NaN guard
     check_nan_alert_pick_values,
+    # IV history price drift
+    check_iv_history_price_drift,
 ]
 
 

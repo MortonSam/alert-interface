@@ -204,6 +204,29 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
         )
         atm_iv = None
 
+    # ── Price sanity band (reject None/NaN/inf/<=0 and >50% drift) ────────
+    if current_price is not None:
+        if math.isnan(current_price) or math.isinf(current_price) or current_price <= 0:
+            print(f"  {symbol:8s}  SANITY: price {current_price} invalid — skipped")
+            return {"symbol": symbol, "skipped": f"invalid price {current_price}"}
+
+        async with AsyncSessionLocal() as sess:
+            prev_price = (await sess.execute(sa.text("""
+                SELECT current_price FROM iv_history
+                WHERE symbol = :sym AND current_price IS NOT NULL
+                  AND current_price != 'NaN'::numeric
+                ORDER BY date DESC LIMIT 1
+            """), {"sym": symbol})).scalar()
+
+        if prev_price is not None:
+            prev = float(prev_price)
+            if prev > 0 and abs(current_price - prev) / prev > 0.50:
+                print(
+                    f"  {symbol:8s}  SANITY: price ${current_price:.2f}"
+                    f" failed sanity vs close ${prev:.2f}, skipped"
+                )
+                return {"symbol": symbol, "skipped": f"price {current_price:.2f} vs prior {prev:.2f} >50%"}
+
     # ── Upsert ────────────────────────────────────────────────────────────────
     stmt = sa.text("""
         INSERT INTO iv_history
