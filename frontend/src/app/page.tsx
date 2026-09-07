@@ -33,7 +33,7 @@ function NotePreview() {
             </span>
           </div>
           <p className="font-mono text-xs text-muted-foreground/70 mt-2">
-            Information Technology {"\u00b7"} Technology Hardware {"\u00b7"} $4.3T
+            Information Technology {"\u00b7"} Technology Hardware {"\u00b7"} $4.30T
           </p>
         </div>
 
@@ -41,7 +41,7 @@ function NotePreview() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Market Cap</span>
-            <span className="font-mono text-sm font-semibold text-foreground">$4.3T</span>
+            <span className="font-mono text-sm font-semibold text-foreground">$4.30T</span>
           </div>
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">EPS</span>
