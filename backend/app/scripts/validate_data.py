@@ -849,22 +849,24 @@ async def check_chain_coverage(session) -> CheckResult:
 
 
 async def check_iv_history_price_drift(session) -> CheckResult:
-    """WARN if any iv_history row from the last 7 days drifts >20% from prior day's close."""
+    """WARN if any iv_history row from the last 7 days drifts >20% from prior row's close (within 5 days)."""
     cutoff = date.today() - timedelta(days=7)
     rows = (await session.execute(text("""
         WITH recent AS (
             SELECT symbol, date, current_price,
-                   LAG(current_price) OVER (PARTITION BY symbol ORDER BY date) AS prev_price
+                   LAG(current_price) OVER (PARTITION BY symbol ORDER BY date) AS prev_price,
+                   LAG(date) OVER (PARTITION BY symbol ORDER BY date) AS prev_date
             FROM iv_history
             WHERE current_price IS NOT NULL
               AND current_price != 'NaN'::numeric
               AND current_price > 0
         )
-        SELECT symbol, date, current_price, prev_price,
+        SELECT symbol, date, current_price, prev_price, prev_date,
                ABS(current_price - prev_price) / prev_price AS drift
         FROM recent
         WHERE date >= :cutoff
           AND prev_price IS NOT NULL AND prev_price > 0
+          AND (date - prev_date) <= 5
           AND ABS(current_price - prev_price) / prev_price > 0.20
           AND NOT EXISTS (
               SELECT 1 FROM events e

@@ -211,16 +211,22 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
             return {"symbol": symbol, "skipped": f"invalid price {current_price}"}
 
         async with AsyncSessionLocal() as sess:
-            prev_price = (await sess.execute(sa.text("""
-                SELECT current_price FROM iv_history
+            prev_row = (await sess.execute(sa.text("""
+                SELECT date, current_price FROM iv_history
                 WHERE symbol = :sym AND current_price IS NOT NULL
                   AND current_price != 'NaN'::numeric
                 ORDER BY date DESC LIMIT 1
-            """), {"sym": symbol})).scalar()
+            """), {"sym": symbol})).first()
 
-        if prev_price is not None:
-            prev = float(prev_price)
-            if prev > 0 and abs(current_price - prev) / prev > 0.50:
+        if prev_row is not None:
+            prev = float(prev_row.current_price)
+            age_days = (today - prev_row.date).days
+            if age_days > 5:
+                print(
+                    f"  {symbol:8s}  prior row {prev_row.date} too old for band,"
+                    f" accepting price ${current_price:.2f}"
+                )
+            elif prev > 0 and abs(current_price - prev) / prev > 0.50:
                 print(
                     f"  {symbol:8s}  SANITY: price ${current_price:.2f}"
                     f" failed sanity vs close ${prev:.2f}, skipped"
