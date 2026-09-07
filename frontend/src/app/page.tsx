@@ -6,7 +6,7 @@ import { IvyCard } from "./ivy-card";
 
 function NotePreview() {
   return (
-    <div className="relative rounded-2xl border border-border bg-card overflow-hidden">
+    <div className="relative rounded-2xl border border-border bg-card">
       {/* Status line */}
       <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border bg-secondary/40">
         <span className="h-2 w-2 rounded-full bg-success" />
@@ -108,17 +108,9 @@ function NotePreview() {
         </div>
       </div>
 
-      {/* Fade-out overlay */}
-      <div
-        className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
-        style={{
-          background: "linear-gradient(180deg, transparent 0%, hsl(var(--card)) 90%)",
-        }}
-      />
-
-      {/* Floating caption pill */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/90 backdrop-blur-sm px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
+      {/* Caption pill */}
+      <div className="flex justify-center py-4 border-t border-border">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
           <span className="text-[8px] text-success">{"\u25CF"}</span>
           Sample note from Q2 2026
         </span>

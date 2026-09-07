@@ -300,6 +300,8 @@ export default function DiscoverPage() {
                       key={item.symbol}
                       symbol={item.symbol}
                       name={item.name}
+                      sector={item.sector}
+                      industry={item.industry}
                       price={q?.price != null ? fmtPrice(q.price) : undefined}
                       insight={item.insight}
                       volRegime={item.vol_regime}
@@ -353,6 +355,8 @@ export default function DiscoverPage() {
                       key={item.symbol}
                       symbol={item.symbol}
                       name={item.name}
+                      sector={item.sector}
+                      industry={item.industry}
                       price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                       insight={item.insight}
                       volRegime={item.vol_regime}
@@ -391,6 +395,8 @@ export default function DiscoverPage() {
                     key={item.symbol}
                     symbol={item.symbol}
                     name={item.name}
+                    sector={item.sector}
+                    industry={item.industry}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                     insight={item.insight}
                     volRegime={item.vol_regime}
@@ -418,6 +424,8 @@ export default function DiscoverPage() {
                     key={item.symbol}
                     symbol={item.symbol}
                     name={item.name}
+                    sector={item.sector}
+                    industry={item.industry}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                     insight={item.insight}
                     volRegime={item.vol_regime}

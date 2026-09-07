@@ -28,6 +28,8 @@ _MIN_QUARTERS = 4
 class ReportingSoonItem(BaseModel):
     symbol: str
     name: str | None
+    sector: str | None = None
+    industry: str | None = None
     earnings_date: str  # ISO date
     is_confirmed: bool
     insight: str | None = None  # e.g. "Beat 18 of 20 — beats largely priced in"
@@ -42,6 +44,8 @@ class ReportingSoonResponse(BaseModel):
 class SuggestionItem(BaseModel):
     symbol: str
     name: str | None
+    sector: str | None = None
+    industry: str | None = None
     score: float
     reports_in_days: int | None
     recent_move_pct: float | None
@@ -59,6 +63,8 @@ class SuggestionsResponse(BaseModel):
 class JustReportedItem(BaseModel):
     symbol: str
     name: str | None
+    sector: str | None = None
+    industry: str | None = None
     event_date: str  # ISO date
     pct_change_1d: float | None
     outcome: str  # beat / miss / meet / unknown
@@ -74,6 +80,8 @@ class JustReportedResponse(BaseModel):
 class UnusuallyActiveItem(BaseModel):
     symbol: str
     name: str | None
+    sector: str | None = None
+    industry: str | None = None
     rv_rank: float
     rv_20d: float
     tier: str  # "extreme" or "elevated"
@@ -686,7 +694,7 @@ async def reporting_soon(
     cutoff = today + timedelta(days=days)
 
     q = (
-        select(Ticker.symbol, Ticker.name, Event.event_date, Event.is_confirmed)
+        select(Ticker.symbol, Ticker.name, Ticker.sector, Ticker.industry, Event.event_date, Event.is_confirmed)
         .join(Event, Event.ticker_id == Ticker.id)
         .where(
             Event.event_type == EventType.EARNINGS,
@@ -729,6 +737,8 @@ async def reporting_soon(
         ReportingSoonItem(
             symbol=r.symbol,
             name=r.name,
+            sector=r.sector,
+            industry=r.industry,
             earnings_date=r.event_date.isoformat(),
             is_confirmed=r.is_confirmed,
             insight=_reporting_soon_insight(cond, r.symbol),
@@ -753,6 +763,8 @@ async def just_reported(
         select(
             Ticker.symbol,
             Ticker.name,
+            Ticker.sector,
+            Ticker.industry,
             HistoricalReaction.event_date,
             HistoricalReaction.pct_change_1d,
             HistoricalReaction.outcome,
@@ -799,6 +811,8 @@ async def just_reported(
         JustReportedItem(
             symbol=r.symbol,
             name=r.name,
+            sector=r.sector,
+            industry=r.industry,
             event_date=r.event_date.isoformat(),
             pct_change_1d=round(pct, 2) if pct else None,
             outcome=outcome,
@@ -821,7 +835,7 @@ async def suggestions(
 
     # ── Signal 1: earnings proximity (next 14 days) ──────────────────────────
     earnings_q = (
-        select(Ticker.symbol, Ticker.name, Event.event_date)
+        select(Ticker.symbol, Ticker.name, Ticker.sector, Ticker.industry, Event.event_date)
         .join(Event, Event.ticker_id == Ticker.id)
         .where(
             Event.event_type == EventType.EARNINGS,
@@ -843,6 +857,8 @@ async def suggestions(
             score = max(0.0, 1.0 - days_until / 14.0)
             tickers[r.symbol] = {
                 "name": r.name,
+                "sector": r.sector,
+                "industry": r.industry,
                 "earnings_score": score,
                 "reports_in_days": days_until,
                 "reaction_score": 0.0,
@@ -855,6 +871,8 @@ async def suggestions(
         select(
             Ticker.symbol,
             Ticker.name,
+            Ticker.sector,
+            Ticker.industry,
             HistoricalReaction.event_date,
             HistoricalReaction.pct_change_1d,
             HistoricalReaction.pct_change_5d,
@@ -898,6 +916,8 @@ async def suggestions(
             else:
                 tickers[r.symbol] = {
                     "name": r.name,
+                    "sector": r.sector,
+                    "industry": r.industry,
                     "earnings_score": 0.0,
                     "reports_in_days": None,
                     **reaction_data,
@@ -935,6 +955,8 @@ async def suggestions(
         SuggestionItem(
             symbol=sym,
             name=t["name"],
+            sector=t.get("sector"),
+            industry=t.get("industry"),
             score=round(total, 3),
             reports_in_days=t["reports_in_days"],
             recent_move_pct=t.get("recent_move_pct"),
@@ -967,7 +989,7 @@ async def unusually_active(
         return UnusuallyActiveResponse(items=[])
 
     stmt = sa.text("""
-        SELECT r.symbol, t.name, r.rv_rank, r.rv_20d
+        SELECT r.symbol, t.name, t.sector, t.industry, r.rv_rank, r.rv_20d
         FROM rv_snapshots r
         JOIN tickers t ON t.symbol = r.symbol AND t.is_active = true
         WHERE r.as_of_date = :latest_date
@@ -986,6 +1008,8 @@ async def unusually_active(
         UnusuallyActiveItem(
             symbol=row.symbol,
             name=row.name,
+            sector=row.sector,
+            industry=row.industry,
             rv_rank=float(row.rv_rank),
             rv_20d=float(row.rv_20d),
             tier="extreme" if float(row.rv_rank) >= 93 else "elevated",

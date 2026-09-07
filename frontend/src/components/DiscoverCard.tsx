@@ -5,6 +5,8 @@ import Link from "next/link";
 interface DiscoverCardProps {
   symbol: string;
   name: string | null;
+  sector?: string | null;
+  industry?: string | null;
   price?: string; // pre-formatted, e.g. "$142.50"
   /** Primary badge (e.g. "EPS in 3d", "Beat +4.2%", "RV 92 · extreme") */
   badge?: React.ReactNode;
@@ -22,12 +24,15 @@ const VOL_REGIME_STYLES: Record<string, { bg: string; text: string; label: strin
 export default function DiscoverCard({
   symbol,
   name,
+  sector,
+  industry,
   price,
   badge,
   insight,
   volRegime,
 }: DiscoverCardProps) {
   const volChip = volRegime ? VOL_REGIME_STYLES[volRegime] : null;
+  const context = [sector, industry].filter(Boolean).join(" \u00B7 ");
 
   return (
     <Link
@@ -47,9 +52,16 @@ export default function DiscoverCard({
       </div>
 
       {/* Row 2: company name */}
-      <p className="text-xs text-muted-foreground truncate mb-2">
+      <p className="text-xs text-muted-foreground truncate mb-0.5">
         {name ?? "\u2014"}
       </p>
+
+      {/* Row 2b: sector · industry */}
+      {context && (
+        <p className="text-[11px] text-muted-foreground/60 truncate mb-2">
+          {context}
+        </p>
+      )}
 
       {/* Row 3: badge + vol regime chip */}
       {(badge || volChip) && (

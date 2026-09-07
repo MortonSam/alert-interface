@@ -20,7 +20,7 @@ import {
   type Watchlist,
   type HealthStatus,
 } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, fmtMarketCap } from "@/lib/utils";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
 import StructuredNoteView from "@/components/StructuredNoteView";
@@ -37,12 +37,7 @@ const TODAY = (() => {
 })();
 const CURRENT_YEAR = TODAY.getFullYear();
 
-function formatMarketCap(n: number): string {
-  if (n >= 1_000_000_000_000) return `$${(n / 1_000_000_000_000).toFixed(1)}T`;
-  if (n >= 1_000_000_000)     return `$${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000)         return `$${(n / 1_000_000).toFixed(0)}M`;
-  return `$${n.toLocaleString("en-US")}`;
-}
+const formatMarketCap = (n: number) => fmtMarketCap(n);
 
 function formatEventDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");

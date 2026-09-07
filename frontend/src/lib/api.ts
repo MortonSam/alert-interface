@@ -388,6 +388,8 @@ export interface ExplainResponse {
 export interface ReportingSoonItem {
   symbol: string;
   name: string | null;
+  sector: string | null;
+  industry: string | null;
   earnings_date: string;
   is_confirmed: boolean;
   insight: string | null;
@@ -402,6 +404,8 @@ export interface ReportingSoonResponse {
 export interface JustReportedItem {
   symbol: string;
   name: string | null;
+  sector: string | null;
+  industry: string | null;
   event_date: string;
   pct_change_1d: number | null;
   outcome: EarningsOutcome;
@@ -417,6 +421,8 @@ export interface JustReportedResponse {
 export interface SuggestionItem {
   symbol: string;
   name: string | null;
+  sector: string | null;
+  industry: string | null;
   score: number;
   reports_in_days: number | null;
   recent_move_pct: number | null;
@@ -434,6 +440,8 @@ export interface SuggestionsResponse {
 export interface UnusuallyActiveItem {
   symbol: string;
   name: string | null;
+  sector: string | null;
+  industry: string | null;
   rv_rank: number;
   rv_20d: number;
   tier: "extreme" | "elevated";

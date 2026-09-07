@@ -1,17 +1,12 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { cn, fmtMarketCap } from "@/lib/utils";
 import type { StructuredNote, StructuredNoteItem, StructuredNoteFinancials } from "@/lib/api";
 import Tip from "@/components/Tip";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtCap(n: number): string {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
-  return `$${n.toLocaleString()}`;
-}
+const fmtCap = (n: number) => fmtMarketCap(n);
 
 function fmtRevenue(n: number): string {
   if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;

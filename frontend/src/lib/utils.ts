@@ -26,6 +26,15 @@ export const RV_RANK_TIP_SHORT =
   "How volatile this stock is right now vs. its own past year. " +
   "High = choppier than usual for THIS stock, not volatile in absolute terms.";
 
+/** Format market cap to 2 decimal places ($1.23T, $45.67B, $850M style). */
+export function fmtMarketCap(n: number | null): string {
+  if (!n) return "";
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+  return `$${n.toLocaleString()}`;
+}
+
 /** Tooltip text explaining implied move. */
 export const IMPLIED_MOVE_TIP =
   "The size of the move the options market is pricing in \u2014 up OR down \u2014 " +

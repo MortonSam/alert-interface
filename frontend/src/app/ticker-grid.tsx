@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
+import { fmtMarketCap } from "@/lib/utils";
 
 const PAGE_SIZE = 24;
 
@@ -20,13 +21,7 @@ function isStale(iso: string): boolean {
   return Date.now() - new Date(iso).getTime() > 3 * 24 * 60 * 60 * 1000;
 }
 
-function fmtMcap(n: number | null): string {
-  if (!n) return "";
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(1)}T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  return `$${n.toLocaleString()}`;
-}
+const fmtMcap = fmtMarketCap;
 
 function fmtDate(d: string | null): string {
   if (!d) return "";
