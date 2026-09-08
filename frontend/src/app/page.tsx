@@ -123,32 +123,6 @@ function NotePreview() {
   );
 }
 
-// ── Section heading ──────────────────────────────────────────────────────────
-
-function SectionHeading({
-  kicker,
-  heading,
-  sub,
-}: {
-  kicker: string;
-  heading: string;
-  sub: string;
-}) {
-  return (
-    <div className="text-center mb-10">
-      <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-2">
-        {kicker}
-      </p>
-      <h2 className="font-display text-2xl sm:text-3xl font-bold text-foreground">
-        {heading}
-      </h2>
-      <p className="text-sm text-muted-foreground mt-2 max-w-lg mx-auto">
-        {sub}
-      </p>
-    </div>
-  );
-}
-
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -346,63 +320,72 @@ export default function Home() {
       <div>
         {/* ── 6. Note preview ──────────────────────────────────── */}
         <ScrollReveal>
-          <section className="max-w-3xl mx-auto px-8 py-20">
-            <SectionHeading
-              kicker="See it in action"
-              heading="The note does the explaining"
-              sub="Earnings, financials, and risk analysis, with every number you can hover to understand."
-            />
+          <section className="max-w-3xl mx-auto px-8 py-24">
+            <div className="text-center mb-12">
+              <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+                See it in action
+              </p>
+              <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+                The note does the explaining
+              </h2>
+              <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
+                Earnings, financials, and risk analysis, with every number you can hover to understand.
+              </p>
+            </div>
             <NotePreview />
           </section>
         </ScrollReveal>
 
         {/* ── 7. Market grid ───────────────────────────────────── */}
         <ScrollReveal>
-          <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
-            <SectionHeading
-              kicker="Start anywhere"
-              heading="Browse the market"
-              sub="Pick a ticker to read its research note, earnings history, and options data."
-            />
+          <section id="market" className="max-w-7xl mx-auto px-8 py-24">
+            <div className="text-center mb-12">
+              <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+                Start anywhere
+              </p>
+              <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+                Browse the market
+              </h2>
+              <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
+                Pick a ticker to read its research note, earnings history, and options data.
+              </p>
+            </div>
             <TickerGrid />
           </section>
         </ScrollReveal>
 
         {/* ── 8. Closing CTA ───────────────────────────────────── */}
         <ScrollReveal>
-          <section className="max-w-7xl mx-auto px-8 pb-20">
-            <div
-              className="relative rounded-2xl border border-border overflow-hidden px-8 py-16 text-center"
-              style={{
-                background: "radial-gradient(ellipse at 50% 40%, hsla(29,100%,55%,.08) 0%, transparent 70%), hsl(var(--card))",
-              }}
-            >
-              <h2 className="font-display text-2xl sm:text-3xl font-bold text-foreground">
-                Know what you&#39;re buying.
-              </h2>
-              <p className="text-sm text-muted-foreground mt-3 max-w-md mx-auto">
-                Research first. Understand the company, the numbers, and the risk. Then decide.
-              </p>
-              <div className="flex flex-wrap gap-[13px] justify-center mt-8">
-                <Link
-                  href="/discover"
-                  className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
-                >
-                  Discover what&#39;s worth a look →
-                </Link>
-                <Link
-                  href="/build"
-                  className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
-                >
-                  Build a trade →
-                </Link>
-                <Link
-                  href="/ivy"
-                  className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
-                >
-                  Meet Ivy →
-                </Link>
-              </div>
+          <section className="max-w-4xl mx-auto px-8 py-24 text-center">
+            <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+              The point
+            </p>
+            <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+              Teaches you what Wall Street knows, and proves every word.
+            </h2>
+
+            <div className="mt-10">
+              <a
+                href="#market"
+                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity inline-block"
+              >
+                Browse the market ↓
+              </a>
+            </div>
+
+            <div className="flex justify-center gap-8 mt-6">
+              <Link
+                href="/build"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Build a trade →
+              </Link>
+              <Link
+                href="/ivy"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Meet Ivy →
+              </Link>
             </div>
           </section>
         </ScrollReveal>
