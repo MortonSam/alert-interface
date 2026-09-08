@@ -3,6 +3,9 @@ import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { CountUp } from "@/components/CountUp";
 import { IvyStatLine } from "@/components/IvyStatLine";
+import { StoryFlow } from "@/components/StoryFlow";
+import { CostSection } from "@/components/CostSection";
+import { HeroReveal } from "@/components/HeroReveal";
 
 // ── Static sample data for the note preview ──────────────────────────────────
 
@@ -153,41 +156,6 @@ export default function Home() {
   return (
     <main>
       <style>{`
-        html {
-          scroll-snap-type: y mandatory;
-          scroll-behavior: smooth;
-          scroll-padding-top: 3.25rem;
-        }
-        .snap-stop {
-          scroll-snap-align: start;
-          scroll-snap-stop: normal;
-        }
-        .free-zone {
-          scroll-snap-align: start;
-        }
-        body > footer {
-          scroll-snap-align: end;
-        }
-
-        @keyframes hero-line-in {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .hero-line {
-          opacity: 0;
-          animation: hero-line-in 300ms ease-out forwards;
-        }
-        .hero-line-0 { animation-delay: 0ms; }
-        .hero-line-1 { animation-delay: 150ms; }
-        .hero-line-2 { animation-delay: 300ms; }
-        .hero-fade {
-          opacity: 0;
-          animation: hero-line-in 400ms ease-out forwards;
-        }
-        .hero-fade-sub  { animation-delay: 420ms; }
-        .hero-fade-ctas { animation-delay: 520ms; }
-        .hero-fade-cue  { animation-delay: 620ms; }
-
         @keyframes hero-bob {
           0%, 100% { transform: translateY(0); }
           50%      { transform: translateY(4px); }
@@ -214,178 +182,173 @@ export default function Home() {
         }
 
         @media (prefers-reduced-motion: reduce) {
-          html { scroll-snap-type: none; scroll-behavior: auto; }
-          .hero-line, .hero-fade { opacity: 1; animation: none; }
           .hero-scroll-cue { animation: none; }
         }
       `}</style>
 
-      {/* ── 1. Hero ────────────────────────────────────────────── */}
-      <section className="snap-stop h-[100dvh] flex flex-col bg-background">
-        <div className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
-          <p className="hero-line hero-line-0 font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
-            Equity research tool
-          </p>
+      <StoryFlow>
+        {/* ── 1. Hero ────────────────────────────────────────────── */}
+        <section className="h-[100dvh] flex flex-col bg-background">
+          <HeroReveal className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
+            <p data-hero-line className="font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
+              Equity research tool
+            </p>
 
-          <h1 className="hero-h1 font-display font-extrabold uppercase">
-            <span className="hero-line hero-line-0 block text-foreground">
-              Stock research
-            </span>
-            <span className="hero-line hero-line-1 block text-primary">
-              that verifies
-            </span>
-            <span className="hero-line hero-line-2 block text-foreground">
-              itself.
-            </span>
-          </h1>
+            <h1 className="hero-h1 font-display font-extrabold uppercase">
+              <span data-hero-line className="block text-foreground">
+                Stock research
+              </span>
+              <span data-hero-line className="block text-primary">
+                that verifies
+              </span>
+              <span data-hero-line className="block text-foreground">
+                itself.
+              </span>
+            </h1>
 
-          <p className="hero-fade hero-fade-sub text-foreground/70 text-lg mt-6 max-w-[42em]">
-            One research workspace for the entire S&amp;P 500. Every number
-            explained, every claim checked before you see it.
-          </p>
+            <p data-hero-fade className="text-foreground/70 text-lg mt-6 max-w-[42em]">
+              One research workspace for the entire S&amp;P 500. Every number
+              explained, every claim checked before you see it.
+            </p>
 
-          <div className="hero-fade hero-fade-ctas flex flex-wrap gap-[13px] items-center mt-8">
-            <a
-              href="#market"
-              className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
-            >
-              Browse the market ↓
-            </a>
-            <Link
-              href="/build"
-              className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
-            >
-              Build a trade →
-            </Link>
-          </div>
-        </div>
-
-        <p className="hero-fade hero-fade-cue hero-scroll-cue text-center pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
-          scroll to explore ↓
-        </p>
-      </section>
-
-      {/* ── 2. Big three numbers ──────────────────────────────── */}
-      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
-          {[
-            { value: 500, suffix: "+", label: "Companies covered" },
-            { value: 31000, suffix: "+", label: "Earnings reactions studied" },
-            { value: 165000, suffix: "+", label: "Analyst actions tracked" },
-          ].map((stat) => (
-            <div key={stat.label}>
-              <CountUp
-                value={stat.value}
-                suffix={stat.suffix}
-                className="stat-number font-display font-bold text-foreground block whitespace-nowrap"
-              />
-              <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mt-3">
-                {stat.label}
-              </p>
+            <div data-hero-fade className="flex flex-wrap gap-[13px] items-center mt-8">
+              <a
+                href="#market"
+                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
+              >
+                Browse the market ↓
+              </a>
+              <Link
+                href="/build"
+                className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
+              >
+                Build a trade →
+              </Link>
             </div>
-          ))}
-        </div>
-      </section>
+          </HeroReveal>
 
-      {/* ── 3. The Challenge ──────────────────────────────────── */}
-      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
-        <div className="text-center">
-          <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
-            The challenge
+          <p className="hero-scroll-cue text-center pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
+            scroll to explore ↓
           </p>
-          <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-            Trading apps hand you confetti. Terminals cost thirty grand a year.
-          </h2>
-          <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
-            In between: forty million retail investors doing serious
-            research across six tabs of guesswork.
-          </p>
-        </div>
-      </section>
+        </section>
 
-      {/* ── 4. The Solution ──────────────────────────────────── */}
-      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
-        <div className="max-w-4xl w-full mx-auto">
+        {/* ── 2. Big three numbers ──────────────────────────────── */}
+        <section className="h-[100dvh] flex items-center justify-center px-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
+            {[
+              { value: 500, suffix: "+", label: "Companies covered" },
+              { value: 31000, suffix: "+", label: "Earnings reactions studied" },
+              { value: 165000, suffix: "+", label: "Analyst actions tracked" },
+            ].map((stat) => (
+              <div key={stat.label}>
+                <CountUp
+                  value={stat.value}
+                  suffix={stat.suffix}
+                  className="stat-number font-display font-bold text-foreground block whitespace-nowrap"
+                />
+                <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mt-3">
+                  {stat.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── 3. The Challenge ──────────────────────────────────── */}
+        <section className="h-[100dvh] flex items-center justify-center px-8">
           <div className="text-center">
-            <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
-              The solution
+            <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+              The challenge
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              One workspace where every number comes with its meaning
-              attached, and every claim is checked before you see it.
+              Trading apps hand you confetti. Terminals cost thirty grand a year.
             </h2>
+            <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
+              In between: forty million retail investors doing serious
+              research across six tabs of guesswork.
+            </p>
           </div>
+        </section>
 
-          <div className="mt-12">
-            <div className="border-t border-border pt-4 pb-5">
-              <h3 className="font-display text-[15px] font-bold text-foreground">
-                Grounded in real data
-              </h3>
-              <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
-                Every figure (earnings, margins, valuation) comes straight from filings
-                and market data. The AI writes the analysis; the numbers are exact.
+        {/* ── 4. The Cost (pinned scrub) ───────────────────────── */}
+        <CostSection />
+
+        {/* ── 5. The Solution ──────────────────────────────────── */}
+        <section className="h-[100dvh] flex items-center justify-center px-8">
+          <div className="max-w-4xl w-full mx-auto">
+            <div className="text-center">
+              <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
+                The solution
               </p>
+              <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+                One workspace where every number comes with its meaning
+                attached, and every claim is checked before you see it.
+              </h2>
             </div>
-            <div className="border-t border-border pt-4 pb-5">
-              <h3 className="font-display text-[15px] font-bold text-foreground">
-                Explained as you read
-              </h3>
-              <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
-                Jargon decoded in context. See what each metric means for that specific
-                company, not a generic textbook definition.
-              </p>
-            </div>
-            <div className="border-t border-border pt-4 pb-5">
-              <h3 className="font-display text-[15px] font-bold text-foreground">
-                Claims you can verify
-              </h3>
-              <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
-                A second model cross-checks every statement against the source filing
-                and flags anything it can&#39;t support. No confident hallucinations.
-              </p>
+
+            <div className="mt-12">
+              <div className="border-t border-border pt-4 pb-5">
+                <h3 className="font-display text-[15px] font-bold text-foreground">
+                  Grounded in real data
+                </h3>
+                <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
+                  Every figure (earnings, margins, valuation) comes straight from filings
+                  and market data. The AI writes the analysis; the numbers are exact.
+                </p>
+              </div>
+              <div className="border-t border-border pt-4 pb-5">
+                <h3 className="font-display text-[15px] font-bold text-foreground">
+                  Explained as you read
+                </h3>
+                <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
+                  Jargon decoded in context. See what each metric means for that specific
+                  company, not a generic textbook definition.
+                </p>
+              </div>
+              <div className="border-t border-border pt-4 pb-5">
+                <h3 className="font-display text-[15px] font-bold text-foreground">
+                  Claims you can verify
+                </h3>
+                <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
+                  A second model cross-checks every statement against the source filing
+                  and flags anything it can&#39;t support. No confident hallucinations.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ── 5. The Analyst ───────────────────────────────────── */}
-      <section className="snap-stop h-[100dvh] flex items-center justify-center px-8">
-        <div className="text-center">
-          <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
-            The analyst
-          </p>
-          <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-            Then Ivy makes the call, and keeps score in public.
-          </h2>
-          <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
-            Every pick she has ever made lives on a ledger she can&#39;t edit.
-            Her losses sit right next to her wins.
-          </p>
+        {/* ── 6. The Analyst ───────────────────────────────────── */}
+        <section className="h-[100dvh] flex items-center justify-center px-8">
+          <div className="text-center">
+            <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+              The analyst
+            </p>
+            <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+              Then Ivy makes the call, and keeps score in public.
+            </h2>
+            <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
+              Every pick she has ever made lives on a ledger she can&#39;t edit.
+              Her losses sit right next to her wins.
+            </p>
 
-          <IvyStatLine className="font-mono text-xs text-muted-foreground mt-6" />
+            <IvyStatLine className="font-mono text-xs text-muted-foreground mt-6" />
 
-          <div className="mt-8">
-            <Link
-              href="/ivy"
-              className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity inline-block"
-            >
-              Meet Ivy →
-            </Link>
+            <div className="mt-8">
+              <Link
+                href="/ivy"
+                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity inline-block"
+              >
+                Meet Ivy →
+              </Link>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </StoryFlow>
 
-      {/* ── Free-scroll zone ─────────────────────────────────
-           Single snap area taller than the viewport: per the CSS
-           scroll-snap spec the browser can rest anywhere inside it,
-           restoring normal scrolling while mandatory snap stays
-           decisive in the story sections above.
-           The layout footer sits outside <main>; giving it
-           scroll-snap-align: end (via the <style> block) prevents
-           a bounce at the very bottom of the page.
-      ──────────────────────────────────────────────────────── */}
-      <div className="free-zone">
-        {/* ── 6. Note preview ──────────────────────────────────── */}
+      {/* ── Free-scroll zone ───────────────────────────────────── */}
+      <div>
+        {/* ── 7. Note preview ──────────────────────────────────── */}
         <ScrollReveal>
           <section className="max-w-3xl mx-auto px-8 py-20">
             <SectionHeading
@@ -397,7 +360,7 @@ export default function Home() {
           </section>
         </ScrollReveal>
 
-        {/* ── 7. Market grid ───────────────────────────────────── */}
+        {/* ── 8. Market grid ───────────────────────────────────── */}
         <ScrollReveal>
           <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
             <SectionHeading
@@ -409,7 +372,7 @@ export default function Home() {
           </section>
         </ScrollReveal>
 
-        {/* ── 8. Closing CTA ───────────────────────────────────── */}
+        {/* ── 9. Closing CTA ───────────────────────────────────── */}
         <ScrollReveal>
           <section className="max-w-7xl mx-auto px-8 pb-20">
             <div
