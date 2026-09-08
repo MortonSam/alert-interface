@@ -4,7 +4,6 @@ import { ScrollReveal } from "@/components/ScrollReveal";
 import { CountUp } from "@/components/CountUp";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
-import { CostSection } from "@/components/CostSection";
 import { HeroReveal } from "@/components/HeroReveal";
 
 // ── Static sample data for the note preview ──────────────────────────────────
@@ -270,10 +269,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── 4. The Cost (pinned scrub) ───────────────────────── */}
-        <CostSection />
-
-        {/* ── 5. The Solution ──────────────────────────────────── */}
+        {/* ── 4. The Solution ──────────────────────────────────── */}
         <section className="h-[100dvh] flex items-center justify-center px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
@@ -318,7 +314,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── 6. The Analyst ───────────────────────────────────── */}
+        {/* ── 5. The Analyst ───────────────────────────────────── */}
         <section className="h-[100dvh] flex items-center justify-center px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
@@ -348,7 +344,7 @@ export default function Home() {
 
       {/* ── Free-scroll zone ───────────────────────────────────── */}
       <div>
-        {/* ── 7. Note preview ──────────────────────────────────── */}
+        {/* ── 6. Note preview ──────────────────────────────────── */}
         <ScrollReveal>
           <section className="max-w-3xl mx-auto px-8 py-20">
             <SectionHeading
@@ -360,7 +356,7 @@ export default function Home() {
           </section>
         </ScrollReveal>
 
-        {/* ── 8. Market grid ───────────────────────────────────── */}
+        {/* ── 7. Market grid ───────────────────────────────────── */}
         <ScrollReveal>
           <section id="market" className="max-w-7xl mx-auto px-8 pb-20">
             <SectionHeading
@@ -372,7 +368,7 @@ export default function Home() {
           </section>
         </ScrollReveal>
 
-        {/* ── 9. Closing CTA ───────────────────────────────────── */}
+        {/* ── 8. Closing CTA ───────────────────────────────────── */}
         <ScrollReveal>
           <section className="max-w-7xl mx-auto px-8 pb-20">
             <div
