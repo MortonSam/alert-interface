@@ -187,7 +187,7 @@ export default function Home() {
 
       <StoryFlow>
         {/* ── 1. Hero ────────────────────────────────────────────── */}
-        <section className="h-[100dvh] flex flex-col bg-background">
+        <section className="min-h-[100svh] flex flex-col bg-background">
           <HeroReveal className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
             <p data-hero-line className="font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
               Equity research tool
@@ -232,7 +232,7 @@ export default function Home() {
         </section>
 
         {/* ── 2. Big three numbers ──────────────────────────────── */}
-        <section className="h-[100dvh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
             {[
               { value: 500, suffix: "+", label: "Companies covered" },
@@ -254,7 +254,7 @@ export default function Home() {
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}
-        <section className="h-[100dvh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
@@ -270,7 +270,7 @@ export default function Home() {
         </section>
 
         {/* ── 4. The Solution ──────────────────────────────────── */}
-        <section className="h-[100dvh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
@@ -315,7 +315,7 @@ export default function Home() {
         </section>
 
         {/* ── 5. The Analyst ───────────────────────────────────── */}
-        <section className="h-[100dvh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
