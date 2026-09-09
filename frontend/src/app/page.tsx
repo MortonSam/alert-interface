@@ -162,11 +162,7 @@ export default function Home() {
       <StoryFlow>
         {/* ── 1. Hero ────────────────────────────────────────────── */}
         <section className="min-h-[100svh] flex flex-col bg-background">
-          <HeroReveal className="flex-1 flex flex-col justify-center max-w-7xl w-full mx-auto px-8">
-            <p data-hero-line className="font-mono text-xs uppercase tracking-[.18em] text-muted-foreground mb-4">
-              Equity research tool
-            </p>
-
+          <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-8">
             <h1 className="hero-h1 font-display font-extrabold uppercase">
               <span data-hero-line className="block text-foreground">
                 Stock research
@@ -180,11 +176,11 @@ export default function Home() {
             </h1>
 
             <p data-hero-fade className="text-foreground/70 text-lg mt-6 max-w-[42em]">
-              One research workspace for the entire S&amp;P 500. Every number
-              explained, every claim checked before you see it.
+              One workspace for the retail investor, starting with the S&amp;P 500.
+              Every number explained, every claim checked before you see it.
             </p>
 
-            <div data-hero-fade className="flex flex-wrap gap-[13px] items-center mt-8">
+            <div data-hero-fade className="flex flex-wrap gap-[13px] justify-center mt-8">
               <a
                 href="#market"
                 className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
@@ -209,9 +205,9 @@ export default function Home() {
         <section className="min-h-[100svh] flex items-center justify-center px-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
             {[
-              { value: 500, suffix: "+", label: "Companies covered" },
-              { value: 31000, suffix: "+", label: "Earnings reactions studied" },
-              { value: 165000, suffix: "+", label: "Analyst actions tracked" },
+              { value: 10000, suffix: "+", label: "Earnings reports studied" },
+              { value: 165000, suffix: "+", label: "Analyst actions since 2011" },
+              { value: 100000, suffix: "+", label: "Option contracts priced daily" },
             ].map((stat) => (
               <div key={stat.label}>
                 <CountUp
@@ -236,9 +232,12 @@ export default function Home() {
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
               Trading apps hand you confetti. Terminals cost thirty grand a year.
             </h2>
-            <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
-              In between: forty million retail investors doing serious
-              research across six tabs of guesswork.
+            <p className="text-sm text-muted-foreground mt-6 max-w-2xl mx-auto">
+              Thirty million people started investing since 2020. Most of them
+              research the way there&#39;s always been to research: Yahoo for the
+              numbers, Reddit for opinions they can&#39;t trust, YouTube to learn
+              what a P/E is, their broker for options they don&#39;t understand, and
+              a chatbot that makes things up because nothing checks it.
             </p>
           </div>
         </section>
@@ -361,16 +360,16 @@ export default function Home() {
               The point
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              Teaches you what Wall Street knows, and proves every word.
+              Know what Wall Street knows. See the proof.
             </h2>
 
             <div className="mt-10">
-              <a
-                href="#market"
+              <Link
+                href="/discover"
                 className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity inline-block"
               >
-                Browse the market ↓
-              </a>
+                What&#39;s worth a look →
+              </Link>
             </div>
 
             <div className="flex justify-center gap-8 mt-6">
