@@ -144,7 +144,7 @@ export default function Home() {
           letter-spacing: -.03em;
         }
         .stat-number {
-          font-size: clamp(44px, 7vw, 112px);
+          font-size: clamp(40px, 5.5vw, 84px);
           line-height: 1;
           letter-spacing: -.02em;
         }
@@ -203,7 +203,7 @@ export default function Home() {
 
         {/* ── 2. Big three numbers ──────────────────────────────── */}
         <section className="min-h-[100svh] flex items-center justify-center px-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 max-w-7xl w-full mx-auto text-center">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-12 max-w-[1440px] w-full mx-auto text-center">
             {[
               { value: 10000, suffix: "+", label: "Earnings reports studied" },
               { value: 165000, suffix: "+", label: "Analyst actions since 2011" },
