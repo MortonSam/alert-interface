@@ -1031,6 +1031,7 @@ async def latest_pick(
 
     stmt = (
         select(AlertPick)
+        .where(AlertPick.source != "visitor")
         .order_by(AlertPick.generated_at.desc())
         .limit(1)
     )

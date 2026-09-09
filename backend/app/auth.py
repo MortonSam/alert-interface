@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from jwt import PyJWKClient
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -121,6 +121,40 @@ async def get_current_user(
         status_code=401,
         detail="Drafting is in private beta. Everything else on the site is open, and Ivy's own drafts are in the ledger.",
     )
+
+
+async def get_draft_caller(
+    request: Request,
+    authorization: str | None = Header(None),
+    x_admin_token: str | None = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """Resolve caller identity for draft endpoints. Returns user_id or "anon".
+
+    Same priority as get_current_user but never raises 401:
+    1. Bearer JWT → Clerk user_id
+    2. Admin token match → "admin-local"
+    3. No admin token configured (dev mode) → "admin-local"
+    4. Otherwise → "anon"
+    """
+    bearer = _extract_bearer(authorization)
+    if bearer and _get_jwks_client() is not None:
+        payload = verify_clerk_jwt(bearer)
+        user_id = payload["sub"]
+        email = payload.get("email") or payload.get("email_address")
+        stmt = pg_insert(User).values(id=user_id, email=email)
+        stmt = stmt.on_conflict_do_update(index_elements=["id"], set_={"email": email})
+        await db.execute(stmt)
+        await db.flush()
+        return user_id
+
+    if settings.admin_token and x_admin_token == settings.admin_token:
+        return "admin-local"
+
+    if not settings.admin_token:
+        return "admin-local"
+
+    return "anon"
 
 
 async def get_optional_user(

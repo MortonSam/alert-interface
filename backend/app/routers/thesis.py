@@ -5,12 +5,12 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean, median
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import check_ownership, get_current_user, get_optional_user
+from app.auth import check_ownership, get_current_user, get_draft_caller, get_optional_user
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_recommendation import AnalystRecommendation
@@ -43,6 +43,7 @@ from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.finnhub_client import FinnhubClient
 from app.models.system_metadata import SystemMetadata
+from app.services.draft_limiter import check_draft_limit, get_client_ip, record_draft
 from app.services.system_metadata_service import get_value
 from app.services.yfinance_client import YFinanceClient
 
@@ -943,17 +944,22 @@ Return ONLY this JSON object (no other text):
 @router.post("/draft", response_model=ThesisDraftRead)
 async def draft_thesis(
     payload: ThesisDraftRequest,
-    user_id: str = Depends(get_current_user),
+    request: Request,
+    user_id: str = Depends(get_draft_caller),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftRead:
     """AI-assisted thesis parameter drafting."""
+    client_ip = get_client_ip(request)
+    await check_draft_limit(db, user_id, client_ip)
     data = await _gather_draft_data(payload.symbol.upper(), db)
-    return await _run_draft_generation(
+    result = await _run_draft_generation(
         data,
         payload.direction.lower(),
         payload.aggressiveness.lower(),
         proposed_target=payload.proposed_target,
     )
+    await record_draft(db, user_id, client_ip, payload.symbol.upper())
+    return result
 
 
 # ── Alert-pick service function ───────────────────────────────────────────────
@@ -975,10 +981,16 @@ async def compute_alert_pick(
     """
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
-    # ── Duplicate refusal: one open pick per symbol ────────────────────────
+    # ── Duplicate refusal: one open pick per symbol per source class ────────
+    # Visitor picks are isolated: they don't block Ivy's picks and vice-versa.
+    if source == "visitor":
+        dup_filter = AlertPick.source == "visitor"
+    else:
+        dup_filter = AlertPick.source != "visitor"
     existing = (await db.execute(
-        select(AlertPick).where(AlertPick.symbol == sym, AlertPick.status == "open")
-        .order_by(AlertPick.generated_at.desc()).limit(1)
+        select(AlertPick).where(
+            AlertPick.symbol == sym, AlertPick.status == "open", dup_filter,
+        ).order_by(AlertPick.generated_at.desc()).limit(1)
     )).scalar_one_or_none()
     if existing:
         return {
@@ -1233,13 +1245,18 @@ async def compute_alert_pick(
 @router.post("/alert-pick", response_model=AlertPickRead)
 async def alert_pick(
     payload: AlertPickRequest,
-    user_id: str = Depends(get_current_user),
+    request: Request,
+    user_id: str = Depends(get_draft_caller),
     db: AsyncSession = Depends(get_db),
 ) -> AlertPickRead:
     """Evidence-based auto-direction: compute signal leans, pick direction when
     signals agree (or decline when they conflict), draft at moderate aggressiveness,
     and persist every pick to alert_picks."""
-    result = await compute_alert_pick(payload.symbol.upper(), db, source="manual")
+    client_ip = get_client_ip(request)
+    await check_draft_limit(db, user_id, client_ip)
+    pick_source = "visitor" if user_id == "anon" else "manual"
+    result = await compute_alert_pick(payload.symbol.upper(), db, source=pick_source)
+    await record_draft(db, user_id, client_ip, payload.symbol.upper())
     return AlertPickRead(
         symbol=payload.symbol.upper(),
         picked_direction=result.get("picked_direction", result["outcome"]),
@@ -1380,9 +1397,14 @@ async def ivy_activity(
 async def list_alert_picks(
     db: AsyncSession = Depends(get_db),
 ) -> list[AlertPickLedgerItem]:
-    """List all alert picks newest-first, with live price marks and scoring."""
+    """List Ivy's alert picks newest-first, with live price marks and scoring.
+
+    Visitor picks (source='visitor') are excluded — they never appear in Ivy's ledger.
+    """
     rows = (await db.execute(
-        select(AlertPick).order_by(AlertPick.generated_at.desc())
+        select(AlertPick)
+        .where(AlertPick.source != "visitor")
+        .order_by(AlertPick.generated_at.desc())
     )).scalars().all()
 
     if not rows:
@@ -1573,7 +1595,8 @@ async def list_alert_picks(
 @router.post("/draft-alternative", response_model=ThesisDraftAlternativeRead)
 async def draft_alternative(
     payload: ThesisDraftAlternativeRequest,
-    user_id: str = Depends(get_current_user),
+    request: Request,
+    user_id: str = Depends(get_draft_caller),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftAlternativeRead:
     """Generate a budget-constrained alternative to the best trade draft.
@@ -1585,6 +1608,8 @@ async def draft_alternative(
       - AI returns invalid strikes or cost above budget (validation failure)
     The existing /theses/draft endpoint and its output are never touched.
     """
+    client_ip = get_client_ip(request)
+    await check_draft_limit(db, user_id, client_ip)
     sym = payload.symbol.upper()
     direction = payload.direction.lower()
     aggressiveness = payload.aggressiveness.lower()
@@ -1663,6 +1688,7 @@ async def draft_alternative(
 
     # ── NVR / no-options early exit ───────────────────────────────────────────
     if not primary_rows:
+        await record_draft(db, user_id, client_ip, sym)
         return ThesisDraftAlternativeRead(
             fits=False,
             strategy=None, suggested_strike=None, suggested_spread_strike=None,
@@ -1829,6 +1855,7 @@ Return ONLY this JSON object (no other text):
             reasoning         = None
             note = "Alternative validation failed: " + "; ".join(failures) + ". No reliable alternative could be confirmed within budget."
 
+    await record_draft(db, user_id, client_ip, sym)
     return ThesisDraftAlternativeRead(
         fits=fits,
         strategy=strategy,

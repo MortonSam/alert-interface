@@ -1166,7 +1166,7 @@ function BuildTradePageContent() {
               )}
 
               {draftError && (
-                <p className="text-sm text-red-500">{draftError}</p>
+                <p className="text-sm text-muted-foreground">{draftError}</p>
               )}
             </section>
           )}
