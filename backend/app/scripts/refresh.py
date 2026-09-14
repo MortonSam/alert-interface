@@ -68,6 +68,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
+    ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 
@@ -82,6 +83,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Analyst actions": 1200,
     "Build earnings features": 1200,
     "Auto-pick": 600,
+    "Shadow eval": 600,
 }
 
 

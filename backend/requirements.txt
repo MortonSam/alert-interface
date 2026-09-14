@@ -35,3 +35,6 @@ PyJWT[crypto]>=2.8.0
 
 # AI
 anthropic>=0.40.0
+
+# ML (shadow model)
+scikit-learn==1.5.2

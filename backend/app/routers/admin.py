@@ -9,11 +9,12 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
 from app.database import get_db
+from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
 from app.services.system_metadata_service import set_value
 
@@ -128,3 +129,54 @@ async def delete_expired_chains(db: AsyncSession = Depends(get_db)) -> dict:
         )
         await db.commit()
     return {"deleted": len(expired_keys)}
+
+
+@router.get("/shadow-summary", dependencies=[Depends(require_admin)])
+async def shadow_summary(db: AsyncSession = Depends(get_db)) -> dict:
+    """Shadow model summary: settled stats, hit rates, last 20 rows."""
+    # Settled rows (have actual_5d)
+    settled_rows = (await db.execute(
+        select(ShadowPick).where(ShadowPick.actual_5d.is_not(None))
+    )).scalars().all()
+
+    settled_count = len(settled_rows)
+
+    # Shadow hit rate: among settled rows where would_pick=True
+    shadow_picks = [r for r in settled_rows if r.would_pick]
+    shadow_hits = sum(1 for r in shadow_picks if float(r.actual_5d) > 0)
+    shadow_hit_rate = shadow_hits / len(shadow_picks) if shadow_picks else None
+
+    # v2 hit rate: among settled rows where v2_decision='picked'
+    v2_picks = [r for r in settled_rows if r.v2_decision == "picked"]
+    v2_hits = sum(1 for r in v2_picks if float(r.actual_5d) > 0)
+    v2_hit_rate = v2_hits / len(v2_picks) if v2_picks else None
+
+    # Last 20 rows
+    recent = (await db.execute(
+        select(ShadowPick)
+        .order_by(ShadowPick.decided_at.desc())
+        .limit(20)
+    )).scalars().all()
+
+    recent_out = []
+    for r in recent:
+        recent_out.append({
+            "symbol": r.symbol,
+            "event_date": r.event_date.isoformat(),
+            "probability": float(r.probability),
+            "would_pick": r.would_pick,
+            "v2_decision": r.v2_decision,
+            "actual_5d": float(r.actual_5d) if r.actual_5d is not None else None,
+            "top_factors": r.top_factors,
+        })
+
+    return {
+        "settled": settled_count,
+        "shadow_picks": len(shadow_picks),
+        "shadow_hits": shadow_hits,
+        "shadow_hit_rate": shadow_hit_rate,
+        "v2_picks": len(v2_picks),
+        "v2_hits": v2_hits,
+        "v2_hit_rate": v2_hit_rate,
+        "recent": recent_out,
+    }

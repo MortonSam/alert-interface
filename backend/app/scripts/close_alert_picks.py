@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import math
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick
 from app.models.iv_history import IVHistory
+from app.models.shadow_pick import ShadowPick
 from app.services.pnl_math import compute_option_pnl_at_expiry
 from app.services.yfinance_client import YFinanceClient
 
@@ -159,9 +160,56 @@ async def _backfill() -> int:
         return 0
 
 
+async def _settle_shadow_picks() -> int:
+    """Fill actual_5d on shadow_picks once 5 trading days have passed."""
+    today = date.today()
+    # 5 trading days ~ 7 calendar days; settle anything with event_date <= today - 8
+    cutoff = today - timedelta(days=8)
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(ShadowPick).where(
+                ShadowPick.actual_5d.is_(None),
+                ShadowPick.event_date <= cutoff,
+            )
+        )).scalars().all()
+
+        if not rows:
+            print("[shadow-settle] No shadow picks to settle.")
+            return 0
+
+        settled = 0
+        for sp in rows:
+            # Get the 5-day move: compare close on event_date to close 5 trading days later
+            close_before = YFinanceClient.get_close_on_date(sp.symbol, sp.event_date.isoformat())
+            # Approximate 5 trading days after event: +7 calendar days
+            settle_date = sp.event_date + timedelta(days=7)
+            close_after = YFinanceClient.get_close_on_date(sp.symbol, settle_date.isoformat())
+
+            if not _is_valid_price(close_before) or not _is_valid_price(close_after):
+                continue
+
+            cb = float(close_before)
+            ca = float(close_after)
+            pct_5d = round((ca - cb) / cb * 100, 4)
+            sp.actual_5d = pct_5d
+            sp.settled_at = datetime.now(timezone.utc)
+            settled += 1
+            hit = "HIT" if pct_5d > 0 else "MISS"
+            print(f"[shadow-settle] {sp.symbol} event={sp.event_date}: "
+                  f"actual_5d={pct_5d:+.2f}% prob={sp.probability} "
+                  f"would_pick={sp.would_pick} {hit}")
+
+        await session.commit()
+        print(f"[shadow-settle] Done. Settled {settled}/{len(rows)}.")
+    return 0
+
+
 def main() -> int:
     if "--backfill" in sys.argv:
         return asyncio.run(_backfill())
+    # Always run shadow settlement alongside normal close
+    asyncio.run(_settle_shadow_picks())
     return asyncio.run(_close_picks())
 
 
