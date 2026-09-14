@@ -1157,6 +1157,10 @@ function BuildTradePageContent() {
                   >
                     {step === "generating" ? "Ivy is drafting…" : "Generate trade →"}
                   </button>
+                  <p className="text-[11px] text-muted-foreground/60 mt-3">
+                    Educational draft, not a recommendation. Options can lose 100% of premium.{" "}
+                    <a href="/disclosures" className="underline">See Disclosures</a>.
+                  </p>
                 </div>
               )}
 

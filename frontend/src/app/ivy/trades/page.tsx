@@ -318,7 +318,7 @@ export default function IvyTradesPage() {
   return (
     <div className="py-8 space-y-8">
       {/* Summary header */}
-      {!loading && !error && picks.length > 0 && (
+      {!loading && !error && picks.length > 0 && (<>
         <div className="flex flex-wrap gap-6 text-sm">
           <div>
             <span className="text-muted-foreground">Total picks</span>{" "}
@@ -390,7 +390,11 @@ export default function IvyTradesPage() {
             </div>
           )}
         </div>
-      )}
+        <p className="text-[11px] text-muted-foreground/60 -mt-4">
+          Hypothetical, unexecuted picks. No commissions, fees, or slippage.{" "}
+          <a href="/disclosures" className="underline">See Disclosures</a>.
+        </p>
+      </>)}
 
       {/* Nightly evaluation summary */}
       {!loading && !error && activity?.run_date && (

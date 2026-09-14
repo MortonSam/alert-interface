@@ -302,6 +302,9 @@ export default function Home() {
             </p>
 
             <IvyStatLine className="font-mono text-xs text-muted-foreground mt-6" />
+            <p className="text-[11px] text-muted-foreground/50 mt-2">
+              Hypothetical picks, published for everyone, never executed.
+            </p>
 
             <div className="mt-8">
               <Link
