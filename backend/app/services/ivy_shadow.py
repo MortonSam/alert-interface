@@ -4,6 +4,14 @@ Simple on purpose (10k rows). Trained nightly, predicts probability that
 actual_5d > 0, with human-readable factor explanations.
 
 Never writes to alert_picks. Shadow-only.
+
+Backtest note (2026-09-14): the full 8-feature model underperforms baseline
+in Fold 3 (2025-26). A single-feature model using only momentum_20d recovers
+the momentum edge (57.4% at 0.58 threshold, +5.2pp lift, 148 picks -- close
+to v2's 58.6%). The additional features (beat_rate, weighted_1d, prior_n, etc.)
+add noise that actively hurts prediction on recent data. The model is kept as-is
+for shadow tracking; if it is ever promoted, restrict to momentum_20d or a
+validated subset.
 """
 
 from __future__ import annotations
@@ -88,14 +96,14 @@ class ShadowModel:
 
 # ── Feature extraction ───────────────────────────────────────────────────────
 
-def _extract_row(row, medians: dict[str, float]) -> list[float]:
+def _extract_row(row, medians: dict[str, float], feature_cols: list[str] = FEATURE_COLS) -> list[float]:
     """Extract feature vector from an EarningsFeature-like object.
 
     Null-safe: imputes with training median. Appends an is_null flag
     per column (doubles the feature count).
     """
     values = []
-    for col in FEATURE_COLS:
+    for col in feature_cols:
         raw = getattr(row, col, None)
         if raw is not None:
             val = float(raw)
@@ -107,10 +115,10 @@ def _extract_row(row, medians: dict[str, float]) -> list[float]:
     return values
 
 
-def _extract_row_from_dict(d: dict, medians: dict[str, float]) -> list[float]:
+def _extract_row_from_dict(d: dict, medians: dict[str, float], feature_cols: list[str] = FEATURE_COLS) -> list[float]:
     """Extract feature vector from a plain dict."""
     values = []
-    for col in FEATURE_COLS:
+    for col in feature_cols:
         raw = d.get(col)
         if raw is not None:
             values.append(float(raw))
@@ -121,11 +129,11 @@ def _extract_row_from_dict(d: dict, medians: dict[str, float]) -> list[float]:
     return values
 
 
-def _compute_medians(rows: list) -> dict[str, float]:
+def _compute_medians(rows: list, feature_cols: list[str] = FEATURE_COLS) -> dict[str, float]:
     """Compute training medians for imputation."""
-    col_vals: dict[str, list[float]] = {col: [] for col in FEATURE_COLS}
+    col_vals: dict[str, list[float]] = {col: [] for col in feature_cols}
     for r in rows:
-        for col in FEATURE_COLS:
+        for col in feature_cols:
             val = getattr(r, col, None)
             if val is not None:
                 col_vals[col].append(float(val))
@@ -137,25 +145,28 @@ def _compute_medians(rows: list) -> dict[str, float]:
 
 # ── Train ────────────────────────────────────────────────────────────────────
 
-def train(rows: list, cutoff_date: date) -> TrainResult:
+def train(rows: list, cutoff_date: date, feature_cols: list[str] | None = None) -> TrainResult:
     """Fit shadow model on events strictly before cutoff_date.
 
     Args:
         rows: list of EarningsFeature-like objects with FEATURE_COLS + actual_5d
         cutoff_date: train on events before this date
+        feature_cols: override feature set (defaults to FEATURE_COLS)
 
     Returns:
         TrainResult with fitted model, feature importance, and counts.
     """
+    cols = feature_cols or FEATURE_COLS
+
     train_rows = [r for r in rows if r.event_date < cutoff_date and
                   getattr(r, "actual_5d", None) is not None]
 
     if len(train_rows) < 50:
         raise ValueError(f"Too few training rows ({len(train_rows)}), need >= 50")
 
-    medians = _compute_medians(train_rows)
+    medians = _compute_medians(train_rows, cols)
 
-    X = np.array([_extract_row(r, medians) for r in train_rows])
+    X = np.array([_extract_row(r, medians, cols) for r in train_rows])
     y = np.array([1 if float(r.actual_5d) > 0 else 0 for r in train_rows])
 
     # Logistic regression with L2, C tuned via internal CV
@@ -179,12 +190,12 @@ def train(rows: list, cutoff_date: date) -> TrainResult:
 
     # Map back to original column names (skip is_null flags for importance)
     importance = []
-    for i, col in enumerate(FEATURE_COLS):
+    for i, col in enumerate(cols):
         idx = i * 2  # each col has (value, is_null_flag)
         importance.append((col, round(float(coefs[idx]), 4)))
     importance.sort(key=lambda x: abs(x[1]), reverse=True)
 
-    model = ShadowModel(pipeline=pipe, medians=medians)
+    model = ShadowModel(pipeline=pipe, medians=medians, feature_cols=list(cols))
     return TrainResult(
         model=model,
         feature_importance=importance,
@@ -204,10 +215,11 @@ def predict(model: ShadowModel, features) -> ShadowPrediction:
     Returns:
         ShadowPrediction with probability and factor phrases.
     """
+    cols = model.feature_cols
     if isinstance(features, dict):
-        x = np.array([_extract_row_from_dict(features, model.medians)])
+        x = np.array([_extract_row_from_dict(features, model.medians, cols)])
     else:
-        x = np.array([_extract_row(features, model.medians)])
+        x = np.array([_extract_row(features, model.medians, cols)])
 
     prob = float(model.pipeline.predict_proba(x)[0, 1])
 
@@ -228,16 +240,17 @@ def _explain_top_factors(model: ShadowModel, features) -> list[str]:
     refitted plain LR approximation (stored in the pipeline's scaler
     means/stds for direction only).
     """
+    cols = model.feature_cols
     if isinstance(features, dict):
-        raw_vals = {col: features.get(col) for col in FEATURE_COLS}
+        raw_vals = {col: features.get(col) for col in cols}
     else:
-        raw_vals = {col: getattr(features, col, None) for col in FEATURE_COLS}
+        raw_vals = {col: getattr(features, col, None) for col in cols}
 
     # Build the full feature vector to get scaler-transformed values
     if isinstance(features, dict):
-        x = np.array([_extract_row_from_dict(features, model.medians)])
+        x = np.array([_extract_row_from_dict(features, model.medians, cols)])
     else:
-        x = np.array([_extract_row(features, model.medians)])
+        x = np.array([_extract_row(features, model.medians, cols)])
 
     scaler = model.pipeline.named_steps["scaler"]
     x_scaled = scaler.transform(x)[0]
@@ -252,7 +265,7 @@ def _explain_top_factors(model: ShadowModel, features) -> list[str]:
 
     # Contribution = scaled_value * coefficient (for the real feature, not null flag)
     contributions = []
-    for i, col in enumerate(FEATURE_COLS):
+    for i, col in enumerate(cols):
         idx = i * 2
         contrib = x_scaled[idx] * avg_coefs[idx]
         raw = raw_vals[col]

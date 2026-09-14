@@ -159,6 +159,56 @@ async def main() -> None:
             print(f"  {thr:>10.2f} {both_n:>6} {mo_n:>10} {vo_n:>8} "
                   f"{both_rate:>8.1f}% {mo_rate:>9.1f}% {vo_rate:>10.1f}%")
 
+    # ── Single-feature diagnostic: momentum_20d only ──────────────────────────
+    print(f"\n\n{'=' * 100}")
+    print("  DIAGNOSTIC: single-feature model (momentum_20d only)")
+    print(f"{'=' * 100}")
+
+    DIAG_THRESHOLDS = [0.55, 0.58]
+
+    for fold_name, train_end, test_start, test_end in FOLDS:
+        test_rows = [r for r in all_rows
+                     if test_start <= r.event_date <= test_end
+                     and r.actual_5d is not None]
+
+        if len([r for r in all_rows if r.event_date <= train_end]) < 50:
+            continue
+
+        tr = train(all_rows, cutoff_date=test_start, feature_cols=["momentum_20d"])
+        model = tr.model
+
+        probs = []
+        actuals = []
+        for r in test_rows:
+            pred = predict(model, r)
+            probs.append(pred.probability_up_5d)
+            actuals.append(1 if float(r.actual_5d) > 0 else 0)
+
+        probs_arr = np.array(probs)
+        actuals_arr = np.array(actuals)
+
+        if len(set(actuals)) > 1:
+            auc = roc_auc_score(actuals_arr, probs_arr)
+        else:
+            auc = float("nan")
+
+        baseline = _baseline_up_rate(test_rows)
+        v2_mask = np.array([_is_v2_pick(r) for r in test_rows])
+        v2_n = v2_mask.sum()
+        v2_hits = actuals_arr[v2_mask].sum() if v2_n > 0 else 0
+        v2_rate = v2_hits / v2_n if v2_n > 0 else 0
+
+        print(f"\n  {fold_name}   test: {len(test_rows)} rows   AUC: {auc:.4f}   baseline: {baseline*100:.1f}%   v2: {v2_rate*100:.1f}%")
+        print(f"  {'Threshold':>10} {'Picks':>6} {'Hits':>5} {'HitRate':>8} {'Lift':>7}")
+        print(f"  {'':->10} {'':->6} {'':->5} {'':->8} {'':->7}")
+        for thr in DIAG_THRESHOLDS:
+            mask = probs_arr >= thr
+            n = mask.sum()
+            hits = actuals_arr[mask].sum() if n > 0 else 0
+            rate = hits / n if n > 0 else 0
+            lift = rate - baseline
+            print(f"  {thr:>10.2f} {n:>6} {int(hits):>5} {rate*100:>7.1f}% {lift*100:>+6.1f}pp")
+
     print(f"\n{'=' * 100}")
     print("Backtest complete.")
 
