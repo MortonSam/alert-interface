@@ -16,3 +16,7 @@
 Nothing wrong reaches the screen silently. Every displayed number must come from a stored, dated source (never a live fetch that can fail or return padded values); a missing value is shown as absent, never estimated; every metric has a sanity band enforced in validate_data; and any change to how a number is computed bumps the relevant version so history stays comparable.
 
 Accepted exceptions: yfinance daily price history (chart candles, sparklines, reaction settlement). Everything else displayed must come from stored, dated sources.
+
+## Ledger Launch
+
+The ledger is gated by `LEDGER_PUBLIC` env var (default `false`). While false, anonymous visitors see empty ledger/activity; admin-authenticated requests see the full post-LEDGER_START record. To launch: set `LEDGER_PUBLIC=true` on Railway and redeploy. No code change needed.

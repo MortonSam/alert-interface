@@ -725,6 +725,7 @@ export interface IvyActivity {
   error: number;
   sample_refusal: IvySampleRefusal | null;
   rows: IvyWorksheetRow[];
+  ledger_public: boolean;
 }
 
 export interface ThesisDraftAlternativeRead {

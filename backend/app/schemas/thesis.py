@@ -239,6 +239,7 @@ class IvyActivityRead(BaseModel):
     error: int = 0
     sample_refusal: IvySampleRefusal | None = None
     rows: list[IvyWorksheetRow] = []
+    ledger_public: bool = False
 
 
 class ThesisDraftAlternativeRead(BaseModel):

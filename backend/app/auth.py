@@ -27,6 +27,13 @@ async def require_admin(token: str | None = Depends(_get_admin_token)) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
+def is_admin(token: str | None = Depends(_get_admin_token)) -> bool:
+    """Return True if the request carries a valid admin token. Never raises."""
+    if not settings.admin_token:
+        return True  # dev mode
+    return token == settings.admin_token
+
+
 # ── Clerk JWKS (lazy singleton) ───────────────────────────────────────────────
 
 _jwks_client: PyJWKClient | None = None

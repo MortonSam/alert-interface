@@ -127,6 +127,11 @@ export default function IvyDeskPage() {
 
   return (
     <div className="py-6 pb-14">
+      {!activity.ledger_public && (
+        <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground mb-2">
+          Private preview
+        </p>
+      )}
       <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
         Overnight worksheet · {fmtDate(activity.run_date)}
       </p>

@@ -10,7 +10,7 @@ from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import check_ownership, get_current_user, get_draft_caller, get_optional_user
+from app.auth import check_ownership, get_current_user, get_draft_caller, get_optional_user, is_admin
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_recommendation import AnalystRecommendation
@@ -39,7 +39,7 @@ from app.schemas.thesis import (
     ThesisResolve,
     ThesisStockMarkRead,
 )
-from app.constants import LEDGER_START
+from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.finnhub_client import FinnhubClient
@@ -1565,8 +1565,11 @@ from app.services.pnl_math import (
 @router.get("/ivy-activity", response_model=IvyActivityRead)
 async def ivy_activity(
     db: AsyncSession = Depends(get_db),
+    admin: bool = Depends(is_admin),
 ) -> IvyActivityRead:
     """Latest nightly evaluation batch summary."""
+    if not LEDGER_PUBLIC and not admin:
+        return IvyActivityRead(ledger_public=LEDGER_PUBLIC)
     # Find the max evaluated_at date for nightly runs (on or after ledger start)
     max_date_row = (await db.execute(
         select(func.max(func.cast(AlertPickEvaluation.evaluated_at, SADate)))
@@ -1577,7 +1580,7 @@ async def ivy_activity(
     )).scalar()
 
     if max_date_row is None:
-        return IvyActivityRead()
+        return IvyActivityRead(ledger_public=LEDGER_PUBLIC)
 
     # Fetch all rows from that batch date
     rows = (await db.execute(
@@ -1587,7 +1590,7 @@ async def ivy_activity(
     )).scalars().all()
 
     if not rows:
-        return IvyActivityRead()
+        return IvyActivityRead(ledger_public=LEDGER_PUBLIC)
 
     outcomes = [r.outcome for r in rows]
 
@@ -1664,6 +1667,7 @@ async def ivy_activity(
         error=outcomes.count("error"),
         sample_refusal=sample_refusal,
         rows=worksheet_rows,
+        ledger_public=LEDGER_PUBLIC,
     )
 
 
@@ -1671,11 +1675,14 @@ async def ivy_activity(
 async def list_alert_picks(
     season: int = Query(default=2, ge=1),
     db: AsyncSession = Depends(get_db),
+    admin: bool = Depends(is_admin),
 ) -> list[AlertPickLedgerItem]:
     """List Ivy's alert picks newest-first, with live price marks and scoring.
 
-    Visitor picks (source='visitor') are excluded — they never appear in Ivy's ledger.
+    Visitor picks (source='visitor') are excluded -- they never appear in Ivy's ledger.
     """
+    if not LEDGER_PUBLIC and not admin:
+        return []
     rows = (await db.execute(
         select(AlertPick)
         .where(

@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import LEDGER_START
+from app.auth import is_admin
+from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.database import get_db
 from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.enums import EventType
@@ -1026,8 +1027,11 @@ async def unusually_active(
 @router.get("/latest-pick", response_model=LatestPickResponse)
 async def latest_pick(
     db: AsyncSession = Depends(get_db),
+    admin: bool = Depends(is_admin),
 ) -> LatestPickResponse:
-    """Most recent alert pick for the teaser strip. No auth required."""
+    """Most recent alert pick for the teaser strip."""
+    if not LEDGER_PUBLIC and not admin:
+        return LatestPickResponse(pick=None)
     from app.models.alert_pick import AlertPick
 
     stmt = (

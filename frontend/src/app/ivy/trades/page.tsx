@@ -342,6 +342,13 @@ export default function IvyTradesPage() {
 
   return (
     <div className="py-8 space-y-8">
+      {/* Private preview label */}
+      {!loading && !error && picks.length > 0 && activity && !activity.ledger_public && (
+        <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
+          Private preview
+        </p>
+      )}
+
       {/* Summary header */}
       {!loading && !error && picks.length > 0 && (<>
         <div className="flex flex-wrap gap-6 text-sm">
