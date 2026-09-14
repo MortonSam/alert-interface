@@ -43,6 +43,11 @@ class EarningsFeature(Base):
     analyst_net_90d: Mapped[int | None] = mapped_column(Integer)
     atm_iv: Mapped[float | None] = mapped_column(Numeric(8, 6))
 
+    # ── Stage 2 features (5d horizon) ────────────────────────────────────────
+    prior_avg_abs_5d: Mapped[float | None] = mapped_column(Numeric(8, 4))
+    prior_n: Mapped[int | None] = mapped_column(Integer)
+    prior_up_5d_rate: Mapped[float | None] = mapped_column(Numeric(8, 4))
+
     # ── V1 lean replay ──────────────────────────────────────────────────────
     lean_earnings: Mapped[str | None] = mapped_column(String(10))   # bullish/bearish/neutral
     lean_analyst: Mapped[str | None] = mapped_column(String(10))

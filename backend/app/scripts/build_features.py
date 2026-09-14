@@ -345,6 +345,12 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                 prior_abs_1ds = [abs(float(e.pct_change_1d)) for e in prior if e.pct_change_1d is not None]
                 prior_avg_abs_1d = round(sum(prior_abs_1ds) / len(prior_abs_1ds), 4) if prior_abs_1ds else None
 
+                # Stage 2: prior 5d features (strict no-leakage)
+                prior_5ds = [float(e.pct_change_5d) for e in prior if e.pct_change_5d is not None]
+                prior_n_5d = len(prior_5ds)
+                prior_avg_abs_5d = round(sum(abs(v) for v in prior_5ds) / prior_n_5d, 4) if prior_5ds else None
+                prior_up_5d_rate = round(sum(1 for v in prior_5ds if v > 0) / prior_n_5d, 4) if prior_5ds else None
+
                 # Analyst net 90d: upgrades minus downgrades in 90 days before event
                 ticker_actions = actions_by_ticker.get(tid, [])
                 cutoff_90 = reaction.event_date - timedelta(days=90)
@@ -407,6 +413,9 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                     "prior_avg_abs_1d": prior_avg_abs_1d,
                     "analyst_net_90d": analyst_net_90d,
                     "atm_iv": atm_iv_val,
+                    "prior_avg_abs_5d": prior_avg_abs_5d,
+                    "prior_n": prior_n_5d,
+                    "prior_up_5d_rate": prior_up_5d_rate,
                     "lean_earnings": lean_e,
                     "lean_analyst": lean_a,
                     "lean_momentum": lean_m,
@@ -422,7 +431,8 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                 for col in ["beat_rate", "median_1d_beat", "median_1d_miss", "weighted_1d",
                             "buy_share_latest", "buy_share_60d_ago", "analyst_delta",
                             "momentum_20d", "prior_avg_abs_1d", "analyst_net_90d",
-                            "atm_iv", "actual_1d"]:
+                            "atm_iv", "prior_avg_abs_5d", "prior_n", "prior_up_5d_rate",
+                            "actual_1d"]:
                     if row[col] is None:
                         null_counts[col] += 1
 
