@@ -159,16 +159,18 @@ export default function MeetIvyPage() {
             She reads the tape overnight, makes a call only when the evidence agrees, and keeps score in public.
           </p>
           <p className="text-base text-muted-foreground leading-relaxed mt-4 max-w-prose">
-            Ivy reads earnings history, live options data, and analyst moves for
-            every ticker she tracks. She synthesizes the numbers into a direction,
-            picks a strategy, and shows her reasoning on every call.
+            She reads twenty quarters of earnings history and the live options
+            chain, applies one rule the backtest supports, and refuses when the
+            options are too expensive for the edge.
           </p>
-          <Link
-            href="/ivy/desk"
-            className="inline-block text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
-          >
-            See last night&apos;s worksheet →
-          </Link>
+          {activity?.run_date && (
+            <Link
+              href="/ivy/desk"
+              className="inline-block text-sm text-muted-foreground hover:text-foreground transition-colors mt-4"
+            >
+              See last night&apos;s worksheet →
+            </Link>
+          )}
         </section>
 
         {/* 02 How she decides */}
@@ -178,13 +180,20 @@ export default function MeetIvyPage() {
         <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="How she decides" />
           <h2 className="font-display text-2xl font-bold text-foreground">
-            Grounded in data she can verify
+            One rule, tested on years she never saw
           </h2>
           <p className="text-base text-muted-foreground leading-relaxed mt-3 max-w-prose">
-            She checks whether a company beats or misses earnings more often, and
-            how big those moves tend to be. She tracks the shift in street
-            recommendation trends over the past three months. She measures
-            20-day price momentum to confirm direction before committing.
+            Ivy looks for one setup: a company reporting earnings in the next
+            few days whose stock has fallen more than 10% over the prior 20
+            trading days, with at least eight quarters of earnings history. In
+            that setup, tested across 2023, 2024, and 2025 on data the rule was
+            not fit to, the stock was higher five days later about 60% of the
+            time. Before she buys anything she checks what the options market is
+            pricing: if the implied move is more than 1.2 times the stock&apos;s
+            usual earnings move, she refuses. Every pick carries its receipt: how
+            many comparable setups, the base rate, the expected move, and what
+            the options were pricing. She makes no bearish calls; the data has
+            not earned them yet.
           </p>
         </section>
 

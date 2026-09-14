@@ -116,7 +116,7 @@ export default function IvyDeskPage() {
           Overnight worksheet
         </p>
         <p className="text-lg text-muted-foreground mt-3">
-          Ivy has not run yet tonight.
+          Ivy&apos;s first overnight worksheet appears after her next evaluation.
         </p>
       </div>
     );

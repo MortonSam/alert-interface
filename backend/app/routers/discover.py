@@ -6,9 +6,10 @@ from datetime import date, timedelta
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants import LEDGER_START
 from app.database import get_db
 from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.enums import EventType
@@ -1031,7 +1032,11 @@ async def latest_pick(
 
     stmt = (
         select(AlertPick)
-        .where(AlertPick.source != "visitor", AlertPick.season == 2)
+        .where(
+            AlertPick.source != "visitor",
+            AlertPick.season == 2,
+            func.cast(AlertPick.generated_at, SADate) >= LEDGER_START,
+        )
         .order_by(AlertPick.generated_at.desc())
         .limit(1)
     )

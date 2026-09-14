@@ -39,6 +39,7 @@ from app.schemas.thesis import (
     ThesisResolve,
     ThesisStockMarkRead,
 )
+from app.constants import LEDGER_START
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.finnhub_client import FinnhubClient
@@ -1566,10 +1567,13 @@ async def ivy_activity(
     db: AsyncSession = Depends(get_db),
 ) -> IvyActivityRead:
     """Latest nightly evaluation batch summary."""
-    # Find the max evaluated_at date for nightly runs
+    # Find the max evaluated_at date for nightly runs (on or after ledger start)
     max_date_row = (await db.execute(
         select(func.max(func.cast(AlertPickEvaluation.evaluated_at, SADate)))
-        .where(AlertPickEvaluation.source == "nightly")
+        .where(
+            AlertPickEvaluation.source == "nightly",
+            func.cast(AlertPickEvaluation.evaluated_at, SADate) >= LEDGER_START,
+        )
     )).scalar()
 
     if max_date_row is None:
@@ -1674,7 +1678,11 @@ async def list_alert_picks(
     """
     rows = (await db.execute(
         select(AlertPick)
-        .where(AlertPick.source != "visitor", AlertPick.season == season)
+        .where(
+            AlertPick.source != "visitor",
+            AlertPick.season == season,
+            func.cast(AlertPick.generated_at, SADate) >= LEDGER_START,
+        )
         .order_by(AlertPick.generated_at.desc())
     )).scalars().all()
 
