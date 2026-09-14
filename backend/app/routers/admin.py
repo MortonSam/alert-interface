@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import math
+from collections import defaultdict
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
 from app.database import get_db
+from app.models.system_metadata import SystemMetadata
 from app.services.system_metadata_service import set_value
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -86,3 +90,41 @@ async def ingest_options_chains(
     if errors:
         result["errors"] = errors
     return result
+
+
+@router.get("/chain-expirations", dependencies=[Depends(require_admin)])
+async def chain_expirations(db: AsyncSession = Depends(get_db)) -> dict:
+    """Return all stored chain expirations grouped by symbol.
+
+    Response: ``{"AAPL": ["2026-10-17", "2026-11-21"], ...}``
+    Used by chain_courier to discover which expirations are already priced.
+    """
+    rows = (await db.execute(
+        select(SystemMetadata.key).where(SystemMetadata.key.like("chain:%"))
+    )).scalars().all()
+    out: dict[str, list[str]] = defaultdict(list)
+    for key in rows:
+        parts = key.split(":")
+        if len(parts) == 3:
+            out[parts[1]].append(parts[2])
+    return {sym: sorted(exps) for sym, exps in out.items()}
+
+
+@router.delete("/expired-chains", dependencies=[Depends(require_admin)])
+async def delete_expired_chains(db: AsyncSession = Depends(get_db)) -> dict:
+    """Delete chain keys whose expiration is in the past."""
+    rows = (await db.execute(
+        select(SystemMetadata.key).where(SystemMetadata.key.like("chain:%"))
+    )).scalars().all()
+    today_str = date.today().isoformat()
+    expired_keys = []
+    for key in rows:
+        parts = key.split(":")
+        if len(parts) == 3 and parts[2] < today_str:
+            expired_keys.append(key)
+    if expired_keys:
+        await db.execute(
+            delete(SystemMetadata).where(SystemMetadata.key.in_(expired_keys))
+        )
+        await db.commit()
+    return {"deleted": len(expired_keys)}

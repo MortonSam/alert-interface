@@ -168,13 +168,32 @@ def _get_next_earnings(symbol: str, base_url: str) -> date | None:
     return None
 
 
-def _pick_expirations(symbol: str, base_url: str) -> tuple[list[str], str | None]:
+def _fetch_stored_expirations(base_url: str, token: str) -> dict[str, list[str]]:
+    """Fetch all stored chain expirations from the backend, grouped by symbol."""
+    try:
+        r = httpx.get(
+            f"{base_url}/api/v1/admin/chain-expirations",
+            headers=_headers(token),
+            timeout=15.0,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
+        print(f"  (stored expirations fetch failed: {exc} — using rule-based only)")
+        return {}
+
+
+def _pick_expirations(
+    symbol: str,
+    base_url: str,
+    stored_exps: list[str] | None = None,
+) -> tuple[list[str], str | None]:
     """Return (distinct expirations to fetch, next_earnings_str | None).
 
-    Two targets:
+    Three sources, deduplicated:
       (a) base_exp  — nearest chain expiry ≥ today + 14 days
       (b) earn_exp  — nearest chain expiry ≥ next earnings + 14 days (if earnings known)
-    Returns deduplicated list (1 or 2 items) and the earnings date string.
+      (c) stored    — every non-expired expiration already in the store for this ticker
     """
     try:
         exps = list(yf.Ticker(symbol).options)
@@ -184,6 +203,9 @@ def _pick_expirations(symbol: str, base_url: str) -> tuple[list[str], str | None
         return [], None
 
     today = date.today()
+    today_str = today.isoformat()
+    exp_set = set(exps)  # valid expirations yfinance knows about
+
     base_cutoff = (today + timedelta(days=MIN_DAYS_OUT)).isoformat()
     base_exp = next((e for e in exps if e >= base_cutoff), exps[-1])
 
@@ -199,7 +221,14 @@ def _pick_expirations(symbol: str, base_url: str) -> tuple[list[str], str | None
     targets = [base_exp]
     if earn_exp and earn_exp != base_exp:
         targets.append(earn_exp)
-    return targets, earnings_str
+
+    # Add stored non-expired expirations that yfinance still lists
+    if stored_exps:
+        for se in stored_exps:
+            if se >= today_str and se in exp_set and se not in targets:
+                targets.append(se)
+
+    return sorted(set(targets)), earnings_str
 
 
 # ── Per-ticker processing ────────────────────────────────────────────────────
@@ -209,10 +238,11 @@ def process_ticker(
     base: str,
     token: str,
     symbol: str,
+    stored_exps: list[str] | None = None,
 ) -> dict:
     """Fetch chain(s) locally and push to the hosted ingest endpoint.
 
-    Computes two target expirations (base ≥ today+14d, earnings ≥ earnings+14d)
+    Computes target expirations (rule-based + already-stored non-expired)
     and pushes a chain for each distinct one.
     """
     t0 = time.monotonic()
@@ -223,16 +253,18 @@ def process_ticker(
         "chain_last_trade": "—",
         "base_exp": "—",
         "earn_exp": "—",
+        "n_exps": 0,
         "elapsed": 0.0,
     }
 
     try:
-        target_exps, earnings_str = _pick_expirations(symbol, base)
+        target_exps, earnings_str = _pick_expirations(symbol, base, stored_exps)
         if not target_exps:
             result["action"] = "no-expirations"
             result["elapsed"] = time.monotonic() - t0
             return result
 
+        result["n_exps"] = len(target_exps)
         result["base_exp"] = target_exps[0]
         if len(target_exps) > 1:
             result["earn_exp"] = target_exps[1]
@@ -298,7 +330,7 @@ def process_ticker(
         )
         r.raise_for_status()
         n = len(chains_to_push)
-        result["action"] = f"pushed({n})" if n > 1 else "pushed"
+        result["action"] = f"pushed({n}exp)" if n > 1 else "pushed"
 
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:120] if exc.response else ""
@@ -338,6 +370,12 @@ def main() -> int:
 
     print(f"Chain courier → {base}")
     print(f"Tickers: {len(tickers)} ({', '.join(tickers[:10])}{'…' if len(tickers) > 10 else ''})")
+
+    # Fetch stored expirations so we can refresh every priced chain
+    stored_map = _fetch_stored_expirations(base, token)
+    if stored_map:
+        total_stored = sum(len(v) for v in stored_map.values())
+        print(f"Stored expirations: {total_stored} across {len(stored_map)} symbols")
     print(f"{'─' * 70}")
 
     results: list[dict] = []
@@ -346,16 +384,17 @@ def main() -> int:
     for i, symbol in enumerate(tickers):
         print(f"[{i + 1}/{len(tickers)}] {symbol} ...", end=" ", flush=True)
 
-        result = process_ticker(client, base, token, symbol)
+        sym_stored = stored_map.get(symbol)
+        result = process_ticker(client, base, token, symbol, stored_exps=sym_stored)
 
         # One retry on transport / server errors
         non_retry = ("pushed", "empty-chain", "no-expirations", "after-hours, skipped")
         if result["action"] not in non_retry and not result["action"].startswith("pushed("):
             print(f"({result['action']}) retrying ...", end=" ", flush=True)
             time.sleep(RETRY_DELAY)
-            result = process_ticker(client, base, token, symbol)
+            result = process_ticker(client, base, token, symbol, stored_exps=sym_stored)
 
-        print(f"{result['action']} ({result['strikes']} strikes, {result['elapsed']:.1f}s)")
+        print(f"{result['action']} ({result['strikes']} strikes, {result['n_exps']} exps, {result['elapsed']:.1f}s)")
         results.append(result)
 
         if i < len(tickers) - 1:
@@ -363,24 +402,39 @@ def main() -> int:
 
     client.close()
 
+    # Delete expired chain keys
+    expired_deleted = 0
+    try:
+        r = httpx.delete(
+            f"{base}/api/v1/admin/expired-chains",
+            headers=_headers(token),
+            timeout=15.0,
+        )
+        r.raise_for_status()
+        expired_deleted = r.json().get("deleted", 0)
+    except Exception as exc:
+        print(f"  (expired chain cleanup failed: {exc})")
+    if expired_deleted:
+        print(f"Expired chains deleted: {expired_deleted}")
+
     # Summary table
     pushed = sum(1 for r in results if r["action"].startswith("pushed"))
     failed = sum(1 for r in results if not r["action"].startswith("pushed"))
 
-    print(f"\n{'═' * 90}")
-    print(f"  {'Ticker':<8} {'Action':<20} {'Strikes':>8} {'Base Exp':<12} {'Earn Exp':<12} {'Last Trade':<12} {'Time':>6}")
-    print(f"  {'─' * 8} {'─' * 20} {'─' * 8} {'─' * 12} {'─' * 12} {'─' * 12} {'─' * 6}")
+    print(f"\n{'═' * 96}")
+    print(f"  {'Ticker':<8} {'Action':<20} {'Strikes':>8} {'Exps':>5} {'Base Exp':<12} {'Earn Exp':<12} {'Last Trade':<12} {'Time':>6}")
+    print(f"  {'─' * 8} {'─' * 20} {'─' * 8} {'─' * 5} {'─' * 12} {'─' * 12} {'─' * 12} {'─' * 6}")
     for r in results:
         print(
-            f"  {r['symbol']:<8} {r['action']:<20} {r['strikes']:>8} "
+            f"  {r['symbol']:<8} {r['action']:<20} {r['strikes']:>8} {r['n_exps']:>5} "
             f"{r.get('base_exp', '—'):<12} {r.get('earn_exp', '—'):<12} "
             f"{r['chain_last_trade']:<12} {r['elapsed']:>5.1f}s"
         )
 
     elapsed_total = time.monotonic() - t_start
-    print(f"{'═' * 90}")
-    print(f"  Pushed: {pushed}  |  Failed: {failed}  |  Runtime: {elapsed_total:.0f}s")
-    print(f"{'═' * 90}")
+    print(f"{'═' * 96}")
+    print(f"  Pushed: {pushed}  |  Failed: {failed}  |  Expired deleted: {expired_deleted}  |  Runtime: {elapsed_total:.0f}s")
+    print(f"{'═' * 96}")
 
     return 1 if failed > 0 else 0
 
