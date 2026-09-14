@@ -962,6 +962,117 @@ async def draft_thesis(
     return result
 
 
+# ── v2 deterministic structure builder ─────────────────────────────────────────
+
+async def _build_deterministic_structure(
+    sym: str,
+    db: AsyncSession,
+    v2_result,
+    earnings_date: date,
+) -> dict | None:
+    """Build a bull call debit spread from the stored chain.
+
+    Long strike  = nearest listed strike at or just below spot.
+    Short strike = nearest listed strike at or above spot × (1 + expected_move).
+    Expiration   = nearest stored expiration on/after earnings + 7 days.
+    Cost         = long mid − short mid.
+    Max loss     = cost × 100.
+    Max gain     = (width − cost) × 100.
+
+    Returns dict with strategy, long_strike, short_strike, expiration,
+    cost, max_loss, max_gain, spot.  Returns None if chain unavailable
+    or spread invalid.
+    """
+    from app.services.ivy_v2 import _mid_or_last
+
+    # Pick expiration: nearest stored on/after earnings + 7 days
+    min_exp_date = (earnings_date + timedelta(days=7)).isoformat()
+    exp = await chain_store.pick_expiration(db, sym, min_exp_date)
+    if exp is None:
+        return None
+
+    chain_result = await chain_store.get_chain(db, sym, exp)
+    if chain_result is None:
+        return None
+
+    chain_data, chain_last_trade = chain_result
+    calls_raw = chain_data.get("calls", [])
+    spot = chain_data.get("underlying_price")
+    if not spot or spot <= 0 or not calls_raw:
+        return None
+
+    expected_move_pct = v2_result.expected_move
+    if expected_move_pct is None or expected_move_pct <= 0:
+        return None
+
+    target_short = spot * (1 + expected_move_pct / 100.0)
+
+    # Sort calls by strike
+    strikes = sorted({c["strike"] for c in calls_raw})
+    if len(strikes) < 2:
+        return None
+
+    # Long strike: nearest listed at or just below spot
+    long_candidates = [s for s in strikes if s <= spot]
+    if not long_candidates:
+        # No strike at or below spot — use lowest available
+        long_strike = strikes[0]
+    else:
+        long_strike = max(long_candidates)
+
+    # Short strike: nearest listed at or above target_short
+    short_candidates = [s for s in strikes if s >= target_short]
+    if not short_candidates:
+        # No strike at or above target — use highest available
+        short_strike = strikes[-1]
+    else:
+        short_strike = min(short_candidates)
+
+    # Refuse if spread width < 1 strike increment
+    if short_strike <= long_strike:
+        return None
+    # Find minimum strike increment in the chain
+    increments = [strikes[i+1] - strikes[i] for i in range(len(strikes) - 1)]
+    min_increment = min(increments) if increments else 1
+    if (short_strike - long_strike) < min_increment:
+        return None
+
+    # Get mids for both legs
+    long_row = next((c for c in calls_raw if c["strike"] == long_strike), None)
+    short_row = next((c for c in calls_raw if c["strike"] == short_strike), None)
+    if long_row is None or short_row is None:
+        return None
+
+    long_mid = _mid_or_last(long_row.get("bid"), long_row.get("ask"), long_row.get("lastPrice"))
+    short_mid = _mid_or_last(short_row.get("bid"), short_row.get("ask"), short_row.get("lastPrice"))
+
+    if long_mid is None or short_mid is None:
+        return None
+
+    cost = round(long_mid - short_mid, 4)
+    if cost <= 0:
+        return None
+    width = short_strike - long_strike
+    max_loss = round(cost * 100, 2)
+    max_gain = round((width - cost) * 100, 2)
+
+    strategy = (
+        f"Bull call spread ${long_strike}/{short_strike} "
+        f"exp {exp} (${cost:.2f} debit)"
+    )
+
+    return {
+        "strategy": strategy,
+        "long_strike": long_strike,
+        "short_strike": short_strike,
+        "expiration": exp,
+        "cost": cost,
+        "max_loss": max_loss,
+        "max_gain": max_gain,
+        "spot": spot,
+    }
+
+
 # ── v2 alert-pick engine ──────────────────────────────────────────────────────
 
 async def _compute_alert_pick_v2(
@@ -971,31 +1082,29 @@ async def _compute_alert_pick_v2(
     dry_run: bool,
     generated_at: str,
 ) -> dict:
-    """v2 engine path: deterministic gates + AI narration."""
+    """v2 engine path: deterministic gates + AI narration.
+
+    Uses compute_live_features to build features as of TODAY for the
+    UPCOMING earnings event (not the backtest row).
+    """
     from app.models.earnings_feature import EarningsFeature
-    from app.services.ivy_v2 import decide as v2_decide
+    from app.services.ivy_v2 import compute_live_features, decide as v2_decide
 
-    # Load features for this symbol (most recent event)
-    feat_result = await db.execute(
-        select(EarningsFeature)
-        .where(EarningsFeature.symbol == sym)
-        .order_by(EarningsFeature.event_date.desc())
-        .limit(1)
-    )
-    features = feat_result.scalar_one_or_none()
+    # Compute live features for the upcoming earnings event
+    live_features = await compute_live_features(sym, db)
 
-    if features is None:
+    if live_features is None:
         return {
             "outcome": "no_features",
             "leans": None,
             "pick_id": None,
-            "note": f"no earnings features for {sym}",
+            "note": f"no upcoming earnings or ticker not found for {sym}",
             "generated_at": generated_at,
             "existing_pick": False,
             "draft": None,
         }
 
-    # Load all features for walk-forward base rate
+    # Load all historical features for walk-forward base rate
     all_result = await db.execute(
         select(EarningsFeature).order_by(EarningsFeature.event_date)
     )
@@ -1004,10 +1113,10 @@ async def _compute_alert_pick_v2(
     # AI client for narration (template fallback on failure)
     ai_client = AnthropicClient()
     result = await v2_decide(
-        features=features,
+        features=live_features,
         db=db,
         symbol=sym,
-        event_date=features.event_date,
+        event_date=live_features.event_date,
         all_features=all_features,
         ai_client=ai_client,
     )
@@ -1029,63 +1138,55 @@ async def _compute_alert_pick_v2(
             "draft": None,
         }
 
-    # ── Persist v2 pick ───────────────────────────────────────────────────
+    # ── Persist v2 pick (deterministic strikes from chain) ──────────────
     pick_id = None
     if not dry_run:
-        # Gather draft data for strikes/structure (reuses existing v1 pipeline)
         try:
-            data = await _gather_draft_data(sym, db, source=source)
-            draft_read = await _run_draft_generation(
-                data, "bullish", "moderate",
-                extra_prompt_section=(
-                    f"\nALERT-PICK MODE (v2 engine):\n"
-                    f"The v2 engine selected bullish based on momentum reversal.\n"
-                    f"Receipt: {result.receipt}\n"
-                    f"In your reasoning, narrate the receipt facts. Do NOT introduce new claims.\n"
-                ),
+            structure = await _build_deterministic_structure(
+                sym, db, result, live_features.event_date,
             )
+            if structure is None:
+                raise ValueError("chain unavailable or spread invalid")
 
-            primary_rows = draft_read.fact_block.get("primary_strikes", [])
-            secondary_rows = draft_read.fact_block.get("secondary_strikes", [])
-            suggested_strike = draft_read.suggested_strike
-            spread_strike = draft_read.suggested_spread_strike
-
-            leg1_mid = next((s["mid"] for s in primary_rows if s["strike"] == suggested_strike), None) if suggested_strike else None
-            leg2_mid = next((s["mid"] for s in primary_rows if s["strike"] == spread_strike), None) if spread_strike else None
-            if leg2_mid is None and spread_strike:
-                leg2_mid = next((s["mid"] for s in secondary_rows if s["strike"] == spread_strike), None)
-
-            if spread_strike and leg1_mid and leg2_mid:
-                cost_to_enter = round(leg1_mid - leg2_mid, 4)
-                spread_width = abs(suggested_strike - spread_strike)
-                max_loss = round(cost_to_enter * 100, 2)
-                max_gain = round((spread_width - cost_to_enter) * 100, 2)
-            elif leg1_mid:
-                cost_to_enter = leg1_mid
-                max_loss = round(leg1_mid * 100, 2)
-                max_gain = None
-            else:
-                cost_to_enter = None
-                max_loss = None
-                max_gain = None
+            # AI narration of the receipt + structure (template fallback)
+            reasoning = result.receipt.get("reasoning", "")
+            try:
+                ai_client = AnthropicClient()
+                narration_prompt = (
+                    "Restate the facts below in 2-3 plain English sentences. "
+                    "Add nothing beyond these facts.\n\n"
+                    f"Receipt: {json.dumps(result.receipt)}\n"
+                    f"Structure: bull call debit spread, "
+                    f"long ${structure['long_strike']} / short ${structure['short_strike']} "
+                    f"calls, expiration {structure['expiration']}, "
+                    f"cost ${structure['cost']:.2f}, "
+                    f"max loss ${structure['max_loss']:.0f}, "
+                    f"max gain ${structure['max_gain']:.0f}."
+                )
+                ai_result = await ai_client.generate_options_read(narration_prompt)
+                ai_text = ai_result.get("content", "").strip()
+                if ai_text:
+                    reasoning = ai_text
+            except Exception:
+                pass  # template reasoning from decide() is already set
 
             pick = AlertPick(
                 symbol=sym,
                 picked_direction="bullish",
                 algo_version="v2.0",
-                model_used=draft_read.model_used,
+                model_used=None,
                 leans=[],
-                strategy=draft_read.strategy,
-                suggested_strike=suggested_strike,
-                suggested_spread_strike=spread_strike,
-                suggested_target=draft_read.suggested_target,
-                expiration=data["chosen_exp"],
-                cost_to_enter=cost_to_enter,
-                max_loss=max_loss,
-                max_gain=max_gain,
-                vol_regime=data.get("vol_regime"),
-                reasoning=draft_read.reasoning,
-                entry_price=data["draft_spot"],
+                strategy=structure["strategy"],
+                suggested_strike=structure["long_strike"],
+                suggested_spread_strike=structure["short_strike"],
+                suggested_target=None,
+                expiration=structure["expiration"],
+                cost_to_enter=structure["cost"],
+                max_loss=structure["max_loss"],
+                max_gain=structure["max_gain"],
+                vol_regime=None,
+                reasoning=reasoning,
+                entry_price=structure["spot"],
                 source=source,
                 season=2,
                 receipt=result.receipt,
@@ -1095,23 +1196,22 @@ async def _compute_alert_pick_v2(
             await db.refresh(pick)
             pick_id = pick.id
         except Exception as exc:
-            print(f"[alert-pick-v2] {sym}: draft/persist failed: {exc}", flush=True)
-            # Persist a minimal pick without draft strikes
-            pick = AlertPick(
-                symbol=sym,
-                picked_direction="bullish",
-                algo_version="v2.0",
-                leans=[],
-                reasoning=result.receipt.get("reasoning", ""),
-                entry_price=0,  # will be updated on next mark
-                source=source,
-                season=2,
-                receipt=result.receipt,
-            )
-            db.add(pick)
-            await db.commit()
-            await db.refresh(pick)
-            pick_id = pick.id
+            import traceback
+            traceback.print_exc()
+            print(f"[alert-pick-v2] {sym}: structure failed: {exc}", flush=True)
+            # Do NOT persist a broken pick — return structure_failed
+            return {
+                "outcome": "structure_failed",
+                "leans": [],
+                "pick_id": None,
+                "picked_direction": "bullish",
+                "note": str(exc),
+                "generated_at": generated_at,
+                "existing_pick": False,
+                "draft": None,
+                "season": 2,
+                "receipt": result.receipt,
+            }
 
     return {
         "outcome": "picked",

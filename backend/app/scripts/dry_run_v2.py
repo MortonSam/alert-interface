@@ -5,22 +5,33 @@ Validates the engine works end-to-end with DB data.
 
 CLI
 ---
-    python -m app.scripts.dry_run_v2
+    python -m app.scripts.dry_run_v2           # backtest mode (historical features)
+    python -m app.scripts.dry_run_v2 --live    # live mode (5 tickers reporting this week)
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import ScriptSessionLocal
 from app.models.earnings_feature import EarningsFeature
-from app.services.ivy_v2 import decide, MIN_PRIOR_N, MOMENTUM_CUTOFF
+from app.models.enums import EventType
+from app.models.event import Event
+from app.models.ticker import Ticker
+from app.services.ivy_v2 import (
+    compute_live_features,
+    decide,
+    MIN_PRIOR_N,
+    MOMENTUM_CUTOFF,
+)
 
 
-async def main() -> None:
+async def _run_backtest() -> None:
+    """Original backtest dry run on historical features."""
     async with ScriptSessionLocal() as session:
         # Load all features (needed for walk-forward base rate)
         all_result = await session.execute(
@@ -115,5 +126,110 @@ async def main() -> None:
         print("Dry run complete.")
 
 
+async def _run_live() -> None:
+    """Live dry run: compute_live_features on 5 tickers reporting this week."""
+    from app.services import chain_store
+
+    today = date.today()
+    horizon = today + timedelta(days=7)
+
+    async with ScriptSessionLocal() as session:
+        # Find tickers with earnings in the next 7 calendar days
+        candidates = (await session.execute(
+            select(Ticker.symbol, func.min(Event.event_date).label("next_earnings"))
+            .join(Event, Event.ticker_id == Ticker.id)
+            .where(
+                Ticker.is_active.is_(True),
+                Event.event_type == EventType.EARNINGS,
+                Event.event_date > today,
+                Event.event_date <= horizon,
+            )
+            .group_by(Ticker.symbol)
+            .order_by(func.min(Event.event_date))
+            .limit(5)
+        )).all()
+
+        if not candidates:
+            print("[live] No tickers with earnings in the next 7 days.")
+            return
+
+        print(f"[live] {len(candidates)} tickers reporting this week\n")
+        print("=" * 90)
+
+        # Load all historical features for walk-forward base rate
+        all_result = await session.execute(
+            select(EarningsFeature).order_by(EarningsFeature.event_date)
+        )
+        all_features = all_result.scalars().all()
+
+        for row in candidates:
+            sym = row.symbol
+            next_earnings = row.next_earnings
+
+            print(f"\n{'─' * 90}")
+            print(f"  {sym}  next_earnings={next_earnings}")
+
+            live = await compute_live_features(sym, session)
+            if live is None:
+                print(f"  [SKIP] compute_live_features returned None")
+                continue
+
+            print(f"  momentum_20d={f'{live.momentum_20d:.1f}%' if live.momentum_20d is not None else 'n/a'}  "
+                  f"prior_n={live.prior_n}  "
+                  f"prior_avg_abs_5d={f'{live.prior_avg_abs_5d:.2f}%' if live.prior_avg_abs_5d is not None else 'n/a'}  "
+                  f"beat_rate={f'{live.beat_rate:.0f}%' if live.beat_rate is not None else 'n/a'}")
+
+            result = await decide(
+                features=live,
+                db=session,
+                symbol=sym,
+                event_date=live.event_date,
+                all_features=all_features,
+                ai_client=None,
+            )
+
+            print(f"  pick={result.pick}  direction={result.direction}  "
+                  f"gate_passed={result.gate_passed}")
+            if result.skip_reason:
+                print(f"  skip_reason: {result.skip_reason}")
+            print(f"  expected_move={result.expected_move}  implied_move={result.implied_move}")
+            print(f"  Receipt:")
+            for k, v in result.receipt.items():
+                print(f"    {k}: {v}")
+
+            # Chain result (will typically refuse locally — that's expected)
+            exp = await chain_store.pick_expiration(
+                session, sym, live.event_date.isoformat()
+            )
+            if exp:
+                chain_result = await chain_store.get_chain(session, sym, exp)
+                if chain_result:
+                    chain_data, clt = chain_result
+                    spot = chain_data.get("underlying_price")
+                    n_calls = len(chain_data.get("calls", []))
+                    n_puts = len(chain_data.get("puts", []))
+                    print(f"  Chain: exp={exp} spot={spot} calls={n_calls} puts={n_puts} "
+                          f"last_trade={clt} fresh={chain_store.is_fresh(clt)}")
+                else:
+                    print(f"  Chain: exp={exp} — no chain data")
+            else:
+                print(f"  Chain: no expiration found on/after {live.event_date}")
+
+        print(f"\n{'=' * 90}")
+        print("[live] Done.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Dry-run the v2 engine")
+    parser.add_argument("--live", action="store_true",
+                        help="Use compute_live_features on 5 tickers reporting this week")
+    args = parser.parse_args()
+
+    if args.live:
+        asyncio.run(_run_live())
+    else:
+        asyncio.run(_run_backtest())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

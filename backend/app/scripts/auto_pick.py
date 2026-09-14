@@ -51,6 +51,8 @@ async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
 
 async def _run(dry_run: bool = False) -> int:
     today = date.today()
+    # 1-5 trading days ≈ next 7 calendar days; exclude today (event day
+    # itself is too late for momentum to be measured into the report).
     horizon = today + timedelta(days=7)
 
     async with AsyncSessionLocal() as session:
@@ -63,14 +65,16 @@ async def _run(dry_run: bool = False) -> int:
             print(f"[auto-pick] {open_count} open picks (cap={MAX_OPEN_TOTAL}). Skipping.")
             return 0
 
-        # ── Find candidates: active tickers with earnings in next 7 days ─────
+        # ── Find candidates: active tickers with earnings in 1-5 trading days
+        # Exclude today: by the time nightly runs, today's earnings is past.
+        # Upper bound: 7 calendar days covers 5 trading days in all cases.
         candidates = (await session.execute(
             select(Ticker.symbol, func.min(Event.event_date).label("next_earnings"))
             .join(Event, Event.ticker_id == Ticker.id)
             .where(
                 Ticker.is_active.is_(True),
                 Event.event_type == EventType.EARNINGS,
-                Event.event_date >= today,
+                Event.event_date > today,
                 Event.event_date <= horizon,
             )
             .group_by(Ticker.symbol)
@@ -78,7 +82,7 @@ async def _run(dry_run: bool = False) -> int:
         )).all()
 
         if not candidates:
-            print("[auto-pick] No candidates with earnings in next 7 days.")
+            print("[auto-pick] No candidates with earnings in next 1-5 trading days.")
             return 0
 
         print(f"[auto-pick] {len(candidates)} candidates, {open_count} open picks, dry_run={dry_run}")

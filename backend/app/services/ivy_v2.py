@@ -11,12 +11,17 @@ All constants tuned via walk-forward grid search (threshold_search.py).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
+import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.earnings_feature import EarningsFeature
+from app.models.enums import EventType
+from app.models.event import Event
+from app.models.historical_reaction import HistoricalReaction
+from app.models.ticker import Ticker
 from app.services import chain_store
 
 # ── Tuned constants ──────────────────────────────────────────────────────────
@@ -58,6 +63,114 @@ def compute_expected_move(features: EarningsFeature) -> float | None:
         return None
     val = features.prior_avg_abs_5d
     return float(val) if val is not None else None
+
+
+@dataclass
+class LiveFeatures:
+    """Live features for an upcoming earnings event (not a DB row)."""
+    symbol: str
+    event_date: date
+    momentum_20d: float | None
+    prior_n: int
+    prior_avg_abs_5d: float | None
+    prior_up_5d_rate: float | None
+    beat_rate: float | None
+
+
+async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures | None:
+    """Build live features for the UPCOMING earnings event.
+
+    Same fields as an EarningsFeature row, but computed as of today using
+    current market data (yfinance) and all historical reactions to date.
+    Returns None if there is no upcoming earnings event.
+    """
+    today = date.today()
+
+    # ── Upcoming earnings date from events table ──────────────────────────
+    ticker_row = (await db.execute(
+        select(Ticker).where(Ticker.symbol == symbol)
+    )).scalar_one_or_none()
+    if ticker_row is None:
+        return None
+
+    event_row = (await db.execute(
+        select(Event.event_date)
+        .where(
+            Event.ticker_id == ticker_row.id,
+            Event.event_type == EventType.EARNINGS,
+            Event.event_date >= today,
+        )
+        .order_by(Event.event_date)
+        .limit(1)
+    )).scalar_one_or_none()
+    if event_row is None:
+        return None
+    upcoming_date: date = event_row
+
+    # ── Prior reactions: all historical earnings reactions to date ─────────
+    reactions = (await db.execute(
+        select(HistoricalReaction)
+        .where(
+            HistoricalReaction.ticker_id == ticker_row.id,
+            HistoricalReaction.event_type == "earnings",
+            HistoricalReaction.event_date < today,
+        )
+        .order_by(HistoricalReaction.event_date)
+    )).scalars().all()
+
+    prior_5ds = [float(r.pct_change_5d) for r in reactions if r.pct_change_5d is not None]
+    prior_n = len(prior_5ds)
+    prior_avg_abs_5d = round(sum(abs(v) for v in prior_5ds) / prior_n, 4) if prior_5ds else None
+    prior_up_5d_rate = round(sum(1 for v in prior_5ds if v > 0) / prior_n, 4) if prior_5ds else None
+
+    # Beat rate from all prior events
+    beat_rate = None
+    if reactions:
+        beats = sum(1 for r in reactions if r.outcome and r.outcome.value == "beat")
+        beat_rate = round(beats / len(reactions) * 100, 4)
+
+    # ── Momentum 20d from yfinance (one call) ────────────────────────────
+    momentum_20d = None
+    try:
+        t = yf.Ticker(symbol)
+        hist = t.history(period="2mo", timeout=30)
+        if hist is not None and len(hist) >= 2:
+            dates = hist.index.date
+            before_mask = dates < today
+            if any(before_mask):
+                before_prices = hist.loc[before_mask]
+                if len(before_prices) >= 2:
+                    day_before_close = float(before_prices["Close"].iloc[-1])
+                    if len(before_prices) >= 21:
+                        ref_close = float(before_prices["Close"].iloc[-21])
+                    else:
+                        ref_close = float(before_prices["Close"].iloc[0])
+                    if ref_close > 0:
+                        momentum_20d = round(
+                            (day_before_close - ref_close) / ref_close * 100, 4
+                        )
+    except Exception:
+        # Fall back: try loading from price history already in DB
+        # (historical_reactions has close_before for each event, but
+        # that's not a continuous series — momentum stays None)
+        pass
+
+    return LiveFeatures(
+        symbol=symbol,
+        event_date=upcoming_date,
+        momentum_20d=momentum_20d,
+        prior_n=prior_n,
+        prior_avg_abs_5d=prior_avg_abs_5d,
+        prior_up_5d_rate=prior_up_5d_rate,
+        beat_rate=beat_rate,
+    )
+
+
+def compute_expected_move_live(features: LiveFeatures) -> float | None:
+    """Return prior_avg_abs_5d if enough history, else None (live variant)."""
+    if features.prior_n < MIN_PRIOR_N:
+        return None
+    return features.prior_avg_abs_5d
 
 
 async def compute_implied_move(
@@ -106,7 +219,7 @@ async def compute_implied_move(
 
 
 def _compute_walk_forward_base_rate(
-    features: EarningsFeature,
+    features: EarningsFeature | LiveFeatures,
     all_features: list[EarningsFeature],
 ) -> tuple[float | None, int]:
     """Compute walk-forward base rate for the receipt.
@@ -114,6 +227,9 @@ def _compute_walk_forward_base_rate(
     Among prior events (before this event's date) that also qualify
     under the v2 rule (momentum_20d <= MOMENTUM_CUTOFF*100, prior_n >= MIN_PRIOR_N),
     what share were up at 5d?
+
+    For LiveFeatures the event_date is the upcoming earnings date; all
+    earnings_features rows are before today, so no leakage.
 
     Returns (up_rate, n).  Never leaks: only uses events strictly before event_date.
     """
@@ -137,7 +253,7 @@ def _compute_walk_forward_base_rate(
 
 
 async def decide(
-    features: EarningsFeature,
+    features: EarningsFeature | LiveFeatures,
     db: AsyncSession,
     symbol: str,
     event_date: date,
@@ -146,6 +262,9 @@ async def decide(
 ) -> V2Result:
     """Run the v2 decision engine.
 
+    Accepts either an EarningsFeature (backtest/historical) or a
+    LiveFeatures (upcoming earnings, computed by compute_live_features).
+
     Gate order:
       1. Volatility gate — refuse if no fresh chain or IV premium too high
       2. History gate — refuse if prior_n < MIN_PRIOR_N
@@ -153,10 +272,17 @@ async def decide(
     Direction: always "bullish" when qualifying.
     """
 
-    expected = compute_expected_move(features)
-    momentum_20d = float(features.momentum_20d) if features.momentum_20d is not None else None
-    prior_n = int(features.prior_n) if features.prior_n is not None else None
-    beat_rate = float(features.beat_rate) if features.beat_rate is not None else None
+    is_live = isinstance(features, LiveFeatures)
+    if is_live:
+        expected = compute_expected_move_live(features)
+        momentum_20d = features.momentum_20d
+        prior_n = features.prior_n
+        beat_rate = features.beat_rate
+    else:
+        expected = compute_expected_move(features)
+        momentum_20d = float(features.momentum_20d) if features.momentum_20d is not None else None
+        prior_n = int(features.prior_n) if features.prior_n is not None else None
+        beat_rate = float(features.beat_rate) if features.beat_rate is not None else None
 
     # Receipt base rate (walk-forward, never leaks)
     if all_features is not None:
@@ -252,7 +378,7 @@ async def decide(
 
 
 def _template_reasoning(
-    features: EarningsFeature,
+    features: EarningsFeature | LiveFeatures,
     expected: float | None,
     implied: float | None,
     base_rate: float | None,
@@ -290,7 +416,7 @@ def _template_reasoning(
 
 async def _ai_narrate(
     ai_client,
-    features: EarningsFeature,
+    features: EarningsFeature | LiveFeatures,
     expected: float | None,
     implied: float | None,
     base_rate: float | None,

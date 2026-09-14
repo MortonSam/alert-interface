@@ -16,10 +16,12 @@ import pytest
 
 from app.services.ivy_v2 import (
     IV_PREMIUM_CAP,
+    LiveFeatures,
     MIN_PRIOR_N,
     MOMENTUM_CUTOFF,
     V2Result,
     compute_expected_move,
+    compute_expected_move_live,
     decide,
 )
 
@@ -238,3 +240,51 @@ class TestGatePipeline:
         feat = _make_feature(momentum_20d=Decimal("-25.0"))
         result = _decide_with_mocked_chain(feat)
         assert result.direction == "bullish"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LiveFeatures tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _make_live(**overrides) -> LiveFeatures:
+    defaults = dict(
+        symbol="TEST",
+        event_date=date(2026, 9, 20),
+        momentum_20d=-15.0,
+        prior_n=12,
+        prior_avg_abs_5d=5.0,
+        prior_up_5d_rate=0.58,
+        beat_rate=65.0,
+    )
+    defaults.update(overrides)
+    return LiveFeatures(**defaults)
+
+
+class TestLiveFeatures:
+
+    def test_decide_accepts_live_features(self):
+        """decide() works with LiveFeatures (not just EarningsFeature)."""
+        live = _make_live()
+        result = _decide_with_mocked_chain(live, implied_move=4.0, has_fresh_chain=True)
+        assert result.pick is True
+        assert result.direction == "bullish"
+
+    def test_live_momentum_above_cutoff_skips(self):
+        live = _make_live(momentum_20d=-5.0)
+        result = _decide_with_mocked_chain(live, implied_move=4.0, has_fresh_chain=True)
+        assert result.pick is False
+        assert "momentum" in result.skip_reason
+
+    def test_live_insufficient_prior_n_skips(self):
+        live = _make_live(prior_n=3)
+        result = _decide_with_mocked_chain(live, implied_move=4.0, has_fresh_chain=True)
+        assert result.pick is False
+        assert "insufficient history" in result.skip_reason
+
+    def test_compute_expected_move_live(self):
+        live = _make_live(prior_n=10, prior_avg_abs_5d=4.5)
+        assert compute_expected_move_live(live) == 4.5
+
+    def test_compute_expected_move_live_insufficient(self):
+        live = _make_live(prior_n=5, prior_avg_abs_5d=4.5)
+        assert compute_expected_move_live(live) is None
