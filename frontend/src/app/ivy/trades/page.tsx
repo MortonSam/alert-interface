@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
 
@@ -239,7 +239,7 @@ function PickCard({
       </div>
 
       {/* v2 Receipt */}
-      {pick.season === 2 && pick.receipt && (
+      {pick.receipt && (
         <div className="rounded bg-muted/50 px-3 py-2 text-xs space-y-1">
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
             {pick.receipt.n_comparable != null && (
@@ -290,23 +290,18 @@ function PickCard({
 }
 
 export default function IvyTradesPage() {
-  const [season, setSeason] = useState<number>(2);
   const [picks, setPicks] = useState<AlertPickLedgerItem[]>([]);
   const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const loadSeason = useCallback((s: number) => {
-    setLoading(true);
-    setError(null);
-    setPicks([]);
-    setExpandedId(null);
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const [data, act] = await Promise.all([
-          api.theses.alertPicks(s),
+          api.theses.alertPicks(2),
           api.theses.ivyActivity(),
         ]);
         if (!cancelled) {
@@ -321,11 +316,6 @@ export default function IvyTradesPage() {
     })();
     return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    const cleanup = loadSeason(season);
-    return cleanup;
-  }, [season, loadSeason]);
 
   const openPicks = picks.filter((p) => p.status === "open");
   const closedPicks = picks.filter((p) => p.status === "closed");
@@ -352,41 +342,6 @@ export default function IvyTradesPage() {
 
   return (
     <div className="py-8 space-y-8">
-      {/* Season tabs */}
-      <div className="flex gap-1 border-b">
-        <button
-          type="button"
-          onClick={() => setSeason(2)}
-          className={cn(
-            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-            season === 2
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-        >
-          Season 2
-        </button>
-        <button
-          type="button"
-          onClick={() => setSeason(1)}
-          className={cn(
-            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-            season === 1
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-        >
-          Season 1
-        </button>
-      </div>
-
-      {/* Season 1 archive banner */}
-      {season === 1 && !loading && (
-        <div className="rounded-lg border border-muted bg-muted/30 px-5 py-3 text-sm text-muted-foreground">
-          Season 1 ran July 22 to September 11, 2026 on the original engine. Archived unedited.
-        </div>
-      )}
-
       {/* Summary header */}
       {!loading && !error && picks.length > 0 && (<>
         <div className="flex flex-wrap gap-6 text-sm">
@@ -504,21 +459,10 @@ export default function IvyTradesPage() {
       {/* Empty state */}
       {!loading && !error && picks.length === 0 && (
         <div className="rounded-lg border border-dashed px-8 py-12 text-center">
-          {season === 2 ? (
-            <>
-              <p className="text-lg font-medium">Season 2</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Season 2 began September 15, 2026. Every pick from here forward is made by the rebuilt engine and recorded before the outcome.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-lg font-medium">No picks</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                No picks found for this season.
-              </p>
-            </>
-          )}
+          <p className="text-lg font-medium">The ledger starts here</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Ivy's ledger began September 15, 2026. Every pick is recorded the moment it is made, before the outcome is known.
+          </p>
         </div>
       )}
 

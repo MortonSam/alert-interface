@@ -13,10 +13,7 @@ export function IvyStatLine({ className = "" }: { className?: string }) {
       .then((picks: AlertPickLedgerItem[]) => {
         if (cancelled) return;
         const open = picks.filter((p) => p.status === "open");
-        if (open.length === 0) {
-          setLine("No Season 2 picks yet");
-          return;
-        }
+        if (open.length === 0) return;
         let text = `${open.length} open pick${open.length !== 1 ? "s" : ""}`;
         const withMove = open.filter((p) => p.unrealized_move_pct != null);
         if (withMove.length > 0) {

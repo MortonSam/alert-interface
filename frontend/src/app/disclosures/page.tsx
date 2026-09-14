@@ -33,7 +33,9 @@ export default function DisclosuresPage() {
           include commissions, fees, slippage, bid-ask spread costs, assignment,
           or early exercise, and a real trade would not have filled at these
           prices. Hypothetical results have inherent limitations and past
-          results do not indicate future results.
+          results do not indicate future results. The ledger began
+          September 15, 2026. Picks generated before that date, during
+          development, are not published.
         </p>
       </section>
 
