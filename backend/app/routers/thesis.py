@@ -1225,6 +1225,7 @@ async def _compute_alert_pick_v2(
         "draft": None,
         "season": 2,
         "receipt": result.receipt,
+        "structure": structure,
     }
 
 
@@ -1652,6 +1653,11 @@ async def ivy_activity(
             leans=leans_list,
             note=r.note,
             pick=pick_obj,
+            momentum_20d=float(r.momentum_20d) if r.momentum_20d is not None else None,
+            prior_n=int(r.prior_n) if r.prior_n is not None else None,
+            expected_move_pct=float(r.expected_move_pct) if r.expected_move_pct is not None else None,
+            implied_move_pct=float(r.implied_move_pct) if r.implied_move_pct is not None else None,
+            verdict=r.verdict,
         ))
     worksheet_rows.sort(key=lambda r: (r.earnings_date or "9999", r.symbol))
 

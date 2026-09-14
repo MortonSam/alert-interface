@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
+from decimal import Decimal
+
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -54,3 +56,9 @@ class AlertPickEvaluation(Base):
     leans: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     alert_pick_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("alert_picks.id"), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # v2 worksheet columns (nullable for old rows)
+    momentum_20d: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    prior_n: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expected_move_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    implied_move_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    verdict: Mapped[str | None] = mapped_column(Text, nullable=True)

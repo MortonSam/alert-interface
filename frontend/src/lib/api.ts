@@ -711,6 +711,11 @@ export interface IvyWorksheetRow {
   leans: SignalLean[] | null;
   note: string | null;
   pick: IvyWorksheetPick | null;
+  momentum_20d: number | null;
+  prior_n: number | null;
+  expected_move_pct: number | null;
+  implied_move_pct: number | null;
+  verdict: string | null;
 }
 
 export interface IvyActivity {

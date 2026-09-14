@@ -9,69 +9,57 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function LeanDot({ direction }: { direction: string }) {
-  return (
-    <span
-      className={
-        "w-2 h-2 rounded-full inline-block " +
-        (direction === "bullish"
-          ? "bg-green-500"
-          : direction === "bearish"
-            ? "bg-red-500"
-            : "bg-zinc-400")
-      }
-    />
-  );
-}
+/* ── v2 cell renderers ─────────────────────────────────────────────── */
 
-function LeanCell({ row, signal }: { row: IvyWorksheetRow; signal: string }) {
-  if (!row.leans) return <td className="px-3 py-2.5" />;
-  const lean = row.leans.find((l) => l.signal === signal);
-  if (!lean) return <td className="px-3 py-2.5" />;
-  const isNeutral = lean.direction === "neutral";
+function MomentumCell({ row }: { row: IvyWorksheetRow }) {
+  if (row.momentum_20d == null) return <td className="px-3 py-2.5 text-muted-foreground" />;
+  const bad = row.momentum_20d <= -10;
   return (
-    <td className={`px-3 py-2.5 ${isNeutral ? "text-muted-foreground" : ""}`}>
-      <span className="inline-flex items-center gap-1.5">
-        <LeanDot direction={lean.direction} />
-        <span className="capitalize">{lean.direction}</span>
-      </span>
+    <td className={`px-3 py-2.5 tabular-nums ${bad ? "text-red-500" : "text-muted-foreground"}`}>
+      {row.momentum_20d > 0 ? "+" : ""}{row.momentum_20d.toFixed(1)}%
     </td>
   );
 }
 
-function Verdict({ row }: { row: IvyWorksheetRow }) {
-  if (row.outcome === "picked" && row.pick) {
-    const dir = row.leans?.find((l) => l.direction !== "neutral")?.direction;
-    return (
-      <span>
-        <span className={dir === "bullish" ? "text-green-500" : dir === "bearish" ? "text-red-500" : ""}>
-          Picked, {dir ?? "—"}
-        </span>
-        {row.pick.strategy && (
-          <span className="text-muted-foreground"> · {row.pick.strategy}</span>
-        )}
-        {row.pick.expiration && (
-          <span className="text-muted-foreground"> · {fmtDate(row.pick.expiration)}</span>
-        )}
-      </span>
-    );
+function HistoryCell({ row }: { row: IvyWorksheetRow }) {
+  if (row.prior_n == null) return <td className="px-3 py-2.5 text-muted-foreground" />;
+  return (
+    <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+      {row.prior_n}
+    </td>
+  );
+}
+
+function ExpectedCell({ row }: { row: IvyWorksheetRow }) {
+  if (row.expected_move_pct == null) return <td className="px-3 py-2.5 text-muted-foreground" />;
+  return (
+    <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+      {row.expected_move_pct.toFixed(1)}%
+    </td>
+  );
+}
+
+function ImpliedCell({ row }: { row: IvyWorksheetRow }) {
+  if (row.implied_move_pct == null) {
+    return <td className="px-3 py-2.5 text-muted-foreground">no chain</td>;
   }
-  if (row.outcome === "picked") {
-    const dir = row.leans?.find((l) => l.direction !== "neutral")?.direction;
-    return (
-      <span className={dir === "bullish" ? "text-green-500" : dir === "bearish" ? "text-red-500" : ""}>
-        Picked, {dir ?? "—"}
-      </span>
-    );
+  return (
+    <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
+      {row.implied_move_pct.toFixed(1)}%
+    </td>
+  );
+}
+
+function V2Verdict({ row }: { row: IvyWorksheetRow }) {
+  if (!row.verdict) {
+    return <td className="px-3 py-2.5 text-muted-foreground">{row.outcome}</td>;
   }
-  const labels: Record<string, string> = {
-    mixed_evidence: "Passed, mixed evidence",
-    no_fresh_chain: "Passed, no fresh options data",
-    open_pick_exists: "Passed, open pick exists",
-    cap_reached: "Passed, cap reached",
-    error: "Could not price",
-  };
-  return <span className="text-muted-foreground">{labels[row.outcome] ?? row.outcome}</span>;
+  const isPicked = row.verdict.startsWith("Picked");
+  return (
+    <td className={`px-3 py-2.5 ${isPicked ? "text-green-500" : "text-muted-foreground"}`}>
+      {row.verdict}
+    </td>
+  );
 }
 
 export default function IvyDeskPage() {
@@ -124,6 +112,11 @@ export default function IvyDeskPage() {
 
   const pickedCount = activity.picked;
   const passedCount = activity.evaluated - pickedCount;
+  // v2 batch if any row has a verdict
+  const isV2 = activity.rows.some((r) => r.verdict != null);
+  const columns = isV2
+    ? ["Symbol", "Reports", "Momentum", "History", "Expected", "Implied", "Verdict"]
+    : ["Symbol", "Reports", "Earnings", "Analyst", "Momentum", "Verdict"];
 
   return (
     <div className="py-6 pb-14">
@@ -140,10 +133,10 @@ export default function IvyDeskPage() {
       </p>
 
       <div className="overflow-x-auto mt-6">
-        <table className="min-w-[700px] w-full text-sm">
+        <table className={`${isV2 ? "min-w-[800px]" : "min-w-[700px]"} w-full text-sm`}>
           <thead>
             <tr className="border-b border-border">
-              {["Symbol", "Reports", "Earnings", "Analyst", "Momentum", "Verdict"].map((col) => (
+              {columns.map((col) => (
                 <th
                   key={col}
                   className="px-3 py-2 text-left font-mono text-xs uppercase tracking-wider text-muted-foreground font-normal"
@@ -168,14 +161,40 @@ export default function IvyDeskPage() {
                   </Link>
                 </td>
                 <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
-                  {row.earnings_date ? fmtDate(row.earnings_date) : "—"}
+                  {row.earnings_date ? fmtDate(row.earnings_date) : ""}
                 </td>
-                <LeanCell row={row} signal="earnings" />
-                <LeanCell row={row} signal="analyst" />
-                <LeanCell row={row} signal="momentum" />
-                <td className="px-3 py-2.5">
-                  <Verdict row={row} />
-                </td>
+                {isV2 ? (
+                  <>
+                    <MomentumCell row={row} />
+                    <HistoryCell row={row} />
+                    <ExpectedCell row={row} />
+                    <ImpliedCell row={row} />
+                    <V2Verdict row={row} />
+                  </>
+                ) : (
+                  <>
+                    {/* v1 lean columns (kept for old data, hidden by LEDGER_START) */}
+                    {["earnings", "analyst", "momentum"].map((signal) => {
+                      const lean = row.leans?.find((l) => l.signal === signal);
+                      if (!lean) return <td key={signal} className="px-3 py-2.5" />;
+                      const isNeutral = lean.direction === "neutral";
+                      return (
+                        <td key={signal} className={`px-3 py-2.5 ${isNeutral ? "text-muted-foreground" : ""}`}>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-full inline-block ${
+                              lean.direction === "bullish" ? "bg-green-500" :
+                              lean.direction === "bearish" ? "bg-red-500" : "bg-zinc-400"
+                            }`} />
+                            <span className="capitalize">{lean.direction}</span>
+                          </span>
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      {row.outcome}
+                    </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>

@@ -225,6 +225,12 @@ class IvyWorksheetRow(BaseModel):
     leans: list[SignalLean] | None
     note: str | None
     pick: IvyWorksheetPick | None
+    # v2 worksheet columns (null for old rows)
+    momentum_20d: float | None = None
+    prior_n: int | None = None
+    expected_move_pct: float | None = None
+    implied_move_pct: float | None = None
+    verdict: str | None = None
 
 
 class IvyActivityRead(BaseModel):

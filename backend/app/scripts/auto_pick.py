@@ -25,9 +25,71 @@ from app.models.ticker import Ticker
 from app.routers.thesis import compute_alert_pick
 from app.services import chain_store
 
+from decimal import Decimal
+
 MAX_NEW_PER_NIGHT = 3
 MAX_OPEN_TOTAL = 10
 MAX_DRAFT_ATTEMPTS = 6
+
+
+def _build_v2_fields(result: dict) -> dict | None:
+    """Extract v2 worksheet columns from a compute_alert_pick result."""
+    receipt = result.get("receipt")
+    if not receipt:
+        return None
+    fields: dict = {}
+    if receipt.get("momentum_20d") is not None:
+        fields["momentum_20d"] = Decimal(str(round(receipt["momentum_20d"], 2)))
+    if receipt.get("n_comparable") is not None:
+        fields["prior_n"] = int(receipt["n_comparable"])
+    if receipt.get("expected_pct") is not None:
+        fields["expected_move_pct"] = Decimal(str(receipt["expected_pct"]))
+    if receipt.get("implied_pct") is not None:
+        fields["implied_move_pct"] = Decimal(str(receipt["implied_pct"]))
+    fields["verdict"] = _build_verdict(result, receipt)
+    return fields
+
+
+def _build_verdict(result: dict, receipt: dict) -> str:
+    """Build a plain-English verdict string for the v2 worksheet."""
+    outcome = result.get("outcome", "")
+    if outcome == "no_features":
+        return "Passed, no features available"
+    if outcome == "no_fresh_chain":
+        return "Refused, no fresh chain"
+    gate_reason = receipt.get("gate_reason")
+    if gate_reason and outcome != "picked":
+        # Normalize gate reasons to plain English
+        if "options pricing" in gate_reason:
+            return f"Refused, {gate_reason}"
+        if "insufficient history" in gate_reason:
+            n = receipt.get("n_comparable", 0) or 0
+            return f"Passed, {n} prior events (needs 8)"
+        if "momentum" in gate_reason:
+            m = receipt.get("momentum_20d")
+            if m is not None:
+                return f"Passed, momentum {m:+.0f}% (needs -10%)"
+            return f"Passed, {gate_reason}"
+        if "no fresh options chain" in gate_reason:
+            return "Refused, no fresh chain"
+        return f"Passed, {gate_reason}"
+    if outcome == "picked":
+        structure = result.get("structure")
+        if structure:
+            ls = structure.get("long_strike", "")
+            ss = structure.get("short_strike", "")
+            exp = structure.get("expiration", "")
+            return f"Picked, bull call spread {ls}/{ss}, {exp}"
+        return "Picked"
+    if outcome == "structure_failed":
+        return "Refused, structure failed"
+    if outcome == "open_pick_exists":
+        return "Passed, open pick exists"
+    if outcome == "cap_reached":
+        return "Passed, cap reached"
+    if outcome == "error":
+        return "Error"
+    return outcome
 
 
 async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
@@ -117,7 +179,8 @@ async def _run(dry_run: bool = False) -> int:
             if not is_fresh:
                 note = f"as_of={chain_as_of}" if chain_as_of else "no chain"
                 if not dry_run:
-                    _log_evaluation(session, sym, "no_fresh_chain", note=note)
+                    _log_evaluation(session, sym, "no_fresh_chain", note=note,
+                                   v2_fields={"verdict": "Refused, no fresh chain"})
                 print(f"  {sym} (earnings {next_earnings}): no_fresh_chain ({note})")
                 continue
 
@@ -136,9 +199,11 @@ async def _run(dry_run: bool = False) -> int:
 
                 if not dry_run:
                     leans_dump = [l.model_dump() for l in leans] if leans else None
+                    v2_fields = _build_v2_fields(result)
                     _log_evaluation(
                         session, sym, outcome,
                         leans=leans_dump, pick_id=pick_id, note=note,
+                        v2_fields=v2_fields,
                     )
 
                 leans_summary = " ".join(f"{l.signal[0]}={l.direction[:3]}" for l in leans) if leans else ""
@@ -178,16 +243,20 @@ def _log_evaluation(
     leans: list[dict] | None = None,
     pick_id=None,
     note: str | None = None,
+    v2_fields: dict | None = None,
 ) -> None:
-    """Add an AlertPickEvaluation row (uncommitted — caller commits)."""
-    session.add(AlertPickEvaluation(
+    """Add an AlertPickEvaluation row (uncommitted -- caller commits)."""
+    kwargs: dict = dict(
         symbol=symbol,
         source="nightly",
         outcome=outcome,
         leans=leans,
         alert_pick_id=pick_id,
         note=note,
-    ))
+    )
+    if v2_fields:
+        kwargs.update(v2_fields)
+    session.add(AlertPickEvaluation(**kwargs))
 
 
 def main() -> int:
