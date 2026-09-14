@@ -689,6 +689,8 @@ export interface AlertPickLedgerItem {
   option_pnl_pct: number | null;
   option_mid: number | null;
   option_mark_as_of: string | null;
+  season: number;
+  receipt: Record<string, unknown> | null;
   option_mark_note: string | null;
 }
 
@@ -903,8 +905,8 @@ export const api = {
       request<ThesisDraftAlternativeRead>("/theses/draft-alternative", { method: "POST", body: JSON.stringify(data) }),
     alertPick: (data: { symbol: string }) =>
       request<AlertPickRead>("/theses/alert-pick", { method: "POST", body: JSON.stringify(data) }),
-    alertPicks: () =>
-      request<AlertPickLedgerItem[]>("/theses/alert-picks"),
+    alertPicks: (season?: number) =>
+      request<AlertPickLedgerItem[]>(`/theses/alert-picks?season=${season ?? 2}`),
     ivyActivity: () =>
       request<IvyActivity>("/theses/ivy-activity"),
     mark: (id: string) =>

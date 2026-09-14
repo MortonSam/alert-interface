@@ -962,6 +962,171 @@ async def draft_thesis(
     return result
 
 
+# ── v2 alert-pick engine ──────────────────────────────────────────────────────
+
+async def _compute_alert_pick_v2(
+    sym: str,
+    db: AsyncSession,
+    source: str,
+    dry_run: bool,
+    generated_at: str,
+) -> dict:
+    """v2 engine path: deterministic gates + AI narration."""
+    from app.models.earnings_feature import EarningsFeature
+    from app.services.ivy_v2 import decide as v2_decide
+
+    # Load features for this symbol (most recent event)
+    feat_result = await db.execute(
+        select(EarningsFeature)
+        .where(EarningsFeature.symbol == sym)
+        .order_by(EarningsFeature.event_date.desc())
+        .limit(1)
+    )
+    features = feat_result.scalar_one_or_none()
+
+    if features is None:
+        return {
+            "outcome": "no_features",
+            "leans": None,
+            "pick_id": None,
+            "note": f"no earnings features for {sym}",
+            "generated_at": generated_at,
+            "existing_pick": False,
+            "draft": None,
+        }
+
+    # Load all features for walk-forward base rate
+    all_result = await db.execute(
+        select(EarningsFeature).order_by(EarningsFeature.event_date)
+    )
+    all_features = all_result.scalars().all()
+
+    # AI client for narration (template fallback on failure)
+    ai_client = AnthropicClient()
+    result = await v2_decide(
+        features=features,
+        db=db,
+        symbol=sym,
+        event_date=features.event_date,
+        all_features=all_features,
+        ai_client=ai_client,
+    )
+
+    print(
+        f"[alert-pick-v2] {sym} | pick={result.pick} direction={result.direction} "
+        f"skip={result.skip_reason}",
+        flush=True,
+    )
+
+    if not result.pick:
+        return {
+            "outcome": result.skip_reason or "skipped",
+            "leans": None,
+            "pick_id": None,
+            "note": result.skip_reason,
+            "generated_at": generated_at,
+            "existing_pick": False,
+            "draft": None,
+        }
+
+    # ── Persist v2 pick ───────────────────────────────────────────────────
+    pick_id = None
+    if not dry_run:
+        # Gather draft data for strikes/structure (reuses existing v1 pipeline)
+        try:
+            data = await _gather_draft_data(sym, db, source=source)
+            draft_read = await _run_draft_generation(
+                data, "bullish", "moderate",
+                extra_prompt_section=(
+                    f"\nALERT-PICK MODE (v2 engine):\n"
+                    f"The v2 engine selected bullish based on momentum reversal.\n"
+                    f"Receipt: {result.receipt}\n"
+                    f"In your reasoning, narrate the receipt facts. Do NOT introduce new claims.\n"
+                ),
+            )
+
+            primary_rows = draft_read.fact_block.get("primary_strikes", [])
+            secondary_rows = draft_read.fact_block.get("secondary_strikes", [])
+            suggested_strike = draft_read.suggested_strike
+            spread_strike = draft_read.suggested_spread_strike
+
+            leg1_mid = next((s["mid"] for s in primary_rows if s["strike"] == suggested_strike), None) if suggested_strike else None
+            leg2_mid = next((s["mid"] for s in primary_rows if s["strike"] == spread_strike), None) if spread_strike else None
+            if leg2_mid is None and spread_strike:
+                leg2_mid = next((s["mid"] for s in secondary_rows if s["strike"] == spread_strike), None)
+
+            if spread_strike and leg1_mid and leg2_mid:
+                cost_to_enter = round(leg1_mid - leg2_mid, 4)
+                spread_width = abs(suggested_strike - spread_strike)
+                max_loss = round(cost_to_enter * 100, 2)
+                max_gain = round((spread_width - cost_to_enter) * 100, 2)
+            elif leg1_mid:
+                cost_to_enter = leg1_mid
+                max_loss = round(leg1_mid * 100, 2)
+                max_gain = None
+            else:
+                cost_to_enter = None
+                max_loss = None
+                max_gain = None
+
+            pick = AlertPick(
+                symbol=sym,
+                picked_direction="bullish",
+                algo_version="v2.0",
+                model_used=draft_read.model_used,
+                leans=[],
+                strategy=draft_read.strategy,
+                suggested_strike=suggested_strike,
+                suggested_spread_strike=spread_strike,
+                suggested_target=draft_read.suggested_target,
+                expiration=data["chosen_exp"],
+                cost_to_enter=cost_to_enter,
+                max_loss=max_loss,
+                max_gain=max_gain,
+                vol_regime=data.get("vol_regime"),
+                reasoning=draft_read.reasoning,
+                entry_price=data["draft_spot"],
+                source=source,
+                season=2,
+                receipt=result.receipt,
+            )
+            db.add(pick)
+            await db.commit()
+            await db.refresh(pick)
+            pick_id = pick.id
+        except Exception as exc:
+            print(f"[alert-pick-v2] {sym}: draft/persist failed: {exc}", flush=True)
+            # Persist a minimal pick without draft strikes
+            pick = AlertPick(
+                symbol=sym,
+                picked_direction="bullish",
+                algo_version="v2.0",
+                leans=[],
+                reasoning=result.receipt.get("reasoning", ""),
+                entry_price=0,  # will be updated on next mark
+                source=source,
+                season=2,
+                receipt=result.receipt,
+            )
+            db.add(pick)
+            await db.commit()
+            await db.refresh(pick)
+            pick_id = pick.id
+
+    return {
+        "outcome": "picked",
+        "leans": [],
+        "pick_id": pick_id,
+        "picked_direction": "bullish",
+        "note": None,
+        "generated_at": generated_at,
+        "existing_pick": False,
+        "draft": None,
+        "season": 2,
+        "receipt": result.receipt,
+    }
+
+
 # ── Alert-pick service function ───────────────────────────────────────────────
 
 async def compute_alert_pick(
@@ -969,6 +1134,7 @@ async def compute_alert_pick(
     db: AsyncSession,
     source: str = "manual",
     dry_run: bool = False,
+    use_v2: bool = True,
 ) -> dict:
     """Core alert-pick logic, callable from both the route and scripts.
 
@@ -1002,6 +1168,10 @@ async def compute_alert_pick(
             "existing_pick": True,
             "draft": None,
         }
+
+    # ── v2 engine path ────────────────────────────────────────────────────────
+    if use_v2:
+        return await _compute_alert_pick_v2(sym, db, source, dry_run, generated_at)
 
     data = await _gather_draft_data(sym, db, source=source)
 
@@ -1395,6 +1565,7 @@ async def ivy_activity(
 
 @router.get("/alert-picks", response_model=list[AlertPickLedgerItem])
 async def list_alert_picks(
+    season: int = Query(default=2, ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> list[AlertPickLedgerItem]:
     """List Ivy's alert picks newest-first, with live price marks and scoring.
@@ -1403,7 +1574,7 @@ async def list_alert_picks(
     """
     rows = (await db.execute(
         select(AlertPick)
-        .where(AlertPick.source != "visitor")
+        .where(AlertPick.source != "visitor", AlertPick.season == season)
         .order_by(AlertPick.generated_at.desc())
     )).scalars().all()
 
@@ -1585,6 +1756,8 @@ async def list_alert_picks(
             option_mid=option_mid,
             option_mark_as_of=option_mark_as_of,
             option_mark_note=option_mark_note,
+            season=r.season,
+            receipt=r.receipt,
         ))
 
     return items

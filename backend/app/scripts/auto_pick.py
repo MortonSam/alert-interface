@@ -125,12 +125,9 @@ async def _run(dry_run: bool = False) -> int:
                 pick_id = result.get("pick_id")
                 note = result.get("note")
 
-                # Count any candidate that reached the LLM stage
+                # Count picks and LLM draft attempts
                 if outcome == "picked":
                     new_picks += 1
-                    draft_attempts += 1
-                elif outcome != "mixed_evidence" and outcome != "open_pick_exists":
-                    # errored during draft — still counts as a draft attempt
                     draft_attempts += 1
 
                 if not dry_run:

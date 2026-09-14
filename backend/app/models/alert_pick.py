@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +39,8 @@ class AlertPick(Base):
     close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     option_pnl_dollars: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     option_pnl_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    season: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    receipt: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class AlertPickEvaluation(Base):

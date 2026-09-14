@@ -1031,7 +1031,7 @@ async def latest_pick(
 
     stmt = (
         select(AlertPick)
-        .where(AlertPick.source != "visitor")
+        .where(AlertPick.source != "visitor", AlertPick.season == 2)
         .order_by(AlertPick.generated_at.desc())
         .limit(1)
     )

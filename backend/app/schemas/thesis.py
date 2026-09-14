@@ -168,6 +168,8 @@ class AlertPickRead(BaseModel):
     draft: ThesisDraftRead | None      # None when mixed_evidence
     generated_at: str
     existing_pick: bool = False        # True when returning an existing open pick (duplicate refusal)
+    season: int = 1
+    receipt: dict | None = None
 
 
 class AlertPickLedgerItem(BaseModel):
@@ -202,6 +204,8 @@ class AlertPickLedgerItem(BaseModel):
     option_mid: float | None = None
     option_mark_as_of: str | None = None
     option_mark_note: str | None = None
+    season: int = 1
+    receipt: dict | None = None
 
 
 class IvySampleRefusal(BaseModel):
