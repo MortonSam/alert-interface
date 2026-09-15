@@ -466,10 +466,21 @@ export default function IvyTradesPage() {
       {/* Empty state */}
       {!loading && !error && picks.length === 0 && (
         <div className="rounded-lg border border-dashed px-8 py-12 text-center">
-          <p className="text-lg font-medium">The ledger starts here</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Ivy's ledger began September 15, 2026. Every pick is recorded the moment it is made, before the outcome is known.
-          </p>
+          {activity && !activity.ledger_public ? (
+            <>
+              <p className="text-lg font-medium">Recording nightly</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Ivy&apos;s ledger is being recorded every night and goes public at launch. Every pick is timestamped before the outcome is known.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-medium">The ledger starts here</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Ivy&apos;s ledger began September 15, 2026. Every pick is recorded the moment it is made, before the outcome is known.
+              </p>
+            </>
+          )}
         </div>
       )}
 
