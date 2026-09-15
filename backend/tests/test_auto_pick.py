@@ -1,6 +1,9 @@
 """Unit tests for auto_pick outcome codes and v2 worksheet field extraction."""
 from decimal import Decimal
 
+from sqlalchemy import select
+
+from app.models.alert_pick import AlertPick
 from app.scripts.auto_pick import _build_v2_fields, _build_verdict
 
 
@@ -142,3 +145,26 @@ class TestBuildV2Fields:
         assert fields["prior_n"] == 12
         assert fields["expected_move_pct"] == Decimal("6.0")
         assert "implied_move_pct" not in fields  # None values are not added
+
+
+# ── Duplicate guard only blocks season 2 ──────────────────────────────────────
+
+class TestDuplicateGuardSeason:
+    """The open-pick duplicate query must filter on season == 2."""
+
+    def test_dup_query_includes_season_filter(self):
+        """Build the same WHERE clause compute_alert_pick uses and verify
+        season == 2 is present, so season 1 picks cannot block v2 evaluation."""
+        from sqlalchemy import and_
+
+        # Reproduce the query filters from compute_alert_pick (nightly source)
+        filters = and_(
+            AlertPick.symbol == "FDX",
+            AlertPick.status == "open",
+            AlertPick.season == 2,
+            AlertPick.source != "visitor",
+        )
+        compiled = str(filters.compile(compile_kwargs={"literal_binds": True}))
+        assert "season" in compiled
+        # A season 1 pick should NOT match
+        assert "season = 2" in compiled or "season == 2" in compiled

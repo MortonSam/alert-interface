@@ -1270,13 +1270,17 @@ async def compute_alert_pick(
 
     # ── Duplicate refusal: one open pick per symbol per source class ────────
     # Visitor picks are isolated: they don't block Ivy's picks and vice-versa.
+    # Only season 2 picks block; pre-LEDGER_START season 1 picks are ignored.
     if source == "visitor":
         dup_filter = AlertPick.source == "visitor"
     else:
         dup_filter = AlertPick.source != "visitor"
     existing = (await db.execute(
         select(AlertPick).where(
-            AlertPick.symbol == sym, AlertPick.status == "open", dup_filter,
+            AlertPick.symbol == sym,
+            AlertPick.status == "open",
+            AlertPick.season == 2,
+            dup_filter,
         ).order_by(AlertPick.generated_at.desc()).limit(1)
     )).scalar_one_or_none()
     if existing:
