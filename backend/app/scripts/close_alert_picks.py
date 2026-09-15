@@ -52,11 +52,29 @@ def _store_option_pnl(pick: AlertPick, close_price: float) -> None:
         pick.option_pnl_pct = pnl_p
 
 
-def _mid_or_last(bid, ask, last) -> float | None:
-    """Compute mid from bid/ask, falling back to lastPrice."""
-    if bid and ask and bid > 0 and ask > 0:
+def _leg_mid(row: dict) -> float:
+    """Compute a mid price for a single option leg.
+
+    A worthless leg (bid=0, ask=0) returns 0.0 -- that is a real market
+    value, not missing data.  Returns None only when the strike row is
+    absent from the chain (handled by the caller).
+    """
+    bid = row.get("bid") or 0.0
+    ask = row.get("ask") or 0.0
+    if bid > 0 and ask > 0:
         return (bid + ask) / 2.0
-    return last if last and last > 0 else None
+    if bid == 0 and ask > 0:
+        return ask / 2.0
+    # Both zero (or negative): the leg is worthless.
+    return 0.0
+
+
+def _find_leg(side: list[dict], strike: float) -> dict | None:
+    """Find the chain row matching *strike*, or None if absent."""
+    for row in side:
+        if row.get("strike") == strike:
+            return row
+    return None
 
 
 async def _compute_spread_mid(
@@ -65,7 +83,8 @@ async def _compute_spread_mid(
     """Return (spread_mid, mark_note) from the chain store for a v2 pick.
 
     spread_mid is the net debit value of the bull call spread at current marks.
-    Returns (None, note) if the chain or strikes are unavailable.
+    A spread_mid of 0.0 is valid (worthless spread, -100% P&L).
+    Returns (None, note) only when the chain or strike rows are absent.
     """
     if not pick.expiration or not pick.suggested_strike:
         return None, "no expiration or strike"
@@ -79,25 +98,18 @@ async def _compute_spread_mid(
     side = chain_data.get(side_key, [])
 
     strike = float(pick.suggested_strike)
-    mid1 = None
-    for row in side:
-        if row.get("strike") == strike:
-            mid1 = _mid_or_last(row.get("bid"), row.get("ask"), row.get("lastPrice"))
-            break
-
-    if mid1 is None:
+    leg1_row = _find_leg(side, strike)
+    if leg1_row is None:
         return None, f"strike {strike} not in chain"
+    mid1 = _leg_mid(leg1_row)
 
     spread_strike = float(pick.suggested_spread_strike) if pick.suggested_spread_strike else None
     if spread_strike is not None:
-        mid2 = None
-        for row in side:
-            if row.get("strike") == spread_strike:
-                mid2 = _mid_or_last(row.get("bid"), row.get("ask"), row.get("lastPrice"))
-                break
-        if mid2 is not None:
-            return round(mid1 - mid2, 4), None
-        return None, f"spread strike {spread_strike} not in chain"
+        leg2_row = _find_leg(side, spread_strike)
+        if leg2_row is None:
+            return None, f"spread strike {spread_strike} not in chain"
+        mid2 = _leg_mid(leg2_row)
+        return round(mid1 - mid2, 4), None
 
     return round(mid1, 4), None
 
@@ -145,8 +157,8 @@ async def _close_v2_picks() -> int:
             # Try chain-store spread mid first
             spread_mid, mark_note = await _compute_spread_mid(session, pick)
 
-            if spread_mid is not None and spread_mid > 0:
-                # Compute option P&L from spread mid
+            if spread_mid is not None:
+                # Compute option P&L from spread mid (0.0 is a valid worthless close)
                 cost = float(pick.cost_to_enter) if pick.cost_to_enter else None
                 if cost and cost > 0:
                     pnl_d = round((spread_mid - cost) * 100, 2)
@@ -161,9 +173,7 @@ async def _close_v2_picks() -> int:
                 if _is_valid_price(close_price):
                     pick.close_price = close_price
                     pick.stock_move_5d = _compute_stock_move(pick, float(close_price))
-                else:
-                    # Use entry as fallback for close_price column
-                    pick.close_price = pick.entry_price
+                # else: leave close_price and stock_move_5d null
 
                 close_note = ""
                 if days_late > 0:
@@ -174,8 +184,9 @@ async def _close_v2_picks() -> int:
                 closed += 1
                 pnl_msg = f" option_pnl=${pick.option_pnl_dollars}" if pick.option_pnl_dollars is not None else ""
                 move_msg = f" stock_move={pick.stock_move_5d}%" if pick.stock_move_5d is not None else ""
+                stock_note = "" if pick.close_price is not None else " (stock close unavailable)"
                 print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: "
-                      f"spread_mid=${spread_mid}{pnl_msg}{move_msg}{close_note}")
+                      f"spread_mid=${spread_mid}{pnl_msg}{move_msg}{close_note}{stock_note}")
             else:
                 # No chain available -- check if expiration is a hard stop
                 exp_str = pick.expiration or ""
