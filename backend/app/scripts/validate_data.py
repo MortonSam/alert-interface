@@ -26,10 +26,12 @@ from sqlalchemy import func, select, text
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_recommendation import AnalystRecommendation
+from app.models.earnings_feature import EarningsFeature
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.rv_snapshot import RVSnapshot
+from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
 from app.models.ticker import Ticker
 from app.models.watchlist import WatchlistTicker
@@ -918,6 +920,111 @@ async def check_nan_alert_pick_values(session) -> CheckResult:
     )
 
 
+# ── Earnings features ─────────────────────────────────────────────────────────
+
+async def check_earnings_features_row_count(session) -> CheckResult:
+    """ERROR if earnings_features has fewer than 9,000 rows."""
+    count = (await session.execute(
+        select(func.count()).select_from(EarningsFeature)
+    )).scalar_one()
+    if count >= 9000:
+        return CheckResult("earnings_features_row_count", PASS, f"{count:,} earnings_features rows")
+    return CheckResult("earnings_features_row_count", ERROR, f"Only {count:,} earnings_features rows (need >= 9,000)")
+
+
+async def check_earnings_features_momentum_nulls(session) -> CheckResult:
+    """ERROR if momentum_20d null rate exceeds 1% in earnings_features."""
+    total = (await session.execute(
+        select(func.count()).select_from(EarningsFeature)
+    )).scalar_one()
+    if total == 0:
+        return CheckResult("earnings_features_momentum_nulls", WARN, "No earnings_features rows")
+    null_count = (await session.execute(
+        select(func.count()).select_from(EarningsFeature)
+        .where(EarningsFeature.momentum_20d.is_(None))
+    )).scalar_one()
+    rate = null_count / total * 100
+    if rate < 1.0:
+        return CheckResult(
+            "earnings_features_momentum_nulls", PASS,
+            f"momentum_20d null rate {rate:.2f}% ({null_count:,}/{total:,})",
+        )
+    return CheckResult(
+        "earnings_features_momentum_nulls", ERROR,
+        f"momentum_20d null rate {rate:.1f}% ({null_count:,}/{total:,}), expected < 1%",
+    )
+
+
+async def check_v2_pick_integrity(session) -> CheckResult:
+    """ERROR if any v2 alert_pick has null receipt, null strikes, null cost, or entry_price <= 0."""
+    rows = (await session.execute(
+        select(AlertPick.symbol, AlertPick.generated_at,
+               AlertPick.receipt, AlertPick.suggested_strike,
+               AlertPick.suggested_spread_strike, AlertPick.cost_to_enter,
+               AlertPick.entry_price)
+        .where(AlertPick.algo_version.like("v2%"))
+    )).all()
+    if not rows:
+        return CheckResult("v2_pick_integrity", PASS, "No v2 picks to check")
+    bad: list[str] = []
+    for r in rows:
+        issues: list[str] = []
+        if r.receipt is None:
+            issues.append("null receipt")
+        if r.suggested_strike is None:
+            issues.append("null strike")
+        if r.suggested_spread_strike is None:
+            issues.append("null spread_strike")
+        if r.cost_to_enter is None:
+            issues.append("null cost")
+        if r.entry_price is None or float(r.entry_price) <= 0:
+            issues.append(f"entry_price={r.entry_price}")
+        if issues:
+            dt = r.generated_at.strftime("%Y-%m-%d") if r.generated_at else "?"
+            bad.append(f"{r.symbol} ({dt}): {', '.join(issues)}")
+    if not bad:
+        return CheckResult("v2_pick_integrity", PASS, f"All {len(rows)} v2 picks have receipt, strikes, cost, and entry_price > 0")
+    return CheckResult("v2_pick_integrity", ERROR, f"{len(bad)} v2 pick(s) with missing data", bad)
+
+
+async def check_shadow_pick_count(session) -> CheckResult:
+    """WARN if latest nightly shadow_pick count does not match evaluation count."""
+    from sqlalchemy import Date as SADate
+
+    # Latest evaluation batch date
+    max_eval_date = (await session.execute(
+        select(func.max(func.cast(AlertPickEvaluation.evaluated_at, SADate)))
+        .where(AlertPickEvaluation.source == "nightly")
+    )).scalar()
+
+    if max_eval_date is None:
+        return CheckResult("shadow_pick_count", PASS, "No nightly evaluations yet")
+
+    eval_count = (await session.execute(
+        select(func.count()).select_from(AlertPickEvaluation)
+        .where(
+            AlertPickEvaluation.source == "nightly",
+            func.cast(AlertPickEvaluation.evaluated_at, SADate) == max_eval_date,
+        )
+    )).scalar_one()
+
+    # Shadow picks for the same date range (shadow_eval uses event_date, not decided_at)
+    shadow_count = (await session.execute(
+        select(func.count()).select_from(ShadowPick)
+        .where(func.cast(ShadowPick.decided_at, SADate) == max_eval_date)
+    )).scalar_one()
+
+    if eval_count == shadow_count:
+        return CheckResult(
+            "shadow_pick_count", PASS,
+            f"Shadow picks ({shadow_count}) match evaluations ({eval_count}) for {max_eval_date}",
+        )
+    return CheckResult(
+        "shadow_pick_count", WARN,
+        f"Shadow picks ({shadow_count}) != evaluations ({eval_count}) for {max_eval_date}",
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -958,6 +1065,13 @@ CHECKS = [
     check_nan_alert_pick_values,
     # IV history price drift
     check_iv_history_price_drift,
+    # Earnings features
+    check_earnings_features_row_count,
+    check_earnings_features_momentum_nulls,
+    # v2 pick integrity
+    check_v2_pick_integrity,
+    # Shadow picks
+    check_shadow_pick_count,
 ]
 
 
