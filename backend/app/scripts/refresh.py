@@ -66,9 +66,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),
-    ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
+    ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 

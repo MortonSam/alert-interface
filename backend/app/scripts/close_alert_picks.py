@@ -376,13 +376,18 @@ async def _settle_shadow_picks() -> int:
     return 0
 
 
+async def _main() -> int:
+    """Single event loop for all close operations."""
+    await _settle_shadow_picks()
+    await _close_v2_picks()
+    await _close_picks()
+    return 0
+
+
 def main() -> int:
     if "--backfill" in sys.argv:
         return asyncio.run(_backfill())
-    # Always run shadow settlement alongside normal close
-    asyncio.run(_settle_shadow_picks())
-    asyncio.run(_close_v2_picks())
-    return asyncio.run(_close_picks())
+    return asyncio.run(_main())
 
 
 if __name__ == "__main__":

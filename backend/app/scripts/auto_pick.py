@@ -15,8 +15,9 @@ import traceback
 from datetime import date, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import Date as SADate, func, select
 
+from app.constants import LEDGER_START
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.enums import EventType
@@ -113,23 +114,21 @@ async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
 
 async def _run(dry_run: bool = False) -> int:
     today = date.today()
-    # 1-5 trading days ≈ next 7 calendar days; exclude today (event day
+    # 1-5 trading days ~ next 7 calendar days; exclude today (event day
     # itself is too late for momentum to be measured into the report).
     horizon = today + timedelta(days=7)
 
     async with AsyncSessionLocal() as session:
-        # ── Count currently open picks ────────────────────────────────────────
+        # ── Count currently open v2 picks (season 2, post-LEDGER_START only) ──
         open_count = (await session.execute(
-            select(func.count()).select_from(AlertPick).where(AlertPick.status == "open")
+            select(func.count()).select_from(AlertPick).where(
+                AlertPick.status == "open",
+                AlertPick.season == 2,
+                func.cast(AlertPick.generated_at, SADate) >= LEDGER_START,
+            )
         )).scalar_one()
 
-        if open_count >= MAX_OPEN_TOTAL:
-            print(f"[auto-pick] {open_count} open picks (cap={MAX_OPEN_TOTAL}). Skipping.")
-            return 0
-
         # ── Find candidates: active tickers with earnings in 1-5 trading days
-        # Exclude today: by the time nightly runs, today's earnings is past.
-        # Upper bound: 7 calendar days covers 5 trading days in all cases.
         candidates = (await session.execute(
             select(Ticker.symbol, func.min(Event.event_date).label("next_earnings"))
             .join(Event, Event.ticker_id == Ticker.id)
@@ -147,32 +146,22 @@ async def _run(dry_run: bool = False) -> int:
             print("[auto-pick] No candidates with earnings in next 1-5 trading days.")
             return 0
 
-        print(f"[auto-pick] {len(candidates)} candidates, {open_count} open picks, dry_run={dry_run}")
+        print(f"[auto-pick] {len(candidates)} candidates, {open_count} open v2 picks, dry_run={dry_run}")
 
         new_picks = 0
         draft_attempts = 0
         for row in candidates:
             sym = row.symbol
             next_earnings = row.next_earnings
+            cap_hit = False
 
-            # ── Cap check ─────────────────────────────────────────────────────
+            # ── Cap check (never skips evaluation -- just blocks persisting) ──
             if new_picks >= MAX_NEW_PER_NIGHT:
-                if not dry_run:
-                    _log_evaluation(session, sym, "cap_reached", note=f"MAX_NEW_PER_NIGHT={MAX_NEW_PER_NIGHT}")
-                print(f"  {sym} (earnings {next_earnings}): cap_reached")
-                continue
-
-            if open_count + new_picks >= MAX_OPEN_TOTAL:
-                if not dry_run:
-                    _log_evaluation(session, sym, "cap_reached", note=f"MAX_OPEN_TOTAL={MAX_OPEN_TOTAL}")
-                print(f"  {sym} (earnings {next_earnings}): cap_reached (total)")
-                continue
-
-            if draft_attempts >= MAX_DRAFT_ATTEMPTS:
-                if not dry_run:
-                    _log_evaluation(session, sym, "cap_reached", note="draft attempts")
-                print(f"  {sym} (earnings {next_earnings}): cap_reached (draft attempts)")
-                continue
+                cap_hit = True
+            elif open_count + new_picks >= MAX_OPEN_TOTAL:
+                cap_hit = True
+            elif draft_attempts >= MAX_DRAFT_ATTEMPTS:
+                cap_hit = True
 
             # ── Chain freshness pre-check ─────────────────────────────────────
             is_fresh, chain_as_of = await _check_chain_freshness(session, sym)
@@ -184,13 +173,21 @@ async def _run(dry_run: bool = False) -> int:
                 print(f"  {sym} (earnings {next_earnings}): no_fresh_chain ({note})")
                 continue
 
-            # ── Evaluate ──────────────────────────────────────────────────────
+            # ── Evaluate (always -- cap only blocks persisting the pick) ──────
             try:
-                result = await compute_alert_pick(sym, session, source="nightly", dry_run=dry_run)
+                result = await compute_alert_pick(
+                    sym, session, source="nightly",
+                    dry_run=dry_run or cap_hit,
+                )
                 outcome = result["outcome"]
                 leans = result["leans"]
                 pick_id = result.get("pick_id")
                 note = result.get("note")
+
+                # If cap blocked a would-be pick, record it as cap_reached
+                if cap_hit and outcome == "picked":
+                    outcome = "cap_reached"
+                    pick_id = None
 
                 # Count picks and LLM draft attempts
                 if outcome == "picked":
@@ -207,21 +204,21 @@ async def _run(dry_run: bool = False) -> int:
                     )
 
                 leans_summary = " ".join(f"{l.signal[0]}={l.direction[:3]}" for l in leans) if leans else ""
-                print(f"  {sym} (earnings {next_earnings}): {outcome} [{leans_summary}]")
+                suffix = " (cap)" if cap_hit else ""
+                print(f"  {sym} (earnings {next_earnings}): {outcome}{suffix} [{leans_summary}]")
 
             except HTTPException as exc:
-                # Draft-path errors (422 stale chain, 502 AI failure) count as draft attempts
                 draft_attempts += 1
                 if not dry_run:
                     _log_evaluation(session, sym, "error", note=f"HTTP {exc.status_code}: {exc.detail}")
-                print(f"  {sym} (earnings {next_earnings}): error — {exc.detail}")
+                print(f"  {sym} (earnings {next_earnings}): error -- {exc.detail}")
 
             except Exception as exc:
                 tb = traceback.format_exc()
                 draft_attempts += 1
                 if not dry_run:
                     _log_evaluation(session, sym, "error", note=f"{type(exc).__name__}: {exc}")
-                print(f"  {sym} (earnings {next_earnings}): error — {exc}\n{tb}")
+                print(f"  {sym} (earnings {next_earnings}): error -- {exc}\n{tb}")
 
         if not dry_run:
             await session.commit()
@@ -229,7 +226,7 @@ async def _run(dry_run: bool = False) -> int:
         # ── Summary ───────────────────────────────────────────────────────────
         print(
             f"\n[auto-pick] Done. {new_picks} new picks, "
-            f"{open_count + new_picks} total open, "
+            f"{open_count + new_picks} total open v2, "
             f"{len(candidates)} evaluated, "
             f"{draft_attempts} draft attempts."
         )

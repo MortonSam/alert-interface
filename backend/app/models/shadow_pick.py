@@ -23,7 +23,7 @@ class ShadowPick(Base):
     threshold_used: Mapped[Decimal] = mapped_column(Numeric(4, 2), nullable=False)
     would_pick: Mapped[bool] = mapped_column(Boolean, nullable=False)
     top_factors: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    v2_decision: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    v2_decision: Mapped[str | None] = mapped_column(String(80), nullable=True)
     v2_pick_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("alert_picks.id"), nullable=True,
     )
