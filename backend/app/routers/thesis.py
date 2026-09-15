@@ -1090,6 +1090,7 @@ async def _compute_alert_pick_v2(
     """
     from app.models.earnings_feature import EarningsFeature
     from app.services.ivy_v2 import compute_live_features, decide as v2_decide
+    from app.services.trading_calendar import nth_trading_day_after
 
     # Compute live features for the upcoming earnings event
     live_features = await compute_live_features(sym, db)
@@ -1171,6 +1172,8 @@ async def _compute_alert_pick_v2(
             except Exception:
                 pass  # template reasoning from decide() is already set
 
+            exit_date = nth_trading_day_after(live_features.event_date, 5)
+
             pick = AlertPick(
                 symbol=sym,
                 picked_direction="bullish",
@@ -1191,6 +1194,8 @@ async def _compute_alert_pick_v2(
                 source=source,
                 season=2,
                 receipt=result.receipt,
+                exit_rule="5d_after_earnings",
+                exit_date=exit_date,
             )
             db.add(pick)
             await db.commit()
@@ -1879,6 +1884,9 @@ async def list_alert_picks(
             option_mark_note=option_mark_note,
             season=r.season,
             receipt=r.receipt,
+            exit_rule=r.exit_rule,
+            exit_date=r.exit_date.isoformat() if r.exit_date else None,
+            stock_move_5d=float(r.stock_move_5d) if r.stock_move_5d is not None else None,
         ))
 
     return items

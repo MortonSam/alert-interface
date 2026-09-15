@@ -206,6 +206,9 @@ class AlertPickLedgerItem(BaseModel):
     option_mark_note: str | None = None
     season: int = 1
     receipt: dict | None = None
+    exit_rule: str | None = None
+    exit_date: str | None = None
+    stock_move_5d: float | None = None
 
 
 class IvySampleRefusal(BaseModel):

@@ -692,6 +692,9 @@ export interface AlertPickLedgerItem {
   season: number;
   receipt: Record<string, unknown> | null;
   option_mark_note: string | null;
+  exit_rule: string | null;
+  exit_date: string | null;
+  stock_move_5d: number | null;
 }
 
 export interface IvySampleRefusal {

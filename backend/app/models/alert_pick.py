@@ -1,10 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from decimal import Decimal
-
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +41,10 @@ class AlertPick(Base):
     option_pnl_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     season: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     receipt: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # v2 exit rule columns (nullable for old picks)
+    exit_rule: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    exit_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    stock_move_5d: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
 
 
 class AlertPickEvaluation(Base):

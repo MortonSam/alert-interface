@@ -107,6 +107,18 @@ function PickCard({
         </p>
       )}
 
+      {/* Exit rule line */}
+      {pick.exit_date && !isClosed && (
+        <p className="text-xs text-muted-foreground">
+          Exit: 5 trading days after earnings ({new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })})
+        </p>
+      )}
+      {pick.exit_date && isClosed && (
+        <p className="text-xs text-muted-foreground">
+          Closed {new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at planned exit
+        </p>
+      )}
+
       {/* Row 2: Price marks + move */}
       <div className="flex items-baseline gap-4 text-sm">
         <div>
@@ -171,6 +183,11 @@ function PickCard({
           >
             {fmtPnlDollars(pick.option_pnl_dollars)} ({fmtPnlPct(pick.option_pnl_pct)})
           </span>
+          {pick.stock_move_5d != null && (
+            <span className="text-muted-foreground ml-3">
+              stock {pick.stock_move_5d >= 0 ? "+" : ""}{pick.stock_move_5d.toFixed(2)}%
+            </span>
+          )}
         </div>
       )}
       {!isClosed && pick.cost_to_enter != null && (
@@ -258,6 +275,9 @@ function PickCard({
             )}
             {pick.receipt.implied_pct != null && (
               <span>implied {(pick.receipt.implied_pct as number).toFixed(1)}%</span>
+            )}
+            {pick.exit_date && (
+              <span>exit {new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
             )}
           </div>
         </div>

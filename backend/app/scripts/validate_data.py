@@ -987,6 +987,36 @@ async def check_v2_pick_integrity(session) -> CheckResult:
     return CheckResult("v2_pick_integrity", ERROR, f"{len(bad)} v2 pick(s) with missing data", bad)
 
 
+async def check_v2_exit_date(session) -> CheckResult:
+    """ERROR if any v2 pick is missing exit_date or is open > 2 trading days past exit_date."""
+    v2_picks = (await session.execute(
+        select(AlertPick.symbol, AlertPick.generated_at, AlertPick.exit_date, AlertPick.status)
+        .where(AlertPick.algo_version.like("v2%"))
+    )).all()
+
+    if not v2_picks:
+        return CheckResult("v2_exit_date", PASS, "No v2 picks to check")
+
+    bad: list[str] = []
+    today = date.today()
+
+    for r in v2_picks:
+        dt = r.generated_at.strftime("%Y-%m-%d") if r.generated_at else "?"
+        if r.exit_date is None:
+            bad.append(f"{r.symbol} ({dt}): missing exit_date")
+        elif r.status == "open" and r.exit_date:
+            # Check if more than 2 trading days past exit_date
+            # Approximate: each calendar day past exit_date that is a weekday counts
+            days_past = (today - r.exit_date).days
+            if days_past > 3:  # 3 calendar days ~ 2 trading days with buffer
+                bad.append(f"{r.symbol} ({dt}): open {days_past} day(s) past exit_date {r.exit_date}")
+
+    if not bad:
+        return CheckResult("v2_exit_date", PASS, f"All {len(v2_picks)} v2 picks have exit_date and none overdue")
+
+    return CheckResult("v2_exit_date", ERROR, f"{len(bad)} v2 pick(s) with exit_date issues", bad)
+
+
 async def check_shadow_pick_count(session) -> CheckResult:
     """WARN if latest nightly shadow_pick count does not match evaluation count."""
     from sqlalchemy import Date as SADate
@@ -1070,6 +1100,8 @@ CHECKS = [
     check_earnings_features_momentum_nulls,
     # v2 pick integrity
     check_v2_pick_integrity,
+    # v2 exit dates
+    check_v2_exit_date,
     # Shadow picks
     check_shadow_pick_count,
 ]
