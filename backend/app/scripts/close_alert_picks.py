@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick
+from app.models.credit_shadow_pick import CreditShadowPick
 from app.models.iv_history import IVHistory
 from app.models.shadow_pick import ShadowPick
 from app.services import chain_store
@@ -376,9 +377,83 @@ async def _settle_shadow_picks() -> int:
     return 0
 
 
+async def _settle_credit_shadows() -> int:
+    """Settle credit shadow picks that have reached exit_date."""
+    today = date.today()
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(CreditShadowPick).where(
+                CreditShadowPick.settled_at.is_(None),
+                CreditShadowPick.exit_date <= today,
+            )
+        )).scalars().all()
+
+        if not rows:
+            print("[credit-shadow-settle] No credit shadow picks to settle.")
+            return 0
+
+        settled = 0
+        for csp in rows:
+            # Get chain at exit for the 4 legs
+            result = await chain_store.get_chain(session, csp.symbol, csp.expiration)
+            if result is None:
+                print(f"[credit-shadow-settle] {csp.symbol}: no chain for {csp.expiration}, skipping")
+                continue
+            chain_data, _ = result
+            puts = chain_data.get("puts", [])
+            calls = chain_data.get("calls", [])
+
+            sp_row = _find_leg(puts, float(csp.short_put_strike))
+            lp_row = _find_leg(puts, float(csp.long_put_strike))
+            sc_row = _find_leg(calls, float(csp.short_call_strike))
+            lc_row = _find_leg(calls, float(csp.long_call_strike))
+
+            if any(r is None for r in [sp_row, lp_row, sc_row, lc_row]):
+                print(f"[credit-shadow-settle] {csp.symbol}: missing leg in chain, skipping")
+                continue
+
+            sp_mid = _leg_mid(sp_row)
+            lp_mid = _leg_mid(lp_row)
+            sc_mid = _leg_mid(sc_row)
+            lc_mid = _leg_mid(lc_row)
+
+            close_value = (sp_mid + sc_mid) - (lp_mid + lc_mid)
+            credit = float(csp.credit_received)
+            max_loss_val = float(csp.max_loss)
+
+            pnl_dollars = round((credit - close_value) * 100, 2)
+            pnl_pct = round(pnl_dollars / (max_loss_val * 100), 4) if max_loss_val > 0 else 0.0
+
+            csp.close_value = Decimal(str(round(close_value, 4)))
+            csp.pnl_dollars = Decimal(str(pnl_dollars))
+            csp.pnl_pct = Decimal(str(pnl_pct))
+
+            # Stock move
+            close_price = YFinanceClient.get_close_on_date(
+                csp.symbol, csp.exit_date.isoformat(),
+            )
+            if _is_valid_price(close_price):
+                spot = float(csp.spot)
+                if spot > 0:
+                    csp.stock_move_5d = Decimal(str(round(
+                        (float(close_price) - spot) / spot * 100, 4
+                    )))
+
+            csp.settled_at = datetime.now(timezone.utc)
+            settled += 1
+            win = "WIN" if pnl_dollars > 0 else "LOSS"
+            print(f"[credit-shadow-settle] {csp.symbol} event={csp.event_date}: "
+                  f"pnl=${pnl_dollars:+.2f} ({pnl_pct:+.2%}) {win}")
+
+        await session.commit()
+        print(f"[credit-shadow-settle] Done. Settled {settled}/{len(rows)}.")
+    return 0
+
+
 async def _main() -> int:
     """Single event loop for all close operations."""
     await _settle_shadow_picks()
+    await _settle_credit_shadows()
     await _close_v2_picks()
     await _close_picks()
     return 0

@@ -894,30 +894,62 @@ async def check_iv_history_price_drift(session) -> CheckResult:
     )
 
 
-async def check_nan_alert_pick_values(session) -> CheckResult:
-    """ERROR if any alert_picks row has NaN in close_price, option_pnl_dollars, or option_pnl_pct."""
-    rows = (await session.execute(text("""
-        SELECT id, symbol, status,
-               close_price, option_pnl_dollars, option_pnl_pct
-        FROM alert_picks
-        WHERE close_price = 'NaN'::numeric
-           OR option_pnl_dollars = 'NaN'::numeric
-           OR option_pnl_pct = 'NaN'::numeric
-        ORDER BY symbol
-    """))).all()
+async def check_nan_numeric_values(session) -> CheckResult:
+    """ERROR if any numeric column in key tables contains PostgreSQL NaN.
 
-    if not rows:
-        return CheckResult("nan_alert_pick_values", PASS, "No NaN values in alert_picks price/P&L columns")
-
-    details = [
-        f"{r.symbol}  status={r.status}  close={r.close_price}  pnl$={r.option_pnl_dollars}  pnl%={r.option_pnl_pct}"
-        for r in rows
+    PostgreSQL 'NaN'::numeric is distinct from NULL and invisible to
+    IS NULL checks.  Python float('nan') fails all comparisons, so NaN
+    rows silently poison filters and aggregates.
+    """
+    # (table, [numeric_columns])
+    NAN_TABLES = [
+        ("earnings_features", [
+            "beat_rate", "median_1d_beat", "median_1d_miss", "weighted_1d",
+            "buy_share_latest", "buy_share_60d_ago", "analyst_delta",
+            "momentum_20d", "prior_avg_abs_1d", "atm_iv",
+            "prior_avg_abs_5d", "prior_up_5d_rate",
+            "actual_1d", "actual_3d", "actual_5d",
+        ]),
+        ("alert_picks", [
+            "close_price", "option_pnl_dollars", "option_pnl_pct",
+            "entry_price", "cost_to_enter", "stock_move_5d",
+        ]),
+        ("alert_pick_evaluations", [
+            "momentum_20d", "expected_move_pct", "implied_move_pct",
+        ]),
+        ("shadow_picks", [
+            "probability", "threshold_used", "actual_5d",
+        ]),
+        ("credit_shadow_picks", [
+            "spot", "expected_pct", "implied_pct",
+            "short_put_strike", "short_call_strike",
+            "long_put_strike", "long_call_strike",
+            "credit_received", "max_loss",
+            "close_value", "pnl_dollars", "pnl_pct", "stock_move_5d",
+        ]),
     ]
-    return CheckResult(
-        "nan_alert_pick_values", ERROR,
-        f"{len(rows)} alert_picks row(s) with NaN in close_price, option_pnl_dollars, or option_pnl_pct",
-        details,
-    )
+
+    bad: list[str] = []
+    for table, cols in NAN_TABLES:
+        # Check if table exists first
+        exists = (await session.execute(text(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :t)"
+        ), {"t": table})).scalar()
+        if not exists:
+            continue
+        for col in cols:
+            try:
+                cnt = (await session.execute(text(
+                    f"SELECT count(*) FROM {table} WHERE {col} = 'NaN'::numeric"
+                ))).scalar()
+            except Exception:
+                continue  # column doesn't exist yet
+            if cnt and cnt > 0:
+                bad.append(f"{table}.{col}: {cnt} NaN row(s)")
+
+    if not bad:
+        return CheckResult("nan_numeric_values", PASS, "No NaN values in any numeric column")
+    return CheckResult("nan_numeric_values", ERROR, f"NaN found in {len(bad)} column(s)", bad)
 
 
 # ── Earnings features ─────────────────────────────────────────────────────────
@@ -1055,6 +1087,44 @@ async def check_shadow_pick_count(session) -> CheckResult:
     )
 
 
+async def check_credit_shadow_integrity(session) -> CheckResult:
+    """ERROR if any credit_shadow_picks row has null strikes or credit <= 0."""
+    # Check if table exists first
+    exists = (await session.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'credit_shadow_picks')"
+    ))).scalar()
+    if not exists:
+        return CheckResult("credit_shadow_integrity", PASS, "credit_shadow_picks table not yet created")
+
+    bad_rows = (await session.execute(text("""
+        SELECT id, symbol, event_date, credit_received
+        FROM credit_shadow_picks
+        WHERE short_put_strike IS NULL
+           OR short_call_strike IS NULL
+           OR long_put_strike IS NULL
+           OR long_call_strike IS NULL
+           OR credit_received IS NULL
+           OR credit_received <= 0
+        ORDER BY event_date DESC
+    """))).all()
+
+    if not bad_rows:
+        total = (await session.execute(text(
+            "SELECT count(*) FROM credit_shadow_picks"
+        ))).scalar()
+        return CheckResult(
+            "credit_shadow_integrity", PASS,
+            f"All {total} credit_shadow_picks have valid strikes and positive credit",
+        )
+
+    details = [f"{r.symbol} {r.event_date} credit={r.credit_received}" for r in bad_rows]
+    return CheckResult(
+        "credit_shadow_integrity", ERROR,
+        f"{len(bad_rows)} credit_shadow_picks row(s) with null strikes or credit <= 0",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1092,7 +1162,7 @@ CHECKS = [
     # Options chains
     check_chain_coverage,
     # NaN guard
-    check_nan_alert_pick_values,
+    check_nan_numeric_values,
     # IV history price drift
     check_iv_history_price_drift,
     # Earnings features
@@ -1104,6 +1174,8 @@ CHECKS = [
     check_v2_exit_date,
     # Shadow picks
     check_shadow_pick_count,
+    # Credit shadow picks
+    check_credit_shadow_integrity,
 ]
 
 

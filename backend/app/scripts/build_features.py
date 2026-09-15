@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import statistics
 import sys
 import time
@@ -46,6 +47,15 @@ MIN_HIST_SAMPLE = 8           # minimum prior events for earnings lean
 BATCH_SIZE = 5
 BATCH_SLEEP = 2.0
 YF_TIMEOUT = 45
+
+
+def _clean(val):
+    """Convert NaN floats to None so PostgreSQL stores NULL, not 'NaN'::numeric."""
+    if val is None:
+        return None
+    if isinstance(val, float) and math.isnan(val):
+        return None
+    return val
 
 
 # ── Lean replay (v1 exact logic) ────────────────────────────────────────────
@@ -157,6 +167,8 @@ def _momentum_20d(prices: pd.DataFrame, event_date: date) -> float | None:
         return None
 
     day_before_close = float(before_prices["Close"].iloc[-1])
+    if math.isnan(day_before_close):
+        return None
 
     # Go back ~20 trading days
     if len(before_prices) < 21:
@@ -165,6 +177,8 @@ def _momentum_20d(prices: pd.DataFrame, event_date: date) -> float | None:
     else:
         ref_close = float(before_prices["Close"].iloc[-21])
 
+    if math.isnan(ref_close):
+        return None
     if ref_close == 0:
         return None
     return round((day_before_close - ref_close) / ref_close * 100, 4)
@@ -259,6 +273,34 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                     await asyncio.sleep(BATCH_SLEEP)
                 done = min(i + BATCH_SIZE, len(symbols_to_fetch))
                 print(f"  {done}/{len(symbols_to_fetch)} tickers fetched")
+
+            # Abort if too many fetches failed (rate-limiting, outage)
+            failed_tids = [tid for tid in tickers_list if prices_by_ticker.get(tid) is None]
+            fail_rate = len(failed_tids) / len(tickers_list) * 100 if tickers_list else 0
+            if failed_tids:
+                print(f"\n  yfinance failures: {len(failed_tids)}/{len(tickers_list)} ({fail_rate:.1f}%)")
+                for tid in failed_tids[:20]:
+                    print(f"    fetch-failed: {ticker_symbols[tid]}")
+                if len(failed_tids) > 20:
+                    print(f"    ... and {len(failed_tids) - 20} more")
+
+            if fail_rate > 10:
+                print(f"\nABORT: {fail_rate:.1f}% of yfinance fetches failed (threshold 10%). "
+                      "No data was changed. Retry later or use --skip-yfinance.")
+                return
+
+            # For failed tickers, load existing momentum so we don't overwrite
+            # valid values with NULL
+            if failed_tids:
+                ef_result = await session.execute(
+                    select(EarningsFeature.ticker_id, EarningsFeature.event_date,
+                           EarningsFeature.momentum_20d)
+                    .where(EarningsFeature.ticker_id.in_(failed_tids))
+                )
+                for tid, edate, mom in ef_result.all():
+                    existing_momentum[(tid, edate)] = float(mom) if mom is not None else None
+                print(f"  Preserved {sum(1 for v in existing_momentum.values() if v is not None)} "
+                      f"existing momentum values for fetch-failed tickers")
         else:
             print("Skipping yfinance — loading existing momentum_20d from DB")
             ef_result = await session.execute(
@@ -360,9 +402,9 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                         net_90 += 1 if atype == "upgrade" else -1
                 analyst_net_90d = net_90 if ticker_actions else None
 
-                # Momentum (from yfinance prices or existing DB values)
-                if not skip_yfinance:
-                    mom_20d = _momentum_20d(prices, reaction.event_date) if prices is not None else None
+                # Momentum (from yfinance prices, or preserve existing on fetch failure)
+                if not skip_yfinance and prices is not None:
+                    mom_20d = _momentum_20d(prices, reaction.event_date)
                 else:
                     mom_20d = existing_momentum.get((tid, reaction.event_date))
 
@@ -425,6 +467,10 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                     "actual_5d": actual_5d,
                     "outcome": outcome_val,
                 }
+                # Sanitize NaN → None for all numeric values
+                for key in row:
+                    row[key] = _clean(row[key])
+
                 feature_rows.append(row)
 
                 # Track nulls

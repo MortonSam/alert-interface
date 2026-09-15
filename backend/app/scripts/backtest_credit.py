@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 from dataclasses import dataclass
 from datetime import date
@@ -48,23 +49,35 @@ class Row:
     momentum_20d: float | None
 
 
+def _safe_float(val) -> float | None:
+    """Convert Decimal/numeric to float, returning None for NaN or None."""
+    if val is None:
+        return None
+    f = float(val)
+    if math.isnan(f):
+        return None
+    return f
+
+
 def _load_rows(features: list) -> list[Row]:
     """Filter features to those usable for the backtest."""
     rows = []
     for f in features:
         if f.prior_n is None or f.prior_n < MIN_PRIOR_N:
             continue
-        if f.prior_avg_abs_5d is None or float(f.prior_avg_abs_5d) <= 0:
+        avg5 = _safe_float(f.prior_avg_abs_5d)
+        if avg5 is None or avg5 <= 0:
             continue
-        if f.actual_5d is None:
+        act5 = _safe_float(f.actual_5d)
+        if act5 is None:
             continue
         rows.append(Row(
             symbol=f.symbol,
             event_date=f.event_date,
             prior_n=int(f.prior_n),
-            prior_avg_abs_5d=float(f.prior_avg_abs_5d),
-            actual_5d=float(f.actual_5d),
-            momentum_20d=float(f.momentum_20d) if f.momentum_20d is not None else None,
+            prior_avg_abs_5d=avg5,
+            actual_5d=act5,
+            momentum_20d=_safe_float(f.momentum_20d),
         ))
     return rows
 
@@ -154,7 +167,9 @@ async def _run() -> int:
         print("[credit-backtest] No usable rows.")
         return 1
 
-    print(f"[credit-backtest] {len(rows)} events with prior_n >= {MIN_PRIOR_N}")
+    mom_count = sum(1 for r in rows if r.momentum_20d is not None)
+    print(f"[credit-backtest] {len(rows)} events with prior_n >= {MIN_PRIOR_N}, "
+          f"{mom_count} with momentum_20d")
 
     # Split into folds
     def fold_filter(rows: list[Row], start: date, end: date) -> list[Row]:

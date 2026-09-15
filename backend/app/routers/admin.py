@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
 from app.database import get_db
+from app.models.credit_shadow_pick import CreditShadowPick
 from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
 from app.services.system_metadata_service import set_value
@@ -178,5 +179,63 @@ async def shadow_summary(db: AsyncSession = Depends(get_db)) -> dict:
         "v2_picks": len(v2_picks),
         "v2_hits": v2_hits,
         "v2_hit_rate": v2_hit_rate,
+        "recent": recent_out,
+    }
+
+
+@router.get("/credit-shadow-summary", dependencies=[Depends(require_admin)])
+async def credit_shadow_summary(db: AsyncSession = Depends(get_db)) -> dict:
+    """Credit shadow iron condor summary: settled stats, win rate, last 20 rows."""
+    total = (await db.execute(
+        select(func.count()).select_from(CreditShadowPick)
+    )).scalar_one()
+
+    settled_rows = (await db.execute(
+        select(CreditShadowPick).where(CreditShadowPick.settled_at.is_not(None))
+    )).scalars().all()
+
+    settled_count = len(settled_rows)
+    wins = sum(1 for r in settled_rows if r.pnl_dollars is not None and float(r.pnl_dollars) > 0)
+    win_rate = wins / settled_count if settled_count else None
+    mean_pnl_dollars = (
+        sum(float(r.pnl_dollars) for r in settled_rows if r.pnl_dollars is not None) / settled_count
+        if settled_count else None
+    )
+    mean_pnl_pct = (
+        sum(float(r.pnl_pct) for r in settled_rows if r.pnl_pct is not None) / settled_count
+        if settled_count else None
+    )
+    worst_loss = (
+        min(float(r.pnl_dollars) for r in settled_rows if r.pnl_dollars is not None)
+        if settled_count else None
+    )
+
+    recent = (await db.execute(
+        select(CreditShadowPick)
+        .order_by(CreditShadowPick.decided_at.desc())
+        .limit(20)
+    )).scalars().all()
+
+    recent_out = []
+    for r in recent:
+        recent_out.append({
+            "symbol": r.symbol,
+            "event_date": r.event_date.isoformat(),
+            "spot": float(r.spot),
+            "credit_received": float(r.credit_received),
+            "max_loss": float(r.max_loss),
+            "pnl_dollars": float(r.pnl_dollars) if r.pnl_dollars is not None else None,
+            "pnl_pct": float(r.pnl_pct) if r.pnl_pct is not None else None,
+            "settled": r.settled_at is not None,
+        })
+
+    return {
+        "total": total,
+        "settled": settled_count,
+        "wins": wins,
+        "win_rate": win_rate,
+        "mean_pnl_dollars": mean_pnl_dollars,
+        "mean_pnl_pct": mean_pnl_pct,
+        "worst_loss": worst_loss,
         "recent": recent_out,
     }

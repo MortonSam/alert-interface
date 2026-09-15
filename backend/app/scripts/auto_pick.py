@@ -20,11 +20,13 @@ from sqlalchemy import Date as SADate, func, select
 from app.constants import LEDGER_START
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
+from app.models.credit_shadow_pick import CreditShadowPick
 from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.routers.thesis import compute_alert_pick
 from app.services import chain_store
+from app.services.trading_calendar import nth_trading_day_after
 
 from decimal import Decimal
 
@@ -121,6 +123,120 @@ async def _build_no_chain_fields(session, sym: str) -> dict:
     except Exception:
         pass  # best-effort; verdict alone is sufficient
     return fields
+
+
+def _leg_mid(row: dict) -> float:
+    """Compute mid price for a single option leg (same rule as close_alert_picks)."""
+    bid = row.get("bid") or 0.0
+    ask = row.get("ask") or 0.0
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    if bid == 0 and ask > 0:
+        return ask / 2.0
+    return 0.0
+
+
+async def _build_iron_condor(session, sym: str, event_date: date, receipt: dict) -> CreditShadowPick | None:
+    """Record a hypothetical iron condor from a vol_gate refusal. Returns None if structure can't be built."""
+    expected_pct = receipt.get("expected_pct")
+    implied_pct = receipt.get("implied_pct")
+    if expected_pct is None or implied_pct is None:
+        return None
+
+    # Pick expiration
+    exp = await chain_store.pick_expiration(session, sym, event_date.isoformat())
+    if exp is None:
+        return None
+
+    # Get chain
+    result = await chain_store.get_chain(session, sym, exp)
+    if result is None:
+        return None
+    chain_data, _ = result
+    spot = chain_data.get("underlying_price")
+    if spot is None or spot <= 0:
+        return None
+
+    # Compute targets: spot * (1 +/- 1.25 * expected_pct/100)
+    put_target = spot * (1 - 1.25 * expected_pct / 100)
+    call_target = spot * (1 + 1.25 * expected_pct / 100)
+
+    puts = sorted(chain_data.get("puts", []), key=lambda r: r.get("strike", 0))
+    calls = sorted(chain_data.get("calls", []), key=lambda r: r.get("strike", 0))
+    if not puts or not calls:
+        return None
+
+    # Short put = max strike <= put_target
+    short_put_row = None
+    for row in reversed(puts):
+        if row.get("strike", 0) <= put_target:
+            short_put_row = row
+            break
+    if short_put_row is None:
+        return None
+
+    # Long put = next strike below short put
+    sp_strike = short_put_row["strike"]
+    long_put_row = None
+    for row in reversed(puts):
+        if row.get("strike", 0) < sp_strike:
+            long_put_row = row
+            break
+    if long_put_row is None:
+        return None
+
+    # Short call = min strike >= call_target
+    short_call_row = None
+    for row in calls:
+        if row.get("strike", 0) >= call_target:
+            short_call_row = row
+            break
+    if short_call_row is None:
+        return None
+
+    # Long call = next strike above short call
+    sc_strike = short_call_row["strike"]
+    long_call_row = None
+    for row in calls:
+        if row.get("strike", 0) > sc_strike:
+            long_call_row = row
+            break
+    if long_call_row is None:
+        return None
+
+    # Compute mids
+    sp_mid = _leg_mid(short_put_row)
+    sc_mid = _leg_mid(short_call_row)
+    lp_mid = _leg_mid(long_put_row)
+    lc_mid = _leg_mid(long_call_row)
+
+    credit = (sp_mid + sc_mid) - (lp_mid + lc_mid)
+    if credit <= 0:
+        return None
+
+    put_wing = sp_strike - long_put_row["strike"]
+    call_wing = long_call_row["strike"] - sc_strike
+    max_loss = max(put_wing, call_wing) - credit
+    if max_loss <= 0:
+        return None
+
+    exit_dt = nth_trading_day_after(event_date, 5)
+
+    return CreditShadowPick(
+        symbol=sym,
+        event_date=event_date,
+        spot=Decimal(str(round(spot, 4))),
+        expected_pct=Decimal(str(round(expected_pct, 4))),
+        implied_pct=Decimal(str(round(implied_pct, 4))),
+        short_put_strike=Decimal(str(round(sp_strike, 4))),
+        short_call_strike=Decimal(str(round(sc_strike, 4))),
+        long_put_strike=Decimal(str(round(long_put_row["strike"], 4))),
+        long_call_strike=Decimal(str(round(long_call_row["strike"], 4))),
+        expiration=exp,
+        credit_received=Decimal(str(round(credit, 4))),
+        max_loss=Decimal(str(round(max_loss, 2))),
+        exit_date=exit_dt,
+    )
 
 
 async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
@@ -234,6 +350,14 @@ async def _run(dry_run: bool = False) -> int:
                         leans=leans_dump, pick_id=pick_id, note=note,
                         v2_fields=v2_fields,
                     )
+
+                    # Record hypothetical iron condor on vol_gate
+                    if outcome == "vol_gate":
+                        receipt = result.get("receipt")
+                        if receipt:
+                            ic = await _build_iron_condor(session, sym, next_earnings, receipt)
+                            if ic is not None:
+                                session.add(ic)
 
                 leans_summary = " ".join(f"{l.signal[0]}={l.direction[:3]}" for l in leans) if leans else ""
                 suffix = " (cap)" if cap_hit else ""
