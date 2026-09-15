@@ -33,47 +33,52 @@ MAX_OPEN_TOTAL = 10
 MAX_DRAFT_ATTEMPTS = 6
 
 
-def _build_v2_fields(result: dict) -> dict | None:
-    """Extract v2 worksheet columns from a compute_alert_pick result."""
+def _build_v2_fields(result: dict) -> dict:
+    """Extract v2 worksheet columns from a compute_alert_pick result.
+
+    Always returns a dict with at least verdict. Receipt fields are
+    populated whenever the receipt is present (picks AND refusals).
+    """
     receipt = result.get("receipt")
-    if not receipt:
-        return None
     fields: dict = {}
-    if receipt.get("momentum_20d") is not None:
-        fields["momentum_20d"] = Decimal(str(round(receipt["momentum_20d"], 2)))
-    if receipt.get("n_comparable") is not None:
-        fields["prior_n"] = int(receipt["n_comparable"])
-    if receipt.get("expected_pct") is not None:
-        fields["expected_move_pct"] = Decimal(str(receipt["expected_pct"]))
-    if receipt.get("implied_pct") is not None:
-        fields["implied_move_pct"] = Decimal(str(receipt["implied_pct"]))
+    if receipt:
+        if receipt.get("momentum_20d") is not None:
+            fields["momentum_20d"] = Decimal(str(round(receipt["momentum_20d"], 2)))
+        if receipt.get("n_comparable") is not None:
+            fields["prior_n"] = int(receipt["n_comparable"])
+        if receipt.get("expected_pct") is not None:
+            fields["expected_move_pct"] = Decimal(str(receipt["expected_pct"]))
+        if receipt.get("implied_pct") is not None:
+            fields["implied_move_pct"] = Decimal(str(receipt["implied_pct"]))
     fields["verdict"] = _build_verdict(result, receipt)
     return fields
 
 
-def _build_verdict(result: dict, receipt: dict) -> str:
-    """Build a plain-English verdict string for the v2 worksheet."""
+def _build_verdict(result: dict, receipt: dict | None) -> str:
+    """Build a plain-English verdict string for the v2 worksheet.
+
+    Outcome codes are short DB keys; verdict is the human-readable text
+    shown on the Desk worksheet.
+    """
     outcome = result.get("outcome", "")
+    gate_reason = receipt.get("gate_reason") if receipt else None
+
     if outcome == "no_features":
         return "Passed, no features available"
     if outcome == "no_fresh_chain":
         return "Refused, no fresh chain"
-    gate_reason = receipt.get("gate_reason")
-    if gate_reason and outcome != "picked":
-        # Normalize gate reasons to plain English
-        if "options pricing" in gate_reason:
+    if outcome == "vol_gate":
+        if gate_reason:
             return f"Refused, {gate_reason}"
-        if "insufficient history" in gate_reason:
-            n = receipt.get("n_comparable", 0) or 0
-            return f"Passed, {n} prior events (needs 8)"
-        if "momentum" in gate_reason:
-            m = receipt.get("momentum_20d")
-            if m is not None:
-                return f"Passed, momentum {m:+.0f}% (needs -10%)"
-            return f"Passed, {gate_reason}"
-        if "no fresh options chain" in gate_reason:
-            return "Refused, no fresh chain"
-        return f"Passed, {gate_reason}"
+        return "Refused, IV too high"
+    if outcome == "insufficient_history":
+        n = receipt.get("n_comparable", 0) if receipt else 0
+        return f"Passed, {n or 0} prior events (needs 8)"
+    if outcome == "momentum_gate":
+        m = receipt.get("momentum_20d") if receipt else None
+        if m is not None:
+            return f"Passed, momentum {m:+.0f}% (needs <= -10%)"
+        return "Passed, no momentum data"
     if outcome == "picked":
         structure = result.get("structure")
         if structure:
@@ -91,6 +96,31 @@ def _build_verdict(result: dict, receipt: dict) -> str:
     if outcome == "error":
         return "Error"
     return outcome
+
+
+async def _build_no_chain_fields(session, sym: str) -> dict:
+    """Build v2 worksheet fields for a no-chain refusal.
+
+    Runs compute_live_features to get momentum, prior_n, and expected
+    move -- everything that doesn't require a chain. implied_move_pct
+    stays null.
+    """
+    from app.services.ivy_v2 import compute_live_features, compute_expected_move
+
+    fields: dict = {"verdict": "Refused, no fresh chain"}
+    try:
+        live = await compute_live_features(sym, session)
+        if live is not None:
+            if live.momentum_20d is not None:
+                fields["momentum_20d"] = Decimal(str(round(float(live.momentum_20d), 2)))
+            if live.prior_n is not None:
+                fields["prior_n"] = int(live.prior_n)
+            expected = compute_expected_move(live)
+            if expected is not None:
+                fields["expected_move_pct"] = Decimal(str(round(expected, 2)))
+    except Exception:
+        pass  # best-effort; verdict alone is sufficient
+    return fields
 
 
 async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
@@ -168,8 +198,10 @@ async def _run(dry_run: bool = False) -> int:
             if not is_fresh:
                 note = f"as_of={chain_as_of}" if chain_as_of else "no chain"
                 if not dry_run:
+                    # Still evaluate to populate worksheet fields (without chain)
+                    v2_fields = await _build_no_chain_fields(session, sym)
                     _log_evaluation(session, sym, "no_fresh_chain", note=note,
-                                   v2_fields={"verdict": "Refused, no fresh chain"})
+                                   v2_fields=v2_fields)
                 print(f"  {sym} (earnings {next_earnings}): no_fresh_chain ({note})")
                 continue
 

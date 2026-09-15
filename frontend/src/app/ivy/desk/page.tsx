@@ -50,9 +50,23 @@ function ImpliedCell({ row }: { row: IvyWorksheetRow }) {
   );
 }
 
+const OUTCOME_LABELS: Record<string, string> = {
+  no_fresh_chain: "No fresh chain",
+  vol_gate: "IV too high",
+  insufficient_history: "Insufficient history",
+  momentum_gate: "Momentum gate",
+  structure_failed: "Structure failed",
+  cap_reached: "Cap reached",
+  no_features: "No features",
+  error: "Error",
+  picked: "Picked",
+  skipped: "Skipped",
+};
+
 function V2Verdict({ row }: { row: IvyWorksheetRow }) {
   if (!row.verdict) {
-    return <td className="px-3 py-2.5 text-muted-foreground">{row.outcome}</td>;
+    const label = OUTCOME_LABELS[row.outcome] ?? row.outcome;
+    return <td className="px-3 py-2.5 text-muted-foreground">{label}</td>;
   }
   const isPicked = row.verdict.startsWith("Picked");
   return (

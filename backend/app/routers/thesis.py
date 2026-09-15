@@ -1104,6 +1104,7 @@ async def _compute_alert_pick_v2(
             "generated_at": generated_at,
             "existing_pick": False,
             "draft": None,
+            "receipt": None,
         }
 
     # Load all historical features for walk-forward base rate
@@ -1130,14 +1131,27 @@ async def _compute_alert_pick_v2(
     )
 
     if not result.pick:
+        # Map free-text skip_reason to a short stable outcome code
+        reason = result.skip_reason or ""
+        if "no fresh options chain" in reason:
+            outcome_code = "no_fresh_chain"
+        elif "options pricing" in reason:
+            outcome_code = "vol_gate"
+        elif "insufficient history" in reason:
+            outcome_code = "insufficient_history"
+        elif "momentum" in reason or "no momentum" in reason:
+            outcome_code = "momentum_gate"
+        else:
+            outcome_code = "skipped"
         return {
-            "outcome": result.skip_reason or "skipped",
+            "outcome": outcome_code,
             "leans": None,
             "pick_id": None,
             "note": result.skip_reason,
             "generated_at": generated_at,
             "existing_pick": False,
             "draft": None,
+            "receipt": result.receipt,
         }
 
     # ── Persist v2 pick (deterministic strikes from chain) ──────────────

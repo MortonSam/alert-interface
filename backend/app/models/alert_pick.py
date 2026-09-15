@@ -54,7 +54,7 @@ class AlertPickEvaluation(Base):
     symbol: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False)
     leans: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     alert_pick_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("alert_picks.id"), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
