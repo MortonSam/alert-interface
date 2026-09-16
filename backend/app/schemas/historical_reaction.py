@@ -107,6 +107,22 @@ class ConditionalEarningsRead(BaseModel):
     last_event_date: str | None = None         # ISO date of most recent earnings in sample
 
 
+class SectorPeerItem(BaseModel):
+    symbol: str
+    avg_abs_1d: float
+    quarter_count: int
+
+
+class SectorPeersRead(BaseModel):
+    symbol: str
+    sector: str | None
+    own_avg_abs_1d: float | None
+    sector_avg_abs_1d: float | None
+    peer_count: int
+    as_of: str | None
+    peers: list[SectorPeerItem]
+
+
 class AnalystReactionStatsRead(BaseModel):
     """Precomputed per-ticker stats: how does this stock move on upgrades vs downgrades?"""
     model_config = ConfigDict(from_attributes=True)

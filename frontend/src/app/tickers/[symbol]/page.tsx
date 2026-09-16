@@ -13,6 +13,7 @@ import {
   api, ApiError, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker,
   type Event, type EventType, type EarningsOutcome, type HistoricalReaction,
   type ReactionSummary, type ConditionalEarningsRead, type AnalystReactionStatsRead,
+  type SectorPeersRead,
   type ResearchNote, type VerificationClaim, type VerificationResult,
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
@@ -175,11 +176,14 @@ function CatalystRow({ event }: { event: Event }) {
 // ── History insights panel (replaces EarningsInsightsPanel) ──────────────────
 
 function HistoryInsightsPanel({
-  s, ce,
+  s, ce, sectorPeers,
 }: {
   s: ReactionSummary;
   ce: ConditionalEarningsRead | null;
+  sectorPeers: SectorPeersRead | null;
 }) {
+  const [peersExpanded, setPeersExpanded] = useState(false);
+
   const sectorVsOwn =
     s.sector_avg_abs_1d != null && s.avg_abs_1d != null
       ? s.avg_abs_1d < s.sector_avg_abs_1d * 0.85 ? "smaller than"
@@ -197,12 +201,52 @@ function HistoryInsightsPanel({
   return (
     <div className="space-y-1.5 mb-3">
       {showSector && (
-        <p className="text-xs text-muted-foreground">
-          Typical earnings move (±{s.avg_abs_1d!.toFixed(2)}%) is{" "}
-          <span className="font-medium">{sectorVsOwn}</span> the{" "}
-          {s.sector ?? "sector"} <ExplainTip term="peer average">peer average</ExplainTip> (±{s.sector_avg_abs_1d!.toFixed(2)}%){" "}
-          across {s.sector_peer_count} peers
-        </p>
+        <>
+          <p className="text-xs text-muted-foreground">
+            Typical earnings move (±{s.avg_abs_1d!.toFixed(2)}%) is{" "}
+            <span className="font-medium">{sectorVsOwn}</span> the{" "}
+            {s.sector ?? "sector"} <ExplainTip term="peer average">peer average</ExplainTip> (±{s.sector_avg_abs_1d!.toFixed(2)}%){" "}
+            across {s.sector_peer_count} peers
+          </p>
+          {sectorPeers && sectorPeers.peers.length > 0 && (
+            <>
+              <button
+                onClick={() => setPeersExpanded(p => !p)}
+                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {peersExpanded ? "Hide peer list ▴" : `Show ${sectorPeers.peers.length} peers ▾`}
+              </button>
+              {peersExpanded && (
+                <div className="max-h-64 overflow-y-auto mt-1">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/40">
+                        <th className="text-left font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-3">Symbol</th>
+                        <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-3">Avg 1d move</th>
+                        <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1">Quarters</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {sectorPeers.peers.map(p => {
+                        const isOwn = p.symbol === s.symbol;
+                        return (
+                          <tr key={p.symbol} className={isOwn ? "bg-primary/5 font-medium" : ""}>
+                            <td className="py-1 pr-3 text-xs">{p.symbol}</td>
+                            <td className="py-1 pr-3 text-right tabular-nums">±{p.avg_abs_1d.toFixed(2)}%</td>
+                            <td className="py-1 text-right tabular-nums">{p.quarter_count}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {sectorPeers.as_of && (
+                    <p className="text-[10px] text-muted-foreground/70 mt-1">Through {fmtBasisDate(sectorPeers.as_of)}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
       {showBeatFollow && (
         <p className="text-xs text-muted-foreground">
@@ -1255,6 +1299,7 @@ export default function TickerPage() {
   const [reactionStatus, setReactionStatus]   = useState<SectionStatus>("loading");
   const [reactionError, setReactionError]     = useState<string | null>(null);
   const [reactionSummary, setReactionSummary] = useState<ReactionSummary | null>(null);
+  const [sectorPeers, setSectorPeers] = useState<SectorPeersRead | null>(null);
 
   const [historyView, setHistoryView] = useState<"earnings" | "fed">("earnings");
   const [fomcReactions, setFomcReactions] = useState<HistoricalReaction[]>([]);
@@ -1439,6 +1484,10 @@ export default function TickerPage() {
       .summary(upperSymbol)
       .then(setReactionSummary)
       .catch(() => setReactionSummary(null));
+    api.reactions
+      .sectorPeers(upperSymbol)
+      .then(setSectorPeers)
+      .catch(() => setSectorPeers(null));
     api.reactions
       .list({ symbol: upperSymbol, event_type: "fomc" })
       .then((rows) => { setFomcReactions(rows); setFomcStatus("done"); })
@@ -2137,7 +2186,7 @@ export default function TickerPage() {
             <>
               <ReactionChart reactions={reactions} />
               {reactionSummary && reactionSummary.total_quarters >= 3 && (
-                <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} />
+                <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} sectorPeers={sectorPeers} />
               )}
               <ReactionsTable reactions={reactions} />
             </>

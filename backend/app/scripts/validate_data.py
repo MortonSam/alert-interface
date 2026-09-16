@@ -1245,6 +1245,69 @@ async def check_analyst_stats_continuation_range(session) -> CheckResult:
     )
 
 
+async def check_sector_peer_avg_range(session) -> CheckResult:
+    """ERROR if any ticker's avg abs 1d earnings move is outside [0.5, 40.0]."""
+    rows = (await session.execute(
+        select(
+            Ticker.symbol,
+            func.avg(func.abs(HistoricalReaction.pct_change_1d)).label("avg_abs"),
+        )
+        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.pct_change_1d.isnot(None),
+        )
+        .group_by(Ticker.symbol)
+        .having(
+            (func.avg(func.abs(HistoricalReaction.pct_change_1d)) < Decimal("0.5")) |
+            (func.avg(func.abs(HistoricalReaction.pct_change_1d)) > Decimal("40.0"))
+        )
+        .order_by(Ticker.symbol)
+    )).all()
+
+    if not rows:
+        return CheckResult("sector_peer_avg_range", PASS, "All per-ticker avg abs 1d in [0.5, 40.0]")
+
+    details = [f"{r.symbol}  avg_abs_1d={float(r.avg_abs):.2f}" for r in rows]
+    return CheckResult(
+        "sector_peer_avg_range", ERROR,
+        f"{len(rows)} ticker(s) with avg abs 1d outside [0.5, 40.0]",
+        details,
+    )
+
+
+async def check_sector_peer_count_range(session) -> CheckResult:
+    """ERROR if any sector's distinct peer count is outside [5, 150]."""
+    rows = (await session.execute(
+        select(
+            Ticker.sector,
+            func.count(func.distinct(Ticker.id)).label("peer_count"),
+        )
+        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+        .where(
+            Ticker.sector.isnot(None),
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.pct_change_1d.isnot(None),
+        )
+        .group_by(Ticker.sector)
+        .having(
+            (func.count(func.distinct(Ticker.id)) < 5) |
+            (func.count(func.distinct(Ticker.id)) > 150)
+        )
+        .order_by(Ticker.sector)
+    )).all()
+
+    if not rows:
+        return CheckResult("sector_peer_count_range", PASS, "All sector peer counts in [5, 150]")
+
+    details = [f"{r.sector}  peer_count={r.peer_count}" for r in rows]
+    return CheckResult(
+        "sector_peer_count_range", ERROR,
+        f"{len(rows)} sector(s) with peer count outside [5, 150]",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1300,6 +1363,9 @@ CHECKS = [
     check_reaction_pct_range,
     check_analyst_stats_median_range,
     check_analyst_stats_continuation_range,
+    # Sector peers
+    check_sector_peer_avg_range,
+    check_sector_peer_count_range,
 ]
 
 
