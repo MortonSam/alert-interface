@@ -23,7 +23,15 @@ from app.services.system_metadata_service import get_value as _get_meta, set_val
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services import chain_store
 from app.services.finnhub_client import FinnhubClient
+from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regime_label, discover_rv_tier
+from app.schemas.options import LabelRule as OptionsLabelRule
 from app.services import news_cache, quote_cache
+
+
+def _to_options_lr(lv: object) -> OptionsLabelRule | None:
+    if lv is None:
+        return None
+    return OptionsLabelRule(label=lv.label, rule=lv.rule)  # type: ignore[union-attr]
 from app.services.yfinance_client import YFinanceClient
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
@@ -1198,11 +1206,13 @@ async def get_options_read(
     if cached_raw:
         try:
             c = json.loads(cached_raw)
+            spread_pp_cached = c.get("iv_rv_spread_pp")
             return OptionsReadRead(
                 symbol=sym, content=c["content"], facts=c["facts"],
                 model_used=c["model_used"], generated_at=c["generated_at"],
                 cached=True, as_of=as_of,
-                iv_rv_spread_pp=c.get("iv_rv_spread_pp"),
+                iv_rv_spread_pp=spread_pp_cached,
+                spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
             )
         except Exception:
             pass  # corrupt cache → fall through to regenerate
@@ -1483,6 +1493,7 @@ STRICT RULES:
         model_used=gen["model_used"], generated_at=generated_at,
         cached=False, as_of=as_of,
         iv_rv_spread_pp=iv_rv_spread_pp,
+        spread_labeled=_to_options_lr(spread_label(iv_rv_spread_pp)),
     )
 
 
@@ -1566,10 +1577,7 @@ async def get_explain(
             "realized_vol_20d": _fpct(rv_20d),
             "rv_rank": f"{rv_rank_val:.1f}" if rv_rank_val is not None else "(unavailable)",
             "interpretation": (
-                "options are priced above recent realized movement" if spread_pp is not None and spread_pp > 5
-                else "options are priced below recent realized movement" if spread_pp is not None and spread_pp < -5
-                else "options pricing roughly matches recent realized movement" if spread_pp is not None
-                else "(unavailable)"
+                spread_label(spread_pp).label if spread_label(spread_pp) else "(unavailable)"
             ),
         })
 
@@ -1582,13 +1590,8 @@ async def get_explain(
         rv_max = float(rv_snapshot.rv_max_1y) if rv_snapshot and rv_snapshot.rv_max_1y is not None else None
         sample = rv_snapshot.sample_days if rv_snapshot else 0
 
-        tier = (
-            "extreme" if rv_rank_val is not None and rv_rank_val >= 90
-            else "elevated" if rv_rank_val is not None and rv_rank_val >= 70
-            else "normal" if rv_rank_val is not None and rv_rank_val >= 25
-            else "quiet" if rv_rank_val is not None
-            else "(unavailable)"
-        )
+        _rvl = rv_rank_label(rv_rank_val)
+        tier = _rvl.label if _rvl else "(unavailable)"
 
         facts.update({
             "rv_rank": f"{rv_rank_val:.1f}" if rv_rank_val is not None else "(unavailable)",
@@ -1652,10 +1655,7 @@ async def get_explain(
                         "call_volume": str(call_vol),
                         "expiration": exp,
                         "interpretation": (
-                            "put-heavy (more bearish bets)" if ratio is not None and ratio > 1.2
-                            else "call-heavy (more bullish bets)" if ratio is not None and ratio < 0.7
-                            else "balanced" if ratio is not None
-                            else "(unavailable)"
+                            put_call_label(ratio).label if put_call_label(ratio) else "(unavailable)"
                         ),
                     })
                 else:
@@ -1780,16 +1780,18 @@ async def get_realized_vol(
     row = await get_latest_rv(db, sym)
     if row is not None:
         print(f"[rv] {sym}: serving from rv_snapshots ({row.as_of_date})", flush=True)
+        rank_val = float(row.rv_rank) if row.rv_rank is not None else None
         return RealizedVolRead(
             symbol=sym,
             current_rv=float(row.rv_20d) if row.rv_20d is not None else None,
-            rv_rank=float(row.rv_rank) if row.rv_rank is not None else None,
+            rv_rank=rank_val,
             rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None else None,
             rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None else None,
             rv_max_1y=float(row.rv_max_1y) if row.rv_max_1y is not None else None,
             sample_days=row.sample_days,
             window_days=20,
             as_of=row.as_of_date.isoformat(),
+            rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
         )
 
     # ── Fallback: live yfinance fetch ─────────────────────────────────────────
@@ -1804,18 +1806,21 @@ async def get_realized_vol(
             rv_rank=None, rv_percentile=None,
             rv_min_1y=None, rv_max_1y=None,
             sample_days=0, window_days=20, as_of=as_of,
+            rv_rank_labeled=None,
         )
 
+    rank_val_yf = data.get("rv_rank")
     return RealizedVolRead(
         symbol=sym,
         current_rv=current_rv,
-        rv_rank=data.get("rv_rank"),
+        rv_rank=rank_val_yf,
         rv_percentile=data.get("rv_percentile"),
         rv_min_1y=data.get("rv_min"),
         rv_max_1y=data.get("rv_max"),
         sample_days=data.get("sample_days", 0),
         window_days=20,
         as_of=as_of,
+        rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val_yf)),
     )
 
 

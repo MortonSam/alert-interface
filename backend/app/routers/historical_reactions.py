@@ -7,6 +7,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
+from app.thresholds import (
+    MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD,
+    magnitude_trend_label, priced_in_label,
+)
+from app.schemas.historical_reaction import LabelRule
 from app.database import get_db
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
@@ -21,6 +26,13 @@ from app.schemas.historical_reaction import (
 )
 
 router = APIRouter(prefix="/reactions", tags=["historical-reactions"])
+
+
+def _to_lr(lv: object) -> LabelRule | None:
+    """Convert thresholds.LabeledValue to schema LabelRule."""
+    if lv is None:
+        return None
+    return LabelRule(label=lv.label, rule=lv.rule)  # type: ignore[union-attr]
 
 
 # ── Per-row enrichment helper ──────────────────────────────────────────────────
@@ -133,6 +145,7 @@ async def get_reaction_summary(
         avg_abs_1d=avg_abs_1d,
         sector_avg_abs_1d=sector_avg,
         sector_peer_count=peer_count,
+        priced_in=_to_lr(priced_in_label(beat_dropped_rate)),
     )
 
 
@@ -238,9 +251,9 @@ async def get_conditional_earnings(
             magnitude_trend = "stable"
         else:
             pct_change = (recent_avg - prior_avg) / prior_avg
-            if pct_change > 0.20:
+            if pct_change > MAGNITUDE_INCREASE_THRESHOLD:
                 magnitude_trend = "increasing"
-            elif pct_change < -0.20:
+            elif pct_change < MAGNITUDE_DECREASE_THRESHOLD:
                 magnitude_trend = "decreasing"
             else:
                 magnitude_trend = "stable"
@@ -266,6 +279,7 @@ async def get_conditional_earnings(
         recent_avg_abs_1d=recent_avg,
         prior_avg_abs_1d=prior_avg,
         magnitude_trend=magnitude_trend,
+        magnitude_trend_labeled=_to_lr(magnitude_trend_label(magnitude_trend)),
     )
 
 

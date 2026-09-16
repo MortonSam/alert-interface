@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import check_ownership, get_current_user, get_draft_caller, get_optional_user, is_admin
+from app.thresholds import MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_recommendation import AnalystRecommendation
@@ -382,7 +383,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     magnitude_trend: str | None = None
     if recent_avg_abs and prior_avg_abs and prior_avg_abs > 0.01:
         pct_chg = (recent_avg_abs - prior_avg_abs) / prior_avg_abs
-        magnitude_trend = "increasing" if pct_chg > 0.20 else ("decreasing" if pct_chg < -0.20 else "stable")
+        magnitude_trend = "increasing" if pct_chg > MAGNITUDE_INCREASE_THRESHOLD else ("decreasing" if pct_chg < MAGNITUDE_DECREASE_THRESHOLD else "stable")
 
     # ── 2c. Analyst reaction stats ──────────────────────────────────────────
     analyst_row = await db.scalar(

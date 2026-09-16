@@ -1,7 +1,7 @@
 "use client";
 
 import type { RealizedVol } from "@/lib/api";
-import { cn, rvRankShort } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import ExplainTip from "./ExplainTip";
 
 function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
@@ -9,32 +9,35 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
     v == null ? "—" : `${(v * 100).toFixed(d)}%`;
 
   const rank = rv.rv_rank;
+  const rvLabel = rv.rv_rank_labeled?.label ?? null;
 
-  const { text: interp, color: interpColor } =
-    rank == null
-      ? { text: "", color: "" }
-      : rank < 25
-      ? {
-          text: "Vol is quieter than usual for this stock, moving less than its own norm over the past year.",
-          color: "text-muted-foreground",
-        }
-      : rank < 70
-      ? {
-          text: "Vol is normal for this stock, near its typical level over the past year.",
-          color: "text-muted-foreground",
-        }
-      : rank < 90
-      ? {
-          text: "Vol is elevated for this stock, moving more than its own norm over the past year.",
-          color: "text-amber-600 dark:text-amber-400",
-        }
-      : {
-          text: "Vol is extreme for this stock, moving much more than usual compared to its own past year.",
-          color: "text-primary",
-        };
+  const INTERP_MAP: Record<string, { text: string; color: string }> = {
+    quiet: {
+      text: "Vol is quieter than usual for this stock, moving less than its own norm over the past year.",
+      color: "text-muted-foreground",
+    },
+    normal: {
+      text: "Vol is normal for this stock, near its typical level over the past year.",
+      color: "text-muted-foreground",
+    },
+    elevated: {
+      text: "Vol is elevated for this stock, moving more than its own norm over the past year.",
+      color: "text-amber-600 dark:text-amber-400",
+    },
+    extreme: {
+      text: "Vol is extreme for this stock, moving much more than usual compared to its own past year.",
+      color: "text-primary",
+    },
+  };
+  const { text: interp, color: interpColor } = rvLabel ? (INTERP_MAP[rvLabel] ?? { text: "", color: "" }) : { text: "", color: "" };
 
-  const gaugeColor = rank == null ? "bg-muted"
-    : rank < 25 ? "bg-muted-foreground/60" : rank < 70 ? "bg-foreground/60" : rank < 90 ? "bg-amber-500" : "bg-primary";
+  const GAUGE_MAP: Record<string, string> = {
+    quiet: "bg-muted-foreground/60",
+    normal: "bg-foreground/60",
+    elevated: "bg-amber-500",
+    extreme: "bg-primary",
+  };
+  const gaugeColor = rvLabel ? (GAUGE_MAP[rvLabel] ?? "bg-muted") : "bg-muted";
 
   return (
     <div className="rounded-lg border bg-card px-5 py-4 space-y-4">
@@ -47,9 +50,10 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
           <p className="text-3xl font-bold tabular-nums leading-none">
             {rv.rv_rank?.toFixed(1) ?? "—"}
           </p>
-          {rv.rv_rank != null && (
-            <p className={cn("text-sm font-medium mt-0.5", rvRankShort(rv.rv_rank).colorClass)}>
-              {rvRankShort(rv.rv_rank).tag}
+          {rv.rv_rank_labeled && (
+            <p className={cn("text-sm font-medium mt-0.5", interpColor)}>
+              {rv.rv_rank_labeled.label}
+              <span className="text-xs text-muted-foreground ml-1">({rv.rv_rank_labeled.rule})</span>
             </p>
           )}
         </div>

@@ -101,6 +101,11 @@ export interface HistoricalReaction {
   // Revisit when next-day OHLCV (T+1 open) is stored.
 }
 
+export interface LabelRule {
+  label: string;
+  rule: string;
+}
+
 export interface ReactionSummary {
   symbol: string;
   sector: string | null;
@@ -116,6 +121,7 @@ export interface ReactionSummary {
   avg_abs_1d: number | null;
   sector_avg_abs_1d: number | null;
   sector_peer_count: number;
+  priced_in: LabelRule | null;
 }
 
 export interface ConditionalEarningsRead {
@@ -139,6 +145,7 @@ export interface ConditionalEarningsRead {
   recent_avg_abs_1d: number | null;
   prior_avg_abs_1d: number | null;
   magnitude_trend: string | null;
+  magnitude_trend_labeled: LabelRule | null;
 }
 
 export interface AnalystReactionStatsRead {
@@ -364,6 +371,7 @@ export interface OptionsRead {
   cached: boolean;
   as_of: string;
   iv_rv_spread_pp: number | null;         // IV minus RV in percentage points (positive = options rich)
+  spread_labeled: LabelRule | null;
 }
 
 export interface OptionsBundle {
@@ -494,6 +502,7 @@ export interface RealizedVol {
   sample_days: number;
   window_days: number;
   as_of: string;
+  rv_rank_labeled: LabelRule | null;
 }
 
 export type ThesisDirection = "bullish" | "bearish" | "neutral";

@@ -77,6 +77,11 @@ class StrategyDataRead(BaseModel):
 
 # ── Realized volatility rank / percentile ──────────────────────────────────────
 
+class LabelRule(BaseModel):
+    label: str
+    rule: str
+
+
 class RealizedVolRead(BaseModel):
     symbol: str
     current_rv: float | None         # annualized 20-day RV, 0–1 decimal (0.24 = 24%)
@@ -87,6 +92,7 @@ class RealizedVolRead(BaseModel):
     sample_days: int                 # number of RV data points in the trailing window
     window_days: int                 # rolling window used (20 trading days)
     as_of: str
+    rv_rank_labeled: LabelRule | None = None  # interpretive label + rule for RV rank
 
 
 # ── AI-generated options setup read ───────────────────────────────────────────
@@ -100,6 +106,7 @@ class OptionsReadRead(BaseModel):
     cached: bool                     # True if served from today's cache
     as_of: str
     iv_rv_spread_pp: float | None = None  # IV minus RV in percentage points (positive = options rich)
+    spread_labeled: LabelRule | None = None  # interpretive label + rule for IV-RV spread
 
 
 # ── Contextual metric explanation ────────────────────────────────────────────

@@ -46,6 +46,11 @@ class HistoricalReactionRead(HistoricalReactionBase):
     # (T+1 open), which is not currently stored. Revisit when price-history data is richer.
 
 
+class LabelRule(BaseModel):
+    label: str
+    rule: str
+
+
 class ReactionSummaryRead(BaseModel):
     """Aggregate insights for a ticker's earnings reaction history."""
     symbol: str
@@ -62,6 +67,7 @@ class ReactionSummaryRead(BaseModel):
     avg_abs_1d: float | None                # average |pct_change_1d| across all quarters
     sector_avg_abs_1d: float | None         # same metric across sector peers (None if <5 peers)
     sector_peer_count: int                  # distinct peer tickers used for sector avg
+    priced_in: LabelRule | None = None      # interpretive label for beat-but-dropped rate
 
 
 class ConditionalEarningsRead(BaseModel):
@@ -96,6 +102,7 @@ class ConditionalEarningsRead(BaseModel):
     recent_avg_abs_1d: float | None            # last 4 prints avg |pct_change_1d|
     prior_avg_abs_1d: float | None             # prior 4 prints avg |pct_change_1d|
     magnitude_trend: str | None                # "increasing" | "decreasing" | "stable"
+    magnitude_trend_labeled: LabelRule | None = None  # human-friendly label + rule
 
 
 class AnalystReactionStatsRead(BaseModel):

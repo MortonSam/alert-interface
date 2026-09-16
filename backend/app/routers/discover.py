@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import is_admin
 from app.constants import LEDGER_PUBLIC, LEDGER_START
+from app.thresholds import (
+    DISCOVER_IV_RICH_PP, DISCOVER_IV_CHEAP_PP,
+    DISCOVER_EXTREME_RV, DISCOVER_ELEVATED_RV,
+    discover_rv_tier,
+)
 from app.database import get_db
 from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.enums import EventType
@@ -228,12 +233,12 @@ async def _batch_vol_regime(
 
         if atm_iv is not None and rv_20d is not None and rv_20d > 0:
             spread_pp = round((atm_iv - rv_20d) * 100, 1)
-            if spread_pp > 8:
+            if spread_pp > DISCOVER_IV_RICH_PP:
                 regime = "iv_rich"
-            elif spread_pp < -4:
+            elif spread_pp < DISCOVER_IV_CHEAP_PP:
                 regime = "iv_cheap"
             else:
-                regime = None  # "iv_fair" — no chip
+                regime = None  # no chip
         else:
             spread_pp = None
             regime = None
@@ -996,11 +1001,11 @@ async def unusually_active(
         JOIN tickers t ON t.symbol = r.symbol AND t.is_active = true
         WHERE r.as_of_date = :latest_date
           AND r.status = 'ok'
-          AND r.rv_rank >= 85
+          AND r.rv_rank >= :min_rank
         ORDER BY r.rv_rank DESC
         LIMIT :limit
     """)
-    result = await db.execute(stmt, {"latest_date": latest_date, "limit": limit})
+    result = await db.execute(stmt, {"latest_date": latest_date, "limit": limit, "min_rank": DISCOVER_ELEVATED_RV})
     rows = result.all()
 
     symbols = [row.symbol for row in rows]
@@ -1014,7 +1019,7 @@ async def unusually_active(
             industry=row.industry,
             rv_rank=float(row.rv_rank),
             rv_20d=float(row.rv_20d),
-            tier="extreme" if float(row.rv_rank) >= 93 else "elevated",
+            tier=discover_rv_tier(float(row.rv_rank)).label,
             insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol),
             vol_regime=vol_data.get(row.symbol, {}).get("vol_regime"),
         )

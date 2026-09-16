@@ -17,10 +17,11 @@ import {
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
-  type Watchlist,
+  type Watchlist, type LabelRule,
   type HealthStatus,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
+import { PC_PUT_HEAVY, PC_CALL_HEAVY } from "@/lib/thresholds";
 import { capture } from "@/lib/analytics";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
@@ -217,10 +218,11 @@ function HistoryInsightsPanel({
           Recent prints moving ±{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
           {" "}, reactions{" "}
           <span className="font-medium">
-            {ce!.magnitude_trend === "heating_up" ? "heating up"
-              : ce!.magnitude_trend === "cooling_down" ? "cooling"
-              : "stable"}
+            {ce!.magnitude_trend_labeled?.label ?? ce!.magnitude_trend ?? "stable"}
           </span>
+          {ce!.magnitude_trend_labeled?.rule && (
+            <span className="text-xs ml-1">({ce!.magnitude_trend_labeled.rule})</span>
+          )}
         </p>
       )}
     </div>
@@ -1812,13 +1814,9 @@ export default function TickerPage() {
                 if (displayEvent.metadata_?.pct_5d != null) realized5d = Number(displayEvent.metadata_.pct_5d);
               }
             }
-            // Priced-in insight logic
-            const dropRate = reactionSummary?.beat_but_dropped_rate_pct ?? null;
-            const pricingNote =
-              dropRate == null ? null
-              : dropRate >= 50 ? "beats appear largely priced in"
-              : dropRate >= 25 ? "beats partially priced in"
-              : "beats tend to drive the stock higher";
+            // Priced-in insight from backend
+            const pricedIn = reactionSummary?.priced_in ?? null;
+            const pricingNote = pricedIn?.label ?? null;
             const showContextStrip = displayEvent.event_type === "earnings" && conditionalEarnings?.has_sufficient_history && reactionSummary;
 
             return (
@@ -1903,7 +1901,9 @@ export default function TickerPage() {
                       {pricingNote && reactionSummary!.beat_count >= 3 && (
                         <p className="text-xs mt-2 text-muted-foreground">
                           Stock fell next day in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
-                          {" "}({dropRate!.toFixed(0)}%). {pricingNote}
+                          {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.
+                          {" "}{pricingNote}
+                          {pricedIn?.rule && <span className="text-xs ml-1">({pricedIn.rule})</span>}
                         </p>
                       )}
                     </div>
@@ -2162,7 +2162,9 @@ export default function TickerPage() {
           {/* RV rank + IV/RV spread + Put/Call as StatRows */}
           {(() => {
             const rvRk = realizedVol?.rv_rank ?? null;
+            const rvLabeled = realizedVol?.rv_rank_labeled ?? null;
             const spread = optionsRead?.iv_rv_spread_pp ?? null;
+            const spreadLabeled = optionsRead?.spread_labeled ?? null;
             const pcRatio = optionsChain
               ? (() => {
                   const putVol = optionsChain.puts.reduce((s, p) => s + (p.volume ?? 0), 0);
@@ -2173,28 +2175,20 @@ export default function TickerPage() {
 
             if (rvRk == null && spread == null && pcRatio == null) return null;
 
-            const rvColor = rvRk != null && rvRk >= 90
-              ? "text-primary" : rvRk != null && rvRk >= 75
+            const rvColor = rvLabeled?.label === "extreme"
+              ? "text-primary" : rvLabeled?.label === "elevated"
               ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground";
-            const rvTag = rvRk != null
-              ? rvRk >= 90 ? "extreme" : rvRk >= 75 ? "elevated" : "normal"
-              : "";
-            const spreadLabel = spread != null
-              ? spread > 10 ? "options rich" : spread < -10 ? "options cheap" : "in line"
-              : "";
-            const pcLabel = pcRatio != null
-              ? pcRatio > 1.2 ? "put-heavy" : pcRatio < 0.7 ? "call-heavy" : "balanced"
-              : "";
 
             return (
               <div className="space-y-2 mb-6">
-                {rvRk != null && (
+                {rvRk != null && rvLabeled && (
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
                     <span className="text-sm text-muted-foreground">
                       <ExplainTip term="rv rank" metric="rv_rank" symbol={upperSymbol}>RV rank</ExplainTip>
                     </span>
                     <span className="font-mono text-sm font-medium tabular-nums">
-                      {rvRk.toFixed(1)} <span className={rvColor}>{rvTag}</span>
+                      {rvRk.toFixed(1)} <span className={rvColor}>{rvLabeled.label}</span>
+                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule})</span>
                     </span>
                   </div>
                 )}
@@ -2203,7 +2197,12 @@ export default function TickerPage() {
                     <span className="text-sm text-muted-foreground">IV - RV spread</span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
-                      <span className="text-muted-foreground"> {spreadLabel}</span>
+                      {spreadLabeled && (
+                        <>
+                          <span className="text-muted-foreground"> {spreadLabeled.label}</span>
+                          <span className="text-muted-foreground text-xs ml-1">({spreadLabeled.rule})</span>
+                        </>
+                      )}
                     </span>
                   </div>
                 )}
@@ -2211,7 +2210,13 @@ export default function TickerPage() {
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
                     <span className="text-sm text-muted-foreground">Put/Call ratio</span>
                     <span className="font-mono text-sm font-medium tabular-nums">
-                      {pcRatio.toFixed(2)} <span className="text-muted-foreground">{pcLabel}</span>
+                      {pcRatio.toFixed(2)}
+                      <span className="text-muted-foreground">
+                        {" "}{pcRatio > PC_PUT_HEAVY ? "put-heavy" : pcRatio < PC_CALL_HEAVY ? "call-heavy" : "balanced"}
+                      </span>
+                      <span className="text-muted-foreground text-xs ml-1">
+                        ({pcRatio > PC_PUT_HEAVY ? `ratio above ${PC_PUT_HEAVY}` : pcRatio < PC_CALL_HEAVY ? `ratio below ${PC_CALL_HEAVY}` : `ratio between ${PC_CALL_HEAVY} and ${PC_PUT_HEAVY}`})
+                      </span>
                     </span>
                   </div>
                 )}
