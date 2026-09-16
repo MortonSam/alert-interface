@@ -254,14 +254,14 @@ function ReactionChartTooltip({ active, payload, mode }: { active?: boolean; pay
       )}
       {d.pct1d != null ? (
         <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-          1d: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
+          1-day move after the report: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
         </p>
       ) : (
-        <p className="text-muted-foreground">1d: no data</p>
+        <p className="text-muted-foreground">1-day move after the report: no data</p>
       )}
       {d.pct5d != null && (
         <p className={cn(d.pct5d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-          5d: {d.pct5d > 0 ? "+" : ""}{d.pct5d.toFixed(2)}%
+          5-day move after the report: {d.pct5d > 0 ? "+" : ""}{d.pct5d.toFixed(2)}%
         </p>
       )}
     </div>
@@ -1065,6 +1065,22 @@ function PriceChart({
             />
           </LineChart>
         </ResponsiveContainer>
+        {!isIntraday && (earningsMarkers.length > 0 || (impliedRangeLow != null && impliedRangeHigh != null)) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[10px] text-muted-foreground px-1">
+            {impliedRangeLow != null && impliedRangeHigh != null && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
+                Shaded band: range the options market priced for the next expiration
+              </span>
+            )}
+            {earningsMarkers.length > 0 && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-0 h-3 border-l-2 border-dashed" style={{ borderColor: "#22c55e" }} />
+                Earnings date (green = beat, red = miss, gray = meet)
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
