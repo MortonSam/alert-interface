@@ -958,7 +958,7 @@ export const api = {
     latestPick: () =>
       request<LatestPickResponse>(`/discover/latest-pick`),
     insight: (symbol: string) =>
-      request<{ insight: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
+      request<{ insight: string | null; rule: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
   },
 
   reactions: {

@@ -1296,6 +1296,7 @@ export default function TickerPage() {
 
   // Insight
   const [insight, setInsight] = useState<string | null>(null);
+  const [insightRule, setInsightRule] = useState<string | null>(null);
 
   // Watchlist
   const [watched, setWatched] = useState<boolean | null>(null); // null = loading
@@ -1400,6 +1401,17 @@ export default function TickerPage() {
     }
   }, [analystStats]);
 
+  const analystInsightRule = useMemo(() => {
+    if (!analystInsight || !analystStats) return null;
+    const { median_1d_upgrade, median_1d_downgrade, upgrade_count, downgrade_count } = analystStats;
+    const upSignal = median_1d_upgrade != null && upgrade_count >= 3;
+    const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
+    if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
+      return "Median of all next-day moves following downgrades, with 5-day continuation rate";
+    }
+    return "Median of all next-day moves following upgrades, with 5-day continuation rate";
+  }, [analystInsight, analystStats]);
+
   // Past-event fallback: only fetch if no upcoming hero-eligible event
   useEffect(() => {
     if (eventStatus !== "done" || heroEvent || !ticker) return;
@@ -1432,7 +1444,7 @@ export default function TickerPage() {
   useEffect(() => {
     api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
     api.system.health().then(setHealth).catch(() => {});
-    api.discover.insight(upperSymbol).then(r => setInsight(r.insight)).catch(() => {});
+    api.discover.insight(upperSymbol).then(r => { setInsight(r.insight); setInsightRule(r.rule ?? null); }).catch(() => {});
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -1795,7 +1807,12 @@ export default function TickerPage() {
         <div className="mt-10 mb-16">
           <SectionKicker index="01" label="Overview" />
           {insight && (
-            <p className="text-2xl font-display text-foreground/80 leading-relaxed">{insight}</p>
+            <>
+              <p className="text-2xl font-display text-foreground/80 leading-relaxed">{insight}</p>
+              {insightRule && (
+                <p className="text-xs text-muted-foreground mt-1.5">How this was computed: {insightRule}</p>
+              )}
+            </>
           )}
         </div>
 
@@ -2038,7 +2055,12 @@ export default function TickerPage() {
                 )}
               </div>
               {analystInsight && (
-                <p className="text-xs text-muted-foreground mt-3 pt-3 border-t">{analystInsight}</p>
+                <div className="mt-3 pt-3 border-t">
+                  <p className="text-xs text-muted-foreground">{analystInsight}</p>
+                  {analystInsightRule && (
+                    <p className="text-[10px] text-muted-foreground/70 mt-1">How this was computed: {analystInsightRule}</p>
+                  )}
+                </div>
               )}
             </div>
           )}

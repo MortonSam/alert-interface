@@ -102,6 +102,16 @@ class UnusuallyActiveResponse(BaseModel):
 
 class InsightResponse(BaseModel):
     insight: str | None = None
+    rule: str | None = None
+
+
+INSIGHT_GENERATOR_RULES: dict[str, str] = {
+    "beat_rate": "Compared this stock's beat rate to the S&P 500 median beat rate",
+    "priced_in": "Compared this stock's beat-but-dropped rate to the S&P 500 median",
+    "avg_move": "Compared this stock's average earnings-day move to the S&P 500 median move",
+    "miss_skew": "Compared the average drop on misses to the average gain on beats",
+    "buy_delta": "Measured the change in analyst buy-share over the past 3 months versus the universe",
+}
 
 
 class LatestPickItem(BaseModel):
@@ -1147,7 +1157,8 @@ async def ticker_insight(
     cond = await _batch_conditional_stats(db, [upper])
     buy_share = await _batch_buy_share_delta(db, [upper])
     base = await _get_base_rates(db)
-    line, _, _ = _suggestion_insight(
+    line, gen, _ = _suggestion_insight(
         cond.get(upper), None, buy_share.get(upper), base, upper,
     )
-    return InsightResponse(insight=line)
+    rule = INSIGHT_GENERATOR_RULES.get(gen) if gen else None
+    return InsightResponse(insight=line, rule=rule)
