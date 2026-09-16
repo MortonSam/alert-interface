@@ -471,7 +471,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
 type ReactionSortKey = "event_date" | "pct_change_1d" | "pct_change_3d" | "pct_change_5d";
 type OutcomeFilter = "all" | "beat" | "miss" | "meet";
 
-interface MoveStats { avg: number; median: number; max: number; min: number }
+interface MoveStats { avg: number; median: number; max: number; min: number; count: number }
 
 function computeStats(values: number[]): MoveStats | null {
   if (values.length === 0) return null;
@@ -479,7 +479,7 @@ function computeStats(values: number[]): MoveStats | null {
   const avg = values.reduce((s, v) => s + v, 0) / values.length;
   const mid = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  return { avg, median, max: sorted[sorted.length - 1], min: sorted[0] };
+  return { avg, median, max: sorted[sorted.length - 1], min: sorted[0], count: values.length };
 }
 
 function pctValues(rows: HistoricalReaction[], key: "pct_change_1d" | "pct_change_3d" | "pct_change_5d"): number[] {
@@ -587,7 +587,8 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
                   <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Avg</th>
                   <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Median</th>
                   <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Max</th>
-                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2">Min</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Min</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2">N</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -605,10 +606,11 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
                         <td className="py-1.5 pr-4 text-right"><StatNum value={s.avg} /></td>
                         <td className="py-1.5 pr-4 text-right"><StatNum value={s.median} /></td>
                         <td className="py-1.5 pr-4 text-right"><StatNum value={s.max} /></td>
-                        <td className="py-1.5 text-right"><StatNum value={s.min} /></td>
+                        <td className="py-1.5 pr-4 text-right"><StatNum value={s.min} /></td>
+                        <td className="py-1.5 text-right tabular-nums text-muted-foreground">{s.count}</td>
                       </>
                     ) : (
-                      <td colSpan={4} className="py-1.5 text-right text-muted-foreground">—</td>
+                      <td colSpan={5} className="py-1.5 text-right text-muted-foreground">—</td>
                     )}
                   </tr>
                 ))}
