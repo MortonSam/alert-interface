@@ -5,6 +5,15 @@
 
 const BASE = "/api/v1";
 
+class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+export { ApiError };
+
 function _adminToken(): string | null {
   if (typeof window === "undefined") return null; // SSR guard
   return localStorage.getItem("admin_token");
@@ -28,7 +37,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const text = await res.text().catch(() => res.statusText);
       message = `API ${res.status}: ${text}`;
     }
-    throw new Error(message);
+    throw new ApiError(res.status, message);
   }
   if (res.status === 204 || res.headers.get("content-length") === "0") {
     return undefined as T;

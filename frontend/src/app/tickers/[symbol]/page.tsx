@@ -10,7 +10,7 @@ import {
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from "recharts";
 import {
-  api, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker,
+  api, ApiError, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker,
   type Event, type EventType, type EarningsOutcome, type HistoricalReaction,
   type ReactionSummary, type ConditionalEarningsRead, type AnalystReactionStatsRead,
   type ResearchNote, type VerificationClaim, type VerificationResult,
@@ -1310,9 +1310,9 @@ export default function TickerPage() {
     api.tickers
       .bySymbol(upperSymbol)
       .then((t) => { setTicker(t); setTickerStatus("found"); capture("ticker_viewed", { symbol: upperSymbol }); })
-      .catch((e: Error) => {
-        if (e.message.includes("404")) { setTickerStatus("missing"); }
-        else { setTickerError(e.message); setTickerStatus("error"); }
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) { setTickerStatus("missing"); }
+        else { setTickerError(e instanceof Error ? e.message : String(e)); setTickerStatus("error"); }
       });
   }, [upperSymbol]);
 
@@ -1544,8 +1544,8 @@ export default function TickerPage() {
         setNote(n); setNoteStatus("done");
         if (n.status === "complete") capture("note_rendered", { symbol: upperSymbol });
       })
-      .catch((e: Error) => {
-        if (e.message.startsWith("API 404")) { setNoteStatus("empty"); }
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) { setNoteStatus("empty"); }
         else { setNoteStatus("error"); }
       });
   }, [upperSymbol]);
@@ -2522,28 +2522,21 @@ export default function TickerPage() {
 
           {noteStatus === "error" && (
             <div className="py-6">
-              <p className="text-sm text-muted-foreground mb-4">Could not load research note.</p>
-              <button
-                onClick={() => void handleGenerate()}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Generate Research Note
-              </button>
+              <p className="text-sm text-muted-foreground">Could not load research note. Try refreshing.</p>
             </div>
           )}
 
           {noteStatus === "empty" && (
             <div className="py-6">
-              <p className="text-sm font-medium mb-1">No research note generated yet.</p>
-              <p className="text-xs text-muted-foreground mb-5">
-                Ivy writes a research note from SEC filings and earnings history. Takes about 40 seconds.
-              </p>
-              <button
-                onClick={() => void handleGenerate()}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Generate Research Note
-              </button>
+              <p className="text-sm text-muted-foreground mb-4">No research note yet for {upperSymbol}.</p>
+              {typeof window !== "undefined" && !!localStorage.getItem("admin_token") && (
+                <button
+                  onClick={() => void handleGenerate()}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Generate Research Note
+                </button>
+              )}
             </div>
           )}
 
