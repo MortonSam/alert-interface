@@ -123,6 +123,22 @@ class SectorPeersRead(BaseModel):
     peers: list[SectorPeerItem]
 
 
+class AnalystDetailItem(BaseModel):
+    event_date: str
+    firm: str | None = None
+    action: str | None = None        # "up" | "down" | "init" | "reit" | etc.
+    from_grade: str | None = None
+    to_grade: str | None = None
+    pct_change_1d: float | None = None
+    pct_change_5d: float | None = None
+
+
+class AnalystDetailRead(BaseModel):
+    rows: list[AnalystDetailItem]
+    total_with_moves: int            # rows with non-null pct_change_1d
+    total_all: int                   # all rows including null moves
+
+
 class AnalystReactionStatsRead(BaseModel):
     """Precomputed per-ticker stats: how does this stock move on upgrades vs downgrades?"""
     model_config = ConfigDict(from_attributes=True)

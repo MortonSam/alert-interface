@@ -15,9 +15,12 @@ from app.schemas.historical_reaction import LabelRule
 from app.database import get_db
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
+from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.schemas.historical_reaction import (
+    AnalystDetailItem,
+    AnalystDetailRead,
     AnalystReactionStatsRead,
     ConditionalEarningsRead,
     HistoricalReactionCreate,
@@ -241,6 +244,57 @@ async def get_sector_peers(
         peer_count=peer_count,
         as_of=last_date.isoformat() if last_date else None,
         peers=peers,
+    )
+
+
+@router.get("/analyst-detail", response_model=AnalystDetailRead)
+async def get_analyst_detail(
+    symbol: str = Query(..., description="Ticker symbol"),
+    db: AsyncSession = Depends(get_db),
+) -> AnalystDetailRead:
+    """All analyst action reactions for a ticker, including null moves."""
+    sym = symbol.upper()
+
+    ticker = await db.scalar(select(Ticker).where(Ticker.symbol == sym))
+    if not ticker:
+        raise HTTPException(status_code=404, detail="Ticker not found")
+
+    # Join HistoricalReaction with Event to get firm/grade metadata
+    rows = (await db.execute(
+        select(
+            HistoricalReaction.event_date,
+            HistoricalReaction.pct_change_1d,
+            HistoricalReaction.pct_change_5d,
+            Event.metadata_.label("event_meta"),
+        )
+        .outerjoin(Event, Event.id == HistoricalReaction.event_id)
+        .where(
+            HistoricalReaction.ticker_id == ticker.id,
+            HistoricalReaction.event_type == EventType.ANALYST_ACTION,
+        )
+        .order_by(HistoricalReaction.event_date.desc())
+    )).all()
+
+    items: list[AnalystDetailItem] = []
+    total_with_moves = 0
+    for r in rows:
+        meta = r.event_meta or {}
+        if r.pct_change_1d is not None:
+            total_with_moves += 1
+        items.append(AnalystDetailItem(
+            event_date=r.event_date.isoformat(),
+            firm=meta.get("firm"),
+            action=meta.get("action"),
+            from_grade=meta.get("from_grade"),
+            to_grade=meta.get("to_grade"),
+            pct_change_1d=float(r.pct_change_1d) if r.pct_change_1d is not None else None,
+            pct_change_5d=float(r.pct_change_5d) if r.pct_change_5d is not None else None,
+        ))
+
+    return AnalystDetailRead(
+        rows=items,
+        total_with_moves=total_with_moves,
+        total_all=len(items),
     )
 
 

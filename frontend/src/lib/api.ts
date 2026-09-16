@@ -150,6 +150,22 @@ export interface SectorPeersRead {
   peers: SectorPeerItem[];
 }
 
+export interface AnalystDetailItem {
+  event_date: string;
+  firm: string | null;
+  action: string | null;
+  from_grade: string | null;
+  to_grade: string | null;
+  pct_change_1d: number | null;
+  pct_change_5d: number | null;
+}
+
+export interface AnalystDetailRead {
+  rows: AnalystDetailItem[];
+  total_with_moves: number;
+  total_all: number;
+}
+
 export interface ConditionalEarningsRead {
   symbol: string;
   total_quarters: number;
@@ -1004,6 +1020,8 @@ export const api = {
       request<AnalystReactionStatsRead>(`/reactions/analyst-stats?symbol=${encodeURIComponent(symbol)}`),
     sectorPeers: (symbol: string) =>
       request<SectorPeersRead>(`/reactions/sector-peers?symbol=${encodeURIComponent(symbol)}`),
+    analystDetail: (symbol: string) =>
+      request<AnalystDetailRead>(`/reactions/analyst-detail?symbol=${encodeURIComponent(symbol)}`),
     get: (id: string) => request<HistoricalReaction>(`/reactions/${id}`),
     create: (data: Partial<HistoricalReaction>) =>
       request<HistoricalReaction>("/reactions", { method: "POST", body: JSON.stringify(data) }),

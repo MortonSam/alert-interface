@@ -13,7 +13,7 @@ import {
   api, ApiError, type Ticker, type TickerQuote, type TickerChart, type EarningsMarker,
   type Event, type EventType, type EarningsOutcome, type HistoricalReaction,
   type ReactionSummary, type ConditionalEarningsRead, type AnalystReactionStatsRead,
-  type SectorPeersRead,
+  type SectorPeersRead, type AnalystDetailRead,
   type ResearchNote, type VerificationClaim, type VerificationResult,
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
@@ -170,6 +170,77 @@ function CatalystRow({ event }: { event: Event }) {
           <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{event.description}</p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Analyst detail expandable table ──────────────────────────────────────────
+
+function AnalystDetailTable({ detail }: { detail: AnalystDetailRead }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mt-3 pt-3 border-t">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+      >
+        {expanded ? "Hide actions ▴" : `Show all ${detail.total_all} actions ▾`}
+      </button>
+      {expanded && (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border/40">
+                <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Date</th>
+                <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Firm</th>
+                <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Action</th>
+                <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Grade</th>
+                <th className="text-right text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">1d</th>
+                <th className="text-right text-[10px] uppercase tracking-wide text-muted-foreground pb-1">5d</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {detail.rows.map((r, i) => (
+                <tr key={i} className="hover:bg-muted/30 transition-colors">
+                  <td className="py-1 pr-2 tabular-nums text-muted-foreground whitespace-nowrap">
+                    {fmtBasisDate(r.event_date)}
+                  </td>
+                  <td className="py-1 pr-2 truncate max-w-[120px]">{r.firm ?? "—"}</td>
+                  <td className="py-1 pr-2">
+                    {r.action === "up" ? "▲" : r.action === "down" ? "▼" : "→"}
+                  </td>
+                  <td className="py-1 pr-2 text-muted-foreground">
+                    {r.from_grade && r.to_grade ? (
+                      <>{r.from_grade} → <ExplainTip term="analyst grades">{r.to_grade}</ExplainTip></>
+                    ) : r.to_grade ? (
+                      <ExplainTip term="analyst grades">{r.to_grade}</ExplainTip>
+                    ) : "—"}
+                  </td>
+                  <td className={cn(
+                    "py-1 pr-2 text-right tabular-nums",
+                    r.pct_change_1d == null ? "text-muted-foreground"
+                      : r.pct_change_1d > 0 ? "text-green-600 dark:text-green-400"
+                      : r.pct_change_1d < 0 ? "text-red-500 dark:text-red-400"
+                      : "text-muted-foreground"
+                  )}>
+                    {r.pct_change_1d != null ? `${r.pct_change_1d > 0 ? "+" : ""}${r.pct_change_1d.toFixed(1)}%` : "—"}
+                  </td>
+                  <td className={cn(
+                    "py-1 text-right tabular-nums",
+                    r.pct_change_5d == null ? "text-muted-foreground"
+                      : r.pct_change_5d > 0 ? "text-green-600 dark:text-green-400"
+                      : r.pct_change_5d < 0 ? "text-red-500 dark:text-red-400"
+                      : "text-muted-foreground"
+                  )}>
+                    {r.pct_change_5d != null ? `${r.pct_change_5d > 0 ? "+" : ""}${r.pct_change_5d.toFixed(1)}%` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1292,6 +1363,7 @@ export default function TickerPage() {
   const [conditionalStatus, setConditionalStatus] = useState<"loading" | "done">("loading");
   const [analystStats, setAnalystStats] = useState<AnalystReactionStatsRead | null>(null);
   const [analystStatsStatus, setAnalystStatsStatus] = useState<"loading" | "done">("loading");
+  const [analystDetail, setAnalystDetail] = useState<AnalystDetailRead | null>(null);
   const [recentAnalystActions, setRecentAnalystActions] = useState<Event[]>([]);
   const [analystActionsStatus, setAnalystActionsStatus] = useState<"loading" | "done">("loading");
   const [pastHeroEvent, setPastHeroEvent] = useState<Event | null>(null);
@@ -1399,6 +1471,9 @@ export default function TickerPage() {
     api.reactions.analystStats(upperSymbol)
       .then(d => { setAnalystStats(d); setAnalystStatsStatus("done"); })
       .catch(() => { setAnalystStats(null); setAnalystStatsStatus("done"); });
+    api.reactions.analystDetail(upperSymbol)
+      .then(setAnalystDetail)
+      .catch(() => setAnalystDetail(null));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -2116,6 +2191,22 @@ export default function TickerPage() {
                   )}
                 </div>
               )}
+              {/* Expandable analyst detail table */}
+              {(() => {
+                if (!analystDetail || !analystStats) return null;
+                // Consistency check: total_with_moves must match sample_count
+                if (analystDetail.total_with_moves !== analystStats.sample_count) {
+                  Sentry.captureMessage("Analyst detail count mismatch", {
+                    extra: {
+                      symbol: upperSymbol,
+                      total_with_moves: analystDetail.total_with_moves,
+                      sample_count: analystStats.sample_count,
+                    },
+                  });
+                  return null;
+                }
+                return <AnalystDetailTable detail={analystDetail} />;
+              })()}
             </div>
           )}
 
