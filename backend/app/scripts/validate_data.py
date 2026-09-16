@@ -25,6 +25,7 @@ from sqlalchemy import func, select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
+from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.earnings_feature import EarningsFeature
 from app.models.enums import EventType
@@ -1125,6 +1126,125 @@ async def check_credit_shadow_integrity(session) -> CheckResult:
     )
 
 
+async def check_reaction_pct_range(session) -> CheckResult:
+    """ERROR if any historical_reaction pct_change_1d/3d/5d is outside [-95, 500]."""
+    bad_filter = (
+        (HistoricalReaction.pct_change_1d.is_not(None) & (
+            (HistoricalReaction.pct_change_1d < Decimal("-95")) |
+            (HistoricalReaction.pct_change_1d > Decimal("500"))
+        )) |
+        (HistoricalReaction.pct_change_3d.is_not(None) & (
+            (HistoricalReaction.pct_change_3d < Decimal("-95")) |
+            (HistoricalReaction.pct_change_3d > Decimal("500"))
+        )) |
+        (HistoricalReaction.pct_change_5d.is_not(None) & (
+            (HistoricalReaction.pct_change_5d < Decimal("-95")) |
+            (HistoricalReaction.pct_change_5d > Decimal("500"))
+        ))
+    )
+    total = await session.scalar(select(func.count(HistoricalReaction.id)).where(bad_filter))
+    if not total:
+        return CheckResult("reaction_pct_range", PASS, "All reaction pct_change values in [-95, 500]")
+
+    rows = (await session.execute(
+        select(
+            Ticker.symbol,
+            HistoricalReaction.event_date,
+            HistoricalReaction.pct_change_1d,
+            HistoricalReaction.pct_change_3d,
+            HistoricalReaction.pct_change_5d,
+        )
+        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .where(bad_filter)
+        .order_by(HistoricalReaction.event_date.desc())
+        .limit(50)
+    )).all()
+    details = [
+        f"{r.symbol}  {r.event_date}  1d={r.pct_change_1d}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
+        for r in rows
+    ]
+    return CheckResult(
+        "reaction_pct_range", ERROR,
+        f"{total} reaction(s) with pct_change outside [-95, 500]",
+        details,
+    )
+
+
+async def check_analyst_stats_median_range(session) -> CheckResult:
+    """ERROR if any analyst_reaction_stats median is outside [-30, 30]."""
+    bad_filter = (
+        (AnalystReactionStats.median_1d_upgrade.is_not(None) & (
+            (AnalystReactionStats.median_1d_upgrade < -30) |
+            (AnalystReactionStats.median_1d_upgrade > 30)
+        )) |
+        (AnalystReactionStats.median_1d_downgrade.is_not(None) & (
+            (AnalystReactionStats.median_1d_downgrade < -30) |
+            (AnalystReactionStats.median_1d_downgrade > 30)
+        ))
+    )
+    total = await session.scalar(select(func.count(AnalystReactionStats.id)).where(bad_filter))
+    if not total:
+        return CheckResult("analyst_stats_median_range", PASS, "All analyst medians in [-30, 30]")
+
+    rows = (await session.execute(
+        select(
+            AnalystReactionStats.symbol,
+            AnalystReactionStats.median_1d_upgrade,
+            AnalystReactionStats.median_1d_downgrade,
+        )
+        .where(bad_filter)
+        .limit(50)
+    )).all()
+    details = [
+        f"{r.symbol}  median_up={r.median_1d_upgrade}  median_down={r.median_1d_downgrade}"
+        for r in rows
+    ]
+    return CheckResult(
+        "analyst_stats_median_range", ERROR,
+        f"{total} analyst_reaction_stats row(s) with median outside [-30, 30]",
+        details,
+    )
+
+
+async def check_analyst_stats_continuation_range(session) -> CheckResult:
+    """ERROR if any analyst_reaction_stats continuation pct is outside [0, 100]."""
+    bad_filter = (
+        (AnalystReactionStats.upgrade_5d_continuation_pct.is_not(None) & (
+            (AnalystReactionStats.upgrade_5d_continuation_pct < 0) |
+            (AnalystReactionStats.upgrade_5d_continuation_pct > 100)
+        )) |
+        (AnalystReactionStats.downgrade_5d_continuation_pct.is_not(None) & (
+            (AnalystReactionStats.downgrade_5d_continuation_pct < 0) |
+            (AnalystReactionStats.downgrade_5d_continuation_pct > 100)
+        ))
+    )
+    total = await session.scalar(select(func.count(AnalystReactionStats.id)).where(bad_filter))
+    if not total:
+        return CheckResult(
+            "analyst_stats_continuation_range", PASS,
+            "All analyst continuation rates in [0, 100]",
+        )
+
+    rows = (await session.execute(
+        select(
+            AnalystReactionStats.symbol,
+            AnalystReactionStats.upgrade_5d_continuation_pct,
+            AnalystReactionStats.downgrade_5d_continuation_pct,
+        )
+        .where(bad_filter)
+        .limit(50)
+    )).all()
+    details = [
+        f"{r.symbol}  up_cont={r.upgrade_5d_continuation_pct}  down_cont={r.downgrade_5d_continuation_pct}"
+        for r in rows
+    ]
+    return CheckResult(
+        "analyst_stats_continuation_range", ERROR,
+        f"{total} analyst_reaction_stats row(s) with continuation pct outside [0, 100]",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1176,6 +1296,10 @@ CHECKS = [
     check_shadow_pick_count,
     # Credit shadow picks
     check_credit_shadow_integrity,
+    # Aggregate sanity bands
+    check_reaction_pct_range,
+    check_analyst_stats_median_range,
+    check_analyst_stats_continuation_range,
 ]
 
 
