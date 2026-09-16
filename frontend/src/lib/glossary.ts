@@ -1,6 +1,6 @@
 /**
  * Plain-English glossary for options & earnings terms.
- * Each definition ≤ 20 words, written for someone who has never traded options.
+ * Written for someone who has never traded options.
  */
 
 const GLOSSARY: Record<string, string> = {
@@ -42,6 +42,36 @@ const GLOSSARY: Record<string, string> = {
     "This stock was removed from the S&P 500 index. It remains tradable and data continues to update normally.",
   "analyst-action":
     "A Wall Street analyst changed their rating, price target, or coverage status on this stock.",
+  meet:
+    "The company reported earnings per share roughly in line with analyst estimates. The stock may still move because a meet removes surprise in either direction but does not guarantee a flat reaction.",
+  "1d move":
+    "The stock's percentage change from the close before the event to the close one trading day after. A positive number means the stock rose; negative means it fell.",
+  "3d move":
+    "The stock's percentage change from the close before the event to the close three trading days after. It shows whether the initial reaction held, reversed, or extended.",
+  "5d move":
+    "The stock's percentage change from the close before the event to the close five trading days (one week) after. It shows whether the initial reaction persisted over the full trading week.",
+  "continuation rate":
+    "How often the stock's day-5 move stayed in the same direction as the day-1 move. A high rate means initial reactions tend to stick; a low rate means reversals are common.",
+  "magnitude trend":
+    "Whether recent earnings moves have been getting bigger or smaller compared to earlier ones. Look for 'heating up' or 'cooling' to gauge if reactions are growing or fading.",
+  "peer average":
+    "The average one-day earnings move across other stocks in the same sector. Compare this company's typical move to the peer average to see if it reacts more or less than its sector.",
+  "priced in":
+    "When a stock drops after beating estimates, the market may have already expected the good news and bid the price up beforehand. A high priced-in rate means beats often do not lead to gains.",
+  "median next-day move":
+    "The middle value of all one-day stock price changes following the event type. The median is less affected by outliers than the average, giving a more typical picture.",
+  "analyst grades":
+    "Rating labels like Buy, Overweight, Hold, Underweight, or Sell that Wall Street analysts assign. Higher ratings suggest the analyst expects the stock to outperform; lower ones suggest underperformance.",
+  "expected move":
+    "The dollar or percentage move the options market implies between now and a specific expiration. It is derived from the at-the-money straddle price and reflects the market's best guess at total movement.",
+  upgrade:
+    "An analyst raised their rating on the stock, for example from Hold to Buy. Look at the median next-day move to see how the stock has historically reacted to upgrades.",
+  downgrade:
+    "An analyst lowered their rating on the stock, for example from Buy to Hold. Look at the median next-day move to see how the stock has historically reacted to downgrades.",
+  rv:
+    "Realized volatility measures how much the stock has actually moved recently, based on daily price changes. Higher RV means the stock has been swinging more than usual.",
+  atm:
+    "At the money - the strike price closest to where the stock trades right now. ATM options have the highest time value and are the most sensitive to price changes.",
 };
 
 export default GLOSSARY;
