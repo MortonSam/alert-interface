@@ -30,7 +30,7 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
@@ -38,6 +38,7 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EventType
 from app.models.event import Event
+from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.scripts.seed_historical_reactions import (
     FETCH_TIMEOUT,
@@ -54,6 +55,7 @@ MIN_ACTIONS = 3        # null aggregates below this per category
 BATCH_SIZE = 5
 BATCH_SLEEP = 2.0
 RETRY_DELAYS = (3, 8, 15)
+COMPUTATION_VERSION = 2
 
 
 # ── yfinance fetch ───────────────────────────────────────────────────────────
@@ -100,6 +102,8 @@ def _compute_pre_market(
     return {
         "pct_change_1d": pct(close_t0),
         "pct_change_5d": pct(close_t4),
+        "close_before": float(baseline),
+        "close_after": float(close_t0) if close_t0 is not None else None,
     }
 
 
@@ -149,7 +153,7 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
     cutoff_old = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
     cutoff_new = date.today() - timedelta(days=MIN_AGE_DAYS)
 
-    # 1. Load upgrade/downgrade events from DB (keep session open for metadata writes)
+    # 1. Load upgrade/downgrade events from DB
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Event)
@@ -165,14 +169,18 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
         events = list(result.scalars().all())
 
         if not events:
+            # Clear stale analyst_action reactions for this ticker
+            await session.execute(
+                delete(HistoricalReaction).where(
+                    HistoricalReaction.ticker_id == ticker.id,
+                    HistoricalReaction.event_type == EventType.ANALYST_ACTION,
+                )
+            )
             await session.commit()
             await _upsert_stats(symbol, _aggregate([], []), _aggregate([], []))
             return True, 0
 
         # 2. Fetch price history (sync, in executor)
-        # wait_for abandons the worker thread rather than killing it, which is
-        # acceptable because the executor pool is large and the subprocess dies
-        # at step end anyway.
         hist = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_history_sync, symbol),
             timeout=FETCH_TIMEOUT,
@@ -182,33 +190,44 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
 
         dates_cache = _build_date_cache(hist)
 
-        # 3. Compute per-event reactions
-        upgrades_1d: list[float] = []
-        upgrades_5d: list[float | None] = []
-        downgrades_1d: list[float] = []
-        downgrades_5d: list[float | None] = []
-        computed = 0
+        # 3. Delete existing analyst_action reactions (will be re-inserted below)
+        await session.execute(
+            delete(HistoricalReaction).where(
+                HistoricalReaction.ticker_id == ticker.id,
+                HistoricalReaction.event_type == EventType.ANALYST_ACTION,
+            )
+        )
 
+        # 4. Compute and persist per-event reactions
+        computed = 0
         for event in events:
             reaction = _compute_pre_market(hist, dates_cache, event.event_date)
-            if reaction is None:
-                continue
 
-            pct_1d = float(reaction["pct_change_1d"]) if reaction["pct_change_1d"] is not None else None
-            pct_5d = float(reaction["pct_change_5d"]) if reaction["pct_change_5d"] is not None else None
+            pct_1d = None
+            pct_5d = None
+            close_before = None
+            close_after = None
+            if reaction is not None:
+                pct_1d = reaction["pct_change_1d"]
+                pct_5d = reaction["pct_change_5d"]
+                close_before = reaction.get("close_before")
+                close_after = reaction.get("close_after")
 
-            if pct_1d is None:
-                continue
+            # Persist to historical_reactions
+            session.add(HistoricalReaction(
+                ticker_id=ticker.id,
+                event_id=event.id,
+                event_type=EventType.ANALYST_ACTION,
+                event_date=event.event_date,
+                close_before=Decimal(str(close_before)) if close_before is not None else None,
+                close_after=Decimal(str(close_after)) if close_after is not None else None,
+                pct_change_1d=Decimal(str(pct_1d)) if pct_1d is not None else None,
+                pct_change_5d=Decimal(str(pct_5d)) if pct_5d is not None else None,
+                computation_version=COMPUTATION_VERSION,
+            ))
 
-            computed += 1
-            action = event.metadata_.get("action")
-
-            if action == "up":
-                upgrades_1d.append(pct_1d)
-                upgrades_5d.append(pct_5d)
-            elif action == "down":
-                downgrades_1d.append(pct_1d)
-                downgrades_5d.append(pct_5d)
+            if pct_1d is not None:
+                computed += 1
 
             # Enrich event metadata with reaction data
             merged = dict(event.metadata_)
@@ -216,9 +235,33 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
             merged["pct_5d"] = round(pct_5d, 4) if pct_5d is not None else None
             event.metadata_ = merged
 
+        await session.flush()
+
+        # 5. Recompute aggregates FROM stored rows (guarantees sample_count == total_with_moves)
+        stored = (await session.execute(
+            select(
+                HistoricalReaction.pct_change_1d,
+                HistoricalReaction.pct_change_5d,
+                Event.metadata_["action"].astext.label("action"),
+            )
+            .join(Event, HistoricalReaction.event_id == Event.id)
+            .where(
+                HistoricalReaction.ticker_id == ticker.id,
+                HistoricalReaction.event_type == EventType.ANALYST_ACTION,
+                HistoricalReaction.pct_change_1d.isnot(None),
+            )
+        )).all()
+
+        upgrades_1d = [float(r.pct_change_1d) for r in stored if r.action == "up"]
+        upgrades_5d = [float(r.pct_change_5d) if r.pct_change_5d is not None else None
+                       for r in stored if r.action == "up"]
+        downgrades_1d = [float(r.pct_change_1d) for r in stored if r.action == "down"]
+        downgrades_5d = [float(r.pct_change_5d) if r.pct_change_5d is not None else None
+                         for r in stored if r.action == "down"]
+
         await session.commit()
 
-    # 4. Aggregate and store
+    # 6. Aggregate and store
     up_agg = _aggregate(upgrades_1d, upgrades_5d)
     dn_agg = _aggregate(downgrades_1d, downgrades_5d)
     await _upsert_stats(symbol, up_agg, dn_agg)

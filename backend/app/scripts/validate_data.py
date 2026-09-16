@@ -289,11 +289,13 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
 
 
 async def check_reactions_null_open_with_pct(session) -> CheckResult:
+    # Analyst actions use close-to-close (no open_after), so exclude them.
     rows = (await session.execute(
         select(Ticker.symbol, HistoricalReaction.event_date)
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
         .where(
             HistoricalReaction.open_after.is_(None),
+            HistoricalReaction.event_type != "analyst_action",
             (
                 HistoricalReaction.pct_change_1d.is_not(None) |
                 HistoricalReaction.pct_change_3d.is_not(None) |
@@ -310,6 +312,36 @@ async def check_reactions_null_open_with_pct(session) -> CheckResult:
     return CheckResult(
         "reactions_null_open_with_pct", ERROR,
         f"{len(rows)} row(s) in impossible state: open_after is NULL but pct_change values are populated",
+        details,
+    )
+
+
+async def check_analyst_reactions_missing_prices(session) -> CheckResult:
+    """analyst_action rows with pct_change_1d must have close_before and close_after."""
+    rows = (await session.execute(
+        select(Ticker.symbol, HistoricalReaction.event_date)
+        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .where(
+            HistoricalReaction.event_type == "analyst_action",
+            HistoricalReaction.pct_change_1d.isnot(None),
+            (
+                HistoricalReaction.close_before.is_(None) |
+                HistoricalReaction.close_after.is_(None)
+            ),
+        )
+        .order_by(Ticker.symbol, HistoricalReaction.event_date)
+    )).all()
+
+    if not rows:
+        return CheckResult(
+            "analyst_reactions_missing_prices", PASS,
+            "All analyst reactions with moves have close_before and close_after",
+        )
+
+    details = [f"{r.symbol}  {r.event_date}" for r in rows]
+    return CheckResult(
+        "analyst_reactions_missing_prices", ERROR,
+        f"{len(rows)} analyst_action row(s) with pct_change_1d but null close_before/close_after",
         details,
     )
 
@@ -1328,6 +1360,7 @@ CHECKS = [
     check_reactions_3d_equals_5d,
     check_reactions_1d_equals_3d,
     check_reactions_null_open_with_pct,
+    check_analyst_reactions_missing_prices,
     check_reactions_eps_bounds,
     check_tickers_no_reactions,
     check_tickers_uniform_outcome,

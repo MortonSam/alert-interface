@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import delete as sa_delete, func, select
+from sqlalchemy import delete as sa_delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
@@ -309,8 +309,9 @@ async def upsert_reaction(
             **data,
         )
         .on_conflict_do_update(
-            constraint = "uq_hist_reaction_ticker_date_type",
-            set_       = update_data,
+            index_elements=["ticker_id", "event_date", "event_type"],
+            index_where=text("event_type = 'earnings'"),
+            set_=update_data,
         )
         .returning(HistoricalReaction.id)
     )
