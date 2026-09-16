@@ -344,7 +344,12 @@ export default function IvyTradesPage() {
 
   const avgUnrealized =
     openPicks.length > 0
-      ? openPicks.reduce((sum, p) => sum + (p.unrealized_move_pct ?? 0), 0) / openPicks.length
+      ? (() => {
+          const withData = openPicks.filter((p) => p.unrealized_move_pct != null);
+          return withData.length > 0
+            ? withData.reduce((sum, p) => sum + p.unrealized_move_pct!, 0) / withData.length
+            : null;
+        })()
       : null;
 
   // Closed stats

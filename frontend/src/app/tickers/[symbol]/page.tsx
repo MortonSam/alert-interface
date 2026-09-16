@@ -240,9 +240,13 @@ function ReactionChartTooltip({ active, payload, mode }: { active?: boolean; pay
       {!isFed && d.epsActual != null && d.epsEstimate != null && (
         <p>EPS ${parseFloat(d.epsActual).toFixed(2)} vs est ${parseFloat(d.epsEstimate).toFixed(2)}</p>
       )}
-      <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-        1d: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
-      </p>
+      {d.pct1d != null ? (
+        <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
+          1d: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
+        </p>
+      ) : (
+        <p className="text-muted-foreground">1d: no data</p>
+      )}
       {d.pct5d != null && (
         <p className={cn(d.pct5d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
           5d: {d.pct5d > 0 ? "+" : ""}{d.pct5d.toFixed(2)}%
@@ -259,7 +263,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
     const recent = chronological.slice(-20);
     return recent.map(r => ({
       date: r.event_date,
-      pct1d: r.pct_change_1d != null ? parseFloat(r.pct_change_1d) : 0,
+      pct1d: r.pct_change_1d != null ? parseFloat(r.pct_change_1d) : null,
       pct5d: r.pct_change_5d != null ? parseFloat(r.pct_change_5d) : null,
       outcome: r.outcome,
       epsEstimate: r.eps_estimate,
@@ -309,11 +313,11 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
             {data.map((entry, i) => (
               <Cell
                 key={i}
-                fill={entry.pct1d >= 0 ? "#22c55e" : "#ef4444"}
-                fillOpacity={isFed ? 1.0 : entry.outcome === "beat" ? 1.0 : entry.outcome === "miss" ? 0.7 : 0.5}
-                stroke={!isFed && entry.outcome === "miss" ? "#ef4444" : "none"}
-                strokeWidth={!isFed && entry.outcome === "miss" ? 1.5 : 0}
-                strokeDasharray={!isFed && entry.outcome === "miss" ? "3 2" : ""}
+                fill={entry.pct1d == null ? "hsl(var(--muted))" : entry.pct1d >= 0 ? "#22c55e" : "#ef4444"}
+                fillOpacity={entry.pct1d == null ? 0.3 : isFed ? 1.0 : entry.outcome === "beat" ? 1.0 : entry.outcome === "miss" ? 0.7 : 0.5}
+                stroke={entry.pct1d == null ? "hsl(var(--muted-foreground))" : !isFed && entry.outcome === "miss" ? "#ef4444" : "none"}
+                strokeWidth={entry.pct1d == null ? 1 : !isFed && entry.outcome === "miss" ? 1.5 : 0}
+                strokeDasharray={entry.pct1d == null ? "2 2" : !isFed && entry.outcome === "miss" ? "3 2" : ""}
               />
             ))}
           </Bar>
@@ -2071,8 +2075,11 @@ export default function TickerPage() {
             <>
               <ReactionChart reactions={fomcReactions} mode="fed" />
               {reactions.length > 0 && (() => {
-                const fomcAvg = fomcReactions.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d ?? "0")), 0) / fomcReactions.length;
-                const earningsAvg = reactions.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d ?? "0")), 0) / reactions.length;
+                const fomcWithData = fomcReactions.filter((r) => r.pct_change_1d != null);
+                const earningsWithData = reactions.filter((r) => r.pct_change_1d != null);
+                if (!fomcWithData.length || !earningsWithData.length) return null;
+                const fomcAvg = fomcWithData.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d!)), 0) / fomcWithData.length;
+                const earningsAvg = earningsWithData.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d!)), 0) / earningsWithData.length;
                 return (
                   <p className="text-sm text-muted-foreground mb-3 mt-3">
                     Avg ±{fomcAvg.toFixed(1)}% on Fed days vs ±{earningsAvg.toFixed(1)}% on earnings days

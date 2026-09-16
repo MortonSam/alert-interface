@@ -8,10 +8,12 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
   const pct = (v: number | null, d = 1) =>
     v == null ? "—" : `${(v * 100).toFixed(d)}%`;
 
-  const rank = rv.rv_rank ?? 0;
+  const rank = rv.rv_rank;
 
   const { text: interp, color: interpColor } =
-    rank < 25
+    rank == null
+      ? { text: "", color: "" }
+      : rank < 25
       ? {
           text: "Vol is quieter than usual for this stock, moving less than its own norm over the past year.",
           color: "text-muted-foreground",
@@ -31,8 +33,8 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
           color: "text-primary",
         };
 
-  const gaugeColor =
-    rank < 25 ? "bg-muted-foreground/60" : rank < 70 ? "bg-foreground/60" : rank < 90 ? "bg-amber-500" : "bg-primary";
+  const gaugeColor = rank == null ? "bg-muted"
+    : rank < 25 ? "bg-muted-foreground/60" : rank < 70 ? "bg-foreground/60" : rank < 90 ? "bg-amber-500" : "bg-primary";
 
   return (
     <div className="rounded-lg border bg-card px-5 py-4 space-y-4">
@@ -62,7 +64,7 @@ function RealizedVolPanel({ rv, symbol }: { rv: RealizedVol; symbol: string }) {
         <div className="relative h-2 rounded-full bg-muted overflow-hidden">
           <div
             className={cn("absolute left-0 top-0 h-full rounded-full", gaugeColor)}
-            style={{ width: `${Math.min(100, rank)}%` }}
+            style={{ width: `${Math.min(100, rank ?? 0)}%` }}
           />
         </div>
         <div className="flex justify-between text-[10px] text-muted-foreground">
