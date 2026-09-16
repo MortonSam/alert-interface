@@ -146,6 +146,7 @@ async def get_reaction_summary(
         sector_avg_abs_1d=sector_avg,
         sector_peer_count=peer_count,
         priced_in=_to_lr(priced_in_label(beat_dropped_rate)),
+        last_event_date=max(r.event_date for r in rows).isoformat(),
     )
 
 
@@ -280,6 +281,7 @@ async def get_conditional_earnings(
         prior_avg_abs_1d=prior_avg,
         magnitude_trend=magnitude_trend,
         magnitude_trend_labeled=_to_lr(magnitude_trend_label(magnitude_trend)),
+        last_event_date=max(r.event_date for r in rows).isoformat() if rows else None,
     )
 
 
@@ -295,7 +297,9 @@ async def get_analyst_reaction_stats(
     )
     if not row:
         raise HTTPException(status_code=404, detail="No analyst reaction stats for this ticker")
-    return AnalystReactionStatsRead.model_validate(row)
+    out = AnalystReactionStatsRead.model_validate(row)
+    out.sample_count = row.upgrade_count + row.downgrade_count
+    return out
 
 
 @router.get("", response_model=list[HistoricalReactionRead])

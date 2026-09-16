@@ -48,6 +48,11 @@ function formatEventDate(iso: string): string {
   return d.getFullYear() === CURRENT_YEAR ? `${mon} ${day}` : `${mon} ${day}, ${d.getFullYear()}`;
 }
 
+function fmtBasisDate(iso: string): string {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
 function daysFromToday(iso: string): number {
   const d = new Date(iso + "T00:00:00");
   return Math.round((d.getTime() - TODAY.getTime()) / 86_400_000);
@@ -225,6 +230,11 @@ function HistoryInsightsPanel({
           )}
         </p>
       )}
+      {/* Basis line */}
+      <p className="text-[10px] text-muted-foreground/70 mt-1">
+        Based on {s.total_quarters} quarters
+        {s.last_event_date && ` through ${fmtBasisDate(s.last_event_date)}`}
+      </p>
     </div>
   );
 }
@@ -1987,6 +1997,10 @@ export default function TickerPage() {
                         <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
                       </div>
                     )}
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Based on {analystStats.sample_count} actions
+                      {analystStats.last_event_date && ` through ${fmtBasisDate(analystStats.last_event_date)}`}
+                    </p>
                   </div>
                 )}
               </div>

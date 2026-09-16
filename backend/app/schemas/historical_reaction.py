@@ -68,6 +68,7 @@ class ReactionSummaryRead(BaseModel):
     sector_avg_abs_1d: float | None         # same metric across sector peers (None if <5 peers)
     sector_peer_count: int                  # distinct peer tickers used for sector avg
     priced_in: LabelRule | None = None      # interpretive label for beat-but-dropped rate
+    last_event_date: str | None = None      # ISO date of most recent earnings in sample
 
 
 class ConditionalEarningsRead(BaseModel):
@@ -103,6 +104,7 @@ class ConditionalEarningsRead(BaseModel):
     prior_avg_abs_1d: float | None             # prior 4 prints avg |pct_change_1d|
     magnitude_trend: str | None                # "increasing" | "decreasing" | "stable"
     magnitude_trend_labeled: LabelRule | None = None  # human-friendly label + rule
+    last_event_date: str | None = None         # ISO date of most recent earnings in sample
 
 
 class AnalystReactionStatsRead(BaseModel):
@@ -127,3 +129,5 @@ class AnalystReactionStatsRead(BaseModel):
     avg_5d_downgrade: float | None
     downgrade_5d_continuation_pct: float | None
     downgrade_5d_sample: int
+    sample_count: int = 0                  # total actions (upgrade + downgrade)
+    last_event_date: str | None = None     # ISO date of most recent analyst action

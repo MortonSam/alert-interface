@@ -122,6 +122,7 @@ export interface ReactionSummary {
   sector_avg_abs_1d: number | null;
   sector_peer_count: number;
   priced_in: LabelRule | null;
+  last_event_date: string | null;
 }
 
 export interface ConditionalEarningsRead {
@@ -146,6 +147,7 @@ export interface ConditionalEarningsRead {
   prior_avg_abs_1d: number | null;
   magnitude_trend: string | null;
   magnitude_trend_labeled: LabelRule | null;
+  last_event_date: string | null;
 }
 
 export interface AnalystReactionStatsRead {
@@ -163,6 +165,8 @@ export interface AnalystReactionStatsRead {
   avg_5d_downgrade: number | null;
   downgrade_5d_continuation_pct: number | null;
   downgrade_5d_sample: number;
+  sample_count: number;
+  last_event_date: string | null;
 }
 
 export interface WatchlistTicker {
