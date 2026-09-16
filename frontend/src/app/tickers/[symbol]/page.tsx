@@ -1689,6 +1689,8 @@ export default function TickerPage() {
   }, [upperSymbol]);
 
   // Research note: poll while generating/verifying
+  // Sentry dedup: fire at most once per symbol per page load
+  const sentryFiredRef = useRef<Set<string>>(new Set());
   const pollInFlight = useRef(false);
   useEffect(() => {
     if (!note || (note.status !== "generating" && note.status !== "verifying")) return;
@@ -2198,13 +2200,17 @@ export default function TickerPage() {
                 if (!analystDetail || !analystStats) return null;
                 // Consistency check: total_with_moves must match sample_count
                 if (analystDetail.total_with_moves !== analystStats.sample_count) {
-                  Sentry.captureMessage("Analyst detail count mismatch", {
-                    extra: {
-                      symbol: upperSymbol,
-                      total_with_moves: analystDetail.total_with_moves,
-                      sample_count: analystStats.sample_count,
-                    },
-                  });
+                  const sk = `analyst-mismatch:${upperSymbol}`;
+                  if (!sentryFiredRef.current.has(sk)) {
+                    sentryFiredRef.current.add(sk);
+                    Sentry.captureMessage("Analyst detail count mismatch", {
+                      extra: {
+                        symbol: upperSymbol,
+                        total_with_moves: analystDetail.total_with_moves,
+                        sample_count: analystStats.sample_count,
+                      },
+                    });
+                  }
                   return null;
                 }
                 return <AnalystDetailTable detail={analystDetail} />;
@@ -2384,7 +2390,7 @@ export default function TickerPage() {
             const rvLabeled = realizedVol?.rv_rank_labeled ?? null;
             const windowDays = realizedVol?.window_days ?? 20;
             const dataError = realizedVol?.data_error ?? false;
-            const spread = optionsRead?.iv_rv_spread_pp ?? null;
+            const spread = realizedVol?.iv_rv_spread_pp ?? null;
             const spreadLabeled = optionsRead?.spread_labeled ?? null;
             const pcRatio = optionsChain
               ? (() => {
@@ -2399,9 +2405,13 @@ export default function TickerPage() {
             if (showSpread && ivVal != null && rvVal != null) {
               const clientSpread = (ivVal - rvVal) * 100;
               if (Math.abs(clientSpread - spread!) > 0.1) {
-                Sentry.captureMessage("IV-RV spread mismatch", {
-                  extra: { symbol: upperSymbol, backend_spread: spread, client_spread: clientSpread, iv: ivVal, rv: rvVal },
-                });
+                const sk = `spread-mismatch:${upperSymbol}`;
+                if (!sentryFiredRef.current.has(sk)) {
+                  sentryFiredRef.current.add(sk);
+                  Sentry.captureMessage("IV-RV spread mismatch", {
+                    extra: { symbol: upperSymbol, backend_spread: spread, client_spread: clientSpread, iv: ivVal, rv: rvVal },
+                  });
+                }
                 showSpread = false;
               }
             }
@@ -2421,7 +2431,7 @@ export default function TickerPage() {
                   </span>
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {ivVal != null
-                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">(ATM{ivAsOf ? `, ${ivAsOf} chain` : ""})</span></>
+                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">(ATM, nearest expiry ≥7d out{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
                       : <span className="text-muted-foreground">IV unavailable</span>}
                   </span>
                 </div>
