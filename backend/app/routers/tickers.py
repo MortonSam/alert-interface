@@ -14,6 +14,8 @@ from app.auth import require_admin, _get_admin_token
 from app.config import settings
 from app.database import get_db
 from app.models.event import Event
+from app.models.iv_history import IVHistory
+from app.models.rv_snapshot import RVSnapshot
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
 from app.schemas.options import ExplainRead, ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
@@ -1776,6 +1778,26 @@ async def get_realized_vol(
     sym = symbol.upper()
     as_of = date.today().isoformat()
 
+    # ── ATM IV from IVHistory (fresh within 3 days) ───────────────────────────
+    iv_cutoff = date.today() - timedelta(days=3)
+    iv_row = (await db.execute(
+        select(IVHistory)
+        .where(IVHistory.symbol == sym, IVHistory.date >= iv_cutoff, IVHistory.atm_iv.isnot(None))
+        .order_by(IVHistory.date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    atm_iv = float(iv_row.atm_iv) if iv_row and iv_row.atm_iv is not None else None
+    atm_iv_as_of = iv_row.date.isoformat() if iv_row else None
+
+    # ── data_error: latest rv_snapshot (any status) ───────────────────────────
+    latest_rv_any = (await db.execute(
+        select(RVSnapshot)
+        .where(RVSnapshot.symbol == sym)
+        .order_by(RVSnapshot.as_of_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    data_error = latest_rv_any is not None and getattr(latest_rv_any, "status", None) == "data_error"
+
     # ── Try precomputed snapshot first ────────────────────────────────────────
     row = await get_latest_rv(db, sym)
     if row is not None:
@@ -1792,6 +1814,9 @@ async def get_realized_vol(
             window_days=20,
             as_of=row.as_of_date.isoformat(),
             rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
+            atm_iv=atm_iv,
+            atm_iv_as_of=atm_iv_as_of,
+            data_error=data_error,
         )
 
     # ── Fallback: live yfinance fetch ─────────────────────────────────────────
@@ -1807,6 +1832,9 @@ async def get_realized_vol(
             rv_min_1y=None, rv_max_1y=None,
             sample_days=0, window_days=20, as_of=as_of,
             rv_rank_labeled=None,
+            atm_iv=atm_iv,
+            atm_iv_as_of=atm_iv_as_of,
+            data_error=data_error,
         )
 
     rank_val_yf = data.get("rv_rank")
@@ -1821,6 +1849,9 @@ async def get_realized_vol(
         window_days=20,
         as_of=as_of,
         rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val_yf)),
+        atm_iv=atm_iv,
+        atm_iv_as_of=atm_iv_as_of,
+        data_error=data_error,
     )
 
 

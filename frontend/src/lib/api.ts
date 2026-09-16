@@ -537,6 +537,9 @@ export interface RealizedVol {
   window_days: number;
   as_of: string;
   rv_rank_labeled: LabelRule | null;
+  atm_iv: number | null;
+  atm_iv_as_of: string | null;
+  data_error: boolean;
 }
 
 export type ThesisDirection = "bullish" | "bearish" | "neutral";

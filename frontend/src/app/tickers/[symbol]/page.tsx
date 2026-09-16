@@ -24,6 +24,7 @@ import {
 import { cn, fmtMarketCap } from "@/lib/utils";
 import { PC_PUT_HEAVY, PC_CALL_HEAVY } from "@/lib/thresholds";
 import { capture } from "@/lib/analytics";
+import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
 import StructuredNoteView from "@/components/StructuredNoteView";
@@ -2281,10 +2282,15 @@ export default function TickerPage() {
             );
           })()}
 
-          {/* RV rank + IV/RV spread + Put/Call as StatRows */}
+          {/* IV, RV, spread, RV rank, Put/Call as StatRows */}
           {(() => {
+            const ivVal = realizedVol?.atm_iv ?? null;
+            const ivAsOf = realizedVol?.atm_iv_as_of ?? null;
+            const rvVal = realizedVol?.current_rv ?? null;
             const rvRk = realizedVol?.rv_rank ?? null;
             const rvLabeled = realizedVol?.rv_rank_labeled ?? null;
+            const windowDays = realizedVol?.window_days ?? 20;
+            const dataError = realizedVol?.data_error ?? false;
             const spread = optionsRead?.iv_rv_spread_pp ?? null;
             const spreadLabeled = optionsRead?.spread_labeled ?? null;
             const pcRatio = optionsChain
@@ -2295,7 +2301,19 @@ export default function TickerPage() {
                 })()
               : null;
 
-            if (rvRk == null && spread == null && pcRatio == null) return null;
+            // IV-RV spread consistency check
+            let showSpread = spread != null;
+            if (showSpread && ivVal != null && rvVal != null) {
+              const clientSpread = (ivVal - rvVal) * 100;
+              if (Math.abs(clientSpread - spread!) > 0.1) {
+                Sentry.captureMessage("IV-RV spread mismatch", {
+                  extra: { symbol: upperSymbol, backend_spread: spread, client_spread: clientSpread, iv: ivVal, rv: rvVal },
+                });
+                showSpread = false;
+              }
+            }
+
+            if (ivVal == null && rvVal == null && rvRk == null && spread == null && pcRatio == null) return null;
 
             const rvColor = rvLabeled?.label === "extreme"
               ? "text-primary" : rvLabeled?.label === "elevated"
@@ -2303,18 +2321,30 @@ export default function TickerPage() {
 
             return (
               <div className="space-y-2 mb-6">
-                {rvRk != null && rvLabeled && (
-                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                    <span className="text-sm text-muted-foreground">
-                      <ExplainTip term="rv rank" metric="rv_rank" symbol={upperSymbol}>RV rank</ExplainTip>
-                    </span>
-                    <span className="font-mono text-sm font-medium tabular-nums">
-                      {rvRk.toFixed(1)} <span className={rvColor}>{rvLabeled.label}</span>
-                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule})</span>
-                    </span>
-                  </div>
-                )}
-                {spread != null && (
+                {/* IV row */}
+                <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                  <span className="text-sm text-muted-foreground">
+                    <ExplainTip term="iv">IV</ExplainTip>
+                  </span>
+                  <span className="font-mono text-sm font-medium tabular-nums">
+                    {ivVal != null
+                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">(ATM{ivAsOf ? `, ${ivAsOf} chain` : ""})</span></>
+                      : <span className="text-muted-foreground">IV unavailable</span>}
+                  </span>
+                </div>
+                {/* RV row */}
+                <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                  <span className="text-sm text-muted-foreground">
+                    <ExplainTip term="rv">RV</ExplainTip>
+                  </span>
+                  <span className="font-mono text-sm font-medium tabular-nums">
+                    {rvVal != null
+                      ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback)</span></>
+                      : <span className="text-muted-foreground">RV unavailable</span>}
+                  </span>
+                </div>
+                {/* IV-RV spread row — only when consistency check passes */}
+                {showSpread && spread != null && (
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
                     <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>IV - RV spread</ExplainTip></span>
                     <span className="font-mono text-sm font-medium tabular-nums">
@@ -2325,6 +2355,17 @@ export default function TickerPage() {
                           <span className="text-muted-foreground text-xs ml-1">({spreadLabeled.rule})</span>
                         </>
                       )}
+                    </span>
+                  </div>
+                )}
+                {rvRk != null && rvLabeled && (
+                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                    <span className="text-sm text-muted-foreground">
+                      <ExplainTip term="rv rank" metric="rv_rank" symbol={upperSymbol}>RV rank</ExplainTip>
+                    </span>
+                    <span className="font-mono text-sm font-medium tabular-nums">
+                      {rvRk.toFixed(1)} <span className={rvColor}>{rvLabeled.label}</span>
+                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule})</span>
                     </span>
                   </div>
                 )}
@@ -2341,6 +2382,11 @@ export default function TickerPage() {
                       </span>
                     </span>
                   </div>
+                )}
+                {dataError && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    RV excluded for this ticker (extreme price returns, likely a split adjustment).
+                  </p>
                 )}
               </div>
             );

@@ -93,6 +93,9 @@ class RealizedVolRead(BaseModel):
     window_days: int                 # rolling window used (20 trading days)
     as_of: str
     rv_rank_labeled: LabelRule | None = None  # interpretive label + rule for RV rank
+    atm_iv: float | None = None              # ATM implied vol from IVHistory (0–1 decimal)
+    atm_iv_as_of: str | None = None          # date of the IVHistory row used
+    data_error: bool = False                 # True if latest rv_snapshot has status='data_error'
 
 
 # ── AI-generated options setup read ───────────────────────────────────────────
