@@ -2285,7 +2285,7 @@ async def thesis_context(
         if prox:
             insight = _reporting_soon_insight(cond, sym)
         else:
-            insight = _suggestion_insight(cond, None, sym)
+            insight = _suggestion_insight(cond, analyst=None, buy_share=None, base=None, symbol=sym)[0]
 
         out[sym] = {
             "earnings_proximity": prox,
