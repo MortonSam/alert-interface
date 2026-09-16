@@ -61,6 +61,9 @@ LOOKBACK_YEARS = 5
 # We need T+5 data, so skip very recent earnings to avoid incomplete windows
 MIN_AGE_DAYS = 8
 
+# Bump when reaction computation logic changes, so history stays comparable.
+COMPUTATION_VERSION = 2  # v2: added all-zero guard (rejects stale frozen quotes)
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 CACHE_DIR              = Path(__file__).parent / "cache"
@@ -243,13 +246,25 @@ def _compute(
     closes = [c for c in (close_t1, close_t3, close_t5) if c is not None]
     frozen = closes and all(c == close_t for c in closes)
 
+    pct_1d = None if frozen else pct(close_t1)
+    pct_3d = None if frozen else pct(close_t3)
+    pct_5d = None if frozen else pct(close_t5)
+
+    # All-zero guard (v2): if every computed pct_change is exactly 0, the
+    # price data is stale — a carried-forward quote with no real trading.
+    # This catches edge cases the frozen guard misses (float-equality on
+    # open vs close columns, volume corrections after initial fetch).
+    non_none = [v for v in (pct_1d, pct_3d, pct_5d) if v is not None]
+    if non_none and all(v == Decimal("0") for v in non_none):
+        return None
+
     return dict(
         close_before  = d2(close_before),
         open_after    = d2(open_t),
         close_after   = d2(close_t),
-        pct_change_1d = None if frozen else pct(close_t1),
-        pct_change_3d = None if frozen else pct(close_t3),
-        pct_change_5d = None if frozen else pct(close_t5),
+        pct_change_1d = pct_1d,
+        pct_change_3d = pct_3d,
+        pct_change_5d = pct_5d,
         volume_after  = vol_t,
     )
 
