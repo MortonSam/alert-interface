@@ -1201,7 +1201,7 @@ async def get_options_read(
     loop = asyncio.get_event_loop()
     today = date.today()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
-    cache_key = f"options_read:{sym}:{today.isoformat()}"
+    cache_key = f"options_read:v2:{sym}:{today.isoformat()}"
 
     # ── Cache check — served freely ───────────────────────────────────────────
     cached_raw = await _get_meta(db, cache_key)
@@ -1304,16 +1304,16 @@ async def get_options_read(
                 expected_move_dollars = straddle
                 implied_range_low    = current_price - straddle
                 implied_range_high   = current_price + straddle
-            # ATM IV: skip contracts with no_market (bid=ask=0) or implausibly low IV (< 3%)
-            _MIN_IV = 0.03
-            ivs = [
-                c["impliedVolatility"] for c in [atm_call, atm_put]
-                if c
-                and c.get("impliedVolatility") is not None
-                and c["impliedVolatility"] >= _MIN_IV
-                and not ((c.get("bid") or 0) == 0 and (c.get("ask") or 0) == 0)
-            ]
-            atm_iv = sum(ivs) / len(ivs) if ivs else None
+    # ── ATM IV from IVHistory (single source, same as RV endpoint) ──────────
+    _iv_cutoff = today - timedelta(days=3)
+    _iv_row = (await db.execute(
+        select(IVHistory)
+        .where(IVHistory.symbol == sym, IVHistory.date >= _iv_cutoff, IVHistory.atm_iv.isnot(None))
+        .order_by(IVHistory.date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    atm_iv = float(_iv_row.atm_iv) if _iv_row and _iv_row.atm_iv is not None else None
+    atm_iv_as_of: str | None = _iv_row.date.isoformat() if _iv_row else None
 
     # RV rank/percentile — prefer precomputed snapshot, fall back to live
     current_rv: float | None = None
@@ -1803,9 +1803,14 @@ async def get_realized_vol(
     if row is not None:
         print(f"[rv] {sym}: serving from rv_snapshots ({row.as_of_date})", flush=True)
         rank_val = float(row.rv_rank) if row.rv_rank is not None else None
+        current_rv_val = float(row.rv_20d) if row.rv_20d is not None else None
+        spread_pp = (
+            round((atm_iv - current_rv_val) * 100, 1)
+            if atm_iv is not None and current_rv_val is not None else None
+        )
         return RealizedVolRead(
             symbol=sym,
-            current_rv=float(row.rv_20d) if row.rv_20d is not None else None,
+            current_rv=current_rv_val,
             rv_rank=rank_val,
             rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None else None,
             rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None else None,
@@ -1816,6 +1821,7 @@ async def get_realized_vol(
             rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
             atm_iv=atm_iv,
             atm_iv_as_of=atm_iv_as_of,
+            iv_rv_spread_pp=spread_pp,
             data_error=data_error,
         )
 
@@ -1834,10 +1840,15 @@ async def get_realized_vol(
             rv_rank_labeled=None,
             atm_iv=atm_iv,
             atm_iv_as_of=atm_iv_as_of,
+            iv_rv_spread_pp=None,
             data_error=data_error,
         )
 
     rank_val_yf = data.get("rv_rank")
+    spread_pp_yf = (
+        round((atm_iv - current_rv) * 100, 1)
+        if atm_iv is not None and current_rv is not None else None
+    )
     return RealizedVolRead(
         symbol=sym,
         current_rv=current_rv,
@@ -1851,6 +1862,7 @@ async def get_realized_vol(
         rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val_yf)),
         atm_iv=atm_iv,
         atm_iv_as_of=atm_iv_as_of,
+        iv_rv_spread_pp=spread_pp_yf,
         data_error=data_error,
     )
 

@@ -555,6 +555,7 @@ export interface RealizedVol {
   rv_rank_labeled: LabelRule | null;
   atm_iv: number | null;
   atm_iv_as_of: string | null;
+  iv_rv_spread_pp: number | null;
   data_error: boolean;
 }
 
