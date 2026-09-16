@@ -121,29 +121,6 @@ const METRIC_TIPS: Record<string, string> = {
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-function RatingPill({ rating }: { rating: string }) {
-  const valid = ["bullish", "neutral", "bearish"] as const;
-  if (!valid.includes(rating as typeof valid[number])) return null;
-
-  const styles = {
-    bullish: "bg-success/10 text-success border-success/25",
-    neutral: "bg-cool/10 text-cool border-cool/25",
-    bearish: "bg-destructive/10 text-destructive border-destructive/25",
-  } as const;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold tracking-wide",
-        styles[rating as keyof typeof styles],
-      )}
-    >
-      <span className="text-[8px]">{"\u25CF"}</span>
-      {rating.charAt(0).toUpperCase() + rating.slice(1)}
-    </span>
-  );
-}
-
 function StatCell({
   label,
   value,
@@ -588,7 +565,6 @@ export default function StructuredNoteView({
               </p>
             )}
           </div>
-          <RatingPill rating={note.rating} />
         </div>
         {(sector || industry || stats.market_cap != null) && (
           <p className="font-mono text-xs text-muted-foreground/70 mt-2">
