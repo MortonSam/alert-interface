@@ -17,7 +17,7 @@ import {
   type OptionsRead, type RealizedVol, type ExpectedMove, type OptionsChain,
   type StrategyData, type StrikeData, type NewsResponse, type OptionsBundle,
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
-  type Watchlist, type LabelRule,
+  type Watchlist, type LabelRule, type NoteStaleness,
   type HealthStatus,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
@@ -1261,6 +1261,7 @@ export default function TickerPage() {
 
   const [note, setNote]               = useState<ResearchNote | null>(null);
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
+  const [noteStaleness, setNoteStaleness] = useState<NoteStaleness | null>(null);
   const [verificationOpen, setVerificationOpen] = useState(false);
 
   const [news, setNews]               = useState<NewsResponse | null>(null);
@@ -1517,6 +1518,13 @@ export default function TickerPage() {
         if (e.message.startsWith("API 404")) { setNoteStatus("empty"); }
         else { setNoteStatus("error"); }
       });
+  }, [upperSymbol]);
+
+  // Research note: staleness check
+  useEffect(() => {
+    api.researchNotes.staleness(upperSymbol)
+      .then(setNoteStaleness)
+      .catch(() => {});
   }, [upperSymbol]);
 
   // Research note: poll while generating/verifying
@@ -2568,6 +2576,19 @@ export default function TickerPage() {
                   <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
                   See the verification section below for details. Consider regenerating.
                 </Callout>
+              )}
+              {noteStaleness?.stale && (
+                <div className="flex items-center justify-between px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
+                  <span>
+                    {noteStaleness.reason}. Last generated {new Date(note.generated_at).toLocaleDateString()}.
+                  </span>
+                  <button
+                    onClick={handleRegenerate}
+                    className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
+                  >
+                    Regenerate
+                  </button>
+                </div>
               )}
               <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
                 <span>

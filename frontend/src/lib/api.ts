@@ -243,6 +243,11 @@ export interface StructuredNote {
   financials: StructuredNoteFinancials | null;
 }
 
+export interface NoteStaleness {
+  stale: boolean;
+  reason: string | null;
+}
+
 export interface ResearchNote {
   id: string;
   ticker_id: string;
@@ -900,6 +905,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ symbol }),
       }),
+    staleness: (symbol: string) =>
+      request<NoteStaleness>(`/research-notes/staleness/${encodeURIComponent(symbol)}`),
   },
 
   system: {
