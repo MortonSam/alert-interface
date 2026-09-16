@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, Index, Numeric, Text, func
+from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, Index, Numeric, SmallInteger, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,7 @@ class HistoricalReaction(Base):
         default=EarningsOutcome.UNKNOWN,
         server_default="unknown",
     )
+    computation_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticker: Mapped["Ticker"] = relationship(back_populates="historical_reactions")

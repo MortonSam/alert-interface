@@ -296,6 +296,10 @@ async def upsert_reaction(
     else:
         update_data = data
 
+    # Always stamp the computation version on insert and update.
+    data["computation_version"] = COMPUTATION_VERSION
+    update_data["computation_version"] = COMPUTATION_VERSION
+
     stmt = (
         pg_insert(HistoricalReaction)
         .values(
