@@ -2116,9 +2116,22 @@ export default function TickerPage() {
             const hist = expectedMove.historical_stats;
             return (
               <div className="mb-8">
-                <p className="text-6xl font-bold tabular-nums tracking-tight">
-                  {emPct != null ? `\u00B1${(emPct * 100).toFixed(1)}%` : ""}
-                </p>
+                {emPct != null ? (
+                  <p className="text-6xl font-bold tabular-nums tracking-tight">
+                    {`\u00B1${(emPct * 100).toFixed(1)}%`}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-2xl font-semibold text-muted-foreground">
+                      Implied move unavailable
+                    </p>
+                    {expectedMove.data_quality_note && (
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {expectedMove.data_quality_note}
+                      </p>
+                    )}
+                  </>
+                )}
                 {emDol != null && (
                   <p className="text-xl text-muted-foreground mt-1 tabular-nums">
                     ${emDol.toFixed(2)} implied move
