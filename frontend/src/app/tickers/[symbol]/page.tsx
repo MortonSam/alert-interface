@@ -200,20 +200,20 @@ function HistoryInsightsPanel({
         <p className="text-xs text-muted-foreground">
           Typical earnings move (±{s.avg_abs_1d!.toFixed(2)}%) is{" "}
           <span className="font-medium">{sectorVsOwn}</span> the{" "}
-          {s.sector ?? "sector"} peer average (±{s.sector_avg_abs_1d!.toFixed(2)}%){" "}
+          {s.sector ?? "sector"} <ExplainTip term="peer average">peer average</ExplainTip> (±{s.sector_avg_abs_1d!.toFixed(2)}%){" "}
           across {s.sector_peer_count} peers
         </p>
       )}
       {showBeatFollow && (
         <p className="text-xs text-muted-foreground">
-          Beats held direction through day 5 in{" "}
+          <ExplainTip term="continuation rate">Beats held direction through day 5</ExplainTip> in{" "}
           <span className="font-medium">{ce!.beat_continuation_rate_pct!.toFixed(0)}%</span> of cases
           {" "}({Math.round(ce!.beat_continuation_rate_pct! / 100 * ce!.beat_5d_sample)} of {ce!.beat_5d_sample})
         </p>
       )}
       {showMissFollow && (
         <p className="text-xs text-muted-foreground">
-          Misses held direction through day 5 in{" "}
+          <ExplainTip term="continuation rate">Misses held direction through day 5</ExplainTip> in{" "}
           <span className="font-medium">{ce!.miss_continuation_rate_pct!.toFixed(0)}%</span> of cases
           {" "}({Math.round(ce!.miss_continuation_rate_pct! / 100 * ce!.miss_5d_sample)} of {ce!.miss_5d_sample})
         </p>
@@ -223,7 +223,7 @@ function HistoryInsightsPanel({
           Recent prints moving ±{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
           {" "}, reactions{" "}
           <span className="font-medium">
-            {ce!.magnitude_trend_labeled?.label ?? ce!.magnitude_trend ?? "stable"}
+            <ExplainTip term="magnitude trend">{ce!.magnitude_trend_labeled?.label ?? ce!.magnitude_trend ?? "stable"}</ExplainTip>
           </span>
           {ce!.magnitude_trend_labeled?.rule && (
             <span className="text-xs ml-1">({ce!.magnitude_trend_labeled.rule})</span>
@@ -393,12 +393,14 @@ function SortTh({
   sort,
   onSort,
   align = "right",
+  tooltip,
 }: {
   label: string;
   col: ReactionSortKey;
   sort: { key: ReactionSortKey; dir: "asc" | "desc" };
   onSort: (col: ReactionSortKey) => void;
   align?: "left" | "right";
+  tooltip?: string;
 }) {
   const active = sort.key === col;
   return (
@@ -411,7 +413,7 @@ function SortTh({
       )}
       onClick={() => onSort(col)}
     >
-      {label}
+      {tooltip ? <ExplainTip term={tooltip}>{label}</ExplainTip> : label}
       {active && <span className="ml-1 opacity-60">{sort.dir === "asc" ? "↑" : "↓"}</span>}
     </th>
   );
@@ -477,7 +479,7 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
                   ] as [string, MoveStats | null][]
                 ).map(([label, s]) => (
                   <tr key={label}>
-                    <td className="py-1.5 pr-4 text-muted-foreground font-medium">{label}</td>
+                    <td className="py-1.5 pr-4 text-muted-foreground font-medium"><ExplainTip term={`${label} move`}>{label}</ExplainTip></td>
                     {s ? (
                       <>
                         <td className="py-1.5 pr-4 text-right"><StatNum value={s.avg} /></td>
@@ -645,9 +647,9 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                     <th className="px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Close After
                     </th>
-                    <SortTh label="1-Day"  col="pct_change_1d" sort={sort} onSort={handleSort} />
-                    <SortTh label="3-Day"  col="pct_change_3d" sort={sort} onSort={handleSort} />
-                    <SortTh label="5-Day"  col="pct_change_5d" sort={sort} onSort={handleSort} />
+                    <SortTh label="1-Day"  col="pct_change_1d" sort={sort} onSort={handleSort} tooltip="1d move" />
+                    <SortTh label="3-Day"  col="pct_change_3d" sort={sort} onSort={handleSort} tooltip="3d move" />
+                    <SortTh label="5-Day"  col="pct_change_5d" sort={sort} onSort={handleSort} tooltip="5d move" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -1889,7 +1891,7 @@ export default function TickerPage() {
                         </div>
                         <div>
                           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-                            {beatHasAvg ? "Avg move on beats" : "Beats"}
+                            {beatHasAvg ? <ExplainTip term="1d move">Avg move on beats</ExplainTip> : <ExplainTip term="beat">Beats</ExplainTip>}
                           </p>
                           {beatHasAvg ? (
                             <p className="text-sm font-semibold tabular-nums">
@@ -1903,7 +1905,7 @@ export default function TickerPage() {
                         </div>
                         <div>
                           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-                            {missHasAvg ? "Avg move on misses" : "Misses"}
+                            {missHasAvg ? <ExplainTip term="1d move">Avg move on misses</ExplainTip> : <ExplainTip term="miss">Misses</ExplainTip>}
                           </p>
                           {missHasAvg ? (
                             <p className="text-sm font-semibold tabular-nums">
@@ -1920,7 +1922,7 @@ export default function TickerPage() {
                         <p className="text-xs mt-2 text-muted-foreground">
                           Stock fell next day in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
                           {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.
-                          {" "}{pricingNote}
+                          {" "}<ExplainTip term="priced in">{pricingNote}</ExplainTip>
                           {pricedIn?.rule && <span className="text-xs ml-1">({pricedIn.rule})</span>}
                         </p>
                       )}
@@ -1991,7 +1993,7 @@ export default function TickerPage() {
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On upgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
-                          {analystStats.median_1d_upgrade > 0 ? "+" : ""}{analystStats.median_1d_upgrade.toFixed(1)}% median next-day
+                          {analystStats.median_1d_upgrade > 0 ? "+" : ""}{analystStats.median_1d_upgrade.toFixed(1)}% <ExplainTip term="median next-day move">median next-day</ExplainTip>
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.upgrade_count} in 5 yr</p>
                       </div>
@@ -2000,7 +2002,7 @@ export default function TickerPage() {
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On downgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
-                          {analystStats.median_1d_downgrade > 0 ? "+" : ""}{analystStats.median_1d_downgrade.toFixed(1)}% median next-day
+                          {analystStats.median_1d_downgrade > 0 ? "+" : ""}{analystStats.median_1d_downgrade.toFixed(1)}% <ExplainTip term="median next-day move">median next-day</ExplainTip>
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
                       </div>
@@ -2140,7 +2142,7 @@ export default function TickerPage() {
               <div className="mb-8">
                 {emPct != null ? (
                   <p className="text-6xl font-bold tabular-nums tracking-tight">
-                    {`\u00B1${(emPct * 100).toFixed(1)}%`}
+                    <ExplainTip term="expected move" metric="expected_move" symbol={upperSymbol}>{`\u00B1${(emPct * 100).toFixed(1)}%`}</ExplainTip>
                   </p>
                 ) : (
                   <>
@@ -2156,18 +2158,18 @@ export default function TickerPage() {
                 )}
                 {emDol != null && (
                   <p className="text-xl text-muted-foreground mt-1 tabular-nums">
-                    ${emDol.toFixed(2)} implied move
+                    ${emDol.toFixed(2)} <ExplainTip term="implied move">implied move</ExplainTip>
                   </p>
                 )}
                 {low != null && high != null && (
                   <p className="text-sm mt-3">
-                    <span className="text-muted-foreground">Implied range</span>{" "}
+                    <span className="text-muted-foreground"><ExplainTip term="implied range">Implied range</ExplainTip></span>{" "}
                     <span className="font-semibold tabular-nums">${low.toFixed(2)} - ${high.toFixed(2)}</span>
                   </p>
                 )}
                 {expectedMove.straddle_price != null && expectedMove.atm_strike != null && (
                   <p className="text-sm text-muted-foreground mt-1">
-                    ATM ${expectedMove.atm_strike.toFixed(0)} straddle at ${expectedMove.straddle_price.toFixed(2)}
+                    <ExplainTip term="atm">ATM</ExplainTip> ${expectedMove.atm_strike.toFixed(0)} <ExplainTip term="straddle">straddle</ExplainTip> at ${expectedMove.straddle_price.toFixed(2)}
                     {expectedMove.expiration_used && ` exp ${expectedMove.expiration_used}`}
                   </p>
                 )}
@@ -2216,7 +2218,7 @@ export default function TickerPage() {
                 )}
                 {spread != null && (
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                    <span className="text-sm text-muted-foreground">IV - RV spread</span>
+                    <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>IV - RV spread</ExplainTip></span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
                       {spreadLabeled && (
@@ -2230,7 +2232,7 @@ export default function TickerPage() {
                 )}
                 {pcRatio != null && (
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                    <span className="text-sm text-muted-foreground">Put/Call ratio</span>
+                    <span className="text-sm text-muted-foreground"><ExplainTip term="put/call ratio" metric="put_call" symbol={upperSymbol}>Put/Call ratio</ExplainTip></span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {pcRatio.toFixed(2)}
                       <span className="text-muted-foreground">
