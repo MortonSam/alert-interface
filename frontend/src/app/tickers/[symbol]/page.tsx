@@ -1992,12 +1992,19 @@ export default function TickerPage() {
                               {action === "up" ? "▲" : action === "down" ? "▼" : "→"}
                             </span>
                             <span className="text-sm font-medium truncate">{firm ?? "Unknown"}</span>
-                            {toGrade && <span className="text-xs text-muted-foreground shrink-0">→ {toGrade}</span>}
+                            {toGrade && <span className="text-xs text-muted-foreground shrink-0">→ <ExplainTip term="analyst grades">{toGrade}</ExplainTip></span>}
                             {pt != null && <span className="text-xs tabular-nums text-muted-foreground shrink-0">${pt}</span>}
                             <span className="text-xs text-muted-foreground ml-auto shrink-0">{formatEventDate(evt.event_date)}</span>
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                  {recentAnalystActions.length > 0 && (
+                    <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
+                      <span>▲ <ExplainTip term="upgrade">upgrade</ExplainTip></span>
+                      <span>▼ <ExplainTip term="downgrade">downgrade</ExplainTip></span>
+                      <span>→ initiate or reiterate</span>
                     </div>
                   )}
                 </div>
