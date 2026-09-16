@@ -241,12 +241,16 @@ function HistoryInsightsPanel({
 
 // ── Reaction bar chart ───────────────────────────────────────────────────────
 
-function ReactionChartTooltip({ active, payload, mode }: { active?: boolean; payload?: any[]; mode?: string }) {
+function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { active?: boolean; payload?: any[]; mode?: string; coordinate?: { x: number; y: number }; viewBox?: { x: number; y: number; width: number; height: number } }) {
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
   const isFed = mode === "fed";
+  const flipLeft = coordinate && viewBox && coordinate.x > viewBox.width / 2;
   return (
-    <div className="rounded-md border bg-white dark:bg-zinc-900 px-3 py-2 text-xs shadow-md">
+    <div
+      className="rounded-md border bg-white dark:bg-zinc-900 px-3 py-2 text-xs shadow-md"
+      style={flipLeft ? { transform: "translateX(calc(-100% - 16px))" } : undefined}
+    >
       <p className="font-medium">{formatEventDate(d.date)}</p>
       {!isFed && <p className="capitalize text-muted-foreground">{d.outcome}</p>}
       {!isFed && d.epsActual != null && d.epsEstimate != null && (
