@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bricolage_Grotesque, Schibsted_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import Link from "next/link";
 import NavLinks from "@/components/NavLinks";
+import PostHogProvider from "@/components/PostHogProvider";
 import "./globals.css";
 
 const fontDisplay = Bricolage_Grotesque({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-display", display: "swap" });
@@ -17,19 +18,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`dark ${fontDisplay.variable} ${fontUi.variable} ${fontMono.variable}`}>
       <body className="font-sans antialiased">
-        <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-8 h-[3.25rem] flex items-center gap-6">
-            <Link href="/" className="font-bold text-sm tracking-tight mr-2">
-              Alert Interface
-            </Link>
-            <NavLinks />
-          </div>
-        </header>
-        {children}
-        <footer className="text-[11px] text-muted-foreground/70 text-center py-6">
-          Alert Interface is an educational research tool. Nothing here is investment advice. Options involve substantial risk.
-          {" "}<Link href="/disclosures" className="underline hover:text-muted-foreground">Disclosures</Link>
-        </footer>
+        <PostHogProvider>
+          <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
+            <div className="max-w-7xl mx-auto px-8 h-[3.25rem] flex items-center gap-6">
+              <Link href="/" className="font-bold text-sm tracking-tight mr-2">
+                Alert Interface
+              </Link>
+              <NavLinks />
+            </div>
+          </header>
+          {children}
+          <footer className="text-[11px] text-muted-foreground/70 text-center py-6">
+            Alert Interface is an educational research tool. Nothing here is investment advice. Options involve substantial risk.
+            {" "}<Link href="/disclosures" className="underline hover:text-muted-foreground">Disclosures</Link>
+          </footer>
+        </PostHogProvider>
       </body>
     </html>
   );

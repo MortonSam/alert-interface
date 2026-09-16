@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import DisclosuresTracker from "./tracker";
 
 export const metadata: Metadata = {
   title: "Disclosures | Alert Interface",
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
 export default function DisclosuresPage() {
   return (
     <div className="max-w-2xl mx-auto px-6 py-16">
+      <DisclosuresTracker />
       <h1 className="text-2xl font-semibold text-foreground">Disclosures</h1>
       <p className="text-sm text-muted-foreground mt-1">
         Last updated September 14, 2026

@@ -14,6 +14,7 @@ import {
   type Thesis,
 } from "@/lib/api";
 import { cn, rvRankShort } from "@/lib/utils";
+import { capture } from "@/lib/analytics";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
 import { GiBull, GiBearFace } from "react-icons/gi";
@@ -804,9 +805,12 @@ function BuildTradePageContent() {
       const d = await api.theses.draft({ symbol: selectedTicker.symbol, direction: direction as "bullish" | "bearish", aggressiveness });
       setDraft(d);
       setStep("review_draft");
+      capture("build_trade_generated", { symbol: selectedTicker.symbol, direction });
     } catch (err) {
-      setDraftError(err instanceof Error ? err.message : "Generation failed. Please try again.");
+      const reason = err instanceof Error ? err.message : "Generation failed. Please try again.";
+      setDraftError(reason);
       setStep("pick_direction");
+      capture("build_trade_refused", { symbol: selectedTicker.symbol, reason });
     }
   }
 
@@ -822,18 +826,23 @@ function BuildTradePageContent() {
         // Duplicate refusal — show existing pick info, don't generate
         setStep("pick_direction");
         setDirection(null);
+        capture("build_trade_refused", { symbol: selectedTicker.symbol, reason: "duplicate_pick" });
       } else if (result.picked_direction === "mixed_evidence") {
         setStep("pick_direction");
         setDirection(null);         // reset so user can pick manually
+        capture("build_trade_refused", { symbol: selectedTicker.symbol, reason: "mixed_evidence" });
       } else {
         setDirection(result.picked_direction as "bullish" | "bearish");
         setDraft(result.draft);
         setStep("review_draft");
+        capture("build_trade_generated", { symbol: selectedTicker.symbol, direction: result.picked_direction });
       }
     } catch (err) {
-      setDraftError(err instanceof Error ? err.message : "Generation failed");
+      const reason = err instanceof Error ? err.message : "Generation failed";
+      setDraftError(reason);
       setStep("pick_direction");
       setDirection(null);
+      capture("build_trade_refused", { symbol: selectedTicker.symbol, reason });
     }
   }
 

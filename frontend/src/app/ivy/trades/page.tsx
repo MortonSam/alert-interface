@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
+import { capture } from "@/lib/analytics";
 
 const EXP_TAIL_RE = /\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$/i;
 
@@ -327,6 +328,7 @@ export default function IvyTradesPage() {
         if (!cancelled) {
           setPicks(data);
           setActivity(act);
+          capture("ivy_trades_viewed");
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load picks");

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type IvyActivity, type IvyWorksheetRow } from "@/lib/api";
+import { capture } from "@/lib/analytics";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
@@ -84,7 +85,7 @@ export default function IvyDeskPage() {
   useEffect(() => {
     api.theses
       .ivyActivity()
-      .then(setActivity)
+      .then((a) => { setActivity(a); capture("ivy_desk_viewed"); })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
   }, []);

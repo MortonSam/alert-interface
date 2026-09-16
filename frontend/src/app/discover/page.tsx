@@ -14,6 +14,7 @@ import {
   type LatestPickItem,
   type HealthStatus,
 } from "@/lib/api";
+import { capture } from "@/lib/analytics";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ export default function DiscoverPage() {
       setUnusuallyActive(ua.items);
       setLatestPick(lp.pick);
       setLoading(false);
+      capture("discover_viewed");
 
       // Batch-fetch quotes for all displayed symbols
       const allSymbols = [

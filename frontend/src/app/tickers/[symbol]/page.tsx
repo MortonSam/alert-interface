@@ -21,6 +21,7 @@ import {
   type HealthStatus,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
+import { capture } from "@/lib/analytics";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
 import StructuredNoteView from "@/components/StructuredNoteView";
@@ -1272,7 +1273,7 @@ export default function TickerPage() {
   useEffect(() => {
     api.tickers
       .bySymbol(upperSymbol)
-      .then((t) => { setTicker(t); setTickerStatus("found"); })
+      .then((t) => { setTicker(t); setTickerStatus("found"); capture("ticker_viewed", { symbol: upperSymbol }); })
       .catch((e: Error) => {
         if (e.message.includes("404")) { setTickerStatus("missing"); }
         else { setTickerError(e.message); setTickerStatus("error"); }
@@ -1492,7 +1493,10 @@ export default function TickerPage() {
   useEffect(() => {
     api.researchNotes
       .get(upperSymbol)
-      .then((n) => { setNote(n); setNoteStatus("done"); })
+      .then((n) => {
+        setNote(n); setNoteStatus("done");
+        if (n.status === "complete") capture("note_rendered", { symbol: upperSymbol });
+      })
       .catch((e: Error) => {
         if (e.message.startsWith("API 404")) { setNoteStatus("empty"); }
         else { setNoteStatus("error"); }
@@ -1511,7 +1515,10 @@ export default function TickerPage() {
       pollInFlight.current = true;
       api.researchNotes
         .get(upperSymbol)
-        .then((n) => { setNote(n); setNoteStatus("done"); })
+        .then((n) => {
+          setNote(n); setNoteStatus("done");
+          if (n.status === "complete") capture("note_rendered", { symbol: upperSymbol });
+        })
         .catch(() => {})
         .finally(() => { pollInFlight.current = false; });
     }, 3000);
