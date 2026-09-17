@@ -1,17 +1,9 @@
 """Seed historical earnings reactions from yfinance.
 
-For each past earnings date (up to 5 years back) we pull daily price history
-and compute price moves relative to the open on the event day:
-
-  open_after   : open price on event day T  (the baseline)
-  close_after  : close price on event day T
-  close_before : close price on the last trading day before T
-  pct_change_1d: (close on 1st trading day after T - open_T) / open_T * 100
-  pct_change_3d: (close on 3rd trading day after T - open_T) / open_T * 100
-  pct_change_5d: (close on 5th trading day after T - open_T) / open_T * 100
-  volume_after : volume on event day T
-
-"T+N" counts trading days using the price history rows as the calendar.
+v3: Timing-aware reaction windows.
+  bmo: base = close(T-1), 1d = close(T), 3d = close(T+2), 5d = close(T+4)
+  amc: base = close(T),   1d = close(T+1), 3d = close(T+3), 5d = close(T+5)
+  unknown: pct fields NULL, price metadata still stored
 
 Upserts match on (ticker_id, event_date, event_type).
 
@@ -52,6 +44,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
+from app.models.earnings_report_timing import EarningsReportTiming
 from app.models.enums import EarningsOutcome, EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
@@ -62,7 +55,7 @@ LOOKBACK_YEARS = 5
 MIN_AGE_DAYS = 8
 
 # Bump when reaction computation logic changes, so history stays comparable.
-COMPUTATION_VERSION = 2  # v2: added all-zero guard (rejects stale frozen quotes)
+COMPUTATION_VERSION = 3  # v3: timing-aware windows (bmo/amc)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -269,6 +262,98 @@ def _compute(
     )
 
 
+def _compute_v3(
+    hist: pd.DataFrame,
+    dates: np.ndarray,
+    event_date: date,
+    report_timing: str,
+) -> dict | None:
+    """Timing-aware reaction windows.
+
+    bmo: base = close(T-1), 1d = close(T), 3d = close(T+2), 5d = close(T+4)
+    amc: base = close(T),   1d = close(T+1), 3d = close(T+3), 5d = close(T+5)
+    unknown: pct fields NULL, price metadata still stored
+    """
+    if dates[0] > event_date:
+        return None
+
+    ov = _open_vol_on_or_after(hist, dates, event_date)
+    if ov is None:
+        return None
+    open_t, vol_t = ov
+    if open_t == 0:
+        return None
+
+    t_idx = int(np.argmax(dates >= event_date))
+
+    if vol_t == 0 or (isinstance(vol_t, float) and np.isnan(vol_t)):
+        return None
+
+    actual_t_date = dates[t_idx]
+
+    def d2(v: float | None) -> Decimal | None:
+        return Decimal(str(round(v, 4))) if v is not None else None
+
+    close_t = float(hist["Close"].iloc[t_idx])
+    close_before = _close_strictly_before(hist, dates, actual_t_date)
+
+    if report_timing == "bmo":
+        # Pre-market report: gap is in open(T), base = close(T-1)
+        base = close_before
+        if base is None or base == 0:
+            return None
+        close_1d = close_t                              # close(T)
+        close_3d = _close_at_offset(hist, t_idx, 2)     # close(T+2)
+        close_5d = _close_at_offset(hist, t_idx, 4)     # close(T+4)
+    elif report_timing == "amc":
+        # After-close report: gap is in open(T+1), base = close(T)
+        base = close_t
+        if base == 0:
+            return None
+        close_1d = _close_at_offset(hist, t_idx, 1)     # close(T+1)
+        close_3d = _close_at_offset(hist, t_idx, 3)     # close(T+3)
+        close_5d = _close_at_offset(hist, t_idx, 5)     # close(T+5)
+    else:
+        # Unknown timing: store metadata, null out pct fields
+        return dict(
+            close_before  = d2(close_before),
+            open_after    = d2(open_t),
+            close_after   = d2(close_t),
+            pct_change_1d = None,
+            pct_change_3d = None,
+            pct_change_5d = None,
+            volume_after  = vol_t,
+        )
+
+    def pct(close: float | None) -> Decimal | None:
+        if close is None:
+            return None
+        return Decimal(str(round((close - base) / base * 100, 4)))
+
+    # Frozen-price guard
+    closes = [c for c in (close_1d, close_3d, close_5d) if c is not None]
+    frozen = closes and all(c == base for c in closes)
+
+    pct_1d = None if frozen else pct(close_1d)
+    pct_3d = None if frozen else pct(close_3d)
+    pct_5d = None if frozen else pct(close_5d)
+
+    # All-zero guard
+    non_none = [v for v in (pct_1d, pct_3d, pct_5d) if v is not None]
+    if non_none and all(v == Decimal("0") for v in non_none):
+        return None
+
+    return dict(
+        close_before  = d2(close_before),
+        open_after    = d2(open_t),
+        close_after   = d2(close_t),
+        pct_change_1d = pct_1d,
+        pct_change_3d = pct_3d,
+        pct_change_5d = pct_5d,
+        volume_after  = vol_t,
+    )
+
+
 # ── DB upsert ─────────────────────────────────────────────────────────────────
 
 async def upsert_reaction(
@@ -296,9 +381,12 @@ async def upsert_reaction(
     else:
         update_data = data
 
-    # Always stamp the computation version on insert and update.
+    # Always stamp the computation version and report_timing on insert and update.
     data["computation_version"] = COMPUTATION_VERSION
     update_data["computation_version"] = COMPUTATION_VERSION
+    # report_timing is passed in data dict by the caller if available
+    if "report_timing" in data:
+        update_data["report_timing"] = data["report_timing"]
 
     stmt = (
         pg_insert(HistoricalReaction)
@@ -335,19 +423,32 @@ def save_failed_reactions(symbols: list[str]) -> None:
 # ── Skip logic ────────────────────────────────────────────────────────────────
 
 async def build_reactions_skip_set(session) -> set[str]:
-    """Return symbols that already have >= SKIP_MIN_REACTIONS reactions within SKIP_WITHIN_DAYS."""
-    cutoff = date.today() - timedelta(days=SKIP_WITHIN_DAYS)
-    rows = (await session.execute(
+    """Return symbols where ALL earnings reactions have computation_version >= COMPUTATION_VERSION.
+
+    This gives natural resume behavior: tickers with any old-version rows are reprocessed.
+    """
+    # Tickers that have at least one earnings reaction below current version
+    needs_update = (await session.execute(
+        select(Ticker.symbol)
+        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.computation_version < COMPUTATION_VERSION,
+        )
+        .group_by(Ticker.id, Ticker.symbol)
+    )).scalars().all()
+    needs_update_set = set(needs_update)
+
+    # All tickers with earnings reactions
+    all_with_reactions = (await session.execute(
         select(Ticker.symbol)
         .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
         .where(HistoricalReaction.event_type == EventType.EARNINGS)
         .group_by(Ticker.id, Ticker.symbol)
-        .having(
-            func.count(HistoricalReaction.id) >= SKIP_MIN_REACTIONS,
-            func.max(HistoricalReaction.event_date) >= cutoff,
-        )
     )).scalars().all()
-    return set(rows)
+
+    # Skip = has reactions AND none below current version
+    return set(all_with_reactions) - needs_update_set
 
 
 # ── Per-ticker seed (one-off, verbose) ────────────────────────────────────────
@@ -389,14 +490,23 @@ async def seed(symbol: str) -> None:
 
     inserted = updated = skipped = 0
     async with AsyncSessionLocal() as session:
+        # Look up report_timing from earnings_report_timing table
+        timing_rows = (await session.execute(
+            select(EarningsReportTiming.event_date, EarningsReportTiming.timing)
+            .where(EarningsReportTiming.ticker_id == ticker.id)
+        )).all()
+        timing_map = {r.event_date: r.timing for r in timing_rows}
+
         for event_date, eps_estimate, eps_actual in earnings_entries:
-            data = _compute(hist, dates_cache, event_date)
+            report_timing = timing_map.get(event_date, "unknown")
+            data = _compute_v3(hist, dates_cache, event_date, report_timing)
             if data is None:
                 skipped += 1
                 continue
             data["eps_estimate"] = eps_estimate
             data["eps_actual"]   = eps_actual
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
+            data["report_timing"] = report_timing
             created = await upsert_reaction(session, ticker, event_date, data)
             if created:
                 inserted += 1
@@ -453,14 +563,23 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
             await session.commit()
             return 0, 0, 0
 
+        # Look up report_timing from earnings_report_timing table
+        timing_rows = (await session.execute(
+            select(EarningsReportTiming.event_date, EarningsReportTiming.timing)
+            .where(EarningsReportTiming.ticker_id == ticker.id)
+        )).all()
+        timing_map = {r.event_date: r.timing for r in timing_rows}
+
         for event_date, eps_estimate, eps_actual in earnings_entries:
-            data = _compute(hist, dates_cache, event_date)
+            report_timing = timing_map.get(event_date, "unknown")
+            data = _compute_v3(hist, dates_cache, event_date, report_timing)
             if data is None:
                 no_price += 1
                 continue
             data["eps_estimate"] = eps_estimate
             data["eps_actual"]   = eps_actual
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
+            data["report_timing"] = report_timing
             created = await upsert_reaction(session, ticker, event_date, data)
             if created:
                 inserted += 1
@@ -596,11 +715,105 @@ def parse_args() -> argparse.Namespace:
                    help="Cap the candidate list at N (for testing; use with --all or --retry-only)")
     p.add_argument("--force", action="store_true",
                    help="Skip the freshness check and reprocess all tickers")
+    p.add_argument("--shadow", action="store_true",
+                   help="Write v3 results to shadow_reactions table for comparison")
     return p.parse_args()
+
+
+async def shadow_seed(symbols: list[str]) -> int:
+    """Compute v3 for given symbols, compare with existing v2 data, print table."""
+    print("\n── Shadow comparison (v2 vs v3) ──────────────────────────")
+
+    for sym in symbols:
+        async with AsyncSessionLocal() as session:
+            ticker = await session.scalar(select(Ticker).where(Ticker.symbol == sym))
+            if ticker is None:
+                print(f"  {sym}: not in DB, skipping")
+                continue
+
+            # Get existing v2 reactions
+            v2_rows = (await session.execute(
+                select(HistoricalReaction)
+                .where(
+                    HistoricalReaction.ticker_id == ticker.id,
+                    HistoricalReaction.event_type == EventType.EARNINGS,
+                )
+                .order_by(HistoricalReaction.event_date.desc())
+            )).scalars().all()
+
+            v2_by_date = {r.event_date: r for r in v2_rows}
+
+            # Look up timing from earnings_report_timing
+            timing_rows = (await session.execute(
+                select(EarningsReportTiming.event_date, EarningsReportTiming.timing)
+                .where(EarningsReportTiming.ticker_id == ticker.id)
+            )).all()
+            timing_map = {r.event_date: r.timing for r in timing_rows}
+
+        # Fetch price history
+        lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
+        yf_ticker = yf.Ticker(sym)
+        try:
+            hist = _fetch_price_history(yf_ticker, lookback)
+        except Exception as exc:
+            print(f"  {sym}: price history failed -- {exc}")
+            continue
+        if hist.empty:
+            continue
+
+        dates_cache = _build_date_cache(hist)
+
+        def fmt(val) -> str:
+            if val is None:
+                return "   --"
+            v = float(val)
+            return f"{v:+7.2f}"
+
+        print(f"\n  {sym}:")
+        print(f"  {'Date':<12} {'Timing':<8} {'v2 1d':>8} {'v3 1d':>8} {'v2 3d':>8} {'v3 3d':>8} {'v2 5d':>8} {'v3 5d':>8}")
+        print(f"  {'─' * 72}")
+
+        v2_abs_1d_vals: list[float] = []
+        v3_abs_1d_vals: list[float] = []
+
+        for edate in sorted(v2_by_date, reverse=True):
+            v2 = v2_by_date[edate]
+            timing = timing_map.get(edate, "unknown")
+            v3_data = _compute_v3(hist, dates_cache, edate, timing)
+
+            v2_1d = fmt(v2.pct_change_1d)
+            v2_3d = fmt(v2.pct_change_3d)
+            v2_5d = fmt(v2.pct_change_5d)
+            v3_1d = fmt(v3_data.get("pct_change_1d") if v3_data else None)
+            v3_3d = fmt(v3_data.get("pct_change_3d") if v3_data else None)
+            v3_5d = fmt(v3_data.get("pct_change_5d") if v3_data else None)
+
+            if v2.pct_change_1d is not None:
+                v2_abs_1d_vals.append(abs(float(v2.pct_change_1d)))
+            v3_pct = v3_data.get("pct_change_1d") if v3_data else None
+            if v3_pct is not None:
+                v3_abs_1d_vals.append(abs(float(v3_pct)))
+
+            print(f"  {edate.isoformat():<12} {timing:<8} {v2_1d} {v3_1d} {v2_3d} {v3_3d} {v2_5d} {v3_5d}")
+
+        v2_avg = sum(v2_abs_1d_vals) / len(v2_abs_1d_vals) if v2_abs_1d_vals else 0
+        v3_avg = sum(v3_abs_1d_vals) / len(v3_abs_1d_vals) if v3_abs_1d_vals else 0
+        print(f"  {'─' * 72}")
+        print(f"  avg abs 1d: v2={v2_avg:.2f}%  v3={v3_avg:.2f}%  (n_v2={len(v2_abs_1d_vals)}, n_v3={len(v3_abs_1d_vals)})")
+
+    return 0
 
 
 async def main() -> int:
     args = parse_args()
+
+    if args.shadow:
+        symbols = [s.upper() for s in args.tickers]
+        if not symbols:
+            print("--shadow requires ticker symbols. Usage:")
+            print("  python -m app.scripts.seed_historical_reactions --shadow CAT JCI JPM MU NVDA AAPL")
+            return 1
+        return await shadow_seed(symbols)
 
     if args.all_tickers or args.retry_only:
         return await main_bulk(retry_only=args.retry_only, limit=args.limit, force=args.force)
