@@ -38,8 +38,9 @@ class HistoricalReactionRead(HistoricalReactionBase):
     id: uuid.UUID
     created_at: datetime
 
-    # Computed enrichment field — not stored in DB; populated by the router
-    eps_surprise_pct: float | None = None   # (eps_actual − eps_estimate) / |eps_estimate| × 100
+    # Computed enrichment field -- not stored in DB; populated by the router
+    eps_surprise_pct: float | None = None   # (eps_actual - eps_estimate) / |eps_estimate| x 100
+    report_timing: str | None = None        # bmo | amc | unknown
     # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
     # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day
     # prices, not the post-earnings reaction. Meaningful decomposition requires next-day OHLCV
@@ -70,6 +71,7 @@ class ReactionSummaryRead(BaseModel):
     sector_as_of: str | None = None         # ISO date of sector peer snapshot
     priced_in: LabelRule | None = None      # interpretive label for beat-but-dropped rate
     last_event_date: str | None = None      # ISO date of most recent earnings in sample
+    mixed_versions: bool = False            # True while reseed in progress (some rows < v3)
 
 
 class ConditionalEarningsRead(BaseModel):

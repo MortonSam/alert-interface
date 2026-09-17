@@ -2046,6 +2046,11 @@ export default function TickerPage() {
                   const missHasAvg = ce.miss_count >= 3 && ce.avg_1d_on_miss != null;
                   return (
                     <div className="mt-3 pt-3 border-t">
+                      {reactionSummary?.mixed_versions && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                          Earnings reaction figures are being recomputed under a corrected definition.
+                        </p>
+                      )}
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2">
                         <div>
                           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Earnings track record</p>
@@ -2228,7 +2233,13 @@ export default function TickerPage() {
         <section id="evidence" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="03" label="Evidence" />
 
-          {/* Toggle pills — only shown when FOMC data exists */}
+          {reactionSummary?.mixed_versions && (
+            <Callout severity="caution" banner>
+              Earnings reaction figures are being recomputed under a corrected definition.
+            </Callout>
+          )}
+
+          {/* Toggle pills -- only shown when FOMC data exists */}
           {fomcStatus === "done" && fomcReactions.length > 0 && (
             <div className="flex gap-2 mb-4">
               <button

@@ -138,13 +138,23 @@ async def get_reaction_summary(
     avg_1d_beat = round(sum(beat_1d) / len(beat_1d), 2) if beat_1d else None
     avg_1d_miss = round(sum(miss_1d) / len(miss_1d), 2) if miss_1d else None
 
-    # 3. Sector peer comparison — read from stored snapshot
+    # 3. Sector peer comparison -- read from stored snapshot
     sector_avg: float | None = None
     peer_count = 0
     sector_as_of: str | None = None
 
     if ticker.sector:
         sector_avg, peer_count, sector_as_of = await _sector_peer_aggregate(db, ticker.sector, sym)
+
+    # 4. Check for mixed computation versions (reseed in progress)
+    mixed_versions = bool(await db.scalar(
+        select(HistoricalReaction.id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.computation_version < 3,
+        )
+        .limit(1)
+    ))
 
     return ReactionSummaryRead(
         symbol=sym,
@@ -164,6 +174,7 @@ async def get_reaction_summary(
         sector_as_of=sector_as_of,
         priced_in=_to_lr(priced_in_label(beat_dropped_rate)),
         last_event_date=max(r.event_date for r in rows).isoformat(),
+        mixed_versions=mixed_versions,
     )
 
 

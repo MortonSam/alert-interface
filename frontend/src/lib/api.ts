@@ -104,10 +104,8 @@ export interface HistoricalReaction {
   outcome: EarningsOutcome;
   created_at: string;
   // Computed enrichment field (populated server-side, null for non-earnings rows)
-  eps_surprise_pct: number | null;  // (eps_actual − eps_estimate) / |eps_estimate| × 100
-  // gap_pct / intraday_pct omitted: open_after/close_after are event-day pre-print prices for
-  // after-close reporters, so those figures measure pre-earnings trading, not the reaction.
-  // Revisit when next-day OHLCV (T+1 open) is stored.
+  eps_surprise_pct: number | null;  // (eps_actual - eps_estimate) / |eps_estimate| x 100
+  report_timing: string | null;    // bmo | amc | unknown
 }
 
 export interface LabelRule {
@@ -133,6 +131,7 @@ export interface ReactionSummary {
   sector_as_of: string | null;
   priced_in: LabelRule | null;
   last_event_date: string | null;
+  mixed_versions?: boolean;
 }
 
 export interface SectorPeerItem {
