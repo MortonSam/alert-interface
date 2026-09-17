@@ -643,6 +643,7 @@ async def run_research_note_background(
                     output_tokens      = gen["output_tokens"],
                     source_filings     = source_filings,
                     status             = "verifying",
+                    data_version       = 3,
                     updated_at         = now,
                 )
             )

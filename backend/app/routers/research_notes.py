@@ -68,17 +68,23 @@ class StalenessRead(BaseModel):
 STALENESS_DAYS = 30
 
 
+CURRENT_REACTION_VERSION = 3
+
+
 @router.get("/staleness/{symbol}", response_model=StalenessRead)
 async def check_staleness(
     symbol: str,
     db: AsyncSession = Depends(get_db),
 ) -> StalenessRead:
-    """Check if a research note is stale (generated >30 days ago). DB only."""
+    """Check if a research note is stale (generated >30 days ago or before reaction-window correction). DB only."""
     note = await get_research_note(db, None, symbol.upper())
     if note is None:
         return StalenessRead(stale=False, reason=None)
     if note.generated_at is None:
         return StalenessRead(stale=False, reason=None)
+    # Check data version staleness first (more actionable)
+    if note.data_version < CURRENT_REACTION_VERSION:
+        return StalenessRead(stale=True, reason="Generated before the reaction-window correction.")
     age = datetime.now(timezone.utc) - note.generated_at.replace(tzinfo=timezone.utc)
     if age > timedelta(days=STALENESS_DAYS):
         return StalenessRead(stale=True, reason=f"Generated over {STALENESS_DAYS} days ago")
