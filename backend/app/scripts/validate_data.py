@@ -1476,6 +1476,110 @@ async def check_options_read_coverage(session) -> CheckResult:
     )
 
 
+# ── v3 reaction checks ───────────────────────────────────────────────────────
+
+async def check_no_mixed_computation_version(session) -> CheckResult:
+    """ERROR if earnings reactions have more than one distinct computation_version."""
+    rows = (await session.execute(
+        select(HistoricalReaction.computation_version)
+        .where(HistoricalReaction.event_type == EventType.EARNINGS)
+        .distinct()
+    )).scalars().all()
+    versions = sorted(rows)
+    if len(versions) <= 1:
+        return CheckResult(
+            "no_mixed_computation_version", PASS,
+            f"All earnings reactions at version {versions[0] if versions else '(none)'}",
+        )
+    return CheckResult(
+        "no_mixed_computation_version", ERROR,
+        f"Mixed computation versions: {versions}. Reseed incomplete.",
+    )
+
+
+async def check_report_timing_unknown_share(session) -> CheckResult:
+    """WARN >10%, ERROR >25% of active tickers have unknown report timing on earnings reactions."""
+    total_active = (await session.scalar(
+        select(func.count(Ticker.id)).where(Ticker.is_active.is_(True))
+    )) or 0
+    if total_active == 0:
+        return CheckResult("report_timing_unknown_share", PASS, "No active tickers")
+
+    unknown_tickers = (await session.scalar(
+        select(func.count(func.distinct(Ticker.id)))
+        .select_from(Ticker)
+        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+        .where(
+            Ticker.is_active.is_(True),
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.report_timing == "unknown",
+            HistoricalReaction.pct_change_1d.is_(None),
+        )
+    )) or 0
+
+    pct = round(unknown_tickers / total_active * 100, 1)
+    msg = f"{unknown_tickers}/{total_active} ({pct}%) active tickers have unknown report timing"
+
+    if pct > 25:
+        return CheckResult("report_timing_unknown_share", ERROR, msg)
+    if pct > 10:
+        return CheckResult("report_timing_unknown_share", WARN, msg)
+    return CheckResult("report_timing_unknown_share", PASS, msg)
+
+
+async def check_bmo_1d_vs_gap(session) -> CheckResult:
+    """ERROR if any ticker's avg abs 1d < avg abs gap * 0.5 for bmo reactions.
+
+    Ensures bmo reactions include the overnight gap. If the 1-day move is less
+    than half the gap, the window is likely wrong.
+    """
+    rows = (await session.execute(
+        select(
+            Ticker.symbol,
+            HistoricalReaction.pct_change_1d,
+            HistoricalReaction.open_after,
+            HistoricalReaction.close_before,
+        )
+        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.report_timing == "bmo",
+            HistoricalReaction.pct_change_1d.isnot(None),
+            HistoricalReaction.open_after.isnot(None),
+            HistoricalReaction.close_before.isnot(None),
+            HistoricalReaction.close_before > 0,
+        )
+    )).all()
+
+    # Group by ticker
+    from collections import defaultdict
+    ticker_data: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for r in rows:
+        gap = abs(float(r.open_after) - float(r.close_before)) / float(r.close_before) * 100
+        abs_1d = abs(float(r.pct_change_1d))
+        ticker_data[r.symbol].append((abs_1d, gap))
+
+    bad_tickers: list[str] = []
+    for sym, pairs in ticker_data.items():
+        if len(pairs) < 4:
+            continue
+        avg_abs_1d = sum(p[0] for p in pairs) / len(pairs)
+        avg_abs_gap = sum(p[1] for p in pairs) / len(pairs)
+        if avg_abs_gap > 0 and avg_abs_1d < avg_abs_gap * 0.5:
+            bad_tickers.append(f"{sym}: avg_abs_1d={avg_abs_1d:.2f}%, avg_abs_gap={avg_abs_gap:.2f}%")
+
+    if not bad_tickers:
+        return CheckResult(
+            "bmo_1d_vs_gap", PASS,
+            f"All bmo tickers have avg abs 1d >= 50% of avg abs gap ({len(ticker_data)} tickers checked)",
+        )
+    return CheckResult(
+        "bmo_1d_vs_gap", ERROR,
+        f"{len(bad_tickers)} bmo ticker(s) have avg abs 1d < 50% of avg abs gap",
+        bad_tickers[:20],
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1542,6 +1646,10 @@ CHECKS = [
     check_put_call_ratio_range,
     # Options-read coverage
     check_options_read_coverage,
+    # v3 reaction checks
+    check_no_mixed_computation_version,
+    check_report_timing_unknown_share,
+    check_bmo_1d_vs_gap,
 ]
 
 
