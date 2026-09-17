@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +35,9 @@ class Event(Base):
     is_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Flexible bag for source-specific data: EPS estimate, FDA drug name, FRED series ID, etc.
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    # Report timing: bmo (before market open), amc (after market close), unknown
+    report_timing: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
+    report_timing_source: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

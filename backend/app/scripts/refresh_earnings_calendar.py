@@ -18,8 +18,10 @@ import sys
 from datetime import date, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import ScriptSessionLocal
+from app.models.earnings_report_timing import EarningsReportTiming
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
@@ -91,6 +93,21 @@ async def _dedup_earnings(session, today: date) -> int:
     return total_deleted
 
 
+async def _upsert_timing(session, ticker_id, event_date: date, timing: str) -> None:
+    """Write timing to earnings_report_timing if known."""
+    if timing == "unknown":
+        return
+    stmt = (
+        pg_insert(EarningsReportTiming)
+        .values(ticker_id=ticker_id, event_date=event_date, timing=timing, source="finnhub")
+        .on_conflict_do_update(
+            index_elements=["ticker_id", "event_date"],
+            set_={"timing": timing, "source": "finnhub"},
+        )
+    )
+    await session.execute(stmt)
+
+
 async def main() -> int:
     today = date.today()
     end = today + timedelta(days=LOOKAHEAD_DAYS)
@@ -138,6 +155,13 @@ async def main() -> int:
         unchanged_examples: list[str] = []
         confirmed_examples: list[str] = []
 
+        def _map_hour(raw: str) -> str:
+            if raw == "bmo":
+                return "bmo"
+            if raw == "amc":
+                return "amc"
+            return "unknown"
+
         for entry in relevant:
             sym = entry["symbol"]
             ticker = ticker_by_sym[sym]
@@ -145,6 +169,9 @@ async def main() -> int:
                 edate = date.fromisoformat(entry["date"])
             except (KeyError, ValueError):
                 continue
+
+            hour_raw = entry.get("hour", "")
+            mapped_timing = _map_hour(hour_raw)
 
             # Look for existing future earnings event within 45-day window
             window_start = edate - timedelta(days=MATCH_WINDOW_DAYS)
@@ -160,6 +187,11 @@ async def main() -> int:
 
             if existing:
                 if existing.event_date == edate:
+                    # Update timing on existing rows if currently unknown
+                    if existing.report_timing == "unknown" and mapped_timing != "unknown":
+                        existing.report_timing = mapped_timing
+                        existing.report_timing_source = "finnhub"
+                    await _upsert_timing(session, ticker.id, edate, mapped_timing)
                     unchanged += 1
                     if len(unchanged_examples) < 5:
                         unchanged_examples.append(f"    {sym}: {edate.isoformat()}")
@@ -174,6 +206,11 @@ async def main() -> int:
                     old_date = existing.event_date.isoformat()
                     existing.event_date = edate
                     existing.source = DataSource.FINNHUB
+                    # Update timing only if currently unknown and Finnhub provides a value
+                    if existing.report_timing == "unknown" and mapped_timing != "unknown":
+                        existing.report_timing = mapped_timing
+                        existing.report_timing_source = "finnhub"
+                    await _upsert_timing(session, ticker.id, edate, mapped_timing)
                     updated += 1
                     if len(update_examples) < 5:
                         update_examples.append(f"    {sym}: {old_date} -> {edate.isoformat()}")
@@ -186,7 +223,10 @@ async def main() -> int:
                     source=DataSource.FINNHUB,
                     is_confirmed=False,
                     metadata_={},
+                    report_timing=mapped_timing,
+                    report_timing_source="finnhub" if mapped_timing != "unknown" else "unknown",
                 ))
+                await _upsert_timing(session, ticker.id, edate, mapped_timing)
                 inserted += 1
                 if len(insert_examples) < 5:
                     insert_examples.append(f"    {sym}: {edate.isoformat()}")

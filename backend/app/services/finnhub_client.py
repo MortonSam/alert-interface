@@ -197,17 +197,21 @@ class FinnhubClient:
         self,
         from_date: str,   # "YYYY-MM-DD"
         to_date: str,     # "YYYY-MM-DD"
+        symbol: str | None = None,
     ) -> dict[str, Any]:
-        """Earnings calendar for a date range.
-        Finnhub endpoint: GET /calendar/earnings?from=&to=
+        """Earnings calendar for a date range, optionally filtered by symbol.
+        Finnhub endpoint: GET /calendar/earnings?from=&to=[&symbol=]
 
         Returns dict with earningsCalendar list of:
         {date, epsActual, epsEstimate, hour, quarter, revenueActual,
          revenueEstimate, symbol, year}.
         """
+        params: dict[str, str] = {"from": from_date, "to": to_date}
+        if symbol:
+            params["symbol"] = symbol
         return await self._request(
             "GET", "/calendar/earnings",
-            params={"from": from_date, "to": to_date},
+            params=params,
         )
 
     # ── News ───────────────────────────────────────────────────────────────────

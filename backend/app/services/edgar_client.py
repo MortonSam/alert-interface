@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -79,6 +80,48 @@ class EdgarClient:
             if entry.get("ticker", "").upper() == upper:
                 return str(entry["cik_str"]).zfill(10)
         return None
+
+    # ── 8-K retrieval with pagination ────────────────────────────────────────
+
+    async def get_all_8k_filings(
+        self, cik: str
+    ) -> list[tuple[str, str]]:
+        """Return all 8-K (filing_date, acceptanceDateTime) pairs for a CIK.
+
+        Follows filings.files pagination to get the complete history.
+        Returns list of (filing_date_str, acceptance_datetime_str).
+        """
+        subs = await self.get_submissions(cik)
+        filings = subs.get("filings", {})
+
+        def _extract_8ks(recent: dict) -> list[tuple[str, str]]:
+            forms = recent.get("form", [])
+            filing_dates = recent.get("filingDate", [])
+            acceptance_times = recent.get("acceptanceDateTime", [])
+            results = []
+            for form, fd, at in zip(forms, filing_dates, acceptance_times):
+                if form == "8-K":
+                    results.append((fd, at))
+            return results
+
+        # Recent page (~1000 most recent filings)
+        all_8ks = _extract_8ks(filings.get("recent", {}))
+
+        # Pagination: filings.files contains older batches
+        for file_ref in filings.get("files", []):
+            name = file_ref.get("name", "")
+            if not name:
+                continue
+            try:
+                resp = await self._client.get(f"/submissions/{name}")
+                resp.raise_for_status()
+                batch = resp.json()
+                all_8ks.extend(_extract_8ks(batch))
+            except Exception:
+                continue
+            await asyncio.sleep(0.12)
+
+        return all_8ks
 
     # ── Filing discovery ─────────────────────────────────────────────────────
 
