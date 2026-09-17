@@ -100,16 +100,26 @@ def _record_step_success(label: str) -> None:
         print(f"  [WARN] Failed to write step stamp for {label}: {exc}")
 
 
-def _record_step_outcome(label: str, exit_code: int, seconds: float) -> None:
-    """Append this step's outcome to the durable step_outcomes JSON blob."""
+def _record_step_outcome(label: str, exit_code: int, seconds: float,
+                         stderr_head: str | None = None) -> None:
+    """Append this step's outcome to the durable step_outcomes JSON blob.
+
+    Merges with any existing fields for this label so that scripts which
+    write their own extended outcome (e.g. warm_options_reads) keep those
+    fields intact.
+    """
     try:
         raw = _db_get("step_outcomes")
         outcomes = json.loads(raw) if raw else {}
-        outcomes[label] = {
+        existing = outcomes.get(label, {})
+        existing.update({
             "exit": exit_code,
             "seconds": round(seconds, 1),
             "at": datetime.now(timezone.utc).isoformat(),
-        }
+        })
+        if stderr_head:
+            existing["stderr_head"] = stderr_head
+        outcomes[label] = existing
         _db_upsert("step_outcomes", json.dumps(outcomes))
     except Exception as exc:
         print(f"  [WARN] Failed to write step outcome for {label}: {exc}")
@@ -123,24 +133,44 @@ def _step_env() -> dict[str, str]:
 
 
 def _run_step(label: str, cmd: list[str]) -> bool:
-    """Run a subprocess step, streaming its output. Returns True on success."""
+    """Run a subprocess step, streaming stdout and capturing stderr.
+
+    Returns True on success.  First 3 lines of stderr are stored in
+    step_outcomes for post-mortem diagnosis of silent failures.
+    """
     timeout = STEP_TIMEOUTS.get(label, STEP_TIMEOUT_SECONDS)
     print(f"\n{'─' * 60}")
     print(f"  STEP: {label}")
     print(f"{'─' * 60}")
     t0 = time.monotonic()
+    stderr_head: str | None = None
     try:
-        result = subprocess.run(cmd, check=False, timeout=timeout, env=_step_env())
-    except subprocess.TimeoutExpired:
+        result = subprocess.run(
+            cmd, check=False, timeout=timeout,
+            env=_step_env(), stderr=subprocess.PIPE,
+        )
+        if result.stderr:
+            stderr_text = result.stderr.decode(errors="replace")
+            # Print stderr so it's visible in logs
+            sys.stderr.write(stderr_text)
+            lines = [l for l in stderr_text.strip().splitlines() if l.strip()]
+            stderr_head = "\n".join(lines[:3]) if lines else None
+    except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - t0
         print(f"\n  [FAIL] {label} (killed after {timeout}s timeout)")
-        _record_step_outcome(label, exit_code=-1, seconds=elapsed)
+        if exc.stderr:
+            stderr_text = exc.stderr.decode(errors="replace")
+            lines = [l for l in stderr_text.strip().splitlines() if l.strip()]
+            stderr_head = "\n".join(lines[:3]) if lines else None
+        _record_step_outcome(label, exit_code=-1, seconds=elapsed,
+                             stderr_head=stderr_head)
         return False
     elapsed = time.monotonic() - t0
     ok = result.returncode == 0
     status = "PASS" if ok else "FAIL"
     print(f"\n  [{status}] {label} (exit {result.returncode}, {elapsed:.0f}s)")
-    _record_step_outcome(label, exit_code=result.returncode, seconds=elapsed)
+    _record_step_outcome(label, exit_code=result.returncode, seconds=elapsed,
+                         stderr_head=stderr_head)
     if ok:
         _record_step_success(label)
     return ok

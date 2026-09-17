@@ -1,14 +1,16 @@
 """Warm the options-read cache for all active tickers.
 
 Hits the running backend over HTTP with the admin token, triggering
-generation for any ticker without a cached read for today.  Tickers
-with a fresh cache hit are skipped automatically by the endpoint.
+generation for any ticker without a cached read for the current chain
+snapshot date.  Tickers with a fresh cache hit are skipped automatically.
 
 Uses claude-sonnet-4-6 (~$0.005/ticker).  509 tickers ~ $2.70 total.
 
 This step must not fail the refresh pipeline.  Always exits 0;
 records generated/cached/failed counts and estimated cost in
-step_outcomes via system_metadata.
+step_outcomes via system_metadata.  If zero reads are generated
+despite active tickers, the outcome is recorded with reason and
+exit -2 (soft failure visible in /health but not aborting refresh).
 
 CLI
 ---
@@ -36,6 +38,9 @@ from app.config import settings
 TIMEOUT = 120.0          # single request timeout (generation can be slow)
 INTER_TICKER_DELAY = 1.0 # seconds between requests
 COST_PER_GENERATION = 0.005  # estimated Sonnet cost per generated read
+
+# Collects diagnostic messages throughout the run for inclusion in step_outcomes.
+_diagnostics: list[str] = []
 
 
 def _warm_one(
@@ -84,8 +89,14 @@ def _get_active_symbols(client: httpx.Client, base: str) -> list[str]:
 
 def _record_warm_outcome(generated: int, cached: int, failed: int,
                          failed_symbols: list[str], total: int,
-                         elapsed: float) -> None:
-    """Write warm outcome details to step_outcomes in system_metadata."""
+                         elapsed: float, *,
+                         reason: str | None = None) -> None:
+    """Write warm outcome details to step_outcomes in system_metadata.
+
+    exit codes in the outcome:
+      0  = normal (some reads generated or all cached)
+     -2  = soft failure (zero generated despite active tickers)
+    """
     try:
         engine = create_engine(settings.database_url_sync, poolclass=NullPool)
         now = datetime.now(timezone.utc)
@@ -97,8 +108,9 @@ def _record_warm_outcome(generated: int, cached: int, failed: int,
         outcomes = json.loads(row[0]) if row else {}
 
         estimated_cost = round(generated * COST_PER_GENERATION, 2)
-        outcomes["Warm options reads"] = {
-            "exit": 0,
+        soft_fail = (generated == 0 and total > 0) or reason is not None
+        outcome: dict = {
+            "exit": -2 if soft_fail else 0,
             "seconds": round(elapsed, 1),
             "at": now.isoformat(),
             "generated": generated,
@@ -108,6 +120,11 @@ def _record_warm_outcome(generated: int, cached: int, failed: int,
             "total": total,
             "estimated_cost_usd": estimated_cost,
         }
+        if reason:
+            outcome["reason"] = reason
+        if _diagnostics:
+            outcome["stderr"] = _diagnostics[:3]
+        outcomes["Warm options reads"] = outcome
 
         upsert = sa.text(
             "INSERT INTO system_metadata (key, value, updated_at) "
@@ -130,8 +147,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Warm the options-read cache for all active tickers"
     )
+    port = os.environ.get("PORT", "8000")
     parser.add_argument("--base-url", default=None,
-                        help="Backend URL (default: WARM_BASE_URL env or http://localhost:8000)")
+                        help=f"Backend URL (default: WARM_BASE_URL env or http://localhost:$PORT [{port}])")
     parser.add_argument("--symbol", default=None,
                         help="Warm a single ticker (e.g. MU)")
     parser.add_argument("--limit", type=int, default=None, metavar="N",
@@ -140,10 +158,13 @@ def main() -> int:
 
     token = os.environ.get("ADMIN_TOKEN", "")
     if not token:
-        print("ERROR: ADMIN_TOKEN env var is required.", file=sys.stderr)
+        msg = "ADMIN_TOKEN env var is required"
+        print(f"ERROR: {msg}.", file=sys.stderr)
+        _diagnostics.append(msg)
+        _record_warm_outcome(0, 0, 0, [], 0, 0.0, reason=msg)
         return 0  # never fail the pipeline
 
-    base = (args.base_url or os.environ.get("WARM_BASE_URL", "http://localhost:8000")).rstrip("/")
+    base = (args.base_url or os.environ.get("WARM_BASE_URL", f"http://localhost:{port}")).rstrip("/")
     client = httpx.Client()
 
     # Build ticker list
@@ -154,7 +175,10 @@ def main() -> int:
         try:
             symbols = _get_active_symbols(client, base)
         except Exception as exc:
-            print(f"  [WARN] Could not fetch tickers: {exc}")
+            msg = f"Could not fetch tickers from {base}: {exc}"
+            print(f"  [WARN] {msg}")
+            _diagnostics.append(msg)
+            _record_warm_outcome(0, 0, 0, [], 0, 0.0, reason=msg)
             return 0  # never fail the pipeline
         if args.limit:
             symbols = symbols[:args.limit]
@@ -184,7 +208,9 @@ def main() -> int:
         elif tag == "failed":
             failed += 1
             failed_list.append(sym)
-            print(f"  [{i+1}/{total}] {sym:<6} FAILED     ({elapsed:.1f}s) {result['error']}", flush=True)
+            err_msg = result["error"] or "unknown"
+            _diagnostics.append(f"{sym}: {err_msg}")
+            print(f"  [{i+1}/{total}] {sym:<6} FAILED     ({elapsed:.1f}s) {err_msg}", flush=True)
         else:
             print(f"  [{i+1}/{total}] {sym:<6} {tag:<10} ({elapsed:.1f}s)", flush=True)
 
@@ -203,8 +229,16 @@ def main() -> int:
     print(f"  Elapsed: {total_elapsed:.0f}s")
     print(f"{'═' * 70}")
 
+    # Determine reason for zero-generation runs
+    reason: str | None = None
+    if generated == 0 and total > 0 and cached == 0:
+        reason = f"Zero generated and zero cached across {total} tickers; likely connection or auth issue"
+    elif generated == 0 and total > 0:
+        reason = None  # all cached is normal, not a failure
+
     # Record detailed outcome in system_metadata
-    _record_warm_outcome(generated, cached, failed, failed_list, total, total_elapsed)
+    _record_warm_outcome(generated, cached, failed, failed_list, total, total_elapsed,
+                         reason=reason)
 
     return 0  # never fail the pipeline
 
