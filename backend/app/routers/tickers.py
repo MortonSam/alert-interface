@@ -580,6 +580,7 @@ async def get_ticker_chart(
                     pct_change_1d=float(r.pct_change_1d) if r.pct_change_1d is not None else None,
                     pct_change_3d=float(r.pct_change_3d) if r.pct_change_3d is not None else None,
                     pct_change_5d=float(r.pct_change_5d) if r.pct_change_5d is not None else None,
+                    report_timing=r.report_timing if r.report_timing != "unknown" else None,
                 ))
 
     return TickerChartRead(symbol=sym, period=period, history=history, earnings_markers=markers, start_price=start_price)

@@ -321,6 +321,7 @@ export interface EarningsMarker {
   pct_change_1d: number | null;
   pct_change_3d: number | null;
   pct_change_5d: number | null;
+  report_timing: string | null;
 }
 
 export interface TickerChart {

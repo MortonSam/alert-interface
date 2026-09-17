@@ -781,6 +781,11 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                       <tr key={r.id} className="hover:bg-muted/30 transition-colors">
                         <td className="px-3 py-2.5 text-sm tabular-nums text-muted-foreground whitespace-nowrap">
                           {formatEventDate(r.event_date)}
+                          {!isFed && r.report_timing && r.report_timing !== "unknown" && (
+                            <span className="ml-1 text-[10px] font-medium text-muted-foreground/70 uppercase">
+                              {r.report_timing}
+                            </span>
+                          )}
                         </td>
                         {!isFed && (
                           <td className="px-3 py-2.5">
@@ -827,8 +832,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
               </table>
             </div>
             <p className="px-3 py-2 text-xs text-muted-foreground border-t">
-              Moves measured from event-day close. Days are calendar days, rolling forward to next
-              trading day on weekends/holidays.
+              Moves measured from the last close before the report. BMO: close(T-1) to close(T/T+2/T+4). AMC: close(T) to close(T+1/T+3/T+5).
             </p>
           </div>
         </>
@@ -1001,7 +1005,7 @@ function PriceChartTooltip({
               "font-medium",
               marker.pct_change_1d > 0 ? "text-green-600 dark:text-green-400" : marker.pct_change_1d < 0 ? "text-red-500 dark:text-red-400" : "text-zinc-500",
             )}>
-              T+1: {marker.pct_change_1d > 0 ? "+" : ""}{marker.pct_change_1d.toFixed(2)}%
+              1-day move{marker.report_timing === "bmo" ? " (pre-market)" : marker.report_timing === "amc" ? " (after close)" : ""}: {marker.pct_change_1d > 0 ? "+" : ""}{marker.pct_change_1d.toFixed(2)}%
             </p>
           )}
         </div>

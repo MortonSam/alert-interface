@@ -48,6 +48,7 @@ class EarningsMarker(BaseModel):
     pct_change_1d: float | None = None
     pct_change_3d: float | None = None
     pct_change_5d: float | None = None
+    report_timing: str | None = None  # "bmo" | "amc" | "unknown"
 
 
 class TickerChartRead(BaseModel):

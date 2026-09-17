@@ -45,11 +45,11 @@ const GLOSSARY: Record<string, string> = {
   meet:
     "The company reported earnings per share roughly in line with analyst estimates. The stock may still move because a meet removes surprise in either direction but does not guarantee a flat reaction.",
   "1d move":
-    "The stock's percentage change from the close before the event to the close one trading day after. A positive number means the stock rose; negative means it fell.",
+    "The stock's percentage change one trading day after the earnings report. For pre-market reports (BMO), this is measured from the prior close to the event-day close. For after-close reports (AMC), it is measured from the event-day close to the next close. The window always starts at the last close before the report and ends one trading day later.",
   "3d move":
-    "The stock's percentage change from the close before the event to the close three trading days after. It shows whether the initial reaction held, reversed, or extended.",
+    "The stock's percentage change three trading days after the earnings report, measured from the same baseline as the 1-day move. It shows whether the initial reaction held, reversed, or extended.",
   "5d move":
-    "The stock's percentage change from the close before the event to the close five trading days (one week) after. It shows whether the initial reaction persisted over the full trading week.",
+    "The stock's percentage change five trading days (one week) after the earnings report, measured from the same baseline as the 1-day move. It shows whether the initial reaction persisted over the full trading week.",
   "continuation rate":
     "How often the stock's day-5 move stayed in the same direction as the day-1 move. A high rate means initial reactions tend to stick; a low rate means reversals are common.",
   "magnitude trend":
