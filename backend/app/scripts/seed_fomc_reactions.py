@@ -42,8 +42,6 @@ from app.scripts.seed_historical_reactions import (
     BULK_BATCH_SLEEP,
     BULK_RETRY_DELAYS,
     FETCH_TIMEOUT,
-    SKIP_MIN_REACTIONS,
-    SKIP_WITHIN_DAYS,
     _build_date_cache,
     _compute,
     _fetch_price_history,
@@ -75,9 +73,10 @@ FOMC_DECISION_DATES: list[date] = [
     date(2025, 1, 29), date(2025, 3, 19), date(2025, 5, 7),
     date(2025, 6, 18), date(2025, 7, 30), date(2025, 9, 17),
     date(2025, 10, 29), date(2025, 12, 17),
-    # 2026 (through present)
+    # 2026
     date(2026, 1, 28), date(2026, 3, 18), date(2026, 4, 29),
-    date(2026, 6, 17),
+    date(2026, 6, 17), date(2026, 7, 29), date(2026, 9, 17),
+    date(2026, 10, 29), date(2026, 12, 16),
 ]
 
 
@@ -179,18 +178,21 @@ async def _upsert_fomc_reaction(
 
 # ── Skip logic ───────────────────────────────────────────────────────────────
 
-async def _build_fomc_skip_set(session) -> set[str]:
-    """Return symbols that already have >= SKIP_MIN_REACTIONS FOMC reactions within SKIP_WITHIN_DAYS."""
-    cutoff = date.today() - timedelta(days=SKIP_WITHIN_DAYS)
+async def _build_fomc_skip_set(session, expected_count: int) -> set[str]:
+    """Return symbols that already have >= expected_count FOMC reactions.
+
+    Unlike earnings (where new events keep appearing), past FOMC dates are
+    fixed.  Once a ticker has a reaction row for every processable FOMC date,
+    there is nothing new to compute.  This also provides natural resume
+    behaviour: after a timeout kills the run at ticker N, the next run skips
+    the N tickers that already finished.
+    """
     rows = (await session.execute(
         select(Ticker.symbol)
         .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
         .where(HistoricalReaction.event_type == EventType.FOMC)
         .group_by(Ticker.id, Ticker.symbol)
-        .having(
-            func.count(HistoricalReaction.id) >= SKIP_MIN_REACTIONS,
-            func.max(HistoricalReaction.event_date) >= cutoff,
-        )
+        .having(func.count(HistoricalReaction.id) >= expected_count)
     )).scalars().all()
     return set(rows)
 
@@ -335,16 +337,16 @@ async def main_bulk(limit: int | None) -> int:
         candidates = candidates[:limit]
         print(f"--limit {limit}: processing first {len(candidates)} tickers.", flush=True)
 
-    # 3. Build skip set
+    # 3. Build skip set — skip tickers that already have all expected dates
+    expected = len(fomc_dates)
     async with AsyncSessionLocal() as session:
-        skip_set = await _build_fomc_skip_set(session)
+        skip_set = await _build_fomc_skip_set(session, expected)
 
     to_process = [t for t in candidates if t.symbol not in skip_set]
     n_skipped = len(candidates) - len(to_process)
     if n_skipped:
         print(
-            f"{n_skipped} skipped "
-            f"(≥{SKIP_MIN_REACTIONS} FOMC reactions within {SKIP_WITHIN_DAYS} days).",
+            f"{n_skipped} skipped (already have ≥{expected} FOMC reactions).",
             flush=True,
         )
 
