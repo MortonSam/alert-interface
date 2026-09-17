@@ -22,6 +22,7 @@ import {
   type HealthStatus,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
+import { fmtPct } from "./fmtPct";
 import { capture } from "@/lib/analytics";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
@@ -219,20 +220,20 @@ function AnalystDetailTable({ detail }: { detail: AnalystDetailRead }) {
                   <td className={cn(
                     "py-1 pr-2 text-right tabular-nums",
                     r.pct_change_1d == null ? "text-muted-foreground"
-                      : r.pct_change_1d > 0 ? "text-green-600 dark:text-green-400"
-                      : r.pct_change_1d < 0 ? "text-red-500 dark:text-red-400"
+                      : Number(r.pct_change_1d.toFixed(1)) > 0 ? "text-green-600 dark:text-green-400"
+                      : Number(r.pct_change_1d.toFixed(1)) < 0 ? "text-red-500 dark:text-red-400"
                       : "text-muted-foreground"
                   )}>
-                    {r.pct_change_1d != null ? `${r.pct_change_1d > 0 ? "+" : ""}${r.pct_change_1d.toFixed(1)}%` : "—"}
+                    {r.pct_change_1d != null ? fmtPct(r.pct_change_1d) : "—"}
                   </td>
                   <td className={cn(
                     "py-1 text-right tabular-nums",
                     r.pct_change_5d == null ? "text-muted-foreground"
-                      : r.pct_change_5d > 0 ? "text-green-600 dark:text-green-400"
-                      : r.pct_change_5d < 0 ? "text-red-500 dark:text-red-400"
+                      : Number(r.pct_change_5d.toFixed(1)) > 0 ? "text-green-600 dark:text-green-400"
+                      : Number(r.pct_change_5d.toFixed(1)) < 0 ? "text-red-500 dark:text-red-400"
                       : "text-muted-foreground"
                   )}>
-                    {r.pct_change_5d != null ? `${r.pct_change_5d > 0 ? "+" : ""}${r.pct_change_5d.toFixed(1)}%` : "—"}
+                    {r.pct_change_5d != null ? fmtPct(r.pct_change_5d) : "—"}
                   </td>
                 </tr>
               ))}
@@ -1510,17 +1511,13 @@ export default function TickerPage() {
     const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
     if (!upSignal && !dnSignal) return null;
     if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
-      const med = median_1d_downgrade!;
-      const sign = med > 0 ? "+" : "";
-      let line = `Downgrades tend to hit, median ${sign}${med.toFixed(1)}% next day`;
+      let line = `Downgrades tend to hit, median ${fmtPct(median_1d_downgrade!)} next day`;
       if (downgrade_5d_continuation_pct != null) {
         line += `, still lower a week later ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
       }
       return line + ".";
     } else {
-      const med = median_1d_upgrade!;
-      const sign = med > 0 ? "+" : "";
-      let line = `Upgrades tend to lift, median ${sign}${med.toFixed(1)}% next day`;
+      let line = `Upgrades tend to lift, median ${fmtPct(median_1d_upgrade!)} next day`;
       if (upgrade_5d_continuation_pct != null) {
         line += `, still higher a week later ${upgrade_5d_continuation_pct.toFixed(0)}% of the time`;
       }
@@ -2167,7 +2164,7 @@ export default function TickerPage() {
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On upgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
-                          {analystStats.median_1d_upgrade > 0 ? "+" : ""}{analystStats.median_1d_upgrade.toFixed(1)}% <ExplainTip term="median next-day move">median next-day</ExplainTip>
+                          {fmtPct(analystStats.median_1d_upgrade)} <ExplainTip term="median next-day move">median next-day</ExplainTip>
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.upgrade_count} in 5 yr</p>
                       </div>
@@ -2176,7 +2173,7 @@ export default function TickerPage() {
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On downgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
-                          {analystStats.median_1d_downgrade > 0 ? "+" : ""}{analystStats.median_1d_downgrade.toFixed(1)}% <ExplainTip term="median next-day move">median next-day</ExplainTip>
+                          {fmtPct(analystStats.median_1d_downgrade)} <ExplainTip term="median next-day move">median next-day</ExplainTip>
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
                       </div>
