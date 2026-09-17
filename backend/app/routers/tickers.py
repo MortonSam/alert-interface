@@ -18,13 +18,14 @@ from app.models.iv_history import IVHistory
 from app.models.rv_snapshot import RVSnapshot
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
-from app.schemas.options import ExplainRead, ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, RealizedVolRead, StrategyDataRead, StrikeData
+from app.schemas.options import ExplainRead, ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, PutCallRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.models.system_metadata import SystemMetadata
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services import chain_store
 from app.services.finnhub_client import FinnhubClient
+from app.models.put_call_snapshot import PutCallSnapshot
 from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regime_label, discover_rv_tier
 from app.schemas.options import LabelRule as OptionsLabelRule
 from app.services import news_cache, quote_cache
@@ -1864,6 +1865,46 @@ async def get_realized_vol(
         atm_iv_as_of=atm_iv_as_of,
         iv_rv_spread_pp=spread_pp_yf,
         data_error=data_error,
+    )
+
+
+@router.get("/put-call/{symbol}", response_model=PutCallRead)
+async def get_put_call(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+) -> PutCallRead:
+    """Return the latest stored put/call ratio for a symbol (within 3 days)."""
+    sym = symbol.upper()
+    cutoff = date.today() - timedelta(days=3)
+    row = (await db.execute(
+        select(PutCallSnapshot)
+        .where(
+            PutCallSnapshot.symbol == sym,
+            PutCallSnapshot.snapshot_date >= cutoff,
+        )
+        .order_by(PutCallSnapshot.snapshot_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if row is None:
+        return PutCallRead(
+            symbol=sym,
+            ratio=None,
+            reason="No options snapshot in last 3 days",
+        )
+
+    ratio_val = float(row.ratio) if row.ratio is not None else None
+    lv = put_call_label(ratio_val)
+
+    return PutCallRead(
+        symbol=sym,
+        ratio=ratio_val,
+        label=_to_options_lr(lv),
+        basis=row.basis,
+        put_total=row.put_total,
+        call_total=row.call_total,
+        expiration_used=row.expiration_used,
+        snapshot_date=row.snapshot_date.isoformat(),
     )
 
 

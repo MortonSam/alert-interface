@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import math
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select, delete
+from sqlalchemy import func, select, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
@@ -68,6 +68,9 @@ async def ingest_options_chains(
 
     ingested: list[str] = []
     errors: list[str] = []
+    # Track the nearest expiration per symbol for put/call ratio
+    nearest_chain: dict[str, ChainIngestItem] = {}
+    today_str = date.today().isoformat()
     for item in payload.chains:
         sym = item.symbol.upper()
         if len(item.calls) > MAX_CONTRACTS_PER_SIDE or len(item.puts) > MAX_CONTRACTS_PER_SIDE:
@@ -84,11 +87,51 @@ async def ingest_options_chains(
             key = f"chain:{sym}:{item.expiration}"
             await set_value(db, key, json.dumps(chain_dict))
             ingested.append(sym)
+            # Track nearest future expiration per symbol for put/call
+            if item.expiration >= today_str:
+                prev = nearest_chain.get(sym)
+                if prev is None or item.expiration < prev.expiration:
+                    nearest_chain[sym] = item
         except Exception as exc:
             errors.append(f"{sym}: {exc}")
 
+    # Compute and store put/call ratio from the nearest expiration per symbol
+    pc_stored = 0
+    for sym, item in nearest_chain.items():
+        put_vol = sum((p.get("volume") or 0) for p in item.puts)
+        call_vol = sum((c.get("volume") or 0) for c in item.calls)
+        ratio = round(put_vol / call_vol, 4) if call_vol > 0 else None
+        snapshot_date = (
+            date.fromisoformat(item.chain_last_trade[:10])
+            if item.chain_last_trade
+            else date.today()
+        )
+        await db.execute(text("""
+            INSERT INTO put_call_snapshots
+                (id, symbol, snapshot_date, ratio, basis, put_total, call_total,
+                 expiration_used, computation_version, created_at)
+            VALUES
+                (gen_random_uuid(), :symbol, :snapshot_date, :ratio, 'volume',
+                 :put_total, :call_total, :expiration_used, 1, :now)
+            ON CONFLICT (symbol, snapshot_date) DO UPDATE SET
+                ratio = :ratio,
+                put_total = :put_total,
+                call_total = :call_total,
+                expiration_used = :expiration_used,
+                created_at = :now
+        """), {
+            "symbol": sym,
+            "snapshot_date": snapshot_date,
+            "ratio": ratio,
+            "put_total": put_vol,
+            "call_total": call_vol,
+            "expiration_used": item.expiration,
+            "now": datetime.now(timezone.utc),
+        })
+        pc_stored += 1
+
     await db.commit()
-    result: dict = {"ingested": len(ingested), "symbols": ingested}
+    result: dict = {"ingested": len(ingested), "symbols": ingested, "put_call_stored": pc_stored}
     if errors:
         result["errors"] = errors
     return result

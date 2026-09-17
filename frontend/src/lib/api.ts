@@ -442,6 +442,18 @@ export interface ExplainResponse {
   as_of: string;
 }
 
+export interface PutCallRead {
+  symbol: string;
+  ratio: number | null;
+  label: LabelRule | null;
+  basis: string | null;
+  put_total: number | null;
+  call_total: number | null;
+  expiration_used: string | null;
+  snapshot_date: string | null;
+  reason: string | null;
+}
+
 // ── Discover types ───────────────────────────────────────────────────────────
 
 export interface ReportingSoonItem {
@@ -898,6 +910,8 @@ export const api = {
       request<OptionsBundle>(`/tickers/options-bundle/${symbol}`),
     explain: (symbol: string, metric: string) =>
       request<ExplainResponse>(`/tickers/explain/${symbol}/${metric}`),
+    putCall: (symbol: string) =>
+      request<PutCallRead>(`/tickers/put-call/${symbol}`),
   },
 
   watchlists: {

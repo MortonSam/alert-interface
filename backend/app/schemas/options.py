@@ -132,3 +132,17 @@ class OptionsBundleRead(BaseModel):
     expected_move: ExpectedMoveRead
     strategy_data: StrategyDataRead
     chain: OptionsChainRead
+
+
+# ── Put/call ratio snapshot ──────────────────────────────────────────────────
+
+class PutCallRead(BaseModel):
+    symbol: str
+    ratio: float | None
+    label: LabelRule | None = None
+    basis: str | None = None
+    put_total: int | None = None
+    call_total: int | None = None
+    expiration_used: str | None = None
+    snapshot_date: str | None = None
+    reason: str | None = None          # set when ratio is null

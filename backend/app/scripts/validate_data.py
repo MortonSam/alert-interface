@@ -33,6 +33,7 @@ from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.rv_snapshot import RVSnapshot
 from app.models.magnitude_trend_snapshot import MagnitudeTrendSnapshot
+from app.models.put_call_snapshot import PutCallSnapshot
 from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
@@ -1391,6 +1392,32 @@ async def check_magnitude_trend_avg_range(session) -> CheckResult:
     )
 
 
+# ── Put/call ratio snapshots ────────────────────────────────────────────────
+
+async def check_put_call_ratio_range(session) -> CheckResult:
+    """ERROR if any stored put/call ratio is outside [0.05, 5.0]."""
+    rows = (await session.execute(
+        select(PutCallSnapshot.symbol, PutCallSnapshot.ratio, PutCallSnapshot.snapshot_date)
+        .where(
+            PutCallSnapshot.ratio.isnot(None),
+            (PutCallSnapshot.ratio < Decimal("0.05")) |
+            (PutCallSnapshot.ratio > Decimal("5.0")),
+        )
+        .order_by(PutCallSnapshot.symbol)
+    )).all()
+
+    if not rows:
+        return CheckResult("put_call_ratio_range", PASS,
+                           "All stored put/call ratios in [0.05, 5.0]")
+
+    details = [f"{r.symbol}  ratio={float(r.ratio):.4f}  date={r.snapshot_date}" for r in rows]
+    return CheckResult(
+        "put_call_ratio_range", ERROR,
+        f"{len(rows)} ratio(s) outside [0.05, 5.0]",
+        details,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1453,6 +1480,8 @@ CHECKS = [
     check_sector_peer_count_range,
     # Magnitude trend (stored snapshots)
     check_magnitude_trend_avg_range,
+    # Put/call ratio (stored snapshots)
+    check_put_call_ratio_range,
 ]
 
 

@@ -22,7 +22,6 @@ import {
   type HealthStatus,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
-import { PC_PUT_HEAVY, PC_CALL_HEAVY } from "@/lib/thresholds";
 import { capture } from "@/lib/analytics";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
@@ -1392,6 +1391,7 @@ export default function TickerPage() {
   const [rvStatus, setRvStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
   const [optionsRead, setOptionsRead]     = useState<OptionsRead | null>(null);
   const [orStatus, setOrStatus]           = useState<"loading" | "done" | "error">("loading");
+  const [putCall, setPutCall]             = useState<import("@/lib/api").PutCallRead | null>(null);
 
   // Options bundle replaces 3 separate calls
   const [expectedMove, setExpectedMove]     = useState<ExpectedMove | null>(null);
@@ -1601,6 +1601,7 @@ export default function TickerPage() {
     api.tickers.optionsRead(upperSymbol)
       .then((data) => { setOptionsRead(data); setOrStatus("done"); })
       .catch(() => setOrStatus("error"));
+    api.tickers.putCall(upperSymbol).then(setPutCall).catch(() => {});
   }, [upperSymbol]);
 
   // Options bundle: single request replaces expected-move + strategy-data + chain
@@ -2392,13 +2393,7 @@ export default function TickerPage() {
             const dataError = realizedVol?.data_error ?? false;
             const spread = realizedVol?.iv_rv_spread_pp ?? null;
             const spreadLabeled = optionsRead?.spread_labeled ?? null;
-            const pcRatio = optionsChain
-              ? (() => {
-                  const putVol = optionsChain.puts.reduce((s, p) => s + (p.volume ?? 0), 0);
-                  const callVol = optionsChain.calls.reduce((s, c) => s + (c.volume ?? 0), 0);
-                  return callVol > 0 ? putVol / callVol : null;
-                })()
-              : null;
+            const pcRatio = putCall?.ratio ?? null;
 
             // IV-RV spread consistency check
             let showSpread = spread != null;
@@ -2477,12 +2472,15 @@ export default function TickerPage() {
                     <span className="text-sm text-muted-foreground"><ExplainTip term="put/call ratio" metric="put_call" symbol={upperSymbol}>Put/Call ratio</ExplainTip></span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {pcRatio.toFixed(2)}
-                      <span className="text-muted-foreground">
-                        {" "}{pcRatio > PC_PUT_HEAVY ? "put-heavy" : pcRatio < PC_CALL_HEAVY ? "call-heavy" : "balanced"}
-                      </span>
-                      <span className="text-muted-foreground text-xs ml-1">
-                        ({pcRatio > PC_PUT_HEAVY ? `ratio above ${PC_PUT_HEAVY}` : pcRatio < PC_CALL_HEAVY ? `ratio below ${PC_CALL_HEAVY}` : `ratio between ${PC_CALL_HEAVY} and ${PC_PUT_HEAVY}`})
-                      </span>
+                      {putCall?.label && (
+                        <>
+                          <span className="text-muted-foreground"> {putCall.label.label}</span>
+                          <span className="text-muted-foreground text-xs ml-1">({putCall.label.rule})</span>
+                        </>
+                      )}
+                      {putCall?.expiration_used && (
+                        <span className="text-muted-foreground text-xs ml-1">(volume, exp {putCall.expiration_used})</span>
+                      )}
                     </span>
                   </div>
                 )}
