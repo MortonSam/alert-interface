@@ -32,6 +32,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.rv_snapshot import RVSnapshot
+from app.models.magnitude_trend_snapshot import MagnitudeTrendSnapshot
 from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
@@ -1357,6 +1358,39 @@ async def check_sector_peer_count_range(session) -> CheckResult:
     )
 
 
+# ── Magnitude trend snapshots ────────────────────────────────────────────────
+
+async def check_magnitude_trend_avg_range(session) -> CheckResult:
+    """ERROR if any stored magnitude trend avg is outside [0.3, 40.0]."""
+    rows = (await session.execute(
+        select(
+            MagnitudeTrendSnapshot.symbol,
+            MagnitudeTrendSnapshot.recent_avg_abs_1d,
+            MagnitudeTrendSnapshot.prior_avg_abs_1d,
+        )
+        .where(
+            (MagnitudeTrendSnapshot.recent_avg_abs_1d.isnot(None)) |
+            (MagnitudeTrendSnapshot.prior_avg_abs_1d.isnot(None)),
+        )
+    )).all()
+
+    bad: list[str] = []
+    for r in rows:
+        for col_name, val in [("recent", r.recent_avg_abs_1d), ("prior", r.prior_avg_abs_1d)]:
+            if val is not None and (val < Decimal("0.3") or val > Decimal("40.0")):
+                bad.append(f"{r.symbol}  {col_name}_avg_abs_1d={float(val):.2f}")
+
+    if not bad:
+        return CheckResult("magnitude_trend_avg_range", PASS,
+                           "All stored magnitude trend avgs in [0.3, 40.0]")
+
+    return CheckResult(
+        "magnitude_trend_avg_range", ERROR,
+        f"{len(bad)} value(s) outside [0.3, 40.0]",
+        bad,
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1417,6 +1451,8 @@ CHECKS = [
     check_sector_peer_avg_range,
     check_sector_peer_sector_avg_range,
     check_sector_peer_count_range,
+    # Magnitude trend (stored snapshots)
+    check_magnitude_trend_avg_range,
 ]
 
 

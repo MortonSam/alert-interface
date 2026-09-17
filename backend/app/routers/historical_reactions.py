@@ -7,16 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
-from app.thresholds import (
-    MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD,
-    magnitude_trend_label, priced_in_label,
-)
+from app.thresholds import magnitude_trend_label, priced_in_label
 from app.schemas.historical_reaction import LabelRule
 from app.database import get_db
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
+from app.models.magnitude_trend_snapshot import MagnitudeTrendSnapshot
 from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.ticker import Ticker
 from app.schemas.historical_reaction import (
@@ -367,30 +365,22 @@ async def get_conditional_earnings(
     beat_avg_5d, beat_cont, beat_5d_n = _continuation_stats(beats)
     miss_avg_5d, miss_cont, miss_5d_n = _continuation_stats(misses)
 
-    # ── Magnitude trend: last 4 prints vs prior 4 ───────────────────────────
-    abs_1d_all = [abs(float(r.pct_change_1d)) for r in rows]
-    recent_4 = abs_1d_all[-4:]
-    prior_4 = abs_1d_all[-8:-4] if total >= 8 else None
-
-    recent_avg = round(sum(recent_4) / 4, 2) if len(recent_4) == 4 else None
-    prior_avg = (
-        round(sum(prior_4) / 4, 2)
-        if prior_4 and len(prior_4) == 4
-        else None
-    )
-
+    # ── Magnitude trend: read from stored snapshot ──────────────────────────
+    recent_avg: float | None = None
+    prior_avg: float | None = None
     magnitude_trend: str | None = None
-    if recent_avg is not None and prior_avg is not None:
-        if prior_avg < 0.01:
-            magnitude_trend = "stable"
-        else:
-            pct_change = (recent_avg - prior_avg) / prior_avg
-            if pct_change > MAGNITUDE_INCREASE_THRESHOLD:
-                magnitude_trend = "increasing"
-            elif pct_change < MAGNITUDE_DECREASE_THRESHOLD:
-                magnitude_trend = "decreasing"
-            else:
-                magnitude_trend = "stable"
+
+    mag_snap = (await db.execute(
+        select(MagnitudeTrendSnapshot)
+        .where(MagnitudeTrendSnapshot.symbol == sym)
+        .order_by(MagnitudeTrendSnapshot.as_of_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if mag_snap:
+        recent_avg = round(float(mag_snap.recent_avg_abs_1d), 2) if mag_snap.recent_avg_abs_1d is not None else None
+        prior_avg = round(float(mag_snap.prior_avg_abs_1d), 2) if mag_snap.prior_avg_abs_1d is not None else None
+        magnitude_trend = mag_snap.trend
 
     return ConditionalEarningsRead(
         symbol=sym,
