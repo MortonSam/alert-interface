@@ -72,6 +72,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
+    ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
 ]
 
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
@@ -86,6 +87,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Build earnings features": 1200,
     "Auto-pick": 600,
     "Shadow eval": 600,
+    "Warm options reads": 3600,
 }
 
 

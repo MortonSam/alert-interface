@@ -1418,6 +1418,44 @@ async def check_put_call_ratio_range(session) -> CheckResult:
     )
 
 
+# ── Options-read coverage ───────────────────────────────────────────────────
+
+async def check_options_read_coverage(session) -> CheckResult:
+    """WARN if <90% of active tickers have an options-read for the latest chain date. ERROR <75%."""
+    today_iso = date.today().isoformat()
+    # Count active tickers
+    total_active = (await session.execute(
+        select(func.count()).select_from(Ticker).where(Ticker.is_active.is_(True))
+    )).scalar_one()
+
+    if total_active == 0:
+        return CheckResult("options_read_coverage", PASS, "No active tickers")
+
+    # Count options-read cache keys for today
+    pattern = f"options_read:v2:%:{today_iso}"
+    cached_count = (await session.execute(
+        select(func.count()).select_from(SystemMetadata)
+        .where(SystemMetadata.key.like(pattern))
+    )).scalar_one()
+
+    pct = round(cached_count / total_active * 100, 1)
+
+    if pct < 75:
+        return CheckResult(
+            "options_read_coverage", ERROR,
+            f"Only {cached_count}/{total_active} ({pct}%) active tickers have an options-read for {today_iso}",
+        )
+    if pct < 90:
+        return CheckResult(
+            "options_read_coverage", WARN,
+            f"{cached_count}/{total_active} ({pct}%) active tickers have an options-read for {today_iso}",
+        )
+    return CheckResult(
+        "options_read_coverage", PASS,
+        f"{cached_count}/{total_active} ({pct}%) active tickers have an options-read for {today_iso}",
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1482,6 +1520,8 @@ CHECKS = [
     check_magnitude_trend_avg_range,
     # Put/call ratio (stored snapshots)
     check_put_call_ratio_range,
+    # Options-read coverage
+    check_options_read_coverage,
 ]
 
 
