@@ -1193,7 +1193,8 @@ async def get_options_read(
     """AI-generated 2–4 sentence interpretive read synthesizing vol/options data.
 
     Every number is precomputed server-side and injected as an authoritative string.
-    The model narrates; it does not calculate. Cached per calendar day in system_metadata.
+    The model narrates; it does not calculate. Cached by chain snapshot date
+    (chain_last_trade) in system_metadata so reads survive UTC midnight rollovers.
 
     Cache hits are served without authentication. On cache miss, admin token is
     required when ADMIN_TOKEN is configured; otherwise a graceful no-read is returned.
@@ -1202,10 +1203,13 @@ async def get_options_read(
     loop = asyncio.get_event_loop()
     today = date.today()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
-    cache_key = f"options_read:v2:{sym}:{today.isoformat()}"
+
+    # Key by chain snapshot date (chain_last_trade) so reads survive UTC midnight
+    chain_date = await chain_store.get_latest_chain_date(db, sym)
+    cache_key = f"options_read:v3:{sym}:{chain_date}" if chain_date else None
 
     # ── Cache check — served freely ───────────────────────────────────────────
-    cached_raw = await _get_meta(db, cache_key)
+    cached_raw = await _get_meta(db, cache_key) if cache_key else None
     if cached_raw:
         try:
             c = json.loads(cached_raw)
@@ -1480,16 +1484,17 @@ STRICT RULES:
         flush=True,
     )
 
-    # ── Cache for the calendar day ────────────────────────────────────────────
-    try:
-        await _set_meta(db, cache_key, json.dumps({
-            "content": gen["content"], "facts": facts,
-            "model_used": gen["model_used"], "generated_at": generated_at,
-            "iv_rv_spread_pp": iv_rv_spread_pp,
-        }))
-        await db.commit()
-    except Exception as exc:
-        print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
+    # ── Cache by chain snapshot date ──────────────────────────────────────────
+    if cache_key:
+        try:
+            await _set_meta(db, cache_key, json.dumps({
+                "content": gen["content"], "facts": facts,
+                "model_used": gen["model_used"], "generated_at": generated_at,
+                "iv_rv_spread_pp": iv_rv_spread_pp,
+            }))
+            await db.commit()
+        except Exception as exc:
+            print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
 
     return OptionsReadRead(
         symbol=sym, content=gen["content"], facts=facts,

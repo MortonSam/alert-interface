@@ -64,6 +64,27 @@ async def get_chain(
     return chain, chain.get("chain_last_trade")
 
 
+async def get_latest_chain_date(db: AsyncSession, sym: str) -> str | None:
+    """Return the chain_last_trade date for any chain of this symbol, or None.
+
+    All expirations for a symbol share the same chain_last_trade (ingested
+    in the same courier batch), so we just grab the first one.
+    """
+    row = await db.scalar(
+        select(SystemMetadata)
+        .where(SystemMetadata.key.like(f"chain:{sym}:%"))
+        .limit(1)
+    )
+    if not row:
+        return None
+    try:
+        chain = json.loads(row.value)
+        clt = chain.get("chain_last_trade")
+        return clt[:10] if clt else None  # "YYYY-MM-DD" or full ISO → just date part
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 async def pick_expiration(
     db: AsyncSession, sym: str, min_date: str,
 ) -> str | None:

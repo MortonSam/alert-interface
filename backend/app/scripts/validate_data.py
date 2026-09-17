@@ -1422,7 +1422,6 @@ async def check_put_call_ratio_range(session) -> CheckResult:
 
 async def check_options_read_coverage(session) -> CheckResult:
     """WARN if <90% of active tickers have an options-read for the latest chain date. ERROR <75%."""
-    today_iso = date.today().isoformat()
     # Count active tickers
     total_active = (await session.execute(
         select(func.count()).select_from(Ticker).where(Ticker.is_active.is_(True))
@@ -1431,8 +1430,29 @@ async def check_options_read_coverage(session) -> CheckResult:
     if total_active == 0:
         return CheckResult("options_read_coverage", PASS, "No active tickers")
 
-    # Count options-read cache keys for today
-    pattern = f"options_read:v2:%:{today_iso}"
+    # Find the latest chain_last_trade date from any stored chain
+    import json as _json
+    chain_row = (await session.execute(
+        select(SystemMetadata.value)
+        .where(SystemMetadata.key.like("chain:%"))
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if chain_row is None:
+        return CheckResult("options_read_coverage", WARN,
+                           "No chains stored — cannot determine chain date")
+
+    try:
+        chain_date = _json.loads(chain_row).get("chain_last_trade", "")[:10]
+    except Exception:
+        chain_date = ""
+
+    if not chain_date:
+        return CheckResult("options_read_coverage", WARN,
+                           "No chain_last_trade found in stored chains")
+
+    # Count options-read cache keys for the latest chain date (v3 key format)
+    pattern = f"options_read:v3:%:{chain_date}"
     cached_count = (await session.execute(
         select(func.count()).select_from(SystemMetadata)
         .where(SystemMetadata.key.like(pattern))
@@ -1443,16 +1463,16 @@ async def check_options_read_coverage(session) -> CheckResult:
     if pct < 75:
         return CheckResult(
             "options_read_coverage", ERROR,
-            f"Only {cached_count}/{total_active} ({pct}%) active tickers have an options-read for {today_iso}",
+            f"Only {cached_count}/{total_active} ({pct}%) active tickers have an options-read for chain date {chain_date}",
         )
     if pct < 90:
         return CheckResult(
             "options_read_coverage", WARN,
-            f"{cached_count}/{total_active} ({pct}%) active tickers have an options-read for {today_iso}",
+            f"{cached_count}/{total_active} ({pct}%) active tickers have an options-read for chain date {chain_date}",
         )
     return CheckResult(
         "options_read_coverage", PASS,
-        f"{cached_count}/{total_active} ({pct}%) active tickers have an options-read for {today_iso}",
+        f"{cached_count}/{total_active} ({pct}%) active tickers have an options-read for chain date {chain_date}",
     )
 
 
