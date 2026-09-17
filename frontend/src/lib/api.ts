@@ -130,6 +130,7 @@ export interface ReactionSummary {
   avg_abs_1d: number | null;
   sector_avg_abs_1d: number | null;
   sector_peer_count: number;
+  sector_as_of: string | null;
   priced_in: LabelRule | null;
   last_event_date: string | null;
 }

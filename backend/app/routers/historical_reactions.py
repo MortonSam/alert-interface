@@ -17,6 +17,7 @@ from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
+from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.ticker import Ticker
 from app.schemas.historical_reaction import (
     AnalystDetailItem,
@@ -61,30 +62,27 @@ def _enrich(r: HistoricalReaction) -> HistoricalReactionRead:
 
 async def _sector_peer_aggregate(
     db: AsyncSession, sector: str, exclude_symbol: str,
-) -> tuple[float | None, int]:
-    """Sector peer avg(abs(pct_change_1d)) and distinct peer count.
+) -> tuple[float | None, int, str | None]:
+    """Read sector avg and peer count from the latest stored snapshot.
 
-    Returns (sector_avg, peer_count). avg is None when peer_count < 5.
+    Returns (sector_avg, peer_count, as_of_iso). Falls back to (None, 0, None)
+    when no snapshot exists for this sector.
     """
-    peer_result = await db.execute(
-        select(
-            func.count(func.distinct(Ticker.id)).label("peer_tickers"),
-            func.avg(func.abs(HistoricalReaction.pct_change_1d)).label("avg_abs"),
-        )
-        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+    row = (await db.execute(
+        select(SectorPeerSnapshot)
         .where(
-            Ticker.sector == sector,
-            Ticker.symbol != exclude_symbol,
-            HistoricalReaction.event_type == EventType.EARNINGS,
-            HistoricalReaction.pct_change_1d.isnot(None),
+            SectorPeerSnapshot.sector == sector,
+            SectorPeerSnapshot.symbol != exclude_symbol,
         )
-    )
-    peer_row = peer_result.one()
-    peer_count = peer_row.peer_tickers or 0
-    sector_avg: float | None = None
-    if peer_count >= 5 and peer_row.avg_abs is not None:
-        sector_avg = round(float(peer_row.avg_abs), 2)
-    return sector_avg, peer_count
+        .order_by(SectorPeerSnapshot.as_of_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if row is None:
+        return None, 0, None
+
+    sector_avg = float(row.sector_avg_abs_1d) if row.sector_avg_abs_1d is not None else None
+    return sector_avg, row.sector_peer_count, row.as_of_date.isoformat()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -142,12 +140,13 @@ async def get_reaction_summary(
     avg_1d_beat = round(sum(beat_1d) / len(beat_1d), 2) if beat_1d else None
     avg_1d_miss = round(sum(miss_1d) / len(miss_1d), 2) if miss_1d else None
 
-    # 3. Sector peer comparison — only when we have a sector and ≥5 peer tickers
+    # 3. Sector peer comparison — read from stored snapshot
     sector_avg: float | None = None
     peer_count = 0
+    sector_as_of: str | None = None
 
     if ticker.sector:
-        sector_avg, peer_count = await _sector_peer_aggregate(db, ticker.sector, sym)
+        sector_avg, peer_count, sector_as_of = await _sector_peer_aggregate(db, ticker.sector, sym)
 
     return ReactionSummaryRead(
         symbol=sym,
@@ -164,6 +163,7 @@ async def get_reaction_summary(
         avg_abs_1d=avg_abs_1d,
         sector_avg_abs_1d=sector_avg,
         sector_peer_count=peer_count,
+        sector_as_of=sector_as_of,
         priced_in=_to_lr(priced_in_label(beat_dropped_rate)),
         last_event_date=max(r.event_date for r in rows).isoformat(),
     )
@@ -181,60 +181,45 @@ async def get_sector_peers(
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")
 
-    # Own avg abs 1d
-    own_result = await db.execute(
-        select(func.avg(func.abs(HistoricalReaction.pct_change_1d)))
-        .where(
-            HistoricalReaction.ticker_id == ticker.id,
-            HistoricalReaction.event_type == EventType.EARNINGS,
-            HistoricalReaction.pct_change_1d.isnot(None),
-        )
-    )
-    own_avg_raw = own_result.scalar()
-    own_avg = round(float(own_avg_raw), 2) if own_avg_raw is not None else None
+    # Read everything from stored snapshot
+    own_snap = (await db.execute(
+        select(SectorPeerSnapshot)
+        .where(SectorPeerSnapshot.symbol == sym)
+        .order_by(SectorPeerSnapshot.as_of_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
 
-    # Sector aggregate (reuse helper)
+    own_avg = float(own_snap.avg_abs_1d) if own_snap and own_snap.avg_abs_1d is not None else None
     sector_avg: float | None = None
     peer_count = 0
-    if ticker.sector:
-        sector_avg, peer_count = await _sector_peer_aggregate(db, ticker.sector, sym)
+    as_of: str | None = None
 
-    # Per-peer breakdown
+    if own_snap:
+        sector_avg = float(own_snap.sector_avg_abs_1d) if own_snap.sector_avg_abs_1d is not None else None
+        peer_count = own_snap.sector_peer_count
+        as_of = own_snap.as_of_date.isoformat()
+
+    # Per-peer breakdown from the same snapshot date
     peers: list[SectorPeerItem] = []
-    if ticker.sector:
+    if ticker.sector and own_snap:
         peer_rows = (await db.execute(
-            select(
-                Ticker.symbol,
-                func.avg(func.abs(HistoricalReaction.pct_change_1d)).label("avg_abs"),
-                func.count(HistoricalReaction.id).label("qcount"),
-            )
-            .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+            select(SectorPeerSnapshot)
             .where(
-                Ticker.sector == ticker.sector,
-                Ticker.symbol != sym,
-                HistoricalReaction.event_type == EventType.EARNINGS,
-                HistoricalReaction.pct_change_1d.isnot(None),
+                SectorPeerSnapshot.sector == ticker.sector,
+                SectorPeerSnapshot.symbol != sym,
+                SectorPeerSnapshot.as_of_date == own_snap.as_of_date,
+                SectorPeerSnapshot.avg_abs_1d.isnot(None),
             )
-            .group_by(Ticker.symbol)
-            .order_by(func.avg(func.abs(HistoricalReaction.pct_change_1d)).desc())
-        )).all()
+            .order_by(SectorPeerSnapshot.avg_abs_1d.desc())
+        )).scalars().all()
         peers = [
             SectorPeerItem(
                 symbol=r.symbol,
-                avg_abs_1d=round(float(r.avg_abs), 2),
-                quarter_count=r.qcount,
+                avg_abs_1d=round(float(r.avg_abs_1d), 2),
+                quarter_count=r.quarter_count,
             )
             for r in peer_rows
         ]
-
-    # as_of: latest earnings reaction date for this ticker
-    last_date = await db.scalar(
-        select(func.max(HistoricalReaction.event_date))
-        .where(
-            HistoricalReaction.ticker_id == ticker.id,
-            HistoricalReaction.event_type == EventType.EARNINGS,
-        )
-    )
 
     return SectorPeersRead(
         symbol=sym,
@@ -242,7 +227,7 @@ async def get_sector_peers(
         own_avg_abs_1d=own_avg,
         sector_avg_abs_1d=sector_avg,
         peer_count=peer_count,
-        as_of=last_date.isoformat() if last_date else None,
+        as_of=as_of,
         peers=peers,
     )
 

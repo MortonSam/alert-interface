@@ -278,7 +278,7 @@ function HistoryInsightsPanel({
             Typical earnings move (±{s.avg_abs_1d!.toFixed(2)}%) is{" "}
             <span className="font-medium">{sectorVsOwn}</span> the{" "}
             {s.sector ?? "sector"} <ExplainTip term="peer average">peer average</ExplainTip> (±{s.sector_avg_abs_1d!.toFixed(2)}%){" "}
-            across {s.sector_peer_count} peers
+            across {s.sector_peer_count} peers{s.sector_as_of ? `, as of ${fmtBasisDate(s.sector_as_of)}` : ""}
           </p>
           {sectorPeers && sectorPeers.peers.length > 0 && (
             <>

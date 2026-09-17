@@ -67,6 +67,7 @@ class ReactionSummaryRead(BaseModel):
     avg_abs_1d: float | None                # average |pct_change_1d| across all quarters
     sector_avg_abs_1d: float | None         # same metric across sector peers (None if <5 peers)
     sector_peer_count: int                  # distinct peer tickers used for sector avg
+    sector_as_of: str | None = None         # ISO date of sector peer snapshot
     priced_in: LabelRule | None = None      # interpretive label for beat-but-dropped rate
     last_event_date: str | None = None      # ISO date of most recent earnings in sample
 

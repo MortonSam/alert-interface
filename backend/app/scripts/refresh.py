@@ -63,6 +63,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Split history",                  ["python", "-m", "app.scripts.seed_splits"]),
     ("Analyst actions",                ["python", "-m", "app.scripts.seed_analyst_actions"]),
     ("Analyst reaction stats",         ["python", "-m", "app.scripts.compute_analyst_reactions"]),
+    ("Sector peer snapshot",            ["python", "-m", "app.scripts.compute_sector_peers"]),
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),

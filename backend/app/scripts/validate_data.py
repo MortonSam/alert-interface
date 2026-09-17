@@ -32,6 +32,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.rv_snapshot import RVSnapshot
+from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
 from app.models.ticker import Ticker
@@ -1278,64 +1279,80 @@ async def check_analyst_stats_continuation_range(session) -> CheckResult:
 
 
 async def check_sector_peer_avg_range(session) -> CheckResult:
-    """ERROR if any ticker's avg abs 1d earnings move is outside [0.5, 40.0]."""
+    """ERROR if any stored per-ticker avg abs 1d is outside [0.5, 40.0]."""
     rows = (await session.execute(
-        select(
-            Ticker.symbol,
-            func.avg(func.abs(HistoricalReaction.pct_change_1d)).label("avg_abs"),
-        )
-        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        select(SectorPeerSnapshot.symbol, SectorPeerSnapshot.avg_abs_1d)
         .where(
-            HistoricalReaction.event_type == EventType.EARNINGS,
-            HistoricalReaction.pct_change_1d.isnot(None),
+            SectorPeerSnapshot.avg_abs_1d.isnot(None),
+            (SectorPeerSnapshot.avg_abs_1d < Decimal("0.5")) |
+            (SectorPeerSnapshot.avg_abs_1d > Decimal("40.0")),
         )
-        .group_by(Ticker.symbol)
-        .having(
-            (func.avg(func.abs(HistoricalReaction.pct_change_1d)) < Decimal("0.5")) |
-            (func.avg(func.abs(HistoricalReaction.pct_change_1d)) > Decimal("40.0"))
-        )
-        .order_by(Ticker.symbol)
+        .order_by(SectorPeerSnapshot.symbol)
     )).all()
 
     if not rows:
-        return CheckResult("sector_peer_avg_range", PASS, "All per-ticker avg abs 1d in [0.5, 40.0]")
+        return CheckResult("sector_peer_avg_range", PASS,
+                           "All stored per-ticker avg abs 1d in [0.5, 40.0]")
 
-    details = [f"{r.symbol}  avg_abs_1d={float(r.avg_abs):.2f}" for r in rows]
+    details = [f"{r.symbol}  avg_abs_1d={float(r.avg_abs_1d):.2f}" for r in rows]
     return CheckResult(
         "sector_peer_avg_range", ERROR,
-        f"{len(rows)} ticker(s) with avg abs 1d outside [0.5, 40.0]",
+        f"{len(rows)} ticker(s) with stored avg abs 1d outside [0.5, 40.0]",
+        details,
+    )
+
+
+async def check_sector_peer_sector_avg_range(session) -> CheckResult:
+    """ERROR if any stored sector aggregate avg abs 1d is outside [1.0, 25.0]."""
+    rows = (await session.execute(
+        select(
+            SectorPeerSnapshot.sector,
+            SectorPeerSnapshot.sector_avg_abs_1d,
+        )
+        .where(
+            SectorPeerSnapshot.sector_avg_abs_1d.isnot(None),
+            (SectorPeerSnapshot.sector_avg_abs_1d < Decimal("1.0")) |
+            (SectorPeerSnapshot.sector_avg_abs_1d > Decimal("25.0")),
+        )
+        .distinct(SectorPeerSnapshot.sector)
+        .order_by(SectorPeerSnapshot.sector)
+    )).all()
+
+    if not rows:
+        return CheckResult("sector_peer_sector_avg_range", PASS,
+                           "All stored sector aggregate avg abs 1d in [1.0, 25.0]")
+
+    details = [f"{r.sector}  sector_avg={float(r.sector_avg_abs_1d):.2f}" for r in rows]
+    return CheckResult(
+        "sector_peer_sector_avg_range", ERROR,
+        f"{len(rows)} sector(s) with stored aggregate avg abs 1d outside [1.0, 25.0]",
         details,
     )
 
 
 async def check_sector_peer_count_range(session) -> CheckResult:
-    """ERROR if any sector's distinct peer count is outside [5, 150]."""
+    """ERROR if any sector's stored peer count is outside [5, 150]."""
     rows = (await session.execute(
         select(
-            Ticker.sector,
-            func.count(func.distinct(Ticker.id)).label("peer_count"),
+            SectorPeerSnapshot.sector,
+            SectorPeerSnapshot.sector_peer_count,
         )
-        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
         .where(
-            Ticker.sector.isnot(None),
-            HistoricalReaction.event_type == EventType.EARNINGS,
-            HistoricalReaction.pct_change_1d.isnot(None),
+            (SectorPeerSnapshot.sector_peer_count < 5) |
+            (SectorPeerSnapshot.sector_peer_count > 150),
         )
-        .group_by(Ticker.sector)
-        .having(
-            (func.count(func.distinct(Ticker.id)) < 5) |
-            (func.count(func.distinct(Ticker.id)) > 150)
-        )
-        .order_by(Ticker.sector)
+        .distinct(SectorPeerSnapshot.sector)
+        .order_by(SectorPeerSnapshot.sector)
     )).all()
 
     if not rows:
-        return CheckResult("sector_peer_count_range", PASS, "All sector peer counts in [5, 150]")
+        return CheckResult("sector_peer_count_range", PASS,
+                           "All stored sector peer counts in [5, 150]")
 
-    details = [f"{r.sector}  peer_count={r.peer_count}" for r in rows]
+    details = [f"{r.sector}  peer_count={r.sector_peer_count}" for r in rows]
     return CheckResult(
         "sector_peer_count_range", ERROR,
-        f"{len(rows)} sector(s) with peer count outside [5, 150]",
+        f"{len(rows)} sector(s) with stored peer count outside [5, 150]",
         details,
     )
 
@@ -1396,8 +1413,9 @@ CHECKS = [
     check_reaction_pct_range,
     check_analyst_stats_median_range,
     check_analyst_stats_continuation_range,
-    # Sector peers
+    # Sector peers (stored snapshots)
     check_sector_peer_avg_range,
+    check_sector_peer_sector_avg_range,
     check_sector_peer_count_range,
 ]
 
