@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import yfinance as yf
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.earnings_report_timing import EarningsReportTiming
@@ -39,6 +39,7 @@ from app.scripts.seed_historical_reactions import (
 )
 
 FETCH_TIMEOUT = 30  # seconds per ticker
+DUPLICATE_WINDOW_DAYS = 45  # skip rows with a neighbor within this window
 
 
 async def _run(write: bool = False) -> int:
@@ -68,7 +69,25 @@ async def _run(write: bool = False) -> int:
             print("No NULL-pct v3 rows inside lookback. Nothing to do.")
             return 0
 
-        print(f"{len(rows)} NULL-pct v3 rows inside lookback (write={write})\n")
+        # Build set of (ticker_id, event_date) that have a neighboring
+        # earnings row within DUPLICATE_WINDOW_DAYS — skip until dedupe.
+        dup_rows = (await session.execute(text(
+            "SELECT hr1.ticker_id, hr1.event_date AS d1, hr2.event_date AS d2 "
+            "FROM historical_reactions hr1 "
+            "JOIN historical_reactions hr2 "
+            "  ON hr1.ticker_id = hr2.ticker_id "
+            "  AND hr1.event_type = :et AND hr2.event_type = :et "
+            "  AND hr2.event_date > hr1.event_date "
+            "  AND hr2.event_date - hr1.event_date <= :win "
+            "ORDER BY hr1.ticker_id, hr1.event_date"
+        ), {"et": "earnings", "win": DUPLICATE_WINDOW_DAYS})).all()
+        dup_dates: set[tuple] = set()
+        for dr in dup_rows:
+            dup_dates.add((dr.ticker_id, dr.d1))
+            dup_dates.add((dr.ticker_id, dr.d2))
+
+        print(f"{len(rows)} NULL-pct v3 rows inside lookback (write={write})")
+        print(f"{len(dup_dates)} rows in duplicate pairs (skipped until dedupe)\n")
 
         # Group by ticker for efficient fetching
         by_ticker: dict[str, list] = {}
@@ -91,6 +110,7 @@ async def _run(write: bool = False) -> int:
         skipped_unknown = 0
         skipped_no_data = 0
         skipped_guard = 0
+        skipped_dup = 0
 
         for sym, ticker_rows in sorted(by_ticker.items()):
             # Fetch price history once per ticker
@@ -115,6 +135,11 @@ async def _run(write: bool = False) -> int:
             dates_cache = _build_date_cache(hist)
 
             for r in ticker_rows:
+                if (r.ticker_id, r.event_date) in dup_dates:
+                    print(f"  {sym}  {r.event_date}  → skip (duplicate pair, pending dedupe)")
+                    skipped_dup += 1
+                    continue
+
                 timing = timing_map.get((r.ticker_id, r.event_date), "unknown")
 
                 if timing == "unknown":
@@ -160,7 +185,8 @@ async def _run(write: bool = False) -> int:
             await session.commit()
 
     print(f"\nSummary: {updated} updated, {skipped_unknown} unknown-timing, "
-          f"{skipped_no_data} no-data, {skipped_guard} guard-rejected")
+          f"{skipped_no_data} no-data, {skipped_guard} guard-rejected, "
+          f"{skipped_dup} duplicate-skipped")
     return 0
 
 

@@ -1594,14 +1594,15 @@ async def check_fomc_pre_listing(session) -> CheckResult:
 # ── Duplicate reaction detection ─────────────────────────────────────────────
 
 async def check_duplicate_earnings_reactions(session) -> CheckResult:
-    """WARN listing tickers with two earnings reactions within 3 calendar days.
+    """WARN listing tickers with two earnings reactions within 45 calendar days.
 
     Pattern: yfinance reports the same quarter under two dates (preliminary +
-    confirmed). The row with known timing (bmo/amc) and non-null pcts is the
-    real one; the other (usually timing=unknown, null pcts) is a ghost.
+    confirmed, or event_date-1 acceptance). The row with known timing (bmo/amc)
+    and non-null pcts is the real one; the other (usually timing=unknown, null
+    pcts) is a ghost.
 
     Dedupe rule (not yet enforced): when two earnings reactions for the same
-    ticker are <=3 days apart, keep the one with non-null pct_change_1d; if
+    ticker are <=45 days apart, keep the one with non-null pct_change_1d; if
     both non-null, keep the one with known timing; if still tied, keep earlier.
     """
     rows = (await session.execute(text("""
@@ -1609,14 +1610,16 @@ async def check_duplicate_earnings_reactions(session) -> CheckResult:
                hr1.event_date AS d1, hr2.event_date AS d2,
                hr1.report_timing AS t1, hr2.report_timing AS t2,
                hr1.pct_change_1d IS NOT NULL AS has_pct1,
-               hr2.pct_change_1d IS NOT NULL AS has_pct2
+               hr2.pct_change_1d IS NOT NULL AS has_pct2,
+               hr1.eps_estimate AS eps_est1, hr1.eps_actual AS eps_act1,
+               hr2.eps_estimate AS eps_est2, hr2.eps_actual AS eps_act2
         FROM historical_reactions hr1
         JOIN historical_reactions hr2
           ON hr1.ticker_id = hr2.ticker_id
           AND hr1.event_type = 'earnings'
           AND hr2.event_type = 'earnings'
           AND hr2.event_date > hr1.event_date
-          AND hr2.event_date - hr1.event_date <= 3
+          AND hr2.event_date - hr1.event_date <= 45
         JOIN tickers t ON t.id = hr1.ticker_id
         ORDER BY t.symbol, hr1.event_date
     """))).all()
@@ -1624,17 +1627,19 @@ async def check_duplicate_earnings_reactions(session) -> CheckResult:
     if not rows:
         return CheckResult(
             "duplicate_earnings_reactions", PASS,
-            "No earnings reactions within 3 days of each other",
+            "No earnings reactions within 45 days of each other",
         )
 
     details = [
-        f"{r.symbol}  {r.d1} ({r.t1}, {'pct' if r.has_pct1 else 'null'}) ↔ "
-        f"{r.d2} ({r.t2}, {'pct' if r.has_pct2 else 'null'})"
+        f"{r.symbol}  {r.d1} ({r.t1}, {'pct' if r.has_pct1 else 'null'}, "
+        f"eps={r.eps_est1}/{r.eps_act1}) ↔ "
+        f"{r.d2} ({r.t2}, {'pct' if r.has_pct2 else 'null'}, "
+        f"eps={r.eps_est2}/{r.eps_act2})"
         for r in rows
     ]
     return CheckResult(
         "duplicate_earnings_reactions", WARN,
-        f"{len(rows)} pair(s) of earnings reactions within 3 days (likely yfinance date duplication)",
+        f"{len(rows)} pair(s) of earnings reactions within 45 days",
         details,
     )
 
