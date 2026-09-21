@@ -2,8 +2,15 @@
 
 For each pair of earnings rows for one ticker within WINDOW_DAYS:
   - eps_estimate and eps_actual identical on both rows -> one report.
-      keep the row with pct values; if neither has pct values, keep the row
-      with known timing (bmo/amc); delete the other.
+      The SEC acceptance time (earnings_report_timing.acceptance_datetime)
+      decides the true row: accepted before 09:30 ET on date X -> X with bmo;
+      accepted at or after 16:00 ET on X -> X with amc. Keep the row dated X,
+      stamp it with that timing, delete the other. recompute_null_reactions
+      fills the moves afterwards. When the two rows carry different acceptance
+      times, the earliest one is the release.
+      Fallback (no acceptance time, or accepted during market hours): keep the
+      row with pct values; if neither has pct values, keep the row with known
+      timing (bmo/amc).
   - EPS differs, or the rule does not pick a single row -> print, change nothing.
 
 Dry run by default.
@@ -17,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from datetime import date, datetime, time
 
 from sqlalchemy import text
 
@@ -24,6 +32,8 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 
 WINDOW_DAYS = 45
 KNOWN_TIMINGS = {"bmo", "amc"}
+MARKET_OPEN = time(9, 30)
+MARKET_CLOSE = time(16, 0)
 
 
 def _has_pct(r) -> bool:
@@ -36,32 +46,76 @@ def _timing(r) -> str:
 
 
 def _fmt(r) -> str:
+    acc = f"{r['accepted_et']:%Y-%m-%d %H:%M} ET" if r["accepted_et"] else "none"
     return (f"{r['event_date']} ({_timing(r)}, {'pct' if _has_pct(r) else 'null'}, "
-            f"eps={r['eps_estimate']}/{r['eps_actual']})")
+            f"eps={r['eps_estimate']}/{r['eps_actual']}, accepted={acc})")
 
 
-def decide(a: dict, b: dict) -> tuple[dict | None, dict | None, str]:
-    """Return (keep, delete, reason). keep/delete are None when nothing changes."""
-    if a["eps_estimate"] is None or a["eps_actual"] is None:
-        return None, None, "NO CHANGE: EPS missing on first row, cannot prove one report"
-    if (a["eps_estimate"], a["eps_actual"]) != (b["eps_estimate"], b["eps_actual"]):
-        return None, None, "NO CHANGE: EPS differs"
+def true_row_from_acceptance(accepted_et: datetime | None) -> tuple[date, str] | None:
+    """Map an acceptance time (naive, US Eastern) to (true event date, timing)."""
+    if accepted_et is None:
+        return None
+    if accepted_et.time() < MARKET_OPEN:
+        return accepted_et.date(), "bmo"
+    if accepted_et.time() >= MARKET_CLOSE:
+        return accepted_et.date(), "amc"
+    return None
 
+
+def _fallback(a: dict, b: dict) -> tuple[dict | None, dict | None, str]:
     pa, pb = _has_pct(a), _has_pct(b)
     if pa != pb:
         keep, drop = (a, b) if pa else (b, a)
-        return keep, drop, "same EPS, keep the row with pct values"
+        return keep, drop, "keep the row with pct values"
     if pa and pb:
-        return None, None, "NO CHANGE: same EPS but both rows have pct values"
-
+        return None, None, "NO CHANGE: both rows have pct values"
     ka, kb = _timing(a) in KNOWN_TIMINGS, _timing(b) in KNOWN_TIMINGS
     if ka != kb:
         keep, drop = (a, b) if ka else (b, a)
-        return keep, drop, "same EPS, neither has pct, keep the row with known timing"
+        return keep, drop, "neither has pct, keep the row with known timing"
     return None, None, (
-        "NO CHANGE: same EPS, neither has pct, "
+        "NO CHANGE: neither has pct, "
         + ("both timings known" if ka else "neither timing known")
     )
+
+
+def decide(a: dict, b: dict) -> tuple[dict | None, dict | None, str | None, str]:
+    """Return (keep, delete, timing_to_stamp, reason). keep/delete None = no change."""
+    if a["eps_estimate"] is None or a["eps_actual"] is None:
+        return None, None, None, "NO CHANGE: EPS missing on first row, cannot prove one report"
+    if (a["eps_estimate"], a["eps_actual"]) != (b["eps_estimate"], b["eps_actual"]):
+        return None, None, None, "NO CHANGE: EPS differs"
+
+    accepted = sorted({x["accepted_et"] for x in (a, b) if x["accepted_et"] is not None})
+    if accepted:
+        note = " (earliest of two acceptance times)" if len(accepted) > 1 else ""
+        truth = true_row_from_acceptance(accepted[0])
+        if truth is None:
+            keep, drop, why = _fallback(a, b)
+            return keep, drop, None, f"accepted during market hours{note}, fallback: {why}"
+        true_date, timing = truth
+        for keep, drop in ((a, b), (b, a)):
+            if keep["event_date"] == true_date:
+                return keep, drop, timing, f"accepted {accepted[0]:%Y-%m-%d %H:%M} ET{note} -> {true_date} {timing}"
+        return None, None, None, f"NO CHANGE: acceptance implies {true_date} {timing}, which is neither row"
+
+    keep, drop, why = _fallback(a, b)
+    return keep, drop, None, f"no acceptance time, fallback: {why}"
+
+
+async def _stamp_timing(session, keep: dict, drop: dict, timing: str) -> None:
+    """Make the kept row and its timing record agree with the acceptance-derived timing."""
+    await session.execute(
+        text("UPDATE historical_reactions SET report_timing = :t WHERE id = :id"),
+        {"t": timing, "id": keep["id"]},
+    )
+    accepted = keep["accepted_utc"] or drop["accepted_utc"]
+    await session.execute(text("""
+        INSERT INTO earnings_report_timing (id, ticker_id, event_date, timing, source, acceptance_datetime)
+        VALUES (gen_random_uuid(), :tid, :d, :t, 'edgar', :acc)
+        ON CONFLICT (ticker_id, event_date)
+        DO UPDATE SET timing = :t, source = 'edgar', acceptance_datetime = :acc
+    """), {"tid": keep["ticker_id"], "d": keep["event_date"], "t": timing, "acc": accepted})
 
 
 async def _run(write: bool) -> int:
@@ -88,26 +142,39 @@ async def _run(write: bool) -> int:
                 continue
             rows = {
                 r.id: dict(r._mapping) for r in (await session.execute(text("""
-                    SELECT id, event_date, report_timing AS timing,
-                           eps_estimate, eps_actual,
-                           pct_change_1d AS pct_1d, pct_change_3d AS pct_3d, pct_change_5d AS pct_5d
-                    FROM historical_reactions WHERE id IN (:a, :b)
+                    SELECT hr.id, hr.ticker_id, hr.event_date, hr.report_timing AS timing,
+                           hr.eps_estimate, hr.eps_actual,
+                           hr.pct_change_1d AS pct_1d, hr.pct_change_3d AS pct_3d,
+                           hr.pct_change_5d AS pct_5d,
+                           ert.acceptance_datetime AT TIME ZONE 'America/New_York' AS accepted_et,
+                           ert.acceptance_datetime AS accepted_utc
+                    FROM historical_reactions hr
+                    LEFT JOIN earnings_report_timing ert
+                      ON ert.ticker_id = hr.ticker_id AND ert.event_date = hr.event_date
+                    WHERE hr.id IN (:a, :b)
                 """), {"a": p.id1, "b": p.id2})).all()
             }
             a, b = rows[p.id1], rows[p.id2]
-            keep, drop, reason = decide(a, b)
+            keep, drop, stamp, reason = decide(a, b)
             print(f"{p.symbol}  {_fmt(a)} <-> {_fmt(b)}")
             if keep is None:
                 print(f"    {reason}")
                 n_nochange += 1
                 continue
-            print(f"    KEEP {keep['event_date']}  DELETE {drop['event_date']}  ({reason})")
+            restamp = stamp is not None and _timing(keep) != stamp
+            print(
+                f"    KEEP {keep['event_date']}  DELETE {drop['event_date']}  ({reason})"
+                + (f"  [timing {_timing(keep)} -> {stamp}]" if restamp else "")
+                + ("  [kept row has no pct, recompute_null_reactions will fill]" if not _has_pct(keep) else "")
+            )
             n_delete += 1
             deleted_ids.add(drop["id"])
             if write:
                 await session.execute(
                     text("DELETE FROM historical_reactions WHERE id = :id"), {"id": drop["id"]}
                 )
+                if restamp:
+                    await _stamp_timing(session, keep, drop, stamp)
 
         if write:
             await session.commit()
