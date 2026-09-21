@@ -8,6 +8,18 @@ that was previously duplicated across thesis.py endpoints.
 from __future__ import annotations
 
 
+def pnl_percent(pnl: float, basis: float | None) -> float | None:
+    """P&L as a PERCENT of the capital at risk: -35.0 means a 35% loss.
+
+    The only place a P&L percentage is computed. Every stored or served
+    *_pnl_pct value comes from here, so they all share one unit. `pnl` and
+    `basis` must be in the same units (both per share, or both in dollars).
+    """
+    if basis is None or basis <= 0:
+        return None
+    return round(pnl / basis * 100, 2)
+
+
 def compute_option_pnl_at_expiry(
     close: float,
     strike: float,
@@ -30,7 +42,7 @@ def compute_option_pnl_at_expiry(
         intrinsic = min(intrinsic, width)
 
     pnl_dollars = round((intrinsic - cost) * 100, 2)
-    pnl_pct = round(((intrinsic - cost) / cost) * 100, 2) if cost else 0.0
+    pnl_pct = pnl_percent(intrinsic - cost, cost) or 0.0
     return pnl_dollars, pnl_pct
 
 
@@ -41,7 +53,7 @@ def compute_spread_pnl_from_mids(
     entry_prem2: float | None,
     contracts: int,
 ) -> tuple[float | None, float | None]:
-    """Compute (pnl_dollars, pnl_pct) from live or intrinsic mid-prices.
+    """Compute (pnl_dollars, pnl_pct) from live or intrinsic mid-prices. pnl_pct is a percent.
 
     Single-leg when current_mid2/entry_prem2 are None.
     Spread when both are provided.
@@ -50,18 +62,15 @@ def compute_spread_pnl_from_mids(
     if current_mid2 is None or entry_prem2 is None:
         # Single leg
         pnl_dollars = (current_mid1 - entry_prem1) * contracts * 100
-        pnl_pct = (current_mid1 - entry_prem1) / entry_prem1 if entry_prem1 > 0 else None
+        pnl_pct = pnl_percent(current_mid1 - entry_prem1, entry_prem1)
     else:
         # Spread: long leg1, short leg2
         net_current = current_mid1 - current_mid2
         net_entry = entry_prem1 - entry_prem2
         pnl_dollars = (net_current - net_entry) * contracts * 100
-        pnl_pct = (net_current - net_entry) / net_entry if net_entry > 0 else None
+        pnl_pct = pnl_percent(net_current - net_entry, net_entry)
 
-    return (
-        round(pnl_dollars, 2),
-        round(pnl_pct, 4) if pnl_pct is not None else None,
-    )
+    return round(pnl_dollars, 2), pnl_pct
 
 
 def compute_intrinsic_mids(

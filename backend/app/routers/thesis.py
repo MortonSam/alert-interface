@@ -1587,6 +1587,7 @@ from app.services.pnl_math import (
     compute_spread_pnl_from_mids,
     compute_intrinsic_mids,
     direction_correct as _direction_correct,
+    pnl_percent,
     target_reached as _target_reached,
 )
 
@@ -1817,7 +1818,7 @@ async def list_alert_picks(
             option_mid = round(mid1, 4)
 
         pnl_d = round((option_mid - cost) * 100, 2)
-        pnl_p = round(((option_mid - cost) / cost) * 100, 2)
+        pnl_p = pnl_percent(option_mid - cost, cost)
 
         mark = {
             "option_mid": option_mid,

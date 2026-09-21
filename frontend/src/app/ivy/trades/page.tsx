@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { averagePnlPct, fmtPnlPct } from "@/lib/pnl";
 import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
 import { capture } from "@/lib/analytics";
 
@@ -20,9 +21,6 @@ function stripExpTail(strategy: string | null): string | null {
 
 function fmtPnlDollars(d: number): string {
   return d >= 0 ? `+$${d.toFixed(2)}` : `-$${Math.abs(d).toFixed(2)}`;
-}
-function fmtPnlPct(p: number): string {
-  return `${p >= 0 ? "+" : ""}${p.toFixed(1)}%`;
 }
 function fmtMarkDate(d: string): string {
   return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -358,8 +356,7 @@ export default function IvyTradesPage() {
   const directionMisses = scoredClosed.length - directionHits;
   const pnlDollars = closedPicks.filter((p) => p.option_pnl_dollars != null).map((p) => p.option_pnl_dollars!);
   const totalOptionPnl = pnlDollars.length > 0 ? pnlDollars.reduce((a, b) => a + b, 0) : null;
-  const pnlPcts = closedPicks.filter((p) => p.option_pnl_pct != null).map((p) => p.option_pnl_pct!);
-  const avgOptionPnlPct = pnlPcts.length > 0 ? pnlPcts.reduce((a, b) => a + b, 0) / pnlPcts.length : null;
+  const avgOptionPnlPct = averagePnlPct(closedPicks.map((p) => p.option_pnl_pct));
 
   // Open option P&L (from chain marks)
   const markedOpen = openPicks.filter((p) => p.option_pnl_dollars != null);

@@ -22,7 +22,7 @@ from app.models.credit_shadow_pick import CreditShadowPick
 from app.models.iv_history import IVHistory
 from app.models.shadow_pick import ShadowPick
 from app.services import chain_store
-from app.services.pnl_math import compute_option_pnl_at_expiry
+from app.services.pnl_math import compute_option_pnl_at_expiry, pnl_percent
 from app.services.yfinance_client import YFinanceClient
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ async def _close_v2_picks() -> int:
                 cost = float(pick.cost_to_enter) if pick.cost_to_enter else None
                 if cost and cost > 0:
                     pnl_d = round((spread_mid - cost) * 100, 2)
-                    pnl_p = round((spread_mid - cost) / cost, 4)
+                    pnl_p = pnl_percent(spread_mid - cost, cost)
                     pick.option_pnl_dollars = Decimal(str(pnl_d))
                     pick.option_pnl_pct = Decimal(str(pnl_p))
 
@@ -422,7 +422,7 @@ async def _settle_credit_shadows() -> int:
             max_loss_val = float(csp.max_loss)
 
             pnl_dollars = round((credit - close_value) * 100, 2)
-            pnl_pct = round(pnl_dollars / (max_loss_val * 100), 4) if max_loss_val > 0 else 0.0
+            pnl_pct = pnl_percent(pnl_dollars, max_loss_val * 100) or 0.0  # percent of max loss
 
             csp.close_value = Decimal(str(round(close_value, 4)))
             csp.pnl_dollars = Decimal(str(pnl_dollars))

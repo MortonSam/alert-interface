@@ -1887,6 +1887,39 @@ async def check_amc_event_day_vs_1d(session) -> CheckResult:
     )
 
 
+async def check_pnl_pct_units(session) -> CheckResult:
+    """ERROR if a stored option P&L percentage disagrees with its own dollars.
+
+    Every *_pnl_pct is a percent (-35.0). A row written as a fraction (-0.35)
+    makes the ledger show "-0.4%" and corrupts "Avg P&L %".
+    """
+    targets = (
+        ("alert_picks", "symbol", "option_pnl_pct", "option_pnl_dollars / NULLIF(cost_to_enter, 0)"),
+        ("theses", "symbol", "option_pnl_pct",
+         "option_pnl_dollars / NULLIF((entry_premium - COALESCE(entry_premium2, 0)) * contracts, 0)"),
+        ("credit_shadow_picks", "symbol", "pnl_pct", "pnl_dollars / NULLIF(max_loss, 0)"),
+    )
+    bad: list[str] = []
+    checked = 0
+    for table, label, col, implied in targets:
+        exists = (await session.execute(text(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :t)"), {"t": table})).scalar()
+        if not exists:
+            continue
+        rows = (await session.execute(text(
+            f"SELECT {label} AS label, {col} AS stored, ({implied}) AS implied FROM {table} "
+            f"WHERE {col} IS NOT NULL AND ({implied}) IS NOT NULL"
+        ))).all()
+        checked += len(rows)
+        for r in rows:
+            if abs(float(r.stored) - float(r.implied)) > 0.5:
+                bad.append(f"{table} {r.label}: stored {float(r.stored):.4f} but dollars imply {float(r.implied):.2f}%")
+    if bad:
+        return CheckResult("pnl_pct_units", ERROR,
+                           f"{len(bad)} P&L percentage(s) disagree with their dollars (fraction stored as percent?)", bad[:30])
+    return CheckResult("pnl_pct_units", PASS, f"All {checked} stored P&L percentages match their dollars")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1940,6 +1973,7 @@ CHECKS = [
     check_shadow_pick_count,
     # Credit shadow picks
     check_credit_shadow_integrity,
+    check_pnl_pct_units,
     # Aggregate sanity bands
     check_reaction_pct_range,
     check_analyst_stats_median_range,

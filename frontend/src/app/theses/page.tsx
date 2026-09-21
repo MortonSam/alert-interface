@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { rvRankShort } from "@/lib/utils";
+import { fmtPnlPct } from "@/lib/pnl";
 import Callout from "@/components/Callout";
 import {
   api,
@@ -89,7 +90,7 @@ function pctChange(entry: string | null, resolution: string | null): string {
 function fmtPnl(dollars: number | null, pct: number | null): { str: string; color: string } {
   if (dollars == null) return { str: "n/a", color: "text-muted-foreground" };
   const sign = dollars >= 0 ? "+" : "-";
-  const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
+  const pctStr = pct != null ? ` (${fmtPnlPct(pct)})` : "";
   const absStr = `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`;
   const color =
     dollars > 0 ? "text-success" :

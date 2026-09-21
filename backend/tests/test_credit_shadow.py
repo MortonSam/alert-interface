@@ -1,5 +1,6 @@
 """Tests for credit shadow pick strike selection and P&L math."""
 from decimal import Decimal
+from app.services.pnl_math import pnl_percent
 
 import pytest
 
@@ -98,10 +99,10 @@ class TestPnlMath:
         max_loss = 2.50  # 5-wide wing - 2.50 credit
 
         pnl_dollars = round((credit - close_value) * 100, 2)
-        pnl_pct = round(pnl_dollars / (max_loss * 100), 4)
+        pnl_pct = pnl_percent(pnl_dollars, max_loss * 100)
 
         assert pnl_dollars == 200.0
-        assert pnl_pct == 0.8  # 80% return on risk
+        assert pnl_pct == 80.0  # 80% return on risk, stored as a percent
 
     def test_losing_trade(self):
         """Credit < close_value -> negative P&L."""
@@ -110,10 +111,10 @@ class TestPnlMath:
         max_loss = 4.00
 
         pnl_dollars = round((credit - close_value) * 100, 2)
-        pnl_pct = round(pnl_dollars / (max_loss * 100), 4)
+        pnl_pct = pnl_percent(pnl_dollars, max_loss * 100)
 
         assert pnl_dollars == -300.0
-        assert pnl_pct == -0.75
+        assert pnl_pct == -75.0
 
 
 class TestCreditMustBePositive:

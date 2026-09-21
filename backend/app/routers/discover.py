@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.pnl_math import pnl_percent
 from app.auth import is_admin
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.thresholds import (
@@ -1092,8 +1093,7 @@ async def latest_pick(
             if spread_strike:
                 width = abs(strike - spread_strike)
                 intrinsic = min(intrinsic, width)
-            if cost > 0:
-                option_pnl_pct = round((intrinsic - cost) / cost * 100, 1)
+            option_pnl_pct = pnl_percent(intrinsic - cost, cost)
     elif entry:
         # For open picks: try to get current price from Finnhub
         try:

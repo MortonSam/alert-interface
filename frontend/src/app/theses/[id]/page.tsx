@@ -11,6 +11,7 @@ import {
   type Leg, dateMs,
 } from "@/lib/black-scholes";
 import { cn } from "@/lib/utils";
+import { fmtPnlPct } from "@/lib/pnl";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import PayoffSimulator from "@/components/PayoffSimulator";
 
@@ -198,7 +199,7 @@ export default function ThesisDetailPage() {
       })}`;
 
   const pnlPctStr = pnlPct != null
-    ? `${pnlPct >= 0 ? "+" : ""}${(pnlPct * 100).toFixed(1)}%`
+    ? fmtPnlPct(pnlPct)
     : null;
 
   // ── Cost basis ──────────────────────────────────────────────────────────────

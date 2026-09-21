@@ -22,6 +22,7 @@ import {
   type HealthStatus,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
+import { fmtPnlPct } from "@/lib/pnl";
 import { fmtPct } from "./fmtPct";
 import { barCellStyle, legendEntries } from "./reactionChartEncoding";
 import { chainDateLabel } from "./optionsReadFootnote";
@@ -2593,7 +2594,7 @@ export default function TickerPage() {
               const dollars = m.pnl_dollars;
               const pct = m.pnl_pct;
               const sign = dollars >= 0 ? "+" : "";
-              const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${(pct * 100).toFixed(1)}%)` : "";
+              const pctStr = pct != null ? ` (${fmtPnlPct(pct)})` : "";
               return {
                 str: `${sign}$${Math.abs(dollars).toFixed(0)}${pctStr}`,
                 color: dollars > 0 ? "text-success" : dollars < 0 ? "text-destructive" : "text-foreground",
