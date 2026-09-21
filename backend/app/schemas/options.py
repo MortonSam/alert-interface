@@ -106,7 +106,8 @@ class RealizedVolRead(BaseModel):
 class OptionsReadRead(BaseModel):
     symbol: str
     content: str                     # the 2–4 sentence interpretive prose
-    facts: dict                      # the precomputed fact block injected into the prompt
+    facts: dict                      # the strings injected into the prompt, formatted from fact_values
+    fact_values: dict | None = None  # the numeric block the read was generated from; the page renders its rows from it
     model_used: str
     generated_at: str                # ISO UTC of generation
     cached: bool                     # True if served from today's cache

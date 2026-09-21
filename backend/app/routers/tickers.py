@@ -33,6 +33,7 @@ from app.services.options_read_gate import (
     cache_key as options_read_cache_key,
     check_chain,
     check_generation_inputs,
+    format_facts,
     load_cached_read,
 )
 from app.services.price_freshness import assess_history, assess_quote
@@ -1320,7 +1321,7 @@ async def get_options_read(
             c = json.loads(cached_raw)
             spread_pp_cached = c.get("iv_rv_spread_pp")
             return OptionsReadRead(
-                symbol=sym, content=c["content"], facts=c["facts"],
+                symbol=sym, content=c["content"], facts=c["facts"], fact_values=c.get("fact_values"),
                 model_used=c["model_used"], generated_at=c["generated_at"],
                 cached=True, as_of=as_of, chain_date=chain_date,
                 iv_rv_spread_pp=spread_pp_cached,
@@ -1470,37 +1471,37 @@ async def get_options_read(
                 expiration_spans_earnings = True
                 days_exp_past_earnings = (exp_obj - earn_obj).days
 
-    # ── Build pre-formatted fact strings (the model sees ONLY these) ──────────
-    def _fp(v: float | None, d: int = 2) -> str:
-        return f"${v:.{d}f}" if v is not None else "(unavailable)"
-
-    def _fpct(v: float | None, d: int = 1) -> str:
-        """0-1 decimal → formatted percent string."""
-        return f"{v * 100:.{d}f}%" if v is not None else "(unavailable)"
-
-    facts: dict = {
-        "symbol":                    sym,
-        "company_name":              ticker_name,
-        "current_price":             _fp(current_price),
-        "expected_move_pct":         f"±{expected_move_pct * 100:.1f}%" if expected_move_pct is not None else "(unavailable)",
-        "expected_move_dollars":     f"±{_fp(expected_move_dollars)}" if expected_move_dollars is not None else "(unavailable)",
-        "implied_range":             f"{_fp(implied_range_low)} - {_fp(implied_range_high)}" if implied_range_low is not None and implied_range_high is not None else "(unavailable)",
-        "expiration_date":           chosen_exp or "(unavailable)",
-        "days_to_expiration":        str(days_to_exp) if days_to_exp is not None else "(unavailable)",
-        "atm_strike":                _fp(atm_strike),
-        "atm_iv":                    _fpct(atm_iv) if atm_iv is not None else "(unavailable)",
-        "next_earnings_date":        earnings_str or "(unavailable)",
-        "expiration_spans_earnings": str(expiration_spans_earnings),
-        "days_exp_past_earnings":    str(days_exp_past_earnings) if days_exp_past_earnings is not None else "N/A",
-        "realized_vol_20d":          _fpct(current_rv),
-        "rv_rank":                   f"{rv_rank:.1f}" if rv_rank is not None else "(unavailable)",
-        "rv_percentile":             f"{rv_percentile:.1f}" if rv_percentile is not None else "(unavailable)",
-        "rv_1yr_range":              f"{_fpct(rv_min)} - {_fpct(rv_max)}" if rv_min is not None and rv_max is not None else "(unavailable)",
-        "rv_sample_days":            str(rv_sample_days),
-        "iv_rv_spread":              (f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"),
-        "avg_earnings_1d_move":      f"±{avg_earn_move_pct:.1f}%" if avg_earn_move_pct is not None else "(unavailable)",
-        "earnings_sample_size":      str(earn_sample) if earn_sample > 0 else "(unavailable)",
+    # ── One numeric fact block: the model's strings AND the page's rows come from it ──
+    fact_values: dict = {
+        "current_price": round(current_price, 2) if current_price is not None else None,
+        "price_as_of": (
+            dt_datetime.fromtimestamp(gate.quote.traded_on_ts, tz=timezone.utc).isoformat()
+            if gate.quote and gate.quote.traded_on_ts else None
+        ),
+        "chain_date": chain_date,
+        "expected_move_pct": expected_move_pct,
+        "expected_move_dollars": round(expected_move_dollars, 2) if expected_move_dollars is not None else None,
+        "implied_range_low": round(implied_range_low, 2) if implied_range_low is not None else None,
+        "implied_range_high": round(implied_range_high, 2) if implied_range_high is not None else None,
+        "expiration_used": chosen_exp,
+        "days_to_expiration": days_to_exp,
+        "atm_strike": atm_strike,
+        "atm_iv": atm_iv,
+        "atm_iv_as_of": atm_iv_as_of,
+        "next_earnings_date": earnings_str,
+        "expiration_spans_earnings": expiration_spans_earnings,
+        "days_exp_past_earnings": days_exp_past_earnings,
+        "rv_20d": current_rv,
+        "rv_rank": rv_rank,
+        "rv_percentile": rv_percentile,
+        "rv_min_1y": rv_min,
+        "rv_max_1y": rv_max,
+        "rv_sample_days": rv_sample_days,
+        "iv_rv_spread_pp": iv_rv_spread_pp,
+        "avg_earnings_1d_move_pct": avg_earn_move_pct,
+        "earnings_sample_size": earn_sample,
     }
+    facts: dict = format_facts(sym, ticker_name, fact_values)
 
     # Earnings window note — a full pre-written sentence so the model can't miscalculate
     if expiration_spans_earnings and days_exp_past_earnings is not None:
@@ -1579,7 +1580,7 @@ STRICT RULES:
     # ── Cache by chain snapshot date ──────────────────────────────────────────
     try:
         await _set_meta(db, cache_key, json.dumps({
-            "content": gen["content"], "facts": facts,
+            "content": gen["content"], "facts": facts, "fact_values": fact_values,
             "model_used": gen["model_used"], "generated_at": generated_at,
             "iv_rv_spread_pp": iv_rv_spread_pp,
         }))
@@ -1588,7 +1589,7 @@ STRICT RULES:
         print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
 
     return OptionsReadRead(
-        symbol=sym, content=gen["content"], facts=facts,
+        symbol=sym, content=gen["content"], facts=facts, fact_values=fact_values,
         model_used=gen["model_used"], generated_at=generated_at,
         cached=False, as_of=as_of, chain_date=chain_date,
         iv_rv_spread_pp=iv_rv_spread_pp,

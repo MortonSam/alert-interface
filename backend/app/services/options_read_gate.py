@@ -86,3 +86,53 @@ async def load_cached_read(
     except (TypeError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+# ── The fact block ────────────────────────────────────────────────────────────
+# One numeric block is the source of everything a read says AND of the rows
+# shown beside it. format_facts turns it into the strings the model sees; the
+# frontend renders the rows from the same numbers while the read is displayed.
+
+FACT_VALUE_KEYS = (
+    "current_price", "price_as_of", "chain_date",
+    "expected_move_pct", "expected_move_dollars", "implied_range_low", "implied_range_high",
+    "expiration_used", "days_to_expiration", "atm_strike", "atm_iv", "atm_iv_as_of",
+    "next_earnings_date", "expiration_spans_earnings", "days_exp_past_earnings",
+    "rv_20d", "rv_rank", "rv_percentile", "rv_min_1y", "rv_max_1y", "rv_sample_days",
+    "iv_rv_spread_pp", "avg_earnings_1d_move_pct", "earnings_sample_size",
+)
+
+
+def format_facts(symbol: str, company_name: str, v: dict) -> dict:
+    """The strings injected into the prompt, formatted from the numeric fact block only."""
+    def fp(x, d: int = 2) -> str:
+        return f"${x:.{d}f}" if x is not None else "(unavailable)"
+
+    def fpct(x, d: int = 1) -> str:
+        return f"{x * 100:.{d}f}%" if x is not None else "(unavailable)"
+
+    lo, hi = v.get("implied_range_low"), v.get("implied_range_high")
+    rmin, rmax = v.get("rv_min_1y"), v.get("rv_max_1y")
+    return {
+        "symbol": symbol,
+        "company_name": company_name,
+        "current_price": fp(v.get("current_price")),
+        "expected_move_pct": f"±{v['expected_move_pct'] * 100:.1f}%" if v.get("expected_move_pct") is not None else "(unavailable)",
+        "expected_move_dollars": f"±{fp(v['expected_move_dollars'])}" if v.get("expected_move_dollars") is not None else "(unavailable)",
+        "implied_range": f"{fp(lo)} - {fp(hi)}" if lo is not None and hi is not None else "(unavailable)",
+        "expiration_date": v.get("expiration_used") or "(unavailable)",
+        "days_to_expiration": str(v["days_to_expiration"]) if v.get("days_to_expiration") is not None else "(unavailable)",
+        "atm_strike": fp(v.get("atm_strike")),
+        "atm_iv": fpct(v.get("atm_iv")),
+        "next_earnings_date": v.get("next_earnings_date") or "(unavailable)",
+        "expiration_spans_earnings": str(bool(v.get("expiration_spans_earnings"))),
+        "days_exp_past_earnings": str(v["days_exp_past_earnings"]) if v.get("days_exp_past_earnings") is not None else "N/A",
+        "realized_vol_20d": fpct(v.get("rv_20d")),
+        "rv_rank": f"{v['rv_rank']:.1f}" if v.get("rv_rank") is not None else "(unavailable)",
+        "rv_percentile": f"{v['rv_percentile']:.1f}" if v.get("rv_percentile") is not None else "(unavailable)",
+        "rv_1yr_range": f"{fpct(rmin)} - {fpct(rmax)}" if rmin is not None and rmax is not None else "(unavailable)",
+        "rv_sample_days": str(v.get("rv_sample_days") or 0),
+        "iv_rv_spread": f"{v['iv_rv_spread_pp']:+.1f}pp" if v.get("iv_rv_spread_pp") is not None else "(unavailable)",
+        "avg_earnings_1d_move": f"±{v['avg_earnings_1d_move_pct']:.1f}%" if v.get("avg_earnings_1d_move_pct") is not None else "(unavailable)",
+        "earnings_sample_size": str(v["earnings_sample_size"]) if v.get("earnings_sample_size") else "(unavailable)",
+    }

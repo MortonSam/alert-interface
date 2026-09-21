@@ -1,5 +1,8 @@
 "use client";
 
+import { rvTier } from "@/lib/encodings/rvTier";
+import { displayedOptionFacts, priceDriftNote, priceLabel } from "@/lib/optionsReadFacts";
+import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -2352,13 +2355,22 @@ export default function TickerPage() {
             <p className="text-sm text-muted-foreground mb-6">No options data available for {upperSymbol}.</p>
           )}
           {bundleStatus === "done" && expectedMove && (() => {
-            const emPct = expectedMove.expected_move_pct;
-            const emDol = expectedMove.expected_move_dollars;
-            const low = expectedMove.implied_range_low;
-            const high = expectedMove.implied_range_high;
+            const facts = displayedOptionFacts(optionsRead, expectedMove, realizedVol);
+            const emPct = facts.expected_move_pct;
+            const emDol = facts.expected_move_dollars;
+            const low = facts.implied_range_low;
+            const high = facts.implied_range_high;
             const hist = expectedMove.historical_stats;
+            const pricedAt = priceLabel(facts, fmtTimestamp);
+            const drift = priceDriftNote(facts, quote?.price);
             return (
               <div className="mb-8">
+                {facts.source === "read" && pricedAt && (
+                  <p className="text-[11px] font-mono text-muted-foreground/70 mb-2">
+                    From Ivy&apos;s Read: {pricedAt}{facts.chain_date ? ` · options data as of ${facts.chain_date}` : ""}
+                  </p>
+                )}
+                {drift && <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">{drift}</p>}
                 {emPct != null ? (
                   <p className="text-6xl font-bold tabular-nums tracking-tight">
                     <ExplainTip term="expected move" metric="expected_move" symbol={upperSymbol}>{`\u00B1${(emPct * 100).toFixed(1)}%`}</ExplainTip>
@@ -2386,10 +2398,10 @@ export default function TickerPage() {
                     <span className="font-semibold tabular-nums">${low.toFixed(2)} - ${high.toFixed(2)}</span>
                   </p>
                 )}
-                {expectedMove.straddle_price != null && expectedMove.atm_strike != null && (
+                {emDol != null && facts.atm_strike != null && (
                   <p className="text-sm text-muted-foreground mt-1">
-                    <ExplainTip term="atm">ATM</ExplainTip> ${expectedMove.atm_strike.toFixed(0)} <ExplainTip term="straddle">straddle</ExplainTip> at ${expectedMove.straddle_price.toFixed(2)}
-                    {expectedMove.expiration_used && ` exp ${expectedMove.expiration_used}`}
+                    <ExplainTip term="atm">ATM</ExplainTip> ${facts.atm_strike.toFixed(0)} <ExplainTip term="straddle">straddle</ExplainTip> at ${emDol.toFixed(2)}
+                    {facts.expiration_used && ` exp ${facts.expiration_used}`}
                   </p>
                 )}
                 {hist && hist.sample_size >= 3 && (
@@ -2404,14 +2416,15 @@ export default function TickerPage() {
 
           {/* IV, RV, spread, RV rank, Put/Call as StatRows */}
           {(() => {
-            const ivVal = realizedVol?.atm_iv ?? null;
-            const ivAsOf = realizedVol?.atm_iv_as_of ?? null;
-            const rvVal = realizedVol?.current_rv ?? null;
-            const rvRk = realizedVol?.rv_rank ?? null;
-            const rvLabeled = realizedVol?.rv_rank_labeled ?? null;
+            const shown = displayedOptionFacts(optionsRead, expectedMove, realizedVol);
+            const ivVal = shown.atm_iv;
+            const ivAsOf = shown.atm_iv_as_of;
+            const rvVal = shown.rv_20d;
+            const rvRk = shown.rv_rank;
+            const rvLabeled = rvRk != null ? rvTier(rvRk) : null;   // label follows the shown rank
             const windowDays = realizedVol?.window_days ?? 20;
             const dataError = realizedVol?.data_error ?? false;
-            const spread = realizedVol?.iv_rv_spread_pp ?? null;
+            const spread = shown.iv_rv_spread_pp;
             const spreadLabeled = optionsRead?.spread_labeled ?? null;
             const pcRatio = putCall?.ratio ?? null;
 
@@ -2433,9 +2446,7 @@ export default function TickerPage() {
 
             if (ivVal == null && rvVal == null && rvRk == null && spread == null && pcRatio == null && !putCall) return null;
 
-            const rvColor = rvLabeled?.label === "extreme"
-              ? "text-primary" : rvLabeled?.label === "elevated"
-              ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground";
+            const rvColor = rvLabeled?.className ?? "text-muted-foreground";
 
             return (
               <div className="space-y-2 mb-6">

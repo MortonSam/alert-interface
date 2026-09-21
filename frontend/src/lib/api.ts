@@ -1,5 +1,6 @@
 import type { MarkBasis } from "./marks";
 import type { IvyRuleResponse } from "./ivyRule";
+import type { OptionFactValues } from "./optionsReadFacts";
 /**
  * Typed API client for the FastAPI backend.
  * All fetch calls go through /api/* which next.config.ts rewrites to :8000.
@@ -443,6 +444,7 @@ export interface OptionsRead {
   available?: boolean;
   reason?: string | null;
   chain_date?: string | null;
+  fact_values?: OptionFactValues | null;   // the numeric block the read was generated from
 }
 
 export interface OptionsBundle {
