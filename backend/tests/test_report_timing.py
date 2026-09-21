@@ -101,5 +101,23 @@ def test_select_filing_prefers_item_202_and_flags_the_fallback():
     assert chosen.is_earnings_item and chosen.acceptance.hour == 11
     fallback = select_filing([filings[0]], d)
     assert fallback is not None and not fallback.is_earnings_item
-    assert classify("BLK", d, fallback, "mixed").source == "accepted_post_close_any8k"
     assert select_filing([], d) is None
+
+
+def test_borrowed_8k_only_counts_when_the_ticker_pattern_agrees():
+    d = date(2025, 1, 15)
+    after_close = _filing("2025-01-15T21:30:00.000Z", d, earnings=False)   # 16:30 ET, not Item 2.02
+    pre_open = _filing("2025-01-15T11:44:00.000Z", d, earnings=False)      # 06:44 ET, not Item 2.02
+
+    agrees = classify("X", d, after_close, pattern="amc", stored_timing="amc")
+    assert (agrees.timing, agrees.source) == ("amc", "any8k_agrees_with_pattern_amc")
+    assert classify("X", d, pre_open, pattern="bmo").timing == "bmo"
+
+    # Another 8-K's time is not a bound on the earnings release.
+    disagrees = classify("X", d, after_close, pattern="bmo", stored_timing="amc")
+    assert (disagrees.timing, disagrees.source) == ("unknown", "any8k_disagrees_with_pattern")
+    mixed = classify("X", d, pre_open, pattern="mixed", stored_timing="bmo")
+    assert (mixed.timing, mixed.source) == ("unknown", "any8k_pattern_mixed")
+
+    # The same stamps on a real Item 2.02 filing do bind, whatever the pattern.
+    assert classify("X", d, _filing("2025-01-15T11:44:00.000Z", d), pattern="mixed").timing == "bmo"

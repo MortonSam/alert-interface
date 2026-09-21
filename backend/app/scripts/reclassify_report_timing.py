@@ -45,6 +45,7 @@ from app.services.edgar_client import EdgarClient
 from app.services.report_timing import (
     TIMING_RULE_VERSION,
     Filing,
+    acceptance_eastern,
     classify,
     parse_acceptance,
     price_signal,
@@ -164,6 +165,16 @@ async def _run(write: bool, cache: str | None, only: list[str] | None) -> int:
     print("\nby rule branch:")
     for (timing, source), n in sorted(sources.items(), key=lambda kv: -kv[1]):
         print(f"  {n:>6}  {timing:8} {source}")
+
+    borrowed = [x for x in decisions if x[5] is not None and not x[5].is_earnings_item]
+    if borrowed:
+        id_to_sym = {r[0]: sym for sym, rows in stored.items() for r in rows}
+        print(f"\nrows leaning on a non-earnings 8-K ({len(borrowed)}):")
+        for rid, tid, d, old, dec, filing in sorted(borrowed, key=lambda x: (id_to_sym[x[0]], x[2])):
+            sym = id_to_sym[rid]
+            local = acceptance_eastern(sym, filing.acceptance)
+            print(f"  {sym:6} {d}  accepted {local:%m-%d %H:%M} ET  pattern={patterns[sym].pattern:5}  "
+                  f"{old:7} -> {dec.timing:7} {dec.source}")
 
     if not write:
         print("\nDry run. Re-run with --write to apply.")

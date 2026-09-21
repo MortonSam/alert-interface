@@ -199,6 +199,8 @@ def ticker_pattern(signals: list[str]) -> Pattern:
 
 # ── The rule ─────────────────────────────────────────────────────────────────
 
+_BUCKET_IMPLIES = {"pre_open": "bmo", "intraday": "bmo", "post_close": "amc"}
+
 @dataclass(frozen=True)
 class Decision:
     timing: str           # "bmo" | "amc" | "unknown"
@@ -215,25 +217,48 @@ def classify(
 ) -> Decision:
     """Decide one earnings row's timing. `pattern` is the ticker's Pattern.pattern."""
     bucket = acceptance_bucket(symbol, filing.acceptance if filing else None, event_date)
-    weak = "" if filing is None or filing.is_earnings_item else "_any8k"
+
+    if filing is not None and not filing.is_earnings_item:
+        return _classify_borrowed(bucket, pattern)
 
     if bucket == "pre_open":
-        return Decision("bmo", f"accepted_pre_open{weak}", "filing accepted before the open bounds the release")
+        return Decision("bmo", "accepted_pre_open", "filing accepted before the open bounds the release")
     if bucket == "intraday":
         if pattern == "amc":
-            return Decision("unknown", f"contradiction_intraday_vs_amc_pattern{weak}",
+            return Decision("unknown", "contradiction_intraday_vs_amc_pattern",
                             "filed intraday but the ticker's price pattern is after-close")
-        return Decision("bmo", f"accepted_intraday{weak}",
+        return Decision("bmo", "accepted_intraday",
                         "released before an intraday filing: not after the close, and the move lands on T")
     if bucket == "post_close":
         if pattern == "bmo":
-            return Decision("bmo", f"accepted_post_close_pattern_bmo{weak}",
+            return Decision("bmo", "accepted_post_close_pattern_bmo",
                             "filed after the close, but the ticker's price pattern is pre-market")
-        return Decision("amc", f"accepted_post_close{weak}", "filing accepted after the close")
+        return Decision("amc", "accepted_post_close", "filing accepted after the close")
     if bucket == "none":
         if pattern in ("bmo", "amc") and stored_timing == pattern:
             return Decision(pattern, "no_filing_stored_matches_pattern",
                             "no filing; the stored timing matches the ticker's price pattern")
         return Decision("unknown", "no_filing", "no 8-K found near the event date")
-    return Decision("unknown", f"filing_far_from_event_date{weak}",
+    return Decision("unknown", "filing_far_from_event_date",
                     "the nearest filing is on a day the stored event date cannot explain")
+
+
+def _classify_borrowed(bucket: str, pattern: str) -> Decision:
+    """A row with no Item 2.02 filing, leaning on another 8-K filed that day.
+
+    That filing's acceptance time does not bound the earnings release, so it is
+    only corroboration: a timing is assigned when it agrees with the ticker's
+    price pattern, and the row is unknown otherwise.
+    """
+    implied = _BUCKET_IMPLIES.get(bucket)
+    if implied is None:
+        return Decision("unknown", "filing_far_from_event_date_any8k",
+                        "no earnings filing; the nearest 8-K is on a day the stored event date cannot explain")
+    if pattern == "mixed":
+        return Decision("unknown", "any8k_pattern_mixed",
+                        "no earnings filing, and the ticker has no clear price pattern to confirm another 8-K's time")
+    if implied != pattern:
+        return Decision("unknown", "any8k_disagrees_with_pattern",
+                        f"no earnings filing; another 8-K suggests {implied} but the ticker's price pattern is {pattern}")
+    return Decision(pattern, f"any8k_agrees_with_pattern_{pattern}",
+                    f"no earnings filing; another 8-K and the ticker's price pattern both say {pattern}")
