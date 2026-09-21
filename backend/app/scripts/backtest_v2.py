@@ -6,8 +6,6 @@ each fold vs its own baseline, mean/median actual_5d, moved-enough share.
 Fail criterion: the chosen cutoff (-15%) must beat its fold baseline
 in all 3 folds with positive mean 5d move, or we stop.
 
-Also reports vol gate sensitivity at implied/historical ratios 1.0, 1.2, 1.5.
-
 CLI
 ---
     python -m app.scripts.backtest_v2
@@ -201,72 +199,6 @@ async def main() -> None:
         print(f"  {fold_name:<18}  v1: {v1_n:>4} picks, {v1_rate*100:.1f}% hit, mean {v1_mean:+.2f}%  |  "
               f"v2: {v2_s['n']:>4} picks, {v2_s['hit_rate']*100:.1f}% hit, mean {v2_s['mean_5d']:+.2f}%  |  "
               f"baseline: {bl['up_rate']*100:.1f}%")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3: Vol gate sensitivity analysis
-    # ═══════════════════════════════════════════════════════════════════════════
-    print(f"\n{'=' * 110}")
-    print("VOL GATE SENSITIVITY: how many -15% qualifiers survive at various implied/historical ratios")
-    print("(Since IV history is sparse, this simulates what would happen if implied_move were Nx historical)")
-    print("=" * 110)
-
-    # All qualifying events (across entire dataset)
-    all_qualifying = []
-    for ev in events:
-        if ev["actual_5d"] is None:
-            continue
-        if ev["prior_n"] is None or ev["prior_n"] < MIN_PRIOR_N:
-            continue
-        if ev["momentum_20d"] is None or ev["momentum_20d"] > MOMENTUM_CUTOFF * 100:
-            continue
-        if ev["prior_avg_abs_5d"] is None or ev["prior_avg_abs_5d"] <= 0:
-            continue
-        all_qualifying.append(ev)
-
-    test_ratios = [1.0, 1.2, 1.5, 2.0]
-    print(f"\n  Total qualifying events with prior_avg_abs_5d > 0: {len(all_qualifying)}")
-    print(f"\n  {'Implied/Historical':>20} {'Survive':>8} {'Refused':>8} {'Survive%':>9} "
-          f"{'SurvivorHitRate':>16} {'RefusedHitRate':>16}")
-    print("  " + "─" * 85)
-
-    for ratio in test_ratios:
-        # Simulate: implied_move = ratio × prior_avg_abs_5d
-        # Vol gate passes if ratio ≤ IV_PREMIUM_CAP (1.2)
-        survivors = []
-        refused = []
-        for ev in all_qualifying:
-            simulated_implied = ratio * ev["prior_avg_abs_5d"]
-            if simulated_implied > 1.20 * ev["prior_avg_abs_5d"]:
-                refused.append(ev)
-            else:
-                survivors.append(ev)
-
-        s_n = len(survivors)
-        r_n = len(refused)
-        s_hits = sum(1 for e in survivors if e["actual_5d"] > 0)
-        r_hits = sum(1 for e in refused if e["actual_5d"] > 0)
-        s_rate = s_hits / s_n * 100 if s_n > 0 else 0
-        r_rate = r_hits / r_n * 100 if r_n > 0 else 0
-
-        print(f"  {ratio:>18.1f}x {s_n:>8} {r_n:>8} {s_n/(s_n+r_n)*100:>8.1f}% "
-              f"{s_rate:>15.1f}% {r_rate:>15.1f}%")
-
-    # Per-fold breakdown for the cap ratio
-    print(f"\n  Per-fold at IV_PREMIUM_CAP = {1.20}x (events where simulated implied > 1.2x historical are refused):")
-    for fold_name, train_end, test_start, test_end in FOLDS:
-        fold_qual = [e for e in all_qualifying if test_start <= e["event_date"] <= test_end]
-        refused = [e for e in fold_qual if True]  # at 1.2x, nothing is refused (1.2 <= 1.2)
-        # Actually: ratio=1.2 means implied = 1.2 * hist, gate is implied > 1.2 * hist → 1.2*h > 1.2*h is false → all pass
-        # At ratio=1.5: implied = 1.5 * hist, 1.5*h > 1.2*h → refused
-        # Show ratio=1.3 as requested
-        for sim_ratio in [1.0, 1.2, 1.3, 1.5]:
-            survivors = [e for e in fold_qual
-                         if sim_ratio * e["prior_avg_abs_5d"] <= 1.20 * e["prior_avg_abs_5d"]]
-            refused = [e for e in fold_qual
-                       if sim_ratio * e["prior_avg_abs_5d"] > 1.20 * e["prior_avg_abs_5d"]]
-            s_n = len(survivors)
-            total = len(fold_qual)
-            print(f"    {fold_name:<18} ratio={sim_ratio:.1f}x  survive: {s_n}/{total} ({s_n/total*100:.0f}%)" if total > 0 else f"    {fold_name:<18} ratio={sim_ratio:.1f}x  no qualifying events")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # STORE THE RESULT (every run, pass or fail) so pages render real numbers
