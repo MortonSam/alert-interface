@@ -45,3 +45,4 @@ logs/
 backend/app/services/cache/*.json
 backend/app/services/cache/*.html
 backend/app/scripts/cache/*.json
+frontend/test-results/
