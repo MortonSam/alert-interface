@@ -26,7 +26,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
@@ -161,7 +161,8 @@ async def _upsert_fomc_reaction(
         pg_insert(HistoricalReaction)
         .values(**values)
         .on_conflict_do_update(
-            constraint="uq_hist_reaction_ticker_date_type",
+            index_elements=["ticker_id", "event_date", "event_type"],
+            index_where=text("event_type = 'fomc'"),
             set_=data,
         )
     )
