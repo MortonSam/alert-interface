@@ -39,7 +39,10 @@ class HistoricalReactionRead(HistoricalReactionBase):
     created_at: datetime
 
     # Computed enrichment field -- not stored in DB; populated by the router
-    eps_surprise_pct: float | None = None   # (eps_actual - eps_estimate) / |eps_estimate| x 100
+    eps_surprise_pct: float | None = None   # uncapped (eps_actual - eps_estimate) / |eps_estimate| x 100; None when |estimate| < EPS_SURPRISE_DOLLAR_FLOOR
+    eps_surprise_dollars: float | None = None   # eps_actual - eps_estimate, always when both exist
+    eps_surprise_display_pct: float | None = None   # percent to print, capped at +/- EPS_SURPRISE_PCT_CAP
+    eps_surprise_capped: bool = False
     report_timing: str | None = None        # bmo | amc | unknown
     # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
     # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day

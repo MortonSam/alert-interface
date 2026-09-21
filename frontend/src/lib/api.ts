@@ -106,7 +106,10 @@ export interface HistoricalReaction {
   outcome: EarningsOutcome;
   created_at: string;
   // Computed enrichment field (populated server-side, null for non-earnings rows)
-  eps_surprise_pct: number | null;  // (eps_actual - eps_estimate) / |eps_estimate| x 100
+  eps_surprise_pct: number | null;          // uncapped; null when |estimate| < EPS_SURPRISE_DOLLAR_FLOOR
+  eps_surprise_dollars?: number | null;     // actual - estimate
+  eps_surprise_display_pct?: number | null; // capped at +/- EPS_SURPRISE_PCT_CAP
+  eps_surprise_capped?: boolean;
   report_timing: string | null;    // bmo | amc | unknown
 }
 

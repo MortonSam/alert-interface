@@ -1,5 +1,6 @@
 "use client";
 
+import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -786,12 +787,14 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                           <td className="px-3 py-2.5">
                             <span className="inline-flex items-center gap-1.5 flex-wrap">
                               <OutcomeBadge outcome={r.outcome} />
-                              {r.eps_surprise_pct != null && (
-                                <span className="text-xs font-medium tabular-nums text-muted-foreground">
-                                  {r.eps_surprise_pct > 0 ? "+" : ""}
-                                  {r.eps_surprise_pct.toFixed(1)}%
-                                </span>
-                              )}
+                              {(() => {
+                                const sp = fmtEpsSurprise(r);
+                                return sp ? (
+                                  <span className="text-xs font-medium tabular-nums text-muted-foreground" title={sp.title}>
+                                    {sp.text}
+                                  </span>
+                                ) : null;
+                              })()}
                             </span>
                           </td>
                         )}

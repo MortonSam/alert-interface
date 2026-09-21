@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.thresholds import eps_surprise
 from app.auth import require_admin
 from app.thresholds import magnitude_trend_label, priced_in_label
 from app.schemas.historical_reaction import LabelRule
@@ -45,13 +46,16 @@ def _enrich(r: HistoricalReaction) -> HistoricalReactionRead:
     """Convert ORM row to read schema, adding computed fields."""
     read = HistoricalReactionRead.model_validate(r)
 
-    # EPS surprise % — skip when estimate is near zero (avoids misleading huge %)
-    if r.eps_estimate is not None and r.eps_actual is not None:
-        est = float(r.eps_estimate)
-        if abs(est) > 0.01:
-            read.eps_surprise_pct = round(
-                (float(r.eps_actual) - est) / abs(est) * 100, 1
-            )
+    # EPS surprise: dollars under the floor, capped percent above it (thresholds.eps_surprise)
+    sp = eps_surprise(
+        float(r.eps_estimate) if r.eps_estimate is not None else None,
+        float(r.eps_actual) if r.eps_actual is not None else None,
+    )
+    if sp is not None:
+        read.eps_surprise_pct = sp.pct
+        read.eps_surprise_dollars = sp.dollars
+        read.eps_surprise_display_pct = sp.display_pct
+        read.eps_surprise_capped = sp.capped
 
     return read
 

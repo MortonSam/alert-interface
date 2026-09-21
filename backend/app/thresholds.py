@@ -111,6 +111,36 @@ def priced_in_label(drop_rate_pct: float | None) -> LabeledValue | None:
     )
 
 
+# ── EPS surprise display ─────────────────────────────────────────────────────
+# A percent surprise is meaningless against a near-zero estimate (TTWO May 2025:
+# estimate $0.05, actual -$20.98 is "-42060%"). Below the floor, show dollars.
+# Above it, cap the displayed percent and keep the exact dollars for a tooltip.
+
+EPS_SURPRISE_DOLLAR_FLOOR = 0.10   # |estimate| below this: show the surprise in dollars
+EPS_SURPRISE_PCT_CAP = 999         # displayed percent is capped at +/- this
+
+
+@dataclass(frozen=True, slots=True)
+class EpsSurprise:
+    dollars: float              # actual - estimate, always
+    pct: float | None           # uncapped percent, or None when the estimate is under the floor
+    display_pct: float | None   # what to print: capped
+    capped: bool                # True when |pct| exceeded the cap
+    mode: str                   # "dollars" | "pct"
+
+
+def eps_surprise(estimate: float | None, actual: float | None) -> EpsSurprise | None:
+    if estimate is None or actual is None:
+        return None
+    dollars = round(actual - estimate, 4)
+    if abs(estimate) < EPS_SURPRISE_DOLLAR_FLOOR:
+        return EpsSurprise(dollars=dollars, pct=None, display_pct=None, capped=False, mode="dollars")
+    pct = round((actual - estimate) / abs(estimate) * 100, 1)
+    capped = abs(pct) > EPS_SURPRISE_PCT_CAP
+    display = max(-EPS_SURPRISE_PCT_CAP, min(EPS_SURPRISE_PCT_CAP, pct))
+    return EpsSurprise(dollars=dollars, pct=pct, display_pct=display, capped=capped, mode="pct")
+
+
 # ── Magnitude trend ─────────────────────────────────────────────────────────
 
 MAGNITUDE_INCREASE_THRESHOLD = 0.20

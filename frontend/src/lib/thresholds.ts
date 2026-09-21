@@ -27,6 +27,10 @@ export const PC_CALL_HEAVY = 0.7;
 export const PRICED_IN_LARGELY = 50;
 export const PRICED_IN_PARTIALLY = 25;
 
+// ── EPS surprise display ───────────────────────────────────────────
+export const EPS_SURPRISE_DOLLAR_FLOOR = 0.10;   // |estimate| below this: show the surprise in dollars
+export const EPS_SURPRISE_PCT_CAP = 999;         // displayed percent is capped at +/- this
+
 // ── Magnitude trend ────────────────────────────────────────────────
 export const MAGNITUDE_INCREASE_THRESHOLD = 0.20;
 export const MAGNITUDE_DECREASE_THRESHOLD = -0.20;
