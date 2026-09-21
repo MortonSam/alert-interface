@@ -1742,6 +1742,64 @@ async def check_bmo_1d_vs_gap(session) -> CheckResult:
     )
 
 
+async def check_amc_event_day_vs_1d(session) -> CheckResult:
+    """WARN listing amc tickers whose event-day move exceeds their stored 1d move.
+
+    Mirror of bmo_1d_vs_gap. A true after-close report moves the stock the next
+    session, which is what the stored 1d (close(T) -> close(T+1)) captures. If
+    the event day itself (close(T-1) -> close(T)) moves more on average, the
+    ticker probably reports before the open and its amc tag is wrong.
+    """
+    from collections import defaultdict
+
+    rows = (await session.execute(
+        select(
+            Ticker.symbol,
+            HistoricalReaction.pct_change_1d,
+            HistoricalReaction.close_before,
+            HistoricalReaction.close_after,
+        )
+        .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.report_timing == "amc",
+            HistoricalReaction.pct_change_1d.isnot(None),
+            HistoricalReaction.close_before.isnot(None),
+            HistoricalReaction.close_after.isnot(None),
+            HistoricalReaction.close_before > 0,
+        )
+    )).all()
+
+    ticker_data: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for r in rows:
+        event_day = abs(float(r.close_after) - float(r.close_before)) / float(r.close_before) * 100
+        ticker_data[r.symbol].append((event_day, abs(float(r.pct_change_1d))))
+
+    flagged: list[tuple[float, str]] = []
+    for sym, pairs in ticker_data.items():
+        if len(pairs) < 4:
+            continue
+        avg_event_day = sum(p[0] for p in pairs) / len(pairs)
+        avg_abs_1d = sum(p[1] for p in pairs) / len(pairs)
+        if avg_event_day > avg_abs_1d:
+            flagged.append((
+                avg_event_day / avg_abs_1d if avg_abs_1d else float("inf"),
+                f"{sym}: avg_abs_event_day={avg_event_day:.2f}%, avg_abs_1d={avg_abs_1d:.2f}%, n={len(pairs)}",
+            ))
+
+    if not flagged:
+        return CheckResult(
+            "amc_event_day_vs_1d", PASS,
+            f"All amc tickers move more on the stored 1d than on the event day ({len(ticker_data)} tickers checked)",
+        )
+    flagged.sort(reverse=True)
+    return CheckResult(
+        "amc_event_day_vs_1d", WARN,
+        f"{len(flagged)} of {len(ticker_data)} amc ticker(s) move more on the event day than on the stored 1d (possible bmo mis-tag)",
+        [line for _, line in flagged],
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1817,6 +1875,7 @@ CHECKS = [
     check_no_mixed_computation_version,
     check_report_timing_unknown_share,
     check_bmo_1d_vs_gap,
+    check_amc_event_day_vs_1d,
 ]
 
 
