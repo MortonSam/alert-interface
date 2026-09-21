@@ -1,5 +1,6 @@
 "use client";
 
+import { PRICE_FRESHNESS, freshnessLine } from "@/lib/freshness";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
@@ -206,10 +207,7 @@ export function TickerGrid() {
               : "text-muted-foreground"
           }`}
         >
-          Prices live
-          {systemStatus?.last_refreshed_at && (
-            <> · Research data refreshed nightly, last {fmtAgo(systemStatus.last_refreshed_at)}</>
-          )}
+          {systemStatus?.last_refreshed_at ? freshnessLine(fmtAgo(systemStatus.last_refreshed_at)) : PRICE_FRESHNESS}
         </span>
       </div>
 
@@ -316,7 +314,7 @@ export function TickerGrid() {
                         ${q.price!.toFixed(2)}
                       </span>
                     ) : (
-                      <span className="font-mono text-sm text-muted-foreground">—</span>
+                      <span className="font-mono text-sm text-muted-foreground" title={q?.quote_reason ?? undefined}>—</span>
                     )}
                     {/* Day change % */}
                     {hasQuote && q.change_pct != null ? (

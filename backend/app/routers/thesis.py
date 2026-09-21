@@ -1787,6 +1787,11 @@ async def list_alert_picks(
                     price_map[sym] = price
                     ts_map[sym] = ts
 
+    # A stale quote is not a current price: withhold it, as the quote endpoints do.
+    for sym in list(price_map):
+        if assess_quote(price_map.get(sym), ts_map.get(sym)).state != "ok":
+            price_map[sym] = None
+
     # ── Option marks for open picks via chain_store ──
     open_option_marks: dict[str, dict] = {}
     for r in rows:

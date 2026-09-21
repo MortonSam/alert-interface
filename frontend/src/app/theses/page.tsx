@@ -340,7 +340,7 @@ function ResolveForm({
           <input
             type="number" step="0.01" min="0"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-            placeholder="Use live quote if blank"
+            placeholder="Uses the latest quote if blank"
             value={priceOverride}
             onChange={e => setPriceOverride(e.target.value)}
           />
@@ -358,7 +358,7 @@ function ResolveForm({
         />
       </div>
       {thesis.option_type && (
-        <p className="text-xs text-muted-foreground">Option P&L will be computed from the live chain at resolution.</p>
+        <p className="text-xs text-muted-foreground">Option P&L is computed from the stored options data at resolution, or at intrinsic value once expired.</p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex gap-2">

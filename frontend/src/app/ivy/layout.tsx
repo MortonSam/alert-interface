@@ -1,5 +1,6 @@
 "use client";
 
+import { freshnessLine } from "@/lib/freshness";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -39,7 +40,7 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
     stripText = "Ivy is refreshing her data…";
     pulse = true;
   } else if (health?.last_refreshed_at) {
-    stripText = `Prices live · Research data refreshed nightly, last ${timeAgo(health.last_refreshed_at)}`;
+    stripText = freshnessLine(timeAgo(health.last_refreshed_at));
   }
 
   const isWide = pathname === "/ivy" || pathname === "/ivy/desk";

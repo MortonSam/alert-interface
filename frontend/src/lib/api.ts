@@ -343,6 +343,8 @@ export interface BatchQuote {
   change: number | null;
   change_pct: number | null;
   timestamp: number | null;
+  quote_state?: "ok" | "stale" | "no_data";   // price fields are null unless ok
+  quote_reason?: string | null;
 }
 
 export interface NewsItem {
@@ -567,6 +569,8 @@ export interface BatchEnrichItem {
   earnings_date: string | null;
   rv_rank: number | null;
   current_rv: number | null;
+  quote_state?: "ok" | "stale" | "no_data";
+  quote_reason?: string | null;
 }
 
 export interface RealizedVol {
@@ -878,6 +882,7 @@ export interface HealthStatus {
   last_refreshed_at: string | null;
   rv_latest_date: string | null;
   rv_last_run: string | null;
+  options_data_date?: string | null;   // chain date of the newest ingested options data
   step_health: Record<string, string | null>;
 }
 

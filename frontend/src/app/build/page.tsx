@@ -1,5 +1,6 @@
 "use client";
 
+import { premiumSourcePhrase } from "@/lib/freshness";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -937,7 +938,7 @@ function BuildTradePageContent() {
                   ${optionLeg.strike.toFixed(0)}
                   {optionLeg.strike2 != null ? ` / $${optionLeg.strike2.toFixed(0)}` : ""}{" "}
                   · {optionLeg.option_expiration}.
-                  {" "}Entry premium captured live.
+                  {" "}{premiumSourcePhrase(draft?.fact_block.options_as_of)}
                 </>
               )}
             </p>
@@ -975,7 +976,7 @@ function BuildTradePageContent() {
           </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Ivy drafts the idea from live options data, earnings history, and volatility.
+            Ivy drafts the idea from stored options data (updated once a day), earnings history, and volatility.
             Not financial advice.
           </p>
         </div>
@@ -1305,7 +1306,7 @@ function BuildTradePageContent() {
                       {optionLeg.option_expiration ? ` · exp ${optionLeg.option_expiration}` : ""}
                       {optionLeg.spread_type ? ` (${optionLeg.spread_type.replace(/_/g, " ")})` : ""}
                     </span>
-                    {" · Entry premium captured live at save."}
+                    {" · "}{premiumSourcePhrase(draft?.fact_block.options_as_of)}
                   </div>
                 )}
 

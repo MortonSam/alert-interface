@@ -1,5 +1,6 @@
 "use client";
 
+import { PRICE_FRESHNESS } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
@@ -159,9 +160,9 @@ function WatchlistRow({
         {status === "loading" ? (
           <Skeleton w="w-16" />
         ) : (
-          <span>
+          <span title={data?.quote_reason ?? undefined}>
             {fmtPrice(data?.price ?? null)}
-            {data?.quote_ts != null && (
+            {data?.price != null && data?.quote_ts != null && (
               <span className="text-[10px] text-muted-foreground/50 ml-1.5">
                 {fmtQuoteTime(data.quote_ts)}
               </span>
@@ -672,7 +673,7 @@ export default function WatchlistPage() {
 
                 <div className="px-4 py-3 bg-muted/20 border-t border-border">
                   <p className="text-[11px] text-muted-foreground/60">
-                    Prices via Finnhub. May be delayed up to 15 min. Implied move derived from near-term options straddle.
+                    {PRICE_FRESHNESS}. Implied move derived from near-term options straddle.
                     RV rank: where this stock&apos;s current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute).
                   </p>
                 </div>

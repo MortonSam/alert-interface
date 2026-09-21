@@ -75,6 +75,7 @@ async def health_check():
         "last_refreshed_at": None,
         "rv_latest_date": None,
         "rv_last_run": None,
+        "options_data_date": None,     # chain date of the newest ingested options data
         "step_health": {},
         "step_outcomes": {},
     }
@@ -111,6 +112,13 @@ async def health_check():
                 )
                 rv_date = rv_row.scalar()
                 result["rv_latest_date"] = rv_date.isoformat() if rv_date else None
+            except Exception:
+                result["status"] = "degraded"
+
+            try:
+                opt_row = await session.execute(sa.text("SELECT max(snapshot_date) FROM put_call_snapshots"))
+                opt_date = opt_row.scalar()
+                result["options_data_date"] = opt_date.isoformat() if opt_date else None
             except Exception:
                 result["status"] = "degraded"
 

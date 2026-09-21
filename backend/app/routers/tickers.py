@@ -318,6 +318,24 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
     )
 
 
+def _served_quote(data: dict) -> dict:
+    """Quote fields as they may be shown: null with a reason unless the last trade is recent.
+
+    Applied when serving, not when caching, so every reader of the shared quote
+    cache gets the same answer from the same test (price_freshness.assess_quote).
+    """
+    q = assess_quote(data.get("price"), data.get("timestamp"))
+    live = q.state == "ok"
+    return {
+        "price": q.price,
+        "change": data.get("change") if live else None,
+        "change_pct": data.get("change_pct") if live else None,
+        "timestamp": data.get("timestamp"),
+        "quote_state": q.state,
+        "quote_reason": q.reason,
+    }
+
+
 @router.get("/quotes", response_model=list[BatchQuoteRead])
 async def get_batch_quotes(symbols: str = Query(..., description="Comma-separated symbols")) -> list[BatchQuoteRead]:
     """Batch real-time quotes for the home grid, with 60s per-symbol cache."""
@@ -330,7 +348,7 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
     for sym in syms:
         cached = quote_cache.get(sym)
         if cached is not None:
-            results[sym] = BatchQuoteRead(symbol=sym, **cached)
+            results[sym] = BatchQuoteRead(symbol=sym, **_served_quote(cached))
         else:
             to_fetch.append(sym)
 
@@ -355,7 +373,7 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
             ts = int(q["t"]) if q.get("t") else None
             data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts}
             quote_cache.set(sym, data)
-            results[sym] = BatchQuoteRead(symbol=sym, **data)
+            results[sym] = BatchQuoteRead(symbol=sym, **_served_quote(data))
 
     return [results.get(s, BatchQuoteRead(symbol=s, price=None, change=None, change_pct=None)) for s in syms]
 
@@ -443,8 +461,8 @@ async def batch_enrich(
 
     async def _enrich(sym: str) -> BatchEnrichRead:
         async with sem:
-            q = quotes.get(sym, {})
-            current_price = q.get("price")
+            q = _served_quote(quotes.get(sym, {}))
+            current_price = q.get("price")     # None when stale: no implied move from an old price
             earnings_str = earnings_by_sym.get(sym)
 
             # — Expected move from ingested chain ——————————————————————————————
@@ -486,6 +504,8 @@ async def batch_enrich(
                 change=q.get("change"),
                 change_pct=q.get("change_pct"),
                 quote_ts=q.get("timestamp"),
+                quote_state=q["quote_state"],
+                quote_reason=q["quote_reason"],
                 expected_move_pct=em_pct,
                 earnings_date=earnings_str,
                 rv_rank=rv_rank,

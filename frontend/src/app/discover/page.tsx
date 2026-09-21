@@ -1,5 +1,6 @@
 "use client";
 
+import { freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverCard from "@/components/DiscoverCard";
@@ -186,7 +187,7 @@ export default function DiscoverPage() {
           </p>
           {(health?.last_refreshed_at || quotes.size > 0) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">
-              {health?.last_refreshed_at && <>Prices live · Research data refreshed nightly, last {timeAgo(health.last_refreshed_at)}</>}
+              {health?.last_refreshed_at && <>{freshnessLine(timeAgo(health.last_refreshed_at))}</>}
               {health?.last_refreshed_at && quotes.size > 0 && " · "}
               {quotes.size > 0 && (() => {
                 const ts = [...quotes.values()].map(q => q.timestamp).filter(Boolean);

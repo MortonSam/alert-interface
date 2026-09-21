@@ -1,5 +1,6 @@
 "use client";
 
+import { optionsDataPhrase } from "@/lib/freshness";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type HealthStatus, type IvyActivity } from "@/lib/api";
@@ -51,12 +52,8 @@ function StatsBlock({
   return (
     <div>
       <div className="flex items-center gap-2 mb-3">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-        </span>
         <span className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
-          Right now
+          Latest stored data
         </span>
       </div>
 
@@ -159,8 +156,8 @@ export default function MeetIvyPage() {
             She reads the tape overnight, makes a call only when the evidence agrees, and keeps score in public.
           </p>
           <p className="text-base text-muted-foreground leading-relaxed mt-4 max-w-prose">
-            She reads twenty quarters of earnings history and the live options
-            chain, applies one rule the backtest supports, and refuses when the
+            She reads each company&apos;s earnings history and {optionsDataPhrase(health?.options_data_date)},
+            applies one rule the backtest supports, and refuses when the
             options are too expensive for the edge.
           </p>
           {activity?.run_date && (

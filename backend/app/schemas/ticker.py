@@ -93,6 +93,8 @@ class BatchQuoteRead(BaseModel):
     change: float | None
     change_pct: float | None
     timestamp: int | None = None  # Unix UTC (exchange last-trade time)
+    quote_state: str = "ok"           # ok | stale | no_data; price fields are null unless ok
+    quote_reason: str | None = None   # plain language, shown in place of the price
 
 
 class BatchEnrichRead(BaseModel):
@@ -107,6 +109,8 @@ class BatchEnrichRead(BaseModel):
     rv_rank: float | None = None
     current_rv: float | None = None
     inactive: bool = False
+    quote_state: str = "ok"           # ok | stale | no_data; price fields are null unless ok
+    quote_reason: str | None = None
 
 
 # ── Company news (Finnhub) ───────────────────────────────────────────────────
