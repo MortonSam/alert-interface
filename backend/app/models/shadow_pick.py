@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,11 +13,14 @@ class ShadowPick(Base):
     __tablename__ = "shadow_picks"
     __table_args__ = (
         Index("ix_shadow_picks_event_date", "event_date"),
+        UniqueConstraint("symbol", "event_date", "eval_date",
+                         name="uq_shadow_picks_symbol_event_eval"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     symbol: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
+    eval_date: Mapped[date] = mapped_column(Date, nullable=False)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     probability: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False)
     threshold_used: Mapped[Decimal] = mapped_column(Numeric(4, 2), nullable=False)

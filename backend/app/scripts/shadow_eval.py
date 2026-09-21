@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from sqlalchemy import text as sa_text
 
@@ -180,22 +181,40 @@ async def _run(dry_run: bool = False) -> int:
                   f"factors={pred.top_factors[:2]}")
 
             if not dry_run:
-                session.add(ShadowPick(
+                values = dict(
                     symbol=sym,
                     event_date=next_earnings,
+                    eval_date=today,
                     probability=Decimal(str(pred.probability_up_5d)),
                     threshold_used=Decimal(str(SHADOW_THRESHOLD)),
                     would_pick=would_pick,
                     top_factors=pred.top_factors,
                     v2_decision=v2_decision,
                     v2_pick_id=v2_pick_id,
-                ))
+                )
+                stmt = (
+                    pg_insert(ShadowPick)
+                    .values(**values)
+                    .on_conflict_do_update(
+                        constraint="uq_shadow_picks_symbol_event_eval",
+                        set_={
+                            "probability": values["probability"],
+                            "threshold_used": values["threshold_used"],
+                            "would_pick": values["would_pick"],
+                            "top_factors": values["top_factors"],
+                            "v2_decision": values["v2_decision"],
+                            "v2_pick_id": values["v2_pick_id"],
+                            "decided_at": func.now(),
+                        },
+                    )
+                )
+                await session.execute(stmt)
                 inserted += 1
 
         if not dry_run:
             await session.commit()
 
-        print(f"\n[shadow] Done. {inserted} shadow picks inserted.")
+        print(f"\n[shadow] Done. {inserted} shadow picks upserted.")
     return 0
 
 

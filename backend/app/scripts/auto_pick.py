@@ -351,13 +351,26 @@ async def _run(dry_run: bool = False) -> int:
                         v2_fields=v2_fields,
                     )
 
-                    # Record hypothetical iron condor on vol_gate
+                    # Record hypothetical iron condor on vol_gate (idempotent upsert)
                     if outcome == "vol_gate":
                         receipt = result.get("receipt")
                         if receipt:
                             ic = await _build_iron_condor(session, sym, next_earnings, receipt)
                             if ic is not None:
-                                session.add(ic)
+                                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                                ic_values = {
+                                    c.name: getattr(ic, c.name)
+                                    for c in CreditShadowPick.__table__.columns
+                                    if c.name != "id"
+                                }
+                                ic_stmt = (
+                                    pg_insert(CreditShadowPick)
+                                    .values(**ic_values)
+                                    .on_conflict_do_nothing(
+                                        constraint="uq_credit_shadow_picks_symbol_event_date",
+                                    )
+                                )
+                                await session.execute(ic_stmt)
 
                 leans_summary = " ".join(f"{l.signal[0]}={l.direction[:3]}" for l in leans) if leans else ""
                 suffix = " (cap)" if cap_hit else ""

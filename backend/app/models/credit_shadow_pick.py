@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Index, Numeric, String, func
+from sqlalchemy import Date, DateTime, Index, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ class CreditShadowPick(Base):
     __tablename__ = "credit_shadow_picks"
     __table_args__ = (
         Index("ix_credit_shadow_picks_event_date", "event_date"),
+        UniqueConstraint("symbol", "event_date", name="uq_credit_shadow_picks_symbol_event_date"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
