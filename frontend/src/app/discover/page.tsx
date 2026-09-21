@@ -1,5 +1,6 @@
 "use client";
 
+import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { rvTier } from "@/lib/encodings/rvTier";
 import { earningsProximity, earningsProximityText } from "@/lib/encodings/earningsProximity";
 import { freshnessLine } from "@/lib/freshness";
@@ -118,7 +119,7 @@ export default function DiscoverPage() {
     setFetchError(false);
     Promise.all([
       api.discover.reportingSoon(7, LIMIT),
-      api.discover.justReported(5, LIMIT),
+      JUST_REPORTED_ENABLED ? api.discover.justReported(5, LIMIT) : Promise.resolve({ items: [] }),
       api.discover.suggestions(5),
       api.discover.unusuallyActive(LIMIT),
       api.discover.latestPick().catch(() => ({ pick: null })),
@@ -313,13 +314,13 @@ export default function DiscoverPage() {
         ) : null}
 
         {/* ── 03 · Just reported (hidden when empty) ──── */}
-        {!fetchError && loading ? (
+        {!JUST_REPORTED_ENABLED ? null : !fetchError && loading ? (
           <SectionSkeleton />
         ) : !fetchError && justReported && justReported.items.length === 0 ? null : !fetchError ? (
           <section className="border-t border-border py-10">
             <SectionKicker index="03" label="The results" />
             <h2 className="font-display text-xl font-bold text-foreground">Just reported</h2>
-            <p className="text-sm text-muted-foreground mt-1 mb-6">Notable earnings reaction in the last 5 days</p>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings reactions in the last 5 days</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {justReported?.items.map((item) => {
