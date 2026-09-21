@@ -18,3 +18,4 @@ from app.models.sector_peer_snapshot import SectorPeerSnapshot  # noqa: F401
 from app.models.magnitude_trend_snapshot import MagnitudeTrendSnapshot  # noqa: F401
 from app.models.put_call_snapshot import PutCallSnapshot  # noqa: F401
 from app.models.earnings_report_timing import EarningsReportTiming  # noqa: F401
+from app.models.ivy_train_log import IvyTrainLog  # noqa: F401

@@ -21,16 +21,19 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
+from sqlalchemy import text as sa_text
+
 from app.database import ScriptSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.earnings_feature import EarningsFeature
 from app.models.enums import EventType
 from app.models.event import Event
+from app.models.ivy_train_log import IvyTrainLog
 from app.models.shadow_pick import ShadowPick
 from app.models.ticker import Ticker
 from app.services.ivy_shadow import train, predict, FEATURE_COLS
 from app.services.ivy_v2 import compute_live_features, decide as v2_decide, MIN_PRIOR_N, MOMENTUM_CUTOFF
-from app.services.system_metadata_service import set_value
+from app.services.system_metadata_service import get_value, set_value
 
 SHADOW_THRESHOLD = 0.58  # default threshold for would_pick
 
@@ -78,8 +81,20 @@ async def _run(dry_run: bool = False) -> int:
             return 1
 
         model = tr.model
+        positive_rate = tr.n_positive / tr.n_train
         print(f"[shadow] Trained on {tr.n_train} rows, {tr.n_positive} positive "
-              f"({tr.n_positive/tr.n_train*100:.1f}%)")
+              f"({positive_rate*100:.1f}%)")
+        if tr.holdout_accuracy is not None:
+            print(f"[shadow] Holdout accuracy: {tr.holdout_accuracy*100:.1f}% "
+                  f"(n={tr.holdout_n})")
+
+        # Query the current reaction computation version
+        comp_version = (await session.execute(
+            sa_text(
+                "SELECT COALESCE(MAX(computation_version), 1) "
+                "FROM historical_reactions WHERE event_type = 'earnings'"
+            )
+        )).scalar()
 
         # Persist model artifact
         if not dry_run:
@@ -92,6 +107,26 @@ async def _run(dry_run: bool = False) -> int:
                 "threshold": SHADOW_THRESHOLD,
             }
             await set_value(session, "shadow_model_latest", json.dumps(artifact))
+
+            # Persist training metrics
+            session.add(IvyTrainLog(
+                n_rows=tr.n_train,
+                positive_rate=round(positive_rate, 4),
+                holdout_accuracy=round(tr.holdout_accuracy, 4) if tr.holdout_accuracy is not None else None,
+                holdout_n=tr.holdout_n,
+                computation_version=comp_version,
+            ))
+
+            # Write accuracy to step_outcomes so /health shows it
+            raw = await get_value(session, "step_outcomes")
+            outcomes = json.loads(raw) if raw else {}
+            shadow_entry = outcomes.get("Shadow eval", {})
+            shadow_entry["holdout_accuracy"] = round(tr.holdout_accuracy, 4) if tr.holdout_accuracy is not None else None
+            shadow_entry["holdout_n"] = tr.holdout_n
+            shadow_entry["n_train"] = tr.n_train
+            shadow_entry["computation_version"] = comp_version
+            outcomes["Shadow eval"] = shadow_entry
+            await set_value(session, "step_outcomes", json.dumps(outcomes))
 
         # Evaluate each candidate
         inserted = 0

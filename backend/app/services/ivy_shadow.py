@@ -76,6 +76,8 @@ class TrainResult:
     feature_importance: list[tuple[str, float]]
     n_train: int
     n_positive: int
+    holdout_accuracy: float | None = None
+    holdout_n: int = 0
 
 
 @dataclass
@@ -196,11 +198,37 @@ def train(rows: list, cutoff_date: date, feature_cols: list[str] | None = None) 
     importance.sort(key=lambda x: abs(x[1]), reverse=True)
 
     model = ShadowModel(pipeline=pipe, medians=medians, feature_cols=list(cols))
+
+    # Holdout evaluation: chronological last 20% of training data
+    holdout_accuracy = None
+    holdout_n = 0
+    holdout_split = int(len(train_rows) * 0.8)
+    h_train = train_rows[:holdout_split]
+    h_test = train_rows[holdout_split:]
+    if len(h_train) >= 50 and len(h_test) >= 10:
+        h_medians = _compute_medians(h_train, cols)
+        h_X = np.array([_extract_row(r, h_medians, cols) for r in h_train])
+        h_y = np.array([1 if float(r.actual_5d) > 0 else 0 for r in h_train])
+        h_X_test = np.array([_extract_row(r, h_medians, cols) for r in h_test])
+        h_y_test = np.array([1 if float(r.actual_5d) > 0 else 0 for r in h_test])
+        h_pipe = Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", CalibratedClassifierCV(
+                LogisticRegression(max_iter=2000, solver="lbfgs"),
+                cv=5, method="isotonic",
+            )),
+        ])
+        h_pipe.fit(h_X, h_y)
+        holdout_accuracy = float((h_pipe.predict(h_X_test) == h_y_test).mean())
+        holdout_n = len(h_test)
+
     return TrainResult(
         model=model,
         feature_importance=importance,
         n_train=len(train_rows),
         n_positive=int(y.sum()),
+        holdout_accuracy=holdout_accuracy,
+        holdout_n=holdout_n,
     )
 
 
