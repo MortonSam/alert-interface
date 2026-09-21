@@ -96,13 +96,12 @@ async def ingest_options_chains(
             errors.append(f"{sym}: {exc}")
 
     # Compute and store put/call ratio from the nearest expiration per symbol
-    MIN_TOTAL_CONTRACTS = 50
+    from app.constants import MIN_SIDE_CONTRACTS
     pc_stored = 0
     for sym, item in nearest_chain.items():
         put_vol = sum((p.get("volume") or 0) for p in item.puts)
         call_vol = sum((c.get("volume") or 0) for c in item.calls)
-        total = put_vol + call_vol
-        if total < MIN_TOTAL_CONTRACTS or call_vol == 0:
+        if put_vol < MIN_SIDE_CONTRACTS or call_vol < MIN_SIDE_CONTRACTS:
             ratio = None
         else:
             ratio = round(put_vol / call_vol, 4)

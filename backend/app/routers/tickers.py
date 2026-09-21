@@ -1904,10 +1904,12 @@ async def get_put_call(
     # Determine reason when ratio is absent
     reason: str | None = None
     if ratio_val is None:
-        total = (row.put_total or 0) + (row.call_total or 0)
-        if total < 50:
-            reason = "too few contracts"
-        elif (row.call_total or 0) == 0:
+        from app.constants import MIN_SIDE_CONTRACTS
+        put_t = row.put_total or 0
+        call_t = row.call_total or 0
+        if put_t < MIN_SIDE_CONTRACTS or call_t < MIN_SIDE_CONTRACTS:
+            reason = "too few contracts on one side"
+        elif call_t == 0:
             reason = "no call volume"
 
     lv = put_call_label(ratio_val)

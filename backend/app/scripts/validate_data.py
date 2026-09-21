@@ -1395,25 +1395,96 @@ async def check_magnitude_trend_avg_range(session) -> CheckResult:
 # ── Put/call ratio snapshots ────────────────────────────────────────────────
 
 async def check_put_call_ratio_range(session) -> CheckResult:
-    """ERROR if any stored put/call ratio is outside [0.02, 10.0]."""
+    """Multi-tier put/call ratio validation.
+
+    ERROR if stored ratio differs from put_total/call_total by >0.0001
+          or is outside [0.005, 200].
+    WARN  if ratio is outside [0.02, 10.0].
+    """
     rows = (await session.execute(
-        select(PutCallSnapshot.symbol, PutCallSnapshot.ratio, PutCallSnapshot.snapshot_date)
+        select(
+            PutCallSnapshot.symbol,
+            PutCallSnapshot.ratio,
+            PutCallSnapshot.put_total,
+            PutCallSnapshot.call_total,
+            PutCallSnapshot.snapshot_date,
+        )
+        .where(PutCallSnapshot.ratio.isnot(None))
+        .order_by(PutCallSnapshot.symbol, PutCallSnapshot.snapshot_date)
+    )).all()
+
+    errors: list[str] = []
+    warns: list[str] = []
+
+    for r in rows:
+        ratio = float(r.ratio)
+        # Arithmetic consistency: stored ratio must match put/call math
+        if r.put_total is not None and r.call_total and r.call_total > 0:
+            expected = r.put_total / r.call_total
+            if abs(ratio - expected) > 0.0001:
+                errors.append(
+                    f"{r.symbol}  {r.snapshot_date}  ratio={ratio:.4f}  "
+                    f"expected={expected:.4f}  (arithmetic mismatch)"
+                )
+                continue
+
+        # Hard bounds
+        if ratio < 0.005 or ratio > 200:
+            errors.append(f"{r.symbol}  {r.snapshot_date}  ratio={ratio:.4f}  (outside [0.005, 200])")
+            continue
+
+        # Soft bounds (WARN)
+        if ratio < 0.02 or ratio > 10.0:
+            warns.append(f"{r.symbol}  {r.snapshot_date}  ratio={ratio:.4f}  (outside [0.02, 10.0])")
+
+    if errors:
+        return CheckResult(
+            "put_call_ratio_range", ERROR,
+            f"{len(errors)} ratio error(s), {len(warns)} warning(s)",
+            errors + warns,
+        )
+    if warns:
+        return CheckResult(
+            "put_call_ratio_range", WARN,
+            f"{len(warns)} ratio(s) outside [0.02, 10.0] (all arithmetically correct)",
+            warns,
+        )
+    return CheckResult("put_call_ratio_range", PASS,
+                       f"All {len(rows)} stored ratios arithmetically correct and in [0.02, 10.0]")
+
+
+async def check_put_call_per_side_guard(session) -> CheckResult:
+    """ERROR if any stored ratio has put_total or call_total < MIN_SIDE_CONTRACTS."""
+    from app.constants import MIN_SIDE_CONTRACTS
+    rows = (await session.execute(
+        select(
+            PutCallSnapshot.symbol,
+            PutCallSnapshot.ratio,
+            PutCallSnapshot.put_total,
+            PutCallSnapshot.call_total,
+            PutCallSnapshot.snapshot_date,
+        )
         .where(
             PutCallSnapshot.ratio.isnot(None),
-            (PutCallSnapshot.ratio < Decimal("0.02")) |
-            (PutCallSnapshot.ratio > Decimal("10.0")),
+            (PutCallSnapshot.put_total < MIN_SIDE_CONTRACTS) |
+            (PutCallSnapshot.call_total < MIN_SIDE_CONTRACTS),
         )
-        .order_by(PutCallSnapshot.symbol)
+        .order_by(PutCallSnapshot.symbol, PutCallSnapshot.snapshot_date)
     )).all()
 
     if not rows:
-        return CheckResult("put_call_ratio_range", PASS,
-                           "All stored put/call ratios in [0.02, 10.0]")
+        return CheckResult(
+            "put_call_per_side_guard", PASS,
+            f"No stored ratios with either side < {MIN_SIDE_CONTRACTS}",
+        )
 
-    details = [f"{r.symbol}  ratio={float(r.ratio):.4f}  date={r.snapshot_date}" for r in rows]
+    details = [
+        f"{r.symbol}  {r.snapshot_date}  put={r.put_total}  call={r.call_total}  ratio={float(r.ratio):.4f}"
+        for r in rows
+    ]
     return CheckResult(
-        "put_call_ratio_range", ERROR,
-        f"{len(rows)} ratio(s) outside [0.02, 10.0]",
+        "put_call_per_side_guard", ERROR,
+        f"{len(rows)} ratio(s) stored with a side below {MIN_SIDE_CONTRACTS} contracts",
         details,
     )
 
@@ -1644,6 +1715,7 @@ CHECKS = [
     check_magnitude_trend_avg_range,
     # Put/call ratio (stored snapshots)
     check_put_call_ratio_range,
+    check_put_call_per_side_guard,
     # Options-read coverage
     check_options_read_coverage,
     # v3 reaction checks
