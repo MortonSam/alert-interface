@@ -138,7 +138,11 @@ def _classify_timing(acceptance_str: str, event_date: date) -> str:
         dt_et = dt_utc.astimezone(ET)
     except (ValueError, TypeError):
         return "unknown"
+    return classify_local(dt_et, event_date)
 
+
+def classify_local(dt_et: datetime, event_date: date) -> str:
+    """Classify from an acceptance time already expressed as Eastern clock time."""
     accept_date = dt_et.date()
     accept_hour = dt_et.hour
     accept_minute = dt_et.minute

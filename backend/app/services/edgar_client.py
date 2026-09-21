@@ -83,33 +83,31 @@ class EdgarClient:
 
     # ── 8-K retrieval with pagination ────────────────────────────────────────
 
-    async def get_all_8k_filings(
-        self, cik: str
-    ) -> list[tuple[str, str, str]]:
-        """Return every 8-K for a CIK as (filing_date, acceptanceDateTime, items).
+    async def get_all_8k_records(self, cik: str) -> list[dict]:
+        """Every 8-K for a CIK as {filing_date, acceptance, items, accession}.
 
         Follows filings.files pagination to get the complete history. `items`
         is EDGAR's comma-separated item list, e.g. "2.02,9.01" (earnings
-        releases carry Item 2.02); empty string when EDGAR has none.
+        releases carry Item 2.02). The first 10 digits of `accession` identify
+        the filer agent that submitted the document.
         """
         subs = await self.get_submissions(cik)
         filings = subs.get("filings", {})
 
-        def _extract_8ks(recent: dict) -> list[tuple[str, str, str]]:
+        def _extract(recent: dict) -> list[dict]:
             forms = recent.get("form", [])
-            filing_dates = recent.get("filingDate", [])
-            acceptance_times = recent.get("acceptanceDateTime", [])
-            items = recent.get("items") or [""] * len(forms)
-            results = []
-            for form, fd, at, it in zip(forms, filing_dates, acceptance_times, items):
-                if form == "8-K":
-                    results.append((fd, at, it or ""))
-            return results
+            n = len(forms)
+            items = recent.get("items") or [""] * n
+            accessions = recent.get("accessionNumber") or [""] * n
+            return [
+                {"filing_date": fd, "acceptance": at, "items": it or "", "accession": acc or ""}
+                for form, fd, at, it, acc in zip(
+                    forms, recent.get("filingDate", []), recent.get("acceptanceDateTime", []), items, accessions,
+                )
+                if form == "8-K"
+            ]
 
-        # Recent page (~1000 most recent filings)
-        all_8ks = _extract_8ks(filings.get("recent", {}))
-
-        # Pagination: filings.files contains older batches
+        records = _extract(filings.get("recent", {}))
         for file_ref in filings.get("files", []):
             name = file_ref.get("name", "")
             if not name:
@@ -117,13 +115,15 @@ class EdgarClient:
             try:
                 resp = await self._client.get(f"/submissions/{name}")
                 resp.raise_for_status()
-                batch = resp.json()
-                all_8ks.extend(_extract_8ks(batch))
+                records.extend(_extract(resp.json()))
             except Exception:
                 continue
             await asyncio.sleep(0.12)
+        return records
 
-        return all_8ks
+    async def get_all_8k_filings(self, cik: str) -> list[tuple[str, str, str]]:
+        """Every 8-K for a CIK as (filing_date, acceptanceDateTime, items)."""
+        return [(r["filing_date"], r["acceptance"], r["items"]) for r in await self.get_all_8k_records(cik)]
 
     # ── Filing discovery ─────────────────────────────────────────────────────
 
