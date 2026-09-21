@@ -43,10 +43,13 @@ from app.models.ticker import Ticker
 from app.scripts.seed_historical_reactions import (
     FETCH_TIMEOUT,
     _build_date_cache,
+    _close_at_offset,
     _close_on_date,
-    _close_strictly_before,
+    _close_prior_session,
     _fetch_price_history,
-    _resolved_date_on_or_after,
+    _session_on_or_after,
+    _zero_volume,
+    load_reference_sessions,
 )
 
 LOOKBACK_YEARS = 5
@@ -73,6 +76,7 @@ def _compute_pre_market(
     hist: pd.DataFrame,
     dates: np.ndarray,
     event_date: date,
+    sessions: np.ndarray,
 ) -> dict | None:
     """Compute reaction for a pre-market event (analyst action).
 
@@ -80,19 +84,25 @@ def _compute_pre_market(
     pct_change_1d = (close day 0 − baseline) / baseline × 100
     pct_change_5d = (close T+4 − baseline) / baseline × 100
     """
-    # Resolve day 0 = first trading day on or after event_date
-    t0 = _resolved_date_on_or_after(dates, event_date)
+    # Day 0 = first exchange session on or after event_date. The ticker must
+    # have a bar on that exact session, and on the session before it, or the
+    # move would be measured across a gap in its history.
+    t0 = _session_on_or_after(sessions, event_date)
     if t0 is None:
         return None
+    close_t0 = _close_on_date(hist, dates, t0)
+    if close_t0 is None or _zero_volume(hist["Volume"].iloc[int(np.flatnonzero(dates == t0)[0])]):
+        return None
 
-    baseline = _close_strictly_before(hist, dates, t0)
+    baseline = _close_prior_session(hist, dates, sessions, t0)
     if baseline is None or baseline == 0:
         return None
 
-    close_t0 = _close_on_date(hist, dates, t0)
-
-    t4 = _resolved_date_on_or_after(dates, event_date + timedelta(days=4))
-    close_t4 = _close_on_date(hist, dates, t4) if t4 else None
+    t4 = _session_on_or_after(sessions, event_date + timedelta(days=4))
+    close_t4 = None
+    if t4 is not None and t4 > t0:
+        n = int(np.searchsorted(sessions, t4) - np.searchsorted(sessions, t0))
+        close_t4 = _close_at_offset(hist, dates, sessions, t0, n)
 
     def pct(close: float | None) -> float | None:
         if close is None:
@@ -201,7 +211,7 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
         # 4. Compute and persist per-event reactions
         computed = 0
         for event in events:
-            reaction = _compute_pre_market(hist, dates_cache, event.event_date)
+            reaction = _compute_pre_market(hist, dates_cache, event.event_date, load_reference_sessions())
 
             pct_1d = None
             pct_5d = None

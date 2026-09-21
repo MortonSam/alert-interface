@@ -35,6 +35,7 @@ from app.scripts.seed_historical_reactions import (
     LOOKBACK_YEARS,
     _build_date_cache,
     _compute_v3,
+    load_reference_sessions,
     _fetch_price_history,
 )
 
@@ -147,7 +148,7 @@ async def _run(write: bool = False) -> int:
                     skipped_unknown += 1
                     continue
 
-                result = _compute_v3(hist, dates_cache, r.event_date, timing)
+                result = _compute_v3(hist, dates_cache, r.event_date, timing, load_reference_sessions())
 
                 if result is None:
                     print(f"  {sym}  {r.event_date}  timing={timing}  → guard rejection")

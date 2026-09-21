@@ -47,6 +47,7 @@ from app.scripts.seed_historical_reactions import (
     _build_date_cache,
     _compute,
     _fetch_price_history,
+    load_reference_sessions,
 )
 
 
@@ -253,7 +254,7 @@ async def seed(symbol: str) -> None:
             if floor_date and event_date < floor_date:
                 skipped += 1
                 continue
-            data = _compute(hist, dates_cache, event_date)
+            data = _compute(hist, dates_cache, event_date, load_reference_sessions())
             if data is None:
                 skipped += 1
                 continue
@@ -298,7 +299,7 @@ async def _seed_ticker_bulk(
             if floor_date and event_date < floor_date:
                 no_price += 1
                 continue
-            data = _compute(hist, dates_cache, event_date)
+            data = _compute(hist, dates_cache, event_date, load_reference_sessions())
             if data is None:
                 no_price += 1
                 continue

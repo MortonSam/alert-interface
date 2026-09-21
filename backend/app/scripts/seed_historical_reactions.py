@@ -84,14 +84,6 @@ def _build_date_cache(hist: pd.DataFrame) -> np.ndarray:
     return hist.index.map(lambda ts: ts.date()).values
 
 
-def _resolved_date_on_or_after(dates: np.ndarray, target: date) -> date | None:
-    """Return the actual trading date that is on or after target."""
-    mask = dates >= target
-    if not mask.any():
-        return None
-    return dates[int(np.argmax(mask))]
-
-
 def _close_on_date(
     hist: pd.DataFrame, dates: np.ndarray, target: date
 ) -> float | None:
@@ -100,27 +92,6 @@ def _close_on_date(
     if not mask.any():
         return None
     return float(hist["Close"].iloc[int(np.argmax(mask))])
-
-
-def _open_vol_on_or_after(
-    hist: pd.DataFrame, dates: np.ndarray, target: date
-) -> tuple[float, int] | None:
-    """(open, volume) on the first trading day on or after target."""
-    mask = dates >= target
-    if not mask.any():
-        return None
-    idx = int(np.argmax(mask))
-    return float(hist["Open"].iloc[idx]), int(hist["Volume"].iloc[idx])
-
-
-def _close_strictly_before(
-    hist: pd.DataFrame, dates: np.ndarray, target: date
-) -> float | None:
-    """Close on the last trading day strictly before target."""
-    mask = dates < target
-    if not mask.any():
-        return None
-    return float(hist["Close"].iloc[int(np.sum(mask)) - 1])
 
 
 # ── yfinance fetch ────────────────────────────────────────────────────────────
@@ -186,35 +157,113 @@ def _fetch_price_history(t: yf.Ticker, lookback: date) -> pd.DataFrame:
 
 # ── Reaction computation ──────────────────────────────────────────────────────
 
-def _close_at_offset(hist: pd.DataFrame, t_idx: int, offset: int) -> float | None:
-    """Close on the Nth trading day after t_idx (1-indexed offset).
-    Returns None if the target row has zero or NaN volume (halted/stale)."""
-    target_idx = t_idx + offset
-    if target_idx >= len(hist):
+REFERENCE_SYMBOL = "SPY"
+_reference_sessions: np.ndarray | None = None
+
+
+def load_reference_sessions() -> np.ndarray:
+    """Sorted array of exchange session dates, taken from SPY's daily bars.
+
+    Fetched once per process. Raises if SPY cannot be fetched: computing moves
+    without a session calendar is how wrong windows got stored.
+    """
+    global _reference_sessions
+    if _reference_sessions is None:
+        lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
+        hist = _fetch_price_history(yf.Ticker(REFERENCE_SYMBOL), lookback)
+        if hist.empty:
+            raise RuntimeError(f"no {REFERENCE_SYMBOL} history, cannot validate reaction windows")
+        _reference_sessions = _build_date_cache(hist)
+    return _reference_sessions
+
+
+def _zero_volume(vol) -> bool:
+    return vol == 0 or (isinstance(vol, float) and np.isnan(vol))
+
+
+def _session_on_or_after(sessions: np.ndarray, target: date) -> date | None:
+    mask = sessions >= target
+    return sessions[int(np.argmax(mask))] if mask.any() else None
+
+
+def _session_offset(sessions: np.ndarray, t_date: date, offset: int) -> date | None:
+    """The session `offset` sessions after (or before, if negative) t_date."""
+    pos = int(np.searchsorted(sessions, t_date))
+    if pos >= len(sessions) or sessions[pos] != t_date:
         return None
-    vol = hist["Volume"].iloc[target_idx]
-    if vol == 0 or (isinstance(vol, float) and np.isnan(vol)):
+    target = pos + offset
+    if target < 0 or target >= len(sessions):
         return None
-    return float(hist["Close"].iloc[target_idx])
+    return sessions[target]
+
+
+def _close_at_offset(
+    hist: pd.DataFrame,
+    dates: np.ndarray,
+    sessions: np.ndarray,
+    t_date: date,
+    offset: int,
+) -> float | None:
+    """Close on the `offset`-th exchange session after t_date.
+
+    Returns None unless the ticker has a bar dated exactly that session, and
+    every bar it has from T+1 through that session traded (volume > 0). Row
+    position is never used: a ticker with missing bars must not borrow a
+    later bar as its T+k.
+    """
+    target = _session_offset(sessions, t_date, offset)
+    if target is None:
+        return None
+    hit = np.flatnonzero(dates == target)
+    if hit.size == 0:
+        return None
+    window = np.flatnonzero((dates > t_date) & (dates <= target))
+    if any(_zero_volume(hist["Volume"].iloc[int(i)]) for i in window):
+        return None
+    return float(hist["Close"].iloc[int(hit[0])])
+
+
+def _event_session_index(dates: np.ndarray, sessions: np.ndarray, event_date: date) -> int | None:
+    """Row index of T: the first exchange session on or after event_date.
+
+    None when the ticker has no bar on that exact session.
+    """
+    t_session = _session_on_or_after(sessions, event_date)
+    if t_session is None:
+        return None
+    hit = np.flatnonzero(dates == t_session)
+    return int(hit[0]) if hit.size else None
+
+
+def _close_prior_session(
+    hist: pd.DataFrame, dates: np.ndarray, sessions: np.ndarray, t_date: date
+) -> float | None:
+    """Close on the exchange session immediately before t_date, if the ticker traded it."""
+    prior = _session_offset(sessions, t_date, -1)
+    if prior is None:
+        return None
+    hit = np.flatnonzero(dates == prior)
+    if hit.size == 0 or _zero_volume(hist["Volume"].iloc[int(hit[0])]):
+        return None
+    return float(hist["Close"].iloc[int(hit[0])])
 
 
 def _compute(
     hist: pd.DataFrame,
     dates: np.ndarray,
     event_date: date,
+    sessions: np.ndarray,
 ) -> dict | None:
     # If the price history starts after the event, we have no coverage.
     if dates[0] > event_date:
         return None
 
-    ov = _open_vol_on_or_after(hist, dates, event_date)
-    if ov is None:
+    t_idx = _event_session_index(dates, sessions, event_date)
+    if t_idx is None:
         return None
-    open_t, vol_t = ov
+    open_t, vol_t = float(hist["Open"].iloc[t_idx]), int(hist["Volume"].iloc[t_idx])
     if open_t == 0:
         return None
-
-    t_idx = int(np.argmax(dates >= event_date))
 
     # Event-day row with zero volume means the ticker was halted/stale.
     if vol_t == 0 or (isinstance(vol_t, float) and np.isnan(vol_t)):
@@ -231,12 +280,12 @@ def _compute(
         return Decimal(str(round((close - open_t) / open_t * 100, 4)))
 
     close_t      = float(hist["Close"].iloc[t_idx])
-    close_before = _close_strictly_before(hist, dates, actual_t_date)
+    close_before = _close_prior_session(hist, dates, sessions, actual_t_date)
 
-    # Trading-day offsets: 1st, 3rd, 5th trading day after event day T.
-    close_t1 = _close_at_offset(hist, t_idx, 1)
-    close_t3 = _close_at_offset(hist, t_idx, 3)
-    close_t5 = _close_at_offset(hist, t_idx, 5)
+    # Exchange-session offsets: 1st, 3rd, 5th session after event day T.
+    close_t1 = _close_at_offset(hist, dates, sessions, actual_t_date, 1)
+    close_t3 = _close_at_offset(hist, dates, sessions, actual_t_date, 3)
+    close_t5 = _close_at_offset(hist, dates, sessions, actual_t_date, 5)
 
     # Frozen-price guard: if all available closes are identical to the event-day
     # close, the price data is stale (halted/delisted ticker).  Return price
@@ -272,6 +321,7 @@ def _compute_v3(
     dates: np.ndarray,
     event_date: date,
     report_timing: str,
+    sessions: np.ndarray,
 ) -> dict | None:
     """Timing-aware reaction windows.
 
@@ -282,16 +332,14 @@ def _compute_v3(
     if dates[0] > event_date:
         return None
 
-    ov = _open_vol_on_or_after(hist, dates, event_date)
-    if ov is None:
+    t_idx = _event_session_index(dates, sessions, event_date)
+    if t_idx is None:
         return None
-    open_t, vol_t = ov
+    open_t, vol_t = float(hist["Open"].iloc[t_idx]), int(hist["Volume"].iloc[t_idx])
     if open_t == 0:
         return None
 
-    t_idx = int(np.argmax(dates >= event_date))
-
-    if vol_t == 0 or (isinstance(vol_t, float) and np.isnan(vol_t)):
+    if _zero_volume(vol_t):
         return None
 
     actual_t_date = dates[t_idx]
@@ -300,7 +348,7 @@ def _compute_v3(
         return Decimal(str(round(v, 4))) if v is not None else None
 
     close_t = float(hist["Close"].iloc[t_idx])
-    close_before = _close_strictly_before(hist, dates, actual_t_date)
+    close_before = _close_prior_session(hist, dates, sessions, actual_t_date)
 
     if report_timing == "bmo":
         # Pre-market report: gap is in open(T), base = close(T-1)
@@ -308,16 +356,16 @@ def _compute_v3(
         if base is None or base == 0:
             return None
         close_1d = close_t                              # close(T)
-        close_3d = _close_at_offset(hist, t_idx, 2)     # close(T+2)
-        close_5d = _close_at_offset(hist, t_idx, 4)     # close(T+4)
+        close_3d = _close_at_offset(hist, dates, sessions, actual_t_date, 2)     # close(T+2)
+        close_5d = _close_at_offset(hist, dates, sessions, actual_t_date, 4)     # close(T+4)
     elif report_timing == "amc":
         # After-close report: gap is in open(T+1), base = close(T)
         base = close_t
         if base == 0:
             return None
-        close_1d = _close_at_offset(hist, t_idx, 1)     # close(T+1)
-        close_3d = _close_at_offset(hist, t_idx, 3)     # close(T+3)
-        close_5d = _close_at_offset(hist, t_idx, 5)     # close(T+5)
+        close_1d = _close_at_offset(hist, dates, sessions, actual_t_date, 1)     # close(T+1)
+        close_3d = _close_at_offset(hist, dates, sessions, actual_t_date, 3)     # close(T+3)
+        close_5d = _close_at_offset(hist, dates, sessions, actual_t_date, 5)     # close(T+5)
     else:
         # Unknown timing: store metadata, null out pct fields
         return dict(
@@ -588,7 +636,7 @@ async def seed(symbol: str) -> None:
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             report_timing = timing_map.get(event_date, "unknown")
-            data = _compute_v3(hist, dates_cache, event_date, report_timing)
+            data = _compute_v3(hist, dates_cache, event_date, report_timing, load_reference_sessions())
             if data is None:
                 skipped += 1
                 continue
@@ -663,7 +711,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             report_timing = timing_map.get(event_date, "unknown")
-            data = _compute_v3(hist, dates_cache, event_date, report_timing)
+            data = _compute_v3(hist, dates_cache, event_date, report_timing, load_reference_sessions())
             if data is None:
                 no_price += 1
                 continue
@@ -872,7 +920,7 @@ async def shadow_seed(symbols: list[str]) -> int:
         for edate in sorted(v2_by_date, reverse=True):
             v2 = v2_by_date[edate]
             timing = timing_map.get(edate, "unknown")
-            v3_data = _compute_v3(hist, dates_cache, edate, timing)
+            v3_data = _compute_v3(hist, dates_cache, edate, timing, load_reference_sessions())
 
             v2_1d = fmt(v2.pct_change_1d)
             v2_3d = fmt(v2.pct_change_3d)

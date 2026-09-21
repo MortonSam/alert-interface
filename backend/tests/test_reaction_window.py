@@ -61,7 +61,7 @@ class TestBMOWindow:
             (date(2026, 1, 22), 115.0, 116.0, 2_000_000),  # T+5 Thu
         ]
         hist, dates = _make_hist(prices)
-        result = _compute_v3(hist, dates, event_date, "bmo")
+        result = _compute_v3(hist, dates, event_date, "bmo", dates)
 
         assert result is not None
         # base = close(T-1) = 100
@@ -83,7 +83,7 @@ class TestBMOWindow:
             (date(2026, 1, 21), 114.0, 115.0, 2_000_000),
         ]
         hist, dates = _make_hist(prices)
-        result = _compute_v3(hist, dates, event_date, "bmo")
+        result = _compute_v3(hist, dates, event_date, "bmo", dates)
 
         assert result is not None
         assert float(result["close_before"]) == pytest.approx(100.0, abs=0.01)
@@ -107,7 +107,7 @@ class TestAMCWindow:
             (date(2026, 1, 22), 114.0, 115.0, 2_000_000),   # T+5 Thu
         ]
         hist, dates = _make_hist(prices)
-        result = _compute_v3(hist, dates, event_date, "amc")
+        result = _compute_v3(hist, dates, event_date, "amc", dates)
 
         assert result is not None
         # base = close(T) = 100
@@ -133,7 +133,7 @@ class TestUnknownWindow:
             (date(2026, 1, 21), 114.0, 115.0, 2_000_000),
         ]
         hist, dates = _make_hist(prices)
-        result = _compute_v3(hist, dates, event_date, "unknown")
+        result = _compute_v3(hist, dates, event_date, "unknown", dates)
 
         assert result is not None
         assert result["pct_change_1d"] is None
