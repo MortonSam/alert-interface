@@ -11,7 +11,8 @@ For each pair of earnings rows for one ticker within WINDOW_DAYS:
       Fallback (no acceptance time, or accepted during market hours): keep the
       row with pct values; if neither has pct values, keep the row with known
       timing (bmo/amc).
-  - EPS differs, or the rule does not pick a single row -> print, change nothing.
+  - EPS differs, or the rule does not pick a single row -> print, change nothing,
+    unless the row is listed in MANUAL_DELETES (resolved by hand, with a reason).
 
 Dry run by default.
 
@@ -32,6 +33,14 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 
 WINDOW_DAYS = 45
 KNOWN_TIMINGS = {"bmo", "amc"}
+# Pairs whose EPS differs, resolved by hand against the reported figure.
+# (symbol, event_date of the row to delete) -> reason
+MANUAL_DELETES: dict[tuple[str, date], str] = {
+    ("COST", date(2022, 10, 5)): "monthly sales release; 2022-09-22 matches reported Q4 EPS 4.20",
+    ("DD", date(2023, 8, 3)): "2023-08-02 matches reported EPS 0.85",
+    ("TMUS", date(2022, 2, 1)): "2022-02-02 matches reported EPS 0.34",
+    ("TMUS", date(2024, 4, 26)): "2024-04-25 matches reported EPS 2.00",
+}
 MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)
 
@@ -49,6 +58,14 @@ def _fmt(r) -> str:
     acc = f"{r['accepted_et']:%Y-%m-%d %H:%M} ET" if r["accepted_et"] else "none"
     return (f"{r['event_date']} ({_timing(r)}, {'pct' if _has_pct(r) else 'null'}, "
             f"eps={r['eps_estimate']}/{r['eps_actual']}, accepted={acc})")
+
+
+def _fill_note(keep: dict, stamp: str | None) -> str:
+    if _has_pct(keep):
+        return ""
+    if (stamp or _timing(keep)) in KNOWN_TIMINGS:
+        return "  [kept row has no pct, recompute_null_reactions will fill]"
+    return "  [kept row has no pct and unknown timing, stays NULL]"
 
 
 def true_row_from_acceptance(accepted_et: datetime | None) -> tuple[date, str] | None:
@@ -155,7 +172,14 @@ async def _run(write: bool) -> int:
                 """), {"a": p.id1, "b": p.id2})).all()
             }
             a, b = rows[p.id1], rows[p.id2]
-            keep, drop, stamp, reason = decide(a, b)
+            manual = [r for r in (a, b) if (p.symbol, r["event_date"]) in MANUAL_DELETES]
+            if len(manual) == 1:
+                drop = manual[0]
+                keep = b if drop is a else a
+                stamp = None
+                reason = "MANUAL: " + MANUAL_DELETES[(p.symbol, drop["event_date"])]
+            else:
+                keep, drop, stamp, reason = decide(a, b)
             print(f"{p.symbol}  {_fmt(a)} <-> {_fmt(b)}")
             if keep is None:
                 print(f"    {reason}")
@@ -165,7 +189,7 @@ async def _run(write: bool) -> int:
             print(
                 f"    KEEP {keep['event_date']}  DELETE {drop['event_date']}  ({reason})"
                 + (f"  [timing {_timing(keep)} -> {stamp}]" if restamp else "")
-                + ("  [kept row has no pct, recompute_null_reactions will fill]" if not _has_pct(keep) else "")
+                + _fill_note(keep, stamp)
             )
             n_delete += 1
             deleted_ids.add(drop["id"])
