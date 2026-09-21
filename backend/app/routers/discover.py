@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.discover_blurbs import MIN_QUARTERS, earnings_blurb, reaction_blurb, volatility_blurb
 from app.services.pnl_math import pnl_percent
 from app.auth import is_admin
 from app.constants import LEDGER_PUBLIC, LEDGER_START
@@ -27,7 +28,7 @@ from app.models.ticker import Ticker
 router = APIRouter(prefix="/discover", tags=["discover"])
 
 # Minimum quarters for conditional earnings insight lines
-_MIN_QUARTERS = 4
+_MIN_QUARTERS = MIN_QUARTERS
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -485,90 +486,14 @@ async def _get_base_rates(db: AsyncSession) -> dict:
 # ── Insight-line builders ────────────────────────────────────────────────────
 
 
-def _sym_variant(symbol: str, n: int) -> int:
-    """Deterministic variant index from symbol hash — stable per ticker."""
-    return sum(ord(c) for c in symbol) % n
-
-
 def _reporting_soon_insight(cond: dict | None, symbol: str = "") -> str | None:
-    """Build insight for a Reporting Soon card from conditional earnings stats."""
-    if not cond or cond["total"] < _MIN_QUARTERS:
-        return None
-
-    total = cond["total"]
-    beat_count = cond["beat_count"]
-    bbd = cond["bbd_count"]
-    v = _sym_variant(symbol, 3)
-
-    if beat_count >= 3:
-        beat_rate = beat_count / total
-        if bbd >= 2 and beat_count >= 4:
-            bbd_pct = round(bbd / beat_count * 100)
-            templates = [
-                f"Beat {beat_count} of {total}, but {bbd_pct}% of beats dropped",
-                f"{beat_count}/{total} beats but stock fell {bbd_pct}% of the time",
-                f"Beats in {beat_count} of {total}q, yet {bbd_pct}% sold off anyway",
-            ]
-            return templates[v]
-        if beat_rate >= 0.75:
-            avg = cond["avg_1d_on_beat"]
-            if avg is not None:
-                sign = "+" if avg >= 0 else ""
-                templates = [
-                    f"Beat {beat_count} of {total} with avg {sign}{avg:.1f}% on beats",
-                    f"{beat_count}/{total} beats, typically {sign}{avg:.1f}% next day",
-                    f"Topped estimates {beat_count} of {total}q, avg {sign}{avg:.1f}% reaction",
-                ]
-                return templates[v]
-            return f"Beat {beat_count} of {total}"
-
-    avg_abs = cond["avg_abs_1d"]
-    if avg_abs is not None:
-        templates = [
-            f"Avg move {chr(0xB1)}{avg_abs:.1f}% on earnings ({total}q)",
-            f"Typically swings {chr(0xB1)}{avg_abs:.1f}% around earnings ({total}q)",
-            f"Earnings move averages {chr(0xB1)}{avg_abs:.1f}% over {total} quarters",
-        ]
-        return templates[v]
-
-    return None
+    return earnings_blurb(cond)
 
 
 def _just_reported_insight(
     pct_1d: float | None, outcome: str, cond: dict | None, symbol: str = "",
 ) -> str | None:
-    """Build insight for a Just Reported card: realized vs typical."""
-    if pct_1d is None:
-        return None
-    if not cond or cond["total"] < _MIN_QUARTERS:
-        return None
-
-    avg_abs = cond["avg_abs_1d"]
-    if avg_abs is None:
-        return None
-
-    sign = "+" if pct_1d >= 0 else ""
-    move_str = f"{sign}{pct_1d:.1f}%"
-    v = _sym_variant(symbol, 3)
-
-    if outcome in ("beat", "miss"):
-        key = "avg_1d_on_beat" if outcome == "beat" else "avg_1d_on_miss"
-        typical = cond.get(key)
-        if typical is not None:
-            t_sign = "+" if typical >= 0 else ""
-            templates = [
-                f"Moved {move_str} vs {t_sign}{typical:.1f}% typical {outcome}",
-                f"{move_str} reaction, {outcome}s average {t_sign}{typical:.1f}%",
-                f"Reacted {move_str} (typical {outcome}: {t_sign}{typical:.1f}%)",
-            ]
-            return templates[v]
-
-    templates = [
-        f"Moved {move_str} vs {chr(0xB1)}{avg_abs:.1f}% typical",
-        f"{move_str} post-earnings, avg swing is {chr(0xB1)}{avg_abs:.1f}%",
-        f"Reacted {move_str} against a {chr(0xB1)}{avg_abs:.1f}% typical move",
-    ]
-    return templates[v]
+    return reaction_blurb(pct_1d, outcome, cond)
 
 
 def _suggestion_insight(
@@ -661,40 +586,9 @@ def _suggestion_insight(
 
 
 def _unusually_active_insight(vol: dict | None, symbol: str = "") -> str | None:
-    """Build insight for Unusually Active: IV-RV context."""
     if not vol:
         return None
-    spread = vol.get("iv_rv_spread_pp")
-    regime = vol.get("vol_regime")
-    rv_rank = vol.get("rv_rank")
-    v = _sym_variant(symbol, 3)
-
-    if spread is not None and rv_rank is not None:
-        label = ""
-        if regime == "iv_rich":
-            label = "IV rich"
-        elif regime == "iv_cheap":
-            label = "IV cheap"
-
-        sign = "+" if spread >= 0 else ""
-        if label:
-            templates = [
-                f"{label} at {sign}{spread:.0f}pp spread, RV rank {rv_rank:.0f}",
-                f"{label}: {sign}{spread:.0f}pp vs realized, rank {rv_rank:.0f}",
-                f"Options {label.lower()} ({sign}{spread:.0f}pp), RV rank {rv_rank:.0f}",
-            ]
-            return templates[v]
-        templates = [
-            f"IV-RV spread {sign}{spread:.0f}pp, RV rank {rv_rank:.0f}",
-            f"IV {sign}{spread:.0f}pp vs realized, rank {rv_rank:.0f}",
-            f"Implied-realized gap {sign}{spread:.0f}pp, RV rank {rv_rank:.0f}",
-        ]
-        return templates[v]
-
-    if rv_rank is not None:
-        return f"RV rank {rv_rank:.0f}"
-
-    return None
+    return volatility_blurb(vol.get("iv_rv_spread_pp"), vol.get("vol_regime"), vol.get("rv_rank"))
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
