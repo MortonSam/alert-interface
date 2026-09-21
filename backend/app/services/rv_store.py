@@ -34,17 +34,30 @@ _LATEST_SQL = sa.text("""
 """)
 
 
-def _why_not(row: sa.Row, cutoff: date) -> str | None:
-    """None when the row may be served, else the reason it may not."""
+# Visitor-facing wording for each snapshot status. Technical detail goes to the log.
+_STATUS_REASONS = {
+    "no_data": "Not enough recent price history to compute realized volatility",
+    "insufficient": "Not enough recent price history to compute realized volatility",
+    "fetch_failed": "Price data could not be retrieved, so realized volatility is unavailable",
+    "data_error": "Realized volatility could not be computed reliably for this ticker",
+}
+_NO_SNAPSHOT = "Realized volatility has not been computed for this ticker yet"
+
+
+def _why_not(row: sa.Row, cutoff: date) -> tuple[str, str] | None:
+    """None when the row may be served, else (visitor reason, log detail)."""
     if row.status != "ok":
-        return (f"Latest snapshot ({row.as_of_date.isoformat()}) has status "
-                f"'{row.status}' with {row.sample_days} sample days")
+        return (
+            _STATUS_REASONS.get(row.status, "Realized volatility is unavailable for this ticker"),
+            f"snapshot {row.as_of_date} status={row.status} sample_days={row.sample_days}",
+        )
     if row.as_of_date < cutoff:
-        return f"Latest snapshot is from {row.as_of_date.isoformat()}, older than {_FRESHNESS_DAYS} days"
+        return ("Realized volatility has not been updated recently",
+                f"snapshot {row.as_of_date} older than {_FRESHNESS_DAYS} days")
     if row.last_bar_date is not None:
         state = assess_history(row.last_bar_date, None, None, today=row.as_of_date)
         if not state.ok:
-            return state.reason
+            return (state.reason, state.detail or state.state)
     return None
 
 
@@ -52,9 +65,12 @@ async def get_servable_rv(db: AsyncSession, symbol: str) -> tuple[sa.Row | None,
     """(row, None) when RV may be shown, else (latest row or None, reason)."""
     row = (await db.execute(_LATEST_SQL, {"symbols": [symbol]})).one_or_none()
     if row is None:
-        return None, "No realized-volatility snapshot stored for this ticker"
-    reason = _why_not(row, date.today() - timedelta(days=_FRESHNESS_DAYS))
-    return (row, None) if reason is None else (None, reason)
+        return None, _NO_SNAPSHOT
+    why = _why_not(row, date.today() - timedelta(days=_FRESHNESS_DAYS))
+    if why is None:
+        return row, None
+    print(f"[rv] {symbol}: not served ({why[1]})", flush=True)
+    return None, why[0]
 
 
 async def get_latest_rv(db: AsyncSession, symbol: str) -> sa.Row | None:

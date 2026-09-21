@@ -291,6 +291,9 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         quote_data.get("price") if live else None,
     )
 
+    if not live or not hist.ok:
+        print(f"[quote] {sym}: quote={q.state} traded_on={q.traded_on} history={hist.state} ({hist.detail})", flush=True)
+
     return TickerQuoteRead(
         symbol=sym,
         price=quote_data.get("price") if live else None,
@@ -620,6 +623,9 @@ async def get_ticker_chart(
         float(ref_price) if ref_price is not None else None,
     )
 
+    if not hist.ok:
+        print(f"[chart] {sym}: history={hist.state} ({hist.detail})", flush=True)
+
     return TickerChartRead(
         symbol=sym, period=period,
         history=history if hist.ok else [],
@@ -677,7 +683,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             days_expiration_past_earnings=None,
             straddle_price=None, atm_strike=None,
             historical_stats=None, plain_summary=None,
-            data_quality_note=f"No fresh options data for {sym}",
+            data_quality_note="No current options data is available for this ticker",
             as_of=as_of,
         )
 
@@ -704,7 +710,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             days_expiration_past_earnings=days_expiration_past_earnings,
             straddle_price=None, atm_strike=None,
             historical_stats=None, plain_summary=None,
-            data_quality_note=f"No fresh options data for {sym}",
+            data_quality_note="No current options data is available for this ticker",
             as_of=as_of,
         )
 
@@ -813,7 +819,7 @@ async def get_options_chain(
         return OptionsChainRead(
             symbol=sym, expiration="", current_price=current_price,
             calls=[], puts=[], available_expirations=[],
-            as_of=as_of, data_quality_note=f"No fresh options data for {sym}",
+            as_of=as_of, data_quality_note="No current options data is available for this ticker",
         )
 
     chosen = expiration if (expiration and expiration in available) else available[0]
@@ -822,7 +828,7 @@ async def get_options_chain(
         return OptionsChainRead(
             symbol=sym, expiration=chosen, current_price=current_price,
             calls=[], puts=[], available_expirations=available,
-            as_of=as_of, data_quality_note=f"No fresh options data for {sym}",
+            as_of=as_of, data_quality_note="No current options data is available for this ticker",
         )
 
     chain, chain_last_trade = chain_result
@@ -910,7 +916,7 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             symbol=sym, current_price=current_price, expiration=None,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
-            data_quality_note=f"No fresh options data for {sym}",
+            data_quality_note="No current options data is available for this ticker",
         )
 
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)
@@ -919,7 +925,7 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             symbol=sym, current_price=current_price, expiration=chosen_exp,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
-            data_quality_note=f"No fresh options data for {sym}",
+            data_quality_note="No current options data is available for this ticker",
         )
 
     chain, chain_last_trade = chain_result
@@ -1034,7 +1040,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     chosen_exp: str | None = post[0] if post else (ingested_exps[-1] if ingested_exps else None)
 
     if not chosen_exp:
-        no_data_note = f"No fresh options data for {sym}"
+        no_data_note = "No current options data is available for this ticker"
         empty_em = ExpectedMoveRead(
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
@@ -1073,7 +1079,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     # ── Fetch chain from ingested store ───────────────────────────────────────
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
-        no_data_note = f"No fresh options data for {sym}"
+        no_data_note = "No current options data is available for this ticker"
         empty_em = ExpectedMoveRead(
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
@@ -1912,7 +1918,7 @@ async def get_put_call(
         return PutCallRead(
             symbol=sym,
             ratio=None,
-            reason="No options snapshot in last 3 days",
+            reason="No recent options activity data is available for this ticker",
         )
 
     # Per-side guard: NULL the ratio if either side is below minimum
@@ -1923,7 +1929,7 @@ async def get_put_call(
 
     if put_t < MIN_SIDE_CONTRACTS or call_t < MIN_SIDE_CONTRACTS:
         ratio_val = None
-        reason = "too few contracts on one side"
+        reason = "Too few contracts traded to give a reliable put/call ratio"
     else:
         ratio_val = float(row.ratio) if row.ratio is not None else None
 

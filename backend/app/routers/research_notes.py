@@ -84,7 +84,7 @@ async def check_staleness(
         return StalenessRead(stale=False, reason=None)
     # Check data version staleness first (more actionable)
     if note.data_version < CURRENT_REACTION_VERSION:
-        return StalenessRead(stale=True, reason="Generated before the reaction-window correction.")
+        return StalenessRead(stale=True, reason="Written before we corrected how earnings reactions are measured")
     age = datetime.now(timezone.utc) - note.generated_at.replace(tzinfo=timezone.utc)
     if age > timedelta(days=STALENESS_DAYS):
         return StalenessRead(stale=True, reason=f"Generated over {STALENESS_DAYS} days ago")

@@ -19,8 +19,9 @@ MAX_QUOTE_DIVERGENCE = 0.25
 @dataclass(frozen=True)
 class HistoryState:
     state: str            # "ok" | "stale" | "mismatch" | "no_data"
-    reason: str | None
+    reason: str | None    # plain language, safe to show a visitor
     last_bar_date: date | None
+    detail: str | None = None   # technical detail, for logs only
 
     @property
     def ok(self) -> bool:
@@ -40,21 +41,22 @@ def assess_history(
     today: date | None = None,
 ) -> HistoryState:
     if last_bar_date is None:
-        return HistoryState("no_data", "No price history available", None)
+        return HistoryState("no_data", "No price history is available for this ticker", None)
     missed = sessions_after(last_bar_date, today or date.today())
     if missed > MAX_STALE_SESSIONS:
         return HistoryState(
             "stale",
-            f"Price history stopped on {last_bar_date.isoformat()} ({missed} sessions ago)",
+            f"Price history for this ticker stopped updating on {last_bar_date.isoformat()}",
             last_bar_date,
+            detail=f"last bar {last_bar_date} is {missed} sessions old",
         )
     div = quote_divergence(last_close, quote)
     if div is not None and div > MAX_QUOTE_DIVERGENCE:
         return HistoryState(
             "mismatch",
-            f"Price history close {last_close:.2f} on {last_bar_date.isoformat()} is "
-            f"{div * 100:.0f}% away from the quote {quote:.2f}",
+            "The price history we have for this ticker does not match its current price, so it is not shown",
             last_bar_date,
+            detail=f"last close {last_close:.2f} on {last_bar_date} is {div * 100:.0f}% from quote {quote:.2f}",
         )
     return HistoryState("ok", None, last_bar_date)
 
