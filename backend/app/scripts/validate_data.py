@@ -1610,7 +1610,9 @@ async def check_options_read_coverage(session) -> CheckResult:
                            "No chain_last_trade found in stored chains")
 
     # Count options-read cache keys for the latest chain date (v3 key format)
-    pattern = f"options_read:v3:%:{chain_date}"
+    from app.services.options_read_gate import OPTIONS_READ_CACHE_VERSION
+
+    pattern = f"options_read:{OPTIONS_READ_CACHE_VERSION}:%:{chain_date}"
     cached_count = (await session.execute(
         select(func.count()).select_from(SystemMetadata)
         .where(SystemMetadata.key.like(pattern))

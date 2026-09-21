@@ -109,7 +109,10 @@ class OptionsReadRead(BaseModel):
     model_used: str
     generated_at: str                # ISO UTC of generation
     cached: bool                     # True if served from today's cache
-    as_of: str
+    as_of: str                       # when this response was built (not the chain date)
+    available: bool = True           # False: no read; `reason` says why in plain language
+    reason: str | None = None
+    chain_date: str | None = None    # chain_last_trade of the chain the read describes
     iv_rv_spread_pp: float | None = None  # IV minus RV in percentage points (positive = options rich)
     spread_labeled: LabelRule | None = None  # interpretive label + rule for IV-RV spread
 

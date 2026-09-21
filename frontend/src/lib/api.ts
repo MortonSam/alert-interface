@@ -431,6 +431,9 @@ export interface OptionsRead {
   as_of: string;
   iv_rv_spread_pp: number | null;         // IV minus RV in percentage points (positive = options rich)
   spread_labeled: LabelRule | null;
+  available?: boolean;
+  reason?: string | null;
+  chain_date?: string | null;
 }
 
 export interface OptionsBundle {

@@ -8,7 +8,7 @@ away from the ticker's quote (the series belongs to another instrument).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 
 from app.services.trading_calendar import sessions_after
 
@@ -57,3 +57,24 @@ def assess_history(
             last_bar_date,
         )
     return HistoryState("ok", None, last_bar_date)
+
+
+@dataclass(frozen=True)
+class QuoteState:
+    price: float | None       # None unless the quote may be shown
+    state: str                # "ok" | "stale" | "no_data"
+    reason: str | None        # plain language, safe to show a visitor
+    traded_on: date | None
+
+
+def assess_quote(quote_price: float | None, timestamp: int | None, today: date | None = None) -> QuoteState:
+    """A quote may be shown, or fed to a model, only if its last trade is recent."""
+    if not quote_price or quote_price <= 0:
+        return QuoteState(None, "no_data", "No current price is available for this ticker", None)
+    if not timestamp:
+        return QuoteState(None, "no_data", "The latest price has no trade time, so it cannot be confirmed as current", None)
+    traded = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
+    missed = sessions_after(traded, today or date.today())
+    if missed > MAX_STALE_SESSIONS:
+        return QuoteState(None, "stale", f"The latest price is from {traded.isoformat()} and is no longer current", traded)
+    return QuoteState(float(quote_price), "ok", None, traded)

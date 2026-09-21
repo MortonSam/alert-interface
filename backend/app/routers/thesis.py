@@ -44,6 +44,7 @@ from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.finnhub_client import FinnhubClient
+from app.services.price_freshness import assess_quote
 from app.services.rv_store import get_latest_rv
 from app.models.system_metadata import SystemMetadata
 from app.services.draft_limiter import check_draft_limit, get_client_ip, record_draft
@@ -319,9 +320,11 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     finally:
         await finnhub.close()
 
-    current_price: float | None = float(quote.get("c") or 0) or None
+    # A stale quote must never reach the model: same test the quote endpoint uses.
+    q = assess_quote(float(quote.get("c") or 0) or None, int(quote["t"]) if quote.get("t") else None)
+    current_price: float | None = q.price
     if not current_price:
-        raise HTTPException(status_code=422, detail=f"No live price available for {sym}")
+        raise HTTPException(status_code=422, detail=q.reason or f"No live price available for {sym}")
 
     # ── 2. DB: ticker + earnings + reactions ──────────────────────────────────
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()

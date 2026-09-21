@@ -24,6 +24,7 @@ import {
 import { cn, fmtMarketCap } from "@/lib/utils";
 import { fmtPct } from "./fmtPct";
 import { barCellStyle, legendEntries } from "./reactionChartEncoding";
+import { chainDateLabel } from "./optionsReadFootnote";
 import { capture } from "@/lib/analytics";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
@@ -2536,6 +2537,14 @@ export default function TickerPage() {
               <div className="h-4 bg-muted rounded w-4/5" />
             </div>
           )}
+          {orStatus === "done" && optionsRead && optionsRead.available === false && optionsRead.reason && (
+            <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2">
+                Ivy&apos;s Read
+              </p>
+              <p className="text-sm text-muted-foreground">Unavailable. {optionsRead.reason}</p>
+            </div>
+          )}
           {orStatus === "done" && optionsRead && optionsRead.model_used !== "none" && (
             <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6">
               <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2">
@@ -2544,7 +2553,7 @@ export default function TickerPage() {
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
               <p className="text-[10px] text-muted-foreground/60 mt-2">
                 {optionsRead.model_used} · {optionsRead.cached ? "cached" : "generated"} {timeAgo(optionsRead.generated_at)}
-                {optionsRead.as_of && ` · chain as of ${optionsRead.as_of.replace(/T.*$/, "")}`}
+                {chainDateLabel(optionsRead)}
               </p>
             </div>
           )}

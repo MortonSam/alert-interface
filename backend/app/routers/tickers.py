@@ -29,8 +29,8 @@ from app.models.put_call_snapshot import PutCallSnapshot
 from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regime_label, discover_rv_tier
 from app.schemas.options import LabelRule as OptionsLabelRule
 from app.services import news_cache, quote_cache
-from app.services.price_freshness import MAX_STALE_SESSIONS, assess_history
-from app.services.trading_calendar import sessions_after
+from app.services.options_read_gate import cache_key as options_read_cache_key, check_chain, check_generation_inputs
+from app.services.price_freshness import assess_history, assess_quote
 
 
 def _to_options_lr(lv: object) -> OptionsLabelRule | None:
@@ -278,17 +278,12 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         }
         quote_cache.set(sym, quote_data)
 
-    # The quote is withheld when its last-trade time is more than 3 sessions old,
-    # and the sparkline when the daily history fails the shared freshness test.
-    quote_state, quote_reason = "ok", None
+    # The quote is withheld when its last trade is not recent, and the sparkline
+    # when the daily history fails the shared freshness test.
     ts = quote_data.get("timestamp")
-    if ts:
-        traded = dt_datetime.fromtimestamp(ts, tz=timezone.utc).date()
-        missed = sessions_after(traded, date.today())
-        if missed > MAX_STALE_SESSIONS:
-            quote_state = "stale"
-            quote_reason = f"Last trade reported {traded.isoformat()} ({missed} sessions ago)"
-    live = quote_state == "ok"
+    q = assess_quote(quote_data.get("price"), ts)
+    quote_state, quote_reason = q.state, q.reason
+    live = q.state == "ok"
 
     last_bar = date.fromisoformat(candles[-1]["date"][:10]) if candles else None
     hist = assess_history(
@@ -1255,12 +1250,24 @@ async def get_options_read(
     today = date.today()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
-    # Key by chain snapshot date (chain_last_trade) so reads survive UTC midnight
+    def absent(reason: str, detail: str | None) -> OptionsReadRead:
+        print(f"[options-read] {sym}: absent ({detail or reason})", flush=True)
+        return OptionsReadRead(
+            symbol=sym, content="", facts={}, model_used="none",
+            generated_at=as_of, cached=False, as_of=as_of,
+            available=False, reason=reason, chain_date=chain_date,
+        )
+
+    # Key by chain snapshot date (chain_last_trade) so reads survive UTC midnight.
+    # v4: reads generated before the fresh-chain/fresh-quote gate are not reused.
     chain_date = await chain_store.get_latest_chain_date(db, sym)
-    cache_key = f"options_read:v3:{sym}:{chain_date}" if chain_date else None
+    chain_gate = check_chain(chain_date, chain_store.is_fresh(chain_date))
+    if not chain_gate.ok:
+        return absent(chain_gate.reason, chain_gate.detail)
+    cache_key = options_read_cache_key(sym, chain_date)
 
     # ── Cache check — served freely ───────────────────────────────────────────
-    cached_raw = await _get_meta(db, cache_key) if cache_key else None
+    cached_raw = await _get_meta(db, cache_key)
     if cached_raw:
         try:
             c = json.loads(cached_raw)
@@ -1268,7 +1275,7 @@ async def get_options_read(
             return OptionsReadRead(
                 symbol=sym, content=c["content"], facts=c["facts"],
                 model_used=c["model_used"], generated_at=c["generated_at"],
-                cached=True, as_of=as_of,
+                cached=True, as_of=as_of, chain_date=chain_date,
                 iv_rv_spread_pp=spread_pp_cached,
                 spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
             )
@@ -1277,15 +1284,7 @@ async def get_options_read(
 
     # ── No cache — gate AI generation behind admin token ──────────────────────
     if settings.admin_token and token != settings.admin_token:
-        return OptionsReadRead(
-            symbol=sym,
-            content="Options read is not available right now.",
-            facts={},
-            model_used="none",
-            generated_at=as_of,
-            cached=False,
-            as_of=as_of,
-        )
+        return absent("Ivy's Read has not been generated for the latest options data yet", "cache miss, no admin token")
 
     # ── Try precomputed RV snapshot first ────────────────────────────────────
     from app.services.rv_store import get_latest_rv
@@ -1301,7 +1300,8 @@ async def get_options_read(
     finally:
         await finnhub.close()
 
-    current_price: float | None = float(quote.get("c") or 0) or None
+    quote_price: float | None = float(quote.get("c") or 0) or None
+    quote_ts: int | None = int(quote["t"]) if quote.get("t") else None
 
     # Ticker + next earnings from DB
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -1330,6 +1330,14 @@ async def get_options_read(
 
     calls = chain.get("calls", [])
     puts  = chain.get("puts", [])
+
+    # ── Refuse to generate without a fresh chain and a fresh quote ─────────────
+    gate = check_generation_inputs(
+        chain_date, chain_store.is_fresh(chain_date), len(calls), len(puts), quote_price, quote_ts,
+    )
+    if not gate.ok:
+        return absent(gate.reason, gate.detail)
+    current_price: float | None = gate.quote.price
 
     # ATM strike, straddle, expected move, ATM IV
     atm_strike: float | None = None
@@ -1522,21 +1530,20 @@ STRICT RULES:
     )
 
     # ── Cache by chain snapshot date ──────────────────────────────────────────
-    if cache_key:
-        try:
-            await _set_meta(db, cache_key, json.dumps({
-                "content": gen["content"], "facts": facts,
-                "model_used": gen["model_used"], "generated_at": generated_at,
-                "iv_rv_spread_pp": iv_rv_spread_pp,
-            }))
-            await db.commit()
-        except Exception as exc:
-            print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
+    try:
+        await _set_meta(db, cache_key, json.dumps({
+            "content": gen["content"], "facts": facts,
+            "model_used": gen["model_used"], "generated_at": generated_at,
+            "iv_rv_spread_pp": iv_rv_spread_pp,
+        }))
+        await db.commit()
+    except Exception as exc:
+        print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
 
     return OptionsReadRead(
         symbol=sym, content=gen["content"], facts=facts,
         model_used=gen["model_used"], generated_at=generated_at,
-        cached=False, as_of=as_of,
+        cached=False, as_of=as_of, chain_date=chain_date,
         iv_rv_spread_pp=iv_rv_spread_pp,
         spread_labeled=_to_options_lr(spread_label(iv_rv_spread_pp)),
     )
