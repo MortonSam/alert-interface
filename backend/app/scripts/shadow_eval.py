@@ -113,6 +113,7 @@ async def _run(dry_run: bool = False) -> int:
                 n_rows=tr.n_train,
                 positive_rate=round(positive_rate, 4),
                 holdout_accuracy=round(tr.holdout_accuracy, 4) if tr.holdout_accuracy is not None else None,
+                holdout_positive_rate=round(tr.holdout_positive_rate, 4) if tr.holdout_positive_rate is not None else None,
                 holdout_n=tr.holdout_n,
                 computation_version=comp_version,
             ))
@@ -122,6 +123,7 @@ async def _run(dry_run: bool = False) -> int:
             outcomes = json.loads(raw) if raw else {}
             shadow_entry = outcomes.get("Shadow eval", {})
             shadow_entry["holdout_accuracy"] = round(tr.holdout_accuracy, 4) if tr.holdout_accuracy is not None else None
+            shadow_entry["holdout_positive_rate"] = round(tr.holdout_positive_rate, 4) if tr.holdout_positive_rate is not None else None
             shadow_entry["holdout_n"] = tr.holdout_n
             shadow_entry["n_train"] = tr.n_train
             shadow_entry["computation_version"] = comp_version

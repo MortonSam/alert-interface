@@ -18,5 +18,6 @@ class IvyTrainLog(Base):
     n_rows: Mapped[int] = mapped_column(Integer, nullable=False)
     positive_rate: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False)
     holdout_accuracy: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    holdout_positive_rate: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     holdout_n: Mapped[int | None] = mapped_column(Integer, nullable=True)
     computation_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)

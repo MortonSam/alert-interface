@@ -78,6 +78,7 @@ class TrainResult:
     n_positive: int
     holdout_accuracy: float | None = None
     holdout_n: int = 0
+    holdout_positive_rate: float | None = None
 
 
 @dataclass
@@ -202,6 +203,7 @@ def train(rows: list, cutoff_date: date, feature_cols: list[str] | None = None) 
     # Holdout evaluation: chronological last 20% of training data
     holdout_accuracy = None
     holdout_n = 0
+    holdout_pos_rate = None
     holdout_split = int(len(train_rows) * 0.8)
     h_train = train_rows[:holdout_split]
     h_test = train_rows[holdout_split:]
@@ -221,6 +223,7 @@ def train(rows: list, cutoff_date: date, feature_cols: list[str] | None = None) 
         h_pipe.fit(h_X, h_y)
         holdout_accuracy = float((h_pipe.predict(h_X_test) == h_y_test).mean())
         holdout_n = len(h_test)
+        holdout_pos_rate = float(h_y_test.mean())
 
     return TrainResult(
         model=model,
@@ -229,6 +232,7 @@ def train(rows: list, cutoff_date: date, feature_cols: list[str] | None = None) 
         n_positive=int(y.sum()),
         holdout_accuracy=holdout_accuracy,
         holdout_n=holdout_n,
+        holdout_positive_rate=holdout_pos_rate,
     )
 
 
