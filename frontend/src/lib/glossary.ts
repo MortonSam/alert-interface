@@ -58,16 +58,22 @@ const GLOSSARY: Record<string, string> = {
     "The average one-day earnings move across other stocks in the same sector. Compare this company's typical move to the peer average to see if it reacts more or less than its sector.",
   "priced in":
     "When a stock drops after beating estimates, the market may have already expected the good news and bid the price up beforehand. A high priced-in rate means beats often do not lead to gains.",
-  "median next-day move":
-    "The middle value of all one-day stock price changes following the event type. The median is less affected by outliers than the average, giving a more typical picture.",
+  "median event-day move":
+    "The middle value of the stock's moves on the day of the analyst action, measured from the prior close to that day's close. Analyst notes usually come out before the open, so the reaction is in that day's trading. The median is less affected by outliers than the average.",
+  "fed 1d move":
+    "The move from the open on the Fed decision day to the close of the next session. The decision lands mid-afternoon, so the window starts at that day's open and spans two sessions.",
+  "fed 3d move":
+    "The move from the open on the Fed decision day to the close three sessions later.",
+  "fed 5d move":
+    "The move from the open on the Fed decision day to the close five sessions later.",
   "analyst grades":
     "Rating labels like Buy, Overweight, Hold, Underweight, or Sell that Wall Street analysts assign. Higher ratings suggest the analyst expects the stock to outperform; lower ones suggest underperformance.",
   "expected move":
     "The dollar or percentage move the options market implies between now and a specific expiration. It is derived from the at-the-money straddle price and reflects the market's best guess at total movement.",
   upgrade:
-    "An analyst raised their rating on the stock, for example from Hold to Buy. Look at the median next-day move to see how the stock has historically reacted to upgrades.",
+    "An analyst raised their rating on the stock, for example from Hold to Buy. Look at the median event-day move to see how the stock has historically reacted to upgrades.",
   downgrade:
-    "An analyst lowered their rating on the stock, for example from Buy to Hold. Look at the median next-day move to see how the stock has historically reacted to downgrades.",
+    "An analyst lowered their rating on the stock, for example from Buy to Hold. Look at the median event-day move to see how the stock has historically reacted to downgrades.",
   rv:
     "Realized volatility measures how much the stock has actually moved recently, based on daily price changes. Higher RV means the stock has been swinging more than usual.",
   atm:

@@ -26,6 +26,7 @@ import { fmtPnlPct } from "@/lib/pnl";
 import { fmtPct } from "./fmtPct";
 import { barCellStyle, legendEntries } from "./reactionChartEncoding";
 import { chainDateLabel } from "./optionsReadFootnote";
+import { ANALYST_WINDOW_TEXT, REACTION_WINDOW_TEXT, fedVsEarningsLine } from "./reactionWindowText";
 import { capture } from "@/lib/analytics";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
@@ -199,8 +200,8 @@ function AnalystDetailTable({ detail }: { detail: AnalystDetailRead }) {
                 <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Firm</th>
                 <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Action</th>
                 <th className="text-left text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">Grade</th>
-                <th className="text-right text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2">1d</th>
-                <th className="text-right text-[10px] uppercase tracking-wide text-muted-foreground pb-1">5d</th>
+                <th className="text-right text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-2" title="Close on the day of the action vs the prior close">Event day</th>
+                <th className="text-right text-[10px] uppercase tracking-wide text-muted-foreground pb-1" title="Close on the first session at least 4 calendar days later, vs the close before the action">{ANALYST_WINDOW_TEXT.laterHeader}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
@@ -364,6 +365,7 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
   const isFed = mode === "fed";
+  const windowText = REACTION_WINDOW_TEXT[isFed ? "fed" : "earnings"];
   const flipLeft = coordinate && viewBox && coordinate.x > viewBox.width / 2;
   return (
     <div
@@ -377,14 +379,14 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
       )}
       {d.pct1d != null ? (
         <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-          1-day move after the report: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
+          {windowText.tooltip1d}: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
         </p>
       ) : (
-        <p className="text-muted-foreground">1-day move after the report: no data</p>
+        <p className="text-muted-foreground">{windowText.tooltip1d}: no data</p>
       )}
       {d.pct5d != null && (
         <p className={cn(d.pct5d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-          5-day move after the report: {d.pct5d > 0 ? "+" : ""}{d.pct5d.toFixed(2)}%
+          {windowText.tooltip5d}: {d.pct5d > 0 ? "+" : ""}{d.pct5d.toFixed(2)}%
         </p>
       )}
     </div>
@@ -605,7 +607,7 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
                   ] as [string, MoveStats | null][]
                 ).map(([label, s]) => (
                   <tr key={label}>
-                    <td className="py-1.5 pr-4 text-muted-foreground font-medium"><ExplainTip term={`${label} move`}>{label}</ExplainTip></td>
+                    <td className="py-1.5 pr-4 text-muted-foreground font-medium"><ExplainTip term={REACTION_WINDOW_TEXT[mode].glossaryTerm[label as "1d" | "3d" | "5d"]}>{label}</ExplainTip></td>
                     {s ? (
                       <>
                         <td className="py-1.5 pr-4 text-right"><StatNum value={s.avg} /></td>
@@ -774,9 +776,9 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                     <th className="px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       Close After
                     </th>
-                    <SortTh label="1-Day"  col="pct_change_1d" sort={sort} onSort={handleSort} tooltip="1d move" />
-                    <SortTh label="3-Day"  col="pct_change_3d" sort={sort} onSort={handleSort} tooltip="3d move" />
-                    <SortTh label="5-Day"  col="pct_change_5d" sort={sort} onSort={handleSort} tooltip="5d move" />
+                    <SortTh label="1-Day"  col="pct_change_1d" sort={sort} onSort={handleSort} tooltip={REACTION_WINDOW_TEXT[mode].glossaryTerm["1d"]} />
+                    <SortTh label="3-Day"  col="pct_change_3d" sort={sort} onSort={handleSort} tooltip={REACTION_WINDOW_TEXT[mode].glossaryTerm["3d"]} />
+                    <SortTh label="5-Day"  col="pct_change_5d" sort={sort} onSort={handleSort} tooltip={REACTION_WINDOW_TEXT[mode].glossaryTerm["5d"]} />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -837,7 +839,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
               </table>
             </div>
             <p className="px-3 py-2 text-xs text-muted-foreground border-t">
-              Moves measured from the last close before the report. BMO: close(T-1) to close(T/T+2/T+4). AMC: close(T) to close(T+1/T+3/T+5).
+              {REACTION_WINDOW_TEXT[mode].footnote}
             </p>
           </div>
         </>
@@ -1528,15 +1530,15 @@ export default function TickerPage() {
     const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
     if (!upSignal && !dnSignal) return null;
     if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
-      let line = `Downgrades tend to hit, median ${fmtPct(median_1d_downgrade!)} next day`;
+      let line = `Downgrades tend to hit, median ${fmtPct(median_1d_downgrade!)} on the day`;
       if (downgrade_5d_continuation_pct != null) {
-        line += `, still lower a week later ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
+        line += `, still lower ${ANALYST_WINDOW_TEXT.later} ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
       }
       return line + ".";
     } else {
-      let line = `Upgrades tend to lift, median ${fmtPct(median_1d_upgrade!)} next day`;
+      let line = `Upgrades tend to lift, median ${fmtPct(median_1d_upgrade!)} on the day`;
       if (upgrade_5d_continuation_pct != null) {
-        line += `, still higher a week later ${upgrade_5d_continuation_pct.toFixed(0)}% of the time`;
+        line += `, still higher ${ANALYST_WINDOW_TEXT.later} ${upgrade_5d_continuation_pct.toFixed(0)}% of the time`;
       }
       return line + ".";
     }
@@ -1548,9 +1550,9 @@ export default function TickerPage() {
     const upSignal = median_1d_upgrade != null && upgrade_count >= 3;
     const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
     if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
-      return "Median of all next-day moves following downgrades, with 5-day continuation rate";
+      return `Median of all event-day moves on downgrades (close on the day vs the prior close), with the share still lower ${ANALYST_WINDOW_TEXT.later}`;
     }
-    return "Median of all next-day moves following upgrades, with 5-day continuation rate";
+    return `Median of all event-day moves on upgrades (close on the day vs the prior close), with the share still higher ${ANALYST_WINDOW_TEXT.later}`;
   }, [analystInsight, analystStats]);
 
   // Past-event fallback: only fetch if no upcoming hero-eligible event
@@ -2112,7 +2114,7 @@ export default function TickerPage() {
                       </div>
                       {pricingNote && reactionSummary!.beat_count >= 3 && (
                         <p className="text-xs mt-2 text-muted-foreground">
-                          Stock fell next day in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
+                          Stock fell on its 1-day reaction in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
                           {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.
                           {" "}<ExplainTip term="priced in">{pricingNote}</ExplainTip>
                           {pricedIn?.rule && <span className="text-xs ml-1">({pricedIn.rule})</span>}
@@ -2192,7 +2194,7 @@ export default function TickerPage() {
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On upgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
-                          {fmtPct(analystStats.median_1d_upgrade)} <ExplainTip term="median next-day move">median next-day</ExplainTip>
+                          {fmtPct(analystStats.median_1d_upgrade)} <ExplainTip term="median event-day move">median {ANALYST_WINDOW_TEXT.day0}</ExplainTip>
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.upgrade_count} in 5 yr</p>
                       </div>
@@ -2201,7 +2203,7 @@ export default function TickerPage() {
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On downgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
-                          {fmtPct(analystStats.median_1d_downgrade)} <ExplainTip term="median next-day move">median next-day</ExplainTip>
+                          {fmtPct(analystStats.median_1d_downgrade)} <ExplainTip term="median event-day move">median {ANALYST_WINDOW_TEXT.day0}</ExplainTip>
                         </p>
                         <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
                       </div>
@@ -2336,7 +2338,7 @@ export default function TickerPage() {
                 const earningsAvg = earningsWithData.reduce((sum, r) => sum + Math.abs(parseFloat(r.pct_change_1d!)), 0) / earningsWithData.length;
                 return (
                   <p className="text-sm text-muted-foreground mb-3 mt-3">
-                    Avg ±{fomcAvg.toFixed(1)}% on Fed days vs ±{earningsAvg.toFixed(1)}% on earnings days
+                    {fedVsEarningsLine(fomcAvg, earningsAvg)}
                   </p>
                 );
               })()}
@@ -2636,7 +2638,7 @@ export default function TickerPage() {
             if (t.status === "needs_manual_resolution") return <span className="text-xs bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded">Due</span>;
             if (t.status === "resolved") {
               if (t.target_reached) return <span className="text-xs bg-success/10 text-success px-1.5 py-0.5 rounded">Hit target</span>;
-              if (t.direction_correct === false) return <span className="text-xs bg-destructive/10 text-destructive px-1.5 py-0.5 rounded">Stopped</span>;
+              if (t.direction_correct === false) return <span className="text-xs bg-destructive/10 text-destructive px-1.5 py-0.5 rounded">Direction wrong</span>;
               return <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">Resolved</span>;
             }
             return null;

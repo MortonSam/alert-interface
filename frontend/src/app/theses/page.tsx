@@ -267,7 +267,7 @@ function StockPriceMark({
         )}
         {pctToDisplay != null && (
           <span className="font-mono tabular-nums text-muted-foreground text-xs">
-            · {pctToDisplay}% to target
+            · {pctToDisplay}% of the way to target
           </span>
         )}
       </div>

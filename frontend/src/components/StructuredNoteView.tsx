@@ -526,9 +526,9 @@ export default function StructuredNoteView({
     statCells.push(
       <StatCell
         key="beats"
-        label="Beat Streak"
+        label="EPS beats"
         value={`${stats.beat_count}/${stats.total_quarters}`}
-        sub="EPS beats"
+        sub="quarters beat, of those covered"
       />,
     );
   }
