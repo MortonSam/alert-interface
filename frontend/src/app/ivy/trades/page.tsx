@@ -1,5 +1,7 @@
 "use client";
 
+import { useIvyRule } from "@/lib/useIvyRule";
+import { type IvyRule, exitRuleSentence, fmtLongDate } from "@/lib/ivyRule";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { averagePnlPct, fmtPnlPct } from "@/lib/pnl";
@@ -31,11 +33,13 @@ function PickCard({
   expanded,
   onToggle,
   isClosed,
+  rule,
 }: {
   pick: AlertPickLedgerItem;
   expanded: boolean;
   onToggle: () => void;
   isClosed: boolean;
+  rule: IvyRule | null;
 }) {
   const isBullish = pick.picked_direction === "bullish";
   const move = pick.unrealized_move_pct;
@@ -109,7 +113,7 @@ function PickCard({
       {/* Exit rule line */}
       {pick.exit_date && !isClosed && (
         <p className="text-xs text-muted-foreground">
-          Exit: 5 trading days after earnings ({new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })})
+          {rule ? exitRuleSentence(rule, new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })) : `Exit: ${new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
         </p>
       )}
       {pick.exit_date && isClosed && (
@@ -309,6 +313,7 @@ function PickCard({
 }
 
 export default function IvyTradesPage() {
+  const ivy = useIvyRule();
   const [picks, setPicks] = useState<AlertPickLedgerItem[]>([]);
   const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [loading, setLoading] = useState(true);
@@ -501,7 +506,7 @@ export default function IvyTradesPage() {
             <>
               <p className="text-lg font-medium">The ledger starts here</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Ivy&apos;s ledger began September 15, 2026. Every pick is recorded the moment it is made, before the outcome is known.
+                {ivy ? `Ivy's ledger began ${fmtLongDate(ivy.rule.ledger_start)}. ` : ""}Every pick is recorded the moment it is made, before the outcome is known.
               </p>
             </>
           )}
@@ -516,6 +521,7 @@ export default function IvyTradesPage() {
           )}
           {openPicks.map((pick) => (
             <PickCard
+              rule={ivy?.rule ?? null}
               key={pick.id}
               pick={pick}
               expanded={expandedId === pick.id}
@@ -532,6 +538,7 @@ export default function IvyTradesPage() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Closed</h2>
           {closedPicks.map((pick) => (
             <PickCard
+              rule={ivy?.rule ?? null}
               key={pick.id}
               pick={pick}
               expanded={expandedId === pick.id}

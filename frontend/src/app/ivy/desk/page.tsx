@@ -1,5 +1,6 @@
 "use client";
 
+import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type IvyActivity, type IvyWorksheetRow } from "@/lib/api";
@@ -12,11 +13,15 @@ function fmtDate(iso: string): string {
 
 /* ── v2 cell renderers ─────────────────────────────────────────────── */
 
-function MomentumCell({ row }: { row: IvyWorksheetRow }) {
+function MomentumCell({ row, cutoffPct, lookbackDays }: { row: IvyWorksheetRow; cutoffPct: number | null; lookbackDays: number | null }) {
   if (row.momentum_20d == null) return <td className="px-3 py-2.5 text-muted-foreground" />;
-  const bad = row.momentum_20d <= -10;
+  // Highlighted when the drop meets Ivy's momentum cutoff, i.e. the row qualifies on momentum.
+  const qualifies = cutoffPct != null && row.momentum_20d <= cutoffPct;
   return (
-    <td className={`px-3 py-2.5 tabular-nums ${bad ? "text-red-500" : "text-muted-foreground"}`}>
+    <td
+      className={`px-3 py-2.5 tabular-nums ${qualifies ? "text-red-500" : "text-muted-foreground"}`}
+      title={qualifies && cutoffPct != null ? `Meets the momentum rule: down ${Math.abs(cutoffPct)}% or more over ${lookbackDays ?? "the prior"} trading days` : undefined}
+    >
       {row.momentum_20d > 0 ? "+" : ""}{row.momentum_20d.toFixed(1)}%
     </td>
   );
@@ -78,6 +83,7 @@ function V2Verdict({ row }: { row: IvyWorksheetRow }) {
 }
 
 export default function IvyDeskPage() {
+  const ivy = useIvyRule();
   const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +186,7 @@ export default function IvyDeskPage() {
                 </td>
                 {isV2 ? (
                   <>
-                    <MomentumCell row={row} />
+                    <MomentumCell row={row} cutoffPct={ivy?.rule.momentum_cutoff_pct ?? null} lookbackDays={ivy?.rule.momentum_lookback_days ?? null} />
                     <HistoryCell row={row} />
                     <ExpectedCell row={row} />
                     <ImpliedCell row={row} />

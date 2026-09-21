@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
-import { CountUp } from "@/components/CountUp";
+import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline, SiteCounters } from "@/components/IvyCopy";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
@@ -203,24 +203,7 @@ export default function Home() {
 
         {/* ── 2. Big three numbers ──────────────────────────────── */}
         <section className="min-h-[100svh] flex items-center justify-center px-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-12 max-w-[1440px] w-full mx-auto text-center">
-            {[
-              { value: 10000, suffix: "+", label: "Earnings reports studied" },
-              { value: 165000, suffix: "+", label: "Analyst actions since 2011" },
-              { value: 100000, suffix: "+", label: "Option contracts priced daily" },
-            ].map((stat) => (
-              <div key={stat.label}>
-                <CountUp
-                  value={stat.value}
-                  suffix={stat.suffix}
-                  className="stat-number font-display font-bold text-foreground block whitespace-nowrap"
-                />
-                <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mt-3">
-                  {stat.label}
-                </p>
-              </div>
-            ))}
-          </div>
+          <SiteCounters />
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}
@@ -294,16 +277,15 @@ export default function Home() {
               The analyst
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              Then Ivy makes the call, and keeps score in public.
+              <HomeLedgerHeadline />
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
-              Every pick she has ever made lives on a ledger she can&#39;t edit.
-              Her losses sit right next to her wins.
+              <HomeLedgerBody />
             </p>
 
             <IvyStatLine className="font-mono text-xs text-muted-foreground mt-6" />
             <p className="text-[11px] text-muted-foreground/50 mt-2">
-              Hypothetical picks, published for everyone, never executed.
+              <HomeLedgerFootnote />
             </p>
 
             <div className="mt-8">

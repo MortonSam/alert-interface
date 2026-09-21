@@ -1114,7 +1114,7 @@ async def _compute_alert_pick_v2(
     UPCOMING earnings event (not the backtest row).
     """
     from app.models.earnings_feature import EarningsFeature
-    from app.services.ivy_v2 import compute_live_features, decide as v2_decide
+    from app.services.ivy_v2 import EXIT_TRADING_DAYS, compute_live_features, decide as v2_decide
     from app.services.trading_calendar import nth_trading_day_after
 
     # Compute live features for the upcoming earnings event
@@ -1211,7 +1211,7 @@ async def _compute_alert_pick_v2(
             except Exception:
                 pass  # template reasoning from decide() is already set
 
-            exit_date = nth_trading_day_after(live_features.event_date, 5)
+            exit_date = nth_trading_day_after(live_features.event_date, EXIT_TRADING_DAYS)
 
             pick = AlertPick(
                 symbol=sym,
@@ -1610,6 +1610,37 @@ from app.services.pnl_math import (
     pnl_percent,
     target_reached as _target_reached,
 )
+
+
+@router.get("/ivy-rule")
+async def ivy_rule_and_backtest(db: AsyncSession = Depends(get_db)) -> dict:
+    """Ivy's rule constants and the latest stored backtest of that rule.
+
+    The only source pages may take her numbers from (see services/ivy_rule.py).
+    `backtest` is null until backtest_v2 has been run once on this database.
+    """
+    from app.models.ivy_backtest_run import IvyBacktestRun
+    from app.services.ivy_rule import ivy_rule
+
+    latest = (await db.execute(
+        select(IvyBacktestRun).order_by(IvyBacktestRun.run_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    backtest = None
+    if latest is not None:
+        backtest = {
+            "as_of_date": latest.as_of_date.isoformat(),
+            "run_at": latest.run_at.isoformat(),
+            "momentum_cutoff_pct": float(latest.momentum_cutoff_pct),
+            "min_prior_quarters": latest.min_prior_quarters,
+            "folds": latest.folds,
+            "setups": latest.setups,
+            "hits": latest.hits,
+            "hit_rate": float(latest.hit_rate),
+            "base_n": latest.base_n,
+            "base_rate": float(latest.base_rate),
+            "passed": latest.passed,
+        }
+    return {"rule": ivy_rule(), "backtest": backtest}
 
 
 @router.get("/ivy-activity", response_model=IvyActivityRead)

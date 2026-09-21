@@ -50,3 +50,21 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> SystemStatus:
         total_reactions=total_reactions,
         most_recent_reaction_date=most_recent_reaction_date,
     )
+
+
+@router.get("/stats")
+async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
+    """Real counts behind the homepage counters. Nothing here is typed by hand."""
+    from sqlalchemy import text
+
+    earnings_measured = await db.scalar(text(
+        "SELECT count(*) FROM historical_reactions WHERE event_type = 'earnings' AND pct_change_1d IS NOT NULL"
+    )) or 0
+    analyst = (await db.execute(text(
+        "SELECT count(*), min(event_date) FROM events WHERE event_type = 'analyst_action'"
+    ))).one()
+    return {
+        "earnings_reports_measured": int(earnings_measured),
+        "analyst_actions": int(analyst[0] or 0),
+        "analyst_actions_since": analyst[1].isoformat() if analyst[1] else None,
+    }

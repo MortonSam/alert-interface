@@ -28,7 +28,10 @@ def _trading_days_since(trade_date_str: str) -> int:
     return count
 
 
-def is_fresh(chain_last_trade: str | None, max_trading_days: int = 2) -> bool:
+CHAIN_FRESH_TRADING_DAYS = 2   # a chain older than this many trading days is not used
+
+
+def is_fresh(chain_last_trade: str | None, max_trading_days: int = CHAIN_FRESH_TRADING_DAYS) -> bool:
     """Return True if chain_last_trade is within max_trading_days of today."""
     if not chain_last_trade:
         return False

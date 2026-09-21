@@ -25,15 +25,19 @@ from app.models.ticker import Ticker
 from app.services import chain_store
 
 # ── Tuned constants ──────────────────────────────────────────────────────────
-# Source: threshold_search.py extended grid, 1260 combos × 3 held-out folds.
-# Chosen cutoff -10% (passes fail criterion in all 3 folds, 378 total picks):
-#   Fold 1 (test 2023): 68.5% vs 51.8% baseline → +16.7pp  (54 picks)
-#   Fold 2 (test 2024): 57.5% vs 55.4% baseline → +2.1pp   (73 picks)
-#   Fold 3 (test 2025-26): 58.6% vs 52.2% baseline → +6.4pp (251 picks)
+# Source: threshold_search.py extended grid, 1260 combos x 3 held-out folds.
+# The -10% cutoff was chosen because it beat its fold baseline in all three
+# folds. Current per-fold numbers are not quoted here: backtest_v2.py stores
+# them in ivy_backtest_runs on every run, and /ivy renders from that table.
 
 MOMENTUM_CUTOFF = -0.10       # 20d return ≤ -10% qualifies (momentum reversal signal)
+MOMENTUM_LOOKBACK_DAYS = 20   # trading days the momentum is measured over
 MIN_PRIOR_N = 8               # minimum prior earnings events with actual_5d
 IV_PREMIUM_CAP = 1.20         # implied move cannot exceed 1.2× historical expected move
+EXIT_TRADING_DAYS = 5         # a pick is closed this many trading days after the earnings date
+CANDIDATE_WINDOW_DAYS = 7     # evaluate names reporting within this many calendar days
+MAX_NEW_PER_NIGHT = 3         # at most this many new picks per nightly run
+MAX_OPEN_TOTAL = 10           # at most this many open picks at once
 
 
 @dataclass

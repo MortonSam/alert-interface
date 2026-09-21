@@ -1,6 +1,8 @@
 "use client";
 
 import { optionsDataPhrase } from "@/lib/freshness";
+import { ledgerRecordSentence, noForcedCallsSentence, oneRuleParagraph, whoSheIsLine } from "@/lib/ivyRule";
+import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type HealthStatus, type IvyActivity } from "@/lib/api";
@@ -97,6 +99,7 @@ export default function MeetIvyPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [activity, setActivity] = useState<IvyActivity | null>(null);
   const [error, setError] = useState(false);
+  const ivy = useIvyRule();
 
   useEffect(() => {
     Promise.allSettled([api.system.health(), api.theses.ivyActivity()])
@@ -153,7 +156,7 @@ export default function MeetIvyPage() {
             The analyst inside Alert Interface
           </h2>
           <p className="text-lg text-muted-foreground leading-relaxed mt-2 max-w-prose">
-            She reads the tape overnight, makes a call only when the evidence agrees, and keeps score in public.
+            {ivy ? whoSheIsLine(ivy.rule) : "She reads the tape overnight and makes a call only when her one setup appears."}
           </p>
           <p className="text-base text-muted-foreground leading-relaxed mt-4 max-w-prose">
             She reads each company&apos;s earnings history and {optionsDataPhrase(health?.options_data_date)},
@@ -177,20 +180,10 @@ export default function MeetIvyPage() {
         <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="How she decides" />
           <h2 className="font-display text-2xl font-bold text-foreground">
-            One rule, tested on years she never saw
+            One rule, and a record you can check
           </h2>
           <p className="text-base text-muted-foreground leading-relaxed mt-3 max-w-prose">
-            Ivy looks for one setup: a company reporting earnings in the next
-            few days whose stock has fallen more than 10% over the prior 20
-            trading days, with at least eight quarters of earnings history. In
-            that setup, tested across 2023, 2024, and 2025 on data the rule was
-            not fit to, the stock was higher five days later about 60% of the
-            time. Before she buys anything she checks what the options market is
-            pricing: if the implied move is more than 1.2 times the stock&apos;s
-            usual earnings move, she refuses. Every pick carries its receipt: how
-            many comparable setups, the base rate, the expected move, and what
-            the options were pricing. She makes no bearish calls; the data has
-            not earned them yet.
+            {ivy ? oneRuleParagraph(ivy.rule, ivy.backtest) : ""}
           </p>
         </section>
 
@@ -204,9 +197,9 @@ export default function MeetIvyPage() {
             No pick without a clear signal
           </h2>
           <p className="text-base text-muted-foreground leading-relaxed mt-3 max-w-prose">
-            She won&apos;t force a direction when the data is mixed. One pick per
-            symbol, no stacking. And she never quietly edits her record; every
-            call stays on the ledger exactly as she made it.
+            {ivy ? noForcedCallsSentence(ivy.rule) : "She passes when her setup is absent."}{" "}
+            One pick per symbol, no stacking. Picks are never deleted or re-dated; settlement only fills in the outcome.{" "}
+            {ivy ? ledgerRecordSentence(ivy.rule) : ""}
           </p>
         </section>
 

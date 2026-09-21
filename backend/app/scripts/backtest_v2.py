@@ -26,6 +26,8 @@ from sqlalchemy import select
 
 from app.database import ScriptSessionLocal
 from app.models.earnings_feature import EarningsFeature
+from app.models.ivy_backtest_run import IvyBacktestRun
+from app.services.ivy_backtest import summarize
 from app.services.ivy_v2 import MIN_PRIOR_N, MOMENTUM_CUTOFF
 
 FOLDS = [
@@ -33,6 +35,11 @@ FOLDS = [
     ("Fold 2 (2024)", date(2023, 12, 31), date(2024, 1, 1), date(2024, 12, 31)),
     ("Fold 3 (2025-26)", date(2024, 12, 31), date(2025, 1, 1), date(2026, 12, 31)),
 ]
+
+
+def fold_label(name: str) -> str:
+    """ "Fold 3 (2025-26)" -> "2025-26": the years a reader is told the rule was tested on."""
+    return name[name.index("(") + 1:name.index(")")]
 
 CUTOFFS_TO_TEST = [-0.15, -0.10]
 
@@ -141,6 +148,7 @@ async def main() -> None:
     print("  " + "─" * (len(header) - 2))
 
     chosen_passes_all = True
+    chosen_folds: list[dict] = []   # stored in ivy_backtest_runs for /ivy
 
     for fold_name, train_end, test_start, test_end in FOLDS:
         test_events = [e for e in events if test_start <= e["event_date"] <= test_end]
@@ -158,6 +166,10 @@ async def main() -> None:
 
             # Check fail criterion for chosen cutoff
             if cutoff == MOMENTUM_CUTOFF:
+                chosen_folds.append({
+                    "label": fold_label(fold_name), "setups": s["n"], "hits": s["hits"],
+                    "base_n": bl["n"], "base_ups": round(bl["up_rate"] * bl["n"]),
+                })
                 if s["hit_rate"] <= bl["up_rate"] or s["mean_5d"] <= 0:
                     chosen_passes_all = False
 
@@ -255,6 +267,25 @@ async def main() -> None:
             s_n = len(survivors)
             total = len(fold_qual)
             print(f"    {fold_name:<18} ratio={sim_ratio:.1f}x  survive: {s_n}/{total} ({s_n/total*100:.0f}%)" if total > 0 else f"    {fold_name:<18} ratio={sim_ratio:.1f}x  no qualifying events")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STORE THE RESULT (every run, pass or fail) so pages render real numbers
+    # ═══════════════════════════════════════════════════════════════════════════
+    summary = summarize(chosen_folds)
+    as_of = max((e["event_date"] for e in events if e["actual_5d"] is not None), default=date.today())
+    async with ScriptSessionLocal() as session:
+        session.add(IvyBacktestRun(
+            as_of_date=as_of,
+            momentum_cutoff_pct=round(MOMENTUM_CUTOFF * 100, 2),
+            min_prior_quarters=MIN_PRIOR_N,
+            folds=summary["folds"],
+            setups=summary["setups"], hits=summary["hits"], hit_rate=summary["hit_rate"],
+            base_n=summary["base_n"], base_rate=summary["base_rate"],
+            passed=chosen_passes_all,
+        ))
+        await session.commit()
+    print(f"\nStored backtest run: {summary['setups']} setups, hit rate {summary['hit_rate'] * 100:.1f}% "
+          f"vs base rate {summary['base_rate'] * 100:.1f}% over {summary['base_n']} earnings events, as of {as_of}")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # FAIL CRITERION CHECK

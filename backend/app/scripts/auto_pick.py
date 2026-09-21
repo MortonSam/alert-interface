@@ -31,8 +31,12 @@ from app.services.trading_calendar import nth_trading_day_after
 
 from decimal import Decimal
 
-MAX_NEW_PER_NIGHT = 3
-MAX_OPEN_TOTAL = 10
+from app.services.ivy_v2 import (
+    CANDIDATE_WINDOW_DAYS,
+    EXIT_TRADING_DAYS,
+    MAX_NEW_PER_NIGHT,
+    MAX_OPEN_TOTAL,
+)
 MAX_DRAFT_ATTEMPTS = 6
 
 
@@ -221,7 +225,7 @@ async def _build_iron_condor(session, sym: str, event_date: date, receipt: dict)
     if max_loss <= 0:
         return None
 
-    exit_dt = nth_trading_day_after(event_date, 5)
+    exit_dt = nth_trading_day_after(event_date, EXIT_TRADING_DAYS)
 
     return CreditShadowPick(
         symbol=sym,
@@ -264,7 +268,7 @@ async def _run(dry_run: bool = False) -> int:
     today = date.today()
     # 1-5 trading days ~ next 7 calendar days; exclude today (event day
     # itself is too late for momentum to be measured into the report).
-    horizon = today + timedelta(days=7)
+    horizon = today + timedelta(days=CANDIDATE_WINDOW_DAYS)
 
     async with AsyncSessionLocal() as session:
         # ── Count currently open v2 picks (season 2, post-LEDGER_START only) ──
