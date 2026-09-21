@@ -41,6 +41,16 @@ from app.services.finnhub_client import FinnhubClient
 
 ET = ZoneInfo("America/New_York")
 
+# SEC company_tickers.json maps some tickers to the wrong CIK (holding company
+# vs operating entity) or drops them entirely. Override with the correct
+# filing CIK so the 8-K lookup hits the right entity.
+CIK_OVERRIDES: dict[str, str] = {
+    "XOM":  "0000034088",   # EXXON MOBIL CORP (not ExxonMobil Holdings 0002115436)
+    "AVB":  "0000915912",   # AVALONBAY COMMUNITIES INC
+    "EA":   "0000712515",   # ELECTRONIC ARTS INC
+    "EQR":  "0000906107",   # EQUITY RESIDENTIAL
+}
+
 
 # ── Phase 0: Populate earnings_report_timing rows ────────────────────────────
 
@@ -105,6 +115,9 @@ def _classify_timing(acceptance_str: str, event_date: date) -> str:
       - Accepted before 12:00 ET on event_date -> bmo
       - Accepted at or after 16:00 ET on event_date -> amc
       - Accepted before 09:30 ET on event_date+1 -> amc
+      - Accepted at or after 16:00 ET on event_date-1 -> bmo
+        (filed after close the prior day; yfinance records reaction day as event_date,
+         gap lands at open(T), so the correct window is bmo)
       - Anything else -> unknown
     """
     try:
@@ -128,6 +141,11 @@ def _classify_timing(acceptance_str: str, event_date: date) -> str:
         # Next calendar day: before 09:30 ET = amc (filed overnight after close)
         if accept_hour < 9 or (accept_hour == 9 and accept_minute < 30):
             return "amc"
+        return "unknown"
+    elif accept_date == event_date - timedelta(days=1):
+        # Prior day after close: yfinance records reaction day as event_date
+        if accept_hour >= 16:
+            return "bmo"
         return "unknown"
     else:
         return "unknown"
@@ -171,7 +189,7 @@ async def _phase_edgar(
             if (i + 1) % 50 == 0 or i == 0:
                 print(f"  [{i+1}/{len(rows_by_ticker)}] {sym}...", flush=True)
 
-            cik = await edgar.get_cik(sym)
+            cik = CIK_OVERRIDES.get(sym) or await edgar.get_cik(sym)
             if not cik:
                 no_cik += len(rows)
                 continue
