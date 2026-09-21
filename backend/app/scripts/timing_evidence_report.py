@@ -25,7 +25,6 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 
-import numpy as np
 import yfinance as yf
 from sqlalchemy import select
 
@@ -33,26 +32,24 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
-from app.scripts.backfill_report_timing import (
-    ET,
-    ITEM_202_WINDOW_DAYS,
-    _ciks_for,
-    _has_earnings_item,
-    classify_local,
-)
+from app.scripts.backfill_report_timing import _ciks_for
 from app.scripts.seed_historical_reactions import (
     LOOKBACK_YEARS,
     _build_date_cache,
     _fetch_price_history,
-    _session_offset,
     _session_on_or_after,
-    _zero_volume,
     load_reference_sessions,
 )
 from app.services.edgar_client import EdgarClient
+from app.services.report_timing import (
+    ET,
+    ITEM_202_WINDOW_DAYS,
+    MARKET_CLOSE,
+    MARKET_OPEN,
+    has_earnings_item as _has_earnings_item,
+    price_signal,
+)
 
-GAP_RATIO = 2.0
-GAP_MIN_PCT = 1.0
 EDGAR_OPEN, EDGAR_CLOSE = time(6, 0), time(22, 0)
 NEXT_DAY_CUTOFF = time(17, 30)
 
@@ -70,39 +67,16 @@ def _is_dst(d: date) -> bool:
     return bool(datetime(d.year, d.month, d.day, 12, tzinfo=ET).dst())
 
 
-def _gap(hist, dates, sessions, day: date) -> float | None:
-    """|open(day) / close(prior session) - 1| in percent; None unless both bars exist and traded."""
-    prior = _session_offset(sessions, day, -1)
-    if prior is None:
-        return None
-    i, j = np.flatnonzero(dates == day), np.flatnonzero(dates == prior)
-    if i.size == 0 or j.size == 0:
-        return None
-    if _zero_volume(hist["Volume"].iloc[int(i[0])]) or _zero_volume(hist["Volume"].iloc[int(j[0])]):
-        return None
-    base = float(hist["Close"].iloc[int(j[0])])
-    return abs(float(hist["Open"].iloc[int(i[0])]) / base - 1) * 100 if base else None
-
-
-def price_signal(hist, dates, sessions, filing_session: date, event_session: date) -> tuple[str, float | None, float | None]:
-    """Signal C expressed relative to the stored event date."""
-    g_f = _gap(hist, dates, sessions, filing_session)
-    nxt = _session_offset(sessions, filing_session, 1)
-    g_n = _gap(hist, dates, sessions, nxt) if nxt is not None else None
-    if g_f is None or g_n is None:
-        return "none", g_f, g_n
-    hi, lo = max(g_f, g_n), min(g_f, g_n)
-    if hi < GAP_MIN_PCT or hi < GAP_RATIO * lo:
-        return "none", g_f, g_n
-    priced_pre_open = g_f > g_n  # news was in the filing-day open
-    offset = int(np.searchsorted(sessions, filing_session) - np.searchsorted(sessions, event_session))
+def classify_local(local: datetime, event_date: date) -> str:
+    """Class implied by a naive Eastern acceptance time, using the rule's session boundaries."""
+    offset, clock = (local.date() - event_date).days, local.time()
     if offset == 0:
-        return ("bmo" if priced_pre_open else "amc"), g_f, g_n
-    if offset == 1 and priced_pre_open:
-        return "amc", g_f, g_n      # after the event-day close, before the next open
-    if offset == -1 and not priced_pre_open:
-        return "bmo", g_f, g_n      # after the prior close, before the event-day open
-    return "off", g_f, g_n          # priced on a session the stored event date cannot explain
+        return "bmo" if clock < MARKET_OPEN else ("unknown" if clock < MARKET_CLOSE else "amc")
+    if offset == 1 and clock < MARKET_OPEN:
+        return "amc"
+    if offset == -1 and clock >= MARKET_CLOSE:
+        return "bmo"
+    return "unknown"
 
 
 def _fetch_prices(symbol: str):
