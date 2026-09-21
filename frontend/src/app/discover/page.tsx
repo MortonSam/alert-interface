@@ -119,7 +119,7 @@ export default function DiscoverPage() {
     setFetchError(false);
     Promise.all([
       api.discover.reportingSoon(7, LIMIT),
-      JUST_REPORTED_ENABLED ? api.discover.justReported(5, LIMIT) : Promise.resolve({ items: [] }),
+      JUST_REPORTED_ENABLED ? api.discover.justReported(5, LIMIT) : Promise.resolve({ items: [], total: 0 }),
       api.discover.suggestions(5),
       api.discover.unusuallyActive(LIMIT),
       api.discover.latestPick().catch(() => ({ pick: null })),
