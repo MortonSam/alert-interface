@@ -1547,6 +1547,54 @@ async def check_options_read_coverage(session) -> CheckResult:
     )
 
 
+# ── Duplicate reaction detection ─────────────────────────────────────────────
+
+async def check_duplicate_earnings_reactions(session) -> CheckResult:
+    """WARN listing tickers with two earnings reactions within 3 calendar days.
+
+    Pattern: yfinance reports the same quarter under two dates (preliminary +
+    confirmed). The row with known timing (bmo/amc) and non-null pcts is the
+    real one; the other (usually timing=unknown, null pcts) is a ghost.
+
+    Dedupe rule (not yet enforced): when two earnings reactions for the same
+    ticker are <=3 days apart, keep the one with non-null pct_change_1d; if
+    both non-null, keep the one with known timing; if still tied, keep earlier.
+    """
+    rows = (await session.execute(text("""
+        SELECT t.symbol,
+               hr1.event_date AS d1, hr2.event_date AS d2,
+               hr1.report_timing AS t1, hr2.report_timing AS t2,
+               hr1.pct_change_1d IS NOT NULL AS has_pct1,
+               hr2.pct_change_1d IS NOT NULL AS has_pct2
+        FROM historical_reactions hr1
+        JOIN historical_reactions hr2
+          ON hr1.ticker_id = hr2.ticker_id
+          AND hr1.event_type = 'earnings'
+          AND hr2.event_type = 'earnings'
+          AND hr2.event_date > hr1.event_date
+          AND hr2.event_date - hr1.event_date <= 3
+        JOIN tickers t ON t.id = hr1.ticker_id
+        ORDER BY t.symbol, hr1.event_date
+    """))).all()
+
+    if not rows:
+        return CheckResult(
+            "duplicate_earnings_reactions", PASS,
+            "No earnings reactions within 3 days of each other",
+        )
+
+    details = [
+        f"{r.symbol}  {r.d1} ({r.t1}, {'pct' if r.has_pct1 else 'null'}) ↔ "
+        f"{r.d2} ({r.t2}, {'pct' if r.has_pct2 else 'null'})"
+        for r in rows
+    ]
+    return CheckResult(
+        "duplicate_earnings_reactions", WARN,
+        f"{len(rows)} pair(s) of earnings reactions within 3 days (likely yfinance date duplication)",
+        details,
+    )
+
+
 # ── v3 reaction checks ───────────────────────────────────────────────────────
 
 async def check_no_mixed_computation_version(session) -> CheckResult:
@@ -1718,6 +1766,8 @@ CHECKS = [
     check_put_call_per_side_guard,
     # Options-read coverage
     check_options_read_coverage,
+    # Duplicate reactions
+    check_duplicate_earnings_reactions,
     # v3 reaction checks
     check_no_mixed_computation_version,
     check_report_timing_unknown_share,
