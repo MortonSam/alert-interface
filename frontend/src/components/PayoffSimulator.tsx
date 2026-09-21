@@ -9,6 +9,7 @@ import Callout from "@/components/Callout";
 import {
   BS_R,
   type Leg,
+  ivDisclosure,
   multiLegPayoffPS,
   multiLegPayoffBSPS,
 } from "@/lib/black-scholes";
@@ -108,6 +109,7 @@ export interface PayoffSimulatorProps {
   xMin: number;              // x-axis lower bound, already fallback-resolved by caller
   xMax: number;              // x-axis upper bound, already fallback-resolved by caller
   earningsMs: number | null; // for the IV-crush caveat; null = no caveat
+  ivContext?: { expiration: string | null; chainDate: string | null };  // the chain the IVs came from
   usingIVFallback: boolean;  // true if any IV came from BS_IV_DEFAULT
   sdFailed: boolean;         // true if strategyData fetch failed (different warning message)
 }
@@ -116,7 +118,7 @@ export interface PayoffSimulatorProps {
 
 export default function PayoffSimulator({
   legs, spot, currentPrice, symbol, expirationMs, mult, xMin, xMax,
-  earningsMs, usingIVFallback, sdFailed,
+  earningsMs, ivContext, usingIVFallback, sdFailed,
 }: PayoffSimulatorProps) {
 
   const nowMs = Date.now();
@@ -139,12 +141,8 @@ export default function PayoffSimulator({
 
   const showDisclaimer = earningsMs != null && selectedDateMs <= earningsMs;
 
-  // IV label (computed from leg sigmas; sigma is already 0–1 decimal)
-  const ivLabel = useMemo(() => {
-    if (legs.length === 1) return `${(legs[0].sigma * 100).toFixed(1)}%`;
-    const ivs = legs.map(l => `${l.label.split(" ")[0]} ${l.label.split(" ")[1]}: ${(l.sigma * 100).toFixed(1)}%`);
-    return ivs.join(" · ");
-  }, [legs]);
+  // IV label: each leg's sigma and where it came from
+  const ivLabel = useMemo(() => ivDisclosure(legs), [legs]);
 
   // Chart data — split into green/red segments at the zero crossover
   const chartData = useMemo((): ChartPoint[] => {
@@ -210,7 +208,9 @@ export default function PayoffSimulator({
       {/* IV disclosure — always show what IV the simulation holds constant */}
       {ivLabel && !sdFailed && !usingIVFallback && (
         <p className="text-xs text-muted-foreground">
-          Simulated at IV {ivLabel} (held constant)
+          Simulated at IV {ivLabel}, held constant
+          {ivContext?.expiration ? `, from the ${ivContext.expiration} expiration` : ""}
+          {ivContext?.chainDate ? ` · options data as of ${ivContext.chainDate}` : ""}
         </p>
       )}
       {(sdFailed || usingIVFallback) && (

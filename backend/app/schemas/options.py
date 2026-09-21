@@ -73,6 +73,7 @@ class StrategyDataRead(BaseModel):
     strikes: list[StrikeData]        # only strikes with at least one valid mid-price
     as_of: str
     data_quality_note: str | None = None
+    chain_date: str | None = None    # "YYYY-MM-DD" chain_last_trade of the chain these strikes came from
 
 
 # ── Realized volatility rank / percentile ──────────────────────────────────────

@@ -21,6 +21,7 @@ import { GiBull, GiBearFace } from "react-icons/gi";
 import { HiSparkles } from "react-icons/hi2";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
+import { fmtTimestamp } from "@/lib/marks";
 
 // ── Recent tickers (localStorage, SSR-safe) ──────────────────────────────────
 
@@ -170,7 +171,7 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
   const usingIVFallback = fb.atm_iv_pct == null;
   const legs: Leg[] = [{
     kind, K: draft.suggested_strike, mid: row1.mid,
-    sigma: simIV,
+    sigma: simIV, ivSource: usingIVFallback ? "default" : "atm",
     dir: 1, label: `Long $${draft.suggested_strike}`,
   }];
 
@@ -179,7 +180,7 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
     if (!row2) return null;
     legs.push({
       kind, K: draft.suggested_spread_strike, mid: row2.mid,
-      sigma: simIV,
+      sigma: simIV, ivSource: usingIVFallback ? "default" : "atm",
       dir: -1, label: `Short $${draft.suggested_spread_strike}`,
     });
   }
@@ -194,6 +195,7 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
     xMin: fb.implied_range_low ?? fb.current_price * 0.8,
     xMax: fb.implied_range_high ?? fb.current_price * 1.2,
     earningsMs: fb.earnings_date ? dateMs(fb.earnings_date) : null,
+    ivContext: { expiration: fb.expiration_used, chainDate: fb.options_as_of ?? null },
     usingIVFallback,
     sdFailed: false,
   };
@@ -443,7 +445,7 @@ function DraftDisplay({
 
       {/* G) Fact grid */}
       <div className="border border-border/60 bg-transparent rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
-        <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span>{fb.price_as_of && <span className="text-muted-foreground/60 ml-1">as of {(fb.price_as_of as string).replace(/T.*$/, "")}</span>}</span>
+        <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span>{fmtTimestamp(fb.price_as_of) && <span className="text-muted-foreground/60 ml-1">last trade {fmtTimestamp(fb.price_as_of)}</span>}{fb.options_as_of && <span className="text-muted-foreground/60 ml-1">· options data as of {fb.options_as_of}</span>}</span>
         <span>
           Implied move:{" "}
           <span className="font-mono text-foreground">

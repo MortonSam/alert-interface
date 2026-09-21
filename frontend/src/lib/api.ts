@@ -1,3 +1,4 @@
+import type { MarkBasis } from "./marks";
 /**
  * Typed API client for the FastAPI backend.
  * All fetch calls go through /api/* which next.config.ts rewrites to :8000.
@@ -420,6 +421,7 @@ export interface StrategyData {
   implied_range_high: number | null;
   strikes: StrikeData[];
   as_of: string;
+  chain_date?: string | null;    // YYYY-MM-DD chain these strikes came from
 }
 
 export interface OptionsRead {
@@ -638,11 +640,14 @@ export interface ThesisMarkRead {
   entry_premium2: number | null;
   contracts: number;
   pnl_dollars: number | null;
-  pnl_pct: number | null;                // fraction: 0.28 = +28%
-  mark_basis: "live_chain" | "intrinsic" | "not_found" | "no_option_leg";
+  pnl_pct: number | null;                // PERCENT: 28 = +28%
+  mark_basis: MarkBasis;
   is_expired: boolean;
   mark_note: string | null;
-  as_of: string;
+  as_of: string;                         // ISO timestamp of when the mark was computed; never prose
+  chain_date: string | null;             // YYYY-MM-DD chain the option mids came from
+  options_as_of: string | null;          // YYYY-MM-DD the option values refer to
+  price_as_of: string | null;            // ISO last-trade time of the stock price, or the settlement date
 }
 
 export interface ThesisCreate {
@@ -696,7 +701,8 @@ export interface ThesisDraftRead {
   vol_regime: string | null;  // "iv_rich" | "iv_cheap" | "iv_fair" | null
   fact_block: {
     current_price: number;
-    price_as_of: string | null;
+    price_as_of: string | null;      // ISO last-trade time of the quote
+    options_as_of?: string | null;   // YYYY-MM-DD of the options chain the draft used
     atm_strike: number | null;
     earnings_date: string | null;
     expiration_used: string | null;
@@ -911,8 +917,8 @@ export const api = {
       request<RealizedVol>(`/tickers/rv/${symbol}`),
     expectedMove: (symbol: string) =>
       request<ExpectedMove>(`/tickers/expected-move/${symbol}`),
-    strategyData: (symbol: string) =>
-      request<StrategyData>(`/tickers/strategy-data/${symbol}`),
+    strategyData: (symbol: string, expiration?: string | null) =>
+      request<StrategyData>(`/tickers/strategy-data/${symbol}${expiration ? `?expiration=${encodeURIComponent(expiration)}` : ""}`),
     options: (symbol: string, expiration?: string) =>
       request<OptionsChain>(expiration
         ? `/tickers/options/${symbol}?expiration=${encodeURIComponent(expiration)}`

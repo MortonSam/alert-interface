@@ -8,9 +8,11 @@ import {
 } from "@/lib/api";
 import {
   BS_IV_DEFAULT,
+  type IVSource,
   type Leg, dateMs,
 } from "@/lib/black-scholes";
 import { cn } from "@/lib/utils";
+import { markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
 import { fmtPnlPct } from "@/lib/pnl";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import PayoffSimulator from "@/components/PayoffSimulator";
@@ -31,15 +33,6 @@ function fmtDateShort(v: string): string {
   });
 }
 
-function fmtBasis(basis: ThesisMarkRead["mark_basis"]): string {
-  switch (basis) {
-    case "live_chain":    return "live chain";
-    case "intrinsic":     return "intrinsic (expired)";
-    case "not_found":     return "not found";
-    case "no_option_leg": return "no option leg";
-  }
-}
-
 // ── Build Leg[] from thesis ───────────────────────────────────────────────────
 
 interface IVResult {
@@ -54,14 +47,15 @@ function buildLegs(thesis: Thesis, strategyData: StrategyData | null): IVResult 
   const kind = thesis.option_type as "call" | "put";
   let usingFallback = false;
 
-  function getIV(K: number, legKind: "call" | "put"): number {
+  function getIV(K: number, legKind: "call" | "put"): { sigma: number; ivSource: IVSource } {
     const row = strategyData?.strikes.find(s => s.strike === K);
     const atmRow = strategyData?.strikes.find(s => s.is_atm);
-    const iv = legKind === "call"
-      ? (row?.call_iv ?? atmRow?.call_iv ?? null)
-      : (row?.put_iv  ?? atmRow?.put_iv  ?? null);
-    if (iv == null) { usingFallback = true; return BS_IV_DEFAULT; }
-    return iv;
+    const own = legKind === "call" ? row?.call_iv : row?.put_iv;
+    if (own != null) return { sigma: own, ivSource: "strike" };
+    const atm = legKind === "call" ? atmRow?.call_iv : atmRow?.put_iv;
+    if (atm != null) return { sigma: atm, ivSource: "atm" };
+    usingFallback = true;
+    return { sigma: BS_IV_DEFAULT, ivSource: "default" };
   }
 
   if (thesis.strike2 && thesis.entry_premium2) {
@@ -69,14 +63,14 @@ function buildLegs(thesis: Thesis, strategyData: StrategyData | null): IVResult 
     const mid2 = parseFloat(thesis.entry_premium2);
     return {
       legs: [
-        { kind, K: K1, mid: mid1, sigma: getIV(K1, kind), dir:  1, label: `Long $${K1} ${kind}` },
-        { kind, K: K2, mid: mid2, sigma: getIV(K2, kind), dir: -1, label: `Short $${K2} ${kind}` },
+        { kind, K: K1, mid: mid1, ...getIV(K1, kind), dir:  1, label: `Long $${K1} ${kind}` },
+        { kind, K: K2, mid: mid2, ...getIV(K2, kind), dir: -1, label: `Short $${K2} ${kind}` },
       ],
       usingFallback,
     };
   }
   return {
-    legs: [{ kind, K: K1, mid: mid1, sigma: getIV(K1, kind), dir: 1, label: `Long $${K1} ${kind}` }],
+    legs: [{ kind, K: K1, mid: mid1, ...getIV(K1, kind), dir: 1, label: `Long $${K1} ${kind}` }],
     usingFallback,
   };
 }
@@ -109,7 +103,7 @@ export default function ThesisDetailPage() {
           .then(m => { setMark(m); setMarkState("done"); })
           .catch(e => { setMarkError(String(e)); setMarkState("error"); });
         if (t.ticker_symbol) {
-          api.tickers.strategyData(t.ticker_symbol)
+          api.tickers.strategyData(t.ticker_symbol, t.option_expiration)
             .then(sd => { setStrategyData(sd); setSdState("done"); })
             .catch(() => { setSdState("error"); });
         } else {
@@ -165,7 +159,7 @@ export default function ThesisDetailPage() {
 
   let pnlDollars: number | null = null;
   let pnlPct: number | null = null;
-  let pnlLabel = "Live P&L";
+  let pnlLabel = "Open P&L";
 
   if (isResolved && thesis?.option_pnl_dollars != null) {
     // State 1: Resolved — snapshotted on the Thesis record
@@ -176,12 +170,12 @@ export default function ThesisDetailPage() {
     // State 2: Expired but not yet resolved — intrinsic settlement
     pnlDollars = mark?.pnl_dollars ?? null;
     pnlPct = mark?.pnl_pct ?? null;
-    pnlLabel = "Expired (intrinsic)";
+    pnlLabel = "Expired";
   } else {
-    // State 3: Active — live chain mark
+    // State 3: Active, marked from the stored daily chain
     pnlDollars = mark?.pnl_dollars ?? null;
     pnlPct = mark?.pnl_pct ?? null;
-    pnlLabel = "Live P&L";
+    pnlLabel = "Open P&L";
   }
 
   const pnlColor = pnlDollars == null
@@ -297,7 +291,7 @@ export default function ThesisDetailPage() {
     ? { label: "CLOSED", cls: "bg-muted text-muted-foreground" }
     : isExpired
       ? { label: "EXPIRED", cls: "bg-primary/10 text-primary" }
-      : { label: "LIVE", cls: "bg-success/10 text-success" };
+      : { label: "OPEN", cls: "bg-success/10 text-success" };
 
   // ── Loading / error states ──────────────────────────────────────────────────
 
@@ -346,9 +340,6 @@ export default function ThesisDetailPage() {
             "text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1",
             stateBadge.cls,
           )}>
-            {!isResolved && !isExpired && (
-              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-            )}
             {stateBadge.label}
           </span>
         </div>
@@ -382,7 +373,7 @@ export default function ThesisDetailPage() {
                 </p>
                 <p className="text-xs text-muted-foreground mt-1.5">
                   {pnlLabel}
-                  {mark && <span> · {fmtBasis(mark.mark_basis)}</span>}
+                  {mark && <span> · {[markBasisLabel(mark.mark_basis), optionsAsOfLabel(mark)].filter(Boolean).join(" · ")}</span>}
                 </p>
               </>
             )}
@@ -437,6 +428,7 @@ export default function ThesisDetailPage() {
             xMin={xRange.lo}
             xMax={xRange.hi}
             earningsMs={earningsDateMs}
+            ivContext={{ expiration: strategyData?.expiration ?? null, chainDate: strategyData?.chain_date ?? null }}
             usingIVFallback={usingIVFallback}
             sdFailed={sdFailed}
           />

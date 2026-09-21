@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { rvRankShort } from "@/lib/utils";
+import { fmtTimestamp, markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
 import { fmtPnlPct } from "@/lib/pnl";
 import Callout from "@/components/Callout";
 import {
@@ -36,28 +37,6 @@ function isMarketHours(): boolean {
   const weekday = get("weekday");
   const mins = parseInt(get("hour"), 10) * 60 + parseInt(get("minute"), 10);
   return !["Sat", "Sun"].includes(weekday) && mins >= 9 * 60 + 30 && mins < 16 * 60;
-}
-
-/** Format an ISO timestamp as "HH:MM:SS" (local time) for same-day, or "EEE HH:MM" across days. */
-function fmtAsOf(isoStr: string): string {
-  try {
-    const d = new Date(isoStr);
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth()    === now.getMonth()    &&
-      d.getDate()     === now.getDate();
-    if (sameDay) {
-      return d.toLocaleTimeString("en-US", {
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-      });
-    }
-    return d.toLocaleString("en-US", {
-      weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
-    });
-  } catch {
-    return isoStr;
-  }
 }
 
 function fmtPrice(v: string | null | undefined): string {
@@ -181,9 +160,9 @@ function OptionPnlSection({
     } else {
       pnlDollars = mark.pnl_dollars;
       pnlPct = mark.pnl_pct;
-      markLabel = mark.is_expired ? "intrinsic" : mark.mark_basis === "live_chain" ? "live" : null;
+      markLabel = [markBasisLabel(mark.mark_basis), optionsAsOfLabel(mark)].filter(Boolean).join(" · ");
       markNote = mark.mark_note;
-      asOf = mark.as_of; // actual chain fetch time, not request time
+      asOf = mark.as_of; // when the mark was computed (ISO); the options date is in markLabel
     }
   }
 
@@ -208,7 +187,7 @@ function OptionPnlSection({
           )}
           {asOf && (
             <span className="text-xs text-muted-foreground flex items-center gap-1">
-              as of <span className="font-mono">{fmtAsOf(asOf)}</span>
+              checked <span className="font-mono">{fmtTimestamp(asOf) ?? "time unknown"}</span>
               {refreshing && (
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
               )}
@@ -300,7 +279,7 @@ function StockPriceMark({
           </span>
         )}
         <span className="text-muted-foreground flex items-center gap-1">
-          as of <span className="font-mono">{fmtAsOf(as_of)}</span>
+          as of <span className="font-mono">{fmtTimestamp(as_of) ?? "time unknown"}</span>
           {refreshing && (
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
           )}

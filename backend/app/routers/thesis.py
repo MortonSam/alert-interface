@@ -142,7 +142,13 @@ async def _compute_option_mark(
     stock_price_override: skip Finnhub fetch when price is already known (e.g. at resolution).
     use_quote_cache: when False, bypass cache reads (write paths that need fresh prices).
     """
-    as_of = datetime.now(tz=timezone.utc).isoformat()
+    as_of = datetime.now(tz=timezone.utc).isoformat()   # when this mark was computed; always ISO
+    chain_date: str | None = None       # chain the option mids came from
+    options_as_of: str | None = None    # date the option values refer to
+    price_as_of: str | None = None      # last-trade time of the stock price, or the settlement date
+
+    def _quote_time(ts) -> str | None:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat() if ts else None
 
     if not thesis.option_type or not thesis.strike or not thesis.option_expiration:
         return ThesisMarkRead(
@@ -183,12 +189,13 @@ async def _compute_option_mark(
                 current_price = settlement
                 mark_basis = "settled"
                 mark_note = f"Expired {exp_date.isoformat()}, settled at official close"
-                as_of = f"{exp_date.isoformat()}T20:00:00Z"
+                price_as_of = options_as_of = exp_date.isoformat()
             else:
                 # Fallback: live quote with "intrinsic" label (history unavailable)
                 cached = quote_cache.get(sym) if use_quote_cache else None
                 if cached is not None and cached.get("price"):
                     current_price = cached["price"]
+                    price_as_of = _quote_time(cached.get("timestamp"))
                 else:
                     finnhub = FinnhubClient()
                     try:
@@ -198,7 +205,9 @@ async def _compute_option_mark(
                             current_price = float(p)
                             change = float(quote.get("d")) if quote.get("d") is not None else None
                             change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
-                            quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct})
+                            price_as_of = _quote_time(quote.get("t"))
+                            quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
+                            "timestamp": int(quote["t"]) if quote.get("t") else None})
                     except Exception:
                         pass
                     finally:
@@ -214,7 +223,7 @@ async def _compute_option_mark(
                 # stock_price_override was provided
                 mark_basis = "settled"
                 mark_note = f"Expired {exp_date.isoformat()}, settled at official close"
-                as_of = f"{exp_date.isoformat()}T20:00:00Z"
+                price_as_of = options_as_of = exp_date.isoformat()
         else:
             mark_note = f"Expired {exp_date.isoformat()}, could not fetch stock price for intrinsic"
     else:
@@ -223,6 +232,7 @@ async def _compute_option_mark(
             cached = quote_cache.get(sym) if use_quote_cache else None
             if cached is not None and cached.get("price"):
                 current_price = cached["price"]
+                price_as_of = _quote_time(cached.get("timestamp"))
             else:
                 finnhub = FinnhubClient()
                 try:
@@ -232,7 +242,9 @@ async def _compute_option_mark(
                         current_price = float(p)
                         change = float(quote.get("d")) if quote.get("d") is not None else None
                         change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
-                        quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct})
+                        price_as_of = _quote_time(quote.get("t"))
+                        quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
+                        "timestamp": int(quote["t"]) if quote.get("t") else None})
                 except Exception:
                     pass
                 finally:
@@ -245,13 +257,14 @@ async def _compute_option_mark(
             chain_result = await chain_store.get_chain(db, sym, exp_str)
             if chain_result and chain_store.is_fresh(chain_result[1]):
                 chain = chain_result[0]
-                as_of = f"chain as of {chain_result[1]}"
+                chain_date = options_as_of = chain_result[1]
             elif chain_result:
-                mark_note = f"Mark unavailable, chain as of {chain_result[1]}"
+                chain_date = chain_result[1]
+                mark_note = f"Mark unavailable: options data is from {chain_result[1]} and is no longer current"
             else:
-                mark_note = f"Mark unavailable, no ingested chain for {exp_str}"
+                mark_note = f"Mark unavailable: no options data for the {exp_str} expiration"
         else:
-            mark_note = f"Mark unavailable, no database session"
+            mark_note = "Mark unavailable"
 
         side = chain.get("calls") if thesis.option_type == "call" else chain.get("puts", [])
         c1 = next((c for c in side if c["strike"] == strike1), None) if side else None
@@ -299,6 +312,9 @@ async def _compute_option_mark(
         is_expired=is_expired,
         mark_note=mark_note,
         as_of=as_of,
+        chain_date=chain_date,
+        options_as_of=options_as_of,
+        price_as_of=price_as_of,
     )
 
 
@@ -512,6 +528,9 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "vol_regime": vol_regime,
         "rv_raw": rv_raw,
         "chain_last_trade": chain_last_trade,
+        "price_as_of": (
+            datetime.fromtimestamp(q.traded_on_ts, tz=timezone.utc).isoformat() if q.traded_on_ts else None
+        ),
         "chain_from_ingested": chain_from_ingested,
         "draft_spot": draft_spot,
     }
@@ -582,10 +601,11 @@ async def _run_draft_generation(
                 detail=(
                     f"Ivy won't draft {sym} on stale options data "
                     f"(as of {chain_last_trade}). "
-                    f"Chains refresh during market hours."
+                    f"Options data is updated once a day."
                 ),
             )
-    options_as_of = chain_last_trade or generated_at
+    options_as_of = chain_last_trade          # a draft is refused above without a fresh chain
+    price_as_of = data.get("price_as_of")     # the quote's own last-trade time
 
     # ── Pre-LLM guard: expiration must be ≥ earnings + 14 days ────────────
     if earnings_str and chosen_exp:
@@ -682,7 +702,7 @@ async def _run_draft_generation(
         "direction":                 direction,
         "aggressiveness":            aggressiveness,
         "current_price":             round(current_price, 2),
-        "price_as_of":               options_as_of,
+        "price_as_of":               price_as_of,
         "atm_strike":                atm_strike,
         "earnings_date":             earnings_str,
         "expiration_used":           chosen_exp,
@@ -795,7 +815,7 @@ CRITICAL RULES (violating any is an error):
 
 ═══════════════════ INJECTED FACT BLOCK ═══════════════════
 SYMBOL / DIRECTION: {sym} / {direction}
-PRICE (as of {options_as_of}): ${current_price:.2f}
+PRICE (last trade {price_as_of or "time unknown"}): ${current_price:.2f}
 ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
 NEXT EARNINGS DATE: {earnings_str or "(unknown)"}
 EXPIRATION USED:    {chosen_exp or "(none)"} ({_n(days_to_exp, "d")} days out)

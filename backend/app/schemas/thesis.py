@@ -80,6 +80,10 @@ class ThesisRead(BaseModel):
     is_due: bool = False                 # target_date <= today
 
 
+# Every value _compute_option_mark can return; the frontend labels each one (tested).
+MARK_BASES = ("ingested_chain", "settled", "intrinsic", "not_found", "no_option_leg")
+
+
 class ThesisMarkRead(BaseModel):
     """Live mark-to-market for the option leg on a thesis."""
     thesis_id: uuid.UUID
@@ -93,11 +97,14 @@ class ThesisMarkRead(BaseModel):
     entry_premium2: float | None
     contracts: int
     pnl_dollars: float | None           # total P&L in dollars
-    pnl_pct: float | None               # as fraction of initial debit (0.28 = +28%)
-    mark_basis: str                     # "live_chain" | "intrinsic" | "not_found" | "no_option_leg"
+    pnl_pct: float | None               # PERCENT of the initial debit (28.0 = +28%)
+    mark_basis: str                     # one of MARK_BASES
     is_expired: bool
     mark_note: str | None               # human-readable context (expiry, error, etc.)
-    as_of: str                          # ISO UTC timestamp
+    as_of: str                          # ISO UTC timestamp of when this mark was computed. Never prose.
+    chain_date: str | None = None       # "YYYY-MM-DD" chain_last_trade of the chain the option mids came from
+    options_as_of: str | None = None    # "YYYY-MM-DD" the option values refer to: chain_date, or the expiration date once settled
+    price_as_of: str | None = None      # ISO UTC last-trade time of the stock price, or the settlement date; None when unknown
 
 
 class ThesisStockMarkRead(BaseModel):

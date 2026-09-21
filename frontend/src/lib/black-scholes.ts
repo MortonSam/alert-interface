@@ -5,13 +5,30 @@ export const BS_R = 0.045;          // risk-free rate (~4.5%; barely moves resul
 export const BS_IV_DEFAULT = 0.30;  // fallback IV when per-strike IV is unavailable
 export const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000;
 
+/** Where a leg's sigma came from. The simulator's label states it. */
+export type IVSource = "strike" | "atm" | "default";
+
+export const IV_SOURCE_LABELS: Record<IVSource, string> = {
+  strike: "this strike's IV",
+  atm: "at-the-money IV",
+  default: "30% default, no IV available",
+};
+
 export interface Leg {
   kind: "call" | "put";
   K: number;
   mid: number;      // entry premium per share
   sigma: number;    // implied volatility (0–1 decimal) used for pre-expiry BS pricing
+  ivSource: IVSource;
   dir: 1 | -1;     // 1 = long, -1 = short
   label: string;
+}
+
+/** "Long $150 call: 31.2% (this strike's IV) · Short $155 call: 30.1% (at-the-money IV)" */
+export function ivDisclosure(legs: Leg[]): string {
+  return legs
+    .map((l) => `${legs.length > 1 ? `${l.label}: ` : ""}${(l.sigma * 100).toFixed(1)}% (${IV_SOURCE_LABELS[l.ivSource]})`)
+    .join(" · ");
 }
 
 /** MS from epoch for a "YYYY-MM-DD" string (midnight local). */

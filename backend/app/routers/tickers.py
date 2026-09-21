@@ -872,7 +872,11 @@ async def get_options_chain(
 
 
 @router.get("/strategy-data/{symbol}", response_model=StrategyDataRead)
-async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> StrategyDataRead:
+async def get_strategy_data(
+    symbol: str,
+    expiration: str | None = Query(None, description="YYYY-MM-DD: use this expiration's chain instead of the earnings-relevant one"),
+    db: AsyncSession = Depends(get_db),
+) -> StrategyDataRead:
     """Strike-level call/put mid-prices for the earnings-relevant expiration.
     Only returns contracts that pass all quality filters (no wide spread, no_market, etc.)
     so the frontend always works with real, trustworthy premiums.
@@ -914,7 +918,11 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
 
     # Pick expiration from ingested chains
     min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
-    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
+    if expiration:
+        # A caller pricing an existing position needs that position's own chain.
+        chosen_exp = expiration if expiration in await chain_store.get_ingested_expirations(db, sym) else None
+    else:
+        chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
 
     if not chosen_exp:
         return StrategyDataRead(
@@ -993,6 +1001,7 @@ async def get_strategy_data(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         ))
 
     return StrategyDataRead(
+        chain_date=chain_last_trade,
         symbol=sym, current_price=current_price, expiration=chosen_exp,
         earnings_date=earnings_str,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,

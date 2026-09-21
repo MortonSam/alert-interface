@@ -67,6 +67,7 @@ class QuoteState:
     state: str                # "ok" | "stale" | "no_data"
     reason: str | None        # plain language, safe to show a visitor
     traded_on: date | None
+    traded_on_ts: int | None = None   # the quote's own last-trade time, Unix UTC
 
 
 def assess_quote(quote_price: float | None, timestamp: int | None, today: date | None = None) -> QuoteState:
@@ -78,5 +79,6 @@ def assess_quote(quote_price: float | None, timestamp: int | None, today: date |
     traded = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
     missed = sessions_after(traded, today or date.today())
     if missed > MAX_STALE_SESSIONS:
-        return QuoteState(None, "stale", f"The latest price is from {traded.isoformat()} and is no longer current", traded)
-    return QuoteState(float(quote_price), "ok", None, traded)
+        return QuoteState(None, "stale", f"The latest price is from {traded.isoformat()} and is no longer current",
+                          traded, int(timestamp))
+    return QuoteState(float(quote_price), "ok", None, traded, int(timestamp))
