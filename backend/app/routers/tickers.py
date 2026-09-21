@@ -1900,6 +1900,16 @@ async def get_put_call(
         )
 
     ratio_val = float(row.ratio) if row.ratio is not None else None
+
+    # Determine reason when ratio is absent
+    reason: str | None = None
+    if ratio_val is None:
+        total = (row.put_total or 0) + (row.call_total or 0)
+        if total < 50:
+            reason = "too few contracts"
+        elif (row.call_total or 0) == 0:
+            reason = "no call volume"
+
     lv = put_call_label(ratio_val)
 
     return PutCallRead(
@@ -1911,6 +1921,7 @@ async def get_put_call(
         call_total=row.call_total,
         expiration_used=row.expiration_used,
         snapshot_date=row.snapshot_date.isoformat(),
+        reason=reason,
     )
 
 
