@@ -56,6 +56,10 @@ LOOKBACK_YEARS = 5
 MIN_AGE_DAYS = 8
 # Never insert an earnings row when the ticker already has one this close.
 DUPLICATE_GUARD_DAYS = 10
+# Must match the step label in refresh.py so /health shows the refusals on that step.
+SEEDER_STEP_LABEL = "Historical reactions (--all)"
+# Each refused insert this run: {"symbol", "refused_date", "existing_date"}
+GUARD_REFUSALS: list[dict] = []
 
 # Bump when reaction computation logic changes, so history stays comparable.
 COMPUTATION_VERSION = 3  # v3: timing-aware windows (bmo/amc)
@@ -390,6 +394,11 @@ async def upsert_reaction(
             ).limit(1)
         )).scalar_one_or_none()
         if neighbor is not None:
+            GUARD_REFUSALS.append({
+                "symbol": ticker.symbol,
+                "refused_date": event_date.isoformat(),
+                "existing_date": neighbor.isoformat(),
+            })
             print(
                 f"  ⚠ {ticker.symbol}: not inserting earnings row {event_date}, "
                 f"existing row {neighbor} is within {DUPLICATE_GUARD_DAYS} days",
@@ -429,6 +438,22 @@ async def upsert_reaction(
     )
     await session.execute(stmt)
     return row is None
+
+
+async def record_guard_refusals() -> None:
+    """Write this run's duplicate-guard refusals into step_outcomes for /health."""
+    from app.services.system_metadata_service import get_value, set_value
+
+    async with AsyncSessionLocal() as session:
+        raw = await get_value(session, "step_outcomes")
+        outcomes = json.loads(raw) if raw else {}
+        entry = outcomes.get(SEEDER_STEP_LABEL, {})
+        entry["duplicate_guard_refusals"] = len(GUARD_REFUSALS)
+        entry["duplicate_guard_refused"] = GUARD_REFUSALS[:50]
+        outcomes[SEEDER_STEP_LABEL] = entry
+        await set_value(session, "step_outcomes", json.dumps(outcomes))
+        await session.commit()
+    print(f"  duplicate guard: {len(GUARD_REFUSALS)} insert(s) refused", flush=True)
 
 
 # ── Failed-ticker cache ───────────────────────────────────────────────────────
@@ -884,7 +909,9 @@ async def main() -> int:
         return await shadow_seed(symbols)
 
     if args.all_tickers or args.retry_only:
-        return await main_bulk(retry_only=args.retry_only, limit=args.limit, force=args.force)
+        rc = await main_bulk(retry_only=args.retry_only, limit=args.limit, force=args.force)
+        await record_guard_refusals()
+        return rc
 
     # One-off mode: positional TICKER args
     symbols = [s.upper() for s in args.tickers]
