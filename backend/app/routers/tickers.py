@@ -29,7 +29,12 @@ from app.models.put_call_snapshot import PutCallSnapshot
 from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regime_label, discover_rv_tier
 from app.schemas.options import LabelRule as OptionsLabelRule
 from app.services import news_cache, quote_cache
-from app.services.options_read_gate import cache_key as options_read_cache_key, check_chain, check_generation_inputs
+from app.services.options_read_gate import (
+    cache_key as options_read_cache_key,
+    check_chain,
+    check_generation_inputs,
+    load_cached_read,
+)
 from app.services.price_freshness import assess_history, assess_quote
 
 
@@ -1236,6 +1241,13 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     return OptionsBundleRead(expected_move=em, strategy_data=sd, chain=chain_resp)
 
 
+async def _stored_options_read(db: AsyncSession, sym: str) -> dict | None:
+    chain_date = await chain_store.get_latest_chain_date(db, sym)
+    return await load_cached_read(
+        lambda key: _get_meta(db, key), sym, chain_date, chain_store.is_fresh(chain_date),
+    )
+
+
 @router.get("/options-read/{symbol}", response_model=OptionsReadRead)
 async def get_options_read(
     symbol: str,
@@ -1598,6 +1610,13 @@ async def get_explain(
             cached=False, as_of=as_of,
         )
 
+    def unavailable() -> ExplainRead:
+        """The metric's own value is not available, so there is nothing to explain."""
+        return ExplainRead(
+            symbol=sym, metric=metric, content="", facts={}, model_used="none",
+            generated_at=as_of, cached=False, as_of=as_of,
+        )
+
     # ── Gather facts for this metric ────────────────────────────────────────
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     ticker_name = (ticker_row.name if ticker_row else None) or sym
@@ -1613,18 +1632,12 @@ async def get_explain(
 
     if metric == "iv_rv_spread":
         metric_label = "IV-RV spread"
-        # Need options-read cache for the spread value, plus RV context
-        or_key = f"options_read:{sym}:{today.isoformat()}"
-        or_raw = await _get_meta(db, or_key)
-        spread_pp: float | None = None
-        atm_iv_str = "(unavailable)"
-        if or_raw:
-            try:
-                or_data = json.loads(or_raw)
-                spread_pp = or_data.get("iv_rv_spread_pp")
-                atm_iv_str = or_data.get("facts", {}).get("atm_iv", "(unavailable)")
-            except Exception:
-                pass
+        # Spread and IV come from the stored Ivy's Read for the current, fresh chain
+        or_data = await _stored_options_read(db, sym)
+        spread_pp: float | None = or_data.get("iv_rv_spread_pp") if or_data else None
+        atm_iv_str = (or_data or {}).get("facts", {}).get("atm_iv", "(unavailable)")
+        if spread_pp is None:
+            return unavailable()
 
         rv_20d = float(rv_snapshot.rv_20d) if rv_snapshot and rv_snapshot.rv_20d is not None else None
         rv_rank_val = float(rv_snapshot.rv_rank) if rv_snapshot and rv_snapshot.rv_rank is not None else None
@@ -1662,23 +1675,19 @@ async def get_explain(
 
     elif metric == "expected_move":
         metric_label = "expected move"
-        # Read from options bundle cache
-        bundle_key = f"options_read:{sym}:{today.isoformat()}"
-        bundle_raw = await _get_meta(db, bundle_key)
-        if bundle_raw:
-            try:
-                bd = json.loads(bundle_raw)
-                bf = bd.get("facts", {})
-                facts.update({
-                    "expected_move_pct": bf.get("expected_move_pct", "(unavailable)"),
-                    "implied_range": bf.get("implied_range", "(unavailable)"),
-                    "expiration_date": bf.get("expiration_date", "(unavailable)"),
-                    "atm_strike": bf.get("atm_strike", "(unavailable)"),
-                    "straddle_cost": bf.get("expected_move_dollars", "(unavailable)"),
-                    "next_earnings_date": bf.get("next_earnings_date", "(unavailable)"),
-                })
-            except Exception:
-                pass
+        # Read from the stored Ivy's Read for the current, fresh chain
+        bd = await _stored_options_read(db, sym)
+        if not bd or bd.get("facts", {}).get("expected_move_pct", "(unavailable)") == "(unavailable)":
+            return unavailable()
+        bf = bd["facts"]
+        facts.update({
+            "expected_move_pct": bf.get("expected_move_pct", "(unavailable)"),
+            "implied_range": bf.get("implied_range", "(unavailable)"),
+            "expiration_date": bf.get("expiration_date", "(unavailable)"),
+            "atm_strike": bf.get("atm_strike", "(unavailable)"),
+            "straddle_cost": bf.get("expected_move_dollars", "(unavailable)"),
+            "next_earnings_date": bf.get("next_earnings_date", "(unavailable)"),
+        })
         # Supplement with RV context
         rv_20d = float(rv_snapshot.rv_20d) if rv_snapshot and rv_snapshot.rv_20d is not None else None
         facts.setdefault("realized_vol_20d", _fpct(rv_20d))

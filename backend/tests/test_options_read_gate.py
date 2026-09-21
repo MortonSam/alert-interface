@@ -63,3 +63,49 @@ def test_reasons_are_plain_language():
     ]
     for r in reasons:
         assert r and not any(tok in r for tok in ("status", "snapshot", "'", "_", "None", "sessions"))
+
+
+# ── The stored read has one key, used by its writer and by every reader ──────
+
+import asyncio
+import json
+import re
+from pathlib import Path
+
+from app.services.options_read_gate import cache_key, load_cached_read
+
+
+def _store(contents: dict):
+    async def get_meta(key: str):
+        return contents.get(key)
+    return get_meta
+
+
+def test_reader_finds_what_the_writer_stored():
+    written = {cache_key("AAPL", "2026-09-18"): json.dumps({"iv_rv_spread_pp": 3.2, "facts": {"atm_iv": "24.6%"}})}
+    got = asyncio.run(load_cached_read(_store(written), "AAPL", "2026-09-18", True))
+    assert got["iv_rv_spread_pp"] == 3.2 and got["facts"]["atm_iv"] == "24.6%"
+
+
+def test_reader_does_not_look_under_the_old_per_day_key():
+    # /explain used to read options_read:{sym}:{today}, which nothing ever wrote.
+    old_style = {"options_read:AAPL:2026-09-21": json.dumps({"iv_rv_spread_pp": 9.9})}
+    assert asyncio.run(load_cached_read(_store(old_style), "AAPL", "2026-09-18", True)) is None
+
+
+def test_reader_applies_the_chain_freshness_gate():
+    written = {cache_key("AAPL", "2026-08-14"): json.dumps({"iv_rv_spread_pp": 3.2})}
+    assert asyncio.run(load_cached_read(_store(written), "AAPL", "2026-08-14", False)) is None
+    assert asyncio.run(load_cached_read(_store(written), "AAPL", None, False)) is None
+
+
+def test_corrupt_cache_is_absent_not_an_error():
+    assert asyncio.run(load_cached_read(_store({cache_key("X", "2026-09-18"): "{not json"}), "X", "2026-09-18", True)) is None
+
+
+def test_router_never_spells_the_key_by_hand():
+    """Fails if any endpoint reads or writes an options_read key without the shared function."""
+    src = (Path(__file__).resolve().parents[1] / "app" / "routers" / "tickers.py").read_text()
+    assert not re.search(r'f?"options_read:', src), "options_read key built by hand in tickers.py"
+    assert src.count("options_read_cache_key(") >= 1      # the writer
+    assert src.count("_stored_options_read(db, sym)") >= 2  # both /explain readers
