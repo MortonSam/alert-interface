@@ -679,17 +679,29 @@ async def run_research_note_background(
             )
             await db.commit()
         except Exception as exc:
-            print(
-                f"Verification failed for {symbol}: {exc!r} — marking complete without verification",
-                flush=True,
-            )
+            print(f"Verification failed for {symbol}: {exc!r} — note withheld from visitors", flush=True)
             now = datetime.now(timezone.utc)
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
-                .values(status="complete", updated_at=now)
+                .values(status=STATUS_VERIFICATION_FAILED, error=f"verification failed: {exc}", updated_at=now)
             )
             await db.commit()
+
+
+STATUS_VERIFICATION_FAILED = "verification_failed"
+
+
+# ── Who may read a note ───────────────────────────────────────────────────────
+
+def is_verified(note: ResearchNote) -> bool:
+    """True only when the second-model check actually ran and its result is stored."""
+    return note.status == "complete" and note.verification is not None
+
+
+def verification_failed(note: ResearchNote) -> bool:
+    """The check errored, or the note was marked complete without one (older rows)."""
+    return note.status == STATUS_VERIFICATION_FAILED or (note.status == "complete" and note.verification is None)
 
 
 # ── Re-verify existing note ───────────────────────────────────────────────────
@@ -723,6 +735,8 @@ async def verify_existing_note(
     note.verification       = verification
     note.verified_at        = now
     note.verification_model = verification_model
+    note.status             = "complete"   # a successful re-check releases a note whose first check failed
+    note.error              = None
     note.updated_at         = now
     await db.commit()
     await db.refresh(note)

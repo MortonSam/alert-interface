@@ -302,8 +302,9 @@ export interface ResearchNote {
   verification: VerificationResult | null;
   verified_at: string | null;
   verification_model: string | null;
-  status: "generating" | "verifying" | "complete" | "failed";
+  status: "generating" | "verifying" | "complete" | "failed" | "verification_failed";
   error: string | null;
+  verification_failed?: boolean;   // only ever true for admins; visitors get a 404
   created_at: string;
   updated_at: string;
 }

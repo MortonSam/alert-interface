@@ -48,6 +48,7 @@ class ResearchNoteRead(BaseModel):
     error: str | None = None
     created_at: datetime
     updated_at: datetime
+    verification_failed: bool = False   # admins only ever see True here; visitors get a 404 instead
 
 
 class ResearchNoteGenerateRequest(BaseModel):

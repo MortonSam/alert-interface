@@ -2848,8 +2848,14 @@ export default function TickerPage() {
             </div>
           )}
 
-          {noteStatus === "done" && note && note.status === "complete" && (
+          {noteStatus === "done" && note && (note.status === "complete" || note.status === "verification_failed") && (
             <div>
+              {note.verification_failed && (
+                <Callout severity="caution" banner>
+                  <strong>Verification failed.</strong>{" "}
+                  The second-model check did not complete for this note, so its claims are unchecked. Visitors cannot see it. Use Verify or Regenerate.
+                </Callout>
+              )}
               {note.source_filings.length === 0 && (
                 <Callout severity="caution" banner>
                   <strong>Generated without SEC filing.</strong>{" "}

@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_admin
+from app.auth import is_admin, require_admin
 from app.database import get_db
 from app.models.research_note import ResearchNote
 from app.schemas.research_note import (
@@ -15,8 +15,10 @@ from app.schemas.research_note import (
 )
 from app.services.research_note_service import (
     get_research_note,
+    is_verified,
     run_research_note_background,
     start_research_note_generation,
+    verification_failed,
     verify_existing_note,
 )
 
@@ -46,18 +48,38 @@ async def verify(
     return await verify_existing_note(db, payload.ticker_id, payload.symbol)
 
 
+def note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
+    """What this reader may see of a note.
+
+    Visitors only ever get the text of a note whose verification completed. A
+    note whose verification failed does not exist for them (404). While a note
+    is generating or being verified they get its status with the text withheld.
+    Admins get everything, with verification_failed set so the page can say so.
+    """
+    failed = verification_failed(note)
+    read = ResearchNoteRead.model_validate(note)
+    if admin:
+        return read.model_copy(update={"verification_failed": failed})
+    if failed:
+        raise HTTPException(status_code=404, detail="No research note found for this ticker")
+    if not is_verified(note):
+        return read.model_copy(update={"content": "", "structured_content": None, "verification": None, "error": None})
+    return read
+
+
 @router.get("", response_model=ResearchNoteRead)
 async def get_note(
     symbol: str | None = Query(None, description="Ticker symbol, e.g. AAPL"),
     ticker_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-) -> ResearchNote:
+    admin: bool = Depends(is_admin),
+) -> ResearchNoteRead:
     if symbol is None and ticker_id is None:
         raise HTTPException(status_code=422, detail="Either symbol or ticker_id is required")
     note = await get_research_note(db, ticker_id, symbol)
     if note is None:
         raise HTTPException(status_code=404, detail="No research note found for this ticker")
-    return note
+    return note_for_reader(note, admin)
 
 
 class StalenessRead(BaseModel):
