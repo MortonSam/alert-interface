@@ -1552,42 +1552,38 @@ async def check_options_read_coverage(session) -> CheckResult:
 # ── FOMC pre-listing guard ────────────────────────────────────────────────────
 
 async def check_fomc_pre_listing(session) -> CheckResult:
-    """ERROR if any FOMC reaction has non-null pcts before the ticker's first earnings."""
-    rows = (await session.execute(text("""
-        WITH first_earnings AS (
-            SELECT ticker_id, MIN(event_date) AS first_earn
-            FROM historical_reactions
-            WHERE event_type = 'earnings'
-            GROUP BY ticker_id
-        )
-        SELECT t.symbol, hr.event_date, fe.first_earn,
-               hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d
-        FROM historical_reactions hr
-        JOIN tickers t ON t.id = hr.ticker_id
-        JOIN first_earnings fe ON fe.ticker_id = hr.ticker_id
-        WHERE hr.event_type = 'fomc'
-          AND hr.event_date < fe.first_earn
-          AND (hr.pct_change_1d IS NOT NULL
-               OR hr.pct_change_3d IS NOT NULL
-               OR hr.pct_change_5d IS NOT NULL)
-        ORDER BY t.symbol, hr.event_date
-    """))).all()
+    """ERROR if any FOMC reaction before a LISTING_DATE_OVERRIDES date has a non-null pct."""
+    from app.constants import LISTING_DATE_OVERRIDES
 
-    if not rows:
+    offenders = []
+    for symbol, listed in sorted(LISTING_DATE_OVERRIDES.items()):
+        rows = (await session.execute(text("""
+            SELECT hr.event_date, hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d
+            FROM historical_reactions hr
+            JOIN tickers t ON t.id = hr.ticker_id
+            WHERE t.symbol = :symbol
+              AND hr.event_type = 'fomc'
+              AND hr.event_date < :listed
+              AND (hr.pct_change_1d IS NOT NULL
+                   OR hr.pct_change_3d IS NOT NULL
+                   OR hr.pct_change_5d IS NOT NULL)
+            ORDER BY hr.event_date
+        """), {"symbol": symbol, "listed": listed})).all()
+        offenders.extend(
+            f"{symbol}  fomc={r.event_date}  listed={listed}  "
+            f"1d={r.pct_change_1d}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
+            for r in rows
+        )
+
+    if not offenders:
         return CheckResult(
             "fomc_pre_listing", PASS,
-            "No FOMC reactions with pct values before first earnings",
+            f"No FOMC pct values before listing date ({', '.join(sorted(LISTING_DATE_OVERRIDES))})",
         )
-
-    details = [
-        f"{r.symbol}  fomc={r.event_date}  first_earn={r.first_earn}  "
-        f"1d={r.pct_change_1d}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
-        for r in rows[:30]
-    ]
     return CheckResult(
         "fomc_pre_listing", ERROR,
-        f"{len(rows)} FOMC reaction(s) with pct values before ticker's first earnings (pre-listing data)",
-        details,
+        f"{len(offenders)} FOMC reaction(s) with pct values before the ticker's listing date",
+        offenders,
     )
 
 
