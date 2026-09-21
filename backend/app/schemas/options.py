@@ -97,6 +97,7 @@ class RealizedVolRead(BaseModel):
     atm_iv_as_of: str | None = None          # date of the IVHistory row used
     iv_rv_spread_pp: float | None = None     # IV minus RV in percentage points (same rows as atm_iv + current_rv)
     data_error: bool = False                 # True if latest rv_snapshot has status='data_error'
+    reason: str | None = None                # why current_rv is null
 
 
 # ── AI-generated options setup read ───────────────────────────────────────────

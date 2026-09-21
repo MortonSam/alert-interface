@@ -556,6 +556,89 @@ async def check_frozen_price_history(session) -> CheckResult:
     )
 
 
+async def check_price_history_stale(session) -> CheckResult:
+    """ERROR when an active ticker's last price bar is more than 3 sessions old.
+
+    WARN when the last bar's close is more than 25% away from the stored quote
+    (latest iv_history.current_price): the price series is probably another
+    instrument. Reads rv_snapshots.last_bar_date/last_bar_close, written nightly.
+    """
+    from app.services.price_freshness import MAX_QUOTE_DIVERGENCE, MAX_STALE_SESSIONS, quote_divergence
+    from app.services.trading_calendar import sessions_after
+
+    rows = (await session.execute(text("""
+        WITH latest AS (
+            SELECT DISTINCT ON (rs.symbol) rs.symbol, rs.as_of_date, rs.last_bar_date, rs.last_bar_close, rs.status
+            FROM rv_snapshots rs
+            JOIN tickers t ON t.symbol = rs.symbol AND t.is_active = true
+            ORDER BY rs.symbol, rs.as_of_date DESC
+        ),
+        quote AS (
+            SELECT DISTINCT ON (symbol) symbol, date AS quote_date, current_price
+            FROM iv_history
+            WHERE current_price IS NOT NULL AND current_price > 0
+            ORDER BY symbol, date DESC
+        )
+        SELECT l.*, q.quote_date, q.current_price
+        FROM latest l LEFT JOIN quote q ON q.symbol = l.symbol
+        ORDER BY l.symbol
+    """))).all()
+
+    if not rows:
+        return CheckResult("price_history_stale", WARN, "No rv_snapshots rows for active tickers")
+
+    unmeasured = [r.symbol for r in rows if r.last_bar_date is None and r.status == "ok"]
+    stale: list[str] = []
+    diverged: list[str] = []
+    no_recent_quote = 0
+    for r in rows:
+        if r.last_bar_date is None:
+            continue
+        missed = sessions_after(r.last_bar_date, r.as_of_date)
+        if missed > MAX_STALE_SESSIONS:
+            stale.append(f"{r.symbol}  last bar {r.last_bar_date} is {missed} sessions before snapshot {r.as_of_date}")
+            continue
+        # Compare like with like: only a quote stored within 3 sessions of the bar.
+        if r.quote_date is None or max(
+            sessions_after(r.quote_date, r.last_bar_date), sessions_after(r.last_bar_date, r.quote_date)
+        ) > MAX_STALE_SESSIONS:
+            no_recent_quote += 1
+            continue
+        div = quote_divergence(
+            float(r.last_bar_close) if r.last_bar_close is not None else None,
+            float(r.current_price) if r.current_price is not None else None,
+        )
+        if div is not None and div > MAX_QUOTE_DIVERGENCE:
+            diverged.append(
+                f"{r.symbol}  last bar close {float(r.last_bar_close):.2f} ({r.last_bar_date}) vs "
+                f"stored quote {float(r.current_price):.2f} ({r.quote_date}): {div * 100:.0f}% apart"
+            )
+
+    if stale:
+        return CheckResult(
+            "price_history_stale", ERROR,
+            f"{len(stale)} active ticker(s) with a last price bar more than {MAX_STALE_SESSIONS} sessions old"
+            + (f"; {len(diverged)} more diverge from the stored quote" if diverged else "")
+            + (f"; {no_recent_quote} not compared (no stored quote near the last bar)" if no_recent_quote else ""),
+            stale + [f"[diverged] {d}" for d in diverged],
+        )
+    if diverged:
+        return CheckResult(
+            "price_history_stale", WARN,
+            f"{len(diverged)} active ticker(s) whose last bar close is more than "
+            f"{int(MAX_QUOTE_DIVERGENCE * 100)}% from the stored quote",
+            diverged,
+        )
+    note = f" ({len(unmeasured)} ok snapshots predate last_bar_date)" if unmeasured else ""
+    if no_recent_quote:
+        note += f" ({no_recent_quote} had no stored quote near the last bar, so closes were not compared)"
+    return CheckResult(
+        "price_history_stale", PASS,
+        f"All {len(rows) - len(unmeasured)} measured active tickers have a price bar within "
+        f"{MAX_STALE_SESSIONS} sessions and within {int(MAX_QUOTE_DIVERGENCE * 100)}% of the stored quote{note}",
+    )
+
+
 async def check_rv_snapshot_stale(session) -> CheckResult:
     """ERROR if the latest rv_snapshots date is more than 3 calendar days old."""
     latest_date = await session.scalar(select(func.max(RVSnapshot.as_of_date)))
@@ -1808,6 +1891,7 @@ CHECKS = [
     check_ticker_market_cap,
     check_ticker_duplicate_symbols,
     check_frozen_price_history,
+    check_price_history_stale,
     check_duplicate_future_earnings,
     check_inactive_leakage,
     check_quote_sanity,

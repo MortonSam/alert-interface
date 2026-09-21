@@ -52,3 +52,15 @@ def nth_trading_day_after(event_date: date, n: int = 5) -> date:
     """
     ts = pd.Timestamp(event_date) + n * _NYSE_BDAY
     return ts.date()
+
+
+def sessions_after(last: date, ref: date) -> int:
+    """NYSE sessions strictly after `last` and strictly before `ref`.
+
+    Counts completed sessions a price series is missing: `ref` itself is
+    excluded because today's bar may not exist yet.
+    """
+    if ref <= last:
+        return 0
+    days = pd.date_range(pd.Timestamp(last) + _NYSE_BDAY, pd.Timestamp(ref) - pd.Timedelta(days=1), freq=_NYSE_BDAY)
+    return len(days)

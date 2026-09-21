@@ -57,6 +57,9 @@ class TickerChartRead(BaseModel):
     history: list["SparklinePoint"]
     earnings_markers: list[EarningsMarker]
     start_price: float | None = None  # reference for the period's change calc
+    history_state: str = "ok"            # ok | stale | mismatch | no_data; history is [] unless ok
+    history_reason: str | None = None    # why the history is withheld
+    last_bar_date: str | None = None     # date of the newest bar the source returned
 
 
 # ── Quote response (Finnhub) ──────────────────────────────────────────────────
@@ -76,7 +79,12 @@ class TickerQuoteRead(BaseModel):
     open: float | None          # day open
     prev_close: float | None
     timestamp: int | None       # Unix UTC
-    sparkline: list[SparklinePoint]  # daily closes, chronological
+    sparkline: list[SparklinePoint]  # daily closes, chronological; [] unless history_state is ok
+    quote_state: str = "ok"              # ok | stale; price fields are null when stale
+    quote_reason: str | None = None
+    history_state: str = "ok"            # ok | stale | mismatch | no_data
+    history_reason: str | None = None
+    last_bar_date: str | None = None
 
 
 class BatchQuoteRead(BaseModel):

@@ -1073,6 +1073,14 @@ function PriceChart({
     return [mn - pad, mx + pad];
   }, [lineData]);
 
+  if (chartData && chartData.history_state && chartData.history_state !== "ok") {
+    return (
+      <div className="mt-6 rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground">
+        Price chart unavailable. {chartData.history_reason}
+      </div>
+    );
+  }
+
   if (!chartData || lineData.length === 0) {
     return (
       <div className="mt-6 rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground animate-pulse">
@@ -1890,6 +1898,12 @@ export default function TickerPage() {
             </p>
           )}
 
+          {quote && quote.quote_state === "stale" && (
+            <p className="mt-5 text-sm text-muted-foreground">
+              Price unavailable. {quote.quote_reason}
+            </p>
+          )}
+
           {/* Live price header */}
           {quote && quote.price != null && (
             <div className="mt-5 flex items-center gap-5 flex-wrap">
@@ -2453,7 +2467,9 @@ export default function TickerPage() {
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {rvVal != null
                       ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback)</span></>
-                      : <span className="text-muted-foreground">RV unavailable</span>}
+                      : <span className="text-muted-foreground" title={realizedVol?.reason ?? undefined}>
+                          RV unavailable{realizedVol?.reason ? <span className="block text-xs font-sans font-normal">{realizedVol.reason}</span> : null}
+                        </span>}
                   </span>
                 </div>
                 {/* IV-RV spread row — only when consistency check passes */}

@@ -29,6 +29,8 @@ from app.models.put_call_snapshot import PutCallSnapshot
 from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regime_label, discover_rv_tier
 from app.schemas.options import LabelRule as OptionsLabelRule
 from app.services import news_cache, quote_cache
+from app.services.price_freshness import MAX_STALE_SESSIONS, assess_history
+from app.services.trading_calendar import sessions_after
 
 
 def _to_options_lr(lv: object) -> OptionsLabelRule | None:
@@ -276,17 +278,40 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         }
         quote_cache.set(sym, quote_data)
 
+    # The quote is withheld when its last-trade time is more than 3 sessions old,
+    # and the sparkline when the daily history fails the shared freshness test.
+    quote_state, quote_reason = "ok", None
+    ts = quote_data.get("timestamp")
+    if ts:
+        traded = dt_datetime.fromtimestamp(ts, tz=timezone.utc).date()
+        missed = sessions_after(traded, date.today())
+        if missed > MAX_STALE_SESSIONS:
+            quote_state = "stale"
+            quote_reason = f"Last trade reported {traded.isoformat()} ({missed} sessions ago)"
+    live = quote_state == "ok"
+
+    last_bar = date.fromisoformat(candles[-1]["date"][:10]) if candles else None
+    hist = assess_history(
+        last_bar, candles[-1]["close"] if candles else None,
+        quote_data.get("price") if live else None,
+    )
+
     return TickerQuoteRead(
         symbol=sym,
-        price=quote_data.get("price"),
-        change=quote_data.get("change"),
-        change_pct=quote_data.get("change_pct"),
-        high=quote_data.get("high"),
-        low=quote_data.get("low"),
-        open=quote_data.get("open"),
-        prev_close=quote_data.get("prev_close"),
-        timestamp=quote_data.get("timestamp"),
-        sparkline=[SparklinePoint(date=c["date"], close=c["close"]) for c in candles],
+        price=quote_data.get("price") if live else None,
+        change=quote_data.get("change") if live else None,
+        change_pct=quote_data.get("change_pct") if live else None,
+        high=quote_data.get("high") if live else None,
+        low=quote_data.get("low") if live else None,
+        open=quote_data.get("open") if live else None,
+        prev_close=quote_data.get("prev_close") if live else None,
+        timestamp=ts,
+        sparkline=[SparklinePoint(date=c["date"], close=c["close"]) for c in candles] if hist.ok else [],
+        quote_state=quote_state,
+        quote_reason=quote_reason,
+        history_state=hist.state,
+        history_reason=hist.reason,
+        last_bar_date=hist.last_bar_date.isoformat() if hist.last_bar_date else None,
     )
 
 
@@ -583,7 +608,32 @@ async def get_ticker_chart(
                     report_timing=r.report_timing if r.report_timing != "unknown" else None,
                 ))
 
-    return TickerChartRead(symbol=sym, period=period, history=history, earnings_markers=markers, start_price=start_price)
+    # Same freshness test as the quote endpoint. The quote comes from the shared
+    # cache when warm, otherwise from the latest stored iv_history price.
+    cached_quote = quote_cache.get(sym)
+    ref_price = cached_quote.get("price") if cached_quote else None
+    if ref_price is None:
+        ref_price = await db.scalar(
+            select(IVHistory.current_price)
+            .where(IVHistory.symbol == sym, IVHistory.current_price.isnot(None))
+            .order_by(IVHistory.date.desc())
+            .limit(1)
+        )
+    last_bar = date.fromisoformat(history[-1].date[:10]) if history else None
+    hist = assess_history(
+        last_bar, history[-1].close if history else None,
+        float(ref_price) if ref_price is not None else None,
+    )
+
+    return TickerChartRead(
+        symbol=sym, period=period,
+        history=history if hist.ok else [],
+        earnings_markers=markers,
+        start_price=start_price if hist.ok else None,
+        history_state=hist.state,
+        history_reason=hist.reason,
+        last_bar_date=hist.last_bar_date.isoformat() if hist.last_bar_date else None,
+    )
 
 
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
@@ -1778,7 +1828,8 @@ async def get_realized_vol(
     Rank = where today's RV sits in its 1-year [min, max] range (0-100).
     Percentile = % of the trailing 252 trading days where RV was below today's (0-100).
 
-    Reads from precomputed rv_snapshots when fresh; falls back to live yfinance.
+    Served only from a stored rv_snapshots row with status ok; otherwise every
+    value is null and `reason` says why. There is no live fallback.
     """
     from app.services.rv_store import get_latest_rv
 
@@ -1796,80 +1847,61 @@ async def get_realized_vol(
     atm_iv = float(iv_row.atm_iv) if iv_row and iv_row.atm_iv is not None else None
     atm_iv_as_of = iv_row.date.isoformat() if iv_row else None
 
-    # ── data_error: latest rv_snapshot (any status) ───────────────────────────
-    latest_rv_any = (await db.execute(
+    # ── Latest rv_snapshot, any status ────────────────────────────────────────
+    latest = (await db.execute(
         select(RVSnapshot)
         .where(RVSnapshot.symbol == sym)
         .order_by(RVSnapshot.as_of_date.desc())
         .limit(1)
     )).scalar_one_or_none()
-    data_error = latest_rv_any is not None and getattr(latest_rv_any, "status", None) == "data_error"
+    data_error = latest is not None and latest.status == "data_error"
 
-    # ── Try precomputed snapshot first ────────────────────────────────────────
-    row = await get_latest_rv(db, sym)
-    if row is not None:
-        print(f"[rv] {sym}: serving from rv_snapshots ({row.as_of_date})", flush=True)
-        rank_val = float(row.rv_rank) if row.rv_rank is not None else None
-        current_rv_val = float(row.rv_20d) if row.rv_20d is not None else None
-        spread_pp = (
-            round((atm_iv - current_rv_val) * 100, 1)
-            if atm_iv is not None and current_rv_val is not None else None
-        )
+    def absent(reason: str) -> RealizedVolRead:
         return RealizedVolRead(
-            symbol=sym,
-            current_rv=current_rv_val,
-            rv_rank=rank_val,
-            rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None else None,
-            rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None else None,
-            rv_max_1y=float(row.rv_max_1y) if row.rv_max_1y is not None else None,
-            sample_days=row.sample_days,
-            window_days=20,
-            as_of=row.as_of_date.isoformat(),
-            rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
-            atm_iv=atm_iv,
-            atm_iv_as_of=atm_iv_as_of,
-            iv_rv_spread_pp=spread_pp,
-            data_error=data_error,
-        )
-
-    # ── Fallback: live yfinance fetch ─────────────────────────────────────────
-    print(f"[rv] {sym}: no fresh snapshot, falling back to yfinance", flush=True)
-    loop = asyncio.get_event_loop()
-    data: dict = await loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym)
-
-    current_rv: float | None = data.get("current_rv")
-    if current_rv is None:
-        return RealizedVolRead(
-            symbol=sym, current_rv=None,
-            rv_rank=None, rv_percentile=None,
+            symbol=sym, current_rv=None, rv_rank=None, rv_percentile=None,
             rv_min_1y=None, rv_max_1y=None,
-            sample_days=0, window_days=20, as_of=as_of,
-            rv_rank_labeled=None,
-            atm_iv=atm_iv,
-            atm_iv_as_of=atm_iv_as_of,
-            iv_rv_spread_pp=None,
-            data_error=data_error,
+            sample_days=latest.sample_days if latest is not None else 0,
+            window_days=20,
+            as_of=latest.as_of_date.isoformat() if latest is not None else as_of,
+            rv_rank_labeled=None, atm_iv=atm_iv, atm_iv_as_of=atm_iv_as_of,
+            iv_rv_spread_pp=None, data_error=data_error, reason=reason,
         )
 
-    rank_val_yf = data.get("rv_rank")
-    spread_pp_yf = (
-        round((atm_iv - current_rv) * 100, 1)
-        if atm_iv is not None and current_rv is not None else None
+    # RV is served only from a stored snapshot whose status is ok, whose own
+    # date is fresh, and whose underlying price history passes the freshness test.
+    if latest is None:
+        return absent("No realized-volatility snapshot stored for this ticker")
+    if latest.status != "ok":
+        return absent(f"Latest snapshot ({latest.as_of_date.isoformat()}) has status "
+                      f"'{latest.status}' with {latest.sample_days} sample days")
+    row = await get_latest_rv(db, sym)
+    if row is None:
+        return absent(f"Latest snapshot is from {latest.as_of_date.isoformat()}, older than 7 days")
+    if latest.last_bar_date is not None:
+        hist = assess_history(latest.last_bar_date, None, None, today=latest.as_of_date)
+        if not hist.ok:
+            return absent(hist.reason or "Price history is stale")
+
+    rank_val = float(row.rv_rank) if row.rv_rank is not None else None
+    current_rv_val = float(row.rv_20d) if row.rv_20d is not None else None
+    spread_pp = (
+        round((atm_iv - current_rv_val) * 100, 1)
+        if atm_iv is not None and current_rv_val is not None else None
     )
     return RealizedVolRead(
         symbol=sym,
-        current_rv=current_rv,
-        rv_rank=rank_val_yf,
-        rv_percentile=data.get("rv_percentile"),
-        rv_min_1y=data.get("rv_min"),
-        rv_max_1y=data.get("rv_max"),
-        sample_days=data.get("sample_days", 0),
+        current_rv=current_rv_val,
+        rv_rank=rank_val,
+        rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None else None,
+        rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None else None,
+        rv_max_1y=float(row.rv_max_1y) if row.rv_max_1y is not None else None,
+        sample_days=row.sample_days,
         window_days=20,
-        as_of=as_of,
-        rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val_yf)),
+        as_of=row.as_of_date.isoformat(),
+        rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
         atm_iv=atm_iv,
         atm_iv_as_of=atm_iv_as_of,
-        iv_rv_spread_pp=spread_pp_yf,
+        iv_rv_spread_pp=spread_pp,
         data_error=data_error,
     )
 

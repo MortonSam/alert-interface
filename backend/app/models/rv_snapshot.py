@@ -21,6 +21,8 @@ class RVSnapshot(Base):
     rv_max_1y: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
     sample_days: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
+    last_bar_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_bar_close: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

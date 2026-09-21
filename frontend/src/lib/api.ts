@@ -330,6 +330,9 @@ export interface TickerChart {
   history: SparklinePoint[];
   earnings_markers: EarningsMarker[];
   start_price: number | null;  // reference close for the period's change calculation
+  history_state?: "ok" | "stale" | "mismatch" | "no_data";
+  history_reason?: string | null;
+  last_bar_date?: string | null;
 }
 
 export interface BatchQuote {
@@ -363,6 +366,11 @@ export interface TickerQuote {
   prev_close: number | null;
   timestamp: number | null;
   sparkline: SparklinePoint[];
+  quote_state?: "ok" | "stale";
+  quote_reason?: string | null;
+  history_state?: "ok" | "stale" | "mismatch" | "no_data";
+  history_reason?: string | null;
+  last_bar_date?: string | null;
 }
 
 export interface OptionContract {
@@ -570,6 +578,7 @@ export interface RealizedVol {
   atm_iv_as_of: string | null;
   iv_rv_spread_pp: number | null;
   data_error: boolean;
+  reason?: string | null;
 }
 
 export type ThesisDirection = "bullish" | "bearish" | "neutral";

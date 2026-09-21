@@ -44,11 +44,12 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
     stmt = sa.text("""
         INSERT INTO rv_snapshots
             (id, symbol, as_of_date, rv_20d, rv_rank, rv_percentile,
-             rv_min_1y, rv_max_1y, sample_days, status, created_at)
+             rv_min_1y, rv_max_1y, sample_days, status,
+             last_bar_date, last_bar_close, created_at)
         VALUES
             (gen_random_uuid(), :symbol, :as_of_date, :rv_20d, :rv_rank,
              :rv_percentile, :rv_min_1y, :rv_max_1y,
-             :sample_days, :status, now())
+             :sample_days, :status, :last_bar_date, :last_bar_close, now())
         ON CONFLICT (symbol, as_of_date) DO UPDATE SET
             rv_20d        = EXCLUDED.rv_20d,
             rv_rank       = EXCLUDED.rv_rank,
@@ -56,7 +57,9 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
             rv_min_1y     = EXCLUDED.rv_min_1y,
             rv_max_1y     = EXCLUDED.rv_max_1y,
             sample_days   = EXCLUDED.sample_days,
-            status        = EXCLUDED.status
+            status        = EXCLUDED.status,
+            last_bar_date  = EXCLUDED.last_bar_date,
+            last_bar_close = EXCLUDED.last_bar_close
     """)
     async with AsyncSessionLocal() as session:
         await session.execute(stmt, {
@@ -69,6 +72,8 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
             "rv_max_1y": metrics.get("rv_max"),
             "sample_days": metrics["sample_days"],
             "status": metrics["status"],
+            "last_bar_date": metrics.get("last_bar_date"),
+            "last_bar_close": metrics.get("last_bar_close"),
         })
         await session.commit()
 
@@ -179,6 +184,8 @@ async def main(only_symbol: str | None = None) -> int:
             closes = all_closes.get(sym)
             if closes is not None:
                 metrics = compute_rv_metrics(closes)
+                metrics["last_bar_date"] = closes.index[-1].date()
+                metrics["last_bar_close"] = round(float(closes.iloc[-1]), 4)
             else:
                 # Only write fetch_failed if no recent row exists
                 if await _has_recent_row(sym, today):
