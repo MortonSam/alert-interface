@@ -220,6 +220,7 @@ async def check_reactions_3d_equals_5d(session) -> CheckResult:
         select(
             Ticker.symbol,
             HistoricalReaction.event_date,
+            HistoricalReaction.event_type,
             HistoricalReaction.pct_change_3d,
             HistoricalReaction.pct_change_5d,
         )
@@ -236,7 +237,7 @@ async def check_reactions_3d_equals_5d(session) -> CheckResult:
         return CheckResult("reactions_3d_equals_5d", PASS, "No rows where pct_change_3d = pct_change_5d (rollforward bug absent)")
 
     details = [
-        f"{r.symbol}  {r.event_date}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
+        f"{r.symbol}  {r.event_date}  [{r.event_type}]  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
         for r in rows
     ]
     rate = len(rows) / total * 100 if total else 0
@@ -261,6 +262,7 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
         select(
             Ticker.symbol,
             HistoricalReaction.event_date,
+            HistoricalReaction.event_type,
             HistoricalReaction.pct_change_1d,
             HistoricalReaction.pct_change_3d,
         )
@@ -277,7 +279,7 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
         return CheckResult("reactions_1d_equals_3d", PASS, "No rows where pct_change_1d = pct_change_3d")
 
     details = [
-        f"{r.symbol}  {r.event_date}  1d={r.pct_change_1d}  3d={r.pct_change_3d}"
+        f"{r.symbol}  {r.event_date}  [{r.event_type}]  1d={r.pct_change_1d}  3d={r.pct_change_3d}"
         for r in rows
     ]
     rate = len(rows) / total * 100 if total else 0
@@ -1547,6 +1549,48 @@ async def check_options_read_coverage(session) -> CheckResult:
     )
 
 
+# ── FOMC pre-listing guard ────────────────────────────────────────────────────
+
+async def check_fomc_pre_listing(session) -> CheckResult:
+    """ERROR if any FOMC reaction has non-null pcts before the ticker's first earnings."""
+    rows = (await session.execute(text("""
+        WITH first_earnings AS (
+            SELECT ticker_id, MIN(event_date) AS first_earn
+            FROM historical_reactions
+            WHERE event_type = 'earnings'
+            GROUP BY ticker_id
+        )
+        SELECT t.symbol, hr.event_date, fe.first_earn,
+               hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d
+        FROM historical_reactions hr
+        JOIN tickers t ON t.id = hr.ticker_id
+        JOIN first_earnings fe ON fe.ticker_id = hr.ticker_id
+        WHERE hr.event_type = 'fomc'
+          AND hr.event_date < fe.first_earn
+          AND (hr.pct_change_1d IS NOT NULL
+               OR hr.pct_change_3d IS NOT NULL
+               OR hr.pct_change_5d IS NOT NULL)
+        ORDER BY t.symbol, hr.event_date
+    """))).all()
+
+    if not rows:
+        return CheckResult(
+            "fomc_pre_listing", PASS,
+            "No FOMC reactions with pct values before first earnings",
+        )
+
+    details = [
+        f"{r.symbol}  fomc={r.event_date}  first_earn={r.first_earn}  "
+        f"1d={r.pct_change_1d}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
+        for r in rows[:30]
+    ]
+    return CheckResult(
+        "fomc_pre_listing", ERROR,
+        f"{len(rows)} FOMC reaction(s) with pct values before ticker's first earnings (pre-listing data)",
+        details,
+    )
+
+
 # ── Duplicate reaction detection ─────────────────────────────────────────────
 
 async def check_duplicate_earnings_reactions(session) -> CheckResult:
@@ -1768,6 +1812,8 @@ CHECKS = [
     check_options_read_coverage,
     # Duplicate reactions
     check_duplicate_earnings_reactions,
+    # Pre-listing FOMC guard
+    check_fomc_pre_listing,
     # v3 reaction checks
     check_no_mixed_computation_version,
     check_report_timing_unknown_share,

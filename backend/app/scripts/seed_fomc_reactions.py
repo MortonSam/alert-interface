@@ -35,6 +35,7 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.models.historical_reaction import HistoricalReaction
 from app.scripts.seed_historical_reactions import (
     LOOKBACK_YEARS,
     MIN_AGE_DAYS,
@@ -46,6 +47,22 @@ from app.scripts.seed_historical_reactions import (
     _compute,
     _fetch_price_history,
 )
+
+
+async def _first_earnings_dates() -> dict[str, date]:
+    """Return {ticker_id: first_earnings_event_date} for all tickers.
+
+    Used as a pre-listing guard: FOMC reactions before a ticker's first
+    earnings date use price data from a prior entity that traded under
+    the same symbol (e.g. SW before Smurfit WestRock, July 2024).
+    """
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(HistoricalReaction.ticker_id, func.min(HistoricalReaction.event_date))
+            .where(HistoricalReaction.event_type == EventType.EARNINGS)
+            .group_by(HistoricalReaction.ticker_id)
+        )).all()
+    return {str(r[0]): r[1] for r in rows}
 
 
 # ── Historical FOMC decision dates ───────────────────────────────────────────
@@ -234,9 +251,16 @@ async def seed(symbol: str) -> None:
 
     dates_cache = _build_date_cache(hist)
 
+    # Pre-listing guard
+    first_earn_map = await _first_earnings_dates()
+    floor_date = first_earn_map.get(str(ticker.id))
+
     inserted = updated = skipped = 0
     async with AsyncSessionLocal() as session:
         for event_date, event_id in fomc_dates:
+            if floor_date and event_date < floor_date:
+                skipped += 1
+                continue
             data = _compute(hist, dates_cache, event_date)
             if data is None:
                 skipped += 1
@@ -264,11 +288,9 @@ async def _seed_ticker_bulk(
     ticker: Ticker,
     fomc_dates: list[tuple[date, str]],
     loop,
+    floor_date: date | None = None,
 ) -> tuple[int, int, int]:
     """Seed one ticker in bulk mode. Returns (inserted, updated, no_price_data)."""
-    # wait_for abandons the worker thread rather than killing it, which is
-    # acceptable because the executor pool is large and the subprocess dies
-    # at step end anyway.
     hist = await asyncio.wait_for(
         loop.run_in_executor(None, _fetch_price_sync, ticker.symbol),
         timeout=FETCH_TIMEOUT,
@@ -281,6 +303,9 @@ async def _seed_ticker_bulk(
 
     async with AsyncSessionLocal() as session:
         for event_date, event_id in fomc_dates:
+            if floor_date and event_date < floor_date:
+                no_price += 1
+                continue
             data = _compute(hist, dates_cache, event_date)
             if data is None:
                 no_price += 1
@@ -299,12 +324,13 @@ async def _process_ticker_bulk(
     ticker: Ticker,
     fomc_dates: list[tuple[date, str]],
     loop,
+    floor_date: date | None = None,
 ) -> tuple[bool, int, int, int]:
     """Fetch + upsert with retries. Returns (ok, inserted, updated, no_price)."""
     last_exc: Exception | None = None
     for attempt, delay in enumerate(BULK_RETRY_DELAYS, start=1):
         try:
-            ins, upd, nop = await _seed_ticker_bulk(ticker, fomc_dates, loop)
+            ins, upd, nop = await _seed_ticker_bulk(ticker, fomc_dates, loop, floor_date)
             return True, ins, upd, nop
         except Exception as exc:
             last_exc = exc
@@ -355,6 +381,9 @@ async def main_bulk(limit: int | None) -> int:
         print("Nothing to process.")
         return 0
 
+    # 3b. Load first-earnings floor dates for pre-listing guard
+    first_earn_map = await _first_earnings_dates()
+
     # 4. Process in batches
     loop = asyncio.get_event_loop()
     succeeded: list[str] = []
@@ -365,7 +394,10 @@ async def main_bulk(limit: int | None) -> int:
 
     with tqdm(total=len(to_process), unit="ticker", dynamic_ncols=True) as bar:
         for batch_idx, batch in enumerate(batches):
-            tasks = [_process_ticker_bulk(t, fomc_dates, loop) for t in batch]
+            tasks = [
+                _process_ticker_bulk(t, fomc_dates, loop, first_earn_map.get(str(t.id)))
+                for t in batch
+            ]
             results = await asyncio.gather(*tasks)
 
             for ticker, (ok, ins, upd, nop) in zip(batch, results):
