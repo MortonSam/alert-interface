@@ -85,23 +85,25 @@ class EdgarClient:
 
     async def get_all_8k_filings(
         self, cik: str
-    ) -> list[tuple[str, str]]:
-        """Return all 8-K (filing_date, acceptanceDateTime) pairs for a CIK.
+    ) -> list[tuple[str, str, str]]:
+        """Return every 8-K for a CIK as (filing_date, acceptanceDateTime, items).
 
-        Follows filings.files pagination to get the complete history.
-        Returns list of (filing_date_str, acceptance_datetime_str).
+        Follows filings.files pagination to get the complete history. `items`
+        is EDGAR's comma-separated item list, e.g. "2.02,9.01" (earnings
+        releases carry Item 2.02); empty string when EDGAR has none.
         """
         subs = await self.get_submissions(cik)
         filings = subs.get("filings", {})
 
-        def _extract_8ks(recent: dict) -> list[tuple[str, str]]:
+        def _extract_8ks(recent: dict) -> list[tuple[str, str, str]]:
             forms = recent.get("form", [])
             filing_dates = recent.get("filingDate", [])
             acceptance_times = recent.get("acceptanceDateTime", [])
+            items = recent.get("items") or [""] * len(forms)
             results = []
-            for form, fd, at in zip(forms, filing_dates, acceptance_times):
+            for form, fd, at, it in zip(forms, filing_dates, acceptance_times, items):
                 if form == "8-K":
-                    results.append((fd, at))
+                    results.append((fd, at, it or ""))
             return results
 
         # Recent page (~1000 most recent filings)

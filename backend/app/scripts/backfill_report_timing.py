@@ -52,6 +52,12 @@ CIK_OVERRIDES: dict[str, str] = {
 }
 
 
+async def _ciks_for(sym: str, edgar: EdgarClient) -> list[str]:
+    """CIKs whose 8-Ks belong to this ticker."""
+    cik = CIK_OVERRIDES.get(sym) or await edgar.get_cik(sym)
+    return [cik] if cik else []
+
+
 # ── Phase 0: Populate earnings_report_timing rows ────────────────────────────
 
 async def _populate_table(session, ticker_by_sym: dict, symbol_filter: str | None) -> int:
@@ -151,6 +157,54 @@ def _classify_timing(acceptance_str: str, event_date: date) -> str:
         return "unknown"
 
 
+EARNINGS_ITEM = "2.02"          # 8-K item "Results of Operations and Financial Condition"
+ITEM_202_WINDOW_DAYS = 3        # how far from event_date an Item 2.02 filing may sit
+
+
+def _has_earnings_item(items: str) -> bool:
+    return EARNINGS_ITEM in [i.strip() for i in items.split(",")]
+
+
+def _parse_acceptance(at_str: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(at_str.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def select_timing(
+    filings: list[tuple[str, str, str]], event_date: date,
+) -> tuple[str, datetime | None, str]:
+    """Pick the 8-K that dates this earnings report. Returns (timing, acceptance, basis).
+
+    Prefers the Item 2.02 filing nearest event_date (within ITEM_202_WINDOW_DAYS;
+    ties go to the earliest acceptance). Only when no Item 2.02 filing exists
+    does it fall back to any 8-K filed on event_date or the day after.
+    """
+    dated: list[tuple[date, str, str]] = []
+    for fd_str, at_str, items in filings:
+        try:
+            dated.append((date.fromisoformat(fd_str), at_str, items))
+        except (ValueError, TypeError):
+            continue
+
+    earnings = [
+        f for f in dated
+        if _has_earnings_item(f[2]) and abs((f[0] - event_date).days) <= ITEM_202_WINDOW_DAYS
+    ]
+    if earnings:
+        fd, at_str, _ = min(earnings, key=lambda f: (abs((f[0] - event_date).days), f[1]))
+        timing = _classify_timing(at_str, event_date)
+        return timing, _parse_acceptance(at_str) if timing != "unknown" else None, f"item 2.02 filed {fd}"
+
+    for fd, at_str, _ in dated:
+        if fd in (event_date, event_date + timedelta(days=1)):
+            timing = _classify_timing(at_str, event_date)
+            if timing != "unknown":
+                return timing, _parse_acceptance(at_str), f"any 8-K filed {fd} (no item 2.02 nearby)"
+    return "unknown", None, "no usable 8-K"
+
+
 # ── Phase 1: EDGAR backfill ──────────────────────────────────────────────────
 
 async def _phase_edgar(
@@ -189,13 +243,15 @@ async def _phase_edgar(
             if (i + 1) % 50 == 0 or i == 0:
                 print(f"  [{i+1}/{len(rows_by_ticker)}] {sym}...", flush=True)
 
-            cik = CIK_OVERRIDES.get(sym) or await edgar.get_cik(sym)
-            if not cik:
+            ciks = await _ciks_for(sym, edgar)
+            if not ciks:
                 no_cik += len(rows)
                 continue
 
             try:
-                all_8ks = await edgar.get_all_8k_filings(cik)
+                all_8ks = []
+                for cik in ciks:
+                    all_8ks.extend(await edgar.get_all_8k_filings(cik))
             except Exception as exc:
                 if i < 3:
                     print(f"    {sym}: EDGAR error: {exc}")
@@ -204,38 +260,8 @@ async def _phase_edgar(
 
             await asyncio.sleep(0.12)
 
-            # Build lookup: filing_date -> list of acceptance_datetime strings
-            filings_by_date: dict[date, list[str]] = defaultdict(list)
-            for fd_str, at_str in all_8ks:
-                try:
-                    fd = date.fromisoformat(fd_str)
-                    filings_by_date[fd].append(at_str)
-                except (ValueError, TypeError):
-                    continue
-
             for row in rows:
-                # Look for 8-K filed on event_date or event_date+1
-                candidates: list[str] = []
-                candidates.extend(filings_by_date.get(row.event_date, []))
-                candidates.extend(filings_by_date.get(row.event_date + timedelta(days=1), []))
-
-                if not candidates:
-                    no_8k_match += 1
-                    continue
-
-                # Try each candidate; take first definitive classification
-                best_timing = "unknown"
-                best_acceptance = None
-                for at_str in candidates:
-                    timing = _classify_timing(at_str, row.event_date)
-                    if timing != "unknown":
-                        best_timing = timing
-                        try:
-                            best_acceptance = datetime.fromisoformat(at_str.replace("Z", "+00:00"))
-                        except (ValueError, TypeError):
-                            pass
-                        break
-
+                best_timing, best_acceptance, _basis = select_timing(all_8ks, row.event_date)
                 if best_timing == "unknown":
                     no_8k_match += 1
                     continue
@@ -440,11 +466,77 @@ async def _print_coverage(session, symbol_filter: str | None, ticker_by_sym: dic
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+async def _dry_run_reclassify(session, ticker_by_sym: dict, symbols: list[str] | None, detail: set[str]) -> int:
+    """Report what select_timing would give for every earnings row. Writes nothing."""
+    q = (
+        select(HistoricalReaction.ticker_id, HistoricalReaction.event_date, HistoricalReaction.report_timing)
+        .where(HistoricalReaction.event_type == EventType.EARNINGS)
+        .order_by(HistoricalReaction.event_date)
+    )
+    id_to_sym = {t.id: sym for sym, t in ticker_by_sym.items()}
+    by_sym: dict[str, list] = defaultdict(list)
+    for tid, d, timing in (await session.execute(q)).all():
+        sym = id_to_sym.get(tid)
+        if sym and (not symbols or sym in symbols):
+            by_sym[sym].append((d, (timing or "unknown").lower()))
+
+    print(f"DRY RUN: reclassifying {sum(len(v) for v in by_sym.values())} earnings rows "
+          f"across {len(by_sym)} tickers. Nothing is written.", flush=True)
+    counts: dict[str, int] = defaultdict(int)
+    lines: dict[str, list[str]] = defaultdict(list)
+    edgar = EdgarClient()
+    try:
+        for i, sym in enumerate(sorted(by_sym)):
+            if i % 100 == 0:
+                print(f"  [{i}/{len(by_sym)}] {sym}...", flush=True)
+            filings: list[tuple[str, str, str]] = []
+            try:
+                for cik in await _ciks_for(sym, edgar):
+                    filings.extend(await edgar.get_all_8k_filings(cik))
+                    await asyncio.sleep(0.12)
+            except Exception as exc:
+                counts["edgar error (rows)"] += len(by_sym[sym])
+                lines[sym].append(f"  EDGAR error: {exc}")
+                continue
+            for d, old in by_sym[sym]:
+                new, acc, basis = select_timing(filings, d)
+                if old == new:
+                    key = "unchanged"
+                elif old == "unknown":
+                    key = "unknown -> known"
+                elif new == "unknown":
+                    key = "known -> unknown (not applied: backfill only touches unknown rows)"
+                else:
+                    key = f"{old} -> {new}"
+                counts[key] += 1
+                if sym in detail:
+                    acc_s = acc.astimezone(ET).strftime("%Y-%m-%d %H:%M ET") if acc else "-"
+                    lines[sym].append(f"  {d}  {old:<7} -> {new:<7} accepted {acc_s:<20} {basis}"
+                                      + ("" if old == new else "   <-- changes"))
+    finally:
+        await edgar.close()
+
+    print("\n── Transition counts ──")
+    for k in sorted(counts, key=lambda k: -counts[k]):
+        print(f"  {counts[k]:>6}  {k}")
+    for sym in sorted(detail):
+        if sym in lines:
+            print(f"\n── {sym} ──")
+            print("\n".join(lines[sym]))
+    return 0
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill earnings_report_timing")
     parser.add_argument("--edgar-only", action="store_true")
     parser.add_argument("--finnhub-only", action="store_true")
     parser.add_argument("--symbol", type=str, default=None)
+    parser.add_argument("--dry-run-reclassify", action="store_true",
+                        help="report what the 8-K selection gives for every earnings row; writes nothing")
+    parser.add_argument("--symbols", type=str, default=None,
+                        help="comma-separated tickers to limit --dry-run-reclassify to")
+    parser.add_argument("--detail", type=str, default="",
+                        help="comma-separated tickers whose rows are listed in full in the dry run")
     args = parser.parse_args()
 
     async with AsyncSessionLocal() as session:
@@ -458,6 +550,11 @@ async def main() -> int:
         if symbol_filter and symbol_filter not in ticker_by_sym:
             print(f"ERROR: {symbol_filter} not found in active tickers")
             return 1
+
+        if args.dry_run_reclassify:
+            only = [x.strip().upper() for x in args.symbols.split(",")] if args.symbols else None
+            detail = {x.strip().upper() for x in args.detail.split(",") if x.strip()}
+            return await _dry_run_reclassify(session, ticker_by_sym, only, detail)
 
         # Phase 0: Populate the table
         await _populate_table(session, ticker_by_sym, symbol_filter)
