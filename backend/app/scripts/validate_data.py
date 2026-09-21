@@ -1597,9 +1597,7 @@ async def check_duplicate_earnings_reactions(session) -> CheckResult:
     and non-null pcts is the real one; the other (usually timing=unknown, null
     pcts) is a ghost.
 
-    Dedupe rule (not yet enforced): when two earnings reactions for the same
-    ticker are <=45 days apart, keep the one with non-null pct_change_1d; if
-    both non-null, keep the one with known timing; if still tied, keep earlier.
+    Resolved by app.scripts.dedupe_earnings_reactions (identical EPS = one report).
     """
     rows = (await session.execute(text("""
         SELECT t.symbol,

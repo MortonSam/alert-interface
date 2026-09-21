@@ -54,6 +54,8 @@ from app.models.ticker import Ticker
 LOOKBACK_YEARS = 5
 # We need T+5 data, so skip very recent earnings to avoid incomplete windows
 MIN_AGE_DAYS = 8
+# Never insert an earnings row when the ticker already has one this close.
+DUPLICATE_GUARD_DAYS = 10
 
 # Bump when reaction computation logic changes, so history stays comparable.
 COMPUTATION_VERSION = 3  # v3: timing-aware windows (bmo/amc)
@@ -360,8 +362,13 @@ async def upsert_reaction(
     ticker: Ticker,
     event_date: date,
     data: dict,
-) -> bool:
-    """Upsert on (ticker_id, event_date, event_type). Returns True if inserted."""
+) -> bool | None:
+    """Upsert on (ticker_id, event_date, event_type).
+
+    Returns True if inserted, False if updated, None if the insert was refused
+    because the ticker already has an earnings row within
+    DUPLICATE_GUARD_DAYS (yfinance reporting one quarter under two dates).
+    """
     # Check for pre-existence — also used to freeze settled estimates.
     existing = await session.execute(
         select(HistoricalReaction.id, HistoricalReaction.eps_actual).where(
@@ -371,6 +378,24 @@ async def upsert_reaction(
         )
     )
     row = existing.first()
+
+    if row is None:
+        neighbor = (await session.execute(
+            select(HistoricalReaction.event_date).where(
+                HistoricalReaction.ticker_id == ticker.id,
+                HistoricalReaction.event_type == EventType.EARNINGS,
+                HistoricalReaction.event_date != event_date,
+                HistoricalReaction.event_date >= event_date - timedelta(days=DUPLICATE_GUARD_DAYS),
+                HistoricalReaction.event_date <= event_date + timedelta(days=DUPLICATE_GUARD_DAYS),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if neighbor is not None:
+            print(
+                f"  ⚠ {ticker.symbol}: not inserting earnings row {event_date}, "
+                f"existing row {neighbor} is within {DUPLICATE_GUARD_DAYS} days",
+                flush=True,
+            )
+            return None
 
     # Once a quarter has an actual, its estimates and outcome are frozen
     # facts — refreshes only update price reactions and volumes.
@@ -547,7 +572,9 @@ async def seed(symbol: str) -> None:
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
             data["report_timing"] = report_timing
             created = await upsert_reaction(session, ticker, event_date, data)
-            if created:
+            if created is None:
+                skipped += 1
+            elif created:
                 inserted += 1
             else:
                 updated += 1
@@ -620,7 +647,9 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
             data["report_timing"] = report_timing
             created = await upsert_reaction(session, ticker, event_date, data)
-            if created:
+            if created is None:
+                no_price += 1
+            elif created:
                 inserted += 1
             else:
                 updated += 1
