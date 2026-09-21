@@ -557,9 +557,11 @@ async def check_frozen_price_history(session) -> CheckResult:
 
 
 async def check_price_history_stale(session) -> CheckResult:
-    """ERROR when an active ticker's last price bar is more than 3 sessions old.
+    """WARN when an active ticker's last price bar is more than 3 sessions old.
 
-    WARN when the last bar's close is more than 25% away from the stored quote
+    A warning, not an error: the quote, chart and RV reads already render these
+    tickers absent with a reason, so nothing wrong reaches the screen.
+    Also WARN when the last bar's close is more than 25% away from the stored quote
     (latest iv_history.current_price): the price series is probably another
     instrument. Reads rv_snapshots.last_bar_date/last_bar_close, written nightly.
     """
@@ -616,7 +618,7 @@ async def check_price_history_stale(session) -> CheckResult:
 
     if stale:
         return CheckResult(
-            "price_history_stale", ERROR,
+            "price_history_stale", WARN,
             f"{len(stale)} active ticker(s) with a last price bar more than {MAX_STALE_SESSIONS} sessions old"
             + (f"; {len(diverged)} more diverge from the stored quote" if diverged else "")
             + (f"; {no_recent_quote} not compared (no stored quote near the last bar)" if no_recent_quote else ""),

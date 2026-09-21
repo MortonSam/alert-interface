@@ -33,6 +33,7 @@ import sqlalchemy as sa
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
+from app.services.rv_store import get_latest_rv
 from app.services.yfinance_client import YFinanceClient
 
 # Sanity band — reject ATM IV outside this range
@@ -182,12 +183,14 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
             "skipped": "no ingested chain",
         }
 
-    # ── RV + current price from yfinance (price history is reliable) ─────────
-    rv_data, current_price = await asyncio.gather(
-        loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, symbol),
-        loop.run_in_executor(None, _get_current_price, symbol),
+    # ── RV from the stored snapshot (status, age and price-history freshness
+    #    are enforced by rv_store); current price from yfinance ───────────────
+    current_price = await loop.run_in_executor(None, _get_current_price, symbol)
+    async with AsyncSessionLocal() as rv_session:
+        rv_row = await get_latest_rv(rv_session, symbol)
+    realized_vol_20d: float | None = (
+        float(rv_row.rv_20d) if rv_row is not None and rv_row.rv_20d is not None else None
     )
-    realized_vol_20d: float | None = rv_data.get("current_rv")
 
     # ── Compute ATM IV ────────────────────────────────────────────────────────
     atm_iv: float | None = None

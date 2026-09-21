@@ -44,6 +44,7 @@ from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.finnhub_client import FinnhubClient
+from app.services.rv_store import get_latest_rv
 from app.models.system_metadata import SystemMetadata
 from app.services.draft_limiter import check_draft_limit, get_client_ip, record_draft
 from app.services.system_metadata_service import get_value
@@ -444,14 +445,14 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
 
     days_to_exp: int | None = (date.fromisoformat(chosen_exp) - today).days if chosen_exp else None
 
-    # ── 5. RV ─────────────────────────────────────────────────────────────────
-    current_rv: float | None = rv_raw.get("current_rv")
-    rv_series: list[float]   = rv_raw.get("rv_series", [])
-    rv_rank: float | None    = None
-    if rv_series and current_rv is not None:
-        rv_min = min(rv_series); rv_max = max(rv_series)
-        rv_rank = (current_rv - rv_min) / (rv_max - rv_min) * 100 if rv_max > rv_min else 50.0
-        rv_rank = round(max(0.0, min(100.0, rv_rank)), 1)
+    # ── 5. RV: stored snapshot only (status, age and price-history freshness) ──
+    rv_row = await get_latest_rv(db, sym)
+    current_rv: float | None = float(rv_row.rv_20d) if rv_row is not None and rv_row.rv_20d is not None else None
+    rv_rank: float | None = float(rv_row.rv_rank) if rv_row is not None and rv_row.rv_rank is not None else None
+    if rv_row is None:
+        # The same price history feeds 20-day momentum; without a servable
+        # snapshot it is stale or wrong, so momentum is absent too.
+        rv_raw = {}
 
     iv_rv_spread_pp: float | None = (
         round((atm_iv - current_rv) * 100, 1)

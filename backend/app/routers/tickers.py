@@ -1292,21 +1292,14 @@ async def get_options_read(
 
     rv_snapshot_row = await get_latest_rv(db, sym)
 
-    # ── Finnhub quote + live RV (only if no snapshot) ─────────────────────────
+    # ── Finnhub quote. RV comes from the stored snapshot or is absent. ─────────
     finnhub = FinnhubClient()
-    coros: list = [finnhub.get_quote(sym)]
-    if rv_snapshot_row is None:
-        coros.append(loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym))
-
     try:
-        results = await asyncio.gather(*coros)
+        quote = await finnhub.get_quote(sym)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
     finally:
         await finnhub.close()
-
-    quote = results[0]
-    rv_raw: dict = results[1] if len(results) > 1 else {}
 
     current_price: float | None = float(quote.get("c") or 0) or None
 
@@ -1386,13 +1379,6 @@ async def get_options_read(
         rv_min = float(rv_snapshot_row.rv_min_1y) if rv_snapshot_row.rv_min_1y is not None else None
         rv_max = float(rv_snapshot_row.rv_max_1y) if rv_snapshot_row.rv_max_1y is not None else None
         rv_sample_days = rv_snapshot_row.sample_days
-    else:
-        current_rv = rv_raw.get("current_rv")
-        rv_rank = rv_raw.get("rv_rank")
-        rv_percentile = rv_raw.get("rv_percentile")
-        rv_min = rv_raw.get("rv_min")
-        rv_max = rv_raw.get("rv_max")
-        rv_sample_days = rv_raw.get("sample_days", 0)
 
     # IV-RV spread (in percentage points)
     iv_rv_spread_pp: float | None = (
@@ -1831,7 +1817,7 @@ async def get_realized_vol(
     Served only from a stored rv_snapshots row with status ok; otherwise every
     value is null and `reason` says why. There is no live fallback.
     """
-    from app.services.rv_store import get_latest_rv
+    from app.services.rv_store import get_servable_rv
 
     sym = symbol.upper()
     as_of = date.today().isoformat()
@@ -1867,20 +1853,11 @@ async def get_realized_vol(
             iv_rv_spread_pp=None, data_error=data_error, reason=reason,
         )
 
-    # RV is served only from a stored snapshot whose status is ok, whose own
-    # date is fresh, and whose underlying price history passes the freshness test.
-    if latest is None:
-        return absent("No realized-volatility snapshot stored for this ticker")
-    if latest.status != "ok":
-        return absent(f"Latest snapshot ({latest.as_of_date.isoformat()}) has status "
-                      f"'{latest.status}' with {latest.sample_days} sample days")
-    row = await get_latest_rv(db, sym)
+    # RV is served only through rv_store, which applies the status, age and
+    # price-history freshness tests. Otherwise every value is null with a reason.
+    row, reason = await get_servable_rv(db, sym)
     if row is None:
-        return absent(f"Latest snapshot is from {latest.as_of_date.isoformat()}, older than 7 days")
-    if latest.last_bar_date is not None:
-        hist = assess_history(latest.last_bar_date, None, None, today=latest.as_of_date)
-        if not hist.ok:
-            return absent(hist.reason or "Price history is stale")
+        return absent(reason or "Realized volatility unavailable")
 
     rank_val = float(row.rv_rank) if row.rv_rank is not None else None
     current_rv_val = float(row.rv_20d) if row.rv_20d is not None else None

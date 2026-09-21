@@ -65,8 +65,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Analyst reaction stats",         ["python", "-m", "app.scripts.compute_analyst_reactions"]),
     ("Sector peer snapshot",            ["python", "-m", "app.scripts.compute_sector_peers"]),
     ("Magnitude trend snapshot",        ["python", "-m", "app.scripts.compute_magnitude_trends"]),
-    ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
+    # RV ranks first: snapshot_iv reads realized vol from the rv_snapshots row written here.
     ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
+    ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),
     ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
