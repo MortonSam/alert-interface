@@ -2423,7 +2423,7 @@ export default function TickerPage() {
               }
             }
 
-            if (ivVal == null && rvVal == null && rvRk == null && spread == null && pcRatio == null) return null;
+            if (ivVal == null && rvVal == null && rvRk == null && spread == null && pcRatio == null && !putCall) return null;
 
             const rvColor = rvLabeled?.label === "extreme"
               ? "text-primary" : rvLabeled?.label === "elevated"
@@ -2479,23 +2479,27 @@ export default function TickerPage() {
                     </span>
                   </div>
                 )}
-                {pcRatio != null && (
-                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                    <span className="text-sm text-muted-foreground"><ExplainTip term="put/call ratio" metric="put_call" symbol={upperSymbol}>Put/Call ratio</ExplainTip></span>
-                    <span className="font-mono text-sm font-medium tabular-nums">
-                      {pcRatio.toFixed(2)}
-                      {putCall?.label && (
-                        <>
-                          <span className="text-muted-foreground"> {putCall.label.label}</span>
-                          <span className="text-muted-foreground text-xs ml-1">({putCall.label.rule})</span>
-                        </>
-                      )}
-                      {putCall?.expiration_used && (
-                        <span className="text-muted-foreground text-xs ml-1">(volume, exp {putCall.expiration_used})</span>
-                      )}
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                  <span className="text-sm text-muted-foreground"><ExplainTip term="put/call ratio" metric="put_call" symbol={upperSymbol}>Put/Call ratio</ExplainTip></span>
+                  <span className="font-mono text-sm font-medium tabular-nums">
+                    {pcRatio != null ? (
+                      <>
+                        {pcRatio.toFixed(2)}
+                        {putCall?.label && (
+                          <>
+                            <span className="text-muted-foreground"> {putCall.label.label}</span>
+                            <span className="text-muted-foreground text-xs ml-1">({putCall.label.rule})</span>
+                          </>
+                        )}
+                        {putCall?.expiration_used && (
+                          <span className="text-muted-foreground text-xs ml-1">(volume, exp {putCall.expiration_used})</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">{putCall?.reason || "Unavailable"}</span>
+                    )}
+                  </span>
+                </div>
                 {dataError && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                     RV excluded for this ticker (extreme price returns, likely a split adjustment).
