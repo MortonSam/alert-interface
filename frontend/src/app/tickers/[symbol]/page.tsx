@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
 import { fmtPct } from "./fmtPct";
+import { barCellStyle, legendEntries } from "./reactionChartEncoding";
 import { capture } from "@/lib/analytics";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
@@ -442,26 +443,28 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
           <ReferenceLine y={0} stroke="hsl(var(--border))" />
           <Tooltip content={<ReactionChartTooltip mode={mode} />} />
           <Bar dataKey="pct1d" radius={[2, 2, 0, 0]}>
-            {data.map((entry, i) => (
-              <Cell
-                key={i}
-                fill={entry.pct1d == null ? "hsl(var(--muted))" : entry.pct1d >= 0 ? "#22c55e" : "#ef4444"}
-                fillOpacity={entry.pct1d == null ? 0.3 : isFed ? 1.0 : entry.outcome === "beat" ? 1.0 : entry.outcome === "miss" ? 0.7 : 0.5}
-                stroke={entry.pct1d == null ? "hsl(var(--muted-foreground))" : !isFed && entry.outcome === "miss" ? "#ef4444" : "none"}
-                strokeWidth={entry.pct1d == null ? 1 : !isFed && entry.outcome === "miss" ? 1.5 : 0}
-                strokeDasharray={entry.pct1d == null ? "2 2" : !isFed && entry.outcome === "miss" ? "3 2" : ""}
-              />
-            ))}
+            {data.map((entry, i) => {
+              const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, entry.outcome, isFed);
+              return <Cell key={i} {...cell} />;
+            })}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      {!isFed && (
-        <div className="flex items-center gap-4 mt-1 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500" /> Beat</span>
-          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500 opacity-70 border border-dashed border-red-500" /> Miss</span>
-          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-gray-400 opacity-50" /> Meet</span>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-[10px] text-muted-foreground">
+        {legendEntries(isFed).map((e) => (
+          <span key={`${e.kind}-${e.key}`} className="flex items-center gap-1">
+            {e.kind === "direction" ? (
+              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: e.color }} />
+            ) : (
+              <span
+                className={`inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground ${e.dashed ? "border border-dashed border-foreground" : ""}`}
+                style={{ opacity: e.fillOpacity }}
+              />
+            )}
+            {e.label}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
