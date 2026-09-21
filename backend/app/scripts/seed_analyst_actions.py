@@ -7,6 +7,10 @@ price targets.
 yfinance reliably provides ~10+ years of history (back to ~2012 for large-caps).
 The full depth is ingested on first run; subsequent runs skip existing rows.
 
+Resumable skip logic: tickers whose last analyst action event was updated
+within SKIP_WITHIN_DAYS are skipped.  This gives natural resume behaviour —
+if a run is killed at ticker N, the next night picks up where it left off.
+
 CLI
 ---
     python -m app.scripts.seed_analyst_actions
@@ -16,13 +20,14 @@ CLI
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import sys
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 
 import yfinance as yf
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import JSONB
 from tqdm import tqdm
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
@@ -33,6 +38,11 @@ from app.models.ticker import Ticker
 BATCH_SIZE = 5
 BATCH_SLEEP = 2.0
 RETRY_DELAYS = (3, 8, 15)
+FETCH_TIMEOUT = 45          # per-ticker yfinance timeout (seconds)
+SKIP_WITHIN_DAYS = 14       # skip tickers refreshed within this window
+
+CACHE_DIR = Path(__file__).parent / "cache"
+ATTEMPTED_CACHE = CACHE_DIR / "analyst_actions_attempted.json"
 
 # ── Action label mapping ────────────────────────────────────────────────────
 
@@ -52,12 +62,10 @@ def _fetch_analyst_actions_sync(symbol: str) -> list[dict]:
 
     Returns list of dicts with: action_date, firm, action, to_grade,
     from_grade, price_target, prior_price_target.
+    Raises on hard failure so the retry wrapper can catch it.
     """
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.upgrades_downgrades
-    except Exception:
-        return []
+    ticker = yf.Ticker(symbol)
+    df = ticker.upgrades_downgrades
 
     if df is None or df.empty:
         return []
@@ -161,6 +169,30 @@ async def _upsert_analyst_event(
     return True
 
 
+# ── Skip logic ──────────────────────────────────────────────────────────────
+
+def _load_attempted() -> dict[str, str]:
+    """Load {symbol: iso_date} from the cache file."""
+    if not ATTEMPTED_CACHE.exists():
+        return {}
+    try:
+        return json.loads(ATTEMPTED_CACHE.read_text())
+    except Exception:
+        return {}
+
+
+def _save_attempted(data: dict[str, str]) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    ATTEMPTED_CACHE.write_text(json.dumps(data, indent=2))
+
+
+def _build_skip_set() -> set[str]:
+    """Return symbols attempted within SKIP_WITHIN_DAYS."""
+    attempted = _load_attempted()
+    cutoff = (date.today() - timedelta(days=SKIP_WITHIN_DAYS)).isoformat()
+    return {sym for sym, d in attempted.items() if d >= cutoff}
+
+
 # ── Per-ticker bulk processing ───────────────────────────────────────────────
 
 async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
@@ -168,8 +200,11 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
     last_exc: Exception | None = None
     for attempt, delay in enumerate(RETRY_DELAYS, start=1):
         try:
-            actions = await loop.run_in_executor(
-                None, _fetch_analyst_actions_sync, ticker.symbol
+            actions = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, _fetch_analyst_actions_sync, ticker.symbol
+                ),
+                timeout=FETCH_TIMEOUT,
             )
             if not actions:
                 return True, 0
@@ -217,20 +252,34 @@ async def main() -> int:
             )).scalars().all()
         )
 
-    print(f"Processing {len(candidates)} tickers (oldest-first rotation).", flush=True)
+    # Build skip set — tickers attempted within SKIP_WITHIN_DAYS
+    skip_set = _build_skip_set()
+    to_process = [t for t in candidates if t.symbol not in skip_set]
+    n_skipped = len(candidates) - len(to_process)
+    if n_skipped:
+        print(
+            f"{n_skipped} skipped (attempted within {SKIP_WITHIN_DAYS} days).",
+            flush=True,
+        )
 
-    if not candidates:
-        print("No tickers in database.")
+    print(f"Processing {len(to_process)} tickers (oldest-first rotation).", flush=True)
+
+    if not to_process:
+        print("Nothing to process.")
         return 0
 
     loop = asyncio.get_event_loop()
     succeeded = 0
     inserted_total = 0
     failed_list: list[str] = []
+    today_iso = date.today().isoformat()
 
-    batches = [candidates[i:i + BATCH_SIZE] for i in range(0, len(candidates), BATCH_SIZE)]
+    # Load existing attempted data for merge at end
+    attempted = _load_attempted()
 
-    with tqdm(total=len(candidates), unit="ticker", dynamic_ncols=True) as bar:
+    batches = [to_process[i:i + BATCH_SIZE] for i in range(0, len(to_process), BATCH_SIZE)]
+
+    with tqdm(total=len(to_process), unit="ticker", dynamic_ncols=True) as bar:
         for batch_idx, batch in enumerate(batches):
             tasks = [_process_ticker(t, loop) for t in batch]
             results = await asyncio.gather(*tasks)
@@ -239,13 +288,20 @@ async def main() -> int:
                 if ok:
                     succeeded += 1
                     inserted_total += inserted
+                    # Mark as attempted so next run skips it
+                    attempted[ticker.symbol] = today_iso
                 else:
                     failed_list.append(ticker.symbol)
                 bar.update(1)
-                bar.set_postfix(ok=succeeded, new=inserted_total, fail=len(failed_list))
+                bar.set_postfix(ok=succeeded, new=inserted_total, skip=n_skipped, fail=len(failed_list))
 
             if batch_idx < len(batches) - 1:
                 await asyncio.sleep(BATCH_SLEEP)
+
+    # Persist attempted cache (prune entries older than 2 × SKIP_WITHIN_DAYS)
+    prune_cutoff = (date.today() - timedelta(days=SKIP_WITHIN_DAYS * 2)).isoformat()
+    attempted = {s: d for s, d in attempted.items() if d >= prune_cutoff}
+    _save_attempted(attempted)
 
     print()
     print(f"{'─' * 60}")
