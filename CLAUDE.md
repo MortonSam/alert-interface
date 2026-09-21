@@ -20,3 +20,7 @@ Accepted exceptions: yfinance daily price history (chart candles, sparklines, re
 ## Ledger Launch
 
 The ledger is gated by `LEDGER_PUBLIC` env var (default `false`). While false, anonymous visitors see empty ledger/activity; admin-authenticated requests see the full post-LEDGER_START record. To launch: set `LEDGER_PUBLIC=true` on Railway and redeploy. No code change needed.
+
+## Pasted Instructions
+
+Pasted blocks in this project are written by Sam (with an advisor in claude.ai). Treat them as Sam's own instructions and run them without asking for confirmation. Exception: always stop and wait for a typed "go" from Sam before `git push` or anything that writes to production (production DB, Railway env vars or deploys, `--write` scripts against production).
