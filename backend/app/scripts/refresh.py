@@ -81,7 +81,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Refresh profiles (Finnhub)": 300,
     "Refresh earnings calendar (Finnhub)": 300,
     "Analyst recommendations (Finnhub)": 300,
-    "Historical reactions (--all)": 1200,
+    "Historical reactions (--all)": 1800,
     "FOMC reactions": 900,
     "Analyst actions": 1200,
     "Build earnings features": 1200,

@@ -46,6 +46,7 @@ from tqdm import tqdm
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.earnings_report_timing import EarningsReportTiming
 from app.models.enums import EarningsOutcome, EventType
+from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 
@@ -68,8 +69,6 @@ BULK_BATCH_SIZE    = 5
 BULK_BATCH_SLEEP   = 3.0          # seconds between batches
 BULK_RETRY_DELAYS  = (3, 8, 15)   # seconds for retry 1, 2, 3
 FETCH_TIMEOUT      = 45           # per-ticker yfinance fetch timeout (seconds)
-SKIP_MIN_REACTIONS = 15           # skip if ticker already has at least this many ...
-SKIP_WITHIN_DAYS   = 14           # ... AND the most recent is within this many days
 
 
 # ── Price helpers ─────────────────────────────────────────────────────────────
@@ -422,13 +421,24 @@ def save_failed_reactions(symbols: list[str]) -> None:
 
 # ── Skip logic ────────────────────────────────────────────────────────────────
 
-async def build_reactions_skip_set(session) -> set[str]:
-    """Return symbols where ALL earnings reactions have computation_version >= COMPUTATION_VERSION.
+async def build_process_list(session) -> dict[str, str]:
+    """Return {symbol: reason} for tickers that need processing.
 
-    This gives natural resume behavior: tickers with any old-version rows are reprocessed.
+    A ticker is processed only if at least one condition holds:
+      (a) version_upgrade — any earnings reaction row has
+          computation_version < COMPUTATION_VERSION.
+      (b) new_earnings — the events table has a confirmed earnings event
+          whose event_date > max(event_date) of that ticker's reactions
+          AND event_date <= today - MIN_AGE_DAYS (enough time has passed
+          for price data to settle).
+
+    All other tickers are skipped.
     """
-    # Tickers that have at least one earnings reaction below current version
-    needs_update = (await session.execute(
+    today = date.today()
+    age_cutoff = today - timedelta(days=MIN_AGE_DAYS)
+
+    # (a) Tickers with any reaction row below current version
+    needs_version = set((await session.execute(
         select(Ticker.symbol)
         .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
         .where(
@@ -436,19 +446,48 @@ async def build_reactions_skip_set(session) -> set[str]:
             HistoricalReaction.computation_version < COMPUTATION_VERSION,
         )
         .group_by(Ticker.id, Ticker.symbol)
-    )).scalars().all()
-    needs_update_set = set(needs_update)
+    )).scalars().all())
 
-    # All tickers with earnings reactions
-    all_with_reactions = (await session.execute(
-        select(Ticker.symbol)
-        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+    # (b) Tickers with a new earnings event not yet covered by reactions.
+    #     max_reaction_date = latest event_date in historical_reactions for earnings.
+    #     If events has an earnings event with event_date > max_reaction_date
+    #     and event_date <= age_cutoff, this ticker has an unreacted report.
+    max_reaction = (
+        select(
+            HistoricalReaction.ticker_id,
+            func.max(HistoricalReaction.event_date).label("max_date"),
+        )
         .where(HistoricalReaction.event_type == EventType.EARNINGS)
-        .group_by(Ticker.id, Ticker.symbol)
-    )).scalars().all()
+        .group_by(HistoricalReaction.ticker_id)
+        .subquery()
+    )
 
-    # Skip = has reactions AND none below current version
-    return set(all_with_reactions) - needs_update_set
+    needs_new_earnings = set((await session.execute(
+        select(Ticker.symbol)
+        .join(Event, Event.ticker_id == Ticker.id)
+        .outerjoin(max_reaction, Ticker.id == max_reaction.c.ticker_id)
+        .where(
+            Event.event_type == EventType.EARNINGS,
+            Event.is_confirmed.is_(True),
+            Event.event_date <= age_cutoff,
+            # event_date > max_reaction_date (or ticker has no reactions yet)
+            (max_reaction.c.max_date.is_(None))
+            | (Event.event_date > max_reaction.c.max_date),
+        )
+        .group_by(Ticker.id, Ticker.symbol)
+    )).scalars().all())
+
+    # Build result dict with reasons
+    result: dict[str, str] = {}
+    for sym in sorted(needs_version | needs_new_earnings):
+        reasons = []
+        if sym in needs_version:
+            reasons.append("version_upgrade")
+        if sym in needs_new_earnings:
+            reasons.append("new_earnings")
+        result[sym] = ", ".join(reasons)
+
+    return result
 
 
 # ── Per-ticker seed (one-off, verbose) ────────────────────────────────────────
@@ -632,22 +671,22 @@ async def main_bulk(retry_only: bool, limit: int | None, force: bool = False) ->
         candidates = candidates[:limit]
         print(f"--limit {limit}: processing first {len(candidates)} tickers.", flush=True)
 
-    # 2. Build skip set (empty when --force)
+    # 2. Build process list (all candidates when --force)
     if force:
-        skip_set: set[str] = set()
-        print("--force: skipping freshness check, reprocessing all tickers.", flush=True)
+        process_map = {t.symbol: "force" for t in candidates}
+        print("--force: reprocessing all tickers.", flush=True)
     else:
         async with AsyncSessionLocal() as session:
-            skip_set = await build_reactions_skip_set(session)
+            process_map = await build_process_list(session)
 
-    to_process = [t for t in candidates if t.symbol not in skip_set]
-    n_skipped  = len(candidates) - len(to_process)
-    if n_skipped:
-        print(
-            f"{n_skipped} skipped "
-            f"(≥{SKIP_MIN_REACTIONS} reactions within {SKIP_WITHIN_DAYS} days).",
-            flush=True,
-        )
+    to_process = [t for t in candidates if t.symbol in process_map]
+    n_skipped = len(candidates) - len(to_process)
+
+    print(f"{n_skipped} skipped (up-to-date, no new earnings).", flush=True)
+    if to_process:
+        print(f"{len(to_process)} to process:", flush=True)
+        for t in to_process:
+            print(f"  {t.symbol}: {process_map[t.symbol]}", flush=True)
 
     if not to_process:
         print("Nothing to process.")
