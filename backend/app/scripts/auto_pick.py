@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import sys
 import traceback
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import Date as SADate, func, select
@@ -236,6 +237,7 @@ async def _build_iron_condor(session, sym: str, event_date: date, receipt: dict)
         credit_received=Decimal(str(round(credit, 4))),
         max_loss=Decimal(str(round(max_loss, 2))),
         exit_date=exit_dt,
+        eval_date=datetime.now(ZoneInfo("America/New_York")).date(),
     )
 
 
@@ -358,16 +360,17 @@ async def _run(dry_run: bool = False) -> int:
                             ic = await _build_iron_condor(session, sym, next_earnings, receipt)
                             if ic is not None:
                                 from sqlalchemy.dialects.postgresql import insert as pg_insert
+                                # None values are omitted so server defaults (decided_at) apply
                                 ic_values = {
                                     c.name: getattr(ic, c.name)
                                     for c in CreditShadowPick.__table__.columns
-                                    if c.name != "id"
+                                    if c.name != "id" and getattr(ic, c.name) is not None
                                 }
                                 ic_stmt = (
                                     pg_insert(CreditShadowPick)
                                     .values(**ic_values)
                                     .on_conflict_do_nothing(
-                                        constraint="uq_credit_shadow_picks_symbol_event_date",
+                                        constraint="uq_credit_shadow_picks_symbol_event_eval",
                                     )
                                 )
                                 await session.execute(ic_stmt)

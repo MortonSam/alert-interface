@@ -17,6 +17,7 @@ import asyncio
 import json
 import sys
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -184,7 +185,7 @@ async def _run(dry_run: bool = False) -> int:
                 values = dict(
                     symbol=sym,
                     event_date=next_earnings,
-                    eval_date=today,
+                    eval_date=datetime.now(ZoneInfo("America/New_York")).date(),
                     probability=Decimal(str(pred.probability_up_5d)),
                     threshold_used=Decimal(str(SHADOW_THRESHOLD)),
                     would_pick=would_pick,

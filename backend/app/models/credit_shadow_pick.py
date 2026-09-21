@@ -13,13 +13,15 @@ class CreditShadowPick(Base):
     __tablename__ = "credit_shadow_picks"
     __table_args__ = (
         Index("ix_credit_shadow_picks_event_date", "event_date"),
-        UniqueConstraint("symbol", "event_date", name="uq_credit_shadow_picks_symbol_event_date"),
+        UniqueConstraint("symbol", "event_date", "eval_date",
+                         name="uq_credit_shadow_picks_symbol_event_eval"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     symbol: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    eval_date: Mapped[date] = mapped_column(Date, nullable=False)
     spot: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     expected_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
     implied_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)

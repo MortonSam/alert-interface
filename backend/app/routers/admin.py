@@ -230,59 +230,65 @@ async def shadow_summary(db: AsyncSession = Depends(get_db)) -> dict:
     }
 
 
+def _credit_shadow_stats(rows: list) -> dict:
+    settled = [r for r in rows if r.settled_at is not None and r.pnl_dollars is not None]
+    n = len(settled)
+    wins = sum(1 for r in settled if float(r.pnl_dollars) > 0)
+    pcts = [float(r.pnl_pct) for r in settled if r.pnl_pct is not None]
+    return {
+        "settled": n,
+        "wins": wins,
+        "win_rate": wins / n if n else None,
+        "mean_pnl_dollars": sum(float(r.pnl_dollars) for r in settled) / n if n else None,
+        "mean_pnl_pct": sum(pcts) / len(pcts) if pcts else None,
+        "worst_loss": min(float(r.pnl_dollars) for r in settled) if n else None,
+    }
+
+
 @router.get("/credit-shadow-summary", dependencies=[Depends(require_admin)])
 async def credit_shadow_summary(db: AsyncSession = Depends(get_db)) -> dict:
-    """Credit shadow iron condor summary: settled stats, win rate, last 20 rows."""
-    total = (await db.execute(
-        select(func.count()).select_from(CreditShadowPick)
-    )).scalar_one()
+    """Credit shadow iron condor summary.
 
-    settled_rows = (await db.execute(
-        select(CreditShadowPick).where(CreditShadowPick.settled_at.is_not(None))
+    Headline stats use one condor per event (earliest eval_date), so N counts
+    events. The same event is re-entered on later nights; those all-rows
+    figures are reported separately under repeated_entries.
+    """
+    all_rows = (await db.execute(
+        select(CreditShadowPick).order_by(
+            CreditShadowPick.symbol, CreditShadowPick.event_date,
+            CreditShadowPick.eval_date, CreditShadowPick.decided_at,
+        )
     )).scalars().all()
 
-    settled_count = len(settled_rows)
-    wins = sum(1 for r in settled_rows if r.pnl_dollars is not None and float(r.pnl_dollars) > 0)
-    win_rate = wins / settled_count if settled_count else None
-    mean_pnl_dollars = (
-        sum(float(r.pnl_dollars) for r in settled_rows if r.pnl_dollars is not None) / settled_count
-        if settled_count else None
-    )
-    mean_pnl_pct = (
-        sum(float(r.pnl_pct) for r in settled_rows if r.pnl_pct is not None) / settled_count
-        if settled_count else None
-    )
-    worst_loss = (
-        min(float(r.pnl_dollars) for r in settled_rows if r.pnl_dollars is not None)
-        if settled_count else None
-    )
+    first_per_event: dict[tuple, CreditShadowPick] = {}
+    for r in all_rows:
+        first_per_event.setdefault((r.symbol, r.event_date), r)
+    event_rows = list(first_per_event.values())
 
-    recent = (await db.execute(
-        select(CreditShadowPick)
-        .order_by(CreditShadowPick.decided_at.desc())
-        .limit(20)
-    )).scalars().all()
-
-    recent_out = []
-    for r in recent:
-        recent_out.append({
+    recent = sorted(all_rows, key=lambda r: r.decided_at, reverse=True)[:20]
+    recent_out = [
+        {
             "symbol": r.symbol,
             "event_date": r.event_date.isoformat(),
+            "eval_date": r.eval_date.isoformat(),
             "spot": float(r.spot),
             "credit_received": float(r.credit_received),
             "max_loss": float(r.max_loss),
             "pnl_dollars": float(r.pnl_dollars) if r.pnl_dollars is not None else None,
             "pnl_pct": float(r.pnl_pct) if r.pnl_pct is not None else None,
             "settled": r.settled_at is not None,
-        })
+        }
+        for r in recent
+    ]
 
     return {
-        "total": total,
-        "settled": settled_count,
-        "wins": wins,
-        "win_rate": win_rate,
-        "mean_pnl_dollars": mean_pnl_dollars,
-        "mean_pnl_pct": mean_pnl_pct,
-        "worst_loss": worst_loss,
+        "basis": "one condor per event (earliest eval_date)",
+        "events": len(event_rows),
+        **_credit_shadow_stats(event_rows),
+        "repeated_entries": {
+            "label": "All rows, including repeated entries on the same event",
+            "rows": len(all_rows),
+            **_credit_shadow_stats(all_rows),
+        },
         "recent": recent_out,
     }
