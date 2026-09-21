@@ -1899,18 +1899,17 @@ async def get_put_call(
             reason="No options snapshot in last 3 days",
         )
 
-    ratio_val = float(row.ratio) if row.ratio is not None else None
-
-    # Determine reason when ratio is absent
+    # Per-side guard: NULL the ratio if either side is below minimum
+    from app.constants import MIN_SIDE_CONTRACTS
+    put_t = row.put_total or 0
+    call_t = row.call_total or 0
     reason: str | None = None
-    if ratio_val is None:
-        from app.constants import MIN_SIDE_CONTRACTS
-        put_t = row.put_total or 0
-        call_t = row.call_total or 0
-        if put_t < MIN_SIDE_CONTRACTS or call_t < MIN_SIDE_CONTRACTS:
-            reason = "too few contracts on one side"
-        elif call_t == 0:
-            reason = "no call volume"
+
+    if put_t < MIN_SIDE_CONTRACTS or call_t < MIN_SIDE_CONTRACTS:
+        ratio_val = None
+        reason = "too few contracts on one side"
+    else:
+        ratio_val = float(row.ratio) if row.ratio is not None else None
 
     lv = put_call_label(ratio_val)
 
