@@ -42,19 +42,26 @@ from app.services.finnhub_client import FinnhubClient
 ET = ZoneInfo("America/New_York")
 
 # SEC company_tickers.json maps some tickers to the wrong CIK (holding company
-# vs operating entity) or drops them entirely. Override with the correct
-# filing CIK so the 8-K lookup hits the right entity.
-CIK_OVERRIDES: dict[str, str] = {
-    "XOM":  "0000034088",   # EXXON MOBIL CORP (not ExxonMobil Holdings 0002115436)
-    "AVB":  "0000915912",   # AVALONBAY COMMUNITIES INC
-    "EA":   "0000712515",   # ELECTRONIC ARTS INC
-    "EQR":  "0000906107",   # EQUITY RESIDENTIAL
+# vs operating entity) or drops them entirely. After a reorganization the
+# ticker moves to a new CIK and the earlier 8-Ks stay under the predecessor,
+# so each ticker takes a list: predecessor first, current filer last.
+CIK_OVERRIDES: dict[str, list[str]] = {
+    "XOM":  ["0000034088"],   # EXXON MOBIL CORP (not ExxonMobil Holdings 0002115436)
+    "AVB":  ["0000915912"],   # AVALONBAY COMMUNITIES INC
+    "EA":   ["0000712515"],   # ELECTRONIC ARTS INC
+    "EQR":  ["0000906107"],   # EQUITY RESIDENTIAL
+    "PSKY": ["0000813828", "0002041610"],   # Paramount Global -> Paramount Skydance Corp
+    "BLK":  ["0001364742", "0002012383"],   # BlackRock Finance (old BlackRock) -> BlackRock, Inc.
+    "BG":   ["0001144519", "0001996862"],   # Bunge Ltd -> Bunge Global SA
+    "FERG": ["0001832433", "0002011641"],   # Ferguson plc -> Ferguson Enterprises Inc.
 }
 
 
 async def _ciks_for(sym: str, edgar: EdgarClient) -> list[str]:
     """CIKs whose 8-Ks belong to this ticker."""
-    cik = CIK_OVERRIDES.get(sym) or await edgar.get_cik(sym)
+    if sym in CIK_OVERRIDES:
+        return list(CIK_OVERRIDES[sym])
+    cik = await edgar.get_cik(sym)
     return [cik] if cik else []
 
 
