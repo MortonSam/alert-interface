@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, String, func, text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, SmallInteger, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,4 +25,6 @@ class EarningsReportTiming(Base):
     timing: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     source: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     acceptance_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    timing_source: Mapped[str | None] = mapped_column(String(60), nullable=True)  # rule branch, see report_timing.classify
+    timing_rule_version: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
