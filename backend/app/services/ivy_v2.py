@@ -411,7 +411,7 @@ def _template_reasoning(
 
     if base_rate is not None and base_rate_n > 0:
         parts.append(
-            f"Among {base_rate_n} comparable setups (momentum ≤ -10%, ≥ 8 prior events), "
+            f"Among {base_rate_n} comparable setups (momentum ≤ {MOMENTUM_CUTOFF * 100:.0f}%, ≥ {MIN_PRIOR_N} prior events), "
             f"{base_rate*100:.0f}% were up at 5 days."
         )
 

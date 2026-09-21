@@ -1741,10 +1741,16 @@ async def ivy_activity(
         ))
     worksheet_rows.sort(key=lambda r: (r.earnings_date or "9999", r.symbol))
 
+    from app.services.ivy_outcomes import ERROR, PASSED, PICKED, REFUSED, count_by_category
+    by_category = count_by_category(outcomes)
+
     return IvyActivityRead(
         run_date=max_date_row.isoformat(),
         evaluated=len(rows),
-        picked=outcomes.count("picked"),
+        picked=by_category[PICKED],
+        refused=by_category[REFUSED],
+        passed=by_category[PASSED],
+        errors=by_category[ERROR],
         picked_symbols=[r.symbol for r in rows if r.outcome == "picked"],
         mixed_evidence=outcomes.count("mixed_evidence"),
         no_fresh_chain=outcomes.count("no_fresh_chain"),

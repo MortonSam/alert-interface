@@ -1,5 +1,7 @@
 "use client";
 
+import { chainFreshnessSentence } from "@/lib/ivyRule";
+import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary } from "@/lib/ivyOutcomes";
 import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -47,7 +49,7 @@ function ExpectedCell({ row }: { row: IvyWorksheetRow }) {
 
 function ImpliedCell({ row }: { row: IvyWorksheetRow }) {
   if (row.implied_move_pct == null) {
-    return <td className="px-3 py-2.5 text-muted-foreground">no chain</td>;
+    return <td className="px-3 py-2.5 text-muted-foreground">{impliedMoveAbsentLabel(row.outcome)}</td>;
   }
   return (
     <td className="px-3 py-2.5 tabular-nums text-muted-foreground">
@@ -56,25 +58,12 @@ function ImpliedCell({ row }: { row: IvyWorksheetRow }) {
   );
 }
 
-const OUTCOME_LABELS: Record<string, string> = {
-  no_fresh_chain: "No fresh chain",
-  vol_gate: "IV too high",
-  insufficient_history: "Insufficient history",
-  momentum_gate: "Momentum gate",
-  structure_failed: "Structure failed",
-  cap_reached: "Cap reached",
-  no_features: "No features",
-  error: "Error",
-  picked: "Picked",
-  skipped: "Skipped",
-};
-
 function V2Verdict({ row }: { row: IvyWorksheetRow }) {
   if (!row.verdict) {
-    const label = OUTCOME_LABELS[row.outcome] ?? row.outcome;
+    const label = ivyOutcomeLabel(row.outcome);
     return <td className="px-3 py-2.5 text-muted-foreground">{label}</td>;
   }
-  const isPicked = row.verdict.startsWith("Picked");
+  const isPicked = row.outcome === "picked";
   return (
     <td className={`px-3 py-2.5 ${isPicked ? "text-green-500" : "text-muted-foreground"}`}>
       {row.verdict}
@@ -124,15 +113,20 @@ export default function IvyDeskPage() {
         <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
           Overnight worksheet
         </p>
-        <p className="text-lg text-muted-foreground mt-3">
-          Ivy&apos;s first overnight worksheet appears after her next evaluation.
-        </p>
+        {activity && !activity.ledger_public ? (
+          <>
+            <p className="text-lg font-medium mt-3">{PRIVATE_LEDGER_TITLE}</p>
+            <p className="text-sm text-muted-foreground mt-1">{PRIVATE_LEDGER_BODY}</p>
+          </>
+        ) : (
+          <p className="text-lg text-muted-foreground mt-3">
+            Ivy&apos;s first overnight worksheet appears after her next evaluation.
+          </p>
+        )}
       </div>
     );
   }
 
-  const pickedCount = activity.picked;
-  const passedCount = activity.evaluated - pickedCount;
   // v2 batch if any row has a verdict
   const isV2 = activity.rows.some((r) => r.verdict != null);
   const columns = isV2
@@ -150,7 +144,10 @@ export default function IvyDeskPage() {
         Overnight worksheet · {fmtDate(activity.run_date)}
       </p>
       <p className="text-lg text-muted-foreground mt-2">
-        Ivy evaluated {activity.evaluated} names on {fmtDate(activity.run_date)}, picked {pickedCount}, passed on {passedCount}.
+        On {fmtDate(activity.run_date)} Ivy {nightSummary(activity)}.
+      </p>
+      <p className="text-xs text-muted-foreground mt-1">
+        {NIGHT_SUMMARY_KEY}
       </p>
 
       <div className="overflow-x-auto mt-6">
@@ -223,7 +220,7 @@ export default function IvyDeskPage() {
       </div>
 
       <p className="text-xs text-muted-foreground mt-4">
-        Rows sorted by next earnings date. Chain coverage depends on market hours.
+        Rows sorted by next earnings date. {ivy ? chainFreshnessSentence(ivy.rule) : ""}
       </p>
     </div>
   );

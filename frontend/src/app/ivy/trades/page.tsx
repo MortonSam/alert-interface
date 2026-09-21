@@ -1,5 +1,6 @@
 "use client";
 
+import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, nightSummary } from "@/lib/ivyOutcomes";
 import EncodingLegend from "@/components/EncodingLegend";
 import { pickMove, pickResult, pickResultLegend } from "@/lib/encodings/pickResult";
 import { useIvyRule } from "@/lib/useIvyRule";
@@ -451,16 +452,7 @@ export default function IvyTradesPage() {
             const diff = Math.round((today.getTime() - new Date(rd.getFullYear(), rd.getMonth(), rd.getDate()).getTime()) / 86400000);
             if (diff <= 1) return "Last night";
             return `On ${rd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-          })()} Ivy evaluated {activity.evaluated} {activity.evaluated === 1 ? "name" : "names"}, passed on {activity.evaluated - activity.picked}, picked {activity.picked}.
-          {(() => {
-            const parts: string[] = [];
-            if (activity.no_fresh_chain > 0) parts.push(`no fresh options data on ${activity.no_fresh_chain}`);
-            if (activity.mixed_evidence > 0) parts.push(`mixed evidence on ${activity.mixed_evidence}`);
-            if (activity.open_pick_exists > 0) parts.push(`open pick exists on ${activity.open_pick_exists}`);
-            if (activity.cap_reached > 0) parts.push(`cap reached on ${activity.cap_reached}`);
-            if (activity.error > 0) parts.push(`errors on ${activity.error}`);
-            return parts.length > 0 ? ` (${parts.join(", ")})` : "";
-          })()}
+          })()} Ivy {nightSummary(activity)}. {NIGHT_SUMMARY_KEY}
         </p>
       )}
 
@@ -481,10 +473,8 @@ export default function IvyTradesPage() {
         <div className="rounded-lg border border-dashed px-8 py-12 text-center">
           {activity && !activity.ledger_public ? (
             <>
-              <p className="text-lg font-medium">Recording nightly</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Ivy&apos;s ledger is being recorded every night and goes public at launch. Every pick is timestamped before the outcome is known.
-              </p>
+              <p className="text-lg font-medium">{PRIVATE_LEDGER_TITLE}</p>
+              <p className="text-sm text-muted-foreground mt-1">{PRIVATE_LEDGER_BODY}</p>
             </>
           ) : (
             <>

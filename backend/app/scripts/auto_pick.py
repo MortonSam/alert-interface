@@ -36,6 +36,8 @@ from app.services.ivy_v2 import (
     EXIT_TRADING_DAYS,
     MAX_NEW_PER_NIGHT,
     MAX_OPEN_TOTAL,
+    MIN_PRIOR_N,
+    MOMENTUM_CUTOFF,
 )
 MAX_DRAFT_ATTEMPTS = 6
 
@@ -80,11 +82,11 @@ def _build_verdict(result: dict, receipt: dict | None) -> str:
         return "Refused, IV too high"
     if outcome == "insufficient_history":
         n = receipt.get("n_comparable", 0) if receipt else 0
-        return f"Passed, {n or 0} prior events (needs 8)"
+        return f"Passed, {n or 0} prior events (needs {MIN_PRIOR_N})"
     if outcome == "momentum_gate":
         m = receipt.get("momentum_20d") if receipt else None
         if m is not None:
-            return f"Passed, momentum {m:+.0f}% (needs <= -10%)"
+            return f"Passed, momentum {m:+.0f}% (needs <= {MOMENTUM_CUTOFF * 100:.0f}%)"
         return "Passed, no momentum data"
     if outcome == "picked":
         structure = result.get("structure")

@@ -825,6 +825,9 @@ export interface IvyActivity {
   run_date: string | null;
   evaluated: number;
   picked: number;
+  refused: number;      // the setup was there and Ivy declined it
+  passed: number;       // the setup was not there
+  errors: number;
   picked_symbols: string[];
   mixed_evidence: number;
   no_fresh_chain: number;

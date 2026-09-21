@@ -247,6 +247,9 @@ class IvyActivityRead(BaseModel):
     run_date: str | None = None
     evaluated: int = 0
     picked: int = 0
+    refused: int = 0                 # the setup was there and Ivy declined it
+    passed: int = 0                  # the setup was not there
+    errors: int = 0
     picked_symbols: list[str] = []
     mixed_evidence: int = 0
     no_fresh_chain: int = 0
