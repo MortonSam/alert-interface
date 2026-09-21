@@ -1,5 +1,7 @@
 "use client";
 
+import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
+import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, notFound } from "next/navigation";
 import Link from "next/link";
@@ -454,21 +456,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-[10px] text-muted-foreground">
-        {legendEntries(isFed).map((e) => (
-          <span key={`${e.kind}-${e.key}`} className="flex items-center gap-1">
-            {e.kind === "direction" ? (
-              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: e.color }} />
-            ) : (
-              <span
-                className={`inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground ${e.dashed ? "border border-dashed border-foreground" : ""}`}
-                style={{ opacity: e.fillOpacity }}
-              />
-            )}
-            {e.label}
-          </span>
-        ))}
-      </div>
+      <EncodingLegend items={legendEntries(isFed)} className="mt-1" />
     </div>
   );
 }
@@ -971,13 +959,6 @@ function formatTooltipDate(date: string, period: ChartPeriod): string {
   return date;
 }
 
-const OUTCOME_DOT_COLOR: Record<string, string> = {
-  beat: "#22c55e",
-  miss: "#ef4444",
-  meet: "#9ca3af",
-  unknown: "#9ca3af",
-};
-
 function PriceChartTooltip({
   active,
   payload,
@@ -999,7 +980,7 @@ function PriceChartTooltip({
       <p className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">${p.close.toFixed(2)}</p>
       {marker && (
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 mt-1 space-y-0.5">
-          <p style={{ color: OUTCOME_DOT_COLOR[marker.outcome] }} className="font-medium capitalize">
+          <p style={{ color: earningsMarkerColor(marker.outcome) }} className="font-medium capitalize">
             {marker.outcome === "unknown" ? "Earnings" : `Earnings ${marker.outcome}`}
           </p>
           {marker.eps_estimate != null && marker.eps_actual != null && (
@@ -1028,6 +1009,7 @@ function PriceChart({
   onChartLoad,
   impliedRangeLow,
   impliedRangeHigh,
+  impliedExpiration,
 }: {
   symbol: string;
   period: ChartPeriod;
@@ -1035,6 +1017,7 @@ function PriceChart({
   onChartLoad: (startPrice: number | null) => void;
   impliedRangeLow?: number | null;
   impliedRangeHigh?: number | null;
+  impliedExpiration?: string | null;   // the expiration the implied range is for
 }) {
   const [chartData, setChartData] = useState<TickerChart | null>(null);
 
@@ -1185,14 +1168,14 @@ function PriceChart({
             )}
             {/* Earnings markers */}
             {earningsMarkers.map((mk) => {
-              const color = OUTCOME_DOT_COLOR[mk.outcome] ?? OUTCOME_DOT_COLOR.unknown;
+              const color = earningsMarkerColor(mk.outcome);
               return (
                 <ReferenceLine
                   key={mk.date}
                   x={new Date(mk.date).getTime()}
                   stroke={color}
                   strokeOpacity={0.5}
-                  strokeDasharray="3 3"
+                  strokeDasharray={EARNINGS_MARKER_DASH}
                 />
               );
             })}
@@ -1211,13 +1194,13 @@ function PriceChart({
             {impliedRangeLow != null && impliedRangeHigh != null && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
-                Shaded band: range the options market priced for the next expiration
+                Shaded band: today&apos;s range implied by options{impliedExpiration ? ` expiring ${impliedExpiration}` : ""}
               </span>
             )}
             {earningsMarkers.length > 0 && (
               <span className="flex items-center gap-1.5">
-                <span className="inline-block w-0 h-3 border-l-2 border-dashed" style={{ borderColor: "#22c55e" }} />
-                Earnings date (green = beat, red = miss, gray = meet)
+                Earnings dates, colored by EPS outcome:
+                <EncodingLegend items={earningsMarkerLegend()} />
               </span>
             )}
           </div>
@@ -1954,6 +1937,7 @@ export default function TickerPage() {
             onChartLoad={handleChartLoad}
             impliedRangeLow={expectedMove?.implied_range_low}
             impliedRangeHigh={expectedMove?.implied_range_high}
+            impliedExpiration={expectedMove?.expiration_used}
           />
 
         {/* Section nav */}

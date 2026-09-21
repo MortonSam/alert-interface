@@ -1,5 +1,7 @@
 "use client";
 
+import { rvTier } from "@/lib/encodings/rvTier";
+import { earningsProximity, earningsProximityText } from "@/lib/encodings/earningsProximity";
 import { freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -47,13 +49,6 @@ function daysUntil(dateStr: string): number {
 
 function fmtPrice(n: number | null | undefined): string {
   return n == null ? "" : `$${n.toFixed(2)}`;
-}
-
-/** Map days-until-earnings → color classes for the proximity tag. */
-function earningsUrgency(days: number): { bg: string; text: string } {
-  if (days <= 1) return { bg: "bg-primary/10", text: "text-primary" };       // orange — imminent
-  if (days <= 3) return { bg: "bg-warning/10", text: "text-warning" };       // amber — soon
-  return { bg: "bg-muted", text: "text-muted-foreground" };                  // neutral — further out
 }
 
 // ── Skeletons ────────────────────────────────────────────────────────────────
@@ -291,13 +286,8 @@ export default function DiscoverPage() {
                 {reportingSoon?.items.map((item) => {
                   const days = daysUntil(item.earnings_date);
                   const q = quotes.get(item.symbol);
-                  const urg = earningsUrgency(days);
-                  const tagLabel =
-                    days <= 0
-                      ? "EPS today"
-                      : days === 1
-                        ? "EPS in 1d"
-                        : `EPS in ${days}d`;
+                  const prox = earningsProximity(Math.max(days, 0));
+                  const tagLabel = earningsProximityText(Math.max(days, 0));
                   return (
                     <DiscoverCard
                       key={item.symbol}
@@ -309,7 +299,7 @@ export default function DiscoverPage() {
                       insight={item.insight}
                       volRegime={item.vol_regime}
                       badge={
-                        <span className={`inline-flex items-center gap-1.5 rounded-full ${urg.bg} ${urg.text} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full ${prox?.className ?? ""} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
                           <span className="text-[8px]">{"\u25CF"}</span>
                           {tagLabel}
                         </span>
@@ -421,7 +411,7 @@ export default function DiscoverPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {unusuallyActive.map((item) => {
-                const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${item.tier}`;
+                const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${rvTier(item.rv_rank).label}`;
                 return (
                   <DiscoverCard
                     key={item.symbol}

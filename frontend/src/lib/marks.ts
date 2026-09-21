@@ -1,3 +1,4 @@
+import type { LegendItem } from "./encodings/types";
 // How an option mark describes itself. One label per backend mark_basis
 // (backend/app/schemas/thesis.py MARK_BASES); a vitest fails if one is missing.
 // Dates come from their own fields and are never parsed out of a sentence.
@@ -11,6 +12,13 @@ export const MARK_BASIS_LABELS = {
 } as const;
 
 export type MarkBasis = keyof typeof MARK_BASIS_LABELS;
+
+/** Legend rows for the ways an option mark can be derived (no_option_leg is not a mark). */
+export function markBasisLegend(): LegendItem[] {
+  return (Object.keys(MARK_BASIS_LABELS) as MarkBasis[])
+    .filter((k) => k !== "no_option_leg")
+    .map((key) => ({ key, label: MARK_BASIS_LABELS[key], swatch: { kind: "text", className: "text-muted-foreground" } }));
+}
 
 export function markBasisLabel(basis: string): string {
   return MARK_BASIS_LABELS[basis as MarkBasis] ?? "mark basis unknown";

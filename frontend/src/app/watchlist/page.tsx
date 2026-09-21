@@ -1,5 +1,6 @@
 "use client";
 
+import { earningsProximity } from "@/lib/encodings/earningsProximity";
 import { PRICE_FRESHNESS } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
@@ -56,7 +57,7 @@ function fmtDate(d: string | null): string {
   });
 }
 
-function earningsProximity(d: string): { label: string; full: string } {
+function nextEarningsLabel(d: string): { label: string; full: string; days: number } {
   const [y, m, day] = d.split("-").map(Number);
   const eventDate = new Date(y, m - 1, day);
   const today = new Date();
@@ -65,10 +66,9 @@ function earningsProximity(d: string): { label: string; full: string } {
   const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
   const full = eventDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-  if (days < 0) return { label: `${Math.abs(days)}d ago`, full };
-  if (days === 0) return { label: "Today", full };
-  if (days === 1) return { label: "1d", full };
-  return { label: `${days}d`, full };
+  if (days === 0) return { label: "Today", full, days };
+  if (days === 1) return { label: "1d", full, days };
+  return { label: `${days}d`, full, days };
 }
 
 // ── Small sub-components ──────────────────────────────────────────────────────
@@ -178,10 +178,12 @@ function WatchlistRow({
           <Skeleton w="w-16" />
         ) : data?.earnings_date ? (
           (() => {
-            const prox = earningsProximity(data.earnings_date);
+            const prox = nextEarningsLabel(data.earnings_date);
+            const scale = earningsProximity(prox.days);
+            if (!scale) return <span className="text-muted-foreground">—</span>;   // a past date is not a "next" earnings date
             return (
-              <span className="inline-flex items-center gap-1.5" title={prox.full}>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 bg-amber-500/10 px-1 py-0.5 rounded">
+              <span className="inline-flex items-center gap-1.5" title={`${prox.full} · reports ${scale.label}`}>
+                <span className={`text-[10px] font-semibold uppercase tracking-wider px-1 py-0.5 rounded ${scale.className}`}>
                   EPS
                 </span>
                 <span className="text-muted-foreground font-medium">{prox.label}</span>

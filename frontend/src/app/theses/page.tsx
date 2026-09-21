@@ -1,5 +1,6 @@
 "use client";
 
+import { volRegime } from "@/lib/encodings/volRegime";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fmtTimestamp, markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
@@ -474,14 +475,12 @@ function ThesisCard({
               {ctx.earnings_proximity}
             </span>
           )}
-          {ctx.vol_regime === "iv_rich" && (
-            <span className="inline-flex items-center rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 px-2 py-0.5 text-[10px] font-semibold tracking-wide">
-              IV Rich
-            </span>
-          )}
-          {ctx.vol_regime === "iv_cheap" && (
-            <span className="inline-flex items-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-[10px] font-semibold tracking-wide">
-              IV Cheap
+          {volRegime(ctx.vol_regime) && ctx.vol_regime !== "iv_fair" && (
+            <span
+              title={volRegime(ctx.vol_regime)!.rule}
+              className={`inline-flex items-center rounded-full ${volRegime(ctx.vol_regime)!.className} px-2 py-0.5 text-[10px] font-semibold tracking-wide`}
+            >
+              {volRegime(ctx.vol_regime)!.label}
             </span>
           )}
           {ctx.insight && (

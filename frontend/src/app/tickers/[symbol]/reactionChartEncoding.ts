@@ -1,4 +1,5 @@
 import type { EarningsOutcome } from "@/lib/api";
+import type { LegendItem } from "@/lib/encodings/types";
 
 // Single source of truth for what the reaction bars encode.
 // Both the bar <Cell> props and the legend are derived from this object.
@@ -71,23 +72,27 @@ export function barCellStyle(
   };
 }
 
-export type LegendEntry =
-  | { kind: "direction"; key: DirectionKey; label: string; color: string }
-  | { kind: "outcome"; key: OutcomeStyleKey; label: string; fillOpacity: number; dashed: boolean };
-
-export function legendEntries(isFed: boolean): LegendEntry[] {
+/**
+ * Legend rows, as mini-bars. Outcome rows are drawn in the "up" color at the
+ * outcome's real opacity and outline, because that is what a bar looks like:
+ * a gray dot cannot show "solid vs dashed vs faded".
+ */
+export function legendEntries(isFed: boolean): LegendItem[] {
   const enc = REACTION_CHART_ENCODING;
-  const entries: LegendEntry[] = (Object.keys(enc.direction) as DirectionKey[]).map((key) => ({
-    kind: "direction", key, label: enc.direction[key].label, color: enc.direction[key].color,
+  const items: LegendItem[] = (Object.keys(enc.direction) as DirectionKey[]).map((key) => ({
+    key: `direction-${key}`,
+    label: enc.direction[key].label,
+    swatch: { kind: "bar", color: enc.direction[key].color, opacity: 1, dashed: false },
   }));
   if (!isFed) {
     for (const key of Object.keys(enc.outcome) as OutcomeStyleKey[]) {
       const o = enc.outcome[key];
-      entries.push({
-        kind: "outcome", key, label: `${o.label} (${o.description})`,
-        fillOpacity: o.fillOpacity, dashed: o.dashed,
+      items.push({
+        key: `outcome-${key}`,
+        label: `${o.label} (${o.description})`,
+        swatch: { kind: "bar", color: enc.direction.up.color, opacity: o.fillOpacity, dashed: o.dashed },
       });
     }
   }
-  return entries;
+  return items;
 }

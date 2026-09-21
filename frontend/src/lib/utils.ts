@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { rvTier } from "@/lib/encodings/rvTier";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -7,11 +8,9 @@ export function cn(...inputs: ClassValue[]) {
 
 /** Qualitative tag + color for an RV rank value (0–100).
  *  Labels signal "relative to its own history" — not absolute volatility. */
-export function rvRankShort(rank: number): { tag: string; colorClass: string } {
-  if (rank < 25) return { tag: "low", colorClass: "text-muted-foreground" };
-  if (rank < 70) return { tag: "normal", colorClass: "text-muted-foreground" };
-  if (rank < 90) return { tag: "elevated", colorClass: "text-amber-500" };
-  return { tag: "extreme", colorClass: "text-primary" };
+export function rvRankShort(rank: number): { tag: string; colorClass: string; rule: string } {
+  const tier = rvTier(rank);   // one function for every page: lib/encodings/rvTier.ts
+  return { tag: tier.label, colorClass: tier.className, rule: tier.rule };
 }
 
 /** Tooltip text explaining what RV rank means. */

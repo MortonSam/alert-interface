@@ -1,5 +1,7 @@
 "use client";
 
+import EncodingLegend from "@/components/EncodingLegend";
+import { pickMove, pickResult, pickResultLegend } from "@/lib/encodings/pickResult";
 import { useIvyRule } from "@/lib/useIvyRule";
 import { type IvyRule, exitRuleSentence, fmtLongDate } from "@/lib/ivyRule";
 import { useEffect, useState } from "react";
@@ -43,14 +45,6 @@ function PickCard({
 }) {
   const isBullish = pick.picked_direction === "bullish";
   const move = pick.unrealized_move_pct;
-  const directionCorrect =
-    isClosed && pick.direction_hit != null
-      ? pick.direction_hit
-      : move != null
-        ? isBullish
-          ? move > 0
-          : move < 0
-        : null;
 
   const displayStrategy = stripExpTail(pick.strategy);
 
@@ -72,14 +66,10 @@ function PickCard({
           </span>
           {isClosed && pick.direction_hit != null && (
             <span
-              className={cn(
-                "px-2 py-0.5 rounded text-xs font-bold uppercase",
-                pick.direction_hit
-                  ? "bg-green-500/15 text-green-600 dark:text-green-400"
-                  : "bg-red-500/15 text-red-600 dark:text-red-400"
-              )}
+              title={pickResult(pick.direction_hit)?.detail}
+              className={cn("px-2 py-0.5 rounded text-xs font-bold uppercase", pickResult(pick.direction_hit)?.className)}
             >
-              {pick.direction_hit ? "HIT" : "MISS"}
+              {pickResult(pick.direction_hit)?.label}
             </span>
           )}
           {pick.vol_regime && (
@@ -141,14 +131,8 @@ function PickCard({
         )}
         {move != null && (
           <span
-            className={cn(
-              "font-mono font-semibold",
-              directionCorrect === true
-                ? "text-green-600 dark:text-green-400"
-                : directionCorrect === false
-                  ? "text-red-600 dark:text-red-400"
-                  : ""
-            )}
+            title={pickMove(pick.picked_direction, move).label}
+            className={cn("font-mono font-semibold", pickMove(pick.picked_direction, move).className)}
           >
             {move >= 0 ? "+" : ""}{move.toFixed(2)}%
           </span>
@@ -517,7 +501,7 @@ export default function IvyTradesPage() {
       {!loading && !error && openPicks.length > 0 && (
         <div className="space-y-3">
           {openPicks.length < picks.length && (
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Open</h2>
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Open, newest first</h2>
           )}
           {openPicks.map((pick) => (
             <PickCard
@@ -535,7 +519,8 @@ export default function IvyTradesPage() {
       {/* Closed picks */}
       {!loading && !error && closedPicks.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Closed</h2>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Closed, newest first</h2>
+          <EncodingLegend items={pickResultLegend()} className="mt-1" />
           {closedPicks.map((pick) => (
             <PickCard
               rule={ivy?.rule ?? null}

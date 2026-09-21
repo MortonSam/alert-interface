@@ -1,5 +1,6 @@
 "use client";
 
+import { volRegime } from "@/lib/encodings/volRegime";
 import { premiumSourcePhrase } from "@/lib/freshness";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -471,14 +472,11 @@ function DraftDisplay({
         {draft.vol_regime && (
           <span>
             Vol regime:{" "}
-            <span className={cn(
-              "font-mono font-medium",
-              draft.vol_regime === "iv_rich" ? "text-amber-600 dark:text-amber-400" :
-              draft.vol_regime === "iv_cheap" ? "text-green-600 dark:text-green-400" :
-              "text-foreground"
-            )}>
-              {draft.vol_regime === "iv_rich" ? "IV Rich" :
-               draft.vol_regime === "iv_cheap" ? "IV Cheap" : "IV Fair"}
+            <span
+              title={volRegime(draft.vol_regime)?.rule}
+              className={cn("font-mono font-medium rounded px-1", volRegime(draft.vol_regime)?.className ?? "text-foreground")}
+            >
+              {volRegime(draft.vol_regime)?.label ?? draft.vol_regime}
             </span>
           </span>
         )}

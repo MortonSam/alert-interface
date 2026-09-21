@@ -1,5 +1,6 @@
 "use client";
 
+import { volRegime as volRegimeEncoding } from "@/lib/encodings/volRegime";
 import Link from "next/link";
 
 interface DiscoverCardProps {
@@ -16,11 +17,6 @@ interface DiscoverCardProps {
   volRegime?: string | null;
 }
 
-const VOL_REGIME_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  iv_rich: { bg: "bg-warning/10", text: "text-warning", label: "IV Rich" },
-  iv_cheap: { bg: "bg-success/10", text: "text-success", label: "IV Cheap" },
-};
-
 export default function DiscoverCard({
   symbol,
   name,
@@ -31,7 +27,8 @@ export default function DiscoverCard({
   insight,
   volRegime,
 }: DiscoverCardProps) {
-  const volChip = volRegime ? VOL_REGIME_STYLES[volRegime] : null;
+  // iv_fair is the unmarked default on a card; only rich and cheap get a chip
+  const volChip = volRegime && volRegime !== "iv_fair" ? volRegimeEncoding(volRegime) : null;
   const context = [sector, industry].filter(Boolean).join(" \u00B7 ");
 
   return (
@@ -68,7 +65,7 @@ export default function DiscoverCard({
         <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
           {badge}
           {volChip && (
-            <span className={`inline-flex items-center rounded-full ${volChip.bg} ${volChip.text} px-2 py-0.5 text-[10px] font-semibold tracking-wide`}>
+            <span title={volChip.rule} className={`inline-flex items-center rounded-full ${volChip.className} px-2 py-0.5 text-[10px] font-semibold tracking-wide`}>
               {volChip.label}
             </span>
           )}

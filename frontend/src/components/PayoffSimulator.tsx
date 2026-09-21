@@ -1,5 +1,7 @@
 "use client";
 
+import EncodingLegend from "@/components/EncodingLegend";
+import { payoffChartLegend, payoffMark } from "@/lib/encodings/payoffChart";
 import { useEffect, useMemo, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -302,16 +304,13 @@ export default function PayoffSimulator({
               <Tooltip content={<SimTooltip />} />
 
               {/* Zero line */}
-              <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1} />
+              <ReferenceLine y={0} {...payoffMark("zero")} />
 
               {/* Current price marker */}
               {currentPrice != null && (
                 <ReferenceLine
                   x={currentPrice}
-                  stroke="hsl(var(--muted-foreground))"
-                  strokeWidth={1}
-                  strokeDasharray="3 5"
-                  strokeOpacity={0.6}
+                  {...payoffMark("current")}
                   label={{ value: "Current", position: "insideBottomRight", fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
                 />
               )}
@@ -319,16 +318,13 @@ export default function PayoffSimulator({
               {/* Price scrubber */}
               <ReferenceLine
                 x={effectivePrice}
-                stroke="hsl(var(--cool))"
-                strokeWidth={1.5}
-                strokeOpacity={0.7}
+                {...payoffMark("scrubber")}
               />
 
               {/* Green: profit zone (pnl >= 0) */}
               <Line
                 dataKey="pnl_pos"
-                stroke="hsl(var(--success))"
-                strokeWidth={2.5}
+                {...payoffMark("profit")}
                 dot={false}
                 activeDot={false}
                 type={T_slider === 0 ? "linear" : "monotone"}
@@ -338,8 +334,7 @@ export default function PayoffSimulator({
               {/* Red: loss zone (pnl < 0) */}
               <Line
                 dataKey="pnl_neg"
-                stroke="hsl(var(--destructive))"
-                strokeWidth={2.5}
+                {...payoffMark("loss")}
                 dot={false}
                 activeDot={false}
                 type={T_slider === 0 ? "linear" : "monotone"}
@@ -348,6 +343,7 @@ export default function PayoffSimulator({
               />
             </LineChart>
           </ResponsiveContainer>
+          <EncodingLegend items={payoffChartLegend()} className="mt-2" />
         </div>
       )}
 
