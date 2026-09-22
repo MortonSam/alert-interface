@@ -2523,7 +2523,7 @@ export default function TickerPage() {
                 </div>
                 {dataError && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                    RV excluded for this ticker (extreme price returns, likely a split adjustment).
+                    RV excluded for this ticker: a move of more than 50% in one day with no volume spike and no recorded split or dividend, so the price history is not trusted.
                   </p>
                 )}
               </div>

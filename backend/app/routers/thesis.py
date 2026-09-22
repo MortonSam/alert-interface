@@ -43,6 +43,7 @@ from app.schemas.thesis import (
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
+from app.services.corporate_actions import load_action_dates
 from app.services.finnhub_client import FinnhubClient
 from app.services.price_freshness import assess_quote
 from app.services.rv_store import get_latest_rv
@@ -325,11 +326,14 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     loop = asyncio.get_event_loop()
 
     # ── 1. Parallel market data fetch ─────────────────────────────────────────
+    action_dates = (await load_action_dates(db, [sym])).get(sym, set())
     finnhub = FinnhubClient()
     try:
         quote, rv_raw = await asyncio.gather(
             finnhub.get_quote(sym),
-            loop.run_in_executor(None, YFinanceClient.get_realized_vol_data, sym),
+            loop.run_in_executor(
+                None, lambda: YFinanceClient.get_realized_vol_data(sym, action_dates=action_dates),
+            ),
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Market data fetch failed: {exc}")

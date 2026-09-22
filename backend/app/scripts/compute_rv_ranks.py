@@ -22,6 +22,7 @@ import yfinance as yf
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
+from app.services.corporate_actions import load_action_dates
 from app.services.rv_math import compute_rv_metrics
 from app.services.system_metadata_service import set_value
 
@@ -91,8 +92,19 @@ async def _has_recent_row(symbol: str, as_of: date) -> bool:
         return result.scalar() is not None
 
 
+def _bars(frame) -> "pd.DataFrame | None":
+    """Close and Volume columns of a yfinance frame, rows with a close only."""
+    import pandas as pd
+
+    if not isinstance(frame, pd.DataFrame) or "Close" not in frame:
+        return None
+    bars = frame[["Close", "Volume"]] if "Volume" in frame else frame[["Close"]].assign(Volume=float("nan"))
+    bars = bars[bars["Close"].notna()]
+    return bars if not bars.empty else None
+
+
 def _fetch_bulk(symbols: list[str]) -> dict:
-    """Bulk download 2y daily closes. Returns {symbol: pd.Series}."""
+    """Bulk download 2y daily bars. Returns {symbol: DataFrame[Close, Volume]}."""
     import pandas as pd
 
     data = yf.download(
@@ -110,12 +122,9 @@ def _fetch_bulk(symbols: list[str]) -> dict:
 
     for sym in symbols:
         try:
-            if len(symbols) == 1:
-                closes = data["Close"].dropna()
-            else:
-                closes = data[sym]["Close"].dropna()
-            if isinstance(closes, pd.Series) and not closes.empty:
-                result[sym] = closes
+            bars = _bars(data if len(symbols) == 1 else data[sym])
+            if bars is not None:
+                result[sym] = bars
         except (KeyError, TypeError):
             pass
     return result
@@ -128,10 +137,9 @@ def _fetch_single(symbol: str):
     for wait in STRAGGLER_BACKOFF:
         try:
             hist = yf.Ticker(symbol).history(period="2y", interval="1d", auto_adjust=True)
-            if hist is not None and not hist.empty:
-                closes = hist["Close"].dropna()
-                if isinstance(closes, pd.Series) and not closes.empty:
-                    return closes
+            bars = _bars(hist)
+            if bars is not None:
+                return bars
         except Exception:
             pass
         time.sleep(wait)
@@ -158,32 +166,39 @@ async def main(only_symbol: str | None = None) -> int:
 
     print(f"  Universe: {len(symbols)} ticker(s)")
 
+    # Recorded splits and ex-dividends: a price gap on one of these dates is
+    # not a data error (the guard in rv_math reads them).
+    async with AsyncSessionLocal() as session:
+        action_dates = await load_action_dates(session, symbols)
+
     # ── Bulk fetch in batches ─────────────────────────────────────────────
-    all_closes: dict = {}
+    all_bars: dict = {}
     for i in range(0, len(symbols), BATCH_SIZE):
         batch = symbols[i : i + BATCH_SIZE]
         print(f"  Fetching batch {i // BATCH_SIZE + 1} ({len(batch)} tickers)...")
-        closes_map = _fetch_bulk(batch)
-        all_closes.update(closes_map)
+        all_bars.update(_fetch_bulk(batch))
 
-    fetched = set(all_closes.keys())
+    fetched = set(all_bars.keys())
     missing = [s for s in symbols if s not in fetched]
     print(f"  Bulk fetched: {len(fetched)}, stragglers: {len(missing)}")
 
     # ── Straggler retry ───────────────────────────────────────────────────
     for sym in missing:
-        closes = _fetch_single(sym)
-        if closes is not None:
-            all_closes[sym] = closes
+        bars = _fetch_single(sym)
+        if bars is not None:
+            all_bars[sym] = bars
 
     # ── Compute and upsert ────────────────────────────────────────────────
     counts: dict[str, int] = {}
     ok = err = 0
     for sym in symbols:
         try:
-            closes = all_closes.get(sym)
-            if closes is not None:
-                metrics = compute_rv_metrics(closes)
+            bars = all_bars.get(sym)
+            if bars is not None:
+                closes = bars["Close"]
+                metrics = compute_rv_metrics(
+                    closes, volumes=bars["Volume"], action_dates=action_dates.get(sym, set()),
+                )
                 metrics["last_bar_date"] = closes.index[-1].date()
                 metrics["last_bar_close"] = round(float(closes.iloc[-1]), 4)
             else:

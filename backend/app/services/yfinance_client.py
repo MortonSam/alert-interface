@@ -228,9 +228,15 @@ class YFinanceClient:
             return {"history": history, "start_price": start_price}
 
     @staticmethod
-    def get_realized_vol_data(symbol: str, rv_window: int = 20) -> dict[str, Any]:
+    def get_realized_vol_data(
+        symbol: str, rv_window: int = 20, action_dates: set | None = None,
+    ) -> dict[str, Any]:
         """Compute 20-day annualized realized (historical) volatility and its
         trailing 1-year rank / percentile.
+
+        ``action_dates`` are this ticker's recorded split / ex-dividend dates
+        (``corporate_actions.load_action_dates``); with the frame's volumes they
+        let the extreme-return guard tell a real crash from a bad adjustment.
 
         Returns:
             {
@@ -252,7 +258,8 @@ class YFinanceClient:
                     "rv_rank": None, "rv_percentile": None, "status": "no_data"}
 
         closes = hist["Close"].dropna()
-        metrics = compute_rv_metrics(closes, rv_window=rv_window)
+        volumes = hist["Volume"].reindex(closes.index) if "Volume" in hist else None
+        metrics = compute_rv_metrics(closes, rv_window=rv_window, volumes=volumes, action_dates=action_dates)
 
         # Build backward-compatible rv_series for callers that still need it
         # (batch-enrich, options-read, snapshot_iv).

@@ -690,7 +690,11 @@ async def check_rv_rank_bounds(session) -> CheckResult:
 
 
 async def check_rv_data_error_tickers(session) -> CheckResult:
-    """WARN listing tickers whose latest rv_snapshot has status='data_error' (extreme returns)."""
+    """WARN listing tickers whose latest rv_snapshot has status='data_error'.
+
+    data_error means a >50% daily move with neither a volume spike nor a recorded
+    split / ex-dividend on that date (rv_math): a bad adjustment or corrupt bar.
+    """
     # Subquery: latest as_of_date per symbol
     latest_sq = (
         select(RVSnapshot.symbol, func.max(RVSnapshot.as_of_date).label("max_date"))
@@ -705,12 +709,12 @@ async def check_rv_data_error_tickers(session) -> CheckResult:
     )).all()
 
     if not rows:
-        return CheckResult("rv_data_error_tickers", PASS, "No tickers excluded for extreme returns")
+        return CheckResult("rv_data_error_tickers", PASS, "No tickers excluded for unexplained extreme returns")
 
     details = [f"{r.symbol}  as_of={r.as_of_date}" for r in rows]
     return CheckResult(
         "rv_data_error_tickers", WARN,
-        f"{len(rows)} ticker(s) excluded from RV (extreme returns, likely bad split adjustment)",
+        f"{len(rows)} ticker(s) excluded from RV (>50% daily move with no volume spike and no recorded corporate action)",
         details,
     )
 
