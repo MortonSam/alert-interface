@@ -1893,21 +1893,25 @@ async def check_pnl_pct_units(session) -> CheckResult:
     Every *_pnl_pct is a percent (-35.0). A row written as a fraction (-0.35)
     makes the ledger show "-0.4%" and corrupts "Avg P&L %".
     """
+    # (table, label expression, FROM clause, pct column, percent implied by the row's own dollars).
+    # theses carries ticker_id, not symbol, so it joins tickers like the other checks.
     targets = (
-        ("alert_picks", "symbol", "option_pnl_pct", "option_pnl_dollars / NULLIF(cost_to_enter, 0)"),
-        ("theses", "symbol", "option_pnl_pct",
-         "option_pnl_dollars / NULLIF((entry_premium - COALESCE(entry_premium2, 0)) * contracts, 0)"),
-        ("credit_shadow_picks", "symbol", "pnl_pct", "pnl_dollars / NULLIF(max_loss, 0)"),
+        ("alert_picks", "x.symbol", "alert_picks x",
+         "x.option_pnl_pct", "x.option_pnl_dollars / NULLIF(x.cost_to_enter, 0)"),
+        ("theses", "t.symbol", "theses x JOIN tickers t ON t.id = x.ticker_id",
+         "x.option_pnl_pct", "x.option_pnl_dollars / NULLIF((x.entry_premium - COALESCE(x.entry_premium2, 0)) * x.contracts, 0)"),
+        ("credit_shadow_picks", "x.symbol", "credit_shadow_picks x",
+         "x.pnl_pct", "x.pnl_dollars / NULLIF(x.max_loss, 0)"),
     )
     bad: list[str] = []
     checked = 0
-    for table, label, col, implied in targets:
+    for table, label, from_clause, col, implied in targets:
         exists = (await session.execute(text(
             "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :t)"), {"t": table})).scalar()
         if not exists:
             continue
         rows = (await session.execute(text(
-            f"SELECT {label} AS label, {col} AS stored, ({implied}) AS implied FROM {table} "
+            f"SELECT {label} AS label, {col} AS stored, ({implied}) AS implied FROM {from_clause} "
             f"WHERE {col} IS NOT NULL AND ({implied}) IS NOT NULL"
         ))).all()
         checked += len(rows)
