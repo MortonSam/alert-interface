@@ -2009,19 +2009,28 @@ def _icon(level: str) -> str:
     return {"pass": "✓", "warn": "⚠", "error": "✗"}.get(level, "?")
 
 
-async def main() -> int:
-    results: list[CheckResult] = []
+async def run_checks(checks, session_factory=None) -> list[CheckResult]:
+    """Run every check in its own session.
 
-    async with AsyncSessionLocal() as session:
-        for check_fn in CHECKS:
-            try:
+    A check that raises is recorded as an ERROR and the rest still run. On
+    Postgres a failed statement aborts the whole transaction, so sharing one
+    session would turn a single bad query into "current transaction is
+    aborted" for every check after it.
+    """
+    session_factory = session_factory or AsyncSessionLocal
+    results: list[CheckResult] = []
+    for check_fn in checks:
+        try:
+            async with session_factory() as session:
                 result = await check_fn(session)
-            except Exception as exc:
-                result = CheckResult(
-                    check_fn.__name__, ERROR,
-                    f"Check raised an exception: {exc}",
-                )
-            results.append(result)
+        except Exception as exc:
+            result = CheckResult(check_fn.__name__, ERROR, f"Check raised an exception: {exc}")
+        results.append(result)
+    return results
+
+
+async def main() -> int:
+    results = await run_checks(CHECKS)
 
     passed  = sum(1 for r in results if r.level == PASS)
     warned  = sum(1 for r in results if r.level == WARN)
