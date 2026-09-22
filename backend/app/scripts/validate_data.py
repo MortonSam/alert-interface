@@ -765,6 +765,51 @@ async def check_eps_basis_suspect(session) -> CheckResult:
     return eps_basis_suspect_result([(r.symbol, r.sector, float(r.eps_actual), float(r.eps_estimate)) for r in rows])
 
 
+def estimate_split_basis_result(rows: list[tuple[str, date, Decimal, Decimal, list[float]]]) -> CheckResult:
+    """Pure: rows are (symbol, event_date, eps_estimate, eps_actual, split factors after the date).
+
+    ERROR when estimate and actual differ by a recorded split factor (either
+    side stale). upsert_reaction re-bases a frozen estimate when a split
+    restates the actual; a hit here means a row got past that or predates it.
+    Repair with app.scripts.repair_outcomes --write.
+    """
+    from app.services.split_basis import wrong_basis_factor
+
+    bad: list[str] = []
+    checked = 0
+    for symbol, event_date, estimate, actual, factors in rows:
+        if not factors:
+            continue
+        checked += 1
+        factor = wrong_basis_factor(estimate, actual, factors)
+        if factor is not None:
+            bad.append(f"{symbol} {event_date}: estimate {estimate} vs actual {actual} differ by split factor {factor:g}")
+    if bad:
+        return CheckResult("estimate_split_basis", ERROR,
+                           f"{len(bad)} earnings row(s) hold an estimate on a different split basis from the actual", bad)
+    return CheckResult("estimate_split_basis", PASS,
+                       f"{checked} earnings rows with a later split: estimate and actual on the same basis")
+
+
+async def check_estimate_split_basis(session) -> CheckResult:
+    """ERROR when a frozen estimate sits on a different split basis from its actual."""
+    from app.services.split_basis import factors_after, load_splits
+
+    rows = (await session.execute(text("""
+        SELECT DISTINCT hr.ticker_id, t.symbol, hr.event_date, hr.eps_estimate, hr.eps_actual
+        FROM historical_reactions hr
+        JOIN tickers t ON t.id = hr.ticker_id
+        JOIN events e ON e.ticker_id = hr.ticker_id AND e.event_type = 'split' AND e.event_date > hr.event_date
+        WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL AND hr.eps_estimate IS NOT NULL
+        ORDER BY t.symbol, hr.event_date
+    """))).all()
+    out = []
+    for r in rows:
+        factors = factors_after(await load_splits(session, r.ticker_id), r.event_date)
+        out.append((r.symbol, r.event_date, r.eps_estimate, r.eps_actual, factors))
+    return estimate_split_basis_result(out)
+
+
 async def check_analyst_stats_sessions(session) -> CheckResult:
     """ERROR when analyst stats break the session rule.
 
@@ -2200,6 +2245,7 @@ CHECKS = [
     check_excluded_ticker_has_no_reactions,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,
+    check_estimate_split_basis,
     check_eps_basis_suspect,
     # Analyst recommendations
     check_recommendations_freshness,

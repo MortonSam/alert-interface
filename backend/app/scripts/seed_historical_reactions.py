@@ -50,6 +50,7 @@ from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
+from app.services.split_basis import factors_after, load_splits, rebase_factor
 
 
 LOOKBACK_YEARS = 5
@@ -110,6 +111,11 @@ def _compute_outcome(
 
 
 FROZEN_KEYS = {"eps_estimate", "revenue_estimate"}
+
+
+def rebased_estimate(estimate: Decimal, factor: float) -> Decimal:
+    """The frozen estimate on the post-split share count, at Yahoo's 4dp."""
+    return (Decimal(estimate) / Decimal(str(factor))).quantize(Decimal("0.0001"))
 
 
 def outcome_after_write(
@@ -479,12 +485,22 @@ async def upsert_reaction(
     # never frozen on its own: it is derived from the estimate and actual that
     # will be stored after this write, so it can never contradict them.
     frozen = row is not None and row.eps_actual is not None
+    stored_estimate = row.eps_estimate if row is not None else None
     if frozen:
         update_data = {k: v for k, v in data.items() if k not in FROZEN_KEYS}
+        # A split after the quarter restates the actual on the new share count;
+        # the frozen estimate is re-based by the same factor so they still compare.
+        factor = rebase_factor(
+            row.eps_actual, data.get("eps_actual"),
+            factors_after(await load_splits(session, ticker.id), event_date),
+        )
+        if factor is not None and stored_estimate is not None:
+            stored_estimate = rebased_estimate(stored_estimate, factor)
+            update_data["eps_estimate"] = stored_estimate
     else:
         update_data = dict(data)
     update_data["outcome"] = outcome_after_write(
-        stored_estimate=row.eps_estimate if row is not None else None,
+        stored_estimate=stored_estimate,
         stored_actual=row.eps_actual if row is not None else None,
         data=data, frozen=frozen,
     )
