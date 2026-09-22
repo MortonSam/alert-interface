@@ -109,6 +109,25 @@ def _compute_outcome(
     return EarningsOutcome.MEET
 
 
+FROZEN_KEYS = {"eps_estimate", "revenue_estimate"}
+
+
+def outcome_after_write(
+    stored_estimate: Decimal | None,
+    stored_actual: Decimal | None,
+    data: dict,
+    frozen: bool,
+) -> EarningsOutcome:
+    """Outcome from the values the row will hold after an upsert.
+
+    When the row is frozen the stored estimate stays; otherwise the incoming
+    estimate wins. The actual is the incoming one when present, else stored.
+    """
+    estimate = stored_estimate if frozen else data.get("eps_estimate", stored_estimate)
+    actual = data["eps_actual"] if data.get("eps_actual") is not None else stored_actual
+    return _compute_outcome(estimate, actual)
+
+
 def _fetch_earnings_dates(t: yf.Ticker) -> list[tuple[date, Decimal | None, Decimal | None]]:
     """Return list of (event_date, eps_estimate, eps_actual) within the lookback window, oldest first."""
     today = date.today()
@@ -424,7 +443,7 @@ async def upsert_reaction(
     """
     # Check for pre-existence — also used to freeze settled estimates.
     existing = await session.execute(
-        select(HistoricalReaction.id, HistoricalReaction.eps_actual).where(
+        select(HistoricalReaction.id, HistoricalReaction.eps_actual, HistoricalReaction.eps_estimate).where(
             HistoricalReaction.ticker_id  == ticker.id,
             HistoricalReaction.event_date == event_date,
             HistoricalReaction.event_type == EventType.EARNINGS,
@@ -455,13 +474,21 @@ async def upsert_reaction(
             )
             return None
 
-    # Once a quarter has an actual, its estimates and outcome are frozen
-    # facts — refreshes only update price reactions and volumes.
-    _FROZEN_KEYS = {"eps_estimate", "revenue_estimate", "outcome"}
-    if row is not None and row.eps_actual is not None:
-        update_data = {k: v for k, v in data.items() if k not in _FROZEN_KEYS}
+    # Once a quarter has an actual, its estimates are frozen facts — refreshes
+    # only update price reactions, volumes and a revised actual. The outcome is
+    # never frozen on its own: it is derived from the estimate and actual that
+    # will be stored after this write, so it can never contradict them.
+    frozen = row is not None and row.eps_actual is not None
+    if frozen:
+        update_data = {k: v for k, v in data.items() if k not in FROZEN_KEYS}
     else:
-        update_data = data
+        update_data = dict(data)
+    update_data["outcome"] = outcome_after_write(
+        stored_estimate=row.eps_estimate if row is not None else None,
+        stored_actual=row.eps_actual if row is not None else None,
+        data=data, frozen=frozen,
+    )
+    data["outcome"] = _compute_outcome(data.get("eps_estimate"), data.get("eps_actual"))
 
     # Always stamp the computation version and report_timing on insert and update.
     data["computation_version"] = COMPUTATION_VERSION

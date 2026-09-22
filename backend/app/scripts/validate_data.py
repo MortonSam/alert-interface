@@ -689,6 +689,31 @@ async def check_rv_rank_bounds(session) -> CheckResult:
     )
 
 
+async def check_outcome_matches_eps(session) -> CheckResult:
+    """ERROR when a stored earnings outcome contradicts the row's stored eps_actual / eps_estimate.
+
+    upsert_reaction derives outcome from the values it stores; a mismatch means
+    a writer bypassed it. Repair with app.scripts.repair_outcomes --write.
+    """
+    rows = (await session.execute(text("""
+        SELECT t.symbol, hr.event_date, hr.outcome::text AS outcome, hr.eps_actual, hr.eps_estimate
+        FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE hr.event_type = 'earnings'
+          AND hr.eps_actual IS NOT NULL AND hr.eps_estimate IS NOT NULL
+          AND hr.outcome::text <> CASE WHEN hr.eps_actual > hr.eps_estimate THEN 'beat'
+                                       WHEN hr.eps_actual < hr.eps_estimate THEN 'miss'
+                                       ELSE 'meet' END
+        ORDER BY t.symbol, hr.event_date
+    """))).all()
+    if not rows:
+        return CheckResult("outcome_matches_eps", PASS, "Every stored earnings outcome matches its stored EPS values")
+    details = [f"{r.symbol} {r.event_date}: outcome {r.outcome}, actual {r.eps_actual} vs estimate {r.eps_estimate}"
+               for r in rows]
+    return CheckResult("outcome_matches_eps", ERROR,
+                       f"{len(rows)} earnings row(s) have an outcome that contradicts their EPS values "
+                       "(repair_outcomes --write)", details)
+
+
 async def check_analyst_stats_sessions(session) -> CheckResult:
     """ERROR when analyst stats break the session rule.
 
@@ -2123,6 +2148,7 @@ CHECKS = [
     check_rv_data_error_tickers,
     check_excluded_ticker_has_no_reactions,
     check_analyst_stats_sessions,
+    check_outcome_matches_eps,
     # Analyst recommendations
     check_recommendations_freshness,
     check_recommendations_bounds,
