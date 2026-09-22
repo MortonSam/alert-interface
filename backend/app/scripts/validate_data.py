@@ -703,10 +703,13 @@ async def check_outcome_matches_eps(session) -> CheckResult:
           AND hr.outcome::text <> CASE WHEN hr.eps_actual > hr.eps_estimate THEN 'beat'
                                        WHEN hr.eps_actual < hr.eps_estimate THEN 'miss'
                                        ELSE 'meet' END
+          AND NOT EXISTS (SELECT 1 FROM eps_basis_checks c
+                          WHERE c.ticker_id = hr.ticker_id AND c.event_date = hr.event_date AND c.basis_mismatch)
         ORDER BY t.symbol, hr.event_date
     """))).all()
     if not rows:
-        return CheckResult("outcome_matches_eps", PASS, "Every stored earnings outcome matches its stored EPS values")
+        return CheckResult("outcome_matches_eps", PASS,
+                           "Every stored earnings outcome matches its stored EPS values (basis-unclear rows excepted)")
     details = [f"{r.symbol} {r.event_date}: outcome {r.outcome}, actual {r.eps_actual} vs estimate {r.eps_estimate}"
                for r in rows]
     return CheckResult("outcome_matches_eps", ERROR,
@@ -814,6 +817,40 @@ async def check_estimate_split_basis(session) -> CheckResult:
         cands = candidates(splits_after(await load_splits(session, r.ticker_id), r.event_date))
         out.append((r.symbol, r.event_date, r.eps_estimate, r.eps_actual, cands, anchors_by_ticker[r.ticker_id]))
     return estimate_split_basis_result(out)
+
+
+async def check_basis_mismatch_has_no_outcome(session) -> CheckResult:
+    """ERROR when a basis-mismatch row still carries an outcome anywhere beat statistics read from.
+
+    historical_reactions (every live beat rate, the ticker page, Discover,
+    research notes) and earnings_features (the stored beat_rate and the Build
+    page) must both hold no beat/miss/meet for a row eps_basis_checks flags.
+    """
+    live = (await session.execute(text("""
+        SELECT t.symbol, hr.event_date, hr.outcome::text
+        FROM eps_basis_checks c
+        JOIN historical_reactions hr ON hr.ticker_id = c.ticker_id AND hr.event_date = c.event_date
+                                     AND hr.event_type = 'earnings'
+        JOIN tickers t ON t.id = c.ticker_id
+        WHERE c.basis_mismatch AND hr.outcome <> 'unknown'
+        ORDER BY 1, 2
+    """))).all()
+    stored = (await session.execute(text("""
+        SELECT t.symbol, ef.event_date, ef.outcome
+        FROM eps_basis_checks c
+        JOIN earnings_features ef ON ef.ticker_id = c.ticker_id AND ef.event_date = c.event_date
+        JOIN tickers t ON t.id = c.ticker_id
+        WHERE c.basis_mismatch AND ef.outcome IN ('BEAT', 'MISS', 'MEET')
+        ORDER BY 1, 2
+    """))).all()
+    flagged = await session.scalar(text("SELECT count(*) FROM eps_basis_checks WHERE basis_mismatch"))
+    details = [f"{s} {d}: historical_reactions outcome {o}" for s, d, o in live]
+    details += [f"{s} {d}: earnings_features outcome {o}" for s, d, o in stored]
+    if details:
+        return CheckResult("basis_mismatch_no_outcome", ERROR,
+                           f"{len(details)} basis-mismatch row(s) still carry an outcome", details)
+    return CheckResult("basis_mismatch_no_outcome", PASS,
+                       f"{flagged} basis-mismatch row(s) carry no outcome in historical_reactions or earnings_features")
 
 
 async def check_analyst_stats_sessions(session) -> CheckResult:
@@ -2252,6 +2289,7 @@ CHECKS = [
     check_analyst_stats_sessions,
     check_outcome_matches_eps,
     check_estimate_split_basis,
+    check_basis_mismatch_has_no_outcome,
     check_eps_basis_suspect,
     # Analyst recommendations
     check_recommendations_freshness,

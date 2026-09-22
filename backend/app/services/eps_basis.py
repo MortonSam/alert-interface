@@ -23,6 +23,7 @@ DERIVED_TOLERANCE = 0.03     # for a Q4 derived as FY minus three quarters: FY E
                              # year's weighted share count, so it is not the exact sum of the quarters
 SPLIT_TOLERANCE = 0.03       # relative, for off_by_split
 MAX_LAG_DAYS = 120           # event must fall within this many days after the period end
+BASIS_MISMATCH_FRACTION = 0.20   # actual must sit this far (x |estimate|) from GAAP while the estimate matches it
 
 
 @dataclass(frozen=True)
@@ -111,3 +112,32 @@ def match_actual(actual: Decimal, event_date: date, facts: dict[date, list[Fact]
                     return Match("off_by_split", f.value, f.tag, end, F)
     latest = _latest(values)
     return Match("unmatched", latest.value, latest.tag, end)
+
+
+@dataclass(frozen=True)
+class Classification:
+    actual: Match
+    estimate_status: str | None       # matched / off_by_split / unmatched, or None when there is no estimate / no fact
+    basis_mismatch: bool
+
+
+def classify(actual: Decimal, estimate: Decimal | None, event_date: date,
+             facts: dict[date, list[Fact]], cands: list[Candidate]) -> Classification:
+    """Match the actual, then the estimate against the same XBRL quarter.
+
+    basis_mismatch: the estimate matches GAAP (same tolerances, split-aware)
+    while the actual does not and sits more than BASIS_MISMATCH_FRACTION x
+    |estimate| away from the GAAP figure. The two were reported on different
+    bases, so no Beat/Miss can be read from them.
+    """
+    am = match_actual(actual, event_date, facts, cands)
+    if estimate is None or am.status == "no_fact":
+        return Classification(am, None, False)
+    em = match_actual(estimate, event_date, facts, cands)
+    mismatch = (
+        em.status in ("matched", "off_by_split")
+        and am.status == "unmatched"
+        and am.xbrl_eps is not None
+        and abs(float(actual) - am.xbrl_eps) > BASIS_MISMATCH_FRACTION * abs(float(estimate))
+    )
+    return Classification(am, em.status, mismatch)

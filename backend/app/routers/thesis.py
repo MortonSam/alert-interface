@@ -43,6 +43,7 @@ from app.schemas.thesis import (
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
+from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
 from app.services.corporate_actions import load_action_dates
 from app.services.finnhub_client import FinnhubClient
 from app.services.price_freshness import assess_quote
@@ -375,8 +376,12 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     hist_min: float | None = min(abs_moves_dec) if abs_moves_dec else None
     hist_sample: int = len(abs_moves_dec)
 
-    beats = [r for r in reactions if r.outcome == EarningsOutcome.BEAT]
-    beat_rate: float | None = len(beats) / len(reactions) * 100 if reactions else None
+    # Quarters whose EPS basis is unclear carry no outcome and leave the beat rate
+    basis_unclear = await basis_mismatch_dates(db, ticker_row.id)
+    decidable = [r for r in reactions if r.event_date not in basis_unclear]
+    basis_excluded = len(reactions) - len(decidable)
+    beats = [r for r in decidable if r.outcome == EarningsOutcome.BEAT]
+    beat_rate: float | None = len(beats) / len(decidable) * 100 if decidable else None
     beat_drops = [r for r in beats if float(r.pct_change_1d) < 0]
     bbd_rate: float | None = len(beat_drops) / len(beats) * 100 if beats else None
 
@@ -505,6 +510,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "beats": beats,
         "ce_misses": ce_misses,
         "beat_rate": beat_rate,
+        "basis_excluded": basis_excluded,
         "bbd_rate": bbd_rate,
         "avg_1d_on_beat": avg_1d_on_beat,
         "median_1d_on_beat": median_1d_on_beat,
@@ -721,6 +727,7 @@ async def _run_draft_generation(
         "hist_min_abs_move_pct":     round(hist_min * 100, 2) if hist_min else None,
         "hist_sample_size":          hist_sample,
         "beat_rate_pct":             round(beat_rate, 1) if beat_rate is not None else None,
+        "basis_excluded_note":       excluded_note(data.get("basis_excluded", 0)),
         "beat_but_dropped_rate_pct": round(bbd_rate, 1) if bbd_rate is not None else None,
         "atm_iv_pct":                round(atm_iv * 100, 1) if atm_iv else None,
         "rv_20d_pct":                round(current_rv * 100, 1) if current_rv else None,
@@ -840,7 +847,7 @@ HISTORICAL EARNINGS (1-day reactions, {hist_sample} quarters):
   Avg absolute move:  ±{_n(hist_avg*100 if hist_avg else None)}%
   Max absolute move:  ±{_n(hist_max*100 if hist_max else None)}%
   Min absolute move:  ±{_n(hist_min*100 if hist_min else None)}%
-  Beat rate:          {_n(beat_rate)}%
+  Beat rate:          {_n(beat_rate)}%{(" (" + excluded_note(data.get("basis_excluded", 0)) + ")") if data.get("basis_excluded") else ""}
   Beat-but-dropped:   {_n(bbd_rate)}% (price fell after beating this % of the time)
   NOTE: These are 1-day earnings-day reactions; the expiration above covers the full period.
 {ce_section}\

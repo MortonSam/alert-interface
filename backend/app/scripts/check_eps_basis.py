@@ -3,7 +3,10 @@
 For each ticker with earnings rows: CIK -> companyfacts (cached on disk per
 CIK for the run) -> quarterly EPS facts (services/eps_basis) -> one
 eps_basis_checks row per earnings row with match_status matched /
-off_by_split / unmatched / no_fact / no_filing. Read-only on every other table.
+off_by_split / unmatched / no_fact / no_filing, plus basis_mismatch (estimate
+matches GAAP, actual does not: services/eps_basis.classify). Then applies the
+exclusion: flagged rows get outcome 'unknown' in historical_reactions and
+rows no longer flagged get their outcome re-derived. Writes nothing else.
 
 CLI
 ---
@@ -28,14 +31,15 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.eps_basis_check import EpsBasisCheck
 from app.scripts.backfill_report_timing import CIK_OVERRIDES
 from app.services.edgar_client import EdgarClient, _cache_fresh, _cache_path
-from app.services.eps_basis import match_actual, quarter_facts
+from app.services.basis_exclusion import apply_basis_exclusion
+from app.services.eps_basis import classify, quarter_facts
 from app.services.split_basis import candidates, load_splits, splits_after
 
 REQUEST_GAP_SECONDS = 0.12   # EDGAR fair-use: under 10 requests/second
 CACHE_MAX_AGE_H = 24
 
 ROWS_SQL = text("""
-    SELECT hr.ticker_id, t.symbol, hr.event_date, hr.eps_actual
+    SELECT hr.ticker_id, t.symbol, hr.event_date, hr.eps_actual, hr.eps_estimate
     FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
     WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL
     ORDER BY t.symbol, hr.event_date
@@ -84,15 +88,20 @@ async def check_ticker(session, edgar: EdgarClient, ticker_id, symbol: str, rows
         if not filing_found:
             m = None
             status = "no_filing"
+            est_status, mismatch = None, False
         else:
-            m = match_actual(r.eps_actual, r.event_date, facts_by_end, candidates(splits_after(splits, r.event_date)))
-            status = m.status
+            c = classify(r.eps_actual, r.eps_estimate, r.event_date, facts_by_end,
+                         candidates(splits_after(splits, r.event_date)))
+            m, status, est_status, mismatch = c.actual, c.actual.status, c.estimate_status, c.basis_mismatch
         counts[status] += 1
+        if mismatch:
+            counts["basis_mismatch"] += 1
         values = dict(
             ticker_id=ticker_id, event_date=r.event_date, stored_actual=r.eps_actual,
             xbrl_eps=m.xbrl_eps if m else None, xbrl_tag=m.tag if m else None,
             xbrl_period_end=m.period_end if m else None, match_status=status,
-            split_factor=m.split_factor if m else None, checked_at=now,
+            split_factor=m.split_factor if m else None, estimate_status=est_status,
+            basis_mismatch=mismatch, checked_at=now,
         )
         stmt = pg_insert(EpsBasisCheck).values(**values).on_conflict_do_update(
             constraint="uq_eps_basis_checks_ticker_event",
@@ -126,6 +135,10 @@ async def main(only_symbol: str | None, limit: int | None) -> int:
                 total.update(counts)
                 if i % 25 == 0 or only_symbol:
                     print(f"  [{i}/{len(items)}] {symbol:6s} {dict(counts)}", flush=True)
+            # Flagged rows carry no outcome; rows no longer flagged get theirs back.
+            cleared, restored = await apply_basis_exclusion(session)
+            await session.commit()
+            print(f"Basis exclusion: {cleared} outcome(s) cleared, {restored} restored")
     finally:
         await edgar.close()
     print(f"Done: {dict(total)}")

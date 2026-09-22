@@ -528,7 +528,7 @@ export default function StructuredNoteView({
         key="beats"
         label="EPS beats"
         value={`${stats.beat_count}/${stats.total_quarters}`}
-        sub="quarters beat, of those covered"
+        sub={stats.basis_excluded ? `quarters beat, of those covered; ${stats.basis_excluded} excluded (EPS basis unclear)` : "quarters beat, of those covered"}
       />,
     );
   }

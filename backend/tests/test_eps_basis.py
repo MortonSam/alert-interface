@@ -92,4 +92,5 @@ def test_script_caches_companyfacts_per_cik_and_writes_only_the_checks_table():
     src = Path(__file__).resolve().parents[1].joinpath("app/scripts/check_eps_basis.py").read_text()
     assert 'companyfacts_{cik}.json' in src and "_cache_fresh(" in src
     assert "pg_insert(EpsBasisCheck)" in src
-    assert "UPDATE historical_reactions" not in src and "outcome" not in src.replace("outcome ", "")
+    # the only write outside eps_basis_checks is the outcome exclusion, and it goes through the shared service
+    assert "UPDATE historical_reactions" not in src and "apply_basis_exclusion(session)" in src

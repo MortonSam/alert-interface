@@ -136,10 +136,11 @@ const OUTCOME_STYLES: Record<EarningsOutcome, { label: string; cls: string }> = 
   unknown: { label: "—",       cls: "bg-muted text-muted-foreground" },
 };
 
-function OutcomeBadge({ outcome }: { outcome: EarningsOutcome }) {
-  const { label, cls } = OUTCOME_STYLES[outcome] ?? OUTCOME_STYLES.unknown;
+function OutcomeBadge({ outcome, reason }: { outcome: EarningsOutcome; reason?: string | null }) {
+  // A row whose EPS basis is unclear renders the absent badge with the server's reason.
+  const { label, cls } = reason ? OUTCOME_STYLES.unknown : (OUTCOME_STYLES[outcome] ?? OUTCOME_STYLES.unknown);
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span title={reason ?? undefined} className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
       {label}
     </span>
   );
@@ -790,7 +791,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                         {!isFed && (
                           <td className="px-3 py-2.5">
                             <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <OutcomeBadge outcome={r.outcome} />
+                              <OutcomeBadge outcome={r.outcome} reason={r.outcome_reason} />
                               {(() => {
                                 const sp = fmtEpsSurprise(r);
                                 return sp ? (
@@ -2074,6 +2075,9 @@ export default function TickerPage() {
                           <p className="text-sm font-semibold tabular-nums">
                             Beat {ce.beat_count} of {ce.total_quarters}
                           </p>
+                          {ce.basis_excluded_note && (
+                            <p className="text-[11px] text-muted-foreground">{ce.basis_excluded_note}</p>
+                          )}
                         </div>
                         <div>
                           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
@@ -2110,6 +2114,7 @@ export default function TickerPage() {
                           {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.
                           {" "}<ExplainTip term="priced in">{pricingNote}</ExplainTip>
                           {pricedIn?.rule && <span className="text-xs ml-1">({pricedIn.rule})</span>}
+                          {reactionSummary!.basis_excluded_note && <span className="text-xs ml-1">({reactionSummary!.basis_excluded_note})</span>}
                         </p>
                       )}
                     </div>

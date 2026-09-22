@@ -4,6 +4,7 @@ the vol regime the chip shows, the conditional earnings stats).
 """
 from __future__ import annotations
 
+from app.services.basis_exclusion import excluded_note
 from app.thresholds import PRICED_IN_PARTIALLY, rv_rank_label
 
 MIN_QUARTERS = 4
@@ -16,15 +17,17 @@ def earnings_blurb(cond: dict | None) -> str | None:
     if not cond or cond["total"] < MIN_QUARTERS:
         return None
     total, beats, sold_off = cond["total"], cond["beat_count"], cond["bbd_count"]
+    note = excluded_note(cond.get("basis_excluded", 0))
+    excl = f" ({note})" if note else ""
 
     if beats >= 4 and sold_off >= 2:
         pct = round(sold_off / beats * 100)
         if pct >= PRICED_IN_PARTIALLY:      # the same cutoff the priced-in label uses
-            return f"Beat {beats} of {total}; the stock fell after {pct}% of those beats"
+            return f"Beat {beats} of {total}; the stock fell after {pct}% of those beats{excl}"
 
     if beats >= 3 and beats / total >= 0.75 and cond.get("avg_1d_on_beat") is not None:
         avg = cond["avg_1d_on_beat"]
-        return f"Beat {beats} of {total}, averaging {avg:+.1f}% on the 1-day reaction to a beat"
+        return f"Beat {beats} of {total}, averaging {avg:+.1f}% on the 1-day reaction to a beat{excl}"
 
     if cond.get("avg_abs_1d") is not None:
         return f"Earnings move averages ±{cond['avg_abs_1d']:.1f}% over {total} quarters"

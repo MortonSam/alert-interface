@@ -35,6 +35,7 @@ class EarningsFeature(Base):
     median_1d_miss: Mapped[float | None] = mapped_column(Numeric(8, 4))
     weighted_1d: Mapped[float | None] = mapped_column(Numeric(8, 4))
     n_prior_events: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    basis_excluded: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")  # prior rows left out of beat_rate: EPS basis unclear
     buy_share_latest: Mapped[float | None] = mapped_column(Numeric(8, 4))
     buy_share_60d_ago: Mapped[float | None] = mapped_column(Numeric(8, 4))
     analyst_delta: Mapped[float | None] = mapped_column(Numeric(8, 4))

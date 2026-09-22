@@ -40,6 +40,8 @@ ROWS_WITH_SPLIT_AFTER_SQL = """
     JOIN tickers t ON t.id = hr.ticker_id
     JOIN events e ON e.ticker_id = hr.ticker_id AND e.event_type = 'split' AND e.event_date > hr.event_date
     WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL AND hr.eps_estimate IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM eps_basis_checks c
+                      WHERE c.ticker_id = hr.ticker_id AND c.event_date = hr.event_date AND c.basis_mismatch)
     ORDER BY t.symbol, hr.event_date
 """
 
@@ -55,6 +57,8 @@ MISMATCH_SQL = """
       AND hr.outcome::text <> CASE WHEN hr.eps_actual > hr.eps_estimate THEN 'beat'
                                    WHEN hr.eps_actual < hr.eps_estimate THEN 'miss'
                                    ELSE 'meet' END
+      AND NOT EXISTS (SELECT 1 FROM eps_basis_checks c
+                      WHERE c.ticker_id = hr.ticker_id AND c.event_date = hr.event_date AND c.basis_mismatch)
     ORDER BY t.symbol, hr.event_date
 """
 

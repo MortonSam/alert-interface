@@ -1773,7 +1773,11 @@ async def get_explain(
                     HistoricalReaction.pct_change_1d.isnot(None),
                 )
             )
-            rows = list(result.scalars().all())
+            from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
+            basis_unclear = await basis_mismatch_dates(db, ticker_row.id)
+            all_rows = list(result.scalars().all())
+            rows = [r for r in all_rows if r.event_date not in basis_unclear]
+            basis_excluded = len(all_rows) - len(rows)
             total = len(rows)
             beats = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
             misses = [r for r in rows if r.outcome == EarningsOutcome.MISS]
@@ -1792,6 +1796,7 @@ async def get_explain(
                 "avg_1d_on_beat": f"{mean(beat_1d):+.2f}%" if beat_1d else "(unavailable)",
                 "avg_1d_on_miss": f"{mean(miss_1d):+.2f}%" if miss_1d else "(unavailable)",
                 "avg_abs_1d": f"±{mean(all_1d):.2f}%" if all_1d else "(unavailable)",
+                "basis_excluded": excluded_note(basis_excluded) or "none",
             })
 
     # ── Check we have enough facts to generate ──────────────────────────────

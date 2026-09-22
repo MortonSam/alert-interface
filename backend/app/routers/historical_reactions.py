@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, basis_mismatch_dates, excluded_note
 from app.thresholds import eps_surprise
 from app.auth import require_admin
 from app.thresholds import magnitude_trend_label, priced_in_label
@@ -42,9 +43,13 @@ def _to_lr(lv: object) -> LabelRule | None:
 
 # ── Per-row enrichment helper ──────────────────────────────────────────────────
 
-def _enrich(r: HistoricalReaction) -> HistoricalReactionRead:
+def _enrich(r: HistoricalReaction, basis_unclear: set | None = None) -> HistoricalReactionRead:
     """Convert ORM row to read schema, adding computed fields."""
     read = HistoricalReactionRead.model_validate(r)
+    if basis_unclear and r.event_date in basis_unclear:
+        read.basis_mismatch = True
+        read.outcome = EarningsOutcome.UNKNOWN
+        read.outcome_reason = BASIS_UNCLEAR_REASON
 
     # EPS surprise: dollars under the floor, capped percent above it (thresholds.eps_surprise)
     sp = eps_surprise(
@@ -111,7 +116,10 @@ async def get_reaction_summary(
             HistoricalReaction.pct_change_1d.isnot(None),
         )
     )
-    rows = list(result.scalars().all())
+    basis_unclear = await basis_mismatch_dates(db, ticker.id)
+    all_rows = list(result.scalars().all())
+    rows = [r for r in all_rows if r.event_date not in basis_unclear]
+    basis_excluded = len(all_rows) - len(rows)
 
     total = len(rows)
     if total == 0:
@@ -121,6 +129,7 @@ async def get_reaction_summary(
             beat_but_dropped_count=0, beat_but_dropped_rate_pct=None,
             avg_1d_on_beat=None, avg_1d_on_miss=None, avg_abs_1d=None,
             sector_avg_abs_1d=None, sector_peer_count=0,
+            basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
         )
 
     beats  = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
@@ -173,6 +182,8 @@ async def get_reaction_summary(
         avg_1d_on_beat=avg_1d_beat,
         avg_1d_on_miss=avg_1d_miss,
         avg_abs_1d=avg_abs_1d,
+        basis_excluded=basis_excluded,
+        basis_excluded_note=excluded_note(basis_excluded),
         sector_avg_abs_1d=sector_avg,
         sector_peer_count=peer_count,
         sector_as_of=sector_as_of,
@@ -343,7 +354,10 @@ async def get_conditional_earnings(
         )
         .order_by(HistoricalReaction.event_date.asc())
     )
-    rows = list(result.scalars().all())
+    basis_unclear = await basis_mismatch_dates(db, ticker.id)
+    all_rows = list(result.scalars().all())
+    rows = [r for r in all_rows if r.event_date not in basis_unclear]
+    basis_excluded = len(all_rows) - len(rows)
     total = len(rows)
     sufficient = total >= MIN_QUARTERS
 
@@ -360,6 +374,7 @@ async def get_conditional_earnings(
             has_sufficient_history=False,
             beat_count=len(beats), miss_count=len(misses),
             meet_count=len(meets), unknown_count=len(unknowns),
+            basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
             avg_1d_on_beat=None, median_1d_on_beat=None,
             avg_1d_on_miss=None, median_1d_on_miss=None,
             beat_avg_5d=None, beat_continuation_rate_pct=None, beat_5d_sample=0,
@@ -405,6 +420,8 @@ async def get_conditional_earnings(
         miss_count=len(misses),
         meet_count=len(meets),
         unknown_count=len(unknowns),
+        basis_excluded=basis_excluded,
+        basis_excluded_note=excluded_note(basis_excluded),
         avg_1d_on_beat=avg_1d_beat,
         median_1d_on_beat=median_1d_beat,
         avg_1d_on_miss=avg_1d_miss,
@@ -459,7 +476,11 @@ async def list_reactions(
     if event_type:
         q = q.where(HistoricalReaction.event_type == event_type)
     result = await db.execute(q)
-    return [_enrich(r) for r in result.scalars().all()]
+    rows = list(result.scalars().all())
+    basis_unclear: set = set()
+    for tid in {r.ticker_id for r in rows}:
+        basis_unclear |= {(tid, d) for d in await basis_mismatch_dates(db, tid)}
+    return [_enrich(r, {d for t, d in basis_unclear if t == r.ticker_id}) for r in rows]
 
 
 @router.post("", response_model=HistoricalReactionRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])

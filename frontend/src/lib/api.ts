@@ -105,6 +105,8 @@ export interface HistoricalReaction {
   revenue_estimate: number | null;
   revenue_actual: number | null;
   outcome: EarningsOutcome;
+  basis_mismatch?: boolean;        // actual and estimate on different bases: outcome is absent
+  outcome_reason?: string | null;  // why the outcome is absent (server-provided sentence)
   created_at: string;
   // Computed enrichment field (populated server-side, null for non-earnings rows)
   eps_surprise_pct: number | null;          // uncapped; null when |estimate| < EPS_SURPRISE_DOLLAR_FLOOR
@@ -138,6 +140,8 @@ export interface ReactionSummary {
   priced_in: LabelRule | null;
   last_event_date: string | null;
   mixed_versions?: boolean;
+  basis_excluded?: number;             // quarters left out of every count: EPS basis unclear
+  basis_excluded_note?: string | null; // sentence to show next to any rate
 }
 
 export interface SectorPeerItem {
@@ -180,6 +184,8 @@ export interface ConditionalEarningsRead {
   miss_count: number;
   meet_count: number;
   unknown_count: number;
+  basis_excluded?: number;
+  basis_excluded_note?: string | null;
   avg_1d_on_beat: number | null;
   median_1d_on_beat: number | null;
   avg_1d_on_miss: number | null;
@@ -260,6 +266,7 @@ export interface StructuredNoteStats {
   revenue_beat_pct: number | null;
   beat_count: number | null;
   total_quarters: number | null;
+  basis_excluded?: number | null;
   latest_move_1d: string | null;
   latest_outcome: "beat" | "miss" | "meet" | null;
   latest_quarter_date: string | null;
@@ -725,6 +732,7 @@ export interface ThesisDraftRead {
     implied_range_low: number | null;
     implied_range_high: number | null;
     hist_avg_abs_move_pct: number | null;  // percentage, e.g. 2.74
+    basis_excluded_note?: string | null;   // quarters left out of beat_rate_pct: EPS basis unclear
     hist_max_abs_move_pct: number | null;
     hist_sample_size: number;
     beat_rate_pct: number | null;

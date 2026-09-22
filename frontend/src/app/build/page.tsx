@@ -465,7 +465,7 @@ function DraftDisplay({
           Hist avg ±:{" "}
           <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span>
         </span>
-        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "n/a"}%</span></span>
+        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "n/a"}%</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
         <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "n/a"}%</span></span>
         <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="font-mono text-foreground">n/a</span>}</span>
         <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : "n/a"}</span></span>

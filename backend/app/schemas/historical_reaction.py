@@ -44,6 +44,8 @@ class HistoricalReactionRead(HistoricalReactionBase):
     eps_surprise_display_pct: float | None = None   # percent to print, capped at +/- EPS_SURPRISE_PCT_CAP
     eps_surprise_capped: bool = False
     report_timing: str | None = None        # bmo | amc | unknown
+    basis_mismatch: bool = False            # eps_basis_checks: actual and estimate on different bases; outcome is absent
+    outcome_reason: str | None = None       # why the outcome is absent, when it is (basis_exclusion.BASIS_UNCLEAR_REASON)
     # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
     # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day
     # prices, not the post-earnings reaction. Meaningful decomposition requires next-day OHLCV
@@ -75,6 +77,8 @@ class ReactionSummaryRead(BaseModel):
     priced_in: LabelRule | None = None      # interpretive label for beat-but-dropped rate
     last_event_date: str | None = None      # ISO date of most recent earnings in sample
     mixed_versions: bool = False            # True while reseed in progress (some rows < v3)
+    basis_excluded: int = 0                 # quarters left out of every count above: EPS basis unclear
+    basis_excluded_note: str | None = None  # sentence to show next to any rate when basis_excluded > 0
 
 
 class ConditionalEarningsRead(BaseModel):
@@ -88,6 +92,8 @@ class ConditionalEarningsRead(BaseModel):
     miss_count: int
     meet_count: int
     unknown_count: int
+    basis_excluded: int = 0                 # quarters left out of the counts above: EPS basis unclear
+    basis_excluded_note: str | None = None
 
     # ── Conditional 1d moves ─────────────────────────────────────────────────
     avg_1d_on_beat: float | None

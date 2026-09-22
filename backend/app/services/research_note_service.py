@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
 from app.database import AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
@@ -34,10 +35,16 @@ def _fmt_pct(v: float | None) -> str:
 
 
 def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
-    """Return a dict of authoritative, Python-computed statistics."""
+    """Return a dict of authoritative, Python-computed statistics.
+
+    Quarters _fetch_context marked basis_mismatch (EPS actual and estimate on
+    different bases) leave every count; basis_excluded says how many.
+    """
+    basis_excluded = sum(1 for r in reactions if getattr(r, "basis_mismatch", False))
+    reactions = [r for r in reactions if not getattr(r, "basis_mismatch", False)]
     total = len(reactions)
     if total == 0:
-        return {"available": False}
+        return {"available": False, "basis_excluded": basis_excluded}
 
     beat  = sum(1 for r in reactions if r.outcome.value == "beat")
     miss  = sum(1 for r in reactions if r.outcome.value == "miss")
@@ -66,6 +73,7 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     beat_sentence = (
         f"Beaten consensus EPS in {beat} of {total} quarters "
         f"({miss} miss, {meet} meet) across the full {total}-quarter history."
+        + (f" {excluded_note(basis_excluded)}." if basis_excluded else "")
     )
 
     return {
@@ -74,6 +82,7 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
         "beat":           beat,
         "miss":           miss,
         "meet":           meet,
+        "basis_excluded": basis_excluded,
         "beat_sentence":  beat_sentence,
         "avg_1d":  _fmt_pct(s1["avg"]),  "max_1d": _fmt_pct(s1["max"]),  "min_1d": _fmt_pct(s1["min"]),
         "avg_3d":  _fmt_pct(s3["avg"]),  "max_3d": _fmt_pct(s3["max"]),  "min_3d": _fmt_pct(s3["min"]),
@@ -135,6 +144,7 @@ def _build_stats_object(
         "revenue_beat_pct": None,
         "beat_count": None,
         "total_quarters": None,
+        "basis_excluded": 0,
         "latest_move_1d": None,
         "latest_outcome": None,
         "latest_quarter_date": None,
@@ -145,6 +155,7 @@ def _build_stats_object(
     precomputed = _precompute_stats(reactions)
     stats["beat_count"] = precomputed.get("beat")
     stats["total_quarters"] = precomputed.get("total")
+    stats["basis_excluded"] = precomputed.get("basis_excluded", 0)
 
     latest = reactions[0]
     stats["latest_quarter_date"] = str(latest.event_date)
@@ -482,6 +493,9 @@ async def _fetch_context(
         .limit(20)
     )
     reactions = list(rows.scalars().all())
+    basis_unclear = await basis_mismatch_dates(db, ticker.id)
+    for r in reactions:
+        r.basis_mismatch = r.event_date in basis_unclear   # transient marker read by _precompute_stats
     return filing, sections, reactions
 
 

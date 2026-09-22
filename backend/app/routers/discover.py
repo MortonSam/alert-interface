@@ -22,6 +22,8 @@ from app.database import get_db
 from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.enums import EventType
 from app.models.event import Event
+from app.models.eps_basis_check import EpsBasisCheck
+from app.services.basis_exclusion import excluded_note
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 
@@ -154,8 +156,11 @@ async def _batch_conditional_stats(
             Ticker.symbol,
             HistoricalReaction.outcome,
             HistoricalReaction.pct_change_1d,
+            EpsBasisCheck.basis_mismatch,
         )
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
+        .outerjoin(EpsBasisCheck, (EpsBasisCheck.ticker_id == HistoricalReaction.ticker_id)
+                   & (EpsBasisCheck.event_date == HistoricalReaction.event_date))
         .where(
             HistoricalReaction.event_type == EventType.EARNINGS,
             HistoricalReaction.pct_change_1d.isnot(None),
@@ -166,9 +171,13 @@ async def _batch_conditional_stats(
     result = await db.execute(stmt)
     rows = result.all()
 
-    # Aggregate per symbol
+    # Aggregate per symbol; quarters whose EPS basis is unclear leave every count
     by_sym: dict[str, list[tuple]] = {}
+    excluded: dict[str, int] = {}
     for r in rows:
+        if r.basis_mismatch:
+            excluded[r.symbol] = excluded.get(r.symbol, 0) + 1
+            continue
         by_sym.setdefault(r.symbol, []).append((r.outcome, float(r.pct_change_1d)))
 
     out: dict[str, dict] = {}
@@ -196,6 +205,7 @@ async def _batch_conditional_stats(
             "avg_1d_on_beat": avg_1d_on_beat,
             "avg_1d_on_miss": avg_1d_on_miss,
             "avg_abs_1d": avg_abs_1d,
+            "basis_excluded": excluded.get(sym, 0),
         }
     return out
 
@@ -510,6 +520,10 @@ def _suggestion_insight(
     if base is None:
         base = {}
 
+    def _excluded_suffix(c: dict) -> str:
+        note = excluded_note(c.get("basis_excluded", 0))
+        return f" ({note})" if note else ""
+
     # ── Generator: beat_rate ─────────────────────────────────────────────────
     if cond and cond["total"] >= _MIN_QUARTERS and cond["beat_count"] > 0:
         beat_rate = cond["beat_count"] / cond["total"]
@@ -518,7 +532,7 @@ def _suggestion_insight(
         pct = round(beat_rate * 100)
         med_pct = round(br.get("med", 0) * 100)
         candidates.append((
-            f"Beats estimates {pct}% of the time, versus {med_pct}% across the S&P",
+            f"Beats estimates {pct}% of the time, versus {med_pct}% across the S&P" + _excluded_suffix(cond),
             z, "beat_rate",
         ))
 
@@ -530,7 +544,7 @@ def _suggestion_insight(
         pct = round(bbd_rate * 100)
         med_pct = round(bb.get("med", 0) * 100)
         candidates.append((
-            f"Sells off after {pct}% of beats, versus {med_pct}% across the S&P",
+            f"Sells off after {pct}% of beats, versus {med_pct}% across the S&P" + _excluded_suffix(cond),
             z, "priced_in",
         ))
 

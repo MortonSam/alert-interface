@@ -309,6 +309,11 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
             for tid, edate, mom in ef_result.all():
                 existing_momentum[(tid, edate)] = float(mom) if mom is not None else None
 
+        # Prior quarters whose EPS basis is unclear (eps_basis_checks.basis_mismatch)
+        # leave the beat rate and are counted in basis_excluded.
+        from app.services.basis_exclusion import basis_mismatch_pairs
+        basis_unclear = await basis_mismatch_pairs(session)
+
         # 6. Build feature rows
         feature_rows = []
         null_counts: dict[str, int] = defaultdict(int)
@@ -325,16 +330,18 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                 prior = events[:idx]
                 n_prior = len(prior)
 
-                # Beat rate from prior events only
+                # Beat rate from prior events only, less the basis-unclear ones
                 beat_rate = None
                 median_1d_beat = None
                 median_1d_miss = None
                 weighted_1d = None
+                decidable = [e for e in prior if (tid, e.event_date) not in basis_unclear]
+                basis_excluded = n_prior - len(decidable)
 
-                if n_prior >= 1:
-                    beats = [e for e in prior if e.outcome and e.outcome.value == "beat"]
-                    misses = [e for e in prior if e.outcome and e.outcome.value == "miss"]
-                    beat_rate = len(beats) / n_prior * 100  # percentage
+                if decidable:
+                    beats = [e for e in decidable if e.outcome and e.outcome.value == "beat"]
+                    misses = [e for e in decidable if e.outcome and e.outcome.value == "miss"]
+                    beat_rate = len(beats) / len(decidable) * 100  # percentage
 
                     beat_1ds = [float(e.pct_change_1d) for e in beats if e.pct_change_1d is not None]
                     miss_1ds = [float(e.pct_change_1d) for e in misses if e.pct_change_1d is not None]
@@ -448,6 +455,7 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                     "median_1d_miss": median_1d_miss,
                     "weighted_1d": weighted_1d,
                     "n_prior_events": n_prior,
+                    "basis_excluded": basis_excluded,
                     "buy_share_latest": buy_share_latest_val,
                     "buy_share_60d_ago": buy_share_60d_val,
                     "analyst_delta": analyst_delta,

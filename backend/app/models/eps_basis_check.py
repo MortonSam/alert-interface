@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,11 @@ class EpsBasisCheck(Base):
     xbrl_period_end: Mapped[date | None] = mapped_column(Date)
     match_status: Mapped[str] = mapped_column(String(16), nullable=False)
     split_factor: Mapped[float | None] = mapped_column(Numeric(8, 4))   # set for off_by_split
+    estimate_status: Mapped[str | None] = mapped_column(String(16))      # the estimate against the same XBRL quarter
+    # The estimate matches GAAP and the actual does not, by more than
+    # BASIS_MISMATCH_FRACTION of the estimate: the two were reported on
+    # different bases and no Beat/Miss can be read from them.
+    basis_mismatch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (

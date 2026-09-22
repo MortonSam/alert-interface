@@ -49,6 +49,7 @@ from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
 from app.services.split_basis import (
     Anchor, anchored_factor, candidates, load_anchors, load_splits, rebase_factor, splits_after,
@@ -443,6 +444,7 @@ async def upsert_reaction(
     event_date: date,
     data: dict,
     anchors: set[Anchor] | None = None,
+    basis_unclear: set[date] | None = None,
 ) -> bool | None:
     """Upsert on (ticker_id, event_date, event_type).
 
@@ -514,6 +516,10 @@ async def upsert_reaction(
         data=data, frozen=frozen,
     )
     data["outcome"] = _compute_outcome(data.get("eps_estimate"), data.get("eps_actual"))
+    # A quarter whose actual and estimate sit on different bases (eps_basis_checks.basis_mismatch)
+    # carries no outcome, whatever the numbers say.
+    if basis_unclear and event_date in basis_unclear:
+        data["outcome"] = update_data["outcome"] = EarningsOutcome.UNKNOWN
 
     # Always stamp the computation version and report_timing on insert and update.
     data["computation_version"] = COMPUTATION_VERSION
@@ -690,6 +696,7 @@ async def seed(symbol: str) -> None:
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
+        basis_unclear = await basis_mismatch_dates(session, ticker.id)
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             report_timing = timing_map.get(event_date, "unknown")
@@ -701,7 +708,7 @@ async def seed(symbol: str) -> None:
             data["eps_actual"]   = eps_actual
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
             data["report_timing"] = report_timing
-            created = await upsert_reaction(session, ticker, event_date, data, anchors)
+            created = await upsert_reaction(session, ticker, event_date, data, anchors, basis_unclear)
             if created is None:
                 skipped += 1
             elif created:
@@ -766,6 +773,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
+        basis_unclear = await basis_mismatch_dates(session, ticker.id)
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             report_timing = timing_map.get(event_date, "unknown")
@@ -777,7 +785,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
             data["eps_actual"]   = eps_actual
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
             data["report_timing"] = report_timing
-            created = await upsert_reaction(session, ticker, event_date, data, anchors)
+            created = await upsert_reaction(session, ticker, event_date, data, anchors, basis_unclear)
             if created is None:
                 no_price += 1
             elif created:
