@@ -1981,6 +1981,48 @@ async def check_step_age(session) -> CheckResult:
     return step_age_result(steps, datetime.now(timezone.utc))
 
 
+# ── Data age ──────────────────────────────────────────────────────────────────
+
+DATA_AGE_MAX_SESSIONS = 3
+
+
+def data_age_result(newest: dict[str, date | None], today: date) -> CheckResult:
+    """Pure: `newest` is {feed: newest date | None}; WARN when any is more than 3 sessions old."""
+    from app.services.trading_calendar import sessions_after
+
+    stale: list[str] = []
+    fresh: list[str] = []
+    for feed, d in newest.items():
+        if d is None:
+            stale.append(f"{feed}: no data at all")
+            continue
+        missed = sessions_after(d, today)
+        line = f"{feed}: newest {d.isoformat()} ({missed} sessions ago)"
+        (stale if missed > DATA_AGE_MAX_SESSIONS else fresh).append(line)
+    if stale:
+        return CheckResult("data_age", WARN,
+                           f"{len(stale)} data feed(s) older than {DATA_AGE_MAX_SESSIONS} trading days "
+                           "(has the provider stopped answering?)", stale + fresh)
+    return CheckResult("data_age", PASS, "; ".join(fresh))
+
+
+async def check_data_age(session) -> CheckResult:
+    """WARN when the newest analyst action, options chain date, or price bar is over 3 trading days old.
+
+    These are the signals that yfinance has stopped answering the production host.
+    """
+    analyst = await session.scalar(text("SELECT max(event_date) FROM events WHERE event_type = 'analyst_action'"))
+    chain = await session.scalar(text("SELECT max(snapshot_date) FROM put_call_snapshots"))
+    bar = await session.scalar(text("""
+        SELECT max(rs.last_bar_date) FROM rv_snapshots rs
+        JOIN tickers t ON t.symbol = rs.symbol AND t.is_active = true
+    """))
+    return data_age_result(
+        {"analyst actions": analyst, "options chains": chain, "price bars (rv_snapshots.last_bar_date)": bar},
+        date.today(),
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -2009,6 +2051,7 @@ CHECKS = [
     # RV snapshots
     check_rv_snapshot_stale,
     check_step_age,
+    check_data_age,
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
     # Analyst recommendations
