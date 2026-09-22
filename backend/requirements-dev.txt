@@ -1,0 +1,6 @@
+# Test dependencies (not installed in the production image).
+#   docker compose exec backend pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=9.0
+pytest-asyncio>=1.4
+pytest-randomly>=3.15
