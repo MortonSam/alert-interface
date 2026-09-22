@@ -57,6 +57,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
+    # RV rank runs before every reaction step: its data_error verdict is the price-history
+    # exclusion list the reaction steps and every reader apply, so they act on tonight's verdict.
+    ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
     ("Historical reactions (--all)",    ["python", "-m", "app.scripts.seed_historical_reactions", "--all"]),
     ("EPS basis check (check_eps_basis)", ["python", "-m", "app.scripts.check_eps_basis", "--incremental"]),
     ("FOMC reactions",                  ["python", "-m", "app.scripts.seed_fomc_reactions"]),
@@ -67,7 +70,6 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Sector peer snapshot",            ["python", "-m", "app.scripts.compute_sector_peers"]),
     ("Magnitude trend snapshot",        ["python", "-m", "app.scripts.compute_magnitude_trends"]),
     # RV ranks first: snapshot_iv reads realized vol from the rv_snapshots row written here.
-    ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),
     ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
