@@ -94,3 +94,22 @@ def test_script_caches_companyfacts_per_cik_and_writes_only_the_checks_table():
     assert "pg_insert(EpsBasisCheck)" in src
     # the only write outside eps_basis_checks is the outcome exclusion, and it goes through the shared service
     assert "UPDATE historical_reactions" not in src and "apply_basis_exclusion(session)" in src
+
+
+def test_continuing_operations_and_basic_and_diluted_tags_fill_missing_quarters():
+    from app.services.eps_basis import EPS_TAGS
+    facts = {"facts": {"us-gaap": {
+        "IncomeLossFromContinuingOperationsPerDilutedShare": {"units": {"USD/shares": [
+            {"start": "2024-01-01", "end": "2024-03-31", "val": 0.41, "filed": "2024-05-01"}]}},
+        "EarningsPerShareBasicAndDiluted": {"units": {"USD/shares": [
+            {"start": "2024-04-01", "end": "2024-06-30", "val": 0.86, "filed": "2024-08-01"}]}},
+    }}}
+    q = quarter_facts(facts)
+    assert q[date(2024, 3, 31)][0].tag == "IncomeLossFromContinuingOperationsPerDilutedShare"
+    assert q[date(2024, 6, 30)][0].tag == "EarningsPerShareBasicAndDiluted"
+    assert EPS_TAGS[0] == "EarningsPerShareDiluted"
+
+
+def test_xom_override_lists_both_filers():
+    from app.scripts.backfill_report_timing import CIK_OVERRIDES
+    assert CIK_OVERRIDES["XOM"] == ["0000034088", "0002115436"]

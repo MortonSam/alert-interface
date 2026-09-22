@@ -15,7 +15,16 @@ from decimal import Decimal
 
 from app.services.split_basis import Candidate
 
-EPS_TAGS = ("EarningsPerShareDiluted", "EarningsPerShareBasic")
+# Diluted first, then the tags filers use instead of it; each later tag only
+# fills quarters the earlier ones lack (ABNB files IncomeLossFromContinuing-
+# OperationsPerDilutedShare; some filers only EarningsPerShareBasicAndDiluted).
+EPS_TAGS = (
+    "EarningsPerShareDiluted",
+    "IncomeLossFromContinuingOperationsPerDilutedShare",
+    "EarningsPerShareBasicAndDiluted",
+    "EarningsPerShareBasic",
+    "IncomeLossFromContinuingOperationsPerBasicShare",
+)
 QUARTER_DAYS = (75, 100)
 YEAR_DAYS = (350, 380)
 MATCH_TOLERANCE = 0.01       # |stored - xbrl| for "matched" against a filed quarterly value
@@ -39,7 +48,7 @@ def _entries(facts_json: dict, tag: str) -> list[dict]:
 
 
 def quarter_facts(facts_json: dict) -> dict[date, list[Fact]]:
-    """{period_end: [every quarterly EPS value reported for it]}, diluted first, basic as fallback.
+    """{period_end: [every quarterly EPS value reported for it]}, diluted first, EPS_TAGS order as fallback.
 
     Includes derived Q4 values (FY minus the three quarters inside it) tagged
     "derived_q4:<tag>" when the filer reported no standalone Q4 value.

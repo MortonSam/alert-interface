@@ -40,7 +40,7 @@ from app.services.report_timing import TIMING_RULE_VERSION, classify, select_fil
 # ticker moves to a new CIK and the earlier 8-Ks stay under the predecessor,
 # so each ticker takes a list: predecessor first, current filer last.
 CIK_OVERRIDES: dict[str, list[str]] = {
-    "XOM":  ["0000034088"],   # EXXON MOBIL CORP (not ExxonMobil Holdings 0002115436)
+    "XOM":  ["0000034088", "0002115436"],   # Exxon Mobil Corp -> ExxonMobil Holdings (files from 2026)
     "AVB":  ["0000915912"],   # AVALONBAY COMMUNITIES INC
     "EA":   ["0000712515"],   # ELECTRONIC ARTS INC
     "EQR":  ["0000906107"],   # EQUITY RESIDENTIAL
