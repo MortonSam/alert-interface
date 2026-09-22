@@ -27,6 +27,7 @@ import asyncio
 import json
 import math
 import sys
+import time
 from datetime import date, timedelta
 
 import sqlalchemy as sa
@@ -39,6 +40,10 @@ from app.services.yfinance_client import YFinanceClient
 # Sanity band — reject ATM IV outside this range
 _IV_MIN = 0.05
 _IV_MAX = 4.0
+
+PRICE_FETCH_TIMEOUT = 20    # seconds per ticker; a hung yfinance call must not stall the sequential loop
+TIME_BUDGET_SECONDS = 540   # stop cleanly before the refresh runner's 600 s kill; rows already upserted are kept
+PROGRESS_EVERY = 50         # tickers between progress lines
 
 
 def _last_trading_day(d: date | None = None) -> date:
@@ -185,7 +190,13 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
 
     # ── RV from the stored snapshot (status, age and price-history freshness
     #    are enforced by rv_store); current price from yfinance ───────────────
-    current_price = await loop.run_in_executor(None, _get_current_price, symbol)
+    try:
+        current_price = await asyncio.wait_for(
+            loop.run_in_executor(None, _get_current_price, symbol), timeout=PRICE_FETCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        return {"symbol": symbol, "atm_iv": None, "realized_vol_20d": None, "current_price": None,
+                "atm_strike": None, "skipped": f"price fetch exceeded {PRICE_FETCH_TIMEOUT}s"}
     async with AsyncSessionLocal() as rv_session:
         rv_row = await get_latest_rv(rv_session, symbol)
     realized_vol_20d: float | None = (
@@ -289,15 +300,23 @@ async def main(only_symbol: str | None = None, backfill: bool = False) -> int:
             )
             symbols = [row[0] for row in result.fetchall()]
 
-    print(f"\nSnapshotting {len(symbols)} ticker(s)...\n")
-    ok = skipped = err = 0
+    print(f"\nSnapshotting {len(symbols)} ticker(s), budget {TIME_BUDGET_SECONDS}s...\n")
+    ok = skipped = err = timed_out = 0
+    started = time.monotonic()
+    stopped_early = False
 
-    for symbol in symbols:
+    for i, symbol in enumerate(symbols, start=1):
+        if i > 1 and time.monotonic() - started > TIME_BUDGET_SECONDS:
+            stopped_early = True
+            print(f"  Time budget reached after {time.monotonic() - started:.0f}s; {len(symbols) - i + 1} tickers left.", flush=True)
+            break
         try:
             row = await _snapshot_one(symbol, today)
             if row.get("skipped"):
                 print(f"  {symbol:8s}  — {row['skipped']}")
                 skipped += 1
+                if "exceeded" in row["skipped"]:
+                    timed_out += 1
                 continue
             iv_str = (
                 f"{row['atm_iv'] * 100:.2f}%"
@@ -325,8 +344,11 @@ async def main(only_symbol: str | None = None, backfill: bool = False) -> int:
         except Exception as exc:
             print(f"  {symbol:8s}  ERROR: {exc}")
             err += 1
+        if i % PROGRESS_EVERY == 0:
+            print(f"  … {i}/{len(symbols)}  ok={ok} skipped={skipped} timed_out={timed_out} err={err}  {time.monotonic() - started:.0f}s", flush=True)
 
-    print(f"\n  Done: {ok} OK, {skipped} skipped (no chain), {err} error(s).")
+    print(f"\n  Done: {ok} OK, {skipped} skipped ({timed_out} price fetches timed out), {err} error(s), "
+          f"{time.monotonic() - started:.0f}s" + ("  (stopped at time budget)" if stopped_early else ""))
     if err > 10:
         print(f"  Too many errors ({err} > 10) — marking step as failed.")
         return 1
