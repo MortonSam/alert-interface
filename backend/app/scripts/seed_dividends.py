@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import yfinance as yf
 from sqlalchemy import select
@@ -46,7 +46,7 @@ def _fetch_dividend_info_sync(symbol: str) -> dict | None:
 
     # exDividendDate is a Unix timestamp
     try:
-        ex_date = datetime.utcfromtimestamp(ex_ts).date()
+        ex_date = datetime.fromtimestamp(ex_ts, tz=timezone.utc).date()
     except (TypeError, ValueError, OSError):
         return None
 
