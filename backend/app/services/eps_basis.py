@@ -18,7 +18,9 @@ from app.services.split_basis import Candidate
 EPS_TAGS = ("EarningsPerShareDiluted", "EarningsPerShareBasic")
 QUARTER_DAYS = (75, 100)
 YEAR_DAYS = (350, 380)
-MATCH_TOLERANCE = 0.01       # |stored - xbrl| for "matched"
+MATCH_TOLERANCE = 0.01       # |stored - xbrl| for "matched" against a filed quarterly value
+DERIVED_TOLERANCE = 0.03     # for a Q4 derived as FY minus three quarters: FY EPS is computed on the
+                             # year's weighted share count, so it is not the exact sum of the quarters
 SPLIT_TOLERANCE = 0.03       # relative, for off_by_split
 MAX_LAG_DAYS = 120           # event must fall within this many days after the period end
 
@@ -96,7 +98,8 @@ def match_actual(actual: Decimal, event_date: date, facts: dict[date, list[Fact]
     values = facts[end]
     a = float(actual)
     for f in sorted(values, key=lambda f: f.filed, reverse=True):
-        if abs(f.value - a) <= MATCH_TOLERANCE:
+        tol = DERIVED_TOLERANCE if f.tag.startswith("derived_q4:") else MATCH_TOLERANCE
+        if abs(f.value - a) <= tol:
             return Match("matched", f.value, f.tag, end)
     if a != 0:
         for f in values:

@@ -42,6 +42,20 @@ def test_q4_is_derived_from_fy_when_no_standalone_value():
     assert len(q4) == 1 and q4[0].value == 1.2 and q4[0].tag == "derived_q4:EarningsPerShareDiluted"
 
 
+def test_derived_q4_matches_within_share_count_drift_but_filed_values_stay_tight():
+    # AAPL FY2025: 7.46 - (2.40 + 1.65 + 1.57) = 1.84 derived; the 10-K's own Q4 figure is 1.85
+    entries = [
+        {"start": "2024-09-29", "end": "2024-12-28", "val": 2.40, "filed": "2025-01-31"},
+        {"start": "2024-12-29", "end": "2025-03-29", "val": 1.65, "filed": "2025-05-02"},
+        {"start": "2025-03-30", "end": "2025-06-28", "val": 1.57, "filed": "2025-08-01"},
+        {"start": "2024-09-29", "end": "2025-09-27", "val": 7.46, "filed": "2025-10-31"},
+    ]
+    q = quarter_facts(_facts(entries))
+    assert match_actual(D("1.85"), date(2025, 10, 30), q, []).status == "matched"     # derived, within 0.03
+    assert match_actual(D("1.88"), date(2025, 10, 30), q, []).status == "unmatched"   # beyond 0.03
+    assert match_actual(D("1.59"), date(2025, 7, 31), q, []).status == "unmatched"    # filed value: 0.02 off is not a match
+
+
 def test_basic_only_fills_quarters_diluted_lacks():
     diluted = [{"start": "2024-01-01", "end": "2024-03-31", "val": 1.00, "filed": "2024-05-01"}]
     basic = [{"start": "2024-01-01", "end": "2024-03-31", "val": 1.02, "filed": "2024-05-01"},
