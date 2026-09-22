@@ -853,6 +853,40 @@ async def check_basis_mismatch_has_no_outcome(session) -> CheckResult:
                        f"{flagged} basis-mismatch row(s) carry no outcome in historical_reactions or earnings_features")
 
 
+REFUSAL_WINDOW_DAYS = 30
+
+
+async def check_refused_earnings_dates(session) -> CheckResult:
+    """WARN listing tickers whose seeder refused an earnings date in the last 30 days.
+
+    Each line shows the refused date, the blocking row, and what the blocking
+    row's stored SEC acceptance time supports (refusal_evidence.support).
+    Repair with app.scripts.repair_refused_dates --write (swaps only with SEC evidence).
+    """
+    from app.services.refusal_evidence import describe, support
+
+    rows = (await session.execute(text("""
+        SELECT t.symbol, r.refused_date, r.blocking_row_date, r.source, r.times_seen, r.last_seen,
+               ert.acceptance_datetime
+        FROM refused_earnings_dates r
+        JOIN tickers t ON t.id = r.ticker_id
+        LEFT JOIN earnings_report_timing ert ON ert.ticker_id = r.ticker_id AND ert.event_date = r.blocking_row_date
+        WHERE r.last_seen >= now() - make_interval(days => :days)
+        ORDER BY t.symbol, r.refused_date
+    """), {"days": REFUSAL_WINDOW_DAYS})).all()
+    if not rows:
+        return CheckResult("refused_earnings_dates", PASS, f"No earnings dates refused by the duplicate guard in {REFUSAL_WINDOW_DAYS} days")
+    details = []
+    for r in rows:
+        verdict = support(r.symbol, r.acceptance_datetime, r.refused_date, r.blocking_row_date)
+        acc = f", 8-K accepted {r.acceptance_datetime.isoformat(timespec='minutes')}" if r.acceptance_datetime else ""
+        details.append(f"{r.symbol}: {r.source} offered {r.refused_date}, refused by the {r.blocking_row_date} row "
+                       f"(seen {r.times_seen}x{acc}): {describe(verdict)}")
+    return CheckResult("refused_earnings_dates", WARN,
+                       f"{len(rows)} earnings date(s) across {len({r.symbol for r in rows})} ticker(s) refused by the duplicate guard "
+                       f"in {REFUSAL_WINDOW_DAYS} days (repair_refused_dates)", details)
+
+
 async def check_analyst_stats_sessions(session) -> CheckResult:
     """ERROR when analyst stats break the session rule.
 
@@ -2290,6 +2324,7 @@ CHECKS = [
     check_outcome_matches_eps,
     check_estimate_split_basis,
     check_basis_mismatch_has_no_outcome,
+    check_refused_earnings_dates,
     check_eps_basis_suspect,
     # Analyst recommendations
     check_recommendations_freshness,

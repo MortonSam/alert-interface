@@ -48,6 +48,7 @@ from app.models.earnings_report_timing import EarningsReportTiming
 from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
+from app.models.refused_earnings_date import RefusedEarningsDate
 from app.models.ticker import Ticker
 from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
@@ -482,6 +483,7 @@ async def upsert_reaction(
                 "refused_date": event_date.isoformat(),
                 "existing_date": neighbor.isoformat(),
             })
+            await record_refusal(session, ticker.id, event_date, neighbor)
             print(
                 f"  ⚠ {ticker.symbol}: not inserting earnings row {event_date}, "
                 f"existing row {neighbor} is within {DUPLICATE_GUARD_DAYS} days",
@@ -545,6 +547,19 @@ async def upsert_reaction(
     )
     await session.execute(stmt)
     return row is None
+
+
+async def record_refusal(session, ticker_id, refused_date: date, blocking_date: date, source: str = "yahoo") -> None:
+    """Durable record of a duplicate-guard refusal: first/last seen and a count per (ticker, refused, blocking)."""
+    stmt = (
+        pg_insert(RefusedEarningsDate)
+        .values(ticker_id=ticker_id, refused_date=refused_date, blocking_row_date=blocking_date, source=source)
+        .on_conflict_do_update(
+            constraint="uq_refused_earnings_dates_pair",
+            set_={"last_seen": func.now(), "times_seen": RefusedEarningsDate.times_seen + 1, "source": source},
+        )
+    )
+    await session.execute(stmt)
 
 
 async def record_guard_refusals() -> None:
