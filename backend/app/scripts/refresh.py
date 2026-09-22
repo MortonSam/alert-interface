@@ -58,6 +58,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
     ("Historical reactions (--all)",    ["python", "-m", "app.scripts.seed_historical_reactions", "--all"]),
+    ("EPS basis check (check_eps_basis)", ["python", "-m", "app.scripts.check_eps_basis", "--incremental"]),
     ("FOMC reactions",                  ["python", "-m", "app.scripts.seed_fomc_reactions"]),
     ("Dividend calendar",              ["python", "-m", "app.scripts.seed_dividends"]),
     ("Split history",                  ["python", "-m", "app.scripts.seed_splits"]),
@@ -83,6 +84,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Refresh earnings calendar (Finnhub)": 300,
     "Analyst recommendations (Finnhub)": 300,
     "Historical reactions (--all)": 1800,
+    "EPS basis check (check_eps_basis)": 900,     # TIME_BUDGET_SECONDS 600 + EDGAR slack
     "FOMC reactions": 900,
     "Analyst actions": 1200,
     "Build earnings features": 1200,

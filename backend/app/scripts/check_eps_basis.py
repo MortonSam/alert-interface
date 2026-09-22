@@ -8,9 +8,15 @@ matches GAAP, actual does not: services/eps_basis.classify). Then applies the
 exclusion: flagged rows get outcome 'unknown' in historical_reactions and
 rows no longer flagged get their outcome re-derived. Writes nothing else.
 
+Nightly it runs right after the earnings seeder with --incremental: only rows
+with no check row yet, or whose stored actual changed since the last check,
+are re-matched; companyfacts come from the on-disk cache when fresh; the run
+stops cleanly at TIME_BUDGET_SECONDS and the rest waits for the next night.
+
 CLI
 ---
     python -m app.scripts.check_eps_basis
+    python -m app.scripts.check_eps_basis --incremental
     python -m app.scripts.check_eps_basis --symbol UBER
     python -m app.scripts.check_eps_basis --limit 20
 """
@@ -20,6 +26,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -37,13 +44,24 @@ from app.services.split_basis import candidates, load_splits, splits_after
 
 REQUEST_GAP_SECONDS = 0.12   # EDGAR fair-use: under 10 requests/second
 CACHE_MAX_AGE_H = 24
+TIME_BUDGET_SECONDS = 600    # nightly: stop after this and leave the rest for the next run
 
 ROWS_SQL = text("""
-    SELECT hr.ticker_id, t.symbol, hr.event_date, hr.eps_actual, hr.eps_estimate
-    FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+    SELECT hr.ticker_id, t.symbol, hr.event_date, hr.eps_actual, hr.eps_estimate,
+           c.stored_actual AS checked_actual
+    FROM historical_reactions hr
+    JOIN tickers t ON t.id = hr.ticker_id
+    LEFT JOIN eps_basis_checks c ON c.ticker_id = hr.ticker_id AND c.event_date = hr.event_date
     WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL
     ORDER BY t.symbol, hr.event_date
 """)
+
+
+def needs_check(row, incremental: bool) -> bool:
+    """Incremental: rows with no check row, or whose stored actual changed since it was checked."""
+    if not incremental:
+        return True
+    return row.checked_actual is None or row.checked_actual != row.eps_actual
 
 
 async def _company_facts(edgar: EdgarClient, cik: str) -> dict | None:
@@ -112,20 +130,33 @@ async def check_ticker(session, edgar: EdgarClient, ticker_id, symbol: str, rows
     return counts
 
 
-async def main(only_symbol: str | None, limit: int | None) -> int:
+async def main(only_symbol: str | None, limit: int | None, incremental: bool = False,
+               budget_seconds: float = TIME_BUDGET_SECONDS) -> int:
     edgar = EdgarClient()
     total: Counter = Counter()
+    t0 = time.monotonic()
+    stopped_early = False
     try:
         async with AsyncSessionLocal() as session:
             rows = (await session.execute(ROWS_SQL)).all()
             by_ticker: dict = {}
+            skipped = 0
             for r in rows:
                 if only_symbol and r.symbol != only_symbol.upper():
                     continue
+                if not needs_check(r, incremental):
+                    skipped += 1
+                    continue
                 by_ticker.setdefault((r.ticker_id, r.symbol), []).append(r)
             items = list(by_ticker.items())[:limit] if limit else list(by_ticker.items())
-            print(f"Checking {sum(len(v) for _, v in items)} earnings rows across {len(items)} tickers", flush=True)
+            print(f"Checking {sum(len(v) for _, v in items)} earnings rows across {len(items)} tickers"
+                  + (f" ({skipped} already checked and unchanged)" if incremental else ""), flush=True)
             for i, ((ticker_id, symbol), trs) in enumerate(items, 1):
+                if time.monotonic() - t0 > budget_seconds:
+                    stopped_early = True
+                    print(f"  Time budget of {budget_seconds:.0f}s reached after {i - 1}/{len(items)} tickers; "
+                          f"the rest waits for the next run", flush=True)
+                    break
                 try:
                     counts = await check_ticker(session, edgar, ticker_id, symbol, trs)
                 except Exception as exc:
@@ -141,7 +172,7 @@ async def main(only_symbol: str | None, limit: int | None) -> int:
             print(f"Basis exclusion: {cleared} outcome(s) cleared, {restored} restored")
     finally:
         await edgar.close()
-    print(f"Done: {dict(total)}")
+    print(f"Done: {dict(total)}" + (" (stopped at the time budget)" if stopped_early else ""))
     return 0
 
 
@@ -149,5 +180,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check stored EPS actuals against EDGAR XBRL")
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--incremental", action="store_true",
+                        help="Only rows without a check row or whose stored actual changed")
+    parser.add_argument("--budget", type=float, default=TIME_BUDGET_SECONDS, help="Seconds before stopping cleanly")
     args = parser.parse_args()
-    sys.exit(asyncio.run(main(args.symbol, args.limit)))
+    sys.exit(asyncio.run(main(args.symbol, args.limit, args.incremental, args.budget)))
