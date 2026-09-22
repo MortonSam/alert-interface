@@ -23,26 +23,25 @@ import asyncio
 import json
 import math
 import sys
+import time
 from datetime import date, timedelta
-from pathlib import Path
 
 import yfinance as yf
 from sqlalchemy import func, select
-from tqdm import tqdm
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
+from app.services.system_metadata_service import get_value, set_value
 
 BATCH_SIZE = 5
 BATCH_SLEEP = 2.0
-RETRY_DELAYS = (3, 8, 15)
-FETCH_TIMEOUT = 45          # per-ticker yfinance timeout (seconds)
+RETRY_DELAYS = (5,)         # one retry; a slow provider must not cost 3 x FETCH_TIMEOUT per ticker
+FETCH_TIMEOUT = 30          # per-ticker yfinance timeout (seconds)
 SKIP_WITHIN_DAYS = 14       # skip tickers refreshed within this window
-
-CACHE_DIR = Path(__file__).parent / "cache"
-ATTEMPTED_CACHE = CACHE_DIR / "analyst_actions_attempted.json"
+TIME_BUDGET_SECONDS = 1000  # stop cleanly before the refresh runner's 1200 s kill, keeping progress
+ATTEMPTED_KEY = "analyst_actions_attempted"   # system_metadata: {symbol: iso_date}, survives deploys
 
 # ── Action label mapping ────────────────────────────────────────────────────
 
@@ -171,58 +170,64 @@ async def _upsert_analyst_event(
 
 # ── Skip logic ──────────────────────────────────────────────────────────────
 
-def _load_attempted() -> dict[str, str]:
-    """Load {symbol: iso_date} from the cache file."""
-    if not ATTEMPTED_CACHE.exists():
-        return {}
+async def _load_attempted() -> dict[str, str]:
+    """{symbol: iso_date} of tickers already attempted, from system_metadata."""
+    async with AsyncSessionLocal() as session:
+        raw = await get_value(session, ATTEMPTED_KEY)
     try:
-        return json.loads(ATTEMPTED_CACHE.read_text())
+        return json.loads(raw) if raw else {}
     except Exception:
         return {}
 
 
-def _save_attempted(data: dict[str, str]) -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    ATTEMPTED_CACHE.write_text(json.dumps(data, indent=2))
+async def _save_attempted(data: dict[str, str]) -> None:
+    """Checkpoint: called after every batch so a killed run keeps what it did."""
+    async with AsyncSessionLocal() as session:
+        await set_value(session, ATTEMPTED_KEY, json.dumps(data))
+        await session.commit()
 
 
-def _build_skip_set() -> set[str]:
+def _build_skip_set(attempted: dict[str, str]) -> set[str]:
     """Return symbols attempted within SKIP_WITHIN_DAYS."""
-    attempted = _load_attempted()
     cutoff = (date.today() - timedelta(days=SKIP_WITHIN_DAYS)).isoformat()
     return {sym for sym, d in attempted.items() if d >= cutoff}
 
 
 # ── Per-ticker bulk processing ───────────────────────────────────────────────
 
-async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
-    """Fetch + upsert all analyst actions with retries. Returns (ok, inserted_count)."""
+async def _process_ticker(ticker: Ticker, loop) -> tuple[str, int, str | None]:
+    """Fetch + upsert one ticker. Returns (outcome, inserted, detail).
+
+    outcome: "ok" (rows upserted), "empty" (provider has nothing for this
+    symbol, e.g. a 404), or "failed" (timeout or error after the retry).
+    """
     last_exc: Exception | None = None
-    for attempt, delay in enumerate(RETRY_DELAYS, start=1):
+    for attempt, delay in enumerate((0,) + RETRY_DELAYS, start=1):
+        if delay:
+            await asyncio.sleep(delay)
         try:
             actions = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None, _fetch_analyst_actions_sync, ticker.symbol
-                ),
+                loop.run_in_executor(None, _fetch_analyst_actions_sync, ticker.symbol),
                 timeout=FETCH_TIMEOUT,
             )
-            if not actions:
-                return True, 0
-
-            inserted = 0
-            async with AsyncSessionLocal() as session:
-                for row in actions:
-                    if await _upsert_analyst_event(session, ticker, row):
-                        inserted += 1
-                await session.commit()
-            return True, inserted
+        except asyncio.TimeoutError as exc:
+            last_exc = exc
+            continue
         except Exception as exc:
             last_exc = exc
-            if attempt < len(RETRY_DELAYS):
-                await asyncio.sleep(delay)
+            continue
+        if not actions:
+            return "empty", 0, None
+        inserted = 0
+        async with AsyncSessionLocal() as session:
+            for row in actions:
+                if await _upsert_analyst_event(session, ticker, row):
+                    inserted += 1
+            await session.commit()
+        return "ok", inserted, None
 
-    tqdm.write(f"  ✗ {ticker.symbol}: failed after {len(RETRY_DELAYS)} attempts — {last_exc}")
-    return False, 0
+    detail = "timeout" if isinstance(last_exc, asyncio.TimeoutError) else f"{type(last_exc).__name__}: {str(last_exc)[:120]}"
+    return "failed", 0, detail
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -252,64 +257,78 @@ async def main() -> int:
             )).scalars().all()
         )
 
-    # Build skip set — tickers attempted within SKIP_WITHIN_DAYS
-    skip_set = _build_skip_set()
+    # Skip tickers attempted within SKIP_WITHIN_DAYS (checkpointed in system_metadata)
+    attempted = await _load_attempted()
+    skip_set = _build_skip_set(attempted)
     to_process = [t for t in candidates if t.symbol not in skip_set]
     n_skipped = len(candidates) - len(to_process)
     if n_skipped:
-        print(
-            f"{n_skipped} skipped (attempted within {SKIP_WITHIN_DAYS} days).",
-            flush=True,
-        )
+        print(f"{n_skipped} skipped (attempted within {SKIP_WITHIN_DAYS} days).", flush=True)
 
-    print(f"Processing {len(to_process)} tickers (oldest-first rotation).", flush=True)
+    print(f"Processing {len(to_process)} tickers (oldest-first rotation), budget {TIME_BUDGET_SECONDS}s.", flush=True)
 
     if not to_process:
         print("Nothing to process.")
         return 0
 
     loop = asyncio.get_event_loop()
+    started = time.monotonic()
     succeeded = 0
+    empty_list: list[str] = []
     inserted_total = 0
     failed_list: list[str] = []
     today_iso = date.today().isoformat()
-
-    # Load existing attempted data for merge at end
-    attempted = _load_attempted()
+    prune_cutoff = (date.today() - timedelta(days=SKIP_WITHIN_DAYS * 2)).isoformat()
 
     batches = [to_process[i:i + BATCH_SIZE] for i in range(0, len(to_process), BATCH_SIZE)]
+    stopped_early = False
 
-    with tqdm(total=len(to_process), unit="ticker", dynamic_ncols=True) as bar:
-        for batch_idx, batch in enumerate(batches):
-            tasks = [_process_ticker(t, loop) for t in batch]
-            results = await asyncio.gather(*tasks)
+    for batch_idx, batch in enumerate(batches):
+        results = await asyncio.gather(*(_process_ticker(t, loop) for t in batch))
+        for ticker, (outcome, inserted, detail) in zip(batch, results):
+            # Every outcome counts as attempted: a failing ticker must not block the rotation night after night.
+            attempted[ticker.symbol] = today_iso
+            if outcome == "ok":
+                succeeded += 1
+                inserted_total += inserted
+            elif outcome == "empty":
+                succeeded += 1
+                empty_list.append(ticker.symbol)
+            else:
+                failed_list.append(ticker.symbol)
+                print(f"  ✗ {ticker.symbol}: {detail}", flush=True)
 
-            for ticker, (ok, inserted) in zip(batch, results):
-                if ok:
-                    succeeded += 1
-                    inserted_total += inserted
-                    # Mark as attempted so next run skips it
-                    attempted[ticker.symbol] = today_iso
-                else:
-                    failed_list.append(ticker.symbol)
-                bar.update(1)
-                bar.set_postfix(ok=succeeded, new=inserted_total, skip=n_skipped, fail=len(failed_list))
+        # Checkpoint after every batch so a kill keeps this batch's work.
+        attempted = {sym: d for sym, d in attempted.items() if d >= prune_cutoff}
+        await _save_attempted(attempted)
+        print(
+            f"  batch {batch_idx + 1}/{len(batches)}  ok={succeeded} new={inserted_total} "
+            f"empty={len(empty_list)} fail={len(failed_list)}  {time.monotonic() - started:.0f}s",
+            flush=True,
+        )
 
-            if batch_idx < len(batches) - 1:
-                await asyncio.sleep(BATCH_SLEEP)
-
-    # Persist attempted cache (prune entries older than 2 × SKIP_WITHIN_DAYS)
-    prune_cutoff = (date.today() - timedelta(days=SKIP_WITHIN_DAYS * 2)).isoformat()
-    attempted = {s: d for s, d in attempted.items() if d >= prune_cutoff}
-    _save_attempted(attempted)
+        elapsed = time.monotonic() - started
+        if batch_idx < len(batches) - 1 and elapsed > TIME_BUDGET_SECONDS:
+            stopped_early = True
+            left = len(to_process) - (batch_idx + 1) * BATCH_SIZE
+            print(f"  Time budget reached after {elapsed:.0f}s; {left} tickers left for the next run.", flush=True)
+            break
+        if batch_idx < len(batches) - 1:
+            await asyncio.sleep(BATCH_SLEEP)
 
     print()
     print(f"{'─' * 60}")
-    print(f"  ✓ {succeeded} tickers processed  📊 {inserted_total} analyst actions inserted  ✗ {len(failed_list)} failed")
+    print(f"  ✓ {succeeded} tickers processed  📊 {inserted_total} analyst actions inserted  "
+          f"○ {len(empty_list)} with nothing from the provider  ✗ {len(failed_list)} failed"
+          + ("  (stopped at time budget)" if stopped_early else ""))
+    if empty_list:
+        print(f"\n  Nothing from provider (404/empty): {', '.join(empty_list)}")
     if failed_list:
         print(f"\n  Failed: {', '.join(failed_list)}")
     print(f"{'─' * 60}")
-    return 1 if failed_list else 0
+    # Partial progress is checkpointed, so a slow night is not a failed step;
+    # exit 1 only when every ticker attempted failed.
+    return 1 if failed_list and not succeeded else 0
 
 
 if __name__ == "__main__":
