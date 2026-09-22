@@ -1,5 +1,7 @@
 """Stored EPS actuals are matched to EDGAR XBRL quarters; Q4 is derived when only the FY is filed."""
 from datetime import date
+
+import pytest
 from decimal import Decimal
 from pathlib import Path
 
@@ -120,3 +122,30 @@ def test_every_tag_including_derived_fits_the_column():
     from app.services.eps_basis import EPS_TAGS
     width = EpsBasisCheck.__table__.c.xbrl_tag.type.length
     assert all(len(f"derived_q4:{t}") <= width for t in EPS_TAGS)
+
+
+def test_filer_override_swaps_tags_and_scales_the_unit():
+    from app.services.eps_basis import FILER_EPS_OVERRIDES, filer_override
+    brk = "0001067983"
+    assert FILER_EPS_OVERRIDES[brk]["unit_factor"] == 1 / 1500 and filer_override("0000000000") == {}
+    facts = {"facts": {"us-gaap": {
+        "EarningsPerShareBasic": {"units": {"USD/shares": [
+            {"start": "2013-10-01", "end": "2013-12-31", "val": 3035.0, "filed": "2014-03-03"}]}},   # per Class A share
+        "EarningsPerShareDiluted": {"units": {"USD/shares": [
+            {"start": "2013-10-01", "end": "2013-12-31", "val": 99.0, "filed": "2014-03-03"}]}},     # ignored under the override
+    }}}
+    q = quarter_facts(facts, cik=brk)
+    assert q[date(2013, 12, 31)][0].value == pytest.approx(3035.0 / 1500, abs=1e-4)   # 2.0233 per Class B
+    assert q[date(2013, 12, 31)][0].tag == "EarningsPerShareBasic"
+    # without the override the same facts read diluted first, unscaled
+    assert quarter_facts(facts)[date(2013, 12, 31)][0].value == 99.0
+
+
+def test_sixteen_week_quarters_count_as_quarters():
+    # Kroger: Q1 is 16 weeks (112 days), Q2-Q4 are 12 weeks (84 days)
+    entries = [
+        {"start": "2025-02-02", "end": "2025-05-24", "val": 1.29, "filed": "2025-06-20"},   # 111 days
+        {"start": "2025-05-25", "end": "2025-08-16", "val": 1.05, "filed": "2025-09-12"},   # 83 days
+    ]
+    q = quarter_facts(_facts(entries))
+    assert sorted(q) == [date(2025, 5, 24), date(2025, 8, 16)]

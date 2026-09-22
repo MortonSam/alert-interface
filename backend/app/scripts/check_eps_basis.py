@@ -8,6 +8,12 @@ matches GAAP, actual does not: services/eps_basis.classify). Then applies the
 exclusion: flagged rows get outcome 'unknown' in historical_reactions and
 rows no longer flagged get their outcome re-derived. Writes nothing else.
 
+Filers that report EPS per share class (Visa, Berkshire, Constellation, Erie,
+Hershey, KKR, Ares) tag every EPS value with a StatementClassOfStock
+dimension, and companyfacts carries only undimensioned facts, so they stay
+no_fact here; their figures live in each filing's XBRL instance
+(<primary>_htm.xml), which this check does not read.
+
 Nightly it runs right after the earnings seeder with --incremental: only rows
 with no check row yet, or whose stored actual changed since the last check,
 are re-matched; companyfacts come from the on-disk cache when fresh; the run
@@ -97,7 +103,7 @@ async def check_ticker(session, edgar: EdgarClient, ticker_id, symbol: str, rows
         if facts is None:
             continue
         filing_found = True
-        for end, fs in quarter_facts(facts).items():
+        for end, fs in quarter_facts(facts, cik).items():
             facts_by_end.setdefault(end, []).extend(fs)     # predecessor and current filer both count
     splits = await load_splits(session, ticker_id)
     counts: Counter = Counter()

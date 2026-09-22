@@ -25,13 +25,32 @@ EPS_TAGS = (
     "EarningsPerShareBasic",
     "IncomeLossFromContinuingOperationsPerBasicShare",
 )
-QUARTER_DAYS = (75, 100)
+QUARTER_DAYS = (75, 119)     # 13-week quarters, and the 16-week first quarter of 52/53-week filers (Kroger)
 YEAR_DAYS = (350, 380)
 MATCH_TOLERANCE = 0.01       # |stored - xbrl| for "matched" against a filed quarterly value
 DERIVED_TOLERANCE = 0.03     # for a Q4 derived as FY minus three quarters: FY EPS is computed on the
                              # year's weighted share count, so it is not the exact sum of the quarters
 SPLIT_TOLERANCE = 0.03       # relative, for off_by_split
 MAX_LAG_DAYS = 120           # event must fall within this many days after the period end
+
+# Per-filer overrides, keyed by 10-digit CIK: which tags carry the diluted EPS
+# that Yahoo's figure is comparable to, and a factor to bring the XBRL unit
+# onto the traded share class. Filers not listed use EPS_TAGS and factor 1.
+#
+# Limits of what companyfacts can give: a filer that reports EPS per share
+# class tags each value with a StatementClassOfStock dimension, and
+# companyfacts carries only undimensioned facts. Those filers have no EPS
+# fact here under any tag, so an override cannot reach them; their figures
+# live in each filing's own XBRL instance (see check_eps_basis notes).
+FILER_EPS_OVERRIDES: dict[str, dict] = {
+    # Berkshire Hathaway: undimensioned EPS is per Class A share (EarningsPerShareBasic,
+    # filed through 2013); one Class A = 1,500 Class B, the traded BRK-B unit.
+    "0001067983": {"tags": ("EarningsPerShareBasic",), "unit_factor": 1 / 1500},
+}
+
+
+def filer_override(cik: str | None) -> dict:
+    return FILER_EPS_OVERRIDES.get(cik or "", {})
 BASIS_MISMATCH_FRACTION = 0.20   # actual must sit this far (x |estimate|) from GAAP while the estimate matches it
 BASIS_MISMATCH_MIN_ESTIMATE = 0.25   # cent-level estimates coincide with GAAP too easily to prove a basis
 BASIS_MISMATCH_MIN_ROWS = 2      # a basis pattern is a property of the feed for a ticker, not one quarter
@@ -49,19 +68,25 @@ def _entries(facts_json: dict, tag: str) -> list[dict]:
     return facts_json.get("facts", {}).get("us-gaap", {}).get(tag, {}).get("units", {}).get("USD/shares", [])
 
 
-def quarter_facts(facts_json: dict) -> dict[date, list[Fact]]:
+def quarter_facts(facts_json: dict, cik: str | None = None) -> dict[date, list[Fact]]:
     """{period_end: [every quarterly EPS value reported for it]}, diluted first, EPS_TAGS order as fallback.
 
     Includes derived Q4 values (FY minus the three quarters inside it) tagged
-    "derived_q4:<tag>" when the filer reported no standalone Q4 value.
+    "derived_q4:<tag>" when the filer reported no standalone Q4 value. A CIK
+    in FILER_EPS_OVERRIDES swaps the tag list and scales every value by its
+    unit factor.
     """
+    override = filer_override(cik)
+    tags = tuple(override.get("tags", EPS_TAGS))
+    factor = float(override.get("unit_factor", 1.0))
     out: dict[date, list[Fact]] = {}
-    for tag in EPS_TAGS:
+    for tag in tags:
         quarters: dict[date, list[Fact]] = {}
         years: list[tuple[date, date, float]] = []
         for e in _entries(facts_json, tag):
             try:
-                start, end, val = date.fromisoformat(e["start"]), date.fromisoformat(e["end"]), float(e["val"])
+                start, end = date.fromisoformat(e["start"]), date.fromisoformat(e["end"])
+                val = round(float(e["val"]) * factor, 4)
             except (KeyError, ValueError, TypeError):
                 continue
             days = (end - start).days
