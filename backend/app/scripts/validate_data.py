@@ -714,6 +714,57 @@ async def check_outcome_matches_eps(session) -> CheckResult:
                        "(repair_outcomes --write)", details)
 
 
+EPS_BASIS_SUSPECT_PCT = 100      # |surprise| beyond this, or opposite signs, suggests a basis mismatch
+EPS_BASIS_SUSPECT_MIN_ROWS = 3   # tickers with this many such rows are listed
+
+
+def eps_basis_suspect_result(rows: list[tuple[str, str | None, float, float]]) -> CheckResult:
+    """Pure: rows are (symbol, sector, eps_actual, eps_estimate) with both values present.
+
+    A row is suspect when actual and estimate have opposite signs, or when
+    |actual - estimate| / |estimate| exceeds EPS_BASIS_SUSPECT_PCT (estimates
+    under EPS_SURPRISE_DOLLAR_FLOOR are judged by sign only, as eps_surprise
+    does). These rows are where Yahoo's "Reported EPS" (usually GAAP diluted,
+    FFO for REITs) sits on a different basis from its "EPS Estimate" (usually
+    the adjusted consensus), so the Beat/Miss label and beat rate built from
+    them describe the basis gap, not the quarter.
+
+    Planned fix: cross-check each stored eps_actual against EDGAR companyfacts
+    EarningsPerShareDiluted (edgar_client.get_company_facts) and store an
+    eps_basis per row (gaap / non_gaap / unknown), then label and aggregate
+    only rows whose actual and estimate share a basis.
+    """
+    from app.thresholds import EPS_SURPRISE_DOLLAR_FLOOR
+
+    suspect = 0
+    per_ticker: dict[tuple[str, str | None], int] = {}
+    for symbol, sector, actual, estimate in rows:
+        opposite = actual * estimate < 0
+        beyond = abs(estimate) >= EPS_SURPRISE_DOLLAR_FLOOR and abs(actual - estimate) / abs(estimate) * 100 > EPS_BASIS_SUSPECT_PCT
+        if opposite or beyond:
+            suspect += 1
+            per_ticker[(symbol, sector)] = per_ticker.get((symbol, sector), 0) + 1
+    if not suspect:
+        return CheckResult("eps_basis_suspect", PASS, f"No earnings rows with a surprise beyond ±{EPS_BASIS_SUSPECT_PCT}% or opposite-sign EPS")
+    listed = sorted(((sym, sec, n) for (sym, sec), n in per_ticker.items() if n >= EPS_BASIS_SUSPECT_MIN_ROWS),
+                    key=lambda t: (-t[2], t[0]))
+    details = [f"{sym} ({sec or 'no sector'}): {n} row(s)" for sym, sec, n in listed]
+    return CheckResult("eps_basis_suspect", WARN,
+                       f"{suspect} earnings row(s) across {len(per_ticker)} ticker(s) have a surprise beyond "
+                       f"±{EPS_BASIS_SUSPECT_PCT}% or opposite-sign EPS (likely GAAP actual vs adjusted estimate); "
+                       f"{len(listed)} ticker(s) with {EPS_BASIS_SUSPECT_MIN_ROWS}+", details)
+
+
+async def check_eps_basis_suspect(session) -> CheckResult:
+    """WARN on earnings rows whose EPS surprise looks like a basis mismatch (see eps_basis_suspect_result)."""
+    rows = (await session.execute(text("""
+        SELECT t.symbol, t.sector, hr.eps_actual, hr.eps_estimate
+        FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL AND hr.eps_estimate IS NOT NULL
+    """))).all()
+    return eps_basis_suspect_result([(r.symbol, r.sector, float(r.eps_actual), float(r.eps_estimate)) for r in rows])
+
+
 async def check_analyst_stats_sessions(session) -> CheckResult:
     """ERROR when analyst stats break the session rule.
 
@@ -2149,6 +2200,7 @@ CHECKS = [
     check_excluded_ticker_has_no_reactions,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,
+    check_eps_basis_suspect,
     # Analyst recommendations
     check_recommendations_freshness,
     check_recommendations_bounds,
