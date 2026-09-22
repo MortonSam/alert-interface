@@ -113,3 +113,10 @@ def test_continuing_operations_and_basic_and_diluted_tags_fill_missing_quarters(
 def test_xom_override_lists_both_filers():
     from app.scripts.backfill_report_timing import CIK_OVERRIDES
     assert CIK_OVERRIDES["XOM"] == ["0000034088", "0002115436"]
+
+
+def test_every_tag_including_derived_fits_the_column():
+    from app.models.eps_basis_check import EpsBasisCheck
+    from app.services.eps_basis import EPS_TAGS
+    width = EpsBasisCheck.__table__.c.xbrl_tag.type.length
+    assert all(len(f"derived_q4:{t}") <= width for t in EPS_TAGS)

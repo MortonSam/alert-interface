@@ -26,7 +26,7 @@ class EpsBasisCheck(Base):
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
     stored_actual: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False)
     xbrl_eps: Mapped[float | None] = mapped_column(Numeric(10, 4))
-    xbrl_tag: Mapped[str | None] = mapped_column(String(40))          # EarningsPerShareDiluted / EarningsPerShareBasic / derived_q4:<tag>
+    xbrl_tag: Mapped[str | None] = mapped_column(String(80))          # an EPS_TAGS entry, or derived_q4:<tag> (up to 60 chars)
     xbrl_period_end: Mapped[date | None] = mapped_column(Date)
     match_status: Mapped[str] = mapped_column(String(16), nullable=False)
     split_factor: Mapped[float | None] = mapped_column(Numeric(8, 4))   # set for off_by_split
