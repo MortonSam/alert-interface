@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select, text
@@ -1924,6 +1924,63 @@ async def check_pnl_pct_units(session) -> CheckResult:
     return CheckResult("pnl_pct_units", PASS, f"All {checked} stored P&L percentages match their dollars")
 
 
+# ── Nightly step age ──────────────────────────────────────────────────────────
+
+STEP_AGE_WARN_DAYS = 2
+STEP_AGE_ERROR_DAYS = 4
+
+
+def step_age_result(steps: dict[str, str | None], now: datetime) -> CheckResult:
+    """Pure: `steps` is {label: last_success_iso | None}, the store /health reads."""
+    stale_warn: list[str] = []
+    stale_error: list[str] = []
+    never: list[str] = []
+    for label, iso in sorted(steps.items()):
+        if not iso:
+            never.append(label)
+            continue
+        try:
+            last = datetime.fromisoformat(iso)
+        except ValueError:
+            never.append(f"{label} (unparseable: {iso})")
+            continue
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age_days = (now - last).total_seconds() / 86400
+        line = f"{label}: last success {last.date().isoformat()} ({age_days:.1f} days ago)"
+        if age_days >= STEP_AGE_ERROR_DAYS:
+            stale_error.append(line)
+        elif age_days >= STEP_AGE_WARN_DAYS:
+            stale_warn.append(line)
+    if stale_error:
+        return CheckResult("step_age", ERROR,
+                           f"{len(stale_error)} nightly step(s) have not succeeded in {STEP_AGE_ERROR_DAYS}+ days",
+                           stale_error + stale_warn + [f"never succeeded: {n}" for n in never])
+    if stale_warn or never:
+        return CheckResult("step_age", WARN,
+                           f"{len(stale_warn)} nightly step(s) have not succeeded in {STEP_AGE_WARN_DAYS}+ days"
+                           + (f"; {len(never)} never recorded a success" if never else ""),
+                           stale_warn + [f"never succeeded: {n}" for n in never])
+    return CheckResult("step_age", PASS, f"All {len(steps)} nightly steps succeeded within {STEP_AGE_WARN_DAYS} days")
+
+
+async def check_step_age(session) -> CheckResult:
+    """WARN when a nightly step's last success is 2+ days old, ERROR at 4+ days.
+
+    Reads step:<label>:last_success from system_metadata, the same rows /health
+    reports as step_health, for every step in refresh.py's list except this one.
+    """
+    from app.scripts.refresh import STEPS
+
+    rows = (await session.execute(text(
+        # `\:` keeps SQLAlchemy from reading ":last_success" as a bind parameter
+        r"SELECT key, value FROM system_metadata WHERE key LIKE 'step:%\:last_success'"
+    ))).all()
+    stored = {k[len("step:"):-len(":last_success")]: v for k, v in rows}
+    steps = {label: stored.get(label) for label, _ in STEPS if label != "Validate data"}
+    return step_age_result(steps, datetime.now(timezone.utc))
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1951,6 +2008,7 @@ CHECKS = [
     check_tickers_uniform_outcome,
     # RV snapshots
     check_rv_snapshot_stale,
+    check_step_age,
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
     # Analyst recommendations
