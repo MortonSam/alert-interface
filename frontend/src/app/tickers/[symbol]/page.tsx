@@ -4,7 +4,7 @@ import { rvTier } from "@/lib/encodings/rvTier";
 import { displayedOptionFacts, priceDriftNote, priceLabel } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { analystSampleLabel, analystSampleFooter } from "@/lib/analystSample";
+import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1516,9 +1516,9 @@ export default function TickerPage() {
     const { median_1d_upgrade, median_1d_downgrade,
       upgrade_5d_continuation_pct, downgrade_5d_continuation_pct,
       upgrade_sessions, downgrade_sessions } = analystStats;
-    // A median is stored only on enough distinct sessions, so non-null is the gate.
-    const upSignal = median_1d_upgrade != null;
-    const dnSignal = median_1d_downgrade != null;
+    // A median is stored only on enough distinct sessions; 0 sessions means not yet recomputed.
+    const upSignal = hasAnalystSignal(median_1d_upgrade, upgrade_sessions);
+    const dnSignal = hasAnalystSignal(median_1d_downgrade, downgrade_sessions);
     if (!upSignal && !dnSignal) return null;
     if (dnSignal && (!upSignal || downgrade_sessions >= upgrade_sessions)) {
       let line = `Downgrades tend to hit, median ${fmtPct(median_1d_downgrade!)} on the day`;
@@ -1538,8 +1538,8 @@ export default function TickerPage() {
   const analystInsightRule = useMemo(() => {
     if (!analystInsight || !analystStats) return null;
     const { median_1d_upgrade, median_1d_downgrade, upgrade_sessions, downgrade_sessions } = analystStats;
-    const upSignal = median_1d_upgrade != null;
-    const dnSignal = median_1d_downgrade != null;
+    const upSignal = hasAnalystSignal(median_1d_upgrade, upgrade_sessions);
+    const dnSignal = hasAnalystSignal(median_1d_downgrade, downgrade_sessions);
     if (dnSignal && (!upSignal || downgrade_sessions >= upgrade_sessions)) {
       return `Median event-day move on downgrades across ${downgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still lower ${ANALYST_WINDOW_TEXT.later}`;
     }
@@ -2141,7 +2141,7 @@ export default function TickerPage() {
               <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-3">Street Pulse</p>
               <div className={cn(
                 "grid gap-6",
-                analystStats && (analystStats.median_1d_upgrade != null || analystStats.median_1d_downgrade != null)
+                analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions))
                   ? "grid-cols-1 md:grid-cols-2"
                   : "grid-cols-1",
               )}>
@@ -2180,9 +2180,9 @@ export default function TickerPage() {
                 </div>
 
                 {/* Right: Aggregate Stats */}
-                {analystStats && (analystStats.median_1d_upgrade != null || analystStats.median_1d_downgrade != null) && (
+                {analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions)) && (
                   <div className="space-y-3">
-                    {analystStats.median_1d_upgrade != null && (
+                    {hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) && (
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On upgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
@@ -2191,7 +2191,7 @@ export default function TickerPage() {
                         <p className="text-xs text-muted-foreground">{analystSampleLabel(analystStats.upgrade_count, analystStats.upgrade_sessions, "in 5 yr")}</p>
                       </div>
                     )}
-                    {analystStats.median_1d_downgrade != null && (
+                    {hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions) && (
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">On downgrades</p>
                         <p className="text-sm font-semibold tabular-nums">
