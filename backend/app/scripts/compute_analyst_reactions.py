@@ -5,6 +5,9 @@ For each active ticker:
 2. Fetch 5-year daily price history from yfinance (one call per ticker).
 3. Compute 1d and 5d price moves for each event, enriching event metadata.
 4. Aggregate per-ticker stats and upsert into analyst_reaction_stats.
+   Medians, averages and continuation rates count distinct sessions: three
+   downgrades on one day share one price move, so they are one observation.
+   *_count is the number of actions, *_sessions the number of observations.
 
 Price convention (pre-market events — differs from earnings pipeline):
 - Day 0 = event_date rolled to first trading day on/after
@@ -55,11 +58,11 @@ from app.scripts.seed_historical_reactions import (
 
 LOOKBACK_YEARS = 5
 MIN_AGE_DAYS = 8       # skip very recent events (incomplete T+5 window)
-MIN_ACTIONS = 3        # null aggregates below this per category
+MIN_SESSIONS = 3       # null aggregates below this many distinct sessions per category
 BATCH_SIZE = 5
 BATCH_SLEEP = 2.0
 RETRY_DELAYS = (3, 8, 15)
-COMPUTATION_VERSION = 2
+COMPUTATION_VERSION = 3  # v3: aggregates count distinct sessions, not actions
 
 
 # ── yfinance fetch ───────────────────────────────────────────────────────────
@@ -120,25 +123,33 @@ def _compute_pre_market(
 
 # ── Aggregation helpers ──────────────────────────────────────────────────────
 
-def _aggregate(moves_1d: list[float], moves_5d: list[float]) -> dict:
-    """Compute aggregate stats for a list of 1d and 5d moves.
+def _aggregate(rows: list[tuple[date, float, float | None]]) -> dict:
+    """Aggregate (event_date, move_1d, move_5d) rows for one direction.
 
-    Returns dict with: count, avg_1d, median_1d, avg_5d,
-    continuation_pct, sample_5d.  Nulls below MIN_ACTIONS.
+    Rows on the same event_date measure the same price move, so they collapse
+    to one observation per session before any statistic is taken. Returns
+    count (actions), sessions (distinct dates), avg_1d, median_1d, avg_5d,
+    continuation_pct, sample_5d (sessions with a 5d move). Statistics are
+    None below MIN_SESSIONS.
     """
-    count = len(moves_1d)
-    if count < MIN_ACTIONS:
+    count = len(rows)
+    by_session: dict[date, tuple[float, float | None]] = {}
+    for event_date, d1, d5 in rows:
+        by_session.setdefault(event_date, (d1, d5))
+    sessions = len(by_session)
+    if sessions < MIN_SESSIONS:
         return {
-            "count": count,
+            "count": count, "sessions": sessions,
             "avg_1d": None, "median_1d": None,
             "avg_5d": None, "continuation_pct": None, "sample_5d": 0,
         }
 
-    avg_1d = round(sum(moves_1d) / count, 4)
+    moves_1d = [d1 for d1, _ in by_session.values()]
+    avg_1d = round(sum(moves_1d) / sessions, 4)
     median_1d = round(statistics.median(moves_1d), 4)
 
     # 5d follow-through
-    pairs = [(d1, d5) for d1, d5 in zip(moves_1d, moves_5d) if d5 is not None]
+    pairs = [(d1, d5) for d1, d5 in by_session.values() if d5 is not None]
     if pairs:
         fives = [d5 for _, d5 in pairs]
         avg_5d = round(sum(fives) / len(fives), 4)
@@ -149,7 +160,7 @@ def _aggregate(moves_1d: list[float], moves_5d: list[float]) -> dict:
         cont_pct = None
 
     return {
-        "count": count,
+        "count": count, "sessions": sessions,
         "avg_1d": avg_1d, "median_1d": median_1d,
         "avg_5d": avg_5d, "continuation_pct": cont_pct,
         "sample_5d": len(pairs),
@@ -188,7 +199,7 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
                 )
             )
             await session.commit()
-            await _upsert_stats(symbol, _aggregate([], []), _aggregate([], []))
+            await _upsert_stats(symbol, _aggregate([]), _aggregate([]))
             return True, 0
 
         # 2. Fetch price history (sync, in executor)
@@ -251,6 +262,7 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
         # 5. Recompute aggregates FROM stored rows (guarantees sample_count == total_with_moves)
         stored = (await session.execute(
             select(
+                HistoricalReaction.event_date,
                 HistoricalReaction.pct_change_1d,
                 HistoricalReaction.pct_change_5d,
                 Event.metadata_["action"].astext.label("action"),
@@ -263,18 +275,20 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
             )
         )).all()
 
-        upgrades_1d = [float(r.pct_change_1d) for r in stored if r.action == "up"]
-        upgrades_5d = [float(r.pct_change_5d) if r.pct_change_5d is not None else None
-                       for r in stored if r.action == "up"]
-        downgrades_1d = [float(r.pct_change_1d) for r in stored if r.action == "down"]
-        downgrades_5d = [float(r.pct_change_5d) if r.pct_change_5d is not None else None
-                         for r in stored if r.action == "down"]
+        def _rows(action: str) -> list[tuple[date, float, float | None]]:
+            return [
+                (r.event_date, float(r.pct_change_1d),
+                 float(r.pct_change_5d) if r.pct_change_5d is not None else None)
+                for r in stored if r.action == action
+            ]
+        upgrades = _rows("up")
+        downgrades = _rows("down")
 
         await session.commit()
 
     # 6. Aggregate and store
-    up_agg = _aggregate(upgrades_1d, upgrades_5d)
-    dn_agg = _aggregate(downgrades_1d, downgrades_5d)
+    up_agg = _aggregate(upgrades)
+    dn_agg = _aggregate(downgrades)
     await _upsert_stats(symbol, up_agg, dn_agg)
 
     return True, computed
@@ -286,12 +300,14 @@ async def _upsert_stats(symbol: str, up: dict, dn: dict) -> None:
     values = dict(
         symbol=symbol,
         upgrade_count=up["count"],
+        upgrade_sessions=up["sessions"],
         avg_1d_upgrade=up["avg_1d"],
         median_1d_upgrade=up["median_1d"],
         avg_5d_upgrade=up["avg_5d"],
         upgrade_5d_continuation_pct=up["continuation_pct"],
         upgrade_5d_sample=up["sample_5d"],
         downgrade_count=dn["count"],
+        downgrade_sessions=dn["sessions"],
         avg_1d_downgrade=dn["avg_1d"],
         median_1d_downgrade=dn["median_1d"],
         avg_5d_downgrade=dn["avg_5d"],

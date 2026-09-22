@@ -153,7 +153,8 @@ class AnalystReactionStatsRead(BaseModel):
     computed_at: datetime | None = None
 
     # ── Upgrades ─────────────────────────────────────────────────────────────
-    upgrade_count: int
+    upgrade_count: int                     # actions
+    upgrade_sessions: int = 0              # distinct sessions the upgrade statistics are taken over
     avg_1d_upgrade: float | None
     median_1d_upgrade: float | None
     avg_5d_upgrade: float | None
@@ -161,11 +162,13 @@ class AnalystReactionStatsRead(BaseModel):
     upgrade_5d_sample: int
 
     # ── Downgrades ───────────────────────────────────────────────────────────
-    downgrade_count: int
+    downgrade_count: int                   # actions
+    downgrade_sessions: int = 0            # distinct sessions the downgrade statistics are taken over
     avg_1d_downgrade: float | None
     median_1d_downgrade: float | None
     avg_5d_downgrade: float | None
     downgrade_5d_continuation_pct: float | None
     downgrade_5d_sample: int
     sample_count: int = 0                  # total actions (upgrade + downgrade)
+    session_count: int = 0                 # total distinct sessions (upgrade + downgrade)
     last_event_date: str | None = None     # ISO date of most recent analyst action

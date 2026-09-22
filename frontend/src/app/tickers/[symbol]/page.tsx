@@ -4,6 +4,7 @@ import { rvTier } from "@/lib/encodings/rvTier";
 import { displayedOptionFacts, priceDriftNote, priceLabel } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
+import { analystSampleLabel, analystSampleFooter } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1514,11 +1515,12 @@ export default function TickerPage() {
     if (!analystStats) return null;
     const { median_1d_upgrade, median_1d_downgrade,
       upgrade_5d_continuation_pct, downgrade_5d_continuation_pct,
-      upgrade_count, downgrade_count } = analystStats;
-    const upSignal = median_1d_upgrade != null && upgrade_count >= 3;
-    const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
+      upgrade_sessions, downgrade_sessions } = analystStats;
+    // A median is stored only on enough distinct sessions, so non-null is the gate.
+    const upSignal = median_1d_upgrade != null;
+    const dnSignal = median_1d_downgrade != null;
     if (!upSignal && !dnSignal) return null;
-    if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
+    if (dnSignal && (!upSignal || downgrade_sessions >= upgrade_sessions)) {
       let line = `Downgrades tend to hit, median ${fmtPct(median_1d_downgrade!)} on the day`;
       if (downgrade_5d_continuation_pct != null) {
         line += `, still lower ${ANALYST_WINDOW_TEXT.later} ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
@@ -1535,13 +1537,13 @@ export default function TickerPage() {
 
   const analystInsightRule = useMemo(() => {
     if (!analystInsight || !analystStats) return null;
-    const { median_1d_upgrade, median_1d_downgrade, upgrade_count, downgrade_count } = analystStats;
-    const upSignal = median_1d_upgrade != null && upgrade_count >= 3;
-    const dnSignal = median_1d_downgrade != null && downgrade_count >= 3;
-    if (dnSignal && (!upSignal || downgrade_count >= upgrade_count)) {
-      return `Median of all event-day moves on downgrades (close on the day vs the prior close), with the share still lower ${ANALYST_WINDOW_TEXT.later}`;
+    const { median_1d_upgrade, median_1d_downgrade, upgrade_sessions, downgrade_sessions } = analystStats;
+    const upSignal = median_1d_upgrade != null;
+    const dnSignal = median_1d_downgrade != null;
+    if (dnSignal && (!upSignal || downgrade_sessions >= upgrade_sessions)) {
+      return `Median event-day move on downgrades across ${downgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still lower ${ANALYST_WINDOW_TEXT.later}`;
     }
-    return `Median of all event-day moves on upgrades (close on the day vs the prior close), with the share still higher ${ANALYST_WINDOW_TEXT.later}`;
+    return `Median event-day move on upgrades across ${upgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still higher ${ANALYST_WINDOW_TEXT.later}`;
   }, [analystInsight, analystStats]);
 
   // Past-event fallback: only fetch if no upcoming hero-eligible event
@@ -2186,7 +2188,7 @@ export default function TickerPage() {
                         <p className="text-sm font-semibold tabular-nums">
                           {fmtPct(analystStats.median_1d_upgrade)} <ExplainTip term="median event-day move">median {ANALYST_WINDOW_TEXT.day0}</ExplainTip>
                         </p>
-                        <p className="text-xs text-muted-foreground">{analystStats.upgrade_count} in 5 yr</p>
+                        <p className="text-xs text-muted-foreground">{analystSampleLabel(analystStats.upgrade_count, analystStats.upgrade_sessions, "in 5 yr")}</p>
                       </div>
                     )}
                     {analystStats.median_1d_downgrade != null && (
@@ -2195,11 +2197,11 @@ export default function TickerPage() {
                         <p className="text-sm font-semibold tabular-nums">
                           {fmtPct(analystStats.median_1d_downgrade)} <ExplainTip term="median event-day move">median {ANALYST_WINDOW_TEXT.day0}</ExplainTip>
                         </p>
-                        <p className="text-xs text-muted-foreground">{analystStats.downgrade_count} in 5 yr</p>
+                        <p className="text-xs text-muted-foreground">{analystSampleLabel(analystStats.downgrade_count, analystStats.downgrade_sessions, "in 5 yr")}</p>
                       </div>
                     )}
                     <p className="text-[10px] text-muted-foreground/70">
-                      Based on {analystStats.sample_count} actions
+                      {analystSampleFooter(analystStats.sample_count, analystStats.session_count)}
                       {analystStats.last_event_date && ` through ${fmtBasisDate(analystStats.last_event_date)}`}
                     </p>
                   </div>

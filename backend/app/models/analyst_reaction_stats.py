@@ -15,8 +15,12 @@ class AnalystReactionStats(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     symbol: Mapped[str] = mapped_column(String(10), nullable=False)
 
+    # *_count is actions; *_sessions is distinct event dates, the number of
+    # observations every statistic below is taken over (several actions on one
+    # day share one price move).
     # ── Upgrades ─────────────────────────────────────────────────────────────
     upgrade_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    upgrade_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     avg_1d_upgrade: Mapped[float | None] = mapped_column(Numeric(8, 4))
     median_1d_upgrade: Mapped[float | None] = mapped_column(Numeric(8, 4))
     avg_5d_upgrade: Mapped[float | None] = mapped_column(Numeric(8, 4))
@@ -25,6 +29,7 @@ class AnalystReactionStats(Base):
 
     # ── Downgrades ───────────────────────────────────────────────────────────
     downgrade_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    downgrade_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     avg_1d_downgrade: Mapped[float | None] = mapped_column(Numeric(8, 4))
     median_1d_downgrade: Mapped[float | None] = mapped_column(Numeric(8, 4))
     avg_5d_downgrade: Mapped[float | None] = mapped_column(Numeric(8, 4))

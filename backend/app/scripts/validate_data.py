@@ -689,6 +689,38 @@ async def check_rv_rank_bounds(session) -> CheckResult:
     )
 
 
+async def check_analyst_stats_sessions(session) -> CheckResult:
+    """ERROR when analyst stats break the session rule.
+
+    sessions <= count always; a stored median needs >= MIN_SESSIONS distinct
+    sessions; and a non-zero count with 0 sessions means the row predates the
+    sessions columns and has not been recomputed.
+    """
+    from app.scripts.compute_analyst_reactions import MIN_SESSIONS
+
+    rows = (await session.execute(text("""
+        SELECT symbol, upgrade_count, upgrade_sessions, median_1d_upgrade,
+               downgrade_count, downgrade_sessions, median_1d_downgrade
+        FROM analyst_reaction_stats
+    """))).all()
+    bad: list[str] = []
+    for r in rows:
+        for side, count, sessions, median in (
+            ("upgrade", r.upgrade_count, r.upgrade_sessions, r.median_1d_upgrade),
+            ("downgrade", r.downgrade_count, r.downgrade_sessions, r.median_1d_downgrade),
+        ):
+            if sessions > count:
+                bad.append(f"{r.symbol}: {side}_sessions {sessions} > {side}_count {count}")
+            elif count and not sessions:
+                bad.append(f"{r.symbol}: {side}_count {count} with 0 sessions (not recomputed since sessions were added)")
+            elif median is not None and sessions < MIN_SESSIONS:
+                bad.append(f"{r.symbol}: median_1d_{side} stored on {sessions} session(s) (< {MIN_SESSIONS})")
+    if bad:
+        return CheckResult("analyst_stats_sessions", ERROR, f"{len(bad)} analyst stats row(s) break the session rule", bad)
+    return CheckResult("analyst_stats_sessions", PASS,
+                       f"{len(rows)} analyst stats rows: sessions <= actions, medians only on >= {MIN_SESSIONS} sessions")
+
+
 async def check_excluded_ticker_has_no_reactions(session) -> CheckResult:
     """ERROR when a ticker on the price-history exclusion list still has reaction or analyst stats rows.
 
@@ -2090,6 +2122,7 @@ CHECKS = [
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
     check_excluded_ticker_has_no_reactions,
+    check_analyst_stats_sessions,
     # Analyst recommendations
     check_recommendations_freshness,
     check_recommendations_bounds,

@@ -786,17 +786,24 @@ async def _run_draft_generation(
     if ce_lines:
         ce_section = f"\nCONDITIONAL EARNINGS PROFILE ({hist_sample} quarters):\n" + "\n".join(ce_lines) + "\n"
 
-    # Analyst reaction stats section
+    # Analyst reaction stats section. The median is stored only when there are
+    # enough distinct sessions (compute_analyst_reactions.MIN_SESSIONS), so a
+    # non-null median is the gate; the sample wording names both counts.
+    def _sample(actions: int, sessions: int) -> str:
+        return f"N={actions}" if actions == sessions else f"N={actions} actions across {sessions} sessions"
+
     analyst_section = ""
     if analyst_row:
         a_lines = []
-        if analyst_row.upgrade_count >= 3 and analyst_row.median_1d_upgrade is not None:
-            line = f"  Upgrades (N={analyst_row.upgrade_count}): median 1d move {float(analyst_row.median_1d_upgrade):+.2f}%"
+        if analyst_row.median_1d_upgrade is not None:
+            line = (f"  Upgrades ({_sample(analyst_row.upgrade_count, analyst_row.upgrade_sessions)}): "
+                    f"median 1d move {float(analyst_row.median_1d_upgrade):+.2f}%")
             if analyst_row.upgrade_5d_continuation_pct is not None:
                 line += f", 5d continuation {float(analyst_row.upgrade_5d_continuation_pct):.0f}%"
             a_lines.append(line)
-        if analyst_row.downgrade_count >= 3 and analyst_row.median_1d_downgrade is not None:
-            line = f"  Downgrades (N={analyst_row.downgrade_count}): median 1d move {float(analyst_row.median_1d_downgrade):+.2f}%"
+        if analyst_row.median_1d_downgrade is not None:
+            line = (f"  Downgrades ({_sample(analyst_row.downgrade_count, analyst_row.downgrade_sessions)}): "
+                    f"median 1d move {float(analyst_row.median_1d_downgrade):+.2f}%")
             if analyst_row.downgrade_5d_continuation_pct is not None:
                 line += f", 5d continuation {float(analyst_row.downgrade_5d_continuation_pct):.0f}%"
             a_lines.append(line)

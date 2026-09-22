@@ -437,6 +437,7 @@ async def get_analyst_reaction_stats(
         raise HTTPException(status_code=404, detail="No analyst reaction stats for this ticker")
     out = AnalystReactionStatsRead.model_validate(row)
     out.sample_count = row.upgrade_count + row.downgrade_count
+    out.session_count = row.upgrade_sessions + row.downgrade_sessions
     return out
 
 

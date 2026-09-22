@@ -200,19 +200,22 @@ export interface ConditionalEarningsRead {
 export interface AnalystReactionStatsRead {
   symbol: string;
   computed_at: string | null;
-  upgrade_count: number;
+  upgrade_count: number;          // actions
+  upgrade_sessions: number;       // distinct sessions the upgrade statistics are taken over
   avg_1d_upgrade: number | null;
   median_1d_upgrade: number | null;
   avg_5d_upgrade: number | null;
   upgrade_5d_continuation_pct: number | null;
   upgrade_5d_sample: number;
-  downgrade_count: number;
+  downgrade_count: number;        // actions
+  downgrade_sessions: number;     // distinct sessions the downgrade statistics are taken over
   avg_1d_downgrade: number | null;
   median_1d_downgrade: number | null;
   avg_5d_downgrade: number | null;
   downgrade_5d_continuation_pct: number | null;
   downgrade_5d_sample: number;
-  sample_count: number;
+  sample_count: number;           // total actions
+  session_count: number;          // total distinct sessions
   last_event_date: string | null;
 }
 
