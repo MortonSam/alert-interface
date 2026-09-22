@@ -50,7 +50,9 @@ from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
-from app.services.split_basis import factors_after, load_splits, rebase_factor
+from app.services.split_basis import (
+    Anchor, anchored_factor, candidates, load_anchors, load_splits, rebase_factor, splits_after,
+)
 
 
 LOOKBACK_YEARS = 5
@@ -440,8 +442,13 @@ async def upsert_reaction(
     ticker: Ticker,
     event_date: date,
     data: dict,
+    anchors: set[Anchor] | None = None,
 ) -> bool | None:
     """Upsert on (ticker_id, event_date, event_type).
+
+    `anchors` are the ticker's known (split factor, split date) re-basings
+    (split_basis.load_anchors); a frozen estimate before one of those splits
+    that sits nearer to factor x actual than to actual is re-based too.
 
     Returns True if inserted, False if updated, None if the insert was refused
     because the ticker already has an earnings row within
@@ -490,12 +497,14 @@ async def upsert_reaction(
         update_data = {k: v for k, v in data.items() if k not in FROZEN_KEYS}
         # A split after the quarter restates the actual on the new share count;
         # the frozen estimate is re-based by the same factor so they still compare.
-        factor = rebase_factor(
-            row.eps_actual, data.get("eps_actual"),
-            factors_after(await load_splits(session, ticker.id), event_date),
+        cands = candidates(splits_after(await load_splits(session, ticker.id), event_date))
+        actual_after = data["eps_actual"] if data.get("eps_actual") is not None else row.eps_actual
+        hit = rebase_factor(row.eps_actual, data.get("eps_actual"), cands) or (
+            anchored_factor(stored_estimate, actual_after, event_date, anchors or set())
+            if cands else None
         )
-        if factor is not None and stored_estimate is not None:
-            stored_estimate = rebased_estimate(stored_estimate, factor)
+        if hit is not None and stored_estimate is not None:
+            stored_estimate = rebased_estimate(stored_estimate, hit[0])
             update_data["eps_estimate"] = stored_estimate
     else:
         update_data = dict(data)
@@ -680,6 +689,7 @@ async def seed(symbol: str) -> None:
             .where(EarningsReportTiming.ticker_id == ticker.id)
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
+        anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             report_timing = timing_map.get(event_date, "unknown")
@@ -691,7 +701,7 @@ async def seed(symbol: str) -> None:
             data["eps_actual"]   = eps_actual
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
             data["report_timing"] = report_timing
-            created = await upsert_reaction(session, ticker, event_date, data)
+            created = await upsert_reaction(session, ticker, event_date, data, anchors)
             if created is None:
                 skipped += 1
             elif created:
@@ -755,6 +765,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
             .where(EarningsReportTiming.ticker_id == ticker.id)
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
+        anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
             report_timing = timing_map.get(event_date, "unknown")
@@ -766,7 +777,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
             data["eps_actual"]   = eps_actual
             data["outcome"]      = _compute_outcome(eps_estimate, eps_actual)
             data["report_timing"] = report_timing
-            created = await upsert_reaction(session, ticker, event_date, data)
+            created = await upsert_reaction(session, ticker, event_date, data, anchors)
             if created is None:
                 no_price += 1
             elif created:

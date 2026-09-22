@@ -7,7 +7,9 @@ Two causes, handled in order:
    stayed on the old one (MNST 0.30 vs 0.15 after its 2023 2:1). The estimate
    is re-based by the split factor it differs from the actual by, matching the
    estimate Yahoo now shows for that date, and the outcome is derived from the
-   re-based pair.
+   re-based pair. Once a ticker has such an anchor for a split, every other
+   row before that split whose estimate is nearer to factor x actual than to
+   actual is re-based by the same factor (split_basis.anchored_factor).
 2. Outcome only. The old upsert also froze `outcome` while a revised actual
    could still be written, so the label stopped matching the numbers. The
    outcome is recomputed from the stored values.
@@ -29,7 +31,7 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.scripts.seed_historical_reactions import _compute_outcome, rebased_estimate
-from app.services.split_basis import factors_after, load_splits, wrong_basis_factor
+from app.services.split_basis import candidates, load_anchors, load_splits, splits_after, stale_factor
 
 ROWS_WITH_SPLIT_AFTER_SQL = """
     SELECT DISTINCT hr.id, hr.ticker_id, t.symbol, hr.event_date, hr.outcome::text AS outcome,
@@ -68,12 +70,16 @@ async def repair(write: bool) -> int:
     async with AsyncSessionLocal() as session:
         # 1. Estimates on a different split basis from their actual
         rebased_ids: set = set()
+        anchors_by_ticker: dict = {}
         print("Split basis:")
         for r in (await session.execute(text(ROWS_WITH_SPLIT_AFTER_SQL))).all():
-            factors = factors_after(await load_splits(session, r.ticker_id), r.event_date)
-            factor = wrong_basis_factor(r.eps_estimate, r.eps_actual, factors)
-            if factor is None:
+            if r.ticker_id not in anchors_by_ticker:
+                anchors_by_ticker[r.ticker_id] = await load_anchors(session, r.ticker_id, {})
+            cands = candidates(splits_after(await load_splits(session, r.ticker_id), r.event_date))
+            hit = stale_factor(r.eps_estimate, r.eps_actual, r.event_date, cands, anchors_by_ticker[r.ticker_id])
+            if hit is None:
                 continue
+            factor = hit[0]
             new_est = rebased_estimate(r.eps_estimate, factor)
             new_out = _compute_outcome(new_est, r.eps_actual).value
             rebased_ids.add(r.id)

@@ -765,25 +765,28 @@ async def check_eps_basis_suspect(session) -> CheckResult:
     return eps_basis_suspect_result([(r.symbol, r.sector, float(r.eps_actual), float(r.eps_estimate)) for r in rows])
 
 
-def estimate_split_basis_result(rows: list[tuple[str, date, Decimal, Decimal, list[float]]]) -> CheckResult:
-    """Pure: rows are (symbol, event_date, eps_estimate, eps_actual, split factors after the date).
+def estimate_split_basis_result(rows: list[tuple[str, date, Decimal, Decimal, list, set]]) -> CheckResult:
+    """Pure: rows are (symbol, event_date, eps_estimate, eps_actual, candidates, ticker anchors).
 
-    ERROR when estimate and actual differ by a recorded split factor (either
-    side stale). upsert_reaction re-bases a frozen estimate when a split
-    restates the actual; a hit here means a row got past that or predates it.
-    Repair with app.scripts.repair_outcomes --write.
+    ERROR when the estimate differs from the actual by a recorded split factor
+    (tight band), or, once the ticker has such an anchor for a split, when a
+    row before that split has its estimate nearer to factor x actual than to
+    actual. upsert_reaction re-bases a frozen estimate by the same rules; a
+    hit here means a row got past that or predates it. Repair with
+    app.scripts.repair_outcomes --write.
     """
-    from app.services.split_basis import wrong_basis_factor
+    from app.services.split_basis import stale_factor
 
     bad: list[str] = []
     checked = 0
-    for symbol, event_date, estimate, actual, factors in rows:
-        if not factors:
+    for symbol, event_date, estimate, actual, cands, anchors in rows:
+        if not cands:
             continue
         checked += 1
-        factor = wrong_basis_factor(estimate, actual, factors)
-        if factor is not None:
-            bad.append(f"{symbol} {event_date}: estimate {estimate} vs actual {actual} differ by split factor {factor:g}")
+        hit = stale_factor(estimate, actual, event_date, cands, anchors)
+        if hit is not None:
+            bad.append(f"{symbol} {event_date}: estimate {estimate} vs actual {actual} on the pre-split basis "
+                       f"(factor {hit[0]:g}, split {hit[1]})")
     if bad:
         return CheckResult("estimate_split_basis", ERROR,
                            f"{len(bad)} earnings row(s) hold an estimate on a different split basis from the actual", bad)
@@ -793,7 +796,7 @@ def estimate_split_basis_result(rows: list[tuple[str, date, Decimal, Decimal, li
 
 async def check_estimate_split_basis(session) -> CheckResult:
     """ERROR when a frozen estimate sits on a different split basis from its actual."""
-    from app.services.split_basis import factors_after, load_splits
+    from app.services.split_basis import candidates, load_anchors, load_splits, splits_after
 
     rows = (await session.execute(text("""
         SELECT DISTINCT hr.ticker_id, t.symbol, hr.event_date, hr.eps_estimate, hr.eps_actual
@@ -803,10 +806,13 @@ async def check_estimate_split_basis(session) -> CheckResult:
         WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL AND hr.eps_estimate IS NOT NULL
         ORDER BY t.symbol, hr.event_date
     """))).all()
+    anchors_by_ticker: dict = {}
     out = []
     for r in rows:
-        factors = factors_after(await load_splits(session, r.ticker_id), r.event_date)
-        out.append((r.symbol, r.event_date, r.eps_estimate, r.eps_actual, factors))
+        if r.ticker_id not in anchors_by_ticker:
+            anchors_by_ticker[r.ticker_id] = await load_anchors(session, r.ticker_id, {})
+        cands = candidates(splits_after(await load_splits(session, r.ticker_id), r.event_date))
+        out.append((r.symbol, r.event_date, r.eps_estimate, r.eps_actual, cands, anchors_by_ticker[r.ticker_id]))
     return estimate_split_basis_result(out)
 
 
