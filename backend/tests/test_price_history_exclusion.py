@@ -1,16 +1,16 @@
 """One exclusion list, shared: the RV guard's data_error verdict removes a ticker
 from every reaction pipeline, and validate fails while any of its rows remain.
 
-Runs against the local database inside a rolled-back transaction.
+Runs against the local database inside a rolled-back transaction, on the
+session-wide event loop (see conftest).
 """
-import asyncio
 from datetime import date
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
 
-from app.database import ScriptSessionLocal, script_engine
+from app.database import ScriptSessionLocal
 from app.scripts.validate_data import ERROR, PASS, check_excluded_ticker_has_no_reactions
 from app.services.price_history_exclusion import apply_exclusion, clear_excluded, excluded_symbols
 
@@ -39,18 +39,8 @@ async def _setup(session) -> str:
     return ticker_id
 
 
-def _run(coro):
-    """Each test gets its own event loop; the pooled connections must not outlive it."""
-    async def wrapped():
-        try:
-            return await coro
-        finally:
-            await script_engine.dispose()
-
-    return asyncio.run(wrapped())
-
-
-def test_latest_snapshot_status_decides_the_list_and_clearing_empties_every_table():
+@pytest.mark.asyncio
+async def test_latest_snapshot_status_decides_the_list_and_clearing_empties_every_table():
     async def body():
         async with ScriptSessionLocal() as session:
             async with session.begin():
@@ -78,10 +68,11 @@ def test_latest_snapshot_status_decides_the_list_and_clearing_empties_every_tabl
                 raise _Rollback
 
     with pytest.raises(_Rollback):
-        _run(body())
+        await body()
 
 
-def test_apply_exclusion_reports_and_commits_nothing_when_list_is_empty(capsys):
+@pytest.mark.asyncio
+async def test_apply_exclusion_reports_and_commits_nothing_when_list_is_empty(capsys):
     async def body():
         async with ScriptSessionLocal() as session:
             async with session.begin():
@@ -92,7 +83,7 @@ def test_apply_exclusion_reports_and_commits_nothing_when_list_is_empty(capsys):
                 raise _Rollback
 
     with pytest.raises(_Rollback):
-        _run(body())
+        await body()
     assert "skipping" not in capsys.readouterr().out
 
 

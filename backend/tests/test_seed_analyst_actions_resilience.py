@@ -12,7 +12,8 @@ def _ticker(sym: str):
     return SimpleNamespace(symbol=sym, id=sym)
 
 
-def test_a_hung_fetch_costs_one_timeout_and_one_retry_not_161_seconds(monkeypatch):
+@pytest.mark.asyncio
+async def test_a_hung_fetch_costs_one_timeout_and_one_retry_not_161_seconds(monkeypatch):
     monkeypatch.setattr(m, "FETCH_TIMEOUT", 0.05)
     monkeypatch.setattr(m, "RETRY_DELAYS", (0.01,))
     monkeypatch.setattr(m, "_fetch_analyst_actions_sync", lambda sym: time.sleep(5))
@@ -20,12 +21,13 @@ def test_a_hung_fetch_costs_one_timeout_and_one_retry_not_161_seconds(monkeypatc
         t0 = time.monotonic()
         out = await m._process_ticker(_ticker("HUNG"), asyncio.get_event_loop())
         return out, time.monotonic() - t0
-    (outcome, inserted, detail), took = asyncio.run(go())
+    (outcome, inserted, detail), took = await go()
     assert outcome == "failed" and detail == "timeout" and inserted == 0
     assert took < 2      # the caller gets control back after one timeout and one retry, not 3 x 45 s + 26 s
 
 
-def test_a_404_or_empty_result_is_done_not_retried(monkeypatch):
+@pytest.mark.asyncio
+async def test_a_404_or_empty_result_is_done_not_retried(monkeypatch):
     calls = []
     def empty(sym):
         calls.append(sym)
@@ -33,11 +35,12 @@ def test_a_404_or_empty_result_is_done_not_retried(monkeypatch):
     monkeypatch.setattr(m, "_fetch_analyst_actions_sync", empty)
     async def go():
         return await m._process_ticker(_ticker("ERIE"), asyncio.get_event_loop())
-    outcome, _, _ = asyncio.run(go())
+    outcome, _, _ = await go()
     assert outcome == "empty" and calls == ["ERIE"]
 
 
-def test_progress_is_checkpointed_after_every_batch_and_the_budget_stops_cleanly(monkeypatch):
+@pytest.mark.asyncio
+async def test_progress_is_checkpointed_after_every_batch_and_the_budget_stops_cleanly(monkeypatch):
     saved: list[dict] = []
     async def fake_save(data): saved.append(dict(data))
     async def fake_load(): return {}
@@ -60,12 +63,13 @@ def test_progress_is_checkpointed_after_every_batch_and_the_budget_stops_cleanly
         async def execute(self, q): return _Result([_ticker("A"), _ticker("B"), _ticker("C"), _ticker("D")])
     monkeypatch.setattr(m, "AsyncSessionLocal", lambda: _Session())
 
-    rc = asyncio.run(m.main())
+    rc = await m.main()
     assert rc == 0                                         # partial progress is success, not a failed step
     assert len(saved) == 1 and set(saved[0]) == {"A", "B"}  # first batch checkpointed before the budget stop
 
 
-def test_failed_tickers_are_marked_attempted_so_the_rotation_moves_on(monkeypatch):
+@pytest.mark.asyncio
+async def test_failed_tickers_are_marked_attempted_so_the_rotation_moves_on(monkeypatch):
     saved: list[dict] = []
     async def fake_save(data): saved.append(dict(data))
     async def fake_load(): return {}
@@ -84,5 +88,5 @@ def test_failed_tickers_are_marked_attempted_so_the_rotation_moves_on(monkeypatc
         async def __aexit__(self, *a): return False
         async def execute(self, q): return _Result([_ticker("X"), _ticker("Y")])
     monkeypatch.setattr(m, "AsyncSessionLocal", lambda: _Session())
-    assert asyncio.run(m.main()) == 0
+    assert await m.main() == 0
     assert set(saved[-1]) == {"X", "Y"}

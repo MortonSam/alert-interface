@@ -48,8 +48,8 @@ def _make_feature(**overrides) -> FakeFeature:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _run(coro):
-    """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an async coroutine on a private loop: decide() gets a mocked db, so no pooled connection is involved."""
+    return asyncio.run(coro)
 
 
 def _decide_with_mocked_chain(

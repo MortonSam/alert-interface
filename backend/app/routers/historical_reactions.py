@@ -88,7 +88,8 @@ async def _sector_peer_aggregate(
     if row is None:
         return None, 0, None
 
-    sector_avg = float(row.sector_avg_abs_1d) if row.sector_avg_abs_1d is not None else None
+    # Shown as a 2dp percent next to avg_abs_1d, which is rounded the same way
+    sector_avg = round(float(row.sector_avg_abs_1d), 2) if row.sector_avg_abs_1d is not None else None
     return sector_avg, row.sector_peer_count, row.as_of_date.isoformat()
 
 
@@ -219,7 +220,7 @@ async def get_sector_peers(
     as_of: str | None = None
 
     if own_snap:
-        sector_avg = float(own_snap.sector_avg_abs_1d) if own_snap.sector_avg_abs_1d is not None else None
+        sector_avg = round(float(own_snap.sector_avg_abs_1d), 2) if own_snap.sector_avg_abs_1d is not None else None
         peer_count = own_snap.sector_peer_count
         as_of = own_snap.as_of_date.isoformat()
 

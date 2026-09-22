@@ -1,12 +1,11 @@
 """A row whose estimate matches GAAP while its actual does not is basis_mismatch and carries no outcome."""
-import asyncio
 from datetime import date
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
 
-from app.database import ScriptSessionLocal, script_engine
+from app.database import ScriptSessionLocal
 from app.scripts.validate_data import ERROR, PASS, check_basis_mismatch_has_no_outcome, check_outcome_matches_eps
 from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, apply_basis_exclusion, basis_mismatch_dates, excluded_note
 from app.services.eps_basis import BASIS_MISMATCH_FRACTION, BASIS_MISMATCH_MIN_ESTIMATE, classify, quarter_facts
@@ -71,20 +70,12 @@ def test_excluded_note_wording():
     assert excluded_note(3) == f"3 quarters excluded: {BASIS_UNCLEAR_REASON}"
 
 
-def _run(coro):
-    async def wrapped():
-        try:
-            return await coro
-        finally:
-            await script_engine.dispose()
-    return asyncio.run(wrapped())
-
-
 class _Rollback(Exception):
     pass
 
 
-def test_exclusion_clears_outcome_and_validate_agrees(capsys):
+@pytest.mark.asyncio
+async def test_exclusion_clears_outcome_and_validate_agrees(capsys):
     async def body():
         async with ScriptSessionLocal() as s:
             async with s.begin():
@@ -116,4 +107,4 @@ def test_exclusion_clears_outcome_and_validate_agrees(capsys):
                 raise _Rollback
 
     with pytest.raises(_Rollback):
-        _run(body())
+        await body()

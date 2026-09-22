@@ -1,4 +1,6 @@
 """Validate flags a nightly step that stopped succeeding."""
+import pytest
+
 from datetime import datetime, timedelta, timezone
 
 from app.scripts.validate_data import ERROR, PASS, WARN, step_age_result
@@ -34,16 +36,12 @@ def test_step_age_reads_every_nightly_step_but_itself():
     assert r"step:%\:last_success" in src
 
 
-def test_check_step_age_runs_its_query_against_the_database():
+@pytest.mark.asyncio
+async def test_check_step_age_runs_its_query_against_the_database():
     """The LIKE pattern contains ':last_success'; text() must not read that as a bind parameter."""
-    import asyncio
     from app.database import ScriptSessionLocal
     from app.scripts.validate_data import check_step_age
 
-    async def run():
-        async with ScriptSessionLocal() as session:
-            return await check_step_age(session)
-
-    out = asyncio.run(run())
+    async with ScriptSessionLocal() as session:
+        out = await check_step_age(session)
     assert out.level in (PASS, WARN, ERROR)
-

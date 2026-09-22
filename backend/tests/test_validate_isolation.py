@@ -1,7 +1,7 @@
 """One failing check must not take the checks after it down with it."""
-import asyncio
 from contextlib import asynccontextmanager
 
+import pytest
 from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
@@ -18,15 +18,17 @@ async def check_that_passes(session) -> CheckResult:
     return CheckResult("check_that_passes", PASS, f"{n} tickers")
 
 
-def test_a_raising_check_is_recorded_and_the_next_check_still_runs():
-    results = asyncio.run(run_checks([check_that_raises, check_that_passes]))
+@pytest.mark.asyncio
+async def test_a_raising_check_is_recorded_and_the_next_check_still_runs():
+    results = await run_checks([check_that_raises, check_that_passes])
     assert [r.name for r in results] == ["check_that_raises", "check_that_passes"]
     assert results[0].level == ERROR and "Check raised an exception" in results[0].message
     assert results[1].level == PASS, results[1].message          # not "current transaction is aborted"
     assert "aborted" not in results[1].message
 
 
-def test_each_check_gets_its_own_session():
+@pytest.mark.asyncio
+async def test_each_check_gets_its_own_session():
     opened: list[int] = []
 
     @asynccontextmanager
@@ -35,5 +37,5 @@ def test_each_check_gets_its_own_session():
         async with ScriptSessionLocal() as s:
             yield s
 
-    asyncio.run(run_checks([check_that_passes, check_that_raises, check_that_passes], counting_factory))
+    await run_checks([check_that_passes, check_that_raises, check_that_passes], counting_factory)
     assert len(opened) == 3
