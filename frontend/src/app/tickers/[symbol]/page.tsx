@@ -2145,6 +2145,9 @@ export default function TickerPage() {
           ) && (
             <div className="border-t pt-6 mt-6 mb-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-3">Street Pulse</p>
+              {analystStats?.exclusion_reason && (
+                <p className="text-sm text-muted-foreground mb-3">{analystStats.exclusion_reason}.</p>
+              )}
               <div className={cn(
                 "grid gap-6",
                 analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions))
@@ -2259,6 +2262,11 @@ export default function TickerPage() {
           {reactionSummary?.mixed_versions && (
             <Callout severity="caution" banner>
               Earnings reaction figures are being recomputed under a corrected definition.
+            </Callout>
+          )}
+          {reactionSummary?.exclusion_reason && (
+            <Callout severity="caution" banner>
+              Earnings and analyst reactions are not shown for this ticker. {reactionSummary.exclusion_reason}.
             </Callout>
           )}
 

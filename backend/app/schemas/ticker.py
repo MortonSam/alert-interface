@@ -60,6 +60,8 @@ class TickerChartRead(BaseModel):
     history_state: str = "ok"            # ok | stale | mismatch | no_data; history is [] unless ok
     history_reason: str | None = None    # why the history is withheld
     last_bar_date: str | None = None     # date of the newest bar the source returned
+    price_history_excluded: bool = False # earnings_markers are [] because the ticker is on the RV exclusion list
+    exclusion_reason: str | None = None
 
 
 # ── Quote response (Finnhub) ──────────────────────────────────────────────────

@@ -198,6 +198,9 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
             .order_by(HistoricalReaction.ticker_id, HistoricalReaction.event_date)
         )
         rows = result.all()
+        from app.services.price_history_exclusion import exclusion_list
+        excluded = await exclusion_list(session, "Build earnings features")
+        rows = [(r, sym) for r, sym in rows if sym not in excluded]
         print(f"Loaded {len(rows)} earnings reactions")
 
         if not rows:

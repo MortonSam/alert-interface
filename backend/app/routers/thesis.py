@@ -45,6 +45,7 @@ from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
 from app.services.corporate_actions import load_action_dates
+from app.services.price_history_exclusion import EXCLUSION_REASON, is_excluded
 from app.services.finnhub_client import FinnhubClient
 from app.services.price_freshness import assess_quote
 from app.services.rv_store import get_latest_rv
@@ -353,6 +354,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
     if not ticker_row.is_active:
         raise HTTPException(status_code=422, detail=f"{sym} is no longer actively traded")
+    if await is_excluded(db, sym):
+        raise HTTPException(status_code=422, detail=f"{sym}: {EXCLUSION_REASON}")
 
     today = date.today()
     ned_val = (await db.execute(
@@ -2041,6 +2044,8 @@ async def draft_alternative(
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
     if not ticker_row.is_active:
         raise HTTPException(status_code=422, detail=f"{sym} is no longer actively traded")
+    if await is_excluded(db, sym):
+        raise HTTPException(status_code=422, detail=f"{sym}: {EXCLUSION_REASON}")
 
     today = date.today()
     ned_val = (await db.execute(

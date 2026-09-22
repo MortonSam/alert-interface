@@ -36,7 +36,7 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
-from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
+from app.services.price_history_exclusion import exclusion_list, excluded_symbols
 from app.models.historical_reaction import HistoricalReaction
 from app.scripts.seed_historical_reactions import (
     LOOKBACK_YEARS,
@@ -355,7 +355,7 @@ async def main_bulk(limit: int | None) -> int:
                 select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
             )).scalars().all()
         )
-        excluded = await apply_exclusion(session, "FOMC reactions")
+        excluded = await exclusion_list(session, "FOMC reactions")
 
     candidates = [t for t in all_tickers if t.symbol not in excluded]
     if limit is not None:

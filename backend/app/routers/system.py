@@ -56,9 +56,11 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> SystemStatus:
 async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
     """Real counts behind the homepage counters. Nothing here is typed by hand."""
     from sqlalchemy import text
+    from app.services.price_history_exclusion import EXCLUDED_SYMBOLS_SQL
 
     earnings_measured = await db.scalar(text(
-        "SELECT count(*) FROM historical_reactions WHERE event_type = 'earnings' AND pct_change_1d IS NOT NULL"
+        "SELECT count(*) FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id "
+        "WHERE hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL AND t.symbol NOT IN " + EXCLUDED_SYMBOLS_SQL
     )) or 0
     analyst = (await db.execute(text(
         "SELECT count(*), min(event_date) FROM events WHERE event_type = 'analyst_action'"

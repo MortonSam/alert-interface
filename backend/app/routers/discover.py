@@ -24,6 +24,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.eps_basis_check import EpsBasisCheck
 from app.services.basis_exclusion import excluded_note
+from app.services.price_history_exclusion import EXCLUDED_SYMBOLS_SQL, EXCLUSION_REASON, excluded_symbols, not_excluded
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 
@@ -165,6 +166,7 @@ async def _batch_conditional_stats(
             HistoricalReaction.event_type == EventType.EARNINGS,
             HistoricalReaction.pct_change_1d.isnot(None),
             Ticker.symbol.in_(symbols),
+            not_excluded(Ticker.symbol),
         )
         .order_by(HistoricalReaction.event_date.desc())
     )
@@ -290,7 +292,7 @@ async def _batch_analyst_stats(
                avg_1d_upgrade, avg_1d_downgrade,
                downgrade_5d_continuation_pct, upgrade_5d_continuation_pct
         FROM analyst_reaction_stats
-        WHERE symbol = ANY(:syms)
+        WHERE symbol = ANY(:syms) AND symbol NOT IN """ + EXCLUDED_SYMBOLS_SQL + """
     """)
     result = await db.execute(stmt, {"syms": symbols})
 
@@ -397,6 +399,7 @@ async def _get_base_rates(db: AsyncSession) -> dict:
             HistoricalReaction.event_type == EventType.EARNINGS,
             HistoricalReaction.pct_change_1d.isnot(None),
             Ticker.is_active.is_(True),
+            not_excluded(Ticker.symbol),
         )
     )
     result = await db.execute(stmt)
@@ -701,6 +704,7 @@ async def just_reported(
             HistoricalReaction.event_date >= cutoff,
             HistoricalReaction.pct_change_1d.isnot(None),
             Ticker.is_active.is_(True),
+            not_excluded(Ticker.symbol),
         )
         .order_by(HistoricalReaction.event_date.desc(), Ticker.symbol)
     )
@@ -810,6 +814,7 @@ async def suggestions(
             HistoricalReaction.event_date >= today - timedelta(days=10),
             HistoricalReaction.pct_change_1d.isnot(None),
             Ticker.is_active.is_(True),
+            not_excluded(Ticker.symbol),
         )
         .order_by(HistoricalReaction.event_date.desc())
     )
@@ -872,6 +877,7 @@ async def suggestions(
     # Batch intelligence for top picks only
     top_syms = [sym for sym, _, _ in top]
     cond_stats = await _batch_conditional_stats(db, top_syms)
+    excluded = await excluded_symbols(db)        # such a card states the reason instead of an insight
     analyst_stats = await _batch_analyst_stats(db, top_syms)
     buy_share_stats = await _batch_buy_share_delta(db, top_syms)
     vol_data = await _batch_vol_regime(db, top_syms)
@@ -889,10 +895,10 @@ async def suggestions(
             recent_move_5d=t.get("recent_move_5d"),
             recent_outcome=t.get("recent_outcome"),
             event_date=t.get("event_date"),
-            insight=_suggestion_insight(
+            insight=(EXCLUSION_REASON if sym in excluded else _suggestion_insight(
                 cond_stats.get(sym), analyst_stats.get(sym),
                 buy_share_stats.get(sym), base, sym,
-            )[0],
+            )[0]),
             vol_regime=vol_data.get(sym, {}).get("vol_regime"),
         )
         for sym, t, total in top

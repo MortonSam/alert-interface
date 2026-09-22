@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
+from app.services.price_history_exclusion import not_excluded
 from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.ticker import Ticker
 
@@ -62,6 +63,7 @@ async def main() -> int:
                 Ticker.is_active.is_(True),
                 Ticker.sector.isnot(None),
                 HistoricalReaction.event_type == EventType.EARNINGS,
+                not_excluded(Ticker.symbol),
                 HistoricalReaction.pct_change_1d.isnot(None),
             )
             .group_by(Ticker.symbol, Ticker.sector)

@@ -1,91 +1,133 @@
-"""One exclusion list, shared: the RV guard's data_error verdict removes a ticker
-from every reaction pipeline, and validate fails while any of its rows remain.
+"""The price-history exclusion hides at read time and never deletes.
 
-Runs against the local database inside a rolled-back transaction, on the
-session-wide event loop (see conftest).
+An excluded ticker's reaction and stats rows stay in their tables through the
+earnings seeder and the analyst-stats step, every API reader returns nothing
+for it and states the reason, and the validate check reports the rows as
+hidden. Runs on the session-wide loop (see conftest); the survival test
+commits a synthetic ticker and removes it afterwards, because the pipelines
+open their own sessions.
 """
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
-from app.scripts.validate_data import ERROR, PASS, check_excluded_ticker_has_no_reactions
-from app.services.price_history_exclusion import apply_exclusion, clear_excluded, excluded_symbols
+from app.main import app
+from app.scripts import compute_analyst_reactions, seed_historical_reactions
+from app.scripts.validate_data import ERROR, PASS, check_excluded_ticker_hidden
+from app.services.price_history_exclusion import EXCLUSION_REASON, excluded_symbols, exclusion_list
 
 SYM = "ZZEXCL"
 
 
-async def _setup(session) -> str:
-    ticker_id = await session.scalar(text("""
+async def _create(session) -> str:
+    tid = await session.scalar(text("""
         INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at)
         VALUES (gen_random_uuid(), :s, 'Exclusion test', true, now(), now()) RETURNING id
     """), {"s": SYM})
     await session.execute(text("""
         INSERT INTO rv_snapshots (id, symbol, as_of_date, sample_days, status, created_at)
-        VALUES (gen_random_uuid(), :s, :d1, 0, 'ok', now()),
-               (gen_random_uuid(), :s, :d2, 0, 'data_error', now())
+        VALUES (gen_random_uuid(), :s, :d1, 0, 'ok', now()), (gen_random_uuid(), :s, :d2, 0, 'data_error', now())
     """), {"s": SYM, "d1": date(2026, 9, 18), "d2": date(2026, 9, 21)})
     await session.execute(text("""
-        INSERT INTO historical_reactions (id, ticker_id, event_type, event_date, pct_change_1d, computation_version, created_at)
-        VALUES (gen_random_uuid(), :t, 'earnings', :d, :p, 3, now()),
-               (gen_random_uuid(), :t, 'analyst_action', :d, :p, 2, now())
-    """), {"t": ticker_id, "d": date(2026, 6, 1), "p": Decimal("-35.84")})
+        INSERT INTO historical_reactions (id, ticker_id, event_type, event_date, pct_change_1d, eps_estimate, eps_actual, outcome, computation_version, created_at)
+        VALUES (gen_random_uuid(), :t, 'earnings', :d, :p, 1.0, 1.1, 'beat', 3, now()),
+               (gen_random_uuid(), :t, 'analyst_action', :d, :p, NULL, NULL, 'unknown', 2, now())
+    """), {"t": tid, "d": date(2026, 6, 1), "p": Decimal("-35.84")})
     await session.execute(text("""
         INSERT INTO analyst_reaction_stats (id, symbol, upgrade_count, upgrade_5d_sample, downgrade_count, downgrade_5d_sample, computed_at)
         VALUES (gen_random_uuid(), :s, 0, 0, 3, 3, now())
     """), {"s": SYM})
-    return ticker_id
+    return tid
+
+
+async def _counts(session, tid) -> tuple[int, int]:
+    reactions = await session.scalar(text("SELECT count(*) FROM historical_reactions WHERE ticker_id = :t"), {"t": tid})
+    stats = await session.scalar(text("SELECT count(*) FROM analyst_reaction_stats WHERE symbol = :s"), {"s": SYM})
+    return reactions, stats
+
+
+async def _remove(session):
+    await session.execute(text("DELETE FROM analyst_reaction_stats WHERE symbol = :s"), {"s": SYM})
+    await session.execute(text("DELETE FROM rv_snapshots WHERE symbol = :s"), {"s": SYM})
+    await session.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": SYM})   # cascades reactions
+    await session.commit()
 
 
 @pytest.mark.asyncio
-async def test_latest_snapshot_status_decides_the_list_and_clearing_empties_every_table():
-    async def body():
+async def test_excluded_ticker_rows_survive_the_seeder_and_the_analyst_step_and_readers_say_why(monkeypatch, capsys):
+    async with ScriptSessionLocal() as session:
+        await _remove(session)
+        tid = await _create(session)
+        await session.commit()
+    try:
         async with ScriptSessionLocal() as session:
-            async with session.begin():
-                await _setup(session)
-                assert SYM in await excluded_symbols(session)
+            assert SYM in await excluded_symbols(session)
+            assert await _counts(session, tid) == (2, 1)
 
-                # rows exist -> validate ERROR naming each table
-                out = await check_excluded_ticker_has_no_reactions(session)
-                assert out.level == ERROR
-                assert any(f"{SYM}: 1 earnings reaction row(s)" == r for r in out.rows)
-                assert any(f"{SYM}: 1 analyst_action reaction row(s)" == r for r in out.rows)
-                assert any(f"{SYM}: analyst_reaction_stats row" == r for r in out.rows)
+        # the earnings seeder, forced over every ticker, with the per-ticker work stubbed (no yfinance)
+        async def no_work(ticker, loop): return True, 0, 0, 0
+        monkeypatch.setattr(seed_historical_reactions, "process_ticker_bulk", no_work)
+        monkeypatch.setattr(seed_historical_reactions, "BULK_BATCH_SLEEP", 0)      # one pass, no pacing
+        monkeypatch.setattr(seed_historical_reactions, "BULK_BATCH_SIZE", 10_000)
+        monkeypatch.setattr(seed_historical_reactions, "save_failed_reactions", lambda syms: None)
+        monkeypatch.setattr(seed_historical_reactions, "load_failed_reactions", lambda: [])
+        await seed_historical_reactions.main_bulk(retry_only=False, limit=None, force=True)
 
-                counts = await clear_excluded(session, {SYM})
-                assert counts == {"reactions": 2, "stats": 1}
-                out = await check_excluded_ticker_has_no_reactions(session)
-                assert out.level == PASS and SYM in out.message
+        # the analyst-stats step, with the per-ticker work stubbed
+        async def no_analyst(ticker, loop): return True, 0
+        monkeypatch.setattr(compute_analyst_reactions, "_process_ticker_with_retries", no_analyst)
+        monkeypatch.setattr(compute_analyst_reactions, "BATCH_SLEEP", 0)
+        monkeypatch.setattr("sys.argv", ["compute_analyst_reactions", "--limit", "3"])
+        await compute_analyst_reactions.main()
 
-                # A newer ok snapshot takes the ticker off the list
-                await session.execute(text("""
-                    INSERT INTO rv_snapshots (id, symbol, as_of_date, sample_days, status, created_at)
-                    VALUES (gen_random_uuid(), :s, :d, 0, 'ok', now())
-                """), {"s": SYM, "d": date(2026, 9, 22)})
-                assert SYM not in await excluded_symbols(session)
+        out = capsys.readouterr().out
+        assert "skipping" in out and SYM in out and "hidden at read time" in out
+
+        async with ScriptSessionLocal() as session:
+            assert await _counts(session, tid) == (2, 1)          # nothing deleted
+            check = await check_excluded_ticker_hidden(session)
+            assert check.level == PASS and any(f"{SYM}: 2 reaction row(s) and 1 stats row(s) stored" in r for r in check.rows)
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            summary = (await client.get(f"/api/v1/reactions/summary?symbol={SYM}")).json()
+            assert summary["total_quarters"] == 0 and summary["price_history_excluded"] is True
+            assert summary["exclusion_reason"] == EXCLUSION_REASON
+            cond = (await client.get(f"/api/v1/reactions/conditional?symbol={SYM}")).json()
+            assert cond["total_quarters"] == 0 and cond["exclusion_reason"] == EXCLUSION_REASON
+            stats = (await client.get(f"/api/v1/reactions/analyst-stats?symbol={SYM}")).json()
+            assert stats["downgrade_count"] == 0 and stats["exclusion_reason"] == EXCLUSION_REASON
+            assert (await client.get(f"/api/v1/reactions?symbol={SYM}")).json() == []
+    finally:
+        async with ScriptSessionLocal() as session:
+            await _remove(session)
+
+
+@pytest.mark.asyncio
+async def test_validate_flags_a_stored_derivation_that_still_carries_an_excluded_ticker():
+    class _Rollback(Exception):
+        pass
+    async def body():
+        async with ScriptSessionLocal() as s:
+            async with s.begin():
+                tid = await _create(s)
+                await s.execute(text("""INSERT INTO magnitude_trend_snapshots (id, symbol, as_of_date, trend, created_at)
+                    VALUES (gen_random_uuid(), :s, :d, 'stable', now())"""), {"s": SYM, "d": date(2026, 9, 21)})
+                out = await check_excluded_ticker_hidden(s)
+                assert out.level == ERROR and any(f"{SYM}: 1 row(s) in magnitude_trend_snapshots" == r for r in out.rows)
                 raise _Rollback
-
     with pytest.raises(_Rollback):
         await body()
 
 
-@pytest.mark.asyncio
-async def test_apply_exclusion_reports_and_commits_nothing_when_list_is_empty(capsys):
-    async def body():
-        async with ScriptSessionLocal() as session:
-            async with session.begin():
-                before = await excluded_symbols(session)
-                if before:
-                    pytest.skip("local database has excluded tickers; the empty-list branch is not testable here")
-                assert await apply_exclusion(session, "Test step") == set()
-                raise _Rollback
-
-    with pytest.raises(_Rollback):
-        await body()
-    assert "skipping" not in capsys.readouterr().out
-
-
-class _Rollback(Exception):
-    """Raised to roll the test transaction back."""
+def test_nothing_deletes_on_an_exclusion_verdict():
+    root = Path(__file__).resolve().parents[1].joinpath("app")
+    svc = root.joinpath("services/price_history_exclusion.py").read_text()
+    assert "delete(" not in svc and "DELETE" not in svc and "clear_excluded" not in svc
+    for script in ("scripts/seed_historical_reactions.py", "scripts/compute_analyst_reactions.py", "scripts/seed_fomc_reactions.py"):
+        src = root.joinpath(script).read_text()
+        assert "apply_exclusion" not in src and "clear_excluded" not in src

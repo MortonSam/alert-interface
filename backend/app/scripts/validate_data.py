@@ -919,35 +919,38 @@ async def check_analyst_stats_sessions(session) -> CheckResult:
                        f"{len(rows)} analyst stats rows: sessions <= actions, medians only on >= {MIN_SESSIONS} sessions")
 
 
-async def check_excluded_ticker_has_no_reactions(session) -> CheckResult:
-    """ERROR when a ticker on the price-history exclusion list still has reaction or analyst stats rows.
+async def check_excluded_ticker_hidden(session) -> CheckResult:
+    """Excluded tickers' reaction and stats rows stay stored and are hidden at read time.
 
-    The list is rv_snapshots' latest status = data_error (price_history_exclusion);
-    every reaction pipeline clears the ticker before it runs, so a row here means
-    a consumer is not sharing the exclusion.
+    PASS lists how many rows are hidden per excluded ticker. ERROR when a
+    stored derivation that readers cannot filter by reason (earnings_features,
+    sector_peer_snapshots, magnitude_trend_snapshots) still carries an excluded
+    ticker: the nightly steps must skip them.
     """
     from app.services.price_history_exclusion import excluded_symbols
 
     excluded = await excluded_symbols(session)
     if not excluded:
-        return CheckResult("excluded_ticker_rows", PASS, "No tickers on the price-history exclusion list")
+        return CheckResult("excluded_ticker_hidden", PASS, "No tickers on the price-history exclusion list")
     symbols = sorted(excluded)
-    reactions = (await session.execute(text("""
-        SELECT t.symbol, hr.event_type, count(*)
-        FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
-        WHERE t.symbol = ANY(:symbols)
-        GROUP BY t.symbol, hr.event_type ORDER BY t.symbol, hr.event_type
+    hidden = (await session.execute(text("""
+        SELECT t.symbol, count(hr.id) AS reactions,
+               (SELECT count(*) FROM analyst_reaction_stats a WHERE a.symbol = t.symbol) AS stats
+        FROM tickers t LEFT JOIN historical_reactions hr ON hr.ticker_id = t.id
+        WHERE t.symbol = ANY(:symbols) GROUP BY t.symbol ORDER BY t.symbol
     """), {"symbols": symbols})).all()
-    stats = (await session.execute(text(
-        "SELECT symbol FROM analyst_reaction_stats WHERE symbol = ANY(:symbols) ORDER BY symbol"
-    ), {"symbols": symbols})).scalars().all()
-    details = [f"{sym}: {n} {etype} reaction row(s)" for sym, etype, n in reactions]
-    details += [f"{sym}: analyst_reaction_stats row" for sym in stats]
-    if not details:
-        return CheckResult("excluded_ticker_rows", PASS,
-                           f"{len(symbols)} excluded ticker(s) hold no reaction or stats rows: {', '.join(symbols)}")
-    return CheckResult("excluded_ticker_rows", ERROR,
-                       f"{len(details)} reaction/stats row group(s) exist for excluded ticker(s)", details)
+    leaked = []
+    for table, col in (("earnings_features", "symbol"), ("sector_peer_snapshots", "symbol"), ("magnitude_trend_snapshots", "symbol")):
+        rows = (await session.execute(text(
+            f"SELECT {col}, count(*) FROM {table} WHERE {col} = ANY(:symbols) GROUP BY {col} ORDER BY {col}"
+        ), {"symbols": symbols})).all()
+        leaked += [f"{sym}: {n} row(s) in {table}" for sym, n in rows]
+    if leaked:
+        return CheckResult("excluded_ticker_hidden", ERROR,
+                           f"{len(leaked)} stored derivation(s) still carry an excluded ticker", leaked)
+    details = [f"{sym}: {r} reaction row(s) and {st} stats row(s) stored, hidden at read time" for sym, r, st in hidden]
+    return CheckResult("excluded_ticker_hidden", PASS,
+                       f"{len(symbols)} excluded ticker(s); their rows are stored and hidden: {', '.join(symbols)}", details)
 
 
 async def check_rv_data_error_tickers(session) -> CheckResult:
@@ -2319,7 +2322,7 @@ CHECKS = [
     check_data_age,
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
-    check_excluded_ticker_has_no_reactions,
+    check_excluded_ticker_hidden,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,
     check_estimate_split_basis,

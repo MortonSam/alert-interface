@@ -51,7 +51,7 @@ from app.models.historical_reaction import HistoricalReaction
 from app.models.refused_earnings_date import RefusedEarningsDate
 from app.models.ticker import Ticker
 from app.services.basis_exclusion import basis_mismatch_dates
-from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
+from app.services.price_history_exclusion import exclusion_list, excluded_symbols
 from app.services.split_basis import (
     Anchor, anchored_factor, candidates, load_anchors, load_splits, rebase_factor, splits_after,
 )
@@ -837,7 +837,7 @@ async def main_bulk(retry_only: bool, limit: int | None, force: bool = False) ->
                 select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
             )).scalars().all()
         )
-        excluded = await apply_exclusion(session, SEEDER_STEP_LABEL)
+        excluded = await exclusion_list(session, SEEDER_STEP_LABEL)
     all_tickers = [t for t in all_tickers if t.symbol not in excluded]
 
     by_symbol = {t.symbol: t for t in all_tickers}

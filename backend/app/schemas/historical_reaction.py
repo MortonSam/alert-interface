@@ -79,6 +79,8 @@ class ReactionSummaryRead(BaseModel):
     mixed_versions: bool = False            # True while reseed in progress (some rows < v3)
     basis_excluded: int = 0                 # quarters left out of every count above: EPS basis unclear
     basis_excluded_note: str | None = None  # sentence to show next to any rate when basis_excluded > 0
+    price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
+    exclusion_reason: str | None = None
 
 
 class ConditionalEarningsRead(BaseModel):
@@ -94,6 +96,8 @@ class ConditionalEarningsRead(BaseModel):
     unknown_count: int
     basis_excluded: int = 0                 # quarters left out of the counts above: EPS basis unclear
     basis_excluded_note: str | None = None
+    price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
+    exclusion_reason: str | None = None
 
     # ── Conditional 1d moves ─────────────────────────────────────────────────
     avg_1d_on_beat: float | None
@@ -149,6 +153,8 @@ class AnalystDetailRead(BaseModel):
     rows: list[AnalystDetailItem]
     total_with_moves: int            # rows with non-null pct_change_1d
     total_all: int                   # all rows including null moves
+    price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
+    exclusion_reason: str | None = None
 
 
 class AnalystReactionStatsRead(BaseModel):
@@ -178,3 +184,5 @@ class AnalystReactionStatsRead(BaseModel):
     sample_count: int = 0                  # total actions (upgrade + downgrade)
     session_count: int = 0                 # total distinct sessions (upgrade + downgrade)
     last_event_date: str | None = None     # ISO date of most recent analyst action
+    price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
+    exclusion_reason: str | None = None

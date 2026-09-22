@@ -522,6 +522,12 @@ export default function StructuredNoteView({
     );
   }
 
+  if (stats.beat_count == null && stats.unavailable_reason) {
+    statCells.push(
+      <StatCell key="beats" label="EPS beats" value="—" sub={stats.unavailable_reason} />,
+    );
+  }
+
   if (stats.beat_count != null && stats.total_quarters != null) {
     statCells.push(
       <StatCell

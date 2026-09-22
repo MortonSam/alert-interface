@@ -64,8 +64,13 @@ async def main() -> int:
 
         upserted = 0
         skipped = 0
+        from app.services.price_history_exclusion import exclusion_list
+        excluded = await exclusion_list(session, "Magnitude trend snapshot")
 
         for ticker in tickers:
+            if ticker.symbol in excluded:
+                skipped += 1
+                continue
             # 2. Get earnings reactions ordered by date asc with non-null 1d move
             rows = (await session.execute(
                 select(HistoricalReaction.pct_change_1d)

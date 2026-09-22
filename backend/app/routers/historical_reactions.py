@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, basis_mismatch_dates, excluded_note
+from app.services.price_history_exclusion import exclusion_reason, is_excluded
 from app.thresholds import eps_surprise
 from app.auth import require_admin
 from app.thresholds import magnitude_trend_label, priced_in_label
@@ -118,7 +119,8 @@ async def get_reaction_summary(
         )
     )
     basis_unclear = await basis_mismatch_dates(db, ticker.id)
-    all_rows = list(result.scalars().all())
+    excluded_reason = await exclusion_reason(db, sym)      # rows stay stored; an excluded ticker shows none
+    all_rows = [] if excluded_reason else list(result.scalars().all())
     rows = [r for r in all_rows if r.event_date not in basis_unclear]
     basis_excluded = len(all_rows) - len(rows)
 
@@ -131,6 +133,7 @@ async def get_reaction_summary(
             avg_1d_on_beat=None, avg_1d_on_miss=None, avg_abs_1d=None,
             sector_avg_abs_1d=None, sector_peer_count=0,
             basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
+            price_history_excluded=excluded_reason is not None, exclusion_reason=excluded_reason,
         )
 
     beats  = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
@@ -269,6 +272,11 @@ async def get_analyst_detail(
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")
 
+    excluded_reason = await exclusion_reason(db, sym)
+    if excluded_reason:
+        return AnalystDetailRead(rows=[], total_with_moves=0, total_all=0,
+                                 price_history_excluded=True, exclusion_reason=excluded_reason)
+
     # Join HistoricalReaction with Event to get firm/grade metadata
     rows = (await db.execute(
         select(
@@ -356,7 +364,8 @@ async def get_conditional_earnings(
         .order_by(HistoricalReaction.event_date.asc())
     )
     basis_unclear = await basis_mismatch_dates(db, ticker.id)
-    all_rows = list(result.scalars().all())
+    excluded_reason = await exclusion_reason(db, sym)      # rows stay stored; an excluded ticker shows none
+    all_rows = [] if excluded_reason else list(result.scalars().all())
     rows = [r for r in all_rows if r.event_date not in basis_unclear]
     basis_excluded = len(all_rows) - len(rows)
     total = len(rows)
@@ -376,6 +385,7 @@ async def get_conditional_earnings(
             beat_count=len(beats), miss_count=len(misses),
             meet_count=len(meets), unknown_count=len(unknowns),
             basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
+            price_history_excluded=excluded_reason is not None, exclusion_reason=excluded_reason,
             avg_1d_on_beat=None, median_1d_on_beat=None,
             avg_1d_on_miss=None, median_1d_on_miss=None,
             beat_avg_5d=None, beat_continuation_rate_pct=None, beat_5d_sample=0,
@@ -448,6 +458,16 @@ async def get_analyst_reaction_stats(
 ) -> AnalystReactionStatsRead:
     """Precomputed stats: how does this stock react to analyst upgrades/downgrades?"""
     sym = symbol.upper()
+    excluded_reason = await exclusion_reason(db, sym)
+    if excluded_reason:
+        return AnalystReactionStatsRead(
+            symbol=sym, computed_at=None,
+            upgrade_count=0, upgrade_sessions=0, avg_1d_upgrade=None, median_1d_upgrade=None,
+            avg_5d_upgrade=None, upgrade_5d_continuation_pct=None, upgrade_5d_sample=0,
+            downgrade_count=0, downgrade_sessions=0, avg_1d_downgrade=None, median_1d_downgrade=None,
+            avg_5d_downgrade=None, downgrade_5d_continuation_pct=None, downgrade_5d_sample=0,
+            price_history_excluded=True, exclusion_reason=excluded_reason,
+        )
     row = await db.scalar(
         select(AnalystReactionStats).where(AnalystReactionStats.symbol == sym)
     )
@@ -476,6 +496,8 @@ async def list_reactions(
         q = q.where(HistoricalReaction.ticker_id == ticker_id)
     if event_type:
         q = q.where(HistoricalReaction.event_type == event_type)
+    if symbol and await is_excluded(db, symbol.upper()):
+        return []      # the rows stay stored; /reactions/summary carries the reason
     result = await db.execute(q)
     rows = list(result.scalars().all())
     basis_unclear: set = set()

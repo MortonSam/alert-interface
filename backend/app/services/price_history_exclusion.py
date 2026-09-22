@@ -1,70 +1,65 @@
-"""One exclusion list for every consumer of price history.
+"""One exclusion list for every consumer of price history, applied at read time.
 
 A ticker whose latest rv_snapshot is ``data_error`` had a >50% daily move with
 no volume spike and no recorded corporate action (rv_math): its price history
-is not trusted. Nothing computed from that history may be stored or shown, so
-the reaction pipelines (earnings, FOMC, analyst actions) skip the ticker and
-clear what they hold for it, and validate_data checks nothing remains.
+is not trusted. Every reader of historical_reactions and analyst stats skips
+that ticker's rows and states EXCLUSION_REASON; the rows themselves stay in
+the tables, so a verdict that later reverses (a split event arrives, the
+guard is refined) costs nothing. Nothing here deletes.
 
 The list is read from the stored snapshot, not recomputed, so every consumer
-sees the same decision the RV job made. The reaction steps run before the RV
-step in the nightly order, so they act on the previous night's decision.
+sees the same decision the RV job made; the RV step runs before every
+reaction step in the nightly order, so they act on tonight's verdict.
 """
 from __future__ import annotations
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.analyst_reaction_stats import AnalystReactionStats
-from app.models.historical_reaction import HistoricalReaction
-from app.models.ticker import Ticker
+from app.models.rv_snapshot import RVSnapshot
 
 EXCLUDED_STATUS = "data_error"
+EXCLUSION_REASON = (
+    "Price history for this ticker failed the RV guard (a move of more than 50% in one day "
+    "with no volume spike and no recorded split or dividend), so reactions computed from it are not shown"
+)
 
-_LATEST_STATUS_SQL = text("""
-    SELECT DISTINCT ON (symbol) symbol, status
-    FROM rv_snapshots
-    ORDER BY symbol, as_of_date DESC
-""")
+_latest = (
+    select(RVSnapshot.symbol, RVSnapshot.status)
+    .distinct(RVSnapshot.symbol)
+    .order_by(RVSnapshot.symbol, RVSnapshot.as_of_date.desc())
+    .subquery("latest_rv")
+)
+EXCLUDED_SYMBOLS = select(_latest.c.symbol).where(_latest.c.status == EXCLUDED_STATUS)
+
+
+def not_excluded(symbol_column):
+    """WHERE clause: the symbol is not on the exclusion list (for ORM readers)."""
+    return symbol_column.notin_(EXCLUDED_SYMBOLS)
+
+
+# Raw-SQL readers append this
+EXCLUDED_SYMBOLS_SQL = """(SELECT symbol FROM (SELECT DISTINCT ON (symbol) symbol, status FROM rv_snapshots
+                            ORDER BY symbol, as_of_date DESC) latest_rv WHERE status = 'data_error')"""
 
 
 async def excluded_symbols(session: AsyncSession) -> set[str]:
-    """Symbols whose latest rv_snapshot has status data_error."""
-    rows = (await session.execute(_LATEST_STATUS_SQL)).all()
-    return {symbol for symbol, status in rows if status == EXCLUDED_STATUS}
+    return set((await session.execute(EXCLUDED_SYMBOLS)).scalars().all())
 
 
-async def clear_excluded(session: AsyncSession, symbols: set[str]) -> dict[str, int]:
-    """Delete every stored reaction row and analyst stats row for the symbols.
-
-    Returns {"reactions": n, "stats": n}. Commits nothing; the caller does.
-    """
-    if not symbols:
-        return {"reactions": 0, "stats": 0}
-    ticker_ids = select(Ticker.id).where(Ticker.symbol.in_(symbols))
-    reactions = await session.execute(
-        delete(HistoricalReaction).where(HistoricalReaction.ticker_id.in_(ticker_ids))
-    )
-    stats = await session.execute(
-        delete(AnalystReactionStats).where(AnalystReactionStats.symbol.in_(symbols))
-    )
-    return {"reactions": reactions.rowcount, "stats": stats.rowcount}
+async def is_excluded(session: AsyncSession, symbol: str) -> bool:
+    return symbol in await excluded_symbols(session)
 
 
-async def apply_exclusion(session: AsyncSession, label: str) -> set[str]:
-    """Read the list, clear what the excluded tickers hold, commit, and print.
+async def exclusion_reason(session: AsyncSession, symbol: str) -> str | None:
+    return EXCLUSION_REASON if await is_excluded(session, symbol) else None
 
-    Every reaction pipeline calls this before choosing its candidates and then
-    drops the returned symbols from them.
-    """
+
+async def exclusion_list(session: AsyncSession, label: str) -> set[str]:
+    """The list, printed for a step's log. Pipelines drop these symbols from their candidates and write nothing for them."""
     excluded = await excluded_symbols(session)
     if excluded:
-        counts = await clear_excluded(session, excluded)
-        await session.commit()
-        print(
-            f"{label}: skipping {len(excluded)} ticker(s) whose price history is excluded "
-            f"(RV data_error): {', '.join(sorted(excluded))}; "
-            f"cleared {counts['reactions']} reaction row(s), {counts['stats']} stats row(s).",
-            flush=True,
-        )
+        print(f"{label}: skipping {len(excluded)} ticker(s) whose price history is excluded "
+              f"(RV data_error): {', '.join(sorted(excluded))}; their stored rows stay and are hidden at read time.",
+              flush=True)
     return excluded

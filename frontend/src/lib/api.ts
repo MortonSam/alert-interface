@@ -142,6 +142,8 @@ export interface ReactionSummary {
   mixed_versions?: boolean;
   basis_excluded?: number;             // quarters left out of every count: EPS basis unclear
   basis_excluded_note?: string | null; // sentence to show next to any rate
+  price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
+  exclusion_reason?: string | null;
 }
 
 export interface SectorPeerItem {
@@ -201,6 +203,8 @@ export interface ConditionalEarningsRead {
   magnitude_trend: string | null;
   magnitude_trend_labeled: LabelRule | null;
   last_event_date: string | null;
+  price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
+  exclusion_reason?: string | null;
 }
 
 export interface AnalystReactionStatsRead {
@@ -223,6 +227,8 @@ export interface AnalystReactionStatsRead {
   sample_count: number;           // total actions
   session_count: number;          // total distinct sessions
   last_event_date: string | null;
+  price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
+  exclusion_reason?: string | null;
 }
 
 export interface WatchlistTicker {
@@ -270,6 +276,7 @@ export interface StructuredNoteStats {
   latest_move_1d: string | null;
   latest_outcome: "beat" | "miss" | "meet" | null;
   latest_quarter_date: string | null;
+  unavailable_reason?: string | null;   // why beat_count/total_quarters are null (price history excluded)
 }
 
 export interface StructuredNoteFinancials {
@@ -350,6 +357,8 @@ export interface TickerChart {
   history_state?: "ok" | "stale" | "mismatch" | "no_data";
   history_reason?: string | null;
   last_bar_date?: string | null;
+  price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
+  exclusion_reason?: string | null;
 }
 
 export interface BatchQuote {

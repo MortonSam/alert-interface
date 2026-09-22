@@ -112,6 +112,10 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
     upcoming_date: date = event_row
 
     # ── Prior reactions: all historical earnings reactions to date ─────────
+    # A ticker on the price-history exclusion list has no usable reactions: no features, no pick.
+    from app.services.price_history_exclusion import is_excluded
+    if await is_excluded(db, symbol):
+        return None
     reactions = (await db.execute(
         select(HistoricalReaction)
         .where(

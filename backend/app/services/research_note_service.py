@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
+from app.services.price_history_exclusion import EXCLUSION_REASON, is_excluded
 from app.database import AsyncSessionLocal
 from app.models.enums import EventType
 from app.models.historical_reaction import HistoricalReaction
@@ -44,7 +45,7 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     reactions = [r for r in reactions if not getattr(r, "basis_mismatch", False)]
     total = len(reactions)
     if total == 0:
-        return {"available": False, "basis_excluded": basis_excluded}
+        return {"available": False, "basis_excluded": basis_excluded}   # unavailable_reason added by callers with a symbol
 
     beat  = sum(1 for r in reactions if r.outcome.value == "beat")
     miss  = sum(1 for r in reactions if r.outcome.value == "miss")
@@ -97,9 +98,14 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     }
 
 
+# symbol -> why its earnings history is withheld (set by _fetch_context, read by the prompt and stats)
+_UNAVAILABLE_REASON: dict[str, str] = {}
+
+
 def _stats_block(s: dict) -> str:
     if not s.get("available"):
-        return "(No earnings history available.)"
+        reason = s.get("unavailable_reason")
+        return f"(No earnings history available: {reason}.)" if reason else "(No earnings history available.)"
 
     return f"""\
 PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount or recalculate):
@@ -150,6 +156,7 @@ def _build_stats_object(
         "latest_quarter_date": None,
     }
     if not reactions:
+        stats["unavailable_reason"] = _UNAVAILABLE_REASON.get(ticker.symbol)
         return stats
 
     precomputed = _precompute_stats(reactions)
@@ -253,6 +260,7 @@ def _build_generation_prompt(
         filing_block = "(No SEC filing available. Use general knowledge for this company.)"
 
     stats = _precompute_stats(reactions)
+    stats["unavailable_reason"] = _UNAVAILABLE_REASON.get(ticker.symbol)
     stats_block = _stats_block(stats)
 
     if reactions:
@@ -493,6 +501,9 @@ async def _fetch_context(
         .limit(20)
     )
     reactions = list(rows.scalars().all())
+    if await is_excluded(db, ticker.symbol):
+        reactions = []      # rows stay stored; the note says why there is no earnings history
+        _UNAVAILABLE_REASON[ticker.symbol] = EXCLUSION_REASON
     basis_unclear = await basis_mismatch_dates(db, ticker.id)
     for r in reactions:
         r.basis_mismatch = r.event_date in basis_unclear   # transient marker read by _precompute_stats

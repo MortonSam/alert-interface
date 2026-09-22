@@ -37,6 +37,7 @@ from app.services.options_read_gate import (
     load_cached_read,
 )
 from app.services.price_freshness import QuoteState, assess_history, assess_quote
+from app.services.price_history_exclusion import exclusion_reason, is_excluded
 
 
 def _to_options_lr(lv: object) -> OptionsLabelRule | None:
@@ -610,7 +611,8 @@ async def get_ticker_chart(
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
 
     markers: list[EarningsMarker] = []
-    if ticker_row:
+    excluded_reason = await exclusion_reason(db, sym) if ticker_row else None
+    if ticker_row and not excluded_reason:
         r_q = (
             select(HistoricalReaction)
             .where(
@@ -653,6 +655,8 @@ async def get_ticker_chart(
         print(f"[chart] {sym}: history={hist.state} ({hist.detail})", flush=True)
 
     return TickerChartRead(
+        price_history_excluded=excluded_reason is not None,
+        exclusion_reason=excluded_reason,
         symbol=sym, period=period,
         history=history if hist.ok else [],
         earnings_markers=markers,
@@ -797,9 +801,9 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             implied_range_low = current_price - straddle_price
             implied_range_high = current_price + straddle_price
 
-    # Historical stats
+    # Historical stats (none for a ticker on the price-history exclusion list)
     historical_stats: HistoricalMoveStats | None = None
-    if ticker_row:
+    if ticker_row and not await is_excluded(db, sym):
         r_q = select(HistoricalReaction).where(
             HistoricalReaction.ticker_id == ticker_row.id,
             HistoricalReaction.event_type == "earnings",
@@ -1192,7 +1196,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
 
     # ── Historical stats ──────────────────────────────────────────────────────
     historical_stats: HistoricalMoveStats | None = None
-    if ticker_row:
+    if ticker_row and not await is_excluded(db, sym):    # none for an excluded ticker
         r_q = select(HistoricalReaction).where(
             HistoricalReaction.ticker_id == ticker_row.id,
             HistoricalReaction.event_type == "earnings",
@@ -1468,7 +1472,7 @@ async def get_options_read(
     # Historical earnings avg absolute 1d move
     avg_earn_move_pct: float | None = None
     earn_sample: int = 0
-    if ticker_row:
+    if ticker_row and not await is_excluded(db, sym):
         reactions = (await db.execute(
             select(HistoricalReaction).where(
                 HistoricalReaction.ticker_id == ticker_row.id,
@@ -1787,7 +1791,9 @@ async def get_explain(
 
     elif metric == "beat_drop_pattern":
         metric_label = "earnings beat-drop pattern"
-        if ticker_row:
+        if ticker_row and await is_excluded(db, sym):
+            facts.update({"historical_reactions": f"(unavailable) {await exclusion_reason(db, sym)}"})
+        elif ticker_row:
             from app.models.enums import EarningsOutcome
             result = await db.execute(
                 select(HistoricalReaction).where(
