@@ -689,6 +689,37 @@ async def check_rv_rank_bounds(session) -> CheckResult:
     )
 
 
+async def check_excluded_ticker_has_no_reactions(session) -> CheckResult:
+    """ERROR when a ticker on the price-history exclusion list still has reaction or analyst stats rows.
+
+    The list is rv_snapshots' latest status = data_error (price_history_exclusion);
+    every reaction pipeline clears the ticker before it runs, so a row here means
+    a consumer is not sharing the exclusion.
+    """
+    from app.services.price_history_exclusion import excluded_symbols
+
+    excluded = await excluded_symbols(session)
+    if not excluded:
+        return CheckResult("excluded_ticker_rows", PASS, "No tickers on the price-history exclusion list")
+    symbols = sorted(excluded)
+    reactions = (await session.execute(text("""
+        SELECT t.symbol, hr.event_type, count(*)
+        FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE t.symbol = ANY(:symbols)
+        GROUP BY t.symbol, hr.event_type ORDER BY t.symbol, hr.event_type
+    """), {"symbols": symbols})).all()
+    stats = (await session.execute(text(
+        "SELECT symbol FROM analyst_reaction_stats WHERE symbol = ANY(:symbols) ORDER BY symbol"
+    ), {"symbols": symbols})).scalars().all()
+    details = [f"{sym}: {n} {etype} reaction row(s)" for sym, etype, n in reactions]
+    details += [f"{sym}: analyst_reaction_stats row" for sym in stats]
+    if not details:
+        return CheckResult("excluded_ticker_rows", PASS,
+                           f"{len(symbols)} excluded ticker(s) hold no reaction or stats rows: {', '.join(symbols)}")
+    return CheckResult("excluded_ticker_rows", ERROR,
+                       f"{len(details)} reaction/stats row group(s) exist for excluded ticker(s)", details)
+
+
 async def check_rv_data_error_tickers(session) -> CheckResult:
     """WARN listing tickers whose latest rv_snapshot has status='data_error'.
 
@@ -2058,6 +2089,7 @@ CHECKS = [
     check_data_age,
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
+    check_excluded_ticker_has_no_reactions,
     # Analyst recommendations
     check_recommendations_freshness,
     check_recommendations_bounds,

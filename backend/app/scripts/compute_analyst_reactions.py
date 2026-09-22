@@ -40,6 +40,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.services.price_history_exclusion import apply_exclusion
 from app.scripts.seed_historical_reactions import (
     FETCH_TIMEOUT,
     _build_date_cache,
@@ -344,8 +345,10 @@ async def main() -> int:
                 select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
             )).scalars().all()
         )
+        # Price history the RV guard rejected is not used here either.
+        excluded = await apply_exclusion(session, "Analyst reaction stats")
 
-    candidates = all_tickers
+    candidates = [t for t in all_tickers if t.symbol not in excluded]
     if args.limit is not None:
         candidates = candidates[:args.limit]
         print(f"--limit {args.limit}: processing first {len(candidates)} tickers.", flush=True)

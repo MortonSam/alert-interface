@@ -49,6 +49,7 @@ from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
 
 
 LOOKBACK_YEARS = 5
@@ -601,6 +602,9 @@ async def seed(symbol: str) -> None:
         if ticker is None:
             print(f"  ⚠  Not in DB — run `make seed TICKER={sym}` first")
             return
+        if sym in await excluded_symbols(session):
+            print(f"  ⚠  {sym} is excluded: its price history failed the RV guard (data_error). Nothing seeded.")
+            return
 
     lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
     yf_ticker = yf.Ticker(sym)
@@ -749,13 +753,15 @@ async def process_ticker_bulk(ticker: Ticker, loop) -> tuple[bool, int, int, int
 # ── Bulk main ─────────────────────────────────────────────────────────────────
 
 async def main_bulk(retry_only: bool, limit: int | None, force: bool = False) -> int:
-    # 1. Load all active DB tickers
+    # 1. Load all active DB tickers, less those whose price history the RV guard rejected
     async with AsyncSessionLocal() as session:
         all_tickers: list[Ticker] = list(
             (await session.execute(
                 select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
             )).scalars().all()
         )
+        excluded = await apply_exclusion(session, SEEDER_STEP_LABEL)
+    all_tickers = [t for t in all_tickers if t.symbol not in excluded]
 
     by_symbol = {t.symbol: t for t in all_tickers}
 

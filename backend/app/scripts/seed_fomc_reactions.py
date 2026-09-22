@@ -36,6 +36,7 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.services.price_history_exclusion import apply_exclusion, excluded_symbols
 from app.models.historical_reaction import HistoricalReaction
 from app.scripts.seed_historical_reactions import (
     LOOKBACK_YEARS,
@@ -223,6 +224,9 @@ async def seed(symbol: str) -> None:
         if ticker is None:
             print(f"  ⚠  Not in DB — run `make seed TICKER={sym}` first")
             return
+        if sym in await excluded_symbols(session):
+            print(f"  ⚠  {sym} is excluded: its price history failed the RV guard (data_error). Nothing seeded.")
+            return
 
     fomc_dates = await _load_fomc_dates()
     if not fomc_dates:
@@ -344,15 +348,16 @@ async def main_bulk(limit: int | None) -> int:
 
     print(f"Found {len(fomc_dates)} FOMC dates in lookback window.", flush=True)
 
-    # 2. Load all active DB tickers
+    # 2. Load all active DB tickers, less those whose price history the RV guard rejected
     async with AsyncSessionLocal() as session:
         all_tickers: list[Ticker] = list(
             (await session.execute(
                 select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
             )).scalars().all()
         )
+        excluded = await apply_exclusion(session, "FOMC reactions")
 
-    candidates = all_tickers
+    candidates = [t for t in all_tickers if t.symbol not in excluded]
     if limit is not None:
         candidates = candidates[:limit]
         print(f"--limit {limit}: processing first {len(candidates)} tickers.", flush=True)
