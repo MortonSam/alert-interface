@@ -23,6 +23,9 @@ class OptionsChainRead(BaseModel):
     available_expirations: list[str]
     as_of: str   # ISO UTC
     data_quality_note: str | None = None
+    quote_state: str = "ok"          # ok | stale | no_data: current_price and everything derived from it are null unless ok
+    quote_reason: str | None = None  # plain language, shown in place of the price-derived figures
+    price_as_of: str | None = None   # ISO UTC last-trade time of the quote, set whatever the state
 
 
 class HistoricalMoveStats(BaseModel):
@@ -50,6 +53,9 @@ class ExpectedMoveRead(BaseModel):
     plain_summary: str | None            # plain-English sentence for non-options-fluent users
     data_quality_note: str | None
     as_of: str
+    quote_state: str = "ok"          # ok | stale | no_data: current_price and everything derived from it are null unless ok
+    quote_reason: str | None = None  # plain language, shown in place of the price-derived figures
+    price_as_of: str | None = None   # ISO UTC last-trade time of the quote, set whatever the state
 
 
 # ── Strategy explainer data ────────────────────────────────────────────────────
@@ -74,6 +80,9 @@ class StrategyDataRead(BaseModel):
     as_of: str
     data_quality_note: str | None = None
     chain_date: str | None = None    # "YYYY-MM-DD" chain_last_trade of the chain these strikes came from
+    quote_state: str = "ok"          # ok | stale | no_data: current_price and everything derived from it are null unless ok
+    quote_reason: str | None = None  # plain language, shown in place of the price-derived figures
+    price_as_of: str | None = None   # ISO UTC last-trade time of the quote, set whatever the state
 
 
 # ── Realized volatility rank / percentile ──────────────────────────────────────

@@ -36,7 +36,7 @@ from app.services.options_read_gate import (
     format_facts,
     load_cached_read,
 )
-from app.services.price_freshness import assess_history, assess_quote
+from app.services.price_freshness import QuoteState, assess_history, assess_quote
 
 
 def _to_options_lr(lv: object) -> OptionsLabelRule | None:
@@ -663,22 +663,47 @@ async def get_ticker_chart(
     )
 
 
+
+async def _guarded_price(sym: str) -> QuoteState:
+    """The quote for a price-derived figure, behind the same freshness test the quote endpoint uses.
+
+    Reads the shared quote cache first. The returned state's `price` is None
+    unless the last trade is recent, so nothing derived from a stale quote is
+    computed; `traded_on_ts` is set whatever the state, for the page to date it.
+    """
+    cached = quote_cache.get(sym)
+    if cached is not None:
+        return assess_quote(cached.get("price"), cached.get("timestamp"))
+    finnhub = FinnhubClient()
+    try:
+        raw = await finnhub.get_quote(sym)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+    finally:
+        await finnhub.close()
+    price = float(raw.get("c") or 0) or None
+    ts = int(raw["t"]) if raw.get("t") else None
+    return assess_quote(price, ts)
+
+
+def _price_as_of(q: QuoteState) -> str | None:
+    return dt_datetime.fromtimestamp(q.traded_on_ts, tz=timezone.utc).isoformat() if q.traded_on_ts else None
+
+
+def _quote_fields(q: QuoteState) -> dict:
+    """The three quote-state fields every price-derived read carries."""
+    return {"quote_state": q.state, "quote_reason": q.reason, "price_as_of": _price_as_of(q)}
+
+
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
 async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> ExpectedMoveRead:
     sym = symbol.upper()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
     today = date.today()
 
-    # Finnhub quote for current price
-    finnhub = FinnhubClient()
-    try:
-        quote = await finnhub.get_quote(sym)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
-    finally:
-        await finnhub.close()
-
-    current_price = float(quote.get("c") or 0) or None
+    # The price behind every derived figure, withheld unless its last trade is recent
+    q = await _guarded_price(sym)
+    current_price = q.price
 
     # Look up ticker + next earnings
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -702,6 +727,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
 
     if not chosen_exp:
         return ExpectedMoveRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -729,6 +755,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
         return ExpectedMoveRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -802,6 +829,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
     )
 
     return ExpectedMoveRead(
+            **_quote_fields(q),
         symbol=sym,
         current_price=current_price,
         expected_move_pct=expected_move_pct,
@@ -829,20 +857,14 @@ async def get_options_chain(
     sym = symbol.upper()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
-    # Finnhub quote for current price
-    finnhub = FinnhubClient()
-    try:
-        quote = await finnhub.get_quote(sym)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
-    finally:
-        await finnhub.close()
-
-    current_price = float(quote.get("c") or 0) or None
+    # The price behind every derived figure, withheld unless its last trade is recent
+    q = await _guarded_price(sym)
+    current_price = q.price
 
     available = await chain_store.get_ingested_expirations(db, sym)
     if not available:
         return OptionsChainRead(
+            **_quote_fields(q),
             symbol=sym, expiration="", current_price=current_price,
             calls=[], puts=[], available_expirations=[],
             as_of=as_of, data_quality_note="No current options data is available for this ticker",
@@ -852,6 +874,7 @@ async def get_options_chain(
     chain_result = await chain_store.get_chain(db, sym, chosen)
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
         return OptionsChainRead(
+            **_quote_fields(q),
             symbol=sym, expiration=chosen, current_price=current_price,
             calls=[], puts=[], available_expirations=available,
             as_of=as_of, data_quality_note="No current options data is available for this ticker",
@@ -882,6 +905,7 @@ async def get_options_chain(
     filtered_puts = _filter_side(puts_raw)
 
     return OptionsChainRead(
+            **_quote_fields(q),
         symbol=sym,
         expiration=chosen,
         current_price=current_price,
@@ -905,18 +929,12 @@ async def get_strategy_data(
     sym = symbol.upper()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
-    # Finnhub quote for current price
-    finnhub = FinnhubClient()
-    try:
-        quote = await finnhub.get_quote(sym)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
-    finally:
-        await finnhub.close()
-
-    current_price = float(quote.get("c") or 0) or None
+    # The price behind every derived figure, withheld unless its last trade is recent
+    q = await _guarded_price(sym)
+    current_price = q.price
     if not current_price:
         return StrategyDataRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price, expiration=None,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
@@ -947,6 +965,7 @@ async def get_strategy_data(
 
     if not chosen_exp:
         return StrategyDataRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price, expiration=None,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
@@ -956,6 +975,7 @@ async def get_strategy_data(
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
         return StrategyDataRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price, expiration=chosen_exp,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
@@ -1022,6 +1042,7 @@ async def get_strategy_data(
         ))
 
     return StrategyDataRead(
+            **_quote_fields(q),
         chain_date=chain_last_trade,
         symbol=sym, current_price=current_price, expiration=chosen_exp,
         earnings_date=earnings_str,
@@ -1041,16 +1062,9 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
     today = date.today()
 
-    # Finnhub quote for current price
-    finnhub = FinnhubClient()
-    try:
-        quote = await finnhub.get_quote(sym)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
-    finally:
-        await finnhub.close()
-
-    current_price = float(quote.get("c") or 0) or None
+    # The price behind every derived figure, withheld unless its last trade is recent
+    q = await _guarded_price(sym)
+    current_price = q.price
 
     # ── Ticker + next earnings ────────────────────────────────────────────────
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -1077,6 +1091,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     if not chosen_exp:
         no_data_note = "No current options data is available for this ticker"
         empty_em = ExpectedMoveRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -1087,11 +1102,13 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
             data_quality_note=no_data_note, as_of=as_of,
         )
         empty_sd = StrategyDataRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price, expiration=None,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of, data_quality_note=no_data_note,
         )
         empty_chain = OptionsChainRead(
+            **_quote_fields(q),
             symbol=sym, expiration="", current_price=current_price,
             calls=[], puts=[], available_expirations=[],
             as_of=as_of, data_quality_note=no_data_note,
@@ -1116,6 +1133,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
         no_data_note = "No current options data is available for this ticker"
         empty_em = ExpectedMoveRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -1126,11 +1144,13 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
             data_quality_note=no_data_note, as_of=as_of,
         )
         empty_sd = StrategyDataRead(
+            **_quote_fields(q),
             symbol=sym, current_price=current_price, expiration=chosen_exp,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of, data_quality_note=no_data_note,
         )
         empty_chain = OptionsChainRead(
+            **_quote_fields(q),
             symbol=sym, expiration=chosen_exp, current_price=current_price,
             calls=[], puts=[], available_expirations=ingested_exps,
             as_of=as_of, data_quality_note=no_data_note,
@@ -1199,6 +1219,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     )
 
     em = ExpectedMoveRead(
+            **_quote_fields(q),
         symbol=sym, current_price=current_price,
         expected_move_pct=expected_move_pct, expected_move_dollars=expected_move_dollars,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
@@ -1240,6 +1261,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
             ))
 
     sd = StrategyDataRead(
+            **_quote_fields(q),
         symbol=sym, current_price=current_price, expiration=chosen_exp,
         earnings_date=earnings_str,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
@@ -1261,6 +1283,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     filtered_puts = _filter_side(puts_raw)
 
     chain_resp = OptionsChainRead(
+            **_quote_fields(q),
         symbol=sym, expiration=chosen_exp, current_price=current_price,
         calls=_build_contracts(filtered_calls, atm_strike, current_price=current_price, is_call=True),
         puts=_build_contracts(filtered_puts, atm_strike, current_price=current_price, is_call=False),

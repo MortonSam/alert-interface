@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { PRICE_FRESHNESS, freshnessLine, optionsDataPhrase, premiumSourcePhrase } from "../freshness";
+import { PRICE_FRESHNESS, freshnessLine, optionsDataPhrase, premiumSourcePhrase, priceStateLine, priceAsOfPhrase } from "../freshness";
 
 const SRC = join(__dirname, "../..");
 
@@ -52,5 +52,22 @@ describe("freshness wording", () => {
     const src = readFileSync(join(SRC, "app/ivy/page.tsx"), "utf8");
     expect(src).not.toContain("Right now");
     expect(src).not.toContain("animate-ping");
+  });
+});
+
+describe("withheld price wording", () => {
+  it("is null when the quote is current", () => {
+    expect(priceStateLine("ok", null)).toBeNull();
+    expect(priceStateLine(undefined, null)).toBeNull();
+  });
+  it("names the reason the API gave, which carries the last-trade date", () => {
+    expect(priceStateLine("stale", "The latest price is from 2026-09-10 and is no longer current"))
+      .toBe("Price unavailable. The latest price is from 2026-09-10 and is no longer current");
+    expect(priceStateLine("no_data", null)).toBe("Price unavailable.");
+  });
+  it("dates the price from its own last-trade time, never today", () => {
+    expect(priceAsOfPhrase("2026-09-10T19:59:00+00:00")).toBe("price as of 2026-09-10");
+    expect(priceAsOfPhrase(null)).toBeNull();
+    expect(priceAsOfPhrase("chain as of 2026-09-18")).toBeNull();
   });
 });

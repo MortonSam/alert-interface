@@ -403,6 +403,9 @@ export interface OptionsChain {
   symbol: string; expiration: string; current_price: number | null;
   calls: OptionContract[]; puts: OptionContract[];
   available_expirations: string[]; as_of: string;
+  quote_state?: "ok" | "stale" | "no_data";   // current_price and everything derived from it are null unless ok
+  quote_reason?: string | null;
+  price_as_of?: string | null;                 // ISO last-trade time of the quote, set whatever the state
 }
 export interface HistoricalMoveStats {
   avg_abs_move_pct: number; max_abs_move_pct: number; min_abs_move_pct: number;
@@ -418,6 +421,9 @@ export interface ExpectedMove {
   historical_stats: HistoricalMoveStats | null;
   plain_summary: string | null;
   data_quality_note: string | null; as_of: string;
+  quote_state?: "ok" | "stale" | "no_data";   // current_price and everything derived from it are null unless ok
+  quote_reason?: string | null;
+  price_as_of?: string | null;                 // ISO last-trade time of the quote, set whatever the state
 }
 
 export interface StrikeData {
@@ -439,6 +445,9 @@ export interface StrategyData {
   strikes: StrikeData[];
   as_of: string;
   chain_date?: string | null;    // YYYY-MM-DD chain these strikes came from
+  quote_state?: "ok" | "stale" | "no_data";   // current_price and everything derived from it are null unless ok
+  quote_reason?: string | null;
+  price_as_of?: string | null;                 // ISO last-trade time of the quote, set whatever the state
 }
 
 export interface OptionsRead {

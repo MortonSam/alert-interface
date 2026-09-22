@@ -4,6 +4,7 @@ import { rvTier } from "@/lib/encodings/rvTier";
 import { displayedOptionFacts, priceDriftNote, priceLabel } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
+import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
 import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -1894,9 +1895,9 @@ export default function TickerPage() {
             </p>
           )}
 
-          {quote && quote.quote_state === "stale" && (
+          {quote && priceStateLine(quote.quote_state, quote.quote_reason) && (
             <p className="mt-5 text-sm text-muted-foreground">
-              Price unavailable. {quote.quote_reason}
+              {priceStateLine(quote.quote_state, quote.quote_reason)}
             </p>
           )}
 
@@ -2378,6 +2379,13 @@ export default function TickerPage() {
                   </p>
                 )}
                 {drift && <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">{drift}</p>}
+                {priceStateLine(expectedMove.quote_state, expectedMove.quote_reason) && (
+                  <p className="text-sm text-muted-foreground mb-2">
+                    {priceStateLine(expectedMove.quote_state, expectedMove.quote_reason)}
+                    {priceAsOfPhrase(expectedMove.price_as_of) && ` (${priceAsOfPhrase(expectedMove.price_as_of)})`}
+                    {" "}The implied range, straddle and breakevens need a current price and are not shown.
+                  </p>
+                )}
                 {emPct != null ? (
                   <p className="text-6xl font-bold tabular-nums tracking-tight">
                     <ExplainTip term="expected move" metric="expected_move" symbol={upperSymbol}>{`\u00B1${(emPct * 100).toFixed(1)}%`}</ExplainTip>

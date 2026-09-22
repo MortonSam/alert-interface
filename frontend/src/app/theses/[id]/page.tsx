@@ -12,6 +12,7 @@ import {
   type Leg, dateMs,
 } from "@/lib/black-scholes";
 import { cn } from "@/lib/utils";
+import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
 import { markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
 import { fmtPnlPct } from "@/lib/pnl";
 import { buildPlainEnglish } from "@/lib/plain-english";
@@ -418,6 +419,13 @@ export default function ThesisDetailPage() {
           <span className="inline-block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-background/50 px-2.5 py-0.5 rounded">
             Payoff Simulator
           </span>
+          {priceStateLine(strategyData?.quote_state, strategyData?.quote_reason) && (
+            <p className="text-sm text-muted-foreground mb-2">
+              {priceStateLine(strategyData?.quote_state, strategyData?.quote_reason)}
+              {priceAsOfPhrase(strategyData?.price_as_of) && ` (${priceAsOfPhrase(strategyData?.price_as_of)})`}
+              {" "}The current-price mark, implied range and P&amp;L marks are not shown.
+            </p>
+          )}
           <PayoffSimulator
             legs={legs}
             spot={initialScrub}
