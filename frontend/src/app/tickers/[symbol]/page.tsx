@@ -1,7 +1,7 @@
 "use client";
 
 import { rvTier } from "@/lib/encodings/rvTier";
-import { displayedOptionFacts, priceDriftNote, priceLabel } from "@/lib/optionsReadFacts";
+import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
@@ -2492,8 +2492,8 @@ export default function TickerPage() {
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {rvVal != null
                       ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback)</span></>
-                      : <span className="text-muted-foreground" title={realizedVol?.reason ?? undefined}>
-                          RV unavailable{realizedVol?.reason ? <span className="block text-xs font-sans font-normal">{realizedVol.reason}</span> : null}
+                      : <span className="text-muted-foreground" title={rvUnavailableReason(shown, realizedVol, rvStatus)}>
+                          RV unavailable<span className="block text-xs font-sans font-normal">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
                   </span>
                 </div>

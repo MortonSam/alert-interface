@@ -887,6 +887,58 @@ async def check_refused_earnings_dates(session) -> CheckResult:
                        f"in {REFUSAL_WINDOW_DAYS} days (repair_refused_dates)", details)
 
 
+async def check_cached_reads_stale(session) -> CheckResult:
+    """WARN listing cached Ivy's Reads that carry a null fact while that fact is servable now.
+
+    Same rule the options-read endpoint applies (options_read_gate.stale_facts):
+    such a read is not served and the next warm regenerates it. Only reads for
+    a fresh chain date count.
+    """
+    import json as _json
+    from app.services import chain_store
+    from app.services.options_read_gate import OPTIONS_READ_CACHE_VERSION, stale_facts
+    from app.services.price_history_exclusion import excluded_symbols
+    from app.services.rv_store import get_latest_rv_bulk
+
+    rows = (await session.execute(text(
+        "SELECT key, value FROM system_metadata WHERE key LIKE :p"
+    ), {"p": f"options_read:{OPTIONS_READ_CACHE_VERSION}:%"})).all()
+    reads: dict[str, dict] = {}
+    for key, value in rows:
+        _, _, symbol, chain_date = key.split(":", 3)
+        if not chain_store.is_fresh(chain_date):
+            continue
+        try:
+            reads[symbol] = _json.loads(value)
+        except (TypeError, ValueError):
+            continue
+    if not reads:
+        return CheckResult("cached_reads_stale", PASS, "No cached reads for a fresh chain")
+    symbols = sorted(reads)
+    rv_ok = await get_latest_rv_bulk(session, symbols)
+    iv_ok = set((await session.execute(text("""
+        SELECT DISTINCT symbol FROM iv_history
+        WHERE symbol = ANY(:s) AND atm_iv IS NOT NULL AND date >= current_date - 3
+    """), {"s": symbols})).scalars().all())
+    excluded = await excluded_symbols(session)
+    with_reactions = set((await session.execute(text("""
+        SELECT DISTINCT t.symbol FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE t.symbol = ANY(:s) AND hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL
+    """), {"s": symbols})).scalars().all())
+    details = []
+    for sym in symbols:
+        servable = {"rv": sym in rv_ok, "atm_iv": sym in iv_ok,
+                    "earnings_history": sym in with_reactions and sym not in excluded}
+        stale = stale_facts(reads[sym].get("fact_values"), servable)
+        if stale:
+            details.append(f"{sym}: {', '.join(stale)} null in the cached read while servable now")
+    if details:
+        return CheckResult("cached_reads_stale", WARN,
+                           f"{len(details)} of {len(reads)} cached read(s) carry a null fact that is servable now "
+                           "(not served; the next warm regenerates them)", details)
+    return CheckResult("cached_reads_stale", PASS, f"{len(reads)} cached reads for a fresh chain, no stale facts")
+
+
 async def check_analyst_stats_sessions(session) -> CheckResult:
     """ERROR when analyst stats break the session rule.
 
@@ -2328,6 +2380,7 @@ CHECKS = [
     check_estimate_split_basis,
     check_basis_mismatch_has_no_outcome,
     check_refused_earnings_dates,
+    check_cached_reads_stale,
     check_eps_basis_suspect,
     # Analyst recommendations
     check_recommendations_freshness,

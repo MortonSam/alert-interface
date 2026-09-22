@@ -7,6 +7,7 @@ VALUES = {
     "expiration_used": "2026-10-16", "days_to_expiration": 25, "atm_strike": 340.0, "atm_iv": 0.2463, "atm_iv_as_of": "2026-09-21",
     "next_earnings_date": "2026-10-29", "expiration_spans_earnings": False, "days_exp_past_earnings": None,
     "rv_20d": 0.2145, "rv_rank": 40.3, "rv_percentile": 38.9, "rv_min_1y": 0.0964, "rv_max_1y": 0.3894, "rv_sample_days": 252,
+    "rv_reason": None, "rv_as_of": "2026-09-21",
     "iv_rv_spread_pp": 3.2, "avg_earnings_1d_move_pct": 3.4, "earnings_sample_size": 20,
 }
 

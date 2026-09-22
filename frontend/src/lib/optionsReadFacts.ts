@@ -20,6 +20,8 @@ export interface OptionFactValues {
   atm_iv_as_of: string | null;
   rv_20d: number | null;
   rv_rank: number | null;
+  rv_reason?: string | null;     // why rv_20d is null, from rv_store; null when RV is present
+  rv_as_of?: string | null;      // snapshot date the RV came from
   iv_rv_spread_pp: number | null;
   avg_earnings_1d_move_pct?: number | null;
   earnings_sample_size?: number | null;
@@ -57,6 +59,8 @@ export function displayedOptionFacts(
     atm_iv: realizedVol?.atm_iv ?? null,
     atm_iv_as_of: realizedVol?.atm_iv_as_of ?? null,
     rv_20d: realizedVol?.current_rv ?? null,
+    rv_reason: realizedVol?.reason ?? null,
+    rv_as_of: realizedVol?.as_of ?? null,
     rv_rank: realizedVol?.rv_rank ?? null,
     iv_rv_spread_pp: realizedVol?.iv_rv_spread_pp ?? null,
   };
@@ -75,4 +79,27 @@ export function priceDriftNote(f: DisplayedOptionFacts, quotePrice: number | nul
   const drift = Math.abs(quotePrice - f.current_price) / f.current_price * 100;
   if (drift <= READ_PRICE_DRIFT_PCT) return null;
   return `Ivy's Read was written at $${f.current_price.toFixed(2)}; the stock is now $${quotePrice.toFixed(2)} (${drift.toFixed(1)}% away). The figures here are the ones the read used.`;
+}
+
+export const RV_NO_REASON_RECORDED = "Realized volatility is unavailable and no reason was recorded";
+export const RV_STILL_LOADING = "Realized volatility is still loading";
+
+/**
+ * The sentence under "RV unavailable", from the source the row is showing:
+ * the read's stored rv_reason in read mode, the live endpoint's reason in
+ * live mode. Never empty: an absent value always carries its reason.
+ */
+export function rvUnavailableReason(
+  shown: DisplayedOptionFacts,
+  realizedVol: RealizedVol | null | undefined,
+  rvStatus: "loading" | "done" | "empty" | "error" | undefined,
+): string {
+  if (shown.source === "read") {
+    if (shown.rv_reason) return `${shown.rv_reason} (when Ivy's Read was written)`;
+    return "Realized volatility was unavailable when Ivy's Read was written";
+  }
+  if (realizedVol?.reason) return realizedVol.reason;
+  if (rvStatus === "loading") return RV_STILL_LOADING;
+  if (rvStatus === "error") return "Realized volatility could not be loaded";
+  return RV_NO_REASON_RECORDED;
 }

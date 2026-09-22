@@ -62,12 +62,17 @@ def _warm_one(
         elapsed = time.monotonic() - t0
         cached = data.get("cached", False)
         model = data.get("model_used", "?")
+        stale_fact = data.get("regenerated_for")
+        if stale_fact:
+            # the endpoint treated the cached read as a miss because this fact is servable now
+            _diagnostics.append(f"{symbol}: regenerated, cached read had {stale_fact} null while servable")
         return {
             "symbol": symbol,
             "action": "cached" if cached else ("generated" if model != "none" else "skipped"),
             "model": model,
             "elapsed": elapsed,
             "error": None,
+            "stale_fact": stale_fact,
         }
     except Exception as exc:
         return {

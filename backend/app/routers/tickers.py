@@ -30,6 +30,7 @@ from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regi
 from app.schemas.options import LabelRule as OptionsLabelRule
 from app.services import news_cache, quote_cache
 from app.services.options_read_gate import (
+    load_cached_read_status, stale_reason,
     cache_key as options_read_cache_key,
     check_chain,
     check_generation_inputs,
@@ -1341,30 +1342,50 @@ async def get_options_read(
         return absent(chain_gate.reason, chain_gate.detail)
     cache_key = options_read_cache_key(sym, chain_date)
 
-    # ── Cache check — served freely ───────────────────────────────────────────
-    cached_raw = await _get_meta(db, cache_key)
-    if cached_raw:
-        try:
-            c = json.loads(cached_raw)
-            spread_pp_cached = c.get("iv_rv_spread_pp")
-            return OptionsReadRead(
-                symbol=sym, content=c["content"], facts=c["facts"], fact_values=c.get("fact_values"),
-                model_used=c["model_used"], generated_at=c["generated_at"],
-                cached=True, as_of=as_of, chain_date=chain_date,
-                iv_rv_spread_pp=spread_pp_cached,
-                spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
+    # ── What the stores serve right now: the RV row, the read and the guard share these ──
+    from app.services.rv_store import get_servable_rv
+
+    rv_snapshot_row, rv_reason = await get_servable_rv(db, sym)
+    _iv_cutoff = today - timedelta(days=3)
+    _iv_row = (await db.execute(
+        select(IVHistory)
+        .where(IVHistory.symbol == sym, IVHistory.date >= _iv_cutoff, IVHistory.atm_iv.isnot(None))
+        .order_by(IVHistory.date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    atm_iv = float(_iv_row.atm_iv) if _iv_row and _iv_row.atm_iv is not None else None
+    atm_iv_as_of: str | None = _iv_row.date.isoformat() if _iv_row else None
+    ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    reactions: list = []
+    if ticker_row and not await is_excluded(db, sym):
+        reactions = list((await db.execute(
+            select(HistoricalReaction).where(
+                HistoricalReaction.ticker_id == ticker_row.id,
+                HistoricalReaction.event_type == "earnings",
+                HistoricalReaction.pct_change_1d.isnot(None),
             )
-        except Exception:
-            pass  # corrupt cache → fall through to regenerate
+        )).scalars().all())
+    servable_now = {"rv": rv_snapshot_row is not None, "atm_iv": atm_iv is not None, "earnings_history": bool(reactions)}
 
-    # ── No cache — gate AI generation behind admin token ──────────────────────
+    # ── Cache check — served freely, unless a null fact in it is servable now ──
+    cached, stale_fact = await load_cached_read_status(
+        lambda key: _get_meta(db, key), sym, chain_date, chain_store.is_fresh(chain_date), servable_now,
+    )
+    if cached:
+        spread_pp_cached = cached.get("iv_rv_spread_pp")
+        return OptionsReadRead(
+            symbol=sym, content=cached["content"], facts=cached["facts"], fact_values=cached.get("fact_values"),
+            model_used=cached["model_used"], generated_at=cached["generated_at"],
+            cached=True, as_of=as_of, chain_date=chain_date,
+            iv_rv_spread_pp=spread_pp_cached,
+            spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
+        )
+
+    # ── No cache (or stale) — gate AI generation behind admin token ───────────
     if settings.admin_token and token != settings.admin_token:
+        if stale_fact:
+            return absent(stale_reason(stale_fact), f"stale cached read ({stale_fact} servable now), no admin token")
         return absent("Ivy's Read has not been generated for the latest options data yet", "cache miss, no admin token")
-
-    # ── Try precomputed RV snapshot first ────────────────────────────────────
-    from app.services.rv_store import get_latest_rv
-
-    rv_snapshot_row = await get_latest_rv(db, sym)
 
     # ── Finnhub quote. RV comes from the stored snapshot or is absent. ─────────
     finnhub = FinnhubClient()
@@ -1436,18 +1457,7 @@ async def get_options_read(
                 expected_move_dollars = straddle
                 implied_range_low    = current_price - straddle
                 implied_range_high   = current_price + straddle
-    # ── ATM IV from IVHistory (single source, same as RV endpoint) ──────────
-    _iv_cutoff = today - timedelta(days=3)
-    _iv_row = (await db.execute(
-        select(IVHistory)
-        .where(IVHistory.symbol == sym, IVHistory.date >= _iv_cutoff, IVHistory.atm_iv.isnot(None))
-        .order_by(IVHistory.date.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    atm_iv = float(_iv_row.atm_iv) if _iv_row and _iv_row.atm_iv is not None else None
-    atm_iv_as_of: str | None = _iv_row.date.isoformat() if _iv_row else None
-
-    # RV rank/percentile — prefer precomputed snapshot, fall back to live
+    # RV from the servable snapshot (rv_store), with its reason and date when absent
     current_rv: float | None = None
     rv_rank: float | None    = None
     rv_percentile: float | None = None
@@ -1469,21 +1479,13 @@ async def get_options_read(
         if atm_iv is not None and current_rv is not None else None
     )
 
-    # Historical earnings avg absolute 1d move
+    # Historical earnings avg absolute 1d move (reactions loaded with the servability probes above)
     avg_earn_move_pct: float | None = None
     earn_sample: int = 0
-    if ticker_row and not await is_excluded(db, sym):
-        reactions = (await db.execute(
-            select(HistoricalReaction).where(
-                HistoricalReaction.ticker_id == ticker_row.id,
-                HistoricalReaction.event_type == "earnings",
-                HistoricalReaction.pct_change_1d.isnot(None),
-            )
-        )).scalars().all()
-        abs_moves = [abs(float(r.pct_change_1d)) for r in reactions]  # stored as full pct (e.g. 2.77 = 2.77%)
-        if abs_moves:
-            avg_earn_move_pct = round(mean(abs_moves), 1)
-            earn_sample = len(abs_moves)
+    abs_moves = [abs(float(r.pct_change_1d)) for r in reactions]  # stored as full pct (e.g. 2.77 = 2.77%)
+    if abs_moves:
+        avg_earn_move_pct = round(mean(abs_moves), 1)
+        earn_sample = len(abs_moves)
 
     # Earnings window
     expiration_spans_earnings = False
@@ -1524,6 +1526,8 @@ async def get_options_read(
         "rv_min_1y": rv_min,
         "rv_max_1y": rv_max,
         "rv_sample_days": rv_sample_days,
+        "rv_reason": rv_reason,
+        "rv_as_of": rv_snapshot_row.as_of_date.isoformat() if rv_snapshot_row is not None else None,
         "iv_rv_spread_pp": iv_rv_spread_pp,
         "avg_earnings_1d_move_pct": avg_earn_move_pct,
         "earnings_sample_size": earn_sample,
@@ -1618,7 +1622,7 @@ STRICT RULES:
     return OptionsReadRead(
         symbol=sym, content=gen["content"], facts=facts, fact_values=fact_values,
         model_used=gen["model_used"], generated_at=generated_at,
-        cached=False, as_of=as_of, chain_date=chain_date,
+        cached=False, as_of=as_of, chain_date=chain_date, regenerated_for=stale_fact,
         iv_rv_spread_pp=iv_rv_spread_pp,
         spread_labeled=_to_options_lr(spread_label(iv_rv_spread_pp)),
     )

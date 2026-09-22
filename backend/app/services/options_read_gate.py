@@ -62,30 +62,80 @@ def check_generation_inputs(
     return ReadGate(True, None, None, quote)
 
 
+# ── Staleness by fact: a cached read that says "(unavailable)" for something
+# the stores now serve is not served again. Keyed by servability group; the
+# endpoint and the validate check compute {group: servable_now} the same way.
+SERVABLE_GROUPS: dict[str, tuple[str, ...]] = {
+    "rv": ("rv_20d", "rv_rank", "rv_percentile", "rv_min_1y", "rv_max_1y"),   # rv_store.get_servable_rv
+    "atm_iv": ("atm_iv",),                                                     # iv_history within 3 days
+    "earnings_history": ("avg_earnings_1d_move_pct",),                         # reactions exist, ticker not excluded
+}
+FACT_LABELS = {"rv": "realized volatility", "atm_iv": "implied volatility", "earnings_history": "earnings history"}
+
+
+def stale_facts(fact_values: dict | None, servable_now: dict[str, bool] | None) -> list[str]:
+    """Fact keys that are null in the block while their group is servable now."""
+    if not fact_values or not servable_now:
+        return []
+    out: list[str] = []
+    for group, keys in SERVABLE_GROUPS.items():
+        if servable_now.get(group):
+            out.extend(k for k in keys if fact_values.get(k) is None)
+    return out
+
+
+def stale_reason(fact_key: str) -> str:
+    """Visitor-facing: why a read is being regenerated."""
+    group = next((g for g, keys in SERVABLE_GROUPS.items() if fact_key in keys), fact_key)
+    return (f"Ivy's Read was written when {FACT_LABELS.get(group, group)} was unavailable and is being "
+            f"regenerated now that it is")
+
+
+async def load_cached_read_status(
+    get_meta: Callable[[str], Awaitable[str | None]],
+    symbol: str,
+    chain_date: str | None,
+    chain_is_fresh: bool,
+    servable_now: dict[str, bool] | None = None,
+    log: Callable[[str], None] = print,
+) -> tuple[dict | None, str | None]:
+    """(read, None) when the stored read may be served; (None, fact_key) when it is stale; (None, None) when absent.
+
+    The one way to read what the options-read endpoint cached: it uses the same
+    key function as the writer and the same chain freshness gate, so a consumer
+    (the /explain tooltips) can never look under a key nobody writes, and never
+    gets values from a stale chain. With `servable_now`, a read whose block has
+    a null fact that the stores now serve is stale: not served, and the warm
+    regenerates it. The cached facts were themselves built under the fresh-quote gate.
+    """
+    if not check_chain(chain_date, chain_is_fresh).ok:
+        return None, None
+    raw = await get_meta(cache_key(symbol, chain_date))
+    if not raw:
+        return None, None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    stale = stale_facts(data.get("fact_values"), servable_now)
+    if stale:
+        log(f"[options-read] {symbol}: cached read for chain {chain_date} is stale: "
+            f"{stale[0]} is null in its fact block but servable now (regenerate)")
+        return None, stale[0]
+    return data, None
+
+
 async def load_cached_read(
     get_meta: Callable[[str], Awaitable[str | None]],
     symbol: str,
     chain_date: str | None,
     chain_is_fresh: bool,
+    servable_now: dict[str, bool] | None = None,
 ) -> dict | None:
-    """The stored Ivy's Read for the current chain, or None.
-
-    The one way to read what the options-read endpoint cached: it uses the same
-    key function as the writer and the same chain freshness gate, so a consumer
-    (the /explain tooltips) can never look under a key nobody writes, and never
-    gets values from a stale chain. The cached facts were themselves built under
-    the fresh-quote gate.
-    """
-    if not check_chain(chain_date, chain_is_fresh).ok:
-        return None
-    raw = await get_meta(cache_key(symbol, chain_date))
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-    except (TypeError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    """The stored Ivy's Read for the current chain, or None (absent or stale)."""
+    return (await load_cached_read_status(get_meta, symbol, chain_date, chain_is_fresh, servable_now))[0]
 
 
 # ── The fact block ────────────────────────────────────────────────────────────
@@ -99,6 +149,7 @@ FACT_VALUE_KEYS = (
     "expiration_used", "days_to_expiration", "atm_strike", "atm_iv", "atm_iv_as_of",
     "next_earnings_date", "expiration_spans_earnings", "days_exp_past_earnings",
     "rv_20d", "rv_rank", "rv_percentile", "rv_min_1y", "rv_max_1y", "rv_sample_days",
+    "rv_reason", "rv_as_of",          # why RV is absent (rv_store's reason) and the snapshot date it came from
     "iv_rv_spread_pp", "avg_earnings_1d_move_pct", "earnings_sample_size",
 )
 
@@ -127,7 +178,9 @@ def format_facts(symbol: str, company_name: str, v: dict) -> dict:
         "next_earnings_date": v.get("next_earnings_date") or "(unavailable)",
         "expiration_spans_earnings": str(bool(v.get("expiration_spans_earnings"))),
         "days_exp_past_earnings": str(v["days_exp_past_earnings"]) if v.get("days_exp_past_earnings") is not None else "N/A",
-        "realized_vol_20d": fpct(v.get("rv_20d")),
+        "realized_vol_20d": (fpct(v["rv_20d"]) if v.get("rv_20d") is not None
+                             else f"(unavailable: {v['rv_reason']})" if v.get("rv_reason") else "(unavailable)"),
+        "rv_as_of": v.get("rv_as_of") or "(unavailable)",
         "rv_rank": f"{v['rv_rank']:.1f}" if v.get("rv_rank") is not None else "(unavailable)",
         "rv_percentile": f"{v['rv_percentile']:.1f}" if v.get("rv_percentile") is not None else "(unavailable)",
         "rv_1yr_range": f"{fpct(rmin)} - {fpct(rmax)}" if rmin is not None and rmax is not None else "(unavailable)",

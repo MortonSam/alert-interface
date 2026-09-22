@@ -124,6 +124,7 @@ class OptionsReadRead(BaseModel):
     available: bool = True           # False: no read; `reason` says why in plain language
     reason: str | None = None
     chain_date: str | None = None    # chain_last_trade of the chain the read describes
+    regenerated_for: str | None = None  # fact key that made the previous cached read stale, when this read replaced it
     iv_rv_spread_pp: float | None = None  # IV minus RV in percentage points (positive = options rich)
     spread_labeled: LabelRule | None = None  # interpretive label + rule for IV-RV spread
 
