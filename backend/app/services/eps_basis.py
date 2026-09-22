@@ -33,6 +33,8 @@ DERIVED_TOLERANCE = 0.03     # for a Q4 derived as FY minus three quarters: FY E
 SPLIT_TOLERANCE = 0.03       # relative, for off_by_split
 MAX_LAG_DAYS = 120           # event must fall within this many days after the period end
 BASIS_MISMATCH_FRACTION = 0.20   # actual must sit this far (x |estimate|) from GAAP while the estimate matches it
+BASIS_MISMATCH_MIN_ESTIMATE = 0.25   # cent-level estimates coincide with GAAP too easily to prove a basis
+BASIS_MISMATCH_MIN_ROWS = 2      # a basis pattern is a property of the feed for a ticker, not one quarter
 
 
 @dataclass(frozen=True)
@@ -128,25 +130,43 @@ class Classification:
     actual: Match
     estimate_status: str | None       # matched / off_by_split / unmatched, or None when there is no estimate / no fact
     basis_mismatch: bool
+    estimate_split_factor: float | None = None   # the factor that made the estimate match, when one did
+
+
+def _gaap_on_estimate_basis(xbrl: float, estimate: float, factor: float | None) -> float:
+    """The GAAP figure on the estimate's share count: divided or multiplied by the
+    factor, whichever brought the estimate to match it."""
+    if factor is None:
+        return xbrl
+    down, up = xbrl / factor, xbrl * factor
+    return down if abs(down - estimate) <= abs(up - estimate) else up
 
 
 def classify(actual: Decimal, estimate: Decimal | None, event_date: date,
              facts: dict[date, list[Fact]], cands: list[Candidate]) -> Classification:
     """Match the actual, then the estimate against the same XBRL quarter.
 
-    basis_mismatch: the estimate matches GAAP (same tolerances, split-aware)
-    while the actual does not and sits more than BASIS_MISMATCH_FRACTION x
-    |estimate| away from the GAAP figure. The two were reported on different
-    bases, so no Beat/Miss can be read from them.
+    basis_mismatch needs all of: |estimate| >= BASIS_MISMATCH_MIN_ESTIMATE; the
+    estimate matches GAAP (same tolerances, split-aware); the actual does not
+    match and sits more than BASIS_MISMATCH_FRACTION x |estimate| from GAAP
+    *on the estimate's share count*, so a split factor that explains the
+    estimate cannot also explain the actual. The per-ticker minimum of
+    BASIS_MISMATCH_MIN_ROWS is applied by the caller over all its rows.
     """
     am = match_actual(actual, event_date, facts, cands)
     if estimate is None or am.status == "no_fact":
         return Classification(am, None, False)
     em = match_actual(estimate, event_date, facts, cands)
-    mismatch = (
-        em.status in ("matched", "off_by_split")
-        and am.status == "unmatched"
-        and am.xbrl_eps is not None
-        and abs(float(actual) - am.xbrl_eps) > BASIS_MISMATCH_FRACTION * abs(float(estimate))
-    )
-    return Classification(am, em.status, mismatch)
+    if em.status not in ("matched", "off_by_split") or am.status != "unmatched" or am.xbrl_eps is None:
+        return Classification(am, em.status, False, em.split_factor)
+    e, a = float(estimate), float(actual)
+    gaap = _gaap_on_estimate_basis(am.xbrl_eps, e, em.split_factor)
+    mismatch = abs(e) >= BASIS_MISMATCH_MIN_ESTIMATE and abs(a - gaap) > BASIS_MISMATCH_FRACTION * abs(e)
+    return Classification(am, em.status, mismatch, em.split_factor)
+
+
+def apply_min_rows(flags: list[bool]) -> list[bool]:
+    """A ticker with fewer than BASIS_MISMATCH_MIN_ROWS flagged rows keeps none of them."""
+    if sum(flags) < BASIS_MISMATCH_MIN_ROWS:
+        return [False] * len(flags)
+    return list(flags)

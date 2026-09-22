@@ -39,7 +39,7 @@ from app.models.eps_basis_check import EpsBasisCheck
 from app.scripts.backfill_report_timing import CIK_OVERRIDES
 from app.services.edgar_client import EdgarClient, _cache_fresh, _cache_path
 from app.services.basis_exclusion import apply_basis_exclusion
-from app.services.eps_basis import classify, quarter_facts
+from app.services.eps_basis import apply_min_rows, classify, quarter_facts
 from app.services.split_basis import candidates, load_splits, splits_after
 
 REQUEST_GAP_SECONDS = 0.12   # EDGAR fair-use: under 10 requests/second
@@ -102,23 +102,29 @@ async def check_ticker(session, edgar: EdgarClient, ticker_id, symbol: str, rows
     splits = await load_splits(session, ticker_id)
     counts: Counter = Counter()
     now = datetime.now(timezone.utc)
+    classified = []
     for r in rows:
         if not filing_found:
-            m = None
-            status = "no_filing"
-            est_status, mismatch = None, False
+            classified.append((r, None))
         else:
-            c = classify(r.eps_actual, r.eps_estimate, r.event_date, facts_by_end,
-                         candidates(splits_after(splits, r.event_date)))
-            m, status, est_status, mismatch = c.actual, c.actual.status, c.estimate_status, c.basis_mismatch
+            classified.append((r, classify(r.eps_actual, r.eps_estimate, r.event_date, facts_by_end,
+                                           candidates(splits_after(splits, r.event_date)))))
+    # A basis pattern belongs to the ticker's feed: fewer than the minimum flagged rows means none
+    flags = apply_min_rows([bool(c and c.basis_mismatch) for _, c in classified])
+    for (r, c), mismatch in zip(classified, flags):
+        m = c.actual if c else None
+        status = m.status if m else "no_filing"
+        est_status = c.estimate_status if c else None
         counts[status] += 1
         if mismatch:
             counts["basis_mismatch"] += 1
+        # split_factor: the actual's when it matched by a split, else the estimate's when that did
+        factor = (m.split_factor if m and m.split_factor is not None else (c.estimate_split_factor if c else None))
         values = dict(
             ticker_id=ticker_id, event_date=r.event_date, stored_actual=r.eps_actual,
             xbrl_eps=m.xbrl_eps if m else None, xbrl_tag=m.tag if m else None,
             xbrl_period_end=m.period_end if m else None, match_status=status,
-            split_factor=m.split_factor if m else None, estimate_status=est_status,
+            split_factor=factor, estimate_status=est_status,
             basis_mismatch=mismatch, checked_at=now,
         )
         stmt = pg_insert(EpsBasisCheck).values(**values).on_conflict_do_update(

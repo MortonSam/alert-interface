@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.database import ScriptSessionLocal, script_engine
 from app.scripts.validate_data import ERROR, PASS, check_basis_mismatch_has_no_outcome, check_outcome_matches_eps
 from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, apply_basis_exclusion, basis_mismatch_dates, excluded_note
-from app.services.eps_basis import BASIS_MISMATCH_FRACTION, classify, quarter_facts
+from app.services.eps_basis import BASIS_MISMATCH_FRACTION, BASIS_MISMATCH_MIN_ESTIMATE, classify, quarter_facts
 
 D = Decimal
 PLD = quarter_facts({"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": [
@@ -18,8 +18,10 @@ PLD = quarter_facts({"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": 
 
 
 def test_estimate_matching_gaap_with_a_far_actual_is_basis_mismatch():
-    # PLD-shaped: estimate 0.68 is the GAAP consensus (GAAP 0.69), actual 1.46 is Core FFO
-    c = classify(D("1.46"), D("0.68"), date(2026, 1, 21), PLD, [])
+    # ABT-shaped: estimate 1.14 is the GAAP consensus (GAAP 1.14), actual 1.43 is adjusted
+    ABT = quarter_facts({"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": [
+        {"start": "2022-04-01", "end": "2022-06-30", "val": 1.14, "filed": "2022-07-28"}]}}}}})
+    c = classify(D("1.43"), D("1.14"), date(2022, 7, 20), ABT, [])
     assert c.actual.status == "unmatched" and c.estimate_status == "matched" and c.basis_mismatch is True
 
 
@@ -32,6 +34,35 @@ def test_not_mismatch_when_actual_is_gaap_or_estimate_is_not_or_gap_is_small():
     assert classify(D("1.46"), None, date(2026, 1, 21), PLD, []).estimate_status is None
     assert classify(D("1.46"), D("0.68"), date(2026, 9, 1), PLD, []).basis_mismatch is False    # no fact
     assert BASIS_MISMATCH_FRACTION == 0.20
+
+
+def test_cent_level_estimates_cannot_fire():
+    # UDR 2024-07-30: estimate 0.09 = GAAP 0.08, actual 0.10: a coincidence at cent level
+    UDR = quarter_facts({"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": [
+        {"start": "2024-04-01", "end": "2024-06-30", "val": 0.08, "filed": "2024-07-31"}]}}}}})
+    c = classify(D("0.10"), D("0.09"), date(2024, 7, 30), UDR, [])
+    assert c.estimate_status == "matched" and c.basis_mismatch is False
+    assert BASIS_MISMATCH_MIN_ESTIMATE == 0.25
+
+
+def test_split_factor_explaining_the_estimate_must_not_explain_the_actual():
+    # ANET 2021-11-01: XBRL 0.70 pre-split; estimate 0.17 = 0.70 / 4 (matched by the 4:1); actual 0.19 ~ 0.70 / 4 too
+    ANET = quarter_facts({"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": [
+        {"start": "2021-07-01", "end": "2021-09-30", "val": 2.80, "filed": "2021-11-02"}]}}}}})   # scaled x4 to clear the 0.25 floor
+    cands = [(4.0, date(2024, 12, 4))]
+    c = classify(D("0.76"), D("0.70"), date(2021, 11, 1), ANET, cands)
+    assert c.estimate_status == "off_by_split" and c.estimate_split_factor == 4.0
+    assert c.basis_mismatch is False          # 0.76 is within 20% x 0.70 of 2.80 / 4 = 0.70
+    c = classify(D("1.20"), D("0.70"), date(2021, 11, 1), ANET, cands)
+    assert c.basis_mismatch is True           # 1.20 is 0.50 from 0.70: the split explains the estimate, not the actual
+
+
+def test_min_rows_per_ticker():
+    from app.services.eps_basis import BASIS_MISMATCH_MIN_ROWS, apply_min_rows
+    assert BASIS_MISMATCH_MIN_ROWS == 2
+    assert apply_min_rows([False, True, False]) == [False, False, False]
+    assert apply_min_rows([True, False, True]) == [True, False, True]
+    assert apply_min_rows([]) == []
 
 
 def test_excluded_note_wording():
