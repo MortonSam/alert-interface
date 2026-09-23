@@ -10,6 +10,8 @@ All constants tuned via walk-forward grid search (threshold_search.py).
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -79,6 +81,7 @@ class LiveFeatures:
     prior_avg_abs_5d: float | None
     prior_up_5d_rate: float | None
     beat_rate: float | None
+    momentum_reason: str | None = None   # why momentum_20d is None; never a placeholder number
 
 
 async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures | None:
@@ -139,6 +142,7 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
 
     # ── Momentum 20d from yfinance (one call) ────────────────────────────
     momentum_20d = None
+    momentum_reason: str | None = "no price history"
     try:
         t = yf.Ticker(symbol)
         hist = t.history(period="2mo", timeout=30)
@@ -153,15 +157,20 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
                         ref_close = float(before_prices["Close"].iloc[-21])
                     else:
                         ref_close = float(before_prices["Close"].iloc[0])
-                    if ref_close > 0:
+                    # yfinance can return a NaN close for the newest bar; NaN would
+                    # reach a JSONB receipt, which Postgres rejects. None with a reason.
+                    if not (math.isfinite(day_before_close) and math.isfinite(ref_close)):
+                        momentum_reason = "price history has a non-finite close"
+                    elif ref_close > 0:
                         momentum_20d = round(
                             (day_before_close - ref_close) / ref_close * 100, 4
                         )
+                        momentum_reason = None
     except Exception:
         # Fall back: try loading from price history already in DB
         # (historical_reactions has close_before for each event, but
         # that's not a continuous series — momentum stays None)
-        pass
+        momentum_reason = "price history fetch failed"
 
     return LiveFeatures(
         symbol=symbol,
@@ -171,6 +180,7 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
         prior_avg_abs_5d=prior_avg_abs_5d,
         prior_up_5d_rate=prior_up_5d_rate,
         beat_rate=beat_rate,
+        momentum_reason=momentum_reason,
     )
 
 
@@ -302,6 +312,7 @@ async def decide(
         "n_comparable": prior_n,
         "beat_rate": beat_rate,
         "momentum_20d": momentum_20d,
+        "momentum_reason": getattr(features, "momentum_reason", None),
         "expected_pct": round(expected, 2) if expected else None,
         "implied_pct": None,
         "historical_pct": round(expected, 2) if expected else None,

@@ -1265,6 +1265,7 @@ async def _compute_alert_pick_v2(
             import traceback
             traceback.print_exc()
             print(f"[alert-pick-v2] {sym}: structure failed: {exc}", flush=True)
+            await db.rollback()   # a failed flush leaves the session unusable until rolled back
             # Do NOT persist a broken pick — return structure_failed
             return {
                 "outcome": "structure_failed",

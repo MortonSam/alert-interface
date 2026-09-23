@@ -16,6 +16,8 @@ validated subset.
 
 from __future__ import annotations
 
+import math
+
 import base64
 import pickle
 from dataclasses import dataclass, field
@@ -108,7 +110,7 @@ def _extract_row(row, medians: dict[str, float], feature_cols: list[str] = FEATU
     values = []
     for col in feature_cols:
         raw = getattr(row, col, None)
-        if raw is not None:
+        if raw is not None and math.isfinite(float(raw)):   # NaN would poison the model; impute like a null
             val = float(raw)
             values.append(val)
             values.append(0.0)  # is_null = False
@@ -123,7 +125,7 @@ def _extract_row_from_dict(d: dict, medians: dict[str, float], feature_cols: lis
     values = []
     for col in feature_cols:
         raw = d.get(col)
-        if raw is not None:
+        if raw is not None and math.isfinite(float(raw)):
             values.append(float(raw))
             values.append(0.0)
         else:
