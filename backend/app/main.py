@@ -77,7 +77,7 @@ async def health_check():
         "rv_last_run": None,
         "options_data_date": None,     # chain date of the newest ingested options data
         "step_health": {},
-        "step_outcomes": {},
+        "step_outcomes": {},           # per step: exit, seconds, at, stderr_head / stderr_tail (traceback's last lines)
     }
 
     try:

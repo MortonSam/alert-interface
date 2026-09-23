@@ -105,13 +105,35 @@ def _record_step_success(label: str) -> None:
         print(f"  [WARN] Failed to write step stamp for {label}: {exc}")
 
 
+STDERR_EXCERPT_LINES = 3
+
+
+def _stderr_excerpt(stderr_text: str | None) -> tuple[str | None, str | None]:
+    """(head, tail): the first and last STDERR_EXCERPT_LINES non-empty lines of a step's stderr.
+
+    A Python traceback puts the exception class and message on its last
+    line, so the tail is what names a failure; the head says where it began.
+    The tail is None when the head already holds every line.
+    """
+    if not stderr_text:
+        return None, None
+    lines = [l for l in stderr_text.strip().splitlines() if l.strip()]
+    if not lines:
+        return None, None
+    head = "\n".join(lines[:STDERR_EXCERPT_LINES])
+    tail = "\n".join(lines[-STDERR_EXCERPT_LINES:]) if len(lines) > STDERR_EXCERPT_LINES else None
+    return head, tail
+
+
 def _record_step_outcome(label: str, exit_code: int, seconds: float,
-                         stderr_head: str | None = None) -> None:
+                         stderr_head: str | None = None,
+                         stderr_tail: str | None = None) -> None:
     """Append this step's outcome to the durable step_outcomes JSON blob.
 
     Merges with any existing fields for this label so that scripts which
     write their own extended outcome (e.g. warm_options_reads) keep those
-    fields intact.
+    fields intact. /health returns the blob as step_outcomes, so stderr_head
+    and stderr_tail are readable without the Railway log.
     """
     try:
         raw = _db_get("step_outcomes")
@@ -124,6 +146,10 @@ def _record_step_outcome(label: str, exit_code: int, seconds: float,
         })
         if stderr_head:
             existing["stderr_head"] = stderr_head
+        if stderr_tail:
+            existing["stderr_tail"] = stderr_tail
+        elif "stderr_tail" in existing:
+            del existing["stderr_tail"]      # a short or clean run must not keep an older run's tail
         outcomes[label] = existing
         _db_upsert("step_outcomes", json.dumps(outcomes))
     except Exception as exc:
@@ -140,8 +166,9 @@ def _step_env() -> dict[str, str]:
 def _run_step(label: str, cmd: list[str]) -> bool:
     """Run a subprocess step, streaming stdout and capturing stderr.
 
-    Returns True on success.  First 3 lines of stderr are stored in
-    step_outcomes for post-mortem diagnosis of silent failures.
+    Returns True on success.  The first and last 3 lines of stderr are stored
+    in step_outcomes (stderr_head / stderr_tail) for post-mortem diagnosis:
+    the tail carries a traceback's exception line.
     """
     timeout = STEP_TIMEOUTS.get(label, STEP_TIMEOUT_SECONDS)
     print(f"\n{'─' * 60}")
@@ -149,6 +176,7 @@ def _run_step(label: str, cmd: list[str]) -> bool:
     print(f"{'─' * 60}")
     t0 = time.monotonic()
     stderr_head: str | None = None
+    stderr_tail: str | None = None
     try:
         result = subprocess.run(
             cmd, check=False, timeout=timeout,
@@ -158,24 +186,21 @@ def _run_step(label: str, cmd: list[str]) -> bool:
             stderr_text = result.stderr.decode(errors="replace")
             # Print stderr so it's visible in logs
             sys.stderr.write(stderr_text)
-            lines = [l for l in stderr_text.strip().splitlines() if l.strip()]
-            stderr_head = "\n".join(lines[:3]) if lines else None
+            stderr_head, stderr_tail = _stderr_excerpt(stderr_text)
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - t0
         print(f"\n  [FAIL] {label} (killed after {timeout}s timeout)")
         if exc.stderr:
-            stderr_text = exc.stderr.decode(errors="replace")
-            lines = [l for l in stderr_text.strip().splitlines() if l.strip()]
-            stderr_head = "\n".join(lines[:3]) if lines else None
+            stderr_head, stderr_tail = _stderr_excerpt(exc.stderr.decode(errors="replace"))
         _record_step_outcome(label, exit_code=-1, seconds=elapsed,
-                             stderr_head=stderr_head)
+                             stderr_head=stderr_head, stderr_tail=stderr_tail)
         return False
     elapsed = time.monotonic() - t0
     ok = result.returncode == 0
     status = "PASS" if ok else "FAIL"
     print(f"\n  [{status}] {label} (exit {result.returncode}, {elapsed:.0f}s)")
     _record_step_outcome(label, exit_code=result.returncode, seconds=elapsed,
-                         stderr_head=stderr_head)
+                         stderr_head=stderr_head, stderr_tail=stderr_tail)
     if ok:
         _record_step_success(label)
     return ok
