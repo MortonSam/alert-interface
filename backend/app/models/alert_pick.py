@@ -63,4 +63,5 @@ class AlertPickEvaluation(Base):
     prior_n: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expected_move_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     implied_move_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    implied_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)   # set whenever implied_move_pct is null
     verdict: Mapped[str | None] = mapped_column(Text, nullable=True)

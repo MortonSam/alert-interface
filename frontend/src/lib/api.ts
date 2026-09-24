@@ -854,6 +854,7 @@ export interface IvyWorksheetRow {
   expected_move_pct: number | null;
   implied_move_pct: number | null;
   verdict: string | null;
+  implied_reason?: string | null;   // why implied_move_pct is null (server wording)
 }
 
 export interface IvyActivity {
@@ -877,6 +878,7 @@ export interface IvyActivity {
   last_run_error?: string | null;   // stderr tail when present, else head
   last_run_stale?: boolean;         // older than the latest expected run
   last_run_failed?: boolean;        // exit != 0, stale, or never recorded
+  holding?: number;                 // evaluated names with an open pick already; not doubled up
 }
 
 export interface ThesisDraftAlternativeRead {

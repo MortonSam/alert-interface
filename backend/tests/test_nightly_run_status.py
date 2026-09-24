@@ -22,6 +22,10 @@ def test_status_from_step_outcomes():
                             "stderr_head": "Traceback (most recent call last):", "stderr_tail": "X: invalid input syntax for type json"}}
     s = auto_pick_status(failed, now=T(15))
     assert s.failed and not s.stale and s.exit == 1 and s.error == "X: invalid input syntax for type json"
+    # the exception line is the LAST line of the tail, not the whole tail
+    multi = {"Auto-pick": {"exit": 1, "at": "2026-09-23T06:16:18+00:00",
+                           "stderr_tail": "  File x, line 1\n    self._handle_exception(error)\nsqlalchemy.exc.DBAPIError: boom"}}
+    assert auto_pick_status(multi, now=T(15)).error == "sqlalchemy.exc.DBAPIError: boom"
     ok = {"Auto-pick": {"exit": 0, "seconds": 40.0, "at": "2026-09-23T06:16:18+00:00"}}
     s = auto_pick_status(ok, now=T(15))
     assert s.ok and s.error is None and not s.stale
@@ -30,7 +34,8 @@ def test_status_from_step_outcomes():
     assert s.stale and s.failed and s.exit == 0
     # head is used when no tail was recorded; never recorded counts as failed and stale
     only_head = {"Auto-pick": {"exit": -1, "at": "2026-09-23T06:16:18+00:00", "stderr_head": "Traceback"}}
-    assert auto_pick_status(only_head, now=T(15)).error == "Traceback"
+    assert auto_pick_status(only_head, now=T(15)).error == "traceback recorded, exception line not kept"   # never the head
+    assert auto_pick_status({"Auto-pick": {"exit": 1, "at": "2026-09-23T06:16:18+00:00"}}, now=T(15)).error is None
     s = auto_pick_status({}, now=T(15))
     assert s.failed and s.stale and s.at is None and s.exit is None
 
@@ -39,7 +44,8 @@ def test_status_from_step_outcomes():
 async def test_activity_read_carries_the_run_status(monkeypatch):
     import app.routers.thesis as thesis_module
     outcomes = {"Auto-pick": {"exit": 1, "seconds": 12.3, "at": "2026-09-23T06:16:18+00:00",
-                              "stderr_tail": "X: invalid input syntax for type json"}}
+                              "stderr_head": "Traceback (most recent call last):",
+                              "stderr_tail": "    raise translated_error from error\nX: invalid input syntax for type json"}}
 
     async def fake_get_value(session, key):
         return json.dumps(outcomes) if key == "step_outcomes" else None

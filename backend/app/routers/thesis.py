@@ -1330,7 +1330,7 @@ async def compute_alert_pick(
             dup_filter,
         ).order_by(AlertPick.generated_at.desc()).limit(1)
     )).scalar_one_or_none()
-    if existing:
+    if existing and not use_v2:
         return {
             "outcome": "open_pick_exists",
             "leans": [SignalLean(**l) for l in existing.leans],
@@ -1343,7 +1343,21 @@ async def compute_alert_pick(
 
     # ── v2 engine path ────────────────────────────────────────────────────────
     if use_v2:
-        return await _compute_alert_pick_v2(sym, db, source, dry_run, generated_at)
+        # A name with an open pick is still fully evaluated (momentum, history, expected,
+        # implied are computed and shown); it is only never persisted or narrated again.
+        result = await _compute_alert_pick_v2(sym, db, source, dry_run or existing is not None, generated_at)
+        if existing is not None:
+            since = existing.generated_at.date().isoformat()
+            result.update({
+                "outcome": "open_pick_exists",
+                "leans": [SignalLean(**l) for l in existing.leans],
+                "pick_id": existing.id,
+                "note": f"Existing open pick {existing.id} since {since}",
+                "existing_pick": True,
+                "existing_since": since,
+                "draft": None,
+            })
+        return result
 
     data = await _gather_draft_data(sym, db, source=source)
 
@@ -1771,11 +1785,12 @@ async def ivy_activity(
             prior_n=int(r.prior_n) if r.prior_n is not None else None,
             expected_move_pct=float(r.expected_move_pct) if r.expected_move_pct is not None else None,
             implied_move_pct=float(r.implied_move_pct) if r.implied_move_pct is not None else None,
+            implied_reason=r.implied_reason,
             verdict=r.verdict,
         ))
     worksheet_rows.sort(key=lambda r: (r.earnings_date or "9999", r.symbol))
 
-    from app.services.ivy_outcomes import ERROR, PASSED, PICKED, REFUSED, count_by_category
+    from app.services.ivy_outcomes import ERROR, HOLDING, PASSED, PICKED, REFUSED, count_by_category
     by_category = count_by_category(outcomes)
 
     return IvyActivityRead(
@@ -1784,6 +1799,7 @@ async def ivy_activity(
         picked=by_category[PICKED],
         refused=by_category[REFUSED],
         passed=by_category[PASSED],
+        holding=by_category[HOLDING],
         errors=by_category[ERROR],
         picked_symbols=[r.symbol for r in rows if r.outcome == "picked"],
         mixed_evidence=outcomes.count("mixed_evidence"),

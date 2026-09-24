@@ -49,7 +49,7 @@ function ExpectedCell({ row }: { row: IvyWorksheetRow }) {
 
 function ImpliedCell({ row }: { row: IvyWorksheetRow }) {
   if (row.implied_move_pct == null) {
-    return <td className="px-3 py-2.5 text-muted-foreground">{impliedMoveAbsentLabel(row.outcome)}</td>;
+    return <td className="px-3 py-2.5 text-muted-foreground">{impliedMoveAbsentLabel(row.outcome, row.implied_reason)}</td>;
   }
   return (
     <td className="px-3 py-2.5 tabular-nums text-muted-foreground">

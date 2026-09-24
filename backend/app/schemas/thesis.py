@@ -240,6 +240,7 @@ class IvyWorksheetRow(BaseModel):
     prior_n: int | None = None
     expected_move_pct: float | None = None
     implied_move_pct: float | None = None
+    implied_reason: str | None = None   # why implied_move_pct is null: "not priced: <reason>", or the pricing failure
     verdict: str | None = None
 
 
@@ -249,6 +250,7 @@ class IvyActivityRead(BaseModel):
     picked: int = 0
     refused: int = 0                 # the setup was there and Ivy declined it
     passed: int = 0                  # the setup was not there
+    holding: int = 0                 # she already has an open pick on the name; evaluated, not doubled up
     errors: int = 0
     picked_symbols: list[str] = []
     mixed_evidence: int = 0

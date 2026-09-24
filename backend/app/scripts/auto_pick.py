@@ -59,8 +59,24 @@ def _build_v2_fields(result: dict) -> dict:
             fields["expected_move_pct"] = Decimal(str(receipt["expected_pct"]))
         if receipt.get("implied_pct") is not None:
             fields["implied_move_pct"] = Decimal(str(receipt["implied_pct"]))
+    if "implied_move_pct" not in fields:
+        fields["implied_reason"] = implied_reason(result.get("outcome", ""), receipt)
     fields["verdict"] = _build_verdict(result, receipt)
     return fields
+
+
+NOT_PRICED_NO_CHAIN = "not priced: no current options data"
+
+
+def implied_reason(outcome: str, receipt: dict | None) -> str:
+    """Why a worksheet row has no implied move. "options could not be priced" only when pricing ran and failed."""
+    if outcome == "no_fresh_chain" or (receipt and (receipt.get("gate_reason") or "").startswith("no fresh options chain")):
+        return NOT_PRICED_NO_CHAIN
+    if outcome == "no_features":
+        return "not priced: no data for this name"
+    if outcome == "error" or receipt is None:
+        return "not priced: evaluation stopped before pricing"
+    return "options could not be priced: no usable ATM straddle in the chain"
 
 
 def _build_verdict(result: dict, receipt: dict | None) -> str:
@@ -99,7 +115,8 @@ def _build_verdict(result: dict, receipt: dict | None) -> str:
     if outcome == "structure_failed":
         return "Refused, structure failed"
     if outcome == "open_pick_exists":
-        return "Passed, open pick exists"
+        since = result.get("existing_since")
+        return f"Holding, open pick since {since}" if since else "Holding, open pick"
     if outcome == "cap_reached":
         return "Passed, cap reached"
     if outcome == "error":
@@ -116,7 +133,7 @@ async def _build_no_chain_fields(session, sym: str) -> dict:
     """
     from app.services.ivy_v2 import compute_live_features, compute_expected_move
 
-    fields: dict = {"verdict": "Refused, no fresh chain"}
+    fields: dict = {"verdict": "Refused, no fresh chain", "implied_reason": NOT_PRICED_NO_CHAIN}
     try:
         live = await compute_live_features(sym, session)
         if live is not None:

@@ -19,13 +19,24 @@ NIGHTLY_GRACE = timedelta(hours=1)   # Auto-pick sits ~16 min into the run; allo
 class RunStatus:
     at: str | None          # ISO UTC of the latest Auto-pick outcome
     exit: int | None        # its exit code (-1 = killed at the step timeout)
-    error: str | None       # stderr tail when present, else head
+    error: str | None       # the exception line (last non-empty line of stderr_tail); a fixed note when only a head was kept
     stale: bool             # older than the latest expected run
     failed: bool            # exit is not 0, or stale, or never recorded
 
     @property
     def ok(self) -> bool:
         return not self.failed
+
+
+HEAD_ONLY_NOTE = "traceback recorded, exception line not kept"
+
+
+def exception_line(stderr_tail: str | None, stderr_head: str | None) -> str | None:
+    """The last non-empty line of the tail (a traceback ends with the exception); never the head."""
+    lines = [l.strip() for l in (stderr_tail or "").splitlines() if l.strip()]
+    if lines:
+        return lines[-1]
+    return HEAD_ONLY_NOTE if stderr_head else None
 
 
 def expected_run_at(now: datetime) -> datetime:
@@ -39,7 +50,7 @@ def auto_pick_status(step_outcomes: dict | None, now: datetime | None = None) ->
     entry = (step_outcomes or {}).get(AUTO_PICK_STEP) or {}
     at = entry.get("at")
     exit_code = entry.get("exit")
-    error = entry.get("stderr_tail") or entry.get("stderr_head")
+    error = exception_line(entry.get("stderr_tail"), entry.get("stderr_head"))
     try:
         at_dt = datetime.fromisoformat(at) if at else None
     except ValueError:

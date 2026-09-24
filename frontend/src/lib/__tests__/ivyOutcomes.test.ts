@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
-  IVY_OUTCOME_LABELS, PRIVATE_LEDGER_BODY, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary,
+  IVY_OUTCOME_LABELS, NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary,
 } from "../ivyOutcomes";
 import { runFailureLine } from "../ivyOutcomes";
 
@@ -36,15 +36,16 @@ describe("Ivy's desk outcomes", () => {
   });
 
   it("the night's sentence separates picked, refused, passed and errors", () => {
-    expect(nightSummary({ evaluated: 41, picked: 1, refused: 6, passed: 33, errors: 1 }))
-      .toBe("evaluated 41 names: picked 1, refused 6, passed on 33, 1 error");
+    expect(nightSummary({ evaluated: 41, picked: 1, refused: 6, passed: 32, holding: 1, errors: 1 }))
+      .toBe("evaluated 41 names: picked 1, refused 6, passed 32, holding 1, 1 error");
     expect(nightSummary({ evaluated: 1, picked: 0, refused: 0, passed: 1, errors: 0 }))
-      .toBe("evaluated 1 name: picked 0, refused 0, passed on 1");
+      .toBe("evaluated 1 name: picked 0, refused 0, passed 1, holding 0");
   });
 
   it("no chain and unpriceable options are different labels", () => {
-    expect(impliedMoveAbsentLabel("no_fresh_chain")).toBe("no current options data");
-    expect(impliedMoveAbsentLabel("vol_gate")).toBe("options could not be priced");
+    expect(impliedMoveAbsentLabel("no_fresh_chain")).toBe("not priced: no current options data");
+    // without a stored reason the cell never claims a pricing failure the evaluation did not have
+    expect(impliedMoveAbsentLabel("vol_gate")).toBe("not priced: reason not recorded");
     expect(readFileSync(join(SRC, "app/ivy/desk/page.tsx"), "utf8")).not.toContain(">no chain<");
   });
 
@@ -79,5 +80,18 @@ describe("the desk says when the nightly did not complete", () => {
     expect(runFailureLine({ last_run_at: null, last_run_exit: null, last_run_error: null, last_run_stale: true, last_run_failed: true }, null))
       .toBe("Ivy's nightly evaluation has not run yet. No worksheet to show yet.");
     expect(runFailureLine({ last_run_at: "2026-09-23T06:16:18+00:00", last_run_exit: 0, last_run_failed: false }, "Sep 23")).toBeNull();
+  });
+});
+
+describe("holding and the implied cell", () => {
+  it("holding is a third verdict with its own definition in the legend", () => {
+    expect(ivyOutcomeLabel("open_pick_exists")).toBe("Holding: already has an open pick in this name");
+    expect(NIGHT_SUMMARY_KEY).toContain("Holding means she already has an open pick on the name and does not double up.");
+  });
+  it("the implied cell states the stored reason and never a pricing failure it did not have", () => {
+    expect(impliedMoveAbsentLabel("open_pick_exists", "not priced: no current options data")).toBe("not priced: no current options data");
+    expect(impliedMoveAbsentLabel("vol_gate", "options could not be priced: no usable ATM straddle in the chain")).toContain("could not be priced");
+    expect(impliedMoveAbsentLabel("no_fresh_chain", null)).toBe("not priced: no current options data");
+    expect(impliedMoveAbsentLabel("momentum_gate", undefined)).toBe("not priced: reason not recorded");
   });
 });

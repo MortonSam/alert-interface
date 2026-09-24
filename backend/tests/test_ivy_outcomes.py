@@ -2,7 +2,7 @@
 import re
 from pathlib import Path
 
-from app.services.ivy_outcomes import ERROR, IVY_OUTCOMES, PASSED, PICKED, REFUSED, count_by_category, outcome_category
+from app.services.ivy_outcomes import ERROR, HOLDING, IVY_OUTCOMES, PASSED, PICKED, REFUSED, count_by_category, outcome_category
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -15,11 +15,12 @@ def test_every_outcome_written_by_the_code_is_in_the_map():
     assert written <= set(IVY_OUTCOMES), written - set(IVY_OUTCOMES)
 
 
-def test_categories_split_a_night_four_ways():
+def test_categories_split_a_night_five_ways():
     counts = count_by_category(["picked", "vol_gate", "no_fresh_chain", "momentum_gate", "momentum_gate",
-                                "cap_reached", "error", "something_unknown"])
-    assert counts == {PICKED: 1, REFUSED: 2, PASSED: 3, ERROR: 2}     # unknown outcomes count as errors, not as passes
-    assert sum(counts.values()) == 8
+                                "cap_reached", "open_pick_exists", "error", "something_unknown"])
+    assert counts == {PICKED: 1, REFUSED: 2, PASSED: 3, HOLDING: 1, ERROR: 2}   # unknown outcomes count as errors, not as passes
+    assert sum(counts.values()) == 9
+    assert outcome_category("open_pick_exists") == HOLDING              # evaluated, not doubled up: neither refused nor passed
 
 
 def test_refused_means_the_setup_was_there():
@@ -33,3 +34,17 @@ def test_verdict_text_uses_the_rule_constants():
     src = (APP / "scripts" / "auto_pick.py").read_text()
     assert "(needs {MIN_PRIOR_N})" in src and "needs 8" not in src
     assert "needs <= -10%" not in src
+
+
+def test_holding_verdict_names_the_open_pick_date_and_implied_reason_never_claims_a_failure_that_did_not_happen():
+    from app.scripts.auto_pick import NOT_PRICED_NO_CHAIN, _build_verdict, implied_reason
+    assert _build_verdict({"outcome": "open_pick_exists", "existing_since": "2026-09-18"}, {"implied_pct": 4.1}) == "Holding, open pick since 2026-09-18"
+    # not priced: the evaluation never reached pricing
+    assert implied_reason("no_fresh_chain", None) == NOT_PRICED_NO_CHAIN
+    assert implied_reason("open_pick_exists", {"gate_reason": "no fresh options chain for X", "implied_pct": None}) == NOT_PRICED_NO_CHAIN
+    assert implied_reason("no_features", None) == "not priced: no data for this name"
+    assert implied_reason("error", None) == "not priced: evaluation stopped before pricing"
+    # priced and failed: the only case that may say so
+    assert implied_reason("vol_gate", {"gate_reason": "options pricing 6.1%, history says 3.2%", "implied_pct": None}).startswith("options could not be priced")
+    src = (APP / "scripts" / "auto_pick.py").read_text()
+    assert 'fields["implied_reason"] = implied_reason(' in src
