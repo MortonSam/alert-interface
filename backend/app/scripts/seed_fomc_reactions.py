@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 from datetime import date, timedelta
 
 import pandas as pd
@@ -37,6 +38,7 @@ from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.services.price_history_exclusion import exclusion_list, excluded_symbols
+from app.services.step_outcomes import record_step_fields
 from app.models.historical_reaction import HistoricalReaction
 from app.scripts.seed_historical_reactions import (
     LOOKBACK_YEARS,
@@ -281,6 +283,23 @@ def _fetch_price_sync(symbol: str) -> pd.DataFrame:
     return _fetch_price_history(yf_ticker, lookback)
 
 
+FOMC_STEP_LABEL = "FOMC reactions"       # the label in refresh.STEPS
+FOMC_FETCH_TIMEOUT = 30                  # per-ticker price fetch; a stalled ticker is skipped, not retried
+TIME_BUDGET_SECONDS = 600                # the step finishes inside its 900s timeout whatever yfinance does
+
+
+class PriceFetchStalled(Exception):
+    """The ticker's price fetch exceeded FOMC_FETCH_TIMEOUT."""
+
+
+def nothing_new(newest_fomc: date | None, newest_reaction: date | None, unseeded: int) -> bool:
+    """Skip the run when no FOMC date in the window is newer than the newest stored reaction
+    and every active ticker already has its full set."""
+    if newest_fomc is None:
+        return True
+    return newest_reaction is not None and newest_fomc <= newest_reaction and unseeded == 0
+
+
 async def _seed_ticker_bulk(
     ticker: Ticker,
     fomc_dates: list[tuple[date, str]],
@@ -288,10 +307,13 @@ async def _seed_ticker_bulk(
     floor_date: date | None = None,
 ) -> tuple[int, int, int]:
     """Seed one ticker in bulk mode. Returns (inserted, updated, no_price_data)."""
-    hist = await asyncio.wait_for(
-        loop.run_in_executor(None, _fetch_price_sync, ticker.symbol),
-        timeout=FETCH_TIMEOUT,
-    )
+    try:
+        hist = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_price_sync, ticker.symbol),
+            timeout=FOMC_FETCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise PriceFetchStalled(f"price fetch exceeded {FOMC_FETCH_TIMEOUT}s")
     if hist.empty:
         return 0, 0, 0
 
@@ -322,19 +344,26 @@ async def _process_ticker_bulk(
     fomc_dates: list[tuple[date, str]],
     loop,
     floor_date: date | None = None,
-) -> tuple[bool, int, int, int]:
-    """Fetch + upsert with retries. Returns (ok, inserted, updated, no_price)."""
+) -> tuple[bool, int, int, int, str | None]:
+    """Fetch + upsert with retries. Returns (ok, inserted, updated, no_price, skip_reason).
+
+    A stalled price fetch is skipped at once with its reason (retrying a stall
+    is what turned a 64s step into a 900s timeout); other errors retry.
+    """
     last_exc: Exception | None = None
     for attempt, delay in enumerate(BULK_RETRY_DELAYS, start=1):
         try:
             ins, upd, nop = await _seed_ticker_bulk(ticker, fomc_dates, loop, floor_date)
-            return True, ins, upd, nop
+            return True, ins, upd, nop, None
+        except PriceFetchStalled as exc:
+            tqdm.write(f"  ⏱ {ticker.symbol}: skipped, {exc}")
+            return False, 0, 0, 0, str(exc)
         except Exception as exc:
             last_exc = exc
             if attempt < len(BULK_RETRY_DELAYS):
                 await asyncio.sleep(delay)
     tqdm.write(f"  ✗ {ticker.symbol}: failed after {len(BULK_RETRY_DELAYS)} attempts — {last_exc}")
-    return False, 0, 0, 0
+    return False, 0, 0, 0, f"failed after {len(BULK_RETRY_DELAYS)} attempts: {last_exc}"
 
 
 # ── Bulk main ────────────────────────────────────────────────────────────────
@@ -375,34 +404,58 @@ async def main_bulk(limit: int | None) -> int:
             flush=True,
         )
 
+    # Skip fast: nothing newer than the newest stored reaction and every ticker complete
+    newest_fomc = max((d for d, _ in fomc_dates), default=None)
+    async with AsyncSessionLocal() as session:
+        newest_reaction = await session.scalar(
+            select(func.max(HistoricalReaction.event_date)).where(HistoricalReaction.event_type == EventType.FOMC)
+        )
+    if nothing_new(newest_fomc, newest_reaction, len(to_process)):
+        msg = (f"nothing new: newest FOMC date {newest_fomc}, newest stored reaction {newest_reaction}, "
+               f"{len(candidates)} tickers complete")
+        print(msg, flush=True)
+        await record_step_fields(FOMC_STEP_LABEL, {"nothing_new": True, "note": msg, "skipped": []})
+        return 0
     if not to_process:
         print("Nothing to process.")
+        await record_step_fields(FOMC_STEP_LABEL, {"nothing_new": False, "note": "no tickers to process", "skipped": []})
         return 0
 
-    # 4. Process in batches
+    # 4. Process in batches, inside a time budget
     loop = asyncio.get_event_loop()
+    started = time.monotonic()
     succeeded: list[str] = []
     failed: list[str] = []
+    skipped: list[dict] = []      # {symbol, reason}
     total_ins = total_upd = total_nop = 0
 
     batches = [to_process[i:i + BULK_BATCH_SIZE] for i in range(0, len(to_process), BULK_BATCH_SIZE)]
 
     with tqdm(total=len(to_process), unit="ticker", dynamic_ncols=True) as bar:
         for batch_idx, batch in enumerate(batches):
+            if time.monotonic() - started > TIME_BUDGET_SECONDS:
+                rest = [t.symbol for b in batches[batch_idx:] for t in b]
+                for sym in rest:
+                    skipped.append({"symbol": sym, "reason": f"not reached: time budget of {TIME_BUDGET_SECONDS}s"})
+                print(f"  Time budget reached; {len(rest)} ticker(s) wait for the next run", flush=True)
+                break
             tasks = [
                 _process_ticker_bulk(t, fomc_dates, loop, LISTING_DATE_OVERRIDES.get(t.symbol))
                 for t in batch
             ]
             results = await asyncio.gather(*tasks)
 
-            for ticker, (ok, ins, upd, nop) in zip(batch, results):
+            for ticker, (ok, ins, upd, nop, reason) in zip(batch, results):
                 if ok:
                     succeeded.append(ticker.symbol)
                     total_ins += ins
                     total_upd += upd
                     total_nop += nop
+                elif reason and reason.startswith("price fetch exceeded"):
+                    skipped.append({"symbol": ticker.symbol, "reason": reason})
                 else:
                     failed.append(ticker.symbol)
+                    skipped.append({"symbol": ticker.symbol, "reason": reason or "failed"})
                 bar.update(1)
                 bar.set_postfix(ok=len(succeeded), skip=n_skipped, fail=len(failed))
 
@@ -412,11 +465,15 @@ async def main_bulk(limit: int | None) -> int:
     # 5. Summary
     print()
     print(f"{'─' * 50}")
-    print(f"  ✓ {len(succeeded)} succeeded  ⚠ {n_skipped} skipped  ✗ {len(failed)} failed")
+    print(f"  ✓ {len(succeeded)} succeeded  ⚠ {n_skipped} already complete  ⏱ {len(skipped)} skipped  ✗ {len(failed)} failed")
     print(f"  📊 {total_ins} inserted  {total_upd} updated  {total_nop} no-price-data")
-    if failed:
-        print(f"\n  Failed: {', '.join(failed)}")
+    if skipped:
+        print("\n  Skipped: " + ", ".join(f"{d['symbol']} ({d['reason']})" for d in skipped[:20]))
     print(f"{'─' * 50}")
+    await record_step_fields(FOMC_STEP_LABEL, {
+        "nothing_new": False, "succeeded": len(succeeded), "already_complete": n_skipped,
+        "failed": len(failed), "skipped": skipped[:50], "seconds": round(time.monotonic() - started, 1),
+    })
     return 1 if failed else 0
 
 

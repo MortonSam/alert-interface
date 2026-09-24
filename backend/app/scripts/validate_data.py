@@ -2458,8 +2458,26 @@ async def run_checks(checks, session_factory=None) -> list[CheckResult]:
     return results
 
 
+VALIDATE_STEP_LABEL = "Validate data"     # the label in refresh.STEPS
+OUTCOME_ERROR_CAP = 10
+
+
+def outcome_fields(results: list[CheckResult]) -> dict:
+    """What /health carries for this run: counts, and the failing checks with their one-line messages."""
+    errors = [r for r in results if r.level == ERROR]
+    return {
+        "pass_count": sum(1 for r in results if r.level == PASS),
+        "warn_count": sum(1 for r in results if r.level == WARN),
+        "error_count": len(errors),
+        "errors": [{"check": r.name, "message": r.message} for r in errors[:OUTCOME_ERROR_CAP]],
+    }
+
+
 async def main() -> int:
+    from app.services.step_outcomes import record_step_fields
+
     results = await run_checks(CHECKS)
+    await record_step_fields(VALIDATE_STEP_LABEL, outcome_fields(results))
 
     passed  = sum(1 for r in results if r.level == PASS)
     warned  = sum(1 for r in results if r.level == WARN)
