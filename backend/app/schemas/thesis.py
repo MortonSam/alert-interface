@@ -259,6 +259,13 @@ class IvyActivityRead(BaseModel):
     sample_refusal: IvySampleRefusal | None = None
     rows: list[IvyWorksheetRow] = []
     ledger_public: bool = False
+    # The latest nightly Auto-pick run, from step_outcomes: when it failed or is older than the
+    # latest expected run, the worksheet above is a previous night's and the page must say so.
+    last_run_at: str | None = None
+    last_run_exit: int | None = None
+    last_run_error: str | None = None
+    last_run_stale: bool = False
+    last_run_failed: bool = False
 
 
 class ThesisDraftAlternativeRead(BaseModel):

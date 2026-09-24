@@ -1,7 +1,7 @@
 "use client";
 
 import { chainFreshnessSentence } from "@/lib/ivyRule";
-import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary } from "@/lib/ivyOutcomes";
+import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary, runFailureLine } from "@/lib/ivyOutcomes";
 import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -120,12 +120,14 @@ export default function IvyDeskPage() {
           </>
         ) : (
           <p className="text-lg text-muted-foreground mt-3">
-            Ivy&apos;s first overnight worksheet appears after her next evaluation.
+            {(activity && runFailureLine(activity, null)) ?? "Ivy\u2019s first overnight worksheet appears after her next evaluation."}
           </p>
         )}
       </div>
     );
   }
+
+  const failure = runFailureLine(activity, fmtDate(activity.run_date));
 
   // v2 batch if any row has a verdict
   const isV2 = activity.rows.some((r) => r.verdict != null);
@@ -139,6 +141,9 @@ export default function IvyDeskPage() {
         <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground mb-2">
           Private preview
         </p>
+      )}
+      {failure && (
+        <p className="text-sm text-amber-600 dark:text-amber-400 mb-3" role="status">{failure}</p>
       )}
       <p className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
         Overnight worksheet · {fmtDate(activity.run_date)}

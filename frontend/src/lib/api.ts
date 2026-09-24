@@ -872,6 +872,11 @@ export interface IvyActivity {
   sample_refusal: IvySampleRefusal | null;
   rows: IvyWorksheetRow[];
   ledger_public: boolean;
+  last_run_at?: string | null;      // latest nightly Auto-pick outcome (step_outcomes)
+  last_run_exit?: number | null;
+  last_run_error?: string | null;   // stderr tail when present, else head
+  last_run_stale?: boolean;         // older than the latest expected run
+  last_run_failed?: boolean;        // exit != 0, stale, or never recorded
 }
 
 export interface ThesisDraftAlternativeRead {

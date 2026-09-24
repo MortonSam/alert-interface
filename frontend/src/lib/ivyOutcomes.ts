@@ -42,3 +42,38 @@ export function impliedMoveAbsentLabel(outcome: string): string {
 export const PRIVATE_LEDGER_TITLE = "Recording nightly";
 export const PRIVATE_LEDGER_BODY =
   "Ivy's worksheet and ledger are recorded every night and go public at launch. Every pick is timestamped before the outcome is known.";
+
+/** "06:16Z" from an ISO UTC timestamp; the nightly is a UTC event. */
+function fmtUtcClock(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}Z`;
+}
+
+export interface RunStatusFields {
+  last_run_at?: string | null;
+  last_run_exit?: number | null;
+  last_run_error?: string | null;
+  last_run_stale?: boolean;
+  last_run_failed?: boolean;
+}
+
+/**
+ * The sentence the desk shows when the latest Auto-pick run did not complete.
+ * Null when the latest run is clean and current. `worksheetDate` is the
+ * worksheet being shown instead (already formatted), or null when there is none.
+ */
+export function runFailureLine(run: RunStatusFields, worksheetDate: string | null): string | null {
+  if (!run.last_run_failed) return null;
+  const when = run.last_run_at ? ` at ${fmtUtcClock(run.last_run_at)}` : "";
+  let head: string;
+  if (run.last_run_at == null) {
+    head = "Ivy's nightly evaluation has not run yet";
+  } else if (run.last_run_stale && (run.last_run_exit ?? 0) === 0) {
+    head = `Ivy's nightly evaluation did not run last night (last completed${when} on ${run.last_run_at.slice(0, 10)})`;
+  } else {
+    head = `Last night's evaluation did not complete (exit ${run.last_run_exit ?? "unknown"}${when})`;
+  }
+  const error = run.last_run_error ? `: ${run.last_run_error}` : "";
+  const tail = worksheetDate ? ` Showing the ${worksheetDate} worksheet.` : " No worksheet to show yet.";
+  return `${head}${error}.${tail}`;
+}

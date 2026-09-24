@@ -2,6 +2,7 @@
 
 import { rvTier } from "@/lib/encodings/rvTier";
 import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason , ivUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
+import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
@@ -1407,6 +1408,8 @@ export default function TickerPage() {
 
   // Options bundle replaces 3 separate calls
   const [expectedMove, setExpectedMove]     = useState<ExpectedMove | null>(null);
+  // One source for every options number on the page: the read's fact block while a read is shown, else the live endpoints
+  const shownOptionFacts = useMemo(() => displayedOptionFacts(optionsRead, expectedMove, realizedVol), [optionsRead, expectedMove, realizedVol]);
   const [optionsChain, setOptionsChain]     = useState<OptionsChain | null>(null);
   const [strategyData, setStrategyData]     = useState<StrategyData | null>(null);
   const [strikesFallback, setStrikesFallback] = useState(false);
@@ -1945,9 +1948,9 @@ export default function TickerPage() {
             period={chartPeriod}
             onPeriodChange={setChartPeriod}
             onChartLoad={handleChartLoad}
-            impliedRangeLow={expectedMove?.implied_range_low}
-            impliedRangeHigh={expectedMove?.implied_range_high}
-            impliedExpiration={expectedMove?.expiration_used}
+            impliedRangeLow={shownOptionFacts.implied_range_low}
+            impliedRangeHigh={shownOptionFacts.implied_range_high}
+            impliedExpiration={shownOptionFacts.expiration_used}
           />
 
         {/* Section nav */}
@@ -2371,7 +2374,7 @@ export default function TickerPage() {
             <p className="text-sm text-muted-foreground mb-6">No options data available for {upperSymbol}.</p>
           )}
           {bundleStatus === "done" && expectedMove && (() => {
-            const facts = displayedOptionFacts(optionsRead, expectedMove, realizedVol);
+            const facts = shownOptionFacts;
             const emPct = facts.expected_move_pct;
             const emDol = facts.expected_move_dollars;
             const low = facts.implied_range_low;
@@ -2396,7 +2399,7 @@ export default function TickerPage() {
                 )}
                 {emPct != null ? (
                   <p className="text-6xl font-bold tabular-nums tracking-tight">
-                    <ExplainTip term="expected move" metric="expected_move" symbol={upperSymbol}>{`\u00B1${(emPct * 100).toFixed(1)}%`}</ExplainTip>
+                    <ExplainTip term="expected move" metric="expected_move" symbol={upperSymbol}>{fmtMovePct(emPct)}</ExplainTip>
                   </p>
                 ) : (
                   <>
@@ -2412,18 +2415,18 @@ export default function TickerPage() {
                 )}
                 {emDol != null && (
                   <p className="text-xl text-muted-foreground mt-1 tabular-nums">
-                    ${emDol.toFixed(2)} <ExplainTip term="implied move">implied move</ExplainTip>
+                    {fmtDollars(emDol)} <ExplainTip term="implied move">implied move</ExplainTip>
                   </p>
                 )}
                 {low != null && high != null && (
                   <p className="text-sm mt-3">
                     <span className="text-muted-foreground"><ExplainTip term="implied range">Implied range</ExplainTip></span>{" "}
-                    <span className="font-semibold tabular-nums">${low.toFixed(2)} - ${high.toFixed(2)}</span>
+                    <span className="font-semibold tabular-nums">{fmtRange(low, high)}</span>
                   </p>
                 )}
                 {emDol != null && facts.atm_strike != null && (
                   <p className="text-sm text-muted-foreground mt-1">
-                    <ExplainTip term="atm">ATM</ExplainTip> ${facts.atm_strike.toFixed(0)} <ExplainTip term="straddle">straddle</ExplainTip> at ${emDol.toFixed(2)}
+                    <ExplainTip term="atm">ATM</ExplainTip> {fmtDollars(facts.atm_strike)} <ExplainTip term="straddle">straddle</ExplainTip> at {fmtDollars(emDol)}
                     {facts.expiration_used && ` exp ${facts.expiration_used}`}
                   </p>
                 )}
@@ -2439,7 +2442,7 @@ export default function TickerPage() {
 
           {/* IV, RV, spread, RV rank, Put/Call as StatRows */}
           {(() => {
-            const shown = displayedOptionFacts(optionsRead, expectedMove, realizedVol);
+            const shown = shownOptionFacts;
             const ivVal = shown.atm_iv;
             const ivAsOf = shown.atm_iv_as_of;
             const rvVal = shown.rv_20d;

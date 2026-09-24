@@ -52,7 +52,9 @@ describe("Ivy's Read and its rows cannot disagree", () => {
 
   it("the page renders the block and the IV/RV rows through the same function", () => {
     const src = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
-    expect(src.match(/displayedOptionFacts\(optionsRead, expectedMove, realizedVol\)/g)?.length).toBe(2);
+    // computed once (useMemo) and read by the chart band, the expected-move block and the IV/RV rows
+    expect(src.match(/displayedOptionFacts\(optionsRead, expectedMove, realizedVol\)/g)?.length).toBe(1);
+    expect(src.match(/shownOptionFacts/g)!.length).toBeGreaterThanOrEqual(5);
     expect(src).not.toMatch(/expectedMove\.implied_range_(low|high)\b/);
     expect(src).not.toMatch(/realizedVol\?\.(atm_iv|current_rv|rv_rank|iv_rv_spread_pp)\b/);
   });

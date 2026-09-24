@@ -32,3 +32,15 @@ def test_missing_values_read_unavailable_and_the_key_list_is_complete():
     for k in ("current_price", "implied_range", "atm_iv", "realized_vol_20d", "iv_rv_spread", "earnings_sample_size"):
         assert f[k] == "(unavailable)", k
     assert set(VALUES) == set(FACT_VALUE_KEYS)
+
+
+def test_prose_strings_for_the_block_the_frontend_rows_test_uses():
+    # frontend/src/lib/__tests__/optionFactFormat.test.ts feeds the same numbers to the row
+    # formatters and expects these exact strings; change both or neither.
+    v = dict(VALUES, atm_strike=412.5, expected_move_pct=0.0828, expected_move_dollars=28.08,
+             implied_range_low=384.42, implied_range_high=440.58)
+    f = format_facts("SNPS", "Synopsys", v)
+    assert f["atm_strike"] == "$412.50"                   # the row printed "$413"
+    assert f["expected_move_pct"] == "±8.3%"
+    assert f["expected_move_dollars"] == "±$28.08"
+    assert f["implied_range"] == "$384.42 - $440.58"

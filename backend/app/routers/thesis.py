@@ -1670,9 +1670,21 @@ async def ivy_activity(
     db: AsyncSession = Depends(get_db),
     admin: bool = Depends(is_admin),
 ) -> IvyActivityRead:
-    """Latest nightly evaluation batch summary."""
+    """Latest nightly evaluation batch summary, with the latest Auto-pick run's status."""
+    import json as _json
+    from app.services.nightly_run import auto_pick_status
+    from app.services.system_metadata_service import get_value as _get_meta_value
+
+    raw_outcomes = await _get_meta_value(db, "step_outcomes")
+    try:
+        run = auto_pick_status(_json.loads(raw_outcomes) if raw_outcomes else {})
+    except (TypeError, ValueError):
+        run = auto_pick_status({})
+    run_fields = dict(last_run_at=run.at, last_run_exit=run.exit, last_run_error=run.error,
+                      last_run_stale=run.stale, last_run_failed=run.failed)
+
     if not LEDGER_PUBLIC and not admin:
-        return IvyActivityRead(ledger_public=LEDGER_PUBLIC)
+        return IvyActivityRead(ledger_public=LEDGER_PUBLIC, **run_fields)
     # Find the max evaluated_at date for nightly runs (on or after ledger start)
     max_date_row = (await db.execute(
         select(func.max(func.cast(AlertPickEvaluation.evaluated_at, SADate)))
@@ -1683,7 +1695,7 @@ async def ivy_activity(
     )).scalar()
 
     if max_date_row is None:
-        return IvyActivityRead(ledger_public=LEDGER_PUBLIC)
+        return IvyActivityRead(ledger_public=LEDGER_PUBLIC, **run_fields)
 
     # Fetch all rows from that batch date
     rows = (await db.execute(
@@ -1693,7 +1705,7 @@ async def ivy_activity(
     )).scalars().all()
 
     if not rows:
-        return IvyActivityRead(ledger_public=LEDGER_PUBLIC)
+        return IvyActivityRead(ledger_public=LEDGER_PUBLIC, **run_fields)
 
     outcomes = [r.outcome for r in rows]
 
@@ -1782,6 +1794,7 @@ async def ivy_activity(
         sample_refusal=sample_refusal,
         rows=worksheet_rows,
         ledger_public=LEDGER_PUBLIC,
+        **run_fields,
     )
 
 
