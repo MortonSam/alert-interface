@@ -147,6 +147,7 @@ FACT_VALUE_KEYS = (
     "current_price", "price_as_of", "chain_date",
     "expected_move_pct", "expected_move_dollars", "implied_range_low", "implied_range_high",
     "expiration_used", "days_to_expiration", "atm_strike", "atm_iv", "atm_iv_as_of",
+    "atm_iv_reason",                  # why atm_iv is null (iv_store's reason)
     "next_earnings_date", "expiration_spans_earnings", "days_exp_past_earnings",
     "rv_20d", "rv_rank", "rv_percentile", "rv_min_1y", "rv_max_1y", "rv_sample_days",
     "rv_reason", "rv_as_of",          # why RV is absent (rv_store's reason) and the snapshot date it came from
@@ -174,7 +175,8 @@ def format_facts(symbol: str, company_name: str, v: dict) -> dict:
         "expiration_date": v.get("expiration_used") or "(unavailable)",
         "days_to_expiration": str(v["days_to_expiration"]) if v.get("days_to_expiration") is not None else "(unavailable)",
         "atm_strike": fp(v.get("atm_strike")),
-        "atm_iv": fpct(v.get("atm_iv")),
+        "atm_iv": (fpct(v["atm_iv"]) if v.get("atm_iv") is not None
+                   else f"(unavailable: {v['atm_iv_reason']})" if v.get("atm_iv_reason") else "(unavailable)"),
         "next_earnings_date": v.get("next_earnings_date") or "(unavailable)",
         "expiration_spans_earnings": str(bool(v.get("expiration_spans_earnings"))),
         "days_exp_past_earnings": str(v["days_exp_past_earnings"]) if v.get("days_exp_past_earnings") is not None else "N/A",

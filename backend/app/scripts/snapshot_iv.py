@@ -71,12 +71,22 @@ def _get_current_price(symbol: str) -> float | None:
     return None
 
 
+def null_iv_reason(atm_iv: float | None, current_price: float | None, chosen_exp: str | None) -> str | None:
+    """Why a snapshot row carries no ATM IV; None when it carries one. Never a bare NULL."""
+    if atm_iv is not None:
+        return None
+    if current_price is None:
+        return "no current price to locate the ATM strike"
+    return f"no implied volatility on the ATM strike for expiration {chosen_exp}"
+
+
 async def _backfill_cleanup() -> None:
     """NULL out corrupt iv_history rows where atm_iv < _IV_MIN."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(sa.text("""
             WITH updated AS (
-                UPDATE iv_history SET atm_iv = NULL
+                UPDATE iv_history
+                SET atm_iv = NULL, atm_iv_reason = 'ATM implied volatility below ' || :iv_min || ', cleared by backfill cleanup'
                 WHERE atm_iv IS NOT NULL AND atm_iv < :iv_min
                 RETURNING symbol
             )
@@ -209,6 +219,7 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
 
     if current_price is not None:
         atm_iv, atm_strike = _compute_atm_iv(chain, current_price)
+    atm_iv_reason = null_iv_reason(atm_iv, current_price, chosen_exp)
 
     # ── Sanity band ───────────────────────────────────────────────────────────
     if atm_iv is not None and (atm_iv < _IV_MIN or atm_iv > _IV_MAX):
@@ -216,6 +227,7 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
             f"  {symbol:8s}  SANITY: atm_iv={atm_iv:.4f}"
             f" outside [{_IV_MIN}, {_IV_MAX}] — writing NULL"
         )
+        atm_iv_reason = f"ATM implied volatility {atm_iv:.2f} outside [{_IV_MIN}, {_IV_MAX}]"
         atm_iv = None
 
     # ── Price sanity band (reject None/NaN/inf/<=0 and >50% drift) ────────
@@ -250,13 +262,14 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
     # ── Upsert ────────────────────────────────────────────────────────────────
     stmt = sa.text("""
         INSERT INTO iv_history
-            (id, symbol, date, atm_iv, realized_vol_20d,
+            (id, symbol, date, atm_iv, atm_iv_reason, realized_vol_20d,
              atm_strike, current_price, created_at)
         VALUES
             (gen_random_uuid(), :symbol, :date,
-             :atm_iv, :realized_vol_20d, :atm_strike, :current_price, now())
+             :atm_iv, :atm_iv_reason, :realized_vol_20d, :atm_strike, :current_price, now())
         ON CONFLICT (symbol, date) DO UPDATE SET
             atm_iv           = EXCLUDED.atm_iv,
+            atm_iv_reason    = EXCLUDED.atm_iv_reason,
             realized_vol_20d = EXCLUDED.realized_vol_20d,
             atm_strike       = EXCLUDED.atm_strike,
             current_price    = EXCLUDED.current_price
@@ -265,7 +278,7 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
     async with AsyncSessionLocal() as session:
         await session.execute(stmt, {
             "symbol": symbol, "date": today,
-            "atm_iv": atm_iv, "realized_vol_20d": realized_vol_20d,
+            "atm_iv": atm_iv, "atm_iv_reason": atm_iv_reason, "realized_vol_20d": realized_vol_20d,
             "atm_strike": atm_strike, "current_price": current_price,
         })
         await session.commit()

@@ -105,6 +105,7 @@ class RealizedVolRead(BaseModel):
     rv_rank_labeled: LabelRule | None = None  # interpretive label + rule for RV rank
     atm_iv: float | None = None              # ATM implied vol from IVHistory (0–1 decimal)
     atm_iv_as_of: str | None = None          # date of the IVHistory row used
+    atm_iv_reason: str | None = None         # why atm_iv is null (iv_store), never blank when it is
     iv_rv_spread_pp: float | None = None     # IV minus RV in percentage points (same rows as atm_iv + current_rv)
     data_error: bool = False                 # True if latest rv_snapshot has status='data_error'
     reason: str | None = None                # why current_rv is null

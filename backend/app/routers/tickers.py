@@ -38,6 +38,7 @@ from app.services.options_read_gate import (
     load_cached_read,
 )
 from app.services.price_freshness import QuoteState, assess_history, assess_quote
+from app.services.iv_store import get_servable_iv
 from app.services.price_history_exclusion import exclusion_reason, is_excluded
 
 
@@ -1346,15 +1347,8 @@ async def get_options_read(
     from app.services.rv_store import get_servable_rv
 
     rv_snapshot_row, rv_reason = await get_servable_rv(db, sym)
-    _iv_cutoff = today - timedelta(days=3)
-    _iv_row = (await db.execute(
-        select(IVHistory)
-        .where(IVHistory.symbol == sym, IVHistory.date >= _iv_cutoff, IVHistory.atm_iv.isnot(None))
-        .order_by(IVHistory.date.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    atm_iv = float(_iv_row.atm_iv) if _iv_row and _iv_row.atm_iv is not None else None
-    atm_iv_as_of: str | None = _iv_row.date.isoformat() if _iv_row else None
+    iv_state = await get_servable_iv(db, sym, today)
+    atm_iv, atm_iv_as_of, atm_iv_reason = iv_state.value, iv_state.as_of, iv_state.reason
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     reactions: list = []
     if ticker_row and not await is_excluded(db, sym):
@@ -1441,7 +1435,7 @@ async def get_options_read(
     expected_move_dollars: float | None = None
     implied_range_low: float | None = None
     implied_range_high: float | None = None
-    atm_iv: float | None = None
+    # atm_iv, atm_iv_as_of and atm_iv_reason were read from iv_store above and are not reset here
 
     if calls and puts and current_price:
         intersection = {c["strike"] for c in calls} & {p["strike"] for p in puts}
@@ -1517,6 +1511,7 @@ async def get_options_read(
         "atm_strike": atm_strike,
         "atm_iv": atm_iv,
         "atm_iv_as_of": atm_iv_as_of,
+        "atm_iv_reason": atm_iv_reason,
         "next_earnings_date": earnings_str,
         "expiration_spans_earnings": expiration_spans_earnings,
         "days_exp_past_earnings": days_exp_past_earnings,
@@ -1912,16 +1907,9 @@ async def get_realized_vol(
     sym = symbol.upper()
     as_of = date.today().isoformat()
 
-    # ── ATM IV from IVHistory (fresh within 3 days) ───────────────────────────
-    iv_cutoff = date.today() - timedelta(days=3)
-    iv_row = (await db.execute(
-        select(IVHistory)
-        .where(IVHistory.symbol == sym, IVHistory.date >= iv_cutoff, IVHistory.atm_iv.isnot(None))
-        .order_by(IVHistory.date.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    atm_iv = float(iv_row.atm_iv) if iv_row and iv_row.atm_iv is not None else None
-    atm_iv_as_of = iv_row.date.isoformat() if iv_row else None
+    # ── ATM IV through iv_store (newest non-null row within the window, or a reason) ──
+    iv_state = await get_servable_iv(db, sym)
+    atm_iv, atm_iv_as_of, atm_iv_reason = iv_state.value, iv_state.as_of, iv_state.reason
 
     # ── Latest rv_snapshot, any status ────────────────────────────────────────
     latest = (await db.execute(
@@ -1939,7 +1927,7 @@ async def get_realized_vol(
             sample_days=latest.sample_days if latest is not None else 0,
             window_days=20,
             as_of=latest.as_of_date.isoformat() if latest is not None else as_of,
-            rv_rank_labeled=None, atm_iv=atm_iv, atm_iv_as_of=atm_iv_as_of,
+            rv_rank_labeled=None, atm_iv=atm_iv, atm_iv_as_of=atm_iv_as_of, atm_iv_reason=atm_iv_reason,
             iv_rv_spread_pp=None, data_error=data_error, reason=reason,
         )
 
@@ -1968,6 +1956,7 @@ async def get_realized_vol(
         rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
         atm_iv=atm_iv,
         atm_iv_as_of=atm_iv_as_of,
+        atm_iv_reason=atm_iv_reason,
         iv_rv_spread_pp=spread_pp,
         data_error=data_error,
     )

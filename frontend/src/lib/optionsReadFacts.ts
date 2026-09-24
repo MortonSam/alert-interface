@@ -18,6 +18,7 @@ export interface OptionFactValues {
   atm_strike: number | null;
   atm_iv: number | null;
   atm_iv_as_of: string | null;
+  atm_iv_reason?: string | null;   // why atm_iv is null, from iv_store; null when IV is present
   rv_20d: number | null;
   rv_rank: number | null;
   rv_reason?: string | null;     // why rv_20d is null, from rv_store; null when RV is present
@@ -58,6 +59,7 @@ export function displayedOptionFacts(
     atm_strike: expectedMove?.atm_strike ?? null,
     atm_iv: realizedVol?.atm_iv ?? null,
     atm_iv_as_of: realizedVol?.atm_iv_as_of ?? null,
+    atm_iv_reason: realizedVol?.atm_iv_reason ?? null,
     rv_20d: realizedVol?.current_rv ?? null,
     rv_reason: realizedVol?.reason ?? null,
     rv_as_of: realizedVol?.as_of ?? null,
@@ -102,4 +104,42 @@ export function rvUnavailableReason(
   if (rvStatus === "loading") return RV_STILL_LOADING;
   if (rvStatus === "error") return "Realized volatility could not be loaded";
   return RV_NO_REASON_RECORDED;
+}
+
+/** The sentence under "IV unavailable", from the source the row is showing. Never empty. */
+export function ivUnavailableReason(
+  shown: DisplayedOptionFacts,
+  realizedVol: RealizedVol | null | undefined,
+  rvStatus: "loading" | "done" | "empty" | "error" | undefined,
+): string {
+  if (shown.source === "read") {
+    if (shown.atm_iv_reason) return `${shown.atm_iv_reason} (when Ivy's Read was written)`;
+    return "Implied volatility was unavailable when Ivy's Read was written";
+  }
+  if (realizedVol?.atm_iv_reason) return realizedVol.atm_iv_reason;
+  if (rvStatus === "loading") return "Implied volatility is still loading";
+  if (rvStatus === "error") return "Implied volatility could not be loaded";
+  return "Implied volatility is unavailable and no reason was recorded";
+}
+
+/**
+ * Why the IV-RV spread row has no number: whichever side is missing, with
+ * that side's reason, or the consistency check when both are present but the
+ * server's spread disagrees with them. Null when the spread can be shown.
+ */
+export function spreadUnavailableReason(
+  shown: DisplayedOptionFacts,
+  realizedVol: RealizedVol | null | undefined,
+  rvStatus: "loading" | "done" | "empty" | "error" | undefined,
+  spreadShown: boolean,
+): string | null {
+  const ivMissing = shown.atm_iv == null;
+  const rvMissing = shown.rv_20d == null;
+  if (ivMissing && rvMissing) {
+    return `IV-RV spread unavailable: implied and realized volatility are both missing (${ivUnavailableReason(shown, realizedVol, rvStatus)}; ${rvUnavailableReason(shown, realizedVol, rvStatus)})`;
+  }
+  if (ivMissing) return `IV-RV spread unavailable: implied volatility is missing (${ivUnavailableReason(shown, realizedVol, rvStatus)})`;
+  if (rvMissing) return `IV-RV spread unavailable: realized volatility is missing (${rvUnavailableReason(shown, realizedVol, rvStatus)})`;
+  if (!spreadShown) return "IV-RV spread unavailable: the stored spread does not match the IV and RV shown";
+  return null;
 }

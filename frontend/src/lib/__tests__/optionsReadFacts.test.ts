@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import type { ExpectedMove, OptionsRead, RealizedVol } from "@/lib/api";
-import { displayedOptionFacts, priceDriftNote, priceLabel, readIsShown, rvUnavailableReason, RV_NO_REASON_RECORDED } from "../optionsReadFacts";
+import { displayedOptionFacts, priceDriftNote, priceLabel, readIsShown, rvUnavailableReason, RV_NO_REASON_RECORDED, ivUnavailableReason, spreadUnavailableReason } from "../optionsReadFacts";
 
 const factValues = {
   current_price: 339.07, price_as_of: "2026-09-21T17:59:00+00:00", chain_date: "2026-09-18",
@@ -81,5 +81,39 @@ describe("RV unavailable always carries its reason", () => {
     expect(f.source).toBe("live");
     expect(f.rv_reason).toBe(rvReason);
     expect(f.rv_as_of).toBe("2026-09-21");
+  });
+});
+
+describe("IV unavailable and the spread row always carry their reason", () => {
+  type Shown = Parameters<typeof ivUnavailableReason>[0];
+  type Rv = Parameters<typeof ivUnavailableReason>[1];
+  const ivReason = "No ATM implied volatility in the last 3 days (the 2026-09-23 snapshot recorded none: no implied volatility on the ATM strike for expiration 2026-10-16); last: 46.9% on 2026-09-21";
+  it("read mode: the read's stored atm_iv_reason, dated to the read", () => {
+    const shown = { source: "read", atm_iv: null, atm_iv_reason: ivReason, rv_20d: 0.65 } as unknown as Shown;
+    expect(ivUnavailableReason(shown, null, "done")).toBe(`${ivReason} (when Ivy's Read was written)`);
+    const noReason = { source: "read", atm_iv: null, rv_20d: 0.65 } as unknown as Shown;
+    expect(ivUnavailableReason(noReason, null, "done")).toBe("Implied volatility was unavailable when Ivy's Read was written");
+  });
+  it("live mode: the endpoint's reason, then the load state, never empty", () => {
+    const shown = { source: "live", atm_iv: null, rv_20d: 0.65 } as unknown as Shown;
+    expect(ivUnavailableReason(shown, { atm_iv: null, atm_iv_reason: ivReason } as unknown as Rv, "done")).toBe(ivReason);
+    expect(ivUnavailableReason(shown, null, "loading")).toBe("Implied volatility is still loading");
+    expect(ivUnavailableReason(shown, null, "error")).toBe("Implied volatility could not be loaded");
+    expect(ivUnavailableReason(shown, { atm_iv: null } as unknown as Rv, "empty")).toBe("Implied volatility is unavailable and no reason was recorded");
+  });
+  it("live mode carries atm_iv_reason into the displayed facts", () => {
+    const f = displayedOptionFacts(null, null, { current_rv: 0.65, atm_iv: null, atm_iv_reason: ivReason, reason: null } as unknown as Parameters<typeof displayedOptionFacts>[2]);
+    expect(f.atm_iv_reason).toBe(ivReason);
+  });
+  it("spread row names the missing side with its reason, or the consistency check, or nothing when shown", () => {
+    const ivMissing = { source: "read", atm_iv: null, atm_iv_reason: ivReason, rv_20d: 0.65 } as unknown as Shown;
+    expect(spreadUnavailableReason(ivMissing, null, "done", false)).toBe(`IV-RV spread unavailable: implied volatility is missing (${ivReason} (when Ivy's Read was written))`);
+    const rvMissing = { source: "read", atm_iv: 0.47, rv_20d: null, rv_reason: "Realized volatility could not be computed reliably for this ticker" } as unknown as Shown;
+    expect(spreadUnavailableReason(rvMissing, null, "done", false)).toContain("realized volatility is missing (Realized volatility could not be computed reliably");
+    const both = { source: "live", atm_iv: null, rv_20d: null } as unknown as Shown;
+    expect(spreadUnavailableReason(both, null, "error", false)).toContain("both missing");
+    const present = { source: "read", atm_iv: 0.47, rv_20d: 0.65 } as unknown as Shown;
+    expect(spreadUnavailableReason(present, null, "done", false)).toBe("IV-RV spread unavailable: the stored spread does not match the IV and RV shown");
+    expect(spreadUnavailableReason(present, null, "done", true)).toBeNull();
   });
 });

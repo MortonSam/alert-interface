@@ -28,6 +28,7 @@ class IVHistory(Base):
     date: Mapped[date] = mapped_column(Date, nullable=False)
     # ATM implied vol from the nearest >=7d expiration (0–1 decimal, e.g. 0.30 = 30%)
     atm_iv: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
+    atm_iv_reason: Mapped[str | None] = mapped_column(String(160), nullable=True)   # set whenever atm_iv is written NULL
     # 20-day annualized realized vol on this date (0–1 decimal)
     realized_vol_20d: Mapped[float | None] = mapped_column(Numeric(8, 6), nullable=True)
     atm_strike: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)

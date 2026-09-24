@@ -620,6 +620,7 @@ export interface RealizedVol {
   rv_rank_labeled: LabelRule | null;
   atm_iv: number | null;
   atm_iv_as_of: string | null;
+  atm_iv_reason?: string | null;   // why atm_iv is null (iv_store); never blank when it is
   iv_rv_spread_pp: number | null;
   data_error: boolean;
   reason?: string | null;

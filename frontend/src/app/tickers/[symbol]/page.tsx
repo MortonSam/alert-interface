@@ -1,7 +1,7 @@
 "use client";
 
 import { rvTier } from "@/lib/encodings/rvTier";
-import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason } from "@/lib/optionsReadFacts";
+import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason , ivUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
@@ -2481,7 +2481,9 @@ export default function TickerPage() {
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {ivVal != null
                       ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">(ATM, nearest expiry ≥7d out{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
-                      : <span className="text-muted-foreground">IV unavailable</span>}
+                      : <span className="text-muted-foreground" title={ivUnavailableReason(shown, realizedVol, rvStatus)}>
+                          IV unavailable<span className="block text-xs font-sans font-normal">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
+                        </span>}
                   </span>
                 </div>
                 {/* RV row */}
@@ -2497,7 +2499,16 @@ export default function TickerPage() {
                         </span>}
                   </span>
                 </div>
-                {/* IV-RV spread row — only when consistency check passes */}
+                {/* IV-RV spread row: the number when the consistency check passes, otherwise which side is missing and why */}
+                {(() => {
+                  const why = spreadUnavailableReason(shown, realizedVol, rvStatus, showSpread && spread != null);
+                  return why ? (
+                    <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                      <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>IV - RV spread</ExplainTip></span>
+                      <span className="text-xs text-muted-foreground text-right max-w-[60%]">{why}</span>
+                    </div>
+                  ) : null;
+                })()}
                 {showSpread && spread != null && (
                   <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
                     <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>IV - RV spread</ExplainTip></span>
