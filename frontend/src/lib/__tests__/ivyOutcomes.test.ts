@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   IVY_OUTCOME_LABELS, NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary,
 } from "../ivyOutcomes";
-import { runFailureLine } from "../ivyOutcomes";
+import { runFailureLine, summaryCounts } from "../ivyOutcomes";
 
 const SRC = join(__dirname, "../..");
 const backend = (p: string) => readFileSync(join(SRC, "../../backend/app", p), "utf8");
@@ -39,7 +39,10 @@ describe("Ivy's desk outcomes", () => {
     expect(nightSummary({ evaluated: 41, picked: 1, refused: 6, passed: 32, holding: 1, errors: 1 }))
       .toBe("evaluated 41 names: picked 1, refused 6, passed 32, holding 1, 1 error");
     expect(nightSummary({ evaluated: 1, picked: 0, refused: 0, passed: 1, errors: 0 }))
-      .toBe("evaluated 1 name: picked 0, refused 0, passed 1, holding 0");
+      .toBe("evaluated 1 name: picked 0, passed 1");
+    // the production night of Sep 22: 6 evaluated, 2 refused, 1 passed, 3 holding
+    expect(nightSummary({ evaluated: 6, picked: 0, refused: 2, passed: 1, holding: 3, errors: 0 }))
+      .toBe("evaluated 6 names: picked 0, refused 2, passed 1, holding 3");
   });
 
   it("no chain and unpriceable options are different labels", () => {
@@ -93,5 +96,20 @@ describe("holding and the implied cell", () => {
     expect(impliedMoveAbsentLabel("vol_gate", "options could not be priced: no usable ATM straddle in the chain")).toContain("could not be priced");
     expect(impliedMoveAbsentLabel("no_fresh_chain", null)).toBe("not priced: no current options data");
     expect(impliedMoveAbsentLabel("momentum_gate", undefined)).toBe("not priced: reason not recorded");
+  });
+});
+
+describe("the headline's counts add up to the evaluated count for any row set", () => {
+  it("picked + refused + passed + holding + errors == evaluated", () => {
+    const sets = [
+      { picked: 0, refused: 2, passed: 1, holding: 3, errors: 0 },
+      { picked: 1, refused: 6, passed: 32, holding: 1, errors: 1 },
+      { picked: 0, refused: 0, passed: 0, holding: 0, errors: 0 },
+      { picked: 2, refused: 0, passed: 0, holding: 4, errors: 0 },
+    ];
+    for (const c of sets) {
+      const evaluated = c.picked + c.refused + c.passed + c.holding + c.errors;
+      expect(summaryCounts(nightSummary({ evaluated, ...c }))).toBe(evaluated);
+    }
   });
 });

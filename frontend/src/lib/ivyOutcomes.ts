@@ -22,12 +22,26 @@ export function ivyOutcomeLabel(outcome: string): string {
 
 interface NightCounts { evaluated: number; picked: number; refused: number; passed: number; holding?: number; errors: number }
 
-/** "evaluated 41 names: picked 1, refused 6, passed 33, holding 1, 1 error" : five kinds, never lumped. */
+/**
+ * "evaluated 41 names: picked 1, refused 6, passed 32, holding 1, 1 error".
+ * Every category with a non-zero count is printed, holding included, so the
+ * printed counts always add up to the evaluated count; "picked" is printed
+ * even at zero so a night that picked nothing says so.
+ */
 export function nightSummary(c: NightCounts): string {
   const names = `${c.evaluated} ${c.evaluated === 1 ? "name" : "names"}`;
-  const parts = [`picked ${c.picked}`, `refused ${c.refused}`, `passed ${c.passed}`, `holding ${c.holding ?? 0}`];
+  const parts = [`picked ${c.picked}`];
+  if (c.refused > 0) parts.push(`refused ${c.refused}`);
+  if (c.passed > 0) parts.push(`passed ${c.passed}`);
+  if ((c.holding ?? 0) > 0) parts.push(`holding ${c.holding}`);
   if (c.errors > 0) parts.push(`${c.errors} ${c.errors === 1 ? "error" : "errors"}`);
   return `evaluated ${names}: ${parts.join(", ")}`;
+}
+
+/** The counts a summary sentence prints, for the partition test. */
+export function summaryCounts(sentence: string): number {
+  return [...sentence.matchAll(/(?:picked|refused|passed|holding) (\d+)|(\d+) errors?/g)]
+    .reduce((sum, m) => sum + Number(m[1] ?? m[2]), 0);
 }
 
 export const NIGHT_SUMMARY_KEY =

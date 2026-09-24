@@ -48,3 +48,27 @@ def test_holding_verdict_names_the_open_pick_date_and_implied_reason_never_claim
     assert implied_reason("vol_gate", {"gate_reason": "options pricing 6.1%, history says 3.2%", "implied_pct": None}).startswith("options could not be priced")
     src = (APP / "scripts" / "auto_pick.py").read_text()
     assert 'fields["implied_reason"] = implied_reason(' in src
+
+
+def test_legacy_rows_are_classified_by_the_same_rule_as_new_rows():
+    from app.services.ivy_outcomes import NOT_PRICED_UNRECORDED, implied_reason_for_display, worksheet_verdict
+    # a row stored before the holding verdict and implied_reason existed
+    assert worksheet_verdict("open_pick_exists", "Passed, open pick exists", "2026-09-18") == "Holding, open pick since 2026-09-18"
+    assert worksheet_verdict("open_pick_exists", "Passed, open pick exists", None) == "Holding, open pick"
+    assert worksheet_verdict("vol_gate", "Refused, options pricing 6.1%, history says 3.2%", None) == "Refused, options pricing 6.1%, history says 3.2%"
+    assert implied_reason_for_display(None, None) == NOT_PRICED_UNRECORDED          # never "options could not be priced"
+    assert implied_reason_for_display(None, "not priced: no current options data") == "not priced: no current options data"
+    assert implied_reason_for_display(4.1, None) is None
+    src = (APP / "routers" / "thesis.py").read_text()
+    assert "verdict=worksheet_verdict(r.outcome, r.verdict, pick_since)" in src
+    assert "implied_reason=implied_reason_for_display(implied, r.implied_reason)" in src
+
+
+def test_categories_partition_any_row_set():
+    import random
+    codes = list(IVY_OUTCOMES) + ["unknown_code", None]
+    rng = random.Random(7)
+    for n in (0, 1, 6, 41):
+        outcomes = [rng.choice(codes) for _ in range(n)]
+        counts = count_by_category(outcomes)
+        assert sum(counts.values()) == n                       # picked + refused + passed + holding + error == evaluated

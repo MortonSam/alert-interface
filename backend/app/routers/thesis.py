@@ -1766,14 +1766,20 @@ async def ivy_activity(
         )).scalars().all()
         pick_map = {p.id: p for p in picks_result}
 
+    from app.services.ivy_outcomes import (
+        ERROR, HOLDING, PASSED, PICKED, REFUSED, count_by_category, implied_reason_for_display, worksheet_verdict,
+    )
     # Build worksheet rows
     worksheet_rows = []
     for r in rows:
         leans_list = [SignalLean(**l) for l in r.leans] if isinstance(r.leans, list) else None
         pick_obj = None
+        pick_since: str | None = None
         if r.alert_pick_id and r.alert_pick_id in pick_map:
             p = pick_map[r.alert_pick_id]
             pick_obj = IvyWorksheetPick(strategy=p.strategy, expiration=p.expiration)
+            pick_since = p.generated_at.date().isoformat() if p.generated_at else None
+        implied = float(r.implied_move_pct) if r.implied_move_pct is not None else None
         worksheet_rows.append(IvyWorksheetRow(
             symbol=r.symbol,
             earnings_date=earnings_map.get(r.symbol),
@@ -1784,13 +1790,12 @@ async def ivy_activity(
             momentum_20d=float(r.momentum_20d) if r.momentum_20d is not None else None,
             prior_n=int(r.prior_n) if r.prior_n is not None else None,
             expected_move_pct=float(r.expected_move_pct) if r.expected_move_pct is not None else None,
-            implied_move_pct=float(r.implied_move_pct) if r.implied_move_pct is not None else None,
-            implied_reason=r.implied_reason,
-            verdict=r.verdict,
+            implied_move_pct=implied,
+            implied_reason=implied_reason_for_display(implied, r.implied_reason),
+            verdict=worksheet_verdict(r.outcome, r.verdict, pick_since),
         ))
     worksheet_rows.sort(key=lambda r: (r.earnings_date or "9999", r.symbol))
 
-    from app.services.ivy_outcomes import ERROR, HOLDING, PASSED, PICKED, REFUSED, count_by_category
     by_category = count_by_category(outcomes)
 
     return IvyActivityRead(

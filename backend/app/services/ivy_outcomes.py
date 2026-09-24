@@ -34,3 +34,25 @@ def count_by_category(outcomes: list[str | None]) -> dict[str, int]:
     for o in outcomes:
         counts[outcome_category(o)] += 1
     return counts
+
+
+# ── Worksheet rows, old and new, rendered by one rule ────────────────────────
+# Rows written before the holding verdict and implied_reason existed carry
+# their old text ("Passed, open pick exists", no reason). The desk classifies
+# every stored row by these functions, so the rule is the same on every night.
+
+NOT_PRICED_UNRECORDED = "not priced: reason not recorded"
+
+
+def worksheet_verdict(outcome: str | None, stored_verdict: str | None, pick_since: str | None) -> str | None:
+    """The verdict to show. An open-pick row is always "Holding, open pick[ since <date>]"."""
+    if outcome == "open_pick_exists":
+        return f"Holding, open pick since {pick_since}" if pick_since else "Holding, open pick"
+    return stored_verdict
+
+
+def implied_reason_for_display(implied_move_pct: float | None, stored_reason: str | None) -> str | None:
+    """The reason beside a null implied move; never a failure the evaluation did not record."""
+    if implied_move_pct is not None:
+        return None
+    return stored_reason or NOT_PRICED_UNRECORDED
