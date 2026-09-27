@@ -20,6 +20,7 @@ import { capture } from "@/lib/analytics";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
 import { HiSparkles } from "react-icons/hi2";
+import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
@@ -743,6 +744,9 @@ function BuildTradePageContent() {
   const [optionLeg, setOptionLeg] = useState<OptionLegDraft | null>(null);
   const [contracts, setContracts] = useState("1");
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Building and previewing are open; saving is not. null until the browser has been asked.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  useEffect(() => { setSignedIn(isSignedIn()); }, []);
 
   // Result
   const [savedThesis, setSavedThesis] = useState<Thesis | null>(null);
@@ -854,6 +858,10 @@ function BuildTradePageContent() {
 
   async function handleSave() {
     if (!selectedTicker || !direction) return;
+    if (!isSignedIn()) {
+      setSaveError(SAVE_REQUIRES_SIGN_IN);   // the backend would answer 401; say so before the request
+      return;
+    }
     // Resolve "auto" direction to the actual picked direction for saving
     const saveDirection: "bullish" | "bearish" =
       direction === "auto" && alertPick ? (alertPick.picked_direction as "bullish" | "bearish") : (direction as "bullish" | "bearish");
@@ -1319,16 +1327,23 @@ function BuildTradePageContent() {
                 </div>
 
                 {saveError && <p className="text-sm text-red-500">{saveError}</p>}
+                {signedIn === false && (
+                  <p className="text-sm text-muted-foreground" data-testid="save-requires-sign-in">
+                    {SAVE_REQUIRES_SIGN_IN}
+                  </p>
+                )}
 
                 <div className="flex gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={step === "saving"}
-                    className="rounded-xl bg-primary text-primary-foreground px-8 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
-                  >
-                    {step === "saving" ? "Saving…" : "Save thesis →"}
-                  </button>
+                  {signedIn !== false && (
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={step === "saving"}
+                      className="rounded-xl bg-primary text-primary-foreground px-8 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    >
+                      {step === "saving" ? "Saving…" : "Save thesis →"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setStep("review_draft")}

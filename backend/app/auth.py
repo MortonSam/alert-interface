@@ -1,4 +1,11 @@
-"""Auth: admin-token gating + Clerk JWT verification + per-user ownership."""
+"""Auth: admin-token gating + Clerk JWT verification + per-user ownership.
+
+No request is attributed to admin-local unless it carries the admin token.
+With no ADMIN_TOKEN configured nothing is admin: writes and reads of personal
+data return 401, the ledger stays behind LEDGER_PUBLIC and drafts are rate
+limited as anonymous. Local development sets ADMIN_TOKEN in backend/.env and
+stores the same value as ``admin_token`` in the browser's localStorage.
+"""
 
 from __future__ import annotations
 
@@ -19,19 +26,20 @@ def _get_admin_token(x_admin_token: str | None = Header(None)) -> str | None:
     return x_admin_token
 
 
+def _admin_token_matches(token: str | None) -> bool:
+    """True only when ADMIN_TOKEN is configured and the request carries it."""
+    return bool(settings.admin_token) and token == settings.admin_token
+
+
 async def require_admin(token: str | None = Depends(_get_admin_token)) -> None:
-    """Raise 401 if ADMIN_TOKEN is configured and the request doesn't match."""
-    if not settings.admin_token:
-        return  # no token configured → open access (dev mode)
-    if token != settings.admin_token:
+    """Raise 401 unless the request carries the configured admin token."""
+    if not _admin_token_matches(token):
         raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
 def is_admin(token: str | None = Depends(_get_admin_token)) -> bool:
-    """Return True if the request carries a valid admin token. Never raises."""
-    if not settings.admin_token:
-        return True  # dev mode
-    return token == settings.admin_token
+    """Return True if the request carries the configured admin token. Never raises."""
+    return _admin_token_matches(token)
 
 
 # ── Clerk JWKS (lazy singleton) ───────────────────────────────────────────────
@@ -81,6 +89,11 @@ def verify_clerk_jwt(token: str) -> dict:
 
 # ── User resolution ───────────────────────────────────────────────────────────
 
+SIGN_IN_REQUIRED = (
+    "Sign in required. Saved trades and watchlists belong to the account that made them; "
+    "saving is in private beta."
+)
+
 def _extract_bearer(authorization: str | None) -> str | None:
     if not authorization:
         return None
@@ -100,7 +113,7 @@ async def get_current_user(
     Priority:
     1. Bearer JWT (if JWKS configured) → Clerk user_id, upserts into users table
     2. Admin token match → "admin-local"
-    3. Neither → 401
+    3. Neither → 401 (there is no default identity)
     """
     # 1. Try Bearer JWT
     bearer = _extract_bearer(authorization)
@@ -116,18 +129,11 @@ async def get_current_user(
         return user_id
 
     # 2. Admin token
-    if settings.admin_token and x_admin_token == settings.admin_token:
-        return "admin-local"
-
-    # 2b. No admin token configured → open access (dev mode)
-    if not settings.admin_token:
+    if _admin_token_matches(x_admin_token):
         return "admin-local"
 
     # 3. No valid credentials
-    raise HTTPException(
-        status_code=401,
-        detail="Drafting is in private beta. Everything else on the site is open, and Ivy's own drafts are in the ledger.",
-    )
+    raise HTTPException(status_code=401, detail=SIGN_IN_REQUIRED)
 
 
 async def get_draft_caller(
@@ -141,8 +147,7 @@ async def get_draft_caller(
     Same priority as get_current_user but never raises 401:
     1. Bearer JWT → Clerk user_id
     2. Admin token match → "admin-local"
-    3. No admin token configured (dev mode) → "admin-local"
-    4. Otherwise → "anon"
+    3. Otherwise → "anon" (rate limited by draft_limiter)
     """
     bearer = _extract_bearer(authorization)
     if bearer and _get_jwks_client() is not None:
@@ -155,32 +160,10 @@ async def get_draft_caller(
         await db.flush()
         return user_id
 
-    if settings.admin_token and x_admin_token == settings.admin_token:
-        return "admin-local"
-
-    if not settings.admin_token:
+    if _admin_token_matches(x_admin_token):
         return "admin-local"
 
     return "anon"
-
-
-async def get_optional_user(
-    authorization: str | None = Header(None),
-    x_admin_token: str | None = Header(None),
-    db: AsyncSession = Depends(get_db),
-) -> str | None:
-    """Same as get_current_user but returns None when no credentials provided.
-
-    Used for public list endpoints where anon users see admin-local's data.
-    """
-    bearer = _extract_bearer(authorization)
-    has_admin = x_admin_token is not None
-
-    if not bearer and not has_admin:
-        return None
-
-    # Delegate to get_current_user for actual validation
-    return await get_current_user(authorization, x_admin_token, db)
 
 
 def check_ownership(resource_user_id: str, caller_user_id: str) -> None:

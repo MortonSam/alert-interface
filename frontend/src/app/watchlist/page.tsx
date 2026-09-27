@@ -1,5 +1,8 @@
 "use client";
 
+import SignedOutNotice from "@/components/SignedOutNotice";
+import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
+
 import { earningsProximity } from "@/lib/encodings/earningsProximity";
 import { PRICE_FRESHNESS } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -12,8 +15,7 @@ import {
   type WatchlistTicker,
   type BatchEnrichItem,
   type Ticker,
-  type HealthStatus,
-} from "@/lib/api";
+  type HealthStatus, ApiError } from "@/lib/api";
 
 // ── Row state ─────────────────────────────────────────────────────────────────
 
@@ -218,7 +220,7 @@ function WatchlistRow({
 
 export default function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
-  const [wlStatus, setWlStatus] = useState<"loading" | "done" | "error">("loading");
+  const [wlStatus, setWlStatus] = useState<"loading" | "done" | "error" | "signed_out">("loading");
   const [activeWlId, setActiveWlId] = useState<string | null>(null);
 
   const [rows, setRows] = useState<RowState[]>([]);
@@ -262,6 +264,10 @@ export default function WatchlistPage() {
 
   useEffect(() => {
     api.system.health().then(setHealth).catch(() => {});
+    if (!isSignedIn()) {
+      setWlStatus("signed_out");   // the list endpoint answers 401 without a token; nothing to load
+      return;
+    }
     Promise.all([api.watchlists.list(), api.tickers.list(true)]).then(
       ([wls, tickers]) => {
         setWatchlists(wls);
@@ -269,7 +275,7 @@ export default function WatchlistPage() {
         setAllTickers(tickers);
         setWlStatus("done");
       }
-    ).catch(() => setWlStatus("error"));
+    ).catch((err) => setWlStatus(err instanceof ApiError && err.status === 401 ? "signed_out" : "error"));
   }, []);
 
   // ── Initialize rows + batch-enrich when active watchlist changes ───────────
@@ -510,6 +516,10 @@ export default function WatchlistPage() {
         )}
 
         {/* Error */}
+        {wlStatus === "signed_out" && (
+          <SignedOutNotice title={WATCHLISTS_SIGN_IN_PROMPT.title} body={WATCHLISTS_SIGN_IN_PROMPT.body} />
+        )}
+
         {wlStatus === "error" && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
             Failed to load watchlists. Is the backend running?

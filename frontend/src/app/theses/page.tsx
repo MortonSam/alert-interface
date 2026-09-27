@@ -5,8 +5,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fmtTimestamp, markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
 import { fmtPnlPct } from "@/lib/pnl";
+import SignedOutNotice from "@/components/SignedOutNotice";
+import { SIGN_IN_PROMPT, isSignedIn, myTradesView } from "@/lib/session";
 import {
   api,
+  ApiError,
   type Thesis,
   type ThesisContextItem,
   type ThesisMarkRead,
@@ -651,6 +654,8 @@ const POLL_INTERVAL_MS = 60_000; // 60s — aligns with the 45s chain cache TTL;
 export default function ThesesPage() {
   const [theses, setTheses] = useState<Thesis[]>([]);
   const [loading, setLoading] = useState(true);
+  // null until the browser has been asked; the server render shows the loading skeleton
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "resolved">("all");
   const [marks, setMarks] = useState<Record<string, ThesisMarkRead | "loading" | "error">>({});
   const [stockMarks, setStockMarks] = useState<Record<string, ThesisStockMarkRead | "loading" | "error">>({});
@@ -668,6 +673,13 @@ export default function ThesesPage() {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
+    if (!isSignedIn()) {
+      // No token, no request: the list endpoint would answer 401 and there is nothing to show.
+      setSignedIn(false);
+      setLoading(false);
+      return;
+    }
+    setSignedIn(true);
     api.theses.list().then(data => {
       setTheses(data);
       setLoading(false);
@@ -681,7 +693,10 @@ export default function ThesesPage() {
       if (openSymbols.length > 0) {
         api.theses.context(openSymbols).then(setContext).catch(() => {});
       }
-    }).catch(() => setLoading(false));
+    }).catch((err) => {
+      if (err instanceof ApiError && err.status === 401) setSignedIn(false); // a token the backend rejected
+      setLoading(false);
+    });
   }, []);
 
   // Live re-mark polling for open positions during market hours.
@@ -852,6 +867,27 @@ export default function ThesesPage() {
 
   const openCount = theses.filter(t => t.status === "open" || t.status === "needs_manual_resolution").length;
   const dueCount  = theses.filter(t => t.is_due && (t.status === "open" || t.status === "needs_manual_resolution")).length;
+  const view = signedIn === null ? "loading" : myTradesView(signedIn, loading, filtered.length);
+
+  if (view === "signed_out") {
+    return (
+      <main className="min-h-screen p-8">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-start justify-between mb-6">
+            <h1 className="text-2xl font-display font-bold tracking-tight">My Trades</h1>
+            <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+              ← Home
+            </Link>
+          </div>
+          <SignedOutNotice
+            title={SIGN_IN_PROMPT.title}
+            body={SIGN_IN_PROMPT.body}
+            openPath={{ href: "/build", label: "Build and preview a trade →" }}
+          />
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen p-8">
@@ -892,7 +928,7 @@ export default function ThesesPage() {
           ))}
         </div>
 
-        {loading ? (
+        {view === "loading" ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => (
               <div key={i} className="border-b border-border/40 pb-4 animate-pulse space-y-2">
@@ -902,7 +938,7 @@ export default function ThesesPage() {
               </div>
             ))}
           </div>
-        ) : filtered.length === 0 ? (
+        ) : view === "empty" ? (
           <p className="text-muted-foreground text-sm py-8 text-center">
             {statusFilter === "all" ? "No theses yet. Start one with Build a Trade." : `No ${statusFilter} theses.`}
           </p>

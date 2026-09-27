@@ -51,8 +51,10 @@ async def test_activity_read_carries_the_run_status(monkeypatch):
         return json.dumps(outcomes) if key == "step_outcomes" else None
     monkeypatch.setattr("app.services.system_metadata_service.get_value", fake_get_value)
 
+    import app.auth as auth
+    monkeypatch.setattr(auth.settings, "admin_token", "t")   # nothing is admin without a configured token
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        body = (await client.get("/api/v1/theses/ivy-activity")).json()
+        body = (await client.get("/api/v1/theses/ivy-activity", headers={"X-Admin-Token": "t"})).json()
     assert body["last_run_exit"] == 1 and body["last_run_failed"] is True
     assert body["last_run_error"] == "X: invalid input syntax for type json"
     assert body["last_run_at"] == "2026-09-23T06:16:18+00:00"

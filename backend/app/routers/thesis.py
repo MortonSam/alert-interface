@@ -10,7 +10,7 @@ from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import check_ownership, get_current_user, get_draft_caller, get_optional_user, is_admin
+from app.auth import check_ownership, get_current_user, get_draft_caller, is_admin
 from app.thresholds import MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
@@ -2324,18 +2324,16 @@ Return ONLY this JSON object (no other text):
 async def list_theses(
     symbol: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
-    user_id: str | None = Depends(get_optional_user),
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ThesisRead]:
+    """The caller's own theses. No credentials, no rows: 401, never another account's trades."""
     q = (
         select(Thesis)
         .options(selectinload(Thesis.ticker))
         .order_by(Thesis.created_at.desc())
+        .where(Thesis.user_id == user_id)
     )
-    if user_id is not None:
-        q = q.where(Thesis.user_id == user_id)
-    else:
-        q = q.where(Thesis.user_id == "admin-local")
     if symbol:
         ticker_sq = select(Ticker.id).where(Ticker.symbol == symbol.upper()).scalar_subquery()
         q = q.where(Thesis.ticker_id == ticker_sq)
@@ -2499,14 +2497,19 @@ async def create_thesis(
 
 
 @router.get("/{thesis_id}/mark", response_model=ThesisMarkRead)
-async def mark_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> ThesisMarkRead:
-    """Compute live mark-to-market P&L for a thesis's option leg."""
+async def mark_thesis(
+    thesis_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ThesisMarkRead:
+    """Compute live mark-to-market P&L for a thesis's option leg. Owner only."""
     result = await db.execute(
         select(Thesis).options(selectinload(Thesis.ticker)).where(Thesis.id == thesis_id)
     )
     thesis = result.scalar_one_or_none()
     if not thesis:
         raise HTTPException(status_code=404, detail="Thesis not found")
+    check_ownership(thesis.user_id, user_id)
 
     loop = asyncio.get_event_loop()
     return await _compute_option_mark(thesis, loop, db=db)
@@ -2515,6 +2518,7 @@ async def mark_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) 
 @router.get("/{thesis_id}/stock-mark", response_model=ThesisStockMarkRead)
 async def stock_mark_thesis(
     thesis_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisStockMarkRead:
     """Compute live price mark for a stock-only thesis (no option leg).
@@ -2535,6 +2539,7 @@ async def stock_mark_thesis(
     thesis = result.scalar_one_or_none()
     if not thesis:
         raise HTTPException(status_code=404, detail="Thesis not found")
+    check_ownership(thesis.user_id, user_id)
     if thesis.option_type:
         raise HTTPException(
             status_code=400,
@@ -2637,13 +2642,19 @@ async def stock_mark_thesis(
 
 
 @router.get("/{thesis_id}", response_model=ThesisRead)
-async def get_thesis(thesis_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> ThesisRead:
+async def get_thesis(
+    thesis_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ThesisRead:
+    """One thesis, to its owner (or admin-local). A thesis id is not a credential."""
     result = await db.execute(
         select(Thesis).options(selectinload(Thesis.ticker)).where(Thesis.id == thesis_id)
     )
     thesis = result.scalar_one_or_none()
     if not thesis:
         raise HTTPException(status_code=404, detail="Thesis not found")
+    check_ownership(thesis.user_id, user_id)
     return _to_read(thesis)
 
 

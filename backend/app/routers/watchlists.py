@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import check_ownership, get_current_user, get_optional_user
+from app.auth import check_ownership, get_current_user
 from app.database import get_db
 from app.models.ticker import Ticker
 from app.models.watchlist import Watchlist, WatchlistTicker
@@ -20,14 +20,11 @@ def _load_items(q):
 
 @router.get("", response_model=list[WatchlistRead])
 async def list_watchlists(
-    user_id: str | None = Depends(get_optional_user),
+    user_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[Watchlist]:
-    q = select(Watchlist).order_by(Watchlist.name)
-    if user_id is not None:
-        q = q.where(Watchlist.user_id == user_id)
-    else:
-        q = q.where(Watchlist.user_id == "admin-local")
+    """The caller's own watchlists. No credentials: 401, never another account's lists."""
+    q = select(Watchlist).order_by(Watchlist.name).where(Watchlist.user_id == user_id)
     result = await db.execute(_load_items(q))
     return list(result.scalars().all())
 
@@ -46,11 +43,16 @@ async def create_watchlist(
 
 
 @router.get("/{watchlist_id}", response_model=WatchlistRead)
-async def get_watchlist(watchlist_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> Watchlist:
+async def get_watchlist(
+    watchlist_id: uuid.UUID,
+    user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Watchlist:
     result = await db.execute(_load_items(select(Watchlist).where(Watchlist.id == watchlist_id)))
     wl = result.scalar_one_or_none()
     if not wl:
         raise HTTPException(status_code=404, detail="Watchlist not found")
+    check_ownership(wl.user_id, user_id)
     return wl
 
 
