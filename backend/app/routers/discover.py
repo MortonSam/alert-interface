@@ -470,9 +470,9 @@ async def _get_base_rates(db: AsyncSession) -> dict:
         if lt >= 5 and et >= 5:
             buy_deltas.append(ls - es)
 
-    def _stats(vals: list[float]) -> tuple[float, float]:
+    def _stats(vals: list[float]) -> tuple[float | None, float]:
         if len(vals) < 3:
-            return (0.0, 1.0)
+            return (None, 1.0)    # no median: an insight says the comparison is unavailable, never "0%"
         vals_s = sorted(vals)
         med = vals_s[len(vals_s) // 2]
         variance = sum((v - med) ** 2 for v in vals_s) / len(vals_s)
@@ -509,6 +509,39 @@ def _just_reported_insight(
     return reaction_blurb(pct_1d, outcome, cond)
 
 
+# An insight compares a stock to the S&P median. When that median is not there the
+# line says so and why; it never prints the placeholder ("versus ±0.0% across the S&P").
+INDEX_BASE_NOT_LOADED = "S&P comparison unavailable: index medians were not loaded for this view"
+INDEX_BASE_TOO_FEW = "S&P comparison unavailable: fewer than 3 tickers have this stat stored"
+INDEX_BASE_ZERO = "S&P comparison unavailable: the stored index median is zero, which is not a real value"
+
+
+def _index_median(base: dict, key: str) -> tuple[float | None, str | None]:
+    """(median, None) when the index median for ``key`` is usable, else (None, reason)."""
+    stat = base.get(key)
+    if not stat:
+        return None, INDEX_BASE_NOT_LOADED
+    med = stat.get("med")
+    if med is None:
+        return None, INDEX_BASE_TOO_FEW
+    if med == 0:
+        return None, INDEX_BASE_ZERO
+    return med, None
+
+
+def _z(value: float, base: dict, key: str) -> float:
+    """|z| of ``value`` against the index; 0 when there is no index median to compare with."""
+    med, _ = _index_median(base, key)
+    if med is None:
+        return 0.0
+    return abs(value - med) / (base[key].get("sd") or 1.0)
+
+
+def _versus_index(base: dict, key: str, fmt) -> str:
+    med, reason = _index_median(base, key)
+    return f"versus {fmt(med)} across the S&P" if med is not None else f"({reason})"
+
+
 def _suggestion_insight(
     cond: dict | None, analyst: dict | None,
     buy_share: dict | None, base: dict | None,
@@ -530,37 +563,34 @@ def _suggestion_insight(
     # ── Generator: beat_rate ─────────────────────────────────────────────────
     if cond and cond["total"] >= _MIN_QUARTERS and cond["beat_count"] > 0:
         beat_rate = cond["beat_count"] / cond["total"]
-        br = base.get("beat_rate", {})
-        z = abs(beat_rate - br.get("med", 0)) / br.get("sd", 1)
+        z = _z(beat_rate, base, "beat_rate")
         pct = round(beat_rate * 100)
-        med_pct = round(br.get("med", 0) * 100)
+        versus = _versus_index(base, "beat_rate", lambda m: f"{round(m * 100)}%")
         candidates.append((
-            f"Beats estimates {pct}% of the time, versus {med_pct}% across the S&P" + _excluded_suffix(cond),
+            f"Beats estimates {pct}% of the time, {versus}" + _excluded_suffix(cond),
             z, "beat_rate",
         ))
 
     # ── Generator: priced_in (beat-but-dropped rate) ─────────────────────────
     if cond and cond["total"] >= _MIN_QUARTERS and cond["beat_count"] >= 4 and cond["bbd_count"] >= 2:
         bbd_rate = cond["bbd_count"] / cond["beat_count"]
-        bb = base.get("bbd_rate", {})
-        z = abs(bbd_rate - bb.get("med", 0)) / bb.get("sd", 1)
+        z = _z(bbd_rate, base, "bbd_rate")
         pct = round(bbd_rate * 100)
-        med_pct = round(bb.get("med", 0) * 100)
+        versus = _versus_index(base, "bbd_rate", lambda m: f"{round(m * 100)}%")
         candidates.append((
-            f"Sells off after {pct}% of beats, versus {med_pct}% across the S&P" + _excluded_suffix(cond),
+            f"Sells off after {pct}% of beats, {versus}" + _excluded_suffix(cond),
             z, "priced_in",
         ))
 
     # ── Generator: avg_move (average absolute earnings move) ─────────────────
     if cond and cond["total"] >= _MIN_QUARTERS and cond.get("avg_abs_1d") is not None:
         avg = cond["avg_abs_1d"]
-        am = base.get("avg_abs_move", {})
-        z = abs(avg - am.get("med", 0)) / am.get("sd", 1)
-        med = am.get("med", 0)
-        if med > 0 and avg >= med * 1.8:
+        z = _z(avg, base, "avg_abs_move")
+        med, _ = _index_median(base, "avg_abs_move")
+        if med is not None and avg >= med * 1.8:
             ratio = f"{avg / med:.1f}x the index median"
         else:
-            ratio = f"versus {chr(0xB1)}{med:.1f}% across the S&P"
+            ratio = _versus_index(base, "avg_abs_move", lambda m: f"{chr(0xB1)}{m:.1f}%")
         candidates.append((
             f"Averages a {chr(0xB1)}{avg:.1f}% earnings move, {ratio}",
             z, "avg_move",
@@ -572,8 +602,7 @@ def _suggestion_insight(
         avg_miss = cond.get("avg_1d_on_miss")
         if avg_beat is not None and avg_miss is not None and abs(avg_beat) > 0 and cond["miss_count"] >= 2:
             ratio = abs(avg_miss) / abs(avg_beat)
-            mr = base.get("miss_ratio", {})
-            z = abs(ratio - mr.get("med", 0)) / mr.get("sd", 1)
+            z = _z(ratio, base, "miss_ratio")
             candidates.append((
                 f"Misses cost {abs(avg_miss):.1f}% avg vs +{abs(avg_beat):.1f}% on beats",
                 z, "miss_skew",
@@ -584,8 +613,7 @@ def _suggestion_insight(
         delta = buy_share["delta"]
         share = buy_share["buy_share"]
         total = buy_share["total"]
-        bd = base.get("buy_delta", {})
-        z = abs(delta - bd.get("med", 0)) / bd.get("sd", 1)
+        z = _z(delta, base, "buy_delta")
         share_pct = round(share * 100)
         delta_pp = round(abs(delta) * 100)
         direction = "up" if delta >= 0 else "down"

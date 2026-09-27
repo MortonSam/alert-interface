@@ -2352,6 +2352,7 @@ async def thesis_context(
     from app.routers.discover import (
         _batch_conditional_stats,
         _batch_vol_regime,
+        _get_base_rates,
         _reporting_soon_insight,
         _suggestion_insight,
     )
@@ -2384,6 +2385,7 @@ async def thesis_context(
 
     cond_map = await _batch_conditional_stats(db, sym_list)
     vol_map = await _batch_vol_regime(db, sym_list)
+    base = await _get_base_rates(db)   # the same index medians the Discover cards compare against
 
     out: dict[str, dict] = {}
     for sym in sym_list:
@@ -2408,7 +2410,7 @@ async def thesis_context(
         if prox:
             insight = _reporting_soon_insight(cond, sym)
         else:
-            insight = _suggestion_insight(cond, analyst=None, buy_share=None, base=None, symbol=sym)[0]
+            insight = _suggestion_insight(cond, analyst=None, buy_share=None, base=base, symbol=sym)[0]
 
         out[sym] = {
             "earnings_proximity": prox,
