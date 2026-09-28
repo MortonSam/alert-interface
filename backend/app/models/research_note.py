@@ -1,8 +1,9 @@
 import uuid
+from decimal import Decimal
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
+from sqlalchemy import Numeric, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +40,10 @@ class ResearchNote(Base):
     verification: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     verification_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verification_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # generation + verification, from the stored token counts and the price table in research_cost
+    estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     structured_content: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     data_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("2"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="complete")

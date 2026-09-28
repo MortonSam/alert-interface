@@ -78,6 +78,7 @@ async def health_check():
         "options_data_date": None,     # chain date of the newest ingested options data
         "step_health": {},
         "step_outcomes": {},           # per step: exit, seconds, at, stderr_head / stderr_tail (traceback's last lines)
+        "research_generation": None,   # today's note generations and their estimated spend (see research_cost)
     }
 
     try:
@@ -143,6 +144,25 @@ async def health_check():
                 import json as _json
                 raw = await get_value(session, "step_outcomes")
                 result["step_outcomes"] = _json.loads(raw) if raw else {}
+            except Exception:
+                result["status"] = "degraded"
+
+            try:
+                from app.routers.research_notes import public_generation_enabled
+                from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, global_count_today
+                from app.services.research_cost import PRICES_AS_OF
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                spend = await get_value(session, f"research_gen:spend:{today}")
+                unpriced = await get_value(session, f"research_gen:unpriced:{today}")
+                result["research_generation"] = {
+                    "date": today,
+                    "generations": await global_count_today(session, RESEARCH_GENERATION_POLICY),
+                    "site_daily_cap": RESEARCH_GENERATION_POLICY.global_day,
+                    "estimated_spend_usd": round(float(spend), 4) if spend else 0.0,
+                    "unpriced_calls": int(unpriced) if unpriced else 0,   # model calls with no price in the table
+                    "prices_as_of": PRICES_AS_OF,
+                    "public": public_generation_enabled(),
+                }
             except Exception:
                 result["status"] = "degraded"
     except Exception:

@@ -307,6 +307,17 @@ export interface StructuredNote {
   financials: StructuredNoteFinancials | null;
 }
 
+/** GET /research-notes/policy: who may generate a note, the limits, the expected wait. Rendered, never retyped. */
+export interface GenerationPolicy {
+  public: boolean;
+  can_generate: boolean;            // public, or this request carried the admin token
+  owner_only_message: string | null;
+  per_ip_hour: number | null;
+  per_ip_day: number;
+  site_daily_cap: number;
+  expected_wait_seconds: [number, number];
+}
+
 export interface NoteStaleness {
   stale: boolean;
   reason: string | null;
@@ -1031,11 +1042,12 @@ export const api = {
   researchNotes: {
     get: (symbol: string) =>
       request<ResearchNote>(`/research-notes?symbol=${encodeURIComponent(symbol)}`),
-    generate: (symbol: string) =>
-      request<ResearchNote>("/research-notes/generate", {
+    generate: (symbol: string, opts?: { force?: boolean }) =>
+      request<ResearchNote>(`/research-notes/generate${opts?.force ? "?force=true" : ""}`, {
         method: "POST",
         body: JSON.stringify({ symbol }),
       }),
+    policy: () => request<GenerationPolicy>("/research-notes/policy"),
     verify: (symbol: string) =>
       request<ResearchNote>("/research-notes/verify", {
         method: "POST",

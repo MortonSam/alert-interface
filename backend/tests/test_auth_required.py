@@ -104,7 +104,9 @@ async def test_only_the_configured_token_is_admin_local(configured):
         await get_current_user(None, "wrong", None)
 
 
-OPEN_DRAFT_ROUTES = {"/api/v1/theses/draft", "/api/v1/theses/alert-pick", "/api/v1/theses/draft-alternative"}
+# open to anonymous callers on purpose, rate limited by draft_limiter policies
+OPEN_DRAFT_ROUTES = {"/api/v1/theses/draft", "/api/v1/theses/alert-pick", "/api/v1/theses/draft-alternative",
+                     "/api/v1/research-notes/generate"}
 
 
 def _dependency_calls(dependant) -> set:

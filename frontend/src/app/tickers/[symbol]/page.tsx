@@ -29,6 +29,7 @@ import {
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
   type Watchlist, type LabelRule, type NoteStaleness,
   type HealthStatus,
+  type GenerationPolicy,
 } from "@/lib/api";
 import { cn, fmtMarketCap } from "@/lib/utils";
 import { fmtPnlPct } from "@/lib/pnl";
@@ -1419,6 +1420,9 @@ export default function TickerPage() {
   const [note, setNote]               = useState<ResearchNote | null>(null);
   const [noteStatus, setNoteStatus]   = useState<"loading" | "empty" | "done" | "error">("loading");
   const [noteStaleness, setNoteStaleness] = useState<NoteStaleness | null>(null);
+  // Who may generate, the limits and the expected wait come from the API, never from copy here.
+  const [genPolicy, setGenPolicy] = useState<GenerationPolicy | null>(null);
+  const [generateRefusal, setGenerateRefusal] = useState<string | null>(null);   // a 429 or 403 sentence from the API
   const [verificationOpen, setVerificationOpen] = useState(false);
 
   const [news, setNews]               = useState<NewsResponse | null>(null);
@@ -1701,6 +1705,13 @@ export default function TickerPage() {
       .catch(() => {});
   }, [upperSymbol]);
 
+  // Research note: generation policy (public or owner-only, limits, expected wait)
+  useEffect(() => {
+    api.researchNotes.policy()
+      .then(setGenPolicy)
+      .catch(() => setGenPolicy(null));
+  }, [upperSymbol]);
+
   // Research note: poll while generating/verifying
   // Sentry dedup: fire at most once per symbol per page load
   const sentryFiredRef = useRef<Set<string>>(new Set());
@@ -1725,12 +1736,17 @@ export default function TickerPage() {
     return () => clearInterval(id);
   }, [note?.status, upperSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleGenerate() {
+  async function handleGenerate(opts?: { force?: boolean }) {
+    setGenerateRefusal(null);
     try {
-      const n = await api.researchNotes.generate(upperSymbol);
+      const n = await api.researchNotes.generate(upperSymbol, opts);
       setNote(n);
       setNoteStatus("done");
     } catch (e: unknown) {
+      if (e instanceof ApiError && (e.status === 429 || e.status === 403)) {
+        setGenerateRefusal(e.message);   // the API's own sentence: the limit and when it lifts, or owner-only
+        return;
+      }
       setNote((prev) =>
         prev
           ? { ...prev, status: "failed", error: e instanceof Error ? e.message : "Unknown error" }
@@ -1741,7 +1757,7 @@ export default function TickerPage() {
 
   function handleRegenerate() {
     if (!window.confirm("Regenerate this research note? The current note will be replaced.")) return;
-    void handleGenerate();
+    void handleGenerate({ force: true });
   }
 
   // ── Theses (positions) ────────────────────────────────────────────────────
@@ -2809,24 +2825,40 @@ export default function TickerPage() {
           )}
 
           {noteStatus === "empty" && (
-            <div className="py-6">
-              <p className="text-sm text-muted-foreground mb-4">No research note yet for {upperSymbol}.</p>
-              {typeof window !== "undefined" && !!localStorage.getItem("admin_token") && (
-                <button
-                  onClick={() => void handleGenerate()}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  Generate Research Note
-                </button>
+            <div className="py-6 space-y-3">
+              <p className="text-sm text-muted-foreground">No research note yet for {upperSymbol}.</p>
+              {genPolicy && genPolicy.can_generate && (
+                <>
+                  <button
+                    onClick={() => void handleGenerate()}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Generate research note
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    Takes about {genPolicy.expected_wait_seconds[0]} to {genPolicy.expected_wait_seconds[1]} seconds.
+                    {genPolicy.public && genPolicy.per_ip_hour != null && (
+                      <> Limited to {genPolicy.per_ip_hour} per hour and {genPolicy.per_ip_day} per day per visitor, one note per stock per day.</>
+                    )}
+                  </p>
+                </>
+              )}
+              {genPolicy && !genPolicy.can_generate && genPolicy.owner_only_message && (
+                <p className="text-sm text-muted-foreground" data-testid="generation-owner-only">{genPolicy.owner_only_message}.</p>
+              )}
+              {generateRefusal && (
+                <Callout severity="caution">{generateRefusal}</Callout>
               )}
             </div>
           )}
 
           {noteStatus === "done" && note && note.status === "generating" && (
             <div className="py-6 animate-pulse">
-              <p className="text-sm font-medium mb-1">Generating research note...</p>
+              <p className="text-sm font-medium mb-1">Generating research note…</p>
               <p className="text-xs text-muted-foreground">
-                Analyzing filings and earnings history · ~40 seconds
+                Reading filings and earnings history
+                {genPolicy ? <>, usually {genPolicy.expected_wait_seconds[0]} to {genPolicy.expected_wait_seconds[1]} seconds</> : null}.
+                The note is verified by a second model before it is shown.
               </p>
             </div>
           )}
@@ -2876,6 +2908,7 @@ export default function TickerPage() {
               <Callout severity="caution" title="Generation failed">
                 {note.error || "An unknown error occurred."}
               </Callout>
+              {generateRefusal && <Callout severity="caution">{generateRefusal}</Callout>}
               <button
                 onClick={() => void handleGenerate()}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"

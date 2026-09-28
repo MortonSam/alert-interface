@@ -1,11 +1,12 @@
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import is_admin, require_admin
+from app.auth import get_draft_caller, is_admin, require_admin
 from app.database import get_db
 from app.models.research_note import ResearchNote
 from app.schemas.research_note import (
@@ -13,7 +14,9 @@ from app.schemas.research_note import (
     ResearchNoteRead,
     ResearchNoteVerifyRequest,
 )
+from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, check_limit, get_client_ip, record_use
 from app.services.research_note_service import (
+    _resolve_ticker,
     get_research_note,
     is_verified,
     run_research_note_background,
@@ -24,20 +27,83 @@ from app.services.research_note_service import (
 
 router = APIRouter(prefix="/research-notes", tags=["research-notes"])
 
+# ── Who may generate ──────────────────────────────────────────────────────────
+#
+# Anyone, within RESEARCH_GENERATION_POLICY (per-IP hour and day limits, a site-wide
+# daily cap the owner does not skip), unless PUBLIC_RESEARCH_GENERATION is false: then
+# only the owner. The flag is read from the environment on every request, so flipping
+# the Railway variable is enough.
 
-@router.post("/generate", response_model=ResearchNoteRead, status_code=201, dependencies=[Depends(require_admin)])
+OWNER_ONLY_MESSAGE = "Note generation is currently limited to the site owner"
+EXPECTED_WAIT_SECONDS = (30, 60)   # what the page tells a visitor while a note generates
+FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def public_generation_enabled() -> bool:
+    return os.environ.get("PUBLIC_RESEARCH_GENERATION", "true").strip().lower() not in FALSE_VALUES
+
+
+def generation_policy(admin: bool) -> dict:
+    public = public_generation_enabled()
+    return {
+        "public": public,
+        "can_generate": public or admin,
+        "owner_only_message": None if public else OWNER_ONLY_MESSAGE,
+        "per_ip_hour": RESEARCH_GENERATION_POLICY.per_ip_hour,
+        "per_ip_day": RESEARCH_GENERATION_POLICY.per_ip_day,
+        "site_daily_cap": RESEARCH_GENERATION_POLICY.global_day,
+        "expected_wait_seconds": list(EXPECTED_WAIT_SECONDS),
+    }
+
+
+@router.get("/policy")
+async def get_generation_policy(admin: bool = Depends(is_admin)) -> dict:
+    """The rules the Research section renders: who may generate, the limits, the expected wait."""
+    return generation_policy(admin)
+
+
+def _has_note_from_today(note: ResearchNote, now: datetime) -> bool:
+    """One note per ticker per day: a note in progress, or one completed today, is the note."""
+    if note.status in ("generating", "verifying"):
+        return True
+    if note.status != "complete":
+        return False   # failed or verification_failed: the ticker has no note, generate again
+    generated = note.generated_at if note.generated_at.tzinfo else note.generated_at.replace(tzinfo=timezone.utc)
+    return generated.astimezone(timezone.utc).date() == now.date()
+
+
+@router.post("/generate", response_model=ResearchNoteRead, status_code=201)
 async def generate(
     payload: ResearchNoteGenerateRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
+    response: Response,
+    force: bool = Query(False, description="Owner only: regenerate a note that exists from today"),
     db: AsyncSession = Depends(get_db),
-) -> ResearchNote:
-    note = await start_research_note_generation(db, payload.ticker_id, payload.symbol)
+    caller: str = Depends(get_draft_caller),
+    admin: bool = Depends(is_admin),
+) -> ResearchNoteRead:
+    if not admin and not public_generation_enabled():
+        raise HTTPException(status_code=403, detail=OWNER_ONLY_MESSAGE)
+
+    ticker = await _resolve_ticker(db, payload.ticker_id, payload.symbol)
+    now = datetime.now(timezone.utc)
+    existing = await get_research_note(db, ticker.id, None)
+    if existing is not None and _has_note_from_today(existing, now) and not (admin and force):
+        response.status_code = 200   # nothing generated, nothing charged: today's note is returned
+        return note_for_reader(existing, admin)
+
+    client_ip = get_client_ip(request)
+    await check_limit(db, RESEARCH_GENERATION_POLICY, caller, client_ip)
+    note = await start_research_note_generation(db, ticker.id, None)
+    charged_at = await record_use(db, RESEARCH_GENERATION_POLICY, caller, client_ip, ticker.symbol)
     background_tasks.add_task(
         run_research_note_background,
         ticker_id=note.ticker_id,
-        symbol=payload.symbol or "",
+        symbol=ticker.symbol,
+        charge={"ip": client_ip, "at": charged_at},
     )
-    return note
+    return note_for_reader(note, admin)
 
 
 @router.post("/verify", response_model=ResearchNoteRead, dependencies=[Depends(require_admin)])
@@ -63,8 +129,18 @@ def note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     if failed:
         raise HTTPException(status_code=404, detail="No research note found for this ticker")
     if not is_verified(note):
-        return read.model_copy(update={"content": "", "structured_content": None, "verification": None, "error": None})
+        return read.model_copy(update={
+            "content": "", "structured_content": None, "verification": None,
+            "error": visitor_failure_reason(note) if note.status == "failed" else None,
+        })
     return read
+
+
+def visitor_failure_reason(note: ResearchNote) -> str:
+    """Why a failed generation produced nothing, in a sentence without the exception text."""
+    if note.error and "timed out" in note.error.lower():
+        return "Generation timed out before a note was produced. Your limit was not charged."
+    return "Generation failed before a note was produced. Your limit was not charged."
 
 
 @router.get("", response_model=ResearchNoteRead)

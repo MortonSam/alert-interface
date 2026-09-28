@@ -518,8 +518,8 @@ async def _run_verification(
     sections: dict | None,
     reactions: list[HistoricalReaction],
     ticker: "Ticker",
-) -> tuple[dict, str]:
-    """Call Opus to verify the note. Returns (verification_dict, model_used)."""
+) -> tuple[dict, str, int, int]:
+    """Call Opus to verify the note. Returns (verification_dict, model_used, input_tokens, output_tokens)."""
     prompt = _build_verification_prompt(note_content, filing, sections, reactions, ticker)
     client = AnthropicClient()
     raw = await client.verify_research_note(prompt)
@@ -552,7 +552,20 @@ async def _run_verification(
             print(f"    • {c['claim'][:120]}", flush=True)
             print(f"      Evidence: {c['evidence'][:160]}", flush=True)
 
-    return verification, model_used
+    return verification, model_used, raw["input_tokens"], raw["output_tokens"]
+
+
+async def _add_to_daily_spend(db: AsyncSession, cost: float | None, now: datetime) -> None:
+    """Accumulate today's estimated spend under one dated key, so /health reads a stored number."""
+    from app.services.system_metadata_service import get_value, set_value
+    if cost is None:
+        key = f"research_gen:unpriced:{now.strftime('%Y-%m-%d')}"
+        raw = await get_value(db, key)
+        await set_value(db, key, str((int(raw) if raw else 0) + 1))
+        return
+    key = f"research_gen:spend:{now.strftime('%Y-%m-%d')}"
+    raw = await get_value(db, key)
+    await set_value(db, key, f"{(float(raw) if raw else 0.0) + cost:.4f}")
 
 
 # ── Generate (two-phase: immediate upsert + background work) ─────────────────
@@ -612,11 +625,21 @@ async def start_research_note_generation(
 async def run_research_note_background(
     ticker_id: uuid.UUID,
     symbol: str,
+    charge: dict | None = None,
 ) -> None:
     """Background task: fetch context, generate with Sonnet, verify with Opus.
 
     Opens its own DB session — the request session is already closed.
+    ``charge`` is the rate-limit use recorded for the caller ({"ip", "at"}); a
+    failure at either phase refunds it, so a visitor never pays for no note.
     """
+    from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, refund_use
+    from app.services.research_cost import estimate_cost_usd
+
+    async def _refund(db: AsyncSession) -> None:
+        if charge:
+            await refund_use(db, RESEARCH_GENERATION_POLICY, charge["ip"], charge.get("at"))
+
     async with AsyncSessionLocal() as db:
         try:
             ticker = await _resolve_ticker(db, ticker_id, symbol)
@@ -657,6 +680,7 @@ async def run_research_note_background(
                 })
 
             now = datetime.now(timezone.utc)
+            gen_cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"])
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
@@ -666,12 +690,14 @@ async def run_research_note_background(
                     model_used         = gen["model_used"],
                     input_tokens       = gen["input_tokens"],
                     output_tokens      = gen["output_tokens"],
+                    estimated_cost_usd = gen_cost,
                     source_filings     = source_filings,
                     status             = "verifying",
                     data_version       = 3,
                     updated_at         = now,
                 )
             )
+            await _add_to_daily_spend(db, gen_cost, now)   # spent whether or not verification passes
             await db.commit()
 
         except Exception as exc:
@@ -683,14 +709,17 @@ async def run_research_note_background(
                 .values(status="failed", error=str(exc), updated_at=now)
             )
             await db.commit()
+            await _refund(db)
             return
 
         # ── Phase 2: Opus verification (best-effort) ─────────────────
         try:
-            verification, verification_model = await _run_verification(
+            verification, verification_model, ver_in, ver_out = await _run_verification(
                 content_text, filing, sections, reactions, ticker
             )
             now = datetime.now(timezone.utc)
+            ver_cost = estimate_cost_usd(verification_model, ver_in, ver_out)
+            total_cost = None if gen_cost is None and ver_cost is None else (gen_cost or 0.0) + (ver_cost or 0.0)
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
@@ -698,10 +727,14 @@ async def run_research_note_background(
                     verification       = verification,
                     verified_at        = now,
                     verification_model = verification_model,
+                    verification_input_tokens  = ver_in,
+                    verification_output_tokens = ver_out,
+                    estimated_cost_usd = total_cost,
                     status             = "complete",
                     updated_at         = now,
                 )
             )
+            await _add_to_daily_spend(db, ver_cost, now)
             await db.commit()
         except Exception as exc:
             print(f"Verification failed for {symbol}: {exc!r} — note withheld from visitors", flush=True)
@@ -712,6 +745,7 @@ async def run_research_note_background(
                 .values(status=STATUS_VERIFICATION_FAILED, error=f"verification failed: {exc}", updated_at=now)
             )
             await db.commit()
+            await _refund(db)   # the visitor gets no note, so the use is not theirs to pay
 
 
 STATUS_VERIFICATION_FAILED = "verification_failed"
@@ -747,7 +781,7 @@ async def verify_existing_note(
 
     filing, sections, reactions = await _fetch_context(db, ticker)
     try:
-        verification, verification_model = await _run_verification(
+        verification, verification_model, ver_in, ver_out = await _run_verification(
             note.content, filing, sections, reactions, ticker
         )
     except Exception as exc:
@@ -760,6 +794,8 @@ async def verify_existing_note(
     note.verification       = verification
     note.verified_at        = now
     note.verification_model = verification_model
+    note.verification_input_tokens = ver_in
+    note.verification_output_tokens = ver_out
     note.status             = "complete"   # a successful re-check releases a note whose first check failed
     note.error              = None
     note.updated_at         = now
