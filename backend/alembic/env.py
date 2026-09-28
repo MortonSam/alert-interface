@@ -10,8 +10,12 @@ from app.models import ticker, watchlist, event, historical_reaction, research_n
 
 config = context.config
 
-# Override sqlalchemy.url from env so the ini value is just a placeholder
+# Override sqlalchemy.url from env so the ini value is just a placeholder.
+# The driver is named explicitly: a bare postgresql:// URL means whatever the installed
+# SQLAlchemy defaults to (psycopg2 in 2.0, psycopg v3 in 2.1), and the image ships psycopg2.
 sync_url = os.environ.get("DATABASE_URL_SYNC") or config.get_main_option("sqlalchemy.url")
+if sync_url.startswith("postgresql://"):
+    sync_url = "postgresql+psycopg2://" + sync_url[len("postgresql://"):]
 config.set_main_option("sqlalchemy.url", sync_url)
 
 if config.config_file_name is not None:

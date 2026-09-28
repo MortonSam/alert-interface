@@ -3,7 +3,7 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 
 # Database
-sqlalchemy>=2.0.36
+sqlalchemy>=2.0.36,<2.1   # 2.1 resolves a bare postgresql:// URL to psycopg (v3), which the image does not have
 alembic>=1.14.0
 asyncpg>=0.30.0          # async PostgreSQL driver (FastAPI)
 psycopg2-binary>=2.9.9   # sync PostgreSQL driver (Alembic)
