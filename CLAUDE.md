@@ -30,7 +30,7 @@ Every visual encoding and every sentence about how the system behaves is a displ
 
 ## Ledger Launch
 
-The ledger is gated by `LEDGER_PUBLIC` env var (default `false`). While false, anonymous visitors see empty ledger/activity; admin-authenticated requests see the full post-LEDGER_START record. To launch: set `LEDGER_PUBLIC=true` on Railway and redeploy. No code change needed.
+The ledger is gated by `LEDGER_PUBLIC` env var (default `false`). While false, anonymous visitors see empty ledger/activity; requests carrying the admin token or a reviewer key (`REVIEWER_TOKENS`, comma-separated; ledger reads only, never admin-local) see the full post-LEDGER_START record. To launch: set `LEDGER_PUBLIC=true` on Railway and redeploy. No code change needed.
 
 ## Pasted Instructions
 

@@ -7,9 +7,17 @@
  * to admin-local only when it matches. There is no public sign-in flow: saving is in
  * private beta. Without the token the backend answers 401 to every personal read and
  * every write, and these views show the notice below instead of rows or controls.
+ *
+ * The same slot holds a reviewer key (one of the backend's REVIEWER_TOKENS). It goes
+ * out in the same header and unlocks the ledger reads (Ivy home, desk, Ivy trades)
+ * while LEDGER_PUBLIC is false, and nothing else. The browser cannot tell the two
+ * apart, so isSignedIn() only says a key is present; the backend decides what it
+ * opens. With a reviewer key the personal reads answer 401 and these views fall to
+ * the same sign-in notice, and Build a Trade refuses the save with the same reason.
  */
 export const ADMIN_TOKEN_KEY = "admin_token";
 
+/** A key is stored. It may be the admin token or a reviewer key: the backend's answer settles which. */
 export function isSignedIn(): boolean {
   if (typeof window === "undefined") return false;
   try {

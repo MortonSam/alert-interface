@@ -109,31 +109,20 @@ OPEN_DRAFT_ROUTES = {"/api/v1/theses/draft", "/api/v1/theses/alert-pick", "/api/
                      "/api/v1/research-notes/generate"}
 
 
-def _dependency_calls(dependant) -> set:
-    calls = set()
-    stack = [dependant]
-    while stack:
-        d = stack.pop()
-        if d.call is not None:
-            calls.add(d.call)
-        stack.extend(d.dependencies)
-    return calls
-
-
 def test_every_write_route_requires_credentials():
-    from fastapi.routing import APIRoute
-    unguarded = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    from tests.route_scan import api_routes, dependency_calls
+    unguarded, writes = [], 0
+    for path, route in api_routes(app):
         if not (route.methods & {"POST", "PUT", "PATCH", "DELETE"}):
             continue
-        calls = _dependency_calls(route.dependant)
-        if route.path in OPEN_DRAFT_ROUTES:
-            assert get_draft_caller in calls, route.path
+        writes += 1
+        calls = dependency_calls(route.dependant)
+        if path in OPEN_DRAFT_ROUTES:
+            assert get_draft_caller in calls, path
             continue
         if get_current_user not in calls and require_admin not in calls:
-            unguarded.append(f"{sorted(route.methods)} {route.path}")
+            unguarded.append(f"{sorted(route.methods)} {path}")
+    assert writes > 10, "the route walk found the app's write routes"
     assert unguarded == [], unguarded
 
 

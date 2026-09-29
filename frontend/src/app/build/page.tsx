@@ -6,6 +6,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
+  ApiError,
   api,
   type AlertPickRead,
   type Ticker,
@@ -894,7 +895,13 @@ function BuildTradePageContent() {
       setSavedThesis(thesis);
       setStep("done");
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Save failed. Please try again.");
+      if (err instanceof ApiError && err.status === 401) {
+        // a key the backend does not accept for saving (a reviewer key, or a stale admin token)
+        setSignedIn(false);
+        setSaveError(SAVE_REQUIRES_SIGN_IN);
+      } else {
+        setSaveError(err instanceof Error ? err.message : "Save failed. Please try again.");
+      }
       setStep("confirm");
     }
   }

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     secret_key: str = "changeme"
     cors_origins: str = "http://localhost:3000"  # comma-separated origins
     admin_token: str = ""  # if set, gates AI-powered endpoints
+    # Comma-separated reviewer keys. A request carrying one reads the ledger (desk, Ivy trades, Ivy home)
+    # while LEDGER_PUBLIC is false, exactly as the admin token does, and nothing else: no personal data,
+    # no writes, no admin endpoints, and it is never attributed to admin-local (see app.auth).
+    reviewer_tokens: str = ""
     refresh_enabled: bool = True  # startup + loop refresh pipeline
 
     # Clerk auth (empty = disabled, admin-token-only mode)

@@ -10,7 +10,7 @@ from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import check_ownership, get_current_user, get_draft_caller, is_admin
+from app.auth import check_ownership, get_current_user, get_draft_caller, may_read_ledger
 from app.thresholds import MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
@@ -1700,7 +1700,7 @@ async def ivy_rule_and_backtest(db: AsyncSession = Depends(get_db)) -> dict:
 @router.get("/ivy-activity", response_model=IvyActivityRead)
 async def ivy_activity(
     db: AsyncSession = Depends(get_db),
-    admin: bool = Depends(is_admin),
+    ledger_reader: bool = Depends(may_read_ledger),
 ) -> IvyActivityRead:
     """Latest nightly evaluation batch summary, with the latest Auto-pick run's status."""
     import json as _json
@@ -1715,7 +1715,7 @@ async def ivy_activity(
     run_fields = dict(last_run_at=run.at, last_run_exit=run.exit, last_run_error=run.error,
                       last_run_stale=run.stale, last_run_failed=run.failed)
 
-    if not LEDGER_PUBLIC and not admin:
+    if not LEDGER_PUBLIC and not ledger_reader:
         return IvyActivityRead(ledger_public=LEDGER_PUBLIC, **run_fields)
     # Find the max evaluated_at date for nightly runs (on or after ledger start)
     max_date_row = (await db.execute(
@@ -1841,13 +1841,13 @@ async def ivy_activity(
 async def list_alert_picks(
     season: int = Query(default=2, ge=1),
     db: AsyncSession = Depends(get_db),
-    admin: bool = Depends(is_admin),
+    ledger_reader: bool = Depends(may_read_ledger),
 ) -> list[AlertPickLedgerItem]:
     """List Ivy's alert picks newest-first, with live price marks and scoring.
 
     Visitor picks (source='visitor') are excluded -- they never appear in Ivy's ledger.
     """
-    if not LEDGER_PUBLIC and not admin:
+    if not LEDGER_PUBLIC and not ledger_reader:
         return []
     rows = (await db.execute(
         select(AlertPick)

@@ -1,10 +1,15 @@
-"""Auth: admin-token gating + Clerk JWT verification + per-user ownership.
+"""Auth: admin-token gating + reviewer keys + Clerk JWT verification + per-user ownership.
 
 No request is attributed to admin-local unless it carries the admin token.
 With no ADMIN_TOKEN configured nothing is admin: writes and reads of personal
 data return 401, the ledger stays behind LEDGER_PUBLIC and drafts are rate
 limited as anonymous. Local development sets ADMIN_TOKEN in backend/.env and
 stores the same value as ``admin_token`` in the browser's localStorage.
+
+A reviewer key (one of REVIEWER_TOKENS, comma-separated) travels in the same
+header and the same localStorage slot. It passes the ledger gate (may_read_ledger)
+exactly as the admin token does, and nothing else: is_admin, require_admin,
+get_current_user and get_draft_caller treat it as no credential at all.
 """
 
 from __future__ import annotations
@@ -40,6 +45,32 @@ async def require_admin(token: str | None = Depends(_get_admin_token)) -> None:
 def is_admin(token: str | None = Depends(_get_admin_token)) -> bool:
     """Return True if the request carries the configured admin token. Never raises."""
     return _admin_token_matches(token)
+
+
+# ── Reviewer keys ─────────────────────────────────────────────────────────────
+
+def reviewer_tokens() -> frozenset[str]:
+    """The configured reviewer keys; blanks (an empty var, a trailing comma) are not keys."""
+    return frozenset(t.strip() for t in settings.reviewer_tokens.split(",") if t.strip())
+
+
+def _reviewer_token_matches(token: str | None) -> bool:
+    return bool(token) and token in reviewer_tokens()
+
+
+def viewer_role(token: str | None = Depends(_get_admin_token)) -> str:
+    """'admin', 'reviewer' or 'anon' for the X-Admin-Token the request carries. Never raises."""
+    if _admin_token_matches(token):
+        return "admin"
+    if _reviewer_token_matches(token):
+        return "reviewer"
+    return "anon"
+
+
+def may_read_ledger(role: str = Depends(viewer_role)) -> bool:
+    """The ledger gate: while LEDGER_PUBLIC is false, the admin token and a reviewer key see the ledger
+    (desk, Ivy trades, Ivy home). Reads only: every route that depends on this is a GET (tested)."""
+    return role in ("admin", "reviewer")
 
 
 # ── Clerk JWKS (lazy singleton) ───────────────────────────────────────────────

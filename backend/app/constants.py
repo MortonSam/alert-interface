@@ -7,7 +7,7 @@ from datetime import date
 LEDGER_START = date(2026, 9, 15)
 
 # When false, public (anonymous) requests see empty ledger/activity.
-# Admin-authenticated requests still see the full post-LEDGER_START record.
+# Requests carrying the admin token or a reviewer key (REVIEWER_TOKENS) still see the full post-LEDGER_START record.
 # Launch = set LEDGER_PUBLIC=true on Railway, redeploy.
 LEDGER_PUBLIC = os.getenv("LEDGER_PUBLIC", "false").lower() in ("true", "1", "yes")
 

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.discover_blurbs import MIN_QUARTERS, earnings_blurb, reaction_blurb, volatility_blurb
 from app.services.pnl_math import pnl_percent
-from app.auth import is_admin
+from app.auth import may_read_ledger
 from app.services.earnings_calendar import level_of
 from app.services.next_earnings import batch_next_earnings
 from app.constants import LEDGER_PUBLIC, LEDGER_START
@@ -1033,10 +1033,10 @@ async def unusually_active(
 @router.get("/latest-pick", response_model=LatestPickResponse)
 async def latest_pick(
     db: AsyncSession = Depends(get_db),
-    admin: bool = Depends(is_admin),
+    ledger_reader: bool = Depends(may_read_ledger),
 ) -> LatestPickResponse:
     """Most recent alert pick for the teaser strip."""
-    if not LEDGER_PUBLIC and not admin:
+    if not LEDGER_PUBLIC and not ledger_reader:
         return LatestPickResponse(pick=None)
     from app.models.alert_pick import AlertPick
 

@@ -67,3 +67,26 @@ describe("the notices claim only what the code does", () => {
     }
   });
 });
+
+describe("a reviewer key in the same slot", () => {
+  it("goes out in the same header, and the backend's 401 is what sends My Trades and Watchlists to the notice", () => {
+    const api = read("lib/api.ts");
+    expect(api).toContain('localStorage.getItem("admin_token")');
+    expect(api).toContain('headers["X-Admin-Token"] = token');
+    const session = read("lib/session.ts");
+    expect(session).toContain('export const ADMIN_TOKEN_KEY = "admin_token"');
+    expect(session).toContain("reviewer key");
+    // My Trades and Watchlists: a stored key sends the request; the backend's 401 shows the notice
+    expect(read("app/theses/page.tsx")).toContain("err.status === 401) setSignedIn(false)");
+    expect(read("app/watchlist/page.tsx")).toContain('err.status === 401 ? "signed_out" : "error"');
+    // Build a Trade: a refused save says why, with the same reason as a browser with no key
+    expect(read("app/build/page.tsx")).toMatch(/err instanceof ApiError && err\.status === 401\) \{[\s\S]{0,200}setSignedIn\(false\);\s*setSaveError\(SAVE_REQUIRES_SIGN_IN\)/);
+  });
+
+  it("the Ivy pages take the ledger from the API and never from the browser's key", () => {
+    for (const page of ["app/ivy/page.tsx", "app/ivy/desk/page.tsx", "app/ivy/trades/page.tsx"]) {
+      const src = read(page);
+      expect(src).not.toMatch(/isSignedIn|admin_token|ADMIN_TOKEN_KEY/);
+    }
+  });
+});
