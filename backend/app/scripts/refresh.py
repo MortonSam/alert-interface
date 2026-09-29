@@ -61,6 +61,7 @@ STEPS: list[tuple[str, list[str]]] = [
     # exclusion list the reaction steps and every reader apply, so they act on tonight's verdict.
     ("RV rank precompute",              ["python", "-m", "app.scripts.compute_rv_ranks"]),
     ("Historical reactions (--all)",    ["python", "-m", "app.scripts.seed_historical_reactions", "--all"]),
+    ("Missed reports (catch_up_reports)", ["python", "-m", "app.scripts.catch_up_reports"]),
     ("EPS basis check (check_eps_basis)", ["python", "-m", "app.scripts.check_eps_basis", "--incremental"]),
     ("FOMC reactions",                  ["python", "-m", "app.scripts.seed_fomc_reactions"]),
     ("Dividend calendar",              ["python", "-m", "app.scripts.seed_dividends"]),
@@ -86,6 +87,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Refresh earnings calendar (Finnhub)": 300,
     "Analyst recommendations (Finnhub)": 300,
     "Historical reactions (--all)": 1800,
+    "Missed reports (catch_up_reports)": 600,     # one Finnhub call, a few EDGAR calls, re-seed of a few tickers
     "EPS basis check (check_eps_basis)": 900,     # TIME_BUDGET_SECONDS 600 + EDGAR slack
     "FOMC reactions": 900,
     "Analyst actions": 1200,

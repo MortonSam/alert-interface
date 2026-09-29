@@ -18,7 +18,9 @@ def test_incremental_selects_unchecked_and_changed_rows_only():
 def test_step_runs_after_the_earnings_seeder_with_a_budget_inside_its_timeout():
     labels = [label for label, _ in STEPS]
     i = labels.index("Historical reactions (--all)")
-    assert labels[i + 1] == "EPS basis check (check_eps_basis)"
+    # the missed-reports catch-up seeds rows the calendar missed, then the basis check covers them too
+    assert labels[i + 1] == "Missed reports (catch_up_reports)"
+    assert labels[i + 2] == "EPS basis check (check_eps_basis)"
     cmd = dict(STEPS)["EPS basis check (check_eps_basis)"]
     assert cmd[-1] == "--incremental"
     assert STEP_TIMEOUTS["EPS basis check (check_eps_basis)"] > TIME_BUDGET_SECONDS
