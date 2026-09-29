@@ -9,8 +9,11 @@ Sources, per run:
             nearest candidate is within ANNOUNCE_WINDOW_DAYS: the one source that confirms a date.
   EDGAR     8-K Item 2.02 for an estimate that passed in the last few days with no report found.
 
-Decisions are earnings_calendar.merge_future / resolve_past (pure, tested); this script fetches and
-applies. Every active ticker's earnings_checked_at is set whether or not a date came back.
+Decisions are earnings_calendar.merge_future / resolve_past / beyond_calendar_reach (pure, tested); this
+script fetches and applies. A stored date beyond a calendar source's reach (a reaction row, an actual EPS,
+an EDGAR source, a company announcement) is kept as it is whatever Finnhub or Yahoo list, and a calendar
+date within NEAR_DAYS of it is the same report and is not inserted beside it. Every active ticker's
+earnings_checked_at is set whether or not a date came back.
 
 Usage
 -----
@@ -35,7 +38,8 @@ from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 from app.services.earnings_calendar import (
-    EDGAR_202_LOOKBACK_DAYS, Candidate, FutureDate, PastResolution, merge_future, resolve_past,
+    EDGAR_202_LOOKBACK_DAYS, NEAR_DAYS, Candidate, FutureDate, PastResolution, StoredDate, beyond_calendar_reach,
+    merge_future, resolve_past,
 )
 from app.services.edgar_client import EdgarClient
 from app.services.finnhub_client import FinnhubClient
@@ -58,6 +62,7 @@ class Plan:
     inserted: list[str] = field(default_factory=list)
     replaced: list[str] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
+    kept: list[str] = field(default_factory=list)        # beyond a calendar source's reach, whatever the sources list
     confirmed: list[str] = field(default_factory=list)
     unresolved: list[str] = field(default_factory=list)
     reported: list[str] = field(default_factory=list)
@@ -70,12 +75,12 @@ class Plan:
     def fields(self) -> dict:
         return {
             "checked": self.checked, "inserted": len(self.inserted), "replaced": len(self.replaced),
-            "dropped": len(self.dropped), "confirmed": len(self.confirmed), "unresolved": len(self.unresolved),
+            "dropped": len(self.dropped), "kept": len(self.kept), "confirmed": len(self.confirmed), "unresolved": len(self.unresolved),
             "reported": len(self.reported), "superseded": len(self.superseded), "unchanged": self.unchanged,
             "no_date": len(self.no_date), "yfinance_reached": self.yfinance_reached,
             "announcements_checked": self.announcements_checked,
             "unresolved_list": self.unresolved[:50], "confirmed_examples": self.confirmed[:10],
-            "replaced_examples": self.replaced[:10], "dropped_examples": self.dropped[:10],
+            "replaced_examples": self.replaced[:10], "dropped_examples": self.dropped[:10], "kept_examples": self.kept[:10],
         }
 
 
@@ -86,7 +91,10 @@ def _map_hour(raw: str | None) -> str:
 # ── Sources ──────────────────────────────────────────────────────────────────
 
 def finnhub_by_symbol(entries: list[dict], today: date) -> tuple[dict[str, dict[date, str]], dict[str, list[date]]]:
-    """({symbol: {future date: timing}}, {symbol: [past dates with an actual EPS]})."""
+    """({symbol: {future date: timing}}, {symbol: [dates with an actual EPS]}).
+
+    An entry with an actual EPS is a report that happened, whatever its date (today's included): it is
+    evidence, never a future estimate."""
     future: dict[str, dict[date, str]] = {}
     actual: dict[str, list[date]] = {}
     for e in entries:
@@ -97,10 +105,10 @@ def finnhub_by_symbol(entries: list[dict], today: date) -> tuple[dict[str, dict[
             continue
         if not sym:
             continue
-        if d >= today:
-            future.setdefault(sym, {})[d] = _map_hour(e.get("hour"))
-        elif e.get("epsActual") is not None:
+        if e.get("epsActual") is not None:
             actual.setdefault(sym, []).append(d)
+        elif d >= today:
+            future.setdefault(sym, {})[d] = _map_hour(e.get("hour"))
     return future, actual
 
 
@@ -165,21 +173,38 @@ async def _upsert_timing(session, ticker_id, event_date: date, timing: str, sour
     await session.execute(stmt)
 
 
-async def apply_ticker(session, ticker: Ticker, decided: list[FutureDate], past: list[tuple[Event, PastResolution]],
-                       now: datetime, plan: Plan) -> None:
-    """Write one ticker's decided future dates and past resolutions."""
+async def apply_ticker(session, ticker: Ticker, stored: list[Event], protected: dict[date, str],
+                       decided: list[FutureDate], past: list[tuple[Event, PastResolution]], now: datetime, plan: Plan) -> None:
+    """Write one ticker's decided future dates and past resolutions.
+
+    `stored` is the ticker's stored dates on or after today; `protected` maps those beyond a calendar
+    source's reach to the reason (see beyond_calendar_reach). A protected date is kept as it is, and a
+    decided calendar date within NEAR_DAYS of it is the same report: absorbed, not inserted.
+    """
     today = now.date()
-    stored = list((await session.execute(
-        select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today)
-        .order_by(Event.event_date)
-    )).scalars().all())
     stored_by_date = {e.event_date: e for e in stored}
-    stored_next = stored[0].event_date if stored else None
+    stored_next = min(stored_by_date) if stored_by_date else None
     wanted = {f.day: f for f in decided}
-    wanted_next = min(wanted) if wanted else None
+
+    def _absorbed_by(day: date) -> date | None:
+        near = [p for p in protected if abs((day - p).days) <= NEAR_DAYS]
+        return min(near, key=lambda p: abs((day - p).days)) if near else None
 
     for f in decided:
         existing = stored_by_date.get(f.day)
+        anchor = _absorbed_by(f.day)
+        if anchor is not None:
+            kept = stored_by_date[anchor]
+            kept.checked_at = now
+            plan.unchanged += 1
+            if anchor != f.day:
+                plan.kept.append(f"{ticker.symbol}: {f.day.isoformat()} ({f.source}) is the {anchor.isoformat()} report ({protected[anchor]}); not inserted")
+                continue          # a different day: its time of day is not this date's
+            if kept.report_timing == "unknown" and f.timing != "unknown":
+                kept.report_timing = f.timing
+                kept.report_timing_source = f.source
+            await _upsert_timing(session, ticker.id, anchor, f.timing, f.source)
+            continue
         if existing is None:
             session.add(Event(
                 ticker_id=ticker.id, event_type=EventType.EARNINGS, event_date=f.day, title=f"{ticker.symbol} Earnings",
@@ -205,13 +230,21 @@ async def apply_ticker(session, ticker: Ticker, decided: list[FutureDate], past:
             plan.confirmed.append(f"{ticker.symbol}: {f.day.isoformat()} {f.note}")
         await _upsert_timing(session, ticker.id, f.day, f.timing, f.source)
 
+    after = {f.day for f in decided if _absorbed_by(f.day) is None} | set(protected)
+    next_after = min(after) if after else None
     for e in stored:
-        if e.event_date not in wanted:
-            lists = f"sources list {wanted_next.isoformat()}" if wanted_next else "no source lists a date"
-            plan.dropped.append(f"{ticker.symbol}: dropped {e.event_date.isoformat()} ({getattr(e.source, 'value', e.source)}); {lists}")
-            await session.delete(e)
-    if stored_next and wanted_next and stored_next != wanted_next:
-        plan.replaced.append(f"{ticker.symbol}: {stored_next.isoformat()} -> {wanted_next.isoformat()}")
+        if e.event_date in wanted:
+            continue
+        if e.event_date in protected:
+            lists = "calendar sources list " + ", ".join(d.isoformat() for d in sorted(wanted)) if wanted else "no calendar source lists it"
+            plan.kept.append(f"{ticker.symbol}: kept {e.event_date.isoformat()} ({protected[e.event_date]}); {lists}")
+            e.checked_at = now
+            continue
+        lists = f"sources list {next_after.isoformat()}" if next_after else "no source lists a date"
+        plan.dropped.append(f"{ticker.symbol}: dropped {e.event_date.isoformat()} ({getattr(e.source, 'value', e.source)}); {lists}")
+        await session.delete(e)
+    if stored_next and next_after and stored_next != next_after:
+        plan.replaced.append(f"{ticker.symbol}: {stored_next.isoformat()} -> {next_after.isoformat()}")
 
     for e, res in past:
         label = f"{ticker.symbol}: {e.event_date.isoformat()} {res.note}"
@@ -234,7 +267,7 @@ async def apply_ticker(session, ticker: Ticker, decided: list[FutureDate], past:
             e.checked_at = now
             plan.unresolved.append(label)
 
-    if not decided:
+    if not decided and not protected:
         plan.no_date.append(ticker.symbol)
     ticker.earnings_checked_at = now
     plan.checked += 1
@@ -258,7 +291,21 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
             select(HistoricalReaction.event_date).where(
                 HistoricalReaction.ticker_id == ticker.id, HistoricalReaction.event_type == EventType.EARNINGS)
         )).scalars().all())
-        last_report = reactions[-1] if reactions else None
+
+        actuals = sources["finnhub_actual"].get(sym, []) + sources["yfinance_reported"].get(sym, [])
+        stored = list((await session.execute(
+            select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today)
+            .order_by(Event.event_date)
+        )).scalars().all())
+        protected: dict[date, str] = {}
+        for e in stored:
+            reason = beyond_calendar_reach(_stored_date(e), reactions, actuals)
+            if reason:
+                protected[e.event_date] = reason
+
+        # the last report: the newest reaction row, or today's report if its evidence is already stored
+        reported = reactions + [d for d in protected if d <= today]
+        last_report = max(reported) if reported else None
         decided = merge_future(cands, last_report, today)
 
         past_estimates = list((await session.execute(
@@ -268,8 +315,8 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
         )).scalars().all())
         past: list[tuple[Event, PastResolution]] = []
         for e in past_estimates:
-            if any(abs((r - e.event_date).days) <= 2 for r in reactions):
-                continue   # it has its row: the calendar step leaves reported dates alone
+            if beyond_calendar_reach(_stored_date(e), reactions, []):
+                continue   # it has its row or a non-calendar source: the calendar step leaves it alone
             edgar_202: list[date] = []
             if edgar is not None and (today - e.event_date).days <= EDGAR_202_LOOKBACK_DAYS + 5:
                 edgar_202 = await _edgar_202_dates(edgar, sym, today)
@@ -279,9 +326,13 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
             )
             past.append((e, res))
 
-        await apply_ticker(session, ticker, decided, past, now, plan)
+        await apply_ticker(session, ticker, stored, protected, decided, past, now, plan)
     await session.commit()
     return plan
+
+
+def _stored_date(e: Event) -> StoredDate:
+    return StoredDate(e.event_date, getattr(e.source, "value", e.source), bool(e.is_confirmed), e.confirmation_note)
 
 
 async def _edgar_202_dates(edgar: EdgarClient, sym: str, today: date) -> list[date]:
@@ -380,11 +431,11 @@ async def main() -> int:
 
     print(f"\n{'─' * 60}")
     print(f"  Checked {plan.checked}  Inserted {len(plan.inserted)}  Replaced {len(plan.replaced)}  Dropped {len(plan.dropped)}  "
-          f"Confirmed {len(plan.confirmed)}  Reported {len(plan.reported)}  Superseded {len(plan.superseded)}  "
+          f"Kept {len(plan.kept)}  Confirmed {len(plan.confirmed)}  Reported {len(plan.reported)}  Superseded {len(plan.superseded)}  "
           f"Unresolved {len(plan.unresolved)}  No date {len(plan.no_date)}")
     print(f"{'─' * 60}")
     for title, rows in (("Confirmed", plan.confirmed), ("Replaced", plan.replaced), ("Unresolved", plan.unresolved),
-                        ("Reported", plan.reported), ("Superseded", plan.superseded), ("Dropped", plan.dropped)):
+                        ("Reported", plan.reported), ("Superseded", plan.superseded), ("Dropped", plan.dropped), ("Kept", plan.kept)):
         if rows:
             print(f"\n  {title} (first 10):")
             print("\n".join(f"    {r}" for r in rows[:10]))

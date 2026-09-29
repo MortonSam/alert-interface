@@ -9,8 +9,14 @@ A stored earnings date is one of:
                "expected around <date>; not confirmed", never labelled past.
 
 merge_future() decides the future dates from the sources' candidates; resolve_past() decides what
-becomes of an estimate that passed. Both are pure: the script fetches, these functions decide, the
-script applies.
+becomes of an estimate that passed; beyond_calendar_reach() says which stored dates a calendar source
+may not touch. All are pure: the script fetches, these functions decide, the script applies.
+
+Source precedence. Finnhub and Yahoo Finance are calendar sources: they list dates. A stored date
+that rests on stronger evidence, a reaction row, an actual EPS, an EDGAR filing or a company
+announcement, is never dropped, moved or downgraded because a calendar source lists something else;
+a calendar date near it is the same report and is absorbed. A calendar source may only replace or
+drop a date that came from a calendar source and that no company confirmed.
 """
 from __future__ import annotations
 
@@ -26,6 +32,8 @@ EVIDENCE_DAYS = 3                    # an actual EPS this close to the estimate 
 EDGAR_202_LOOKBACK_DAYS = 5          # 8-K Item 2.02 filed within this many days of the estimate
 
 SOURCE_LABELS = {"finnhub": "Finnhub", "yfinance": "Yahoo Finance", "company": "company announcement"}
+CALENDAR_SOURCES = ("finnhub", "yfinance")                 # events.source values a calendar source may replace
+AGREEMENT_NOTE = "confirmed: Finnhub and Yahoo Finance agree"   # two calendar sources agreeing is still calendar evidence
 
 
 @dataclass(frozen=True)
@@ -43,6 +51,14 @@ class FutureDate:
     note: str            # "confirmed: Finnhub and Yahoo Finance agree" / "estimated (Yahoo Finance); Finnhub says 2026-09-28"
     source: str          # the source whose date was kept
     timing: str = "unknown"
+
+
+@dataclass(frozen=True)
+class StoredDate:
+    day: date
+    source: str          # events.source value: "finnhub" | "yfinance" | "edgar" | "manual" | ...
+    confirmed: bool
+    note: str | None
 
 
 @dataclass
@@ -73,7 +89,7 @@ def merge_future(candidates: list[Candidate], last_report: date | None, today: d
             decided.append(FutureDate(company.day, True, f"confirmed: {company.evidence or 'company announcement'}",
                                       "company", company.timing if company.timing != "unknown" else (yf or fin or company).timing))
         elif fin is not None and yf is not None and fin.day == yf.day:
-            decided.append(FutureDate(fin.day, True, "confirmed: Finnhub and Yahoo Finance agree", "finnhub",
+            decided.append(FutureDate(fin.day, True, AGREEMENT_NOTE, "finnhub",
                                       fin.timing if fin.timing != "unknown" else yf.timing))
         elif yf is not None:
             note = "estimated (Yahoo Finance)" + (f"; Finnhub says {fin.day.isoformat()}" if fin is not None else "")
@@ -126,6 +142,29 @@ def resolve_past(
         "checked_at": checked_at.isoformat(),
     }
     return PastResolution("unresolved", f"expected around {estimate.isoformat()}; not confirmed by Finnhub, Yahoo Finance or EDGAR", None, checked)
+
+
+def beyond_calendar_reach(stored: StoredDate, reaction_dates: list[date], actual_dates: list[date]) -> str | None:
+    """Why a stored earnings date is beyond a calendar source's reach, or None if Finnhub or Yahoo may replace it.
+
+    `reaction_dates` are the ticker's reaction rows; `actual_dates` are dates Finnhub or Yahoo report an actual
+    EPS for. Any of these within EVIDENCE_DAYS of the date, an EDGAR (or other non-calendar) source, or a
+    company-announcement confirmation puts the date beyond a calendar source's reach.
+    """
+    if any(abs((d - stored.day).days) <= EVIDENCE_DAYS for d in reaction_dates):
+        return "reaction row"
+    if any(abs((d - stored.day).days) <= EVIDENCE_DAYS for d in actual_dates):
+        return "actual EPS"
+    if stored.source == "edgar":
+        return "EDGAR"
+    if stored.source not in CALENDAR_SOURCES:
+        return f"{stored.source} source"
+    note = stored.note or ""
+    if stored.confirmed and note.startswith("reported on"):
+        return "report evidence"          # written only by the evidence paths (resolve_past, catch_up_reports)
+    if stored.confirmed and note.startswith("confirmed:") and note != AGREEMENT_NOTE:
+        return "company announcement"
+    return None
 
 
 def level_of(is_confirmed: bool, unresolved_since: date | None) -> str:

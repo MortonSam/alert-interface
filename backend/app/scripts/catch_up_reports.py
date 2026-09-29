@@ -4,9 +4,11 @@ The seeder only learns about a report from the events table, so a report whose
 date was never stored (or stored wrong) is never measured. This step asks the
 sources that know a report happened: Finnhub's past earnings calendar (an entry
 with an actual EPS) for every active ticker, and EDGAR (an 8-K carrying Item
-2.02, the earnings release) for tickers we expected to report in the window but
-Finnhub does not list. For each report in the last LOOKBACK_DAYS with no
-reaction row within MATCH_TOLERANCE_DAYS of it:
+2.02, the earnings release) for tickers Finnhub does not list whose report was
+expected in the window: a stored earnings date fell inside it, or the last
+reaction row is REPORT_DUE_DAYS or more old, so a quarterly report was due whether
+or not the calendar still holds a date for it. For each report in the last
+LOOKBACK_DAYS with no reaction row within MATCH_TOLERANCE_DAYS of it:
 
   - the events row is inserted or confirmed, so the ordinary seeder path sees it;
   - if the report is at least MIN_AGE_DAYS old (the 5-day reaction window has
@@ -39,6 +41,7 @@ from app.services.step_outcomes import record_step_fields
 
 LOOKBACK_DAYS = 21
 MATCH_TOLERANCE_DAYS = 2      # a row within this many days of the report date counts as the report's row
+REPORT_DUE_DAYS = 80          # no reaction row this recent: a quarterly report was due, check EDGAR even with no stored date
 STEP_LABEL = "Missed reports (catch_up_reports)"
 EDGAR_EARNINGS_ITEM = "2.02"  # Results of Operations and Financial Condition
 
@@ -122,7 +125,9 @@ async def _reaction_dates(session, ticker_ids: dict[str, object], start: date) -
 
 
 async def _expected_in_window(session, ticker_ids: dict[str, object], start: date, today: date) -> set[str]:
-    """Tickers whose stored earnings event fell inside the window: we expected a report."""
+    """Tickers we expected to report in the window: a stored earnings date fell inside it, or the last
+    reaction row is REPORT_DUE_DAYS or more old (a quarterly report was due), so a date the calendar
+    dropped or never held does not hide the report."""
     id_to_sym = {v: k for k, v in ticker_ids.items()}
     rows = (await session.execute(
         select(Event.ticker_id).where(
@@ -131,7 +136,16 @@ async def _expected_in_window(session, ticker_ids: dict[str, object], start: dat
             Event.event_date >= start, Event.event_date <= today,
         ).distinct()
     )).all()
-    return {id_to_sym[r[0]] for r in rows}
+    expected = {id_to_sym[r[0]] for r in rows}
+    recent = (await session.execute(
+        select(HistoricalReaction.ticker_id).where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.ticker_id.in_(list(ticker_ids.values())),
+            HistoricalReaction.event_date > today - timedelta(days=REPORT_DUE_DAYS),
+        ).distinct()
+    )).all()
+    with_recent_row = {id_to_sym[r[0]] for r in recent}
+    return expected | (set(ticker_ids) - with_recent_row)
 
 
 # ── Writes ───────────────────────────────────────────────────────────────────
@@ -146,9 +160,11 @@ async def _ensure_event(session, ticker_id, d: date, source: str) -> str:
         ).order_by(Event.event_date)
     )).scalars().first()
     src = DataSource.FINNHUB if source == "finnhub" else DataSource.EDGAR
+    note = f"reported on {d.isoformat()} per " + ("Finnhub (actual EPS)" if source == "finnhub" else "EDGAR (8-K Item 2.02)")
+    now = datetime.now(timezone.utc)
     if existing is None:
-        session.add(Event(ticker_id=ticker_id, event_type=EventType.EARNINGS, event_date=d,
-                          title="Earnings", source=src, is_confirmed=True, metadata_={}))
+        session.add(Event(ticker_id=ticker_id, event_type=EventType.EARNINGS, event_date=d, title="Earnings", source=src,
+                          is_confirmed=True, confirmation_note=note, checked_at=now, metadata_={}))
         return "event inserted"
     changed = []
     if existing.event_date != d:
@@ -157,7 +173,13 @@ async def _ensure_event(session, ticker_id, d: date, source: str) -> str:
         existing.source = src
     if not existing.is_confirmed:
         existing.is_confirmed = True
+        existing.source = src
+        existing.confirmation_note = note
+        existing.unresolved_since = None
+        existing.sources_checked = None
         changed.append("confirmed")
+    if changed:
+        existing.checked_at = now
     return "event " + ", ".join(changed) if changed else "event already right"
 
 

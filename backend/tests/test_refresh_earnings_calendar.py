@@ -15,8 +15,8 @@ from app.database import ScriptSessionLocal
 from app.models.ticker import Ticker
 from app.scripts.refresh_earnings_calendar import LOOKAHEAD_DAYS, finnhub_by_symbol, reconcile
 
-NKE, LONE, NONE = "ZZNKE", "ZZLONE", "ZZNONE"
-SYMS = (NKE, LONE, NONE)
+NKE, LONE, NONE, CCL = "ZZNKE", "ZZLONE", "ZZNONE", "ZZCCL"
+SYMS = (NKE, LONE, NONE, CCL)
 NOW = datetime(2026, 9, 29, 16, 2, 47, tzinfo=timezone.utc)
 TODAY = NOW.date()
 
@@ -29,11 +29,11 @@ async def _cleanup(s):
     await s.commit()
 
 
-async def _event(s, sym, d, source, confirmed=False):
+async def _event(s, sym, d, source, confirmed=False, note=None):
     await s.execute(text("""
-        INSERT INTO events (id, ticker_id, event_type, event_date, title, source, is_confirmed, metadata, created_at, updated_at)
-        SELECT gen_random_uuid(), id, 'earnings', :d, :t, :src, :c, '{}', now(), now() FROM tickers WHERE symbol = :s
-    """), {"d": d, "t": f"{sym} Earnings", "src": source, "c": confirmed, "s": sym})
+        INSERT INTO events (id, ticker_id, event_type, event_date, title, source, is_confirmed, confirmation_note, metadata, created_at, updated_at)
+        SELECT gen_random_uuid(), id, 'earnings', :d, :t, :src, :c, :n, '{}', now(), now() FROM tickers WHERE symbol = :s
+    """), {"d": d, "t": f"{sym} Earnings", "src": source, "c": confirmed, "n": note, "s": sym})
 
 
 async def _reaction(s, sym, d, actual, est):
@@ -47,7 +47,7 @@ async def _reaction(s, sym, d, actual, est):
 async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes_expected_around():
     async with ScriptSessionLocal() as s:
         await _cleanup(s)
-        for sym in SYMS:
+        for sym in (NKE, LONE, NONE):
             await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at) VALUES (gen_random_uuid(), :s, 'calendar test', true, now(), now())"), {"s": sym})
         # NKE exactly
         await _event(s, NKE, date(2026, 6, 25), "yfinance"); await _event(s, NKE, date(2026, 6, 30), "yfinance")
@@ -65,7 +65,7 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
     }
     try:
         async with ScriptSessionLocal() as s:
-            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_(SYMS)).order_by(Ticker.symbol))).scalars().all())
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_((NKE, LONE, NONE))).order_by(Ticker.symbol))).scalars().all())
             plan = await reconcile(s, tickers, sources, NOW, edgar=None)
         assert plan.checked == 3
         assert plan.inserted == [f"{NKE}: 2026-10-01 estimated (Yahoo Finance)"]
@@ -73,6 +73,7 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
         assert plan.unresolved == [f"{LONE}: 2026-09-28 expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
         assert plan.no_date == [LONE, NONE]
         assert plan.replaced == [f"{NKE}: 2026-12-16 -> 2026-10-01"]
+        assert plan.dropped == [] and plan.kept == []
 
         async with ScriptSessionLocal() as s:
             rows = (await s.execute(text("""
@@ -88,13 +89,13 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
             (NKE, date(2026, 10, 1), "yfinance", False, None, "estimated (Yahoo Finance)", "amc"),
             (NKE, date(2026, 12, 16), "finnhub", False, None, "estimated (Finnhub)", "unknown"),
         ]
-        assert all(checked[sym] == NOW for sym in SYMS)
+        assert all(checked[sym] == NOW for sym in (NKE, LONE, NONE))
 
         # the chooser: NKE next is Oct 1 estimated; LONE is 'expected around Sep 28'
         from app.services.next_earnings import batch_next_earnings
         async with ScriptSessionLocal() as s:
             ids = {t.symbol: t.id for t in (await s.execute(select(Ticker).where(Ticker.symbol.in_(SYMS)))).scalars().all()}
-            picked = await batch_next_earnings(s, list(ids.values()))
+            picked = await batch_next_earnings(s, [ids[NKE], ids[LONE], ids[NONE]])
         nke, lone, none = picked[ids[NKE]], picked[ids[LONE]], picked[ids[NONE]]
         assert (nke.date, nke.source, nke.confirmation, nke.note) == (date(2026, 10, 1), "yfinance", "estimated", "estimated (Yahoo Finance)")
         assert (lone.date, lone.confirmation) == (date(2026, 9, 28), "expected_unconfirmed")
@@ -118,3 +119,65 @@ def test_the_script_never_keeps_a_date_as_confirmed_without_evidence():
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
     assert "CONFIRMED_HORIZON" not in src and "kept_confirmed" not in src
     assert "is_confirmed=f.confirmed" in src and "resolve_past(" in src
+
+
+@pytest.mark.asyncio
+async def test_ccl_the_edgar_report_date_is_kept_and_finnhubs_dec_18_is_added_as_the_following_estimate():
+    """CCL, production, 2026-09-29: the catch-up step stored Sep 29 from EDGAR (8-K Item 2.02) the day CCL
+    reported; the calendar step then ran with Finnhub listing only Dec 18 and deleted it. Now: Sep 29 stays as
+    it was, Dec 18 is inserted as the estimate that follows, nothing is dropped or replaced."""
+    async with ScriptSessionLocal() as s:
+        await _cleanup(s)
+        await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at) VALUES (gen_random_uuid(), :s, 'calendar test', true, now(), now())"), {"s": CCL})
+        await _event(s, CCL, date(2026, 6, 24), "yfinance")
+        await _event(s, CCL, date(2026, 9, 29), "edgar", confirmed=True, note="reported on 2026-09-29 per EDGAR (8-K Item 2.02)")
+        await _reaction(s, CCL, date(2026, 3, 27), 0.20, 0.08); await _reaction(s, CCL, date(2026, 6, 23), 0.41, 0.31)
+        await s.commit()
+    sources = {"finnhub_future": {CCL: {date(2026, 12, 18): "amc"}}, "finnhub_actual": {},
+               "yfinance_future": {}, "yfinance_reported": {CCL: [date(2026, 6, 23)]}, "company": {}}
+    try:
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol == CCL))).scalars().all())
+            plan = await reconcile(s, tickers, sources, NOW, edgar=None)
+        assert plan.dropped == [] and plan.replaced == [] and plan.superseded == [] and plan.no_date == []
+        assert plan.inserted == [f"{CCL}: 2026-12-18 estimated (Finnhub)"]
+        assert plan.kept == [f"{CCL}: kept 2026-09-29 (EDGAR); calendar sources list 2026-12-18"]
+        async with ScriptSessionLocal() as s:
+            rows = (await s.execute(text("""
+                SELECT e.event_date, e.source::text, e.is_confirmed, e.confirmation_note, e.checked_at
+                FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = :s AND e.event_type = 'earnings' ORDER BY e.event_date"""), {"s": CCL})).all()
+        assert [tuple(r) for r in rows] == [
+            (date(2026, 6, 24), "yfinance", False, None, None),
+            (date(2026, 9, 29), "edgar", True, "reported on 2026-09-29 per EDGAR (8-K Item 2.02)", NOW),
+            (date(2026, 12, 18), "finnhub", False, "estimated (Finnhub)", NOW),
+        ]
+        from app.services.next_earnings import batch_next_earnings
+        async with ScriptSessionLocal() as s:
+            tid = (await s.execute(select(Ticker.id).where(Ticker.symbol == CCL))).scalar()
+            picked = (await batch_next_earnings(s, [tid]))[tid]
+        assert (picked.date, picked.source, picked.confirmation) == (date(2026, 9, 29), "edgar", "confirmed")
+
+        # a second run with Yahoo now also listing Sep 30 for the same report: absorbed, not inserted beside it
+        sources["yfinance_future"] = {CCL: {date(2026, 9, 30): "bmo", date(2026, 12, 18): "amc"}}
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol == CCL))).scalars().all())
+            plan = await reconcile(s, tickers, sources, NOW, edgar=None)
+        assert plan.inserted == [] and plan.dropped == [] and plan.replaced == []
+        assert plan.kept == [f"{CCL}: 2026-09-30 (yfinance) is the 2026-09-29 report (EDGAR); not inserted",
+                             f"{CCL}: kept 2026-09-29 (EDGAR); calendar sources list 2026-09-30, 2026-12-18"]
+        async with ScriptSessionLocal() as s:
+            rows = (await s.execute(text("""
+                SELECT e.event_date, e.source::text, e.is_confirmed, e.confirmation_note FROM events e JOIN tickers t ON t.id = e.ticker_id
+                WHERE t.symbol = :s AND e.event_type = 'earnings' AND e.event_date >= :d ORDER BY e.event_date"""), {"s": CCL, "d": TODAY})).all()
+        assert [tuple(r) for r in rows] == [
+            (date(2026, 9, 29), "edgar", True, "reported on 2026-09-29 per EDGAR (8-K Item 2.02)"),
+            (date(2026, 12, 18), "finnhub", True, "confirmed: Finnhub and Yahoo Finance agree"),
+        ]
+    finally:
+        async with ScriptSessionLocal() as s:
+            await _cleanup(s)
+
+
+def test_a_finnhub_entry_with_an_actual_eps_is_evidence_whatever_its_date():
+    future, actual = finnhub_by_symbol([{"symbol": "CCL", "date": TODAY.isoformat(), "epsActual": 1.51, "hour": "bmo"}], TODAY)
+    assert future == {} and actual == {"CCL": [TODAY]}
