@@ -15,6 +15,8 @@ interface DiscoverCardProps {
   insight?: string | null;
   /** IV Rich / IV Cheap chip */
   volRegime?: string | null;
+  /** Where the dated fact came from and when it was checked, e.g. "Finnhub, checked today" */
+  sourceNote?: string | null;
 }
 
 export default function DiscoverCard({
@@ -26,6 +28,7 @@ export default function DiscoverCard({
   badge,
   insight,
   volRegime,
+  sourceNote,
 }: DiscoverCardProps) {
   // iv_fair is the unmarked default on a card; only rich and cheap get a chip
   const volChip = volRegime && volRegime !== "iv_fair" ? volRegimeEncoding(volRegime) : null;
@@ -76,6 +79,13 @@ export default function DiscoverCard({
       {insight && (
         <p className="text-xs text-muted-foreground truncate leading-snug mt-1">
           {insight}
+        </p>
+      )}
+
+      {/* Row 5: source of the dated fact */}
+      {sourceNote && (
+        <p className="text-[10px] font-mono text-muted-foreground/60 truncate mt-1">
+          {sourceNote}
         </p>
       )}
     </Link>

@@ -44,6 +44,8 @@ class ReportingSoonItem(BaseModel):
     industry: str | None = None
     earnings_date: str  # ISO date
     is_confirmed: bool
+    source: str | None = None        # events.source of the date ("finnhub", "yfinance", ...)
+    checked_at: str | None = None    # tickers.earnings_checked_at: when Finnhub was last asked about this ticker
     insight: str | None = None  # e.g. "Beat 18 of 20 — beats largely priced in"
     vol_regime: str | None = None  # "iv_rich" | "iv_cheap" | None
 
@@ -651,7 +653,8 @@ async def reporting_soon(
     cutoff = today + timedelta(days=days)
 
     q = (
-        select(Ticker.symbol, Ticker.name, Ticker.sector, Ticker.industry, Event.event_date, Event.is_confirmed)
+        select(Ticker.symbol, Ticker.name, Ticker.sector, Ticker.industry, Event.event_date, Event.is_confirmed,
+               Event.source, Ticker.earnings_checked_at)
         .join(Event, Event.ticker_id == Ticker.id)
         .where(
             Event.event_type == EventType.EARNINGS,
@@ -697,6 +700,8 @@ async def reporting_soon(
             sector=r.sector,
             industry=r.industry,
             earnings_date=r.event_date.isoformat(),
+            source=getattr(r.source, "value", r.source) if r.source is not None else None,
+            checked_at=r.earnings_checked_at.isoformat() if r.earnings_checked_at else None,
             is_confirmed=r.is_confirmed,
             insight=_reporting_soon_insight(cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,

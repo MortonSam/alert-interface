@@ -1,5 +1,7 @@
 "use client";
 
+import { earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
+
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { rvTier } from "@/lib/encodings/rvTier";
 import { earningsProximity, earningsProximityText } from "@/lib/encodings/earningsProximity";
@@ -299,6 +301,7 @@ export default function DiscoverPage() {
                       price={q?.price != null ? fmtPrice(q.price) : undefined}
                       insight={item.insight}
                       volRegime={item.vol_regime}
+                      sourceNote={`Next earnings ${fmtEarningsDate(item.earnings_date)} · ${earningsSourceNote(item.source, item.checked_at)}`}
                       badge={
                         <span className={`inline-flex items-center gap-1.5 rounded-full ${prox?.className ?? ""} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
                           <span className="text-[8px]">{"\u25CF"}</span>

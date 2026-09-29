@@ -220,23 +220,31 @@ async def list_tickers(
     result = await db.execute(q.order_by(Ticker.symbol))
     tickers = list(result.scalars().all())
 
-    # One extra query: next upcoming earnings date per ticker
+    # One extra query: next upcoming earnings date (and its source) per ticker
     today = date.today()
     ned_q = (
-        select(Event.ticker_id, func.min(Event.event_date).label("ned"))
+        select(Event.ticker_id, Event.event_date, Event.source)
         .where(Event.event_type == "earnings", Event.event_date >= today)
         .where(Event.ticker_id.isnot(None))
-        .group_by(Event.ticker_id)
+        .distinct(Event.ticker_id)
+        .order_by(Event.ticker_id, Event.event_date)
     )
     ned_rows = await db.execute(ned_q)
-    ned_map: dict = {row.ticker_id: row.ned for row in ned_rows}
+    ned_map: dict = {row.ticker_id: (row.event_date, row.source) for row in ned_rows}
 
     enriched: list[TickerRead] = []
     for t in tickers:
         r = TickerRead.model_validate(t)
-        r.next_earnings_date = ned_map.get(t.id)
+        ned = ned_map.get(t.id)
+        r.next_earnings_date = ned[0] if ned else None
+        r.next_earnings_source = _source_value(ned[1]) if ned else None
+        r.next_earnings_checked_at = t.earnings_checked_at
         enriched.append(r)
     return enriched
+
+
+def _source_value(source) -> str | None:
+    return getattr(source, "value", source) if source is not None else None
 
 
 @router.post("", response_model=TickerRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
@@ -2026,11 +2034,14 @@ async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) 
     # Enrich with next_earnings_date
     today = date.today()
     ned = (await db.execute(
-        select(func.min(Event.event_date))
+        select(Event.event_date, Event.source)
         .where(Event.event_type == "earnings", Event.event_date >= today, Event.ticker_id == ticker.id)
-    )).scalar_one_or_none()
+        .order_by(Event.event_date).limit(1)
+    )).first()
     r = TickerRead.model_validate(ticker)
-    r.next_earnings_date = ned
+    r.next_earnings_date = ned.event_date if ned else None
+    r.next_earnings_source = _source_value(ned.source) if ned else None
+    r.next_earnings_checked_at = ticker.earnings_checked_at
     return r
 
 

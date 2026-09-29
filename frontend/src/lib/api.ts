@@ -64,6 +64,8 @@ export interface Ticker {
   is_active: boolean;
   index_member: boolean;
   next_earnings_date: string | null;
+  next_earnings_source?: string | null;      // events.source of that date
+  next_earnings_checked_at?: string | null;  // when the calendar refresh last asked Finnhub about this ticker
   created_at: string;
   updated_at: string;
 }
@@ -524,6 +526,8 @@ export interface ReportingSoonItem {
   industry: string | null;
   earnings_date: string;
   is_confirmed: boolean;
+  source?: string | null;      // events.source of the date
+  checked_at?: string | null;  // when Finnhub was last asked about this ticker
   insight: string | null;
   vol_regime: string | null;
 }

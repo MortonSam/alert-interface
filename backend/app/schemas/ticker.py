@@ -34,6 +34,8 @@ class TickerRead(TickerBase):
 
     id: uuid.UUID
     next_earnings_date: date | None = None
+    next_earnings_source: str | None = None          # events.source of that date ("finnhub", "yfinance", ...)
+    next_earnings_checked_at: datetime | None = None  # tickers.earnings_checked_at: when Finnhub was last asked
     created_at: datetime
     updated_at: datetime
 

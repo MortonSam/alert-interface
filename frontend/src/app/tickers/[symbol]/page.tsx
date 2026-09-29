@@ -1,6 +1,7 @@
 "use client";
 
 import { rvTier } from "@/lib/encodings/rvTier";
+import { nextEarningsLine } from "@/lib/earningsSource";
 import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason , ivUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
@@ -1903,6 +1904,10 @@ export default function TickerPage() {
             {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
             {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
             {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
+          </p>
+
+          <p className="font-mono text-xs text-muted-foreground mb-2" data-testid="next-earnings-line">
+            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at)}
           </p>
 
           {/* "Why now" strip */}
