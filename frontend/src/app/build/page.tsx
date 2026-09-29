@@ -20,6 +20,7 @@ import { cn, rvRankShort } from "@/lib/utils";
 import { capture } from "@/lib/analytics";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
+import { GiBull, GiBearFace } from "react-icons/gi";
 import { HiSparkles } from "react-icons/hi2";
 import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
 import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
@@ -1114,6 +1115,7 @@ function BuildTradePageContent() {
                       : "border-border text-muted-foreground hover:border-success/50 hover:bg-success/5",
                   )}
                 >
+                  <GiBull aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
                   <div className="text-base font-bold">Bullish</div>
                   <div className="text-xs opacity-60 mt-1">expecting the stock price to rise</div>
                 </button>
@@ -1128,6 +1130,7 @@ function BuildTradePageContent() {
                       : "border-border text-muted-foreground hover:border-destructive/50 hover:bg-destructive/5",
                   )}
                 >
+                  <GiBearFace aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
                   <div className="text-base font-bold">Bearish</div>
                   <div className="text-xs opacity-60 mt-1">expecting the stock price to fall</div>
                 </button>
