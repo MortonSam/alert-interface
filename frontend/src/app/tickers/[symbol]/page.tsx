@@ -1,7 +1,7 @@
 "use client";
 
 import { rvTier } from "@/lib/encodings/rvTier";
-import { nextEarningsLine } from "@/lib/earningsSource";
+import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
 import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason , ivUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
@@ -1907,7 +1907,7 @@ export default function TickerPage() {
           </p>
 
           <p className="font-mono text-xs text-muted-foreground mb-2" data-testid="next-earnings-line">
-            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at)}
+            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note)}
           </p>
 
           {/* "Why now" strip */}
@@ -2020,6 +2020,8 @@ export default function TickerPage() {
           {eventStatus === "done" && (() => {
             const displayEvent = heroEvent ?? pastHeroEvent;
             const isPast = !heroEvent && !!pastHeroEvent;
+            // a past date is "Past" only with evidence the report happened: a reaction row on it, or a confirmed event
+            const pastHasReport = isPast && !!displayEvent && (displayEvent.is_confirmed || reactions.some(r => r.event_date === displayEvent.event_date));
             if (!displayEvent) {
               return (
                 <p className="text-sm text-muted-foreground mb-4">
@@ -2052,9 +2054,14 @@ export default function TickerPage() {
                   <span className="text-base font-semibold">{displayEvent.title}</span>
                   <span className="text-sm text-muted-foreground">{formatEventDate(displayEvent.event_date)}</span>
                   <EventTypeBadge type={displayEvent.event_type} />
-                  {isPast && (
+                  {isPast && pastHasReport && (
                     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
                       Past
+                    </span>
+                  )}
+                  {(!isPast || !pastHasReport) && displayEvent.event_type === "earnings" && (
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground" data-testid="event-confirmation">
+                      {eventConfirmationBadge(displayEvent)}
                     </span>
                   )}
                   <div className="flex items-center gap-3 ml-auto">

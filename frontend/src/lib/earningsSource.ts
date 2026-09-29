@@ -53,17 +53,48 @@ export function noDateLine(checkedAt: string | null | undefined): string {
   return checkedAt ? `No confirmed date yet (${CALENDAR_SOURCE}, ${checkedOn(checkedAt)})` : "No confirmed date yet (not yet checked)";
 }
 
-/** The full line for a ticker header. */
+export type Confirmation = "confirmed" | "estimated" | "expected_unconfirmed";
+
+/** The evidence phrase after "confirmed": from the API note, e.g. "confirmed: Finnhub and Yahoo Finance agree". */
+function confirmedBy(note: string | null | undefined, source: string | null | undefined): string {
+  const stripped = (note ?? "").replace(/^confirmed:\s*/i, "").split(";")[0].trim();
+  return stripped || sourceLabel(source) || "company";
+}
+
+/**
+ * The full line for a ticker header. The level comes from the API (next_earnings_confirmation);
+ * the wording carries it, and a date that passed unconfirmed is never called past.
+ */
 export function nextEarningsLine(
   date: string | null | undefined,
   source: string | null | undefined,
   checkedAt: string | null | undefined,
+  confirmation: Confirmation | string | null | undefined = null,
+  note: string | null | undefined = null,
   now: Date = new Date(),
 ): string {
   const checked = checkedPhrase(checkedAt, now);
   if (!date) return noDateLine(checkedAt);
+  if (confirmation === "expected_unconfirmed") {
+    return `Next earnings expected around ${fmtEarningsDate(date)}; not confirmed (${checked})`;
+  }
+  if (confirmation === "confirmed") {
+    return `Next earnings ${fmtEarningsDate(date)}, confirmed (${confirmedBy(note, source)}; ${checked})`;
+  }
   const src = sourceLabel(source);
-  return `Next earnings ${fmtEarningsDate(date)} (${src ? `${src}, ` : ""}${checked})`;
+  return `Next earnings ${fmtEarningsDate(date)}, estimated (${src ? `${src}, ` : ""}${checked})`;
+}
+
+/** The badge on an event: "Confirmed", "Estimated (Finnhub)", or "Expected, date not confirmed". Never "Past" without a report. */
+export function eventConfirmationBadge(ev: {
+  is_confirmed: boolean;
+  unresolved_since?: string | null;
+  source?: string | null;
+}): string {
+  if (ev.unresolved_since) return "Expected, date not confirmed";
+  if (ev.is_confirmed) return "Confirmed";
+  const src = sourceLabel(ev.source);
+  return src ? `Estimated (${src})` : "Estimated";
 }
 
 /** The whole card note: the dated line, or the no-date line, never blank. */
@@ -71,10 +102,14 @@ export function cardEarningsNote(
   date: string | null | undefined,
   source: string | null | undefined,
   checkedAt: string | null | undefined,
+  confirmation: Confirmation | string | null | undefined = null,
+  note: string | null | undefined = null,
   now: Date = new Date(),
 ): string {
   if (!date) return noDateLine(checkedAt);
-  return `Next earnings ${fmtEarningsDate(date)} \u00B7 ${earningsSourceNote(source, checkedAt, now)}`;
+  if (confirmation === "expected_unconfirmed") return `Earnings expected around ${fmtEarningsDate(date)}; not confirmed`;
+  if (confirmation === "confirmed") return `Earnings ${fmtEarningsDate(date)}, confirmed (${confirmedBy(note, source)})`;
+  return `Earnings ${fmtEarningsDate(date)}, estimated \u00B7 ${earningsSourceNote(source, checkedAt, now)}`;
 }
 
 /** The short form under a Discover card: "Finnhub, checked today". */

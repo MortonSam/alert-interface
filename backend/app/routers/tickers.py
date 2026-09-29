@@ -20,6 +20,7 @@ from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
 from app.schemas.options import ExplainRead, ExpectedMoveRead, HistoricalMoveStats, OptionsBundleRead, OptionsChainRead, OptionContractRead, OptionsReadRead, PutCallRead, RealizedVolRead, StrategyDataRead, StrikeData
 from app.models.system_metadata import SystemMetadata
+from app.services.next_earnings import batch_next_earnings, next_earnings_for
 from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
@@ -220,25 +221,15 @@ async def list_tickers(
     result = await db.execute(q.order_by(Ticker.symbol))
     tickers = list(result.scalars().all())
 
-    # One extra query: next upcoming earnings date (and its source) per ticker
-    today = date.today()
-    ned_q = (
-        select(Event.ticker_id, Event.event_date, Event.source)
-        .where(Event.event_type == "earnings", Event.event_date >= today)
-        .where(Event.ticker_id.isnot(None))
-        .distinct(Event.ticker_id)
-        .order_by(Event.ticker_id, Event.event_date)
-    )
-    ned_rows = await db.execute(ned_q)
-    ned_map: dict = {row.ticker_id: (row.event_date, row.source) for row in ned_rows}
+    next_map = await batch_next_earnings(db, [t.id for t in tickers])
 
     enriched: list[TickerRead] = []
     for t in tickers:
         r = TickerRead.model_validate(t)
-        ned = ned_map.get(t.id)
-        r.next_earnings_date = ned[0] if ned else None
-        r.next_earnings_source = _source_value(ned[1]) if ned else None
-        r.next_earnings_checked_at = t.earnings_checked_at
+        ne = next_map.get(t.id)
+        if ne is not None:
+            for k, v in ne.as_api().items():
+                setattr(r, k, v)
         enriched.append(r)
     return enriched
 
@@ -2033,15 +2024,9 @@ async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) 
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
     # Enrich with next_earnings_date
     today = date.today()
-    ned = (await db.execute(
-        select(Event.event_date, Event.source)
-        .where(Event.event_type == "earnings", Event.event_date >= today, Event.ticker_id == ticker.id)
-        .order_by(Event.event_date).limit(1)
-    )).first()
     r = TickerRead.model_validate(ticker)
-    r.next_earnings_date = ned.event_date if ned else None
-    r.next_earnings_source = _source_value(ned.source) if ned else None
-    r.next_earnings_checked_at = ticker.earnings_checked_at
+    for k, v in (await next_earnings_for(db, ticker.id)).as_api().items():
+        setattr(r, k, v)
     return r
 
 

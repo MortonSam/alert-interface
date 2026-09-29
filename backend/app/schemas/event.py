@@ -37,5 +37,9 @@ class EventRead(EventBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    confirmation_note: str | None = None    # earnings: why the date is confirmed or estimated
+    unresolved_since: date | None = None    # earnings: an estimate that passed with no report found
+    sources_checked: dict | None = None
+    checked_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

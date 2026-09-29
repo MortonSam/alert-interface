@@ -1,8 +1,10 @@
-"""The calendar refresh makes stored future dates equal to Finnhub's, every ticker, every run.
+"""The calendar step applied to NKE's exact rows, against the database, with the sources injected.
 
-A differing date is replaced, a date Finnhub no longer lists is dropped, a
-ticker with no Finnhub date is still marked checked, and past dates are never
-touched. Uses a synthetic ticker removed afterwards.
+Before: Sep 28 (Finnhub estimate, passed, no row), Dec 16 (Finnhub), reactions through Jun 30. Sources today:
+Finnhub future Dec 16, Yahoo future Oct 1 16:00, no company announcement, no 8-K. After: Oct 1 estimated
+(Yahoo Finance) is next, Dec 16 stays, Sep 28 is gone (replaced by the Oct 1 estimate), every ticker checked.
+A second ticker with nothing but a passed estimate ends as 'expected around'. A third with no source
+date at all is still marked checked. Uses synthetic tickers removed afterwards.
 """
 from datetime import date, datetime, timedelta, timezone
 
@@ -10,83 +12,109 @@ import pytest
 from sqlalchemy import select, text
 
 from app.database import ScriptSessionLocal
-from app.models.event import Event
 from app.models.ticker import Ticker
-from app.scripts.refresh_earnings_calendar import LOOKAHEAD_DAYS, finnhub_dates_by_symbol, reconcile
+from app.scripts.refresh_earnings_calendar import LOOKAHEAD_DAYS, finnhub_by_symbol, reconcile
 
-SYMS = ("ZZCAL1", "ZZCAL2", "ZZCAL3")
-NOW = datetime(2026, 9, 29, 6, 5, tzinfo=timezone.utc)
+NKE, LONE, NONE = "ZZNKE", "ZZLONE", "ZZNONE"
+SYMS = (NKE, LONE, NONE)
+NOW = datetime(2026, 9, 29, 16, 2, 47, tzinfo=timezone.utc)
 TODAY = NOW.date()
 
 
 async def _cleanup(s):
     await s.execute(text("DELETE FROM earnings_report_timing WHERE ticker_id IN (SELECT id FROM tickers WHERE symbol = ANY(:s))"), {"s": list(SYMS)})
+    await s.execute(text("DELETE FROM historical_reactions WHERE ticker_id IN (SELECT id FROM tickers WHERE symbol = ANY(:s))"), {"s": list(SYMS)})
     await s.execute(text("DELETE FROM events WHERE ticker_id IN (SELECT id FROM tickers WHERE symbol = ANY(:s))"), {"s": list(SYMS)})
     await s.execute(text("DELETE FROM tickers WHERE symbol = ANY(:s)"), {"s": list(SYMS)})
     await s.commit()
 
 
-async def _event(s, sym, d, source="yfinance"):
+async def _event(s, sym, d, source, confirmed=False):
     await s.execute(text("""
         INSERT INTO events (id, ticker_id, event_type, event_date, title, source, is_confirmed, metadata, created_at, updated_at)
-        SELECT gen_random_uuid(), id, 'earnings', :d, :t, :src, false, '{}', now(), now() FROM tickers WHERE symbol = :s
-    """), {"d": d, "t": f"{sym} Earnings", "src": source, "s": sym})
+        SELECT gen_random_uuid(), id, 'earnings', :d, :t, :src, :c, '{}', now(), now() FROM tickers WHERE symbol = :s
+    """), {"d": d, "t": f"{sym} Earnings", "src": source, "c": confirmed, "s": sym})
+
+
+async def _reaction(s, sym, d, actual, est):
+    await s.execute(text("""
+        INSERT INTO historical_reactions (id, ticker_id, event_type, event_date, pct_change_1d, eps_estimate, eps_actual, outcome, computation_version, created_at)
+        SELECT gen_random_uuid(), id, 'earnings', :d, 1.0, :e, :a, 'beat', 3, now() FROM tickers WHERE symbol = :s
+    """), {"d": d, "e": est, "a": actual, "s": sym})
 
 
 @pytest.mark.asyncio
-async def test_reconcile_replaces_drops_inserts_and_marks_checked():
+async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes_expected_around():
     async with ScriptSessionLocal() as s:
         await _cleanup(s)
         for sym in SYMS:
-            await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at) VALUES (gen_random_uuid(), :s, 'cal test', true, now(), now())"), {"s": sym})
-        await _event(s, "ZZCAL1", TODAY + timedelta(days=29), "finnhub")   # Finnhub now says a day later
-        await _event(s, "ZZCAL1", TODAY - timedelta(days=90), "finnhub")   # past: the record of a report, untouched
-        await _event(s, "ZZCAL2", TODAY - timedelta(days=5), "yfinance")   # reported 5 days ago (past, untouched)
-        await _event(s, "ZZCAL2", TODAY + timedelta(days=40), "yfinance")  # a future date Finnhub does not list
+            await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at) VALUES (gen_random_uuid(), :s, 'calendar test', true, now(), now())"), {"s": sym})
+        # NKE exactly
+        await _event(s, NKE, date(2026, 6, 25), "yfinance"); await _event(s, NKE, date(2026, 6, 30), "yfinance")
+        await _event(s, NKE, date(2026, 9, 28), "finnhub"); await _event(s, NKE, date(2026, 12, 16), "finnhub")
+        await _reaction(s, NKE, date(2025, 12, 18), 0.53, 0.37); await _reaction(s, NKE, date(2026, 3, 31), 0.35, 0.28); await _reaction(s, NKE, date(2026, 6, 30), 0.72, 0.13)
+        # a passed estimate with no alternative anywhere
+        await _event(s, LONE, date(2026, 9, 28), "finnhub"); await _reaction(s, LONE, date(2026, 6, 30), 1.0, 0.9)
         await s.commit()
+    sources = {
+        "finnhub_future": {NKE: {date(2026, 12, 16): "unknown"}},
+        "finnhub_actual": {},
+        "yfinance_future": {NKE: {date(2026, 10, 1): "amc"}},
+        "yfinance_reported": {NKE: [date(2026, 6, 30)], LONE: [date(2026, 6, 30)]},
+        "company": {},
+    }
     try:
-        entries = [
-            {"symbol": "ZZCAL1", "date": (TODAY + timedelta(days=30)).isoformat(), "hour": "amc"},
-            {"symbol": "ZZCAL3", "date": (TODAY + timedelta(days=70)).isoformat(), "hour": ""},
-            {"symbol": "OTHER", "date": (TODAY + timedelta(days=3)).isoformat(), "hour": "bmo"},
-            {"symbol": "ZZCAL1", "date": (TODAY - timedelta(days=1)).isoformat(), "hour": "bmo"},   # yesterday: not a future date
-        ]
         async with ScriptSessionLocal() as s:
             tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_(SYMS)).order_by(Ticker.symbol))).scalars().all())
-            plan = await reconcile(s, tickers, entries, NOW)
+            plan = await reconcile(s, tickers, sources, NOW, edgar=None)
         assert plan.checked == 3
-        assert plan.replaced == [f"ZZCAL1: {(TODAY + timedelta(days=29)).isoformat()} -> {(TODAY + timedelta(days=30)).isoformat()}"]
-        assert plan.inserted == [f"ZZCAL1: {(TODAY + timedelta(days=30)).isoformat()}", f"ZZCAL3: {(TODAY + timedelta(days=70)).isoformat()}"]
-        assert len(plan.dropped) == 2 and any(d.startswith("ZZCAL2: dropped") and "Finnhub lists nothing" in d for d in plan.dropped)
-        assert plan.no_date == ["ZZCAL2"]
+        assert plan.inserted == [f"{NKE}: 2026-10-01 estimated (Yahoo Finance)"]
+        assert plan.superseded == [f"{NKE}: 2026-09-28 replaced by the 2026-10-01 estimate"]
+        assert plan.unresolved == [f"{LONE}: 2026-09-28 expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
+        assert plan.no_date == [LONE, NONE]
+        assert plan.replaced == [f"{NKE}: 2026-12-16 -> 2026-10-01"]
 
         async with ScriptSessionLocal() as s:
             rows = (await s.execute(text("""
-                SELECT t.symbol, e.event_date, e.source::text, e.report_timing FROM events e JOIN tickers t ON t.id = e.ticker_id
-                WHERE t.symbol = ANY(:s) AND e.event_type = 'earnings' ORDER BY t.symbol, e.event_date"""), {"s": list(SYMS)})).all()
+                SELECT t.symbol, e.event_date, e.source::text, e.is_confirmed, e.unresolved_since, e.confirmation_note, e.report_timing
+                FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND e.event_type = 'earnings'
+                ORDER BY t.symbol, e.event_date"""), {"s": list(SYMS)})).all()
             checked = dict((await s.execute(text("SELECT symbol, earnings_checked_at FROM tickers WHERE symbol = ANY(:s)"), {"s": list(SYMS)})).all())
-        got = [(r[0], r[1], r[2], r[3]) for r in rows]
+        got = [tuple(r) for r in rows]
         assert got == [
-            ("ZZCAL1", TODAY - timedelta(days=90), "finnhub", "unknown"),
-            ("ZZCAL1", TODAY + timedelta(days=30), "finnhub", "amc"),
-            ("ZZCAL2", TODAY - timedelta(days=5), "yfinance", "unknown"),
-            ("ZZCAL3", TODAY + timedelta(days=70), "finnhub", "unknown"),
+            (LONE, date(2026, 9, 28), "finnhub", False, TODAY, "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR", "unknown"),
+            (NKE, date(2026, 6, 25), "yfinance", False, None, None, "unknown"),
+            (NKE, date(2026, 6, 30), "yfinance", False, None, None, "unknown"),
+            (NKE, date(2026, 10, 1), "yfinance", False, None, "estimated (Yahoo Finance)", "amc"),
+            (NKE, date(2026, 12, 16), "finnhub", False, None, "estimated (Finnhub)", "unknown"),
         ]
-        assert all(checked[sym] == NOW for sym in SYMS), "every ticker is marked checked, with or without a date"
+        assert all(checked[sym] == NOW for sym in SYMS)
+
+        # the chooser: NKE next is Oct 1 estimated; LONE is 'expected around Sep 28'
+        from app.services.next_earnings import batch_next_earnings
+        async with ScriptSessionLocal() as s:
+            ids = {t.symbol: t.id for t in (await s.execute(select(Ticker).where(Ticker.symbol.in_(SYMS)))).scalars().all()}
+            picked = await batch_next_earnings(s, list(ids.values()))
+        nke, lone, none = picked[ids[NKE]], picked[ids[LONE]], picked[ids[NONE]]
+        assert (nke.date, nke.source, nke.confirmation, nke.note) == (date(2026, 10, 1), "yfinance", "estimated", "estimated (Yahoo Finance)")
+        assert (lone.date, lone.confirmation) == (date(2026, 9, 28), "expected_unconfirmed")
+        assert none.date is None and none.checked_at == NOW
     finally:
         async with ScriptSessionLocal() as s:
             await _cleanup(s)
 
 
-def test_finnhub_dates_by_symbol_keeps_only_future_dates_and_maps_hour():
-    entries = [{"symbol": "A", "date": "2026-10-29", "hour": "amc"}, {"symbol": "A", "date": "2026-09-28", "hour": "bmo"},
-               {"symbol": "B", "date": "bad"}, {"symbol": "C", "date": "2027-01-27", "hour": "dmh"}]
-    got = finnhub_dates_by_symbol(entries, date(2026, 9, 29))
-    assert got == {"A": {date(2026, 10, 29): "amc"}, "C": {date(2027, 1, 27): "unknown"}}
+def test_finnhub_entries_split_into_future_dates_and_past_actuals():
+    future, actual = finnhub_by_symbol([
+        {"symbol": "NKE", "date": "2026-09-28", "epsActual": None}, {"symbol": "NKE", "date": "2026-12-16", "hour": "amc"},
+        {"symbol": "COST", "date": "2026-09-24", "epsActual": 6.6}, {"symbol": "X", "date": "bad"},
+    ], TODAY)
+    assert future == {"NKE": {date(2026, 12, 16): "amc"}} and actual == {"COST": [date(2026, 9, 24)]}
     assert LOOKAHEAD_DAYS == 120
 
 
-def test_the_script_never_keeps_a_date_as_confirmed():
+def test_the_script_never_keeps_a_date_as_confirmed_without_evidence():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
     assert "CONFIRMED_HORIZON" not in src and "kept_confirmed" not in src
+    assert "is_confirmed=f.confirmed" in src and "resolve_past(" in src

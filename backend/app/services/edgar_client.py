@@ -99,10 +99,11 @@ class EdgarClient:
             n = len(forms)
             items = recent.get("items") or [""] * n
             accessions = recent.get("accessionNumber") or [""] * n
+            docs = recent.get("primaryDocument") or [""] * n
             return [
-                {"filing_date": fd, "acceptance": at, "items": it or "", "accession": acc or ""}
-                for form, fd, at, it, acc in zip(
-                    forms, recent.get("filingDate", []), recent.get("acceptanceDateTime", []), items, accessions,
+                {"filing_date": fd, "acceptance": at, "items": it or "", "accession": acc or "", "primary_document": doc or ""}
+                for form, fd, at, it, acc, doc in zip(
+                    forms, recent.get("filingDate", []), recent.get("acceptanceDateTime", []), items, accessions, docs,
                 )
                 if form == "8-K"
             ]

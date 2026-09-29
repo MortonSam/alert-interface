@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.discover_blurbs import MIN_QUARTERS, earnings_blurb, reaction_blurb, volatility_blurb
 from app.services.pnl_math import pnl_percent
 from app.auth import is_admin
+from app.services.earnings_calendar import level_of
+from app.services.next_earnings import batch_next_earnings
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.thresholds import (
     DISCOVER_IV_RICH_PP, DISCOVER_IV_CHEAP_PP,
@@ -46,6 +48,8 @@ class ReportingSoonItem(BaseModel):
     is_confirmed: bool
     source: str | None = None        # events.source of the date ("finnhub", "yfinance", ...)
     checked_at: str | None = None    # tickers.earnings_checked_at: when Finnhub was last asked about this ticker
+    confirmation: str | None = None  # "confirmed" | "estimated" | "expected_unconfirmed"
+    confirmation_note: str | None = None
     insight: str | None = None  # e.g. "Beat 18 of 20 — beats largely priced in"
     vol_regime: str | None = None  # "iv_rich" | "iv_cheap" | None
 
@@ -71,29 +75,30 @@ class SuggestionItem(BaseModel):
     earnings_date: str | None = None        # next stored earnings date, None when the calendar has none
     earnings_source: str | None = None      # events.source of that date
     earnings_checked_at: str | None = None  # when Finnhub was last asked (tickers.earnings_checked_at)
+    earnings_confirmation: str | None = None   # "confirmed" | "estimated" | "expected_unconfirmed"
+    earnings_note: str | None = None
 
 
 async def _batch_next_earnings(db: AsyncSession, symbols: list[str]) -> dict[str, dict]:
-    """{symbol: {earnings_date, earnings_source, earnings_checked_at}} for the cards: a ticker with no
-    stored future date still gets its checked_at, so the card can say when the calendar was last asked."""
+    """{symbol: {earnings_date, earnings_source, earnings_checked_at, earnings_confirmation, earnings_note}} for the
+    cards, from the one chooser every page uses (services.next_earnings)."""
     if not symbols:
         return {}
-    today = date.today()
-    rows = (await db.execute(
-        select(Ticker.symbol, Ticker.earnings_checked_at).where(Ticker.symbol.in_(symbols))
-    )).all()
-    out = {r.symbol: {"earnings_date": None, "earnings_source": None,
-                      "earnings_checked_at": r.earnings_checked_at.isoformat() if r.earnings_checked_at else None}
-           for r in rows}
-    ev = (await db.execute(
-        select(Ticker.symbol, Event.event_date, Event.source)
-        .join(Event, Event.ticker_id == Ticker.id)
-        .where(Ticker.symbol.in_(symbols), Event.event_type == EventType.EARNINGS, Event.event_date >= today)
-        .distinct(Ticker.symbol).order_by(Ticker.symbol, Event.event_date)
-    )).all()
-    for r in ev:
-        out.setdefault(r.symbol, {})["earnings_date"] = r.event_date.isoformat()
-        out[r.symbol]["earnings_source"] = getattr(r.source, "value", r.source)
+    rows = (await db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.symbol.in_(symbols)))).all()
+    by_id = {r.id: r.symbol for r in rows}
+    picked = await batch_next_earnings(db, list(by_id))
+    out: dict[str, dict] = {}
+    for tid, sym in by_id.items():
+        ne = picked.get(tid)
+        if ne is None:
+            continue
+        out[sym] = {
+            "earnings_date": ne.date.isoformat() if ne.date else None,
+            "earnings_source": ne.source,
+            "earnings_checked_at": ne.checked_at.isoformat() if ne.checked_at else None,
+            "earnings_confirmation": ne.confirmation,
+            "earnings_note": ne.note,
+        }
     return out
 
 
@@ -131,6 +136,8 @@ class UnusuallyActiveItem(BaseModel):
     earnings_date: str | None = None
     earnings_source: str | None = None
     earnings_checked_at: str | None = None
+    earnings_confirmation: str | None = None   # "confirmed" | "estimated" | "expected_unconfirmed"
+    earnings_note: str | None = None
 
 
 class UnusuallyActiveResponse(BaseModel):
@@ -684,7 +691,7 @@ async def reporting_soon(
 
     q = (
         select(Ticker.symbol, Ticker.name, Ticker.sector, Ticker.industry, Event.event_date, Event.is_confirmed,
-               Event.source, Ticker.earnings_checked_at)
+               Event.source, Ticker.earnings_checked_at, Event.unresolved_since, Event.confirmation_note)
         .join(Event, Event.ticker_id == Ticker.id)
         .where(
             Event.event_type == EventType.EARNINGS,
@@ -732,6 +739,8 @@ async def reporting_soon(
             earnings_date=r.event_date.isoformat(),
             source=getattr(r.source, "value", r.source) if r.source is not None else None,
             checked_at=r.earnings_checked_at.isoformat() if r.earnings_checked_at else None,
+            confirmation=level_of(r.is_confirmed, r.unresolved_since),
+            confirmation_note=r.confirmation_note,
             is_confirmed=r.is_confirmed,
             insight=_reporting_soon_insight(cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,

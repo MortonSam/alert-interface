@@ -66,6 +66,8 @@ export interface Ticker {
   next_earnings_date: string | null;
   next_earnings_source?: string | null;      // events.source of that date
   next_earnings_checked_at?: string | null;  // when the calendar refresh last asked Finnhub about this ticker
+  next_earnings_confirmation?: "confirmed" | "estimated" | "expected_unconfirmed" | null;
+  next_earnings_note?: string | null;        // why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +82,10 @@ export interface Event {
   source: DataSource;
   source_url: string | null;
   is_confirmed: boolean;
+  confirmation_note?: string | null;
+  unresolved_since?: string | null;   // an estimate that passed with no report found: never shown as past
+  sources_checked?: Record<string, string> | null;
+  checked_at?: string | null;
   metadata_: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -528,6 +534,8 @@ export interface ReportingSoonItem {
   is_confirmed: boolean;
   source?: string | null;      // events.source of the date
   checked_at?: string | null;  // when Finnhub was last asked about this ticker
+  confirmation?: string | null;
+  confirmation_note?: string | null;
   insight: string | null;
   vol_regime: string | null;
 }
@@ -569,7 +577,9 @@ export interface SuggestionItem {
   vol_regime: string | null;
   earnings_date?: string | null;        // next stored earnings date, null when the calendar has none
   earnings_source?: string | null;
-  earnings_checked_at?: string | null;  // when Finnhub was last asked
+  earnings_checked_at?: string | null;
+  earnings_confirmation?: string | null;
+  earnings_note?: string | null;  // when Finnhub was last asked
 }
 
 export interface SuggestionsResponse {
@@ -589,6 +599,8 @@ export interface UnusuallyActiveItem {
   earnings_date?: string | null;
   earnings_source?: string | null;
   earnings_checked_at?: string | null;
+  earnings_confirmation?: string | null;
+  earnings_note?: string | null;
 }
 
 export interface LatestPickItem {
@@ -766,7 +778,9 @@ export interface ThesisDraftRead {
     atm_strike: number | null;
     earnings_date: string | null;
     earnings_source?: string | null;
-    earnings_checked_at?: string | null;  // the fact grid says 'No confirmed date yet (Finnhub, checked <date>)' with it
+    earnings_checked_at?: string | null;
+    earnings_confirmation?: string | null;
+    earnings_note?: string | null;  // the fact grid says 'No confirmed date yet (Finnhub, checked <date>)' with it
     expiration_used: string | null;
     days_to_expiration: number | null;
     expected_move_pct: number | null;      // percentage, e.g. 4.7

@@ -36,6 +36,13 @@ class Event(Base):
     # Flexible bag for source-specific data: EPS estimate, FDA drug name, FRED series ID, etc.
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     # Report timing: bmo (before market open), amc (after market close), unknown
+    # Earnings confirmation. is_confirmed is true only with evidence the company set the date (an announcement,
+    # or two independent sources agreeing) or that the report happened; confirmation_note says which.
+    confirmation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # An estimated date that passed with no report found: kept as "expected around", never labelled past.
+    unresolved_since: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sources_checked: Mapped[dict | None] = mapped_column(JSONB, nullable=True)   # {source: what it said, checked_at}
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     report_timing: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     report_timing_source: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

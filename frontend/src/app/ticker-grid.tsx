@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
 import { fmtMarketCap } from "@/lib/utils";
-import { noDateLine } from "@/lib/earningsSource";
+import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
 
 const PAGE_SIZE = 24;
 
@@ -352,7 +352,7 @@ export function TickerGrid() {
                   </div>
                   {ticker.next_earnings_date ? (
                     <div className="text-xs font-medium text-foreground/70">
-                      Earnings {fmtDate(ticker.next_earnings_date)}
+                      {cardEarningsNote(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note)}
                     </div>
                   ) : (
                     <div className="text-[11px] text-muted-foreground/70">

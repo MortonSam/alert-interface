@@ -21,7 +21,7 @@ import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
 import { HiSparkles } from "react-icons/hi2";
 import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
-import { noDateLine } from "@/lib/earningsSource";
+import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
@@ -461,7 +461,7 @@ function DraftDisplay({
             ${fb.implied_range_low?.toFixed(2) ?? "n/a"} - ${fb.implied_range_high?.toFixed(2) ?? "n/a"}
           </span>
         </span>
-        <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ?? noDateLine(fb.earnings_checked_at)}</span></span>
+        <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>
         <span>
           Hist avg ±:{" "}
           <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span>

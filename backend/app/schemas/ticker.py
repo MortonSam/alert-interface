@@ -36,6 +36,8 @@ class TickerRead(TickerBase):
     next_earnings_date: date | None = None
     next_earnings_source: str | None = None          # events.source of that date ("finnhub", "yfinance", ...)
     next_earnings_checked_at: datetime | None = None  # tickers.earnings_checked_at: when Finnhub was last asked
+    next_earnings_confirmation: str | None = None    # "confirmed" | "estimated" | "expected_unconfirmed"
+    next_earnings_note: str | None = None            # why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
     created_at: datetime
     updated_at: datetime
 

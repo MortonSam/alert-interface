@@ -358,16 +358,15 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         raise HTTPException(status_code=422, detail=f"{sym}: {EXCLUSION_REASON}")
 
     today = date.today()
-    ned_row = (await db.execute(
-        select(Event.event_date, Event.source)
-        .where(Event.event_type == "earnings", Event.event_date >= today,
-               Event.ticker_id == ticker_row.id)
-        .order_by(Event.event_date).limit(1)
-    )).first()
-    ned_val = ned_row.event_date if ned_row else None
-    earnings_str: str | None = ned_val.isoformat() if ned_val and hasattr(ned_val, "isoformat") else (str(ned_val) if ned_val else None)
-    earnings_source: str | None = getattr(ned_row.source, "value", ned_row.source) if ned_row else None
-    earnings_checked_at: str | None = ticker_row.earnings_checked_at.isoformat() if ticker_row.earnings_checked_at else None
+    from app.services.next_earnings import next_earnings_for
+    ne = await next_earnings_for(db, ticker_row.id)
+    ned_val = ne.date if ne.confirmation != "expected_unconfirmed" else None   # a passed estimate is not a date to trade around
+    earnings_str: str | None = ned_val.isoformat() if ned_val else None
+    earnings_source: str | None = ne.source
+    earnings_checked_at: str | None = ne.checked_at.isoformat() if ne.checked_at else None
+    earnings_confirmation: str | None = ne.confirmation
+    earnings_note: str | None = ne.note
+    earnings_shown: str | None = ne.date.isoformat() if ne.date else None     # what the fact grid prints, level and all
 
     reactions = (await db.execute(
         select(HistoricalReaction).where(
@@ -511,6 +510,9 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "earnings_str": earnings_str,
         "earnings_source": earnings_source,
         "earnings_checked_at": earnings_checked_at,
+        "earnings_confirmation": earnings_confirmation,
+        "earnings_note": earnings_note,
+        "earnings_shown": earnings_shown,
         "reactions": reactions,
         "hist_avg": hist_avg,
         "hist_max": hist_max,
@@ -723,9 +725,11 @@ async def _run_draft_generation(
         "current_price":             round(current_price, 2),
         "price_as_of":               price_as_of,
         "atm_strike":                atm_strike,
-        "earnings_date":             earnings_str,
+        "earnings_date":             data.get("earnings_shown") or earnings_str,
         "earnings_source":           data.get("earnings_source"),
         "earnings_checked_at":       data.get("earnings_checked_at"),
+        "earnings_confirmation":     data.get("earnings_confirmation"),
+        "earnings_note":             data.get("earnings_note"),
         "expiration_used":           chosen_exp,
         "days_to_expiration":        days_to_exp,
         "expected_move_pct":         round(expected_move_pct * 100, 2) if expected_move_pct else None,
