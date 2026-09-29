@@ -119,9 +119,9 @@ class OptionsReadRead(BaseModel):
     facts: dict                      # the strings injected into the prompt, formatted from fact_values
     fact_values: dict | None = None  # the numeric block the read was generated from; the page renders its rows from it
     model_used: str
-    generated_at: str                # ISO UTC of generation
+    generated_at: str | None         # ISO UTC of generation; None when there is no read
     cached: bool                     # True if served from today's cache
-    as_of: str                       # when this response was built (not the chain date)
+    as_of: str | None                # the generation time of the read served (never the request time); None when no read
     available: bool = True           # False: no read; `reason` says why in plain language
     reason: str | None = None
     chain_date: str | None = None    # chain_last_trade of the chain the read describes

@@ -1297,6 +1297,21 @@ async def _compute_alert_pick_v2(
 
 # ── Alert-pick service function ───────────────────────────────────────────────
 
+def existing_pick_fields(existing) -> dict:
+    """What the duplicate-pick response says about the pick that already exists: its own date and direction.
+
+    `generated_at` is the stored pick's timestamp, never the request time, so the
+    banner "Ivy already has an open bullish pick on X from Sep 20, 2026" is true.
+    """
+    return {
+        "existing_pick": True,
+        "existing_since": existing.generated_at.date().isoformat(),
+        "generated_at": existing.generated_at.isoformat(),
+        "picked_direction": existing.picked_direction,
+        "leans": [SignalLean(**l) for l in (existing.leans or [])],
+    }
+
+
 async def compute_alert_pick(
     sym: str,
     db: AsyncSession,
@@ -1331,15 +1346,8 @@ async def compute_alert_pick(
         ).order_by(AlertPick.generated_at.desc()).limit(1)
     )).scalar_one_or_none()
     if existing and not use_v2:
-        return {
-            "outcome": "open_pick_exists",
-            "leans": [SignalLean(**l) for l in existing.leans],
-            "pick_id": existing.id,
-            "note": f"Existing open pick {existing.id}",
-            "generated_at": existing.generated_at.isoformat(),
-            "existing_pick": True,
-            "draft": None,
-        }
+        return {"outcome": "open_pick_exists", "pick_id": existing.id,
+                "note": f"Existing open pick {existing.id}", "draft": None, **existing_pick_fields(existing)}
 
     # ── v2 engine path ────────────────────────────────────────────────────────
     if use_v2:
@@ -1347,15 +1355,13 @@ async def compute_alert_pick(
         # implied are computed and shown); it is only never persisted or narrated again.
         result = await _compute_alert_pick_v2(sym, db, source, dry_run or existing is not None, generated_at)
         if existing is not None:
-            since = existing.generated_at.date().isoformat()
+            fields = existing_pick_fields(existing)
             result.update({
                 "outcome": "open_pick_exists",
-                "leans": [SignalLean(**l) for l in existing.leans],
                 "pick_id": existing.id,
-                "note": f"Existing open pick {existing.id} since {since}",
-                "existing_pick": True,
-                "existing_since": since,
+                "note": f"Existing open pick {existing.id} since {fields['existing_since']}",
                 "draft": None,
+                **fields,
             })
         return result
 

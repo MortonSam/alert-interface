@@ -26,6 +26,8 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.routers.thesis import compute_alert_pick
+from app.services.nightly_run import AUTO_PICK_STEP
+from app.services.step_outcomes import record_step_fields
 from app.services import chain_store
 from app.services.trading_calendar import nth_trading_day_after
 
@@ -283,6 +285,31 @@ async def _check_chain_freshness(session, sym: str) -> tuple[bool, str | None]:
     return False, None
 
 
+async def _open_count(session) -> int:
+    return (await session.execute(
+        select(func.count()).select_from(AlertPick).where(
+            AlertPick.status == "open",
+            AlertPick.season == 2,
+            func.cast(AlertPick.generated_at, SADate) >= LEDGER_START,
+        )
+    )).scalar_one()
+
+
+async def _load_candidates(session, today: date, horizon: date) -> list:
+    return (await session.execute(
+        select(Ticker.symbol, func.min(Event.event_date).label("next_earnings"))
+        .join(Event, Event.ticker_id == Ticker.id)
+        .where(
+            Ticker.is_active.is_(True),
+            Event.event_type == EventType.EARNINGS,
+            Event.event_date > today,
+            Event.event_date <= horizon,
+        )
+        .group_by(Ticker.symbol)
+        .order_by(func.min(Event.event_date))
+    )).all()
+
+
 async def _run(dry_run: bool = False) -> int:
     today = date.today()
     # 1-5 trading days ~ next 7 calendar days; exclude today (event day
@@ -291,27 +318,10 @@ async def _run(dry_run: bool = False) -> int:
 
     async with AsyncSessionLocal() as session:
         # ── Count currently open v2 picks (season 2, post-LEDGER_START only) ──
-        open_count = (await session.execute(
-            select(func.count()).select_from(AlertPick).where(
-                AlertPick.status == "open",
-                AlertPick.season == 2,
-                func.cast(AlertPick.generated_at, SADate) >= LEDGER_START,
-            )
-        )).scalar_one()
+        open_count = await _open_count(session)
 
         # ── Find candidates: active tickers with earnings in 1-5 trading days
-        candidates = (await session.execute(
-            select(Ticker.symbol, func.min(Event.event_date).label("next_earnings"))
-            .join(Event, Event.ticker_id == Ticker.id)
-            .where(
-                Ticker.is_active.is_(True),
-                Event.event_type == EventType.EARNINGS,
-                Event.event_date > today,
-                Event.event_date <= horizon,
-            )
-            .group_by(Ticker.symbol)
-            .order_by(func.min(Event.event_date))
-        )).all()
+        candidates = await _load_candidates(session, today, horizon)
 
         if not candidates:
             print("[auto-pick] No candidates with earnings in next 1-5 trading days.")
@@ -321,6 +331,7 @@ async def _run(dry_run: bool = False) -> int:
 
         new_picks = 0
         draft_attempts = 0
+        failures: list[dict] = []   # every candidate that raised; the run finishes the others, then exits 1
         for row in candidates:
             sym = row.symbol
             next_earnings = row.next_earnings
@@ -407,13 +418,16 @@ async def _run(dry_run: bool = False) -> int:
                 if not dry_run:
                     _log_evaluation(session, sym, "error", note=f"HTTP {exc.status_code}: {exc.detail}")
                 print(f"  {sym} (earnings {next_earnings}): error -- {exc.detail}")
+                failures.append({"symbol": sym, "error": f"HTTP {exc.status_code}: {exc.detail}",
+                                 "traceback": traceback.format_exc()})
 
             except Exception as exc:
                 tb = traceback.format_exc()
                 draft_attempts += 1
                 if not dry_run:
                     _log_evaluation(session, sym, "error", note=f"{type(exc).__name__}: {exc}")
-                print(f"  {sym} (earnings {next_earnings}): error -- {exc}\n{tb}")
+                print(f"  {sym} (earnings {next_earnings}): error -- {exc}")
+                failures.append({"symbol": sym, "error": f"{type(exc).__name__}: {exc}", "traceback": tb})
 
         if not dry_run:
             await session.commit()
@@ -423,9 +437,36 @@ async def _run(dry_run: bool = False) -> int:
             f"\n[auto-pick] Done. {new_picks} new picks, "
             f"{open_count + new_picks} total open v2, "
             f"{len(candidates)} evaluated, "
-            f"{draft_attempts} draft attempts."
+            f"{draft_attempts} draft attempts, "
+            f"{len(failures)} raised."
         )
-    return 0
+    return await finish(failures, dry_run)
+
+
+async def finish(failures: list[dict], dry_run: bool = False) -> int:
+    """Exit 1 when any candidate raised, after the others were evaluated.
+
+    The tracebacks go to stderr so refresh.py keeps them in the step outcome's
+    stderr_tail (whose last line is the exception the desk prints); the failed
+    symbols are recorded on the step outcome so the desk can name them.
+    """
+    if not failures:
+        if not dry_run:
+            await record_step_fields(AUTO_PICK_STEP, {"failed_symbols": [], "failed_count": 0})
+        return 0
+    symbols = [f["symbol"] for f in failures]
+    print(f"[auto-pick] {len(failures)} candidate(s) raised: {', '.join(symbols)}", file=sys.stderr, flush=True)
+    for f in failures:
+        print(f"--- {f['symbol']}\n{f['traceback'].rstrip()}", file=sys.stderr, flush=True)
+    # the last stderr line names the exception and the symbol: that is what the desk shows
+    last = failures[-1]
+    print(f"{last['error']} [{last['symbol']}]", file=sys.stderr, flush=True)
+    if not dry_run:
+        await record_step_fields(AUTO_PICK_STEP, {
+            "failed_symbols": symbols, "failed_count": len(failures),
+            "failed_errors": {f["symbol"]: f["error"][:200] for f in failures},
+        })
+    return 1
 
 
 def _log_evaluation(

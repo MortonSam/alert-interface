@@ -2606,7 +2606,8 @@ export default function TickerPage() {
               </p>
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
               <p className="text-[10px] text-muted-foreground/60 mt-2">
-                {optionsRead.model_used} · {optionsRead.cached ? "cached" : "generated"} {timeAgo(optionsRead.generated_at)}
+                {optionsRead.model_used}
+                {optionsRead.generated_at ? ` · ${optionsRead.cached ? "cached" : "generated"} ${timeAgo(optionsRead.generated_at)}` : ""}
                 {chainDateLabel(optionsRead)}
               </p>
             </div>

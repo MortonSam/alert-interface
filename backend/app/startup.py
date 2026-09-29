@@ -31,12 +31,12 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncIterator
-from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.services.nightly_clock import LAST_NIGHTLY_SLOT_KEY, NIGHTLY_RUN_UTC_HOUR, latest_slot, nightly_due, slot_key
 from app.services.system_metadata_service import get_value, set_value
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -84,8 +84,12 @@ async def _write_sentinel(value: str) -> None:
 
 # ── Background worker ──────────────────────────────────────────────────────────
 
-async def _background_refresh() -> None:
-    """Run the full refresh pipeline in a thread-pool so the event loop stays free."""
+async def _background_refresh(nightly_slot: str | None = None) -> None:
+    """Run the full refresh pipeline in a thread-pool so the event loop stays free.
+
+    `nightly_slot` is set only by the refresh loop; a boot refresh passes None and
+    so never marks a nightly slot as done.
+    """
     global _refresh_in_progress
     try:
         # Local import so the scripts package is not pulled in at module load time.
@@ -101,6 +105,8 @@ async def _background_refresh() -> None:
             now_iso = datetime.now(tz=timezone.utc).isoformat()
             async with AsyncSessionLocal() as session:
                 await set_value(session, _KEY_LAST_REFRESHED, now_iso)
+                if nightly_slot:
+                    await set_value(session, LAST_NIGHTLY_SLOT_KEY, nightly_slot)   # ran, whatever the exit code
                 await session.commit()
         except Exception:
             pass
@@ -126,31 +132,35 @@ async def _background_refresh() -> None:
 
 # ── Refresh loop ──────────────────────────────────────────────────────────────
 
-LOOP_INTERVAL_SECONDS = 30 * 60  # 30 minutes
-LOOP_STALENESS_HOURS = 20
-LOOP_WINDOW_START = 1   # 01:00 ET
-LOOP_WINDOW_END   = 5   # 05:00 ET
-_ET = ZoneInfo("America/New_York")
+LOOP_INTERVAL_SECONDS = 5 * 60   # how often the loop looks at the clock; the run starts within this of the slot
 
 
-def _in_overnight_window(now_et: datetime) -> bool:
-    """True when now_et falls within [LOOP_WINDOW_START, LOOP_WINDOW_END) hours ET."""
-    return LOOP_WINDOW_START <= now_et.hour < LOOP_WINDOW_END
+def nightly_refresh_due(now: datetime, last_slot_done: str | None, last_refreshed_raw: str | None) -> bool:
+    """The nightly is due when the latest clock slot has not been run by the loop.
+
+    `last_refreshed_raw` is accepted and ignored on purpose: a boot refresh that
+    finished at 14:51Z refreshes the data but never satisfies that night's slot.
+    """
+    del last_refreshed_raw
+    return nightly_due(now, last_slot_done)
+
+
+async def _read_last_slot() -> str | None:
+    async with AsyncSessionLocal() as session:
+        return await get_value(session, LAST_NIGHTLY_SLOT_KEY)
 
 
 async def _refresh_loop() -> None:
-    """Permanent background loop: check every 30 min, refresh if stale + in window."""
+    """Permanent background loop: every LOOP_INTERVAL_SECONDS, start the nightly if its slot is due."""
     while True:
         await asyncio.sleep(LOOP_INTERVAL_SECONDS)
         try:
-            now_et = datetime.now(_ET)
-            if not _in_overnight_window(now_et):
+            now = datetime.now(timezone.utc)
+            last_raw, sentinel_raw = await _read_sentinel()
+            last_slot = await _read_last_slot()
+            if not nightly_refresh_due(now, last_slot, last_raw):
                 continue
 
-            last_raw, sentinel_raw = await _read_sentinel()
-            now = datetime.now(timezone.utc)
-
-            # Skip if another refresh is in-flight
             if sentinel_raw and sentinel_raw != "done":
                 try:
                     started_at = datetime.fromisoformat(sentinel_raw)
@@ -163,31 +173,21 @@ async def _refresh_loop() -> None:
             if _refresh_in_progress:
                 continue
 
-            # Staleness check
-            should_refresh = last_raw is None
-            if not should_refresh and last_raw:
-                try:
-                    last_dt = datetime.fromisoformat(last_raw)
-                    should_refresh = (now - last_dt).total_seconds() / 3600 > LOOP_STALENESS_HOURS
-                except ValueError:
-                    should_refresh = True
-
-            if should_refresh:
-                _log("Refresh loop: data is stale and within overnight window — starting refresh.")
-                _refresh_in_progress = True
-                await _write_sentinel(now.isoformat())
-                asyncio.create_task(_background_refresh())
+            slot = slot_key(latest_slot(now))
+            _log(f"Refresh loop: nightly slot {slot} ({NIGHTLY_RUN_UTC_HOUR:02d}:00Z) is due — starting refresh.")
+            _refresh_in_progress = True
+            await _write_sentinel(now.isoformat())
+            asyncio.create_task(_background_refresh(nightly_slot=slot))
 
         except Exception as exc:
             _log(f"Refresh loop iteration failed ({exc}) — will retry next cycle.")
 
 
-# ── Lifespan ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     """Check staleness on startup; fire one background refresh if needed.
-    Start a permanent loop that re-checks every 30 min overnight."""
+    Start a permanent loop that starts the nightly at its clock slot."""
     global _refresh_in_progress
 
     if not settings.refresh_enabled:

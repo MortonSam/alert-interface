@@ -1325,13 +1325,13 @@ async def get_options_read(
     sym = symbol.upper()
     loop = asyncio.get_event_loop()
     today = date.today()
-    as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
     def absent(reason: str, detail: str | None) -> OptionsReadRead:
+        """No read: no timestamps either. The reason is the whole story; nothing here is dated by the request."""
         print(f"[options-read] {sym}: absent ({detail or reason})", flush=True)
         return OptionsReadRead(
             symbol=sym, content="", facts={}, model_used="none",
-            generated_at=as_of, cached=False, as_of=as_of,
+            generated_at=None, cached=False, as_of=None,
             available=False, reason=reason, chain_date=chain_date,
         )
 
@@ -1370,7 +1370,7 @@ async def get_options_read(
         return OptionsReadRead(
             symbol=sym, content=cached["content"], facts=cached["facts"], fact_values=cached.get("fact_values"),
             model_used=cached["model_used"], generated_at=cached["generated_at"],
-            cached=True, as_of=as_of, chain_date=chain_date,
+            cached=True, as_of=cached["generated_at"], chain_date=chain_date,
             iv_rv_spread_pp=spread_pp_cached,
             spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
         )
@@ -1617,7 +1617,7 @@ STRICT RULES:
     return OptionsReadRead(
         symbol=sym, content=gen["content"], facts=facts, fact_values=fact_values,
         model_used=gen["model_used"], generated_at=generated_at,
-        cached=False, as_of=as_of, chain_date=chain_date, regenerated_for=stale_fact,
+        cached=False, as_of=generated_at, chain_date=chain_date, regenerated_for=stale_fact,
         iv_rv_spread_pp=iv_rv_spread_pp,
         spread_labeled=_to_options_lr(spread_label(iv_rv_spread_pp)),
     )

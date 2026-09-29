@@ -475,9 +475,9 @@ export interface OptionsRead {
   content: string;                        // 2–4 sentence interpretive prose
   facts: Record<string, string>;          // precomputed fact strings injected into the prompt
   model_used: string;
-  generated_at: string;
+  generated_at: string | null;   // null when there is no read (available false): the reason is the whole answer
   cached: boolean;
-  as_of: string;
+  as_of: string | null;         // the generation time of the read served, never the request time
   iv_rv_spread_pp: number | null;         // IV minus RV in percentage points (positive = options rich)
   spread_labeled: LabelRule | null;
   available?: boolean;

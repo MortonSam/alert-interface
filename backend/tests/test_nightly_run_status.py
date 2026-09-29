@@ -12,8 +12,8 @@ T = lambda h, m=0: datetime(2026, 9, 23, h, m, tzinfo=timezone.utc)  # noqa: E73
 
 
 def test_expected_run_is_this_morning_after_the_grace_else_yesterday():
-    assert expected_run_at(T(7, 30)) == T(6)
-    assert expected_run_at(T(6, 20)) == datetime(2026, 9, 22, 6, tzinfo=timezone.utc)   # still inside the grace
+    assert expected_run_at(T(8, 30)) == T(6)
+    assert expected_run_at(T(7, 30)) == datetime(2026, 9, 22, 6, tzinfo=timezone.utc)   # still inside the 2h grace
     assert expected_run_at(T(2)) == datetime(2026, 9, 22, 6, tzinfo=timezone.utc)
 
 

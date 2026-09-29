@@ -10,9 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from app.services.nightly_clock import NIGHTLY_GRACE, NIGHTLY_RUN_UTC_HOUR, latest_slot  # noqa: E402  (one clock for the loop and the desk)
+
 AUTO_PICK_STEP = "Auto-pick"
-NIGHTLY_RUN_UTC_HOUR = 6      # the Railway cron starts the nightly at 06:00Z
-NIGHTLY_GRACE = timedelta(hours=1)   # Auto-pick sits ~16 min into the run; allow slow nights
 
 
 @dataclass(frozen=True)
@@ -40,9 +40,8 @@ def exception_line(stderr_tail: str | None, stderr_head: str | None) -> str | No
 
 
 def expected_run_at(now: datetime) -> datetime:
-    """The most recent nightly start that should have completed by `now`."""
-    today_run = now.replace(hour=NIGHTLY_RUN_UTC_HOUR, minute=0, second=0, microsecond=0)
-    return today_run if now >= today_run + NIGHTLY_GRACE else today_run - timedelta(days=1)
+    """The most recent nightly start that should have completed by `now`: the latest slot, less the grace."""
+    return latest_slot(now - NIGHTLY_GRACE)
 
 
 def auto_pick_status(step_outcomes: dict | None, now: datetime | None = None) -> RunStatus:
