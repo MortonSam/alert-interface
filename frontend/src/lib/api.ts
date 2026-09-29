@@ -567,6 +567,9 @@ export interface SuggestionItem {
   event_date: string | null;  // ISO date of the reaction's report
   insight: string | null;
   vol_regime: string | null;
+  earnings_date?: string | null;        // next stored earnings date, null when the calendar has none
+  earnings_source?: string | null;
+  earnings_checked_at?: string | null;  // when Finnhub was last asked
 }
 
 export interface SuggestionsResponse {
@@ -583,6 +586,9 @@ export interface UnusuallyActiveItem {
   tier: "extreme" | "elevated";
   insight: string | null;
   vol_regime: string | null;
+  earnings_date?: string | null;
+  earnings_source?: string | null;
+  earnings_checked_at?: string | null;
 }
 
 export interface LatestPickItem {
@@ -759,6 +765,8 @@ export interface ThesisDraftRead {
     options_as_of?: string | null;   // YYYY-MM-DD of the options chain the draft used
     atm_strike: number | null;
     earnings_date: string | null;
+    earnings_source?: string | null;
+    earnings_checked_at?: string | null;  // the fact grid says 'No confirmed date yet (Finnhub, checked <date>)' with it
     expiration_used: string | null;
     days_to_expiration: number | null;
     expected_move_pct: number | null;      // percentage, e.g. 4.7

@@ -1,6 +1,6 @@
 "use client";
 
-import { earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
+import { cardEarningsNote, earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
 
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { rvTier } from "@/lib/encodings/rvTier";
@@ -397,6 +397,7 @@ export default function DiscoverPage() {
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                     insight={item.insight}
                     volRegime={item.vol_regime}
+                    sourceNote={cardEarningsNote(item.earnings_date, item.earnings_source, item.earnings_checked_at)}
                   />
                 ))}
               </div>
@@ -426,6 +427,7 @@ export default function DiscoverPage() {
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                     insight={item.insight}
                     volRegime={item.vol_regime}
+                    sourceNote={cardEarningsNote(item.earnings_date, item.earnings_source, item.earnings_checked_at)}
                     badge={
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-muted text-foreground px-2.5 py-1 text-[11px] font-semibold tracking-wide">
                         <span className="text-[8px]">{"\u25CF"}</span>

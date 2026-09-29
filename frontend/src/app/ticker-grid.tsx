@@ -5,6 +5,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
 import { fmtMarketCap } from "@/lib/utils";
+import { noDateLine } from "@/lib/earningsSource";
 
 const PAGE_SIZE = 24;
 
@@ -349,9 +350,13 @@ export function TickerGrid() {
                       <span className="shrink-0">{fmtMcap(ticker.market_cap)}</span>
                     ) : null}
                   </div>
-                  {ticker.next_earnings_date && (
+                  {ticker.next_earnings_date ? (
                     <div className="text-xs font-medium text-foreground/70">
                       Earnings {fmtDate(ticker.next_earnings_date)}
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-muted-foreground/70">
+                      {noDateLine(ticker.next_earnings_checked_at)}
                     </div>
                   )}
                 </div>

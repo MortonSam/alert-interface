@@ -358,12 +358,16 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         raise HTTPException(status_code=422, detail=f"{sym}: {EXCLUSION_REASON}")
 
     today = date.today()
-    ned_val = (await db.execute(
-        select(func.min(Event.event_date))
+    ned_row = (await db.execute(
+        select(Event.event_date, Event.source)
         .where(Event.event_type == "earnings", Event.event_date >= today,
                Event.ticker_id == ticker_row.id)
-    )).scalar_one_or_none()
+        .order_by(Event.event_date).limit(1)
+    )).first()
+    ned_val = ned_row.event_date if ned_row else None
     earnings_str: str | None = ned_val.isoformat() if ned_val and hasattr(ned_val, "isoformat") else (str(ned_val) if ned_val else None)
+    earnings_source: str | None = getattr(ned_row.source, "value", ned_row.source) if ned_row else None
+    earnings_checked_at: str | None = ticker_row.earnings_checked_at.isoformat() if ticker_row.earnings_checked_at else None
 
     reactions = (await db.execute(
         select(HistoricalReaction).where(
@@ -505,6 +509,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "current_price": current_price,
         "ticker_row": ticker_row,
         "earnings_str": earnings_str,
+        "earnings_source": earnings_source,
+        "earnings_checked_at": earnings_checked_at,
         "reactions": reactions,
         "hist_avg": hist_avg,
         "hist_max": hist_max,
@@ -718,6 +724,8 @@ async def _run_draft_generation(
         "price_as_of":               price_as_of,
         "atm_strike":                atm_strike,
         "earnings_date":             earnings_str,
+        "earnings_source":           data.get("earnings_source"),
+        "earnings_checked_at":       data.get("earnings_checked_at"),
         "expiration_used":           chosen_exp,
         "days_to_expiration":        days_to_exp,
         "expected_move_pct":         round(expected_move_pct * 100, 2) if expected_move_pct else None,

@@ -36,6 +36,23 @@ export function fmtEarningsDate(iso: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/** "checked Sep 29" from an ISO timestamp, or "not yet checked". */
+export function checkedOn(checkedAt: string | null | undefined): string {
+  if (!checkedAt) return "not yet checked";
+  const t = new Date(checkedAt);
+  if (isNaN(t.getTime())) return "not yet checked";
+  return `checked ${t.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+}
+
+/**
+ * The line for a ticker the calendar left without a future date. The calendar refresh is the only
+ * writer of earnings_checked_at and it asks Finnhub, so the source it names is Finnhub.
+ */
+export const CALENDAR_SOURCE = "Finnhub";
+export function noDateLine(checkedAt: string | null | undefined): string {
+  return checkedAt ? `No confirmed date yet (${CALENDAR_SOURCE}, ${checkedOn(checkedAt)})` : "No confirmed date yet (not yet checked)";
+}
+
 /** The full line for a ticker header. */
 export function nextEarningsLine(
   date: string | null | undefined,
@@ -44,9 +61,20 @@ export function nextEarningsLine(
   now: Date = new Date(),
 ): string {
   const checked = checkedPhrase(checkedAt, now);
-  if (!date) return `No next earnings date (${checked})`;
+  if (!date) return noDateLine(checkedAt);
   const src = sourceLabel(source);
   return `Next earnings ${fmtEarningsDate(date)} (${src ? `${src}, ` : ""}${checked})`;
+}
+
+/** The whole card note: the dated line, or the no-date line, never blank. */
+export function cardEarningsNote(
+  date: string | null | undefined,
+  source: string | null | undefined,
+  checkedAt: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!date) return noDateLine(checkedAt);
+  return `Next earnings ${fmtEarningsDate(date)} \u00B7 ${earningsSourceNote(source, checkedAt, now)}`;
 }
 
 /** The short form under a Discover card: "Finnhub, checked today". */

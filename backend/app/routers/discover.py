@@ -68,6 +68,33 @@ class SuggestionItem(BaseModel):
     event_date: str | None  # ISO date of the reaction's report
     insight: str | None = None
     vol_regime: str | None = None
+    earnings_date: str | None = None        # next stored earnings date, None when the calendar has none
+    earnings_source: str | None = None      # events.source of that date
+    earnings_checked_at: str | None = None  # when Finnhub was last asked (tickers.earnings_checked_at)
+
+
+async def _batch_next_earnings(db: AsyncSession, symbols: list[str]) -> dict[str, dict]:
+    """{symbol: {earnings_date, earnings_source, earnings_checked_at}} for the cards: a ticker with no
+    stored future date still gets its checked_at, so the card can say when the calendar was last asked."""
+    if not symbols:
+        return {}
+    today = date.today()
+    rows = (await db.execute(
+        select(Ticker.symbol, Ticker.earnings_checked_at).where(Ticker.symbol.in_(symbols))
+    )).all()
+    out = {r.symbol: {"earnings_date": None, "earnings_source": None,
+                      "earnings_checked_at": r.earnings_checked_at.isoformat() if r.earnings_checked_at else None}
+           for r in rows}
+    ev = (await db.execute(
+        select(Ticker.symbol, Event.event_date, Event.source)
+        .join(Event, Event.ticker_id == Ticker.id)
+        .where(Ticker.symbol.in_(symbols), Event.event_type == EventType.EARNINGS, Event.event_date >= today)
+        .distinct(Ticker.symbol).order_by(Ticker.symbol, Event.event_date)
+    )).all()
+    for r in ev:
+        out.setdefault(r.symbol, {})["earnings_date"] = r.event_date.isoformat()
+        out[r.symbol]["earnings_source"] = getattr(r.source, "value", r.source)
+    return out
 
 
 class SuggestionsResponse(BaseModel):
@@ -101,6 +128,9 @@ class UnusuallyActiveItem(BaseModel):
     tier: str  # "extreme" or "elevated"
     insight: str | None = None  # e.g. "IV rich +12pp — options expensive vs realized"
     vol_regime: str | None = None
+    earnings_date: str | None = None
+    earnings_source: str | None = None
+    earnings_checked_at: str | None = None
 
 
 class UnusuallyActiveResponse(BaseModel):
@@ -915,6 +945,7 @@ async def suggestions(
     buy_share_stats = await _batch_buy_share_delta(db, top_syms)
     vol_data = await _batch_vol_regime(db, top_syms)
     base = await _get_base_rates(db)
+    next_earnings = await _batch_next_earnings(db, top_syms)
 
     items = [
         SuggestionItem(
@@ -933,6 +964,7 @@ async def suggestions(
                 buy_share_stats.get(sym), base, sym,
             )[0]),
             vol_regime=vol_data.get(sym, {}).get("vol_regime"),
+            **next_earnings.get(sym, {}),
         )
         for sym, t, total in top
     ]
@@ -968,6 +1000,7 @@ async def unusually_active(
 
     symbols = [row.symbol for row in rows]
     vol_data = await _batch_vol_regime(db, symbols)
+    next_earnings = await _batch_next_earnings(db, symbols)
 
     items = [
         UnusuallyActiveItem(
@@ -980,6 +1013,7 @@ async def unusually_active(
             tier=discover_rv_tier(float(row.rv_rank)).label,
             insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol),
             vol_regime=vol_data.get(row.symbol, {}).get("vol_regime"),
+            **next_earnings.get(row.symbol, {}),
         )
         for row in rows
     ]
