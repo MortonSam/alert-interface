@@ -483,10 +483,13 @@ def announcement_targets(symbols: list[str], fin_future: dict, yf_future: dict, 
     return sorted(out)
 
 
-async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbols: list[str], today: date, budget_s: float | None) -> dict:
+async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbols: list[str], today: date, budget_s: float | None,
+                              names: dict[str, str] | None = None) -> dict:
     """{symbol: Announcement} from Finnhub news and EDGAR 8-K 7.01/8.01, inside a budget.
 
-    One log line per ticker says what each source returned, so a missed announcement can be traced."""
+    `names` maps symbol to the tickers table's company name: a news item confirms only when its headline names the
+    issuer (report_announcements.names_issuer). One log line per ticker says what each source returned."""
+    names = names or {}
     out: dict = {}
     started = time.monotonic()
     since = (today - timedelta(days=45)).isoformat()
@@ -496,8 +499,8 @@ async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbol
             break
         try:
             news = await finnhub.get_company_news(sym, since, today.isoformat())
-            hit = from_news(news, today)
-            said = [f"Finnhub news {len(news)} items" + ("" if hit else ", none names a results date")]
+            hit = from_news(news, today, names.get(sym))
+            said = [f"Finnhub news {len(news)} items" + ("" if hit else ", none from the issuer names a results date")]
             if hit is None:
                 cik = await edgar.get_cik(sym)
                 if cik:
@@ -549,6 +552,7 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
                 select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
             )).scalars().all())
             ids = {t.id: t.symbol for t in tickers}
+            names = {t.symbol: t.name for t in tickers if t.name}
             rows = (await session.execute(
                 select(HistoricalReaction.ticker_id, sa_func.max(HistoricalReaction.event_date))
                 .where(HistoricalReaction.event_type == EventType.EARNINGS, HistoricalReaction.ticker_id.in_(list(ids)))
@@ -579,7 +583,7 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
             print(f"  [WARN] not reached by Yahoo {UNREACHED_RUNS_WARN} runs in a row: {', '.join(stuck)}", flush=True)
 
         near = announcement_targets(symbols, fin_future, yf_future, stored_future, last_report, today)
-        company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s)
+        company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names)
         print(f"Company announcements: {len(company)} found among {len(near)} tickers asked.")
 
         sources = {"finnhub_future": fin_future, "finnhub_actual": fin_actual,
