@@ -70,9 +70,9 @@ describe("RV tier", () => {
     expect(rvTier(RV_RANK_EXTREME - 0.1).key).toBe("elevated");
     expect(rvTier(RV_RANK_EXTREME).key).toBe("extreme");
   });
-  it("one function serves the watchlist and Build; discover's badge uses the API's own cutoffs", () => {
+  it("one function serves the watchlist and Build; discover's rows use the API's own cutoffs", () => {
     expect(rvRankShort(92).tag).toBe(rvTier(92).label);
-    const discover = read("app/discover/page.tsx");
+    const discover = read("app/discover/page.tsx") + read("lib/discoverSentences.ts");
     expect(discover).toContain("discoverRvTier(item.rv_rank)");
     expect(discover).not.toMatch(/[^r]rvTier\(/);
     expect(read("lib/utils.ts")).not.toMatch(/rank < (25|70|90)/);
@@ -100,8 +100,8 @@ describe("vol regime", () => {
     expect(volRegime("nonsense")).toBeNull();
     expect(volRegime(null)).toBeNull();
   });
-  it("cards, Build and My Trades all use it", () => {
-    for (const p of ["components/DiscoverCard.tsx", "app/build/page.tsx", "app/theses/page.tsx"]) {
+  it("Discover rows, Build and My Trades all use it", () => {
+    for (const p of ["lib/discoverSentences.ts", "app/build/page.tsx", "app/theses/page.tsx"]) {
       const src = read(p);
       expect(src, p).toMatch(/volRegime/);
       expect(src, p).not.toMatch(/"IV Rich"|>\s*IV Rich\s*<|IV Cheap\s*</);
@@ -119,8 +119,7 @@ describe("earnings proximity", () => {
     expect(earningsProximityText(0)).toBe("EPS today");
     expect(earningsProximityText(5)).toBe("EPS in 5d");
   });
-  it("discover and the watchlist share it; the watchlist never says 'ago'", () => {
-    expect(read("app/discover/page.tsx")).toContain("earningsProximity(");
+  it("the watchlist uses it and never says 'ago'", () => {
     const wl = read("app/watchlist/page.tsx");
     expect(wl).toContain("earningsProximity(");
     const start = wl.indexOf("function nextEarningsLabel(");

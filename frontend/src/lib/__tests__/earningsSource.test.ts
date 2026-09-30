@@ -30,7 +30,7 @@ describe("a ticker the calendar left without a date is never blank", () => {
     expect(cardEarningsNote(null, null, "2026-09-29T06:05:00Z", null, null, NOW)).toBe("No confirmed date yet (Finnhub, checked Sep 29)");
     expect(cardEarningsNote("2026-10-29", "finnhub", "2026-09-29T06:05:00Z", null, null, NOW)).toBe("Earnings Oct 29, estimated \u00B7 Finnhub, checked today");
   });
-  it("the ticker grid, Build fact grid and Discover cards render the no-date line from the API fields", () => {
+  it("the ticker grid, Build fact grid and Discover rows render the no-date line from the API fields", () => {
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
     const { join } = require("node:path") as typeof import("node:path");
     const src = join(__dirname, "../..");
@@ -40,8 +40,9 @@ describe("a ticker the calendar left without a date is never blank", () => {
     const build = readFileSync(join(src, "app/build/page.tsx"), "utf8");
     expect(build).toMatch(/fb\.earnings_date \? cardEarningsNote\([\s\S]{0,200}: noDateLine\(fb\.earnings_checked_at\)/);
     expect(build).not.toContain('fb.earnings_date ?? "n/a"');
-    const discover = readFileSync(join(src, "app/discover/page.tsx"), "utf8");
-    expect((discover.match(/cardEarningsNote\(item\.earnings_date, item\.earnings_source, item\.earnings_checked_at, item\.earnings_confirmation, item\.earnings_note\)/g) || []).length).toBe(2);
+    const discover = readFileSync(join(src, "lib/discoverSentences.ts"), "utf8");
+    expect((discover.match(/earningsClause\(item\.earnings_date, item\.earnings_source, item\.earnings_checked_at, item\.earnings_confirmation, item\.earnings_note, now\)/g) || []).length).toBe(2);
+    expect(discover).toContain("if (!date) return noDateClause(checkedAt, now);");
   });
 });
 

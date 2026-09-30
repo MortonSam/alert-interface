@@ -1,14 +1,17 @@
 "use client";
 
-import { cardEarningsNote } from "@/lib/earningsSource";
-
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
-import { discoverRvTier } from "@/lib/encodings/rvTier";
-import { earningsProximity, earningsProximityText } from "@/lib/encodings/earningsProximity";
 import { freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import DiscoverCard from "@/components/DiscoverCard";
+import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
+import {
+  justReportedSentence,
+  latestPickSentence,
+  reportingSoonSentence,
+  suggestionSentence,
+  unusuallyActiveSentence,
+} from "@/lib/discoverSentences";
 import { SectionKicker } from "@/components/SectionKicker";
 import {
   api,
@@ -42,30 +45,21 @@ function fmtQuoteTime(unix: number | null | undefined): string {
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function daysUntil(dateStr: string): number {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const target = new Date(y, m - 1, d);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 function fmtPrice(n: number | null | undefined): string {
   return n == null ? "" : `$${n.toFixed(2)}`;
 }
 
 // ── Skeletons ────────────────────────────────────────────────────────────────
 
-function CardSkeleton() {
+function RowSkeleton() {
   return (
-    <div className="rounded-xl border border-border/60 p-4 animate-pulse">
-      <div className="flex items-start justify-between mb-2">
-        <div className="h-5 w-16 bg-muted rounded" />
-        <div className="h-4 w-14 bg-muted rounded" />
+    <li className="py-3 animate-pulse sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6">
+      <div className="flex items-center gap-2">
+        <div className="h-4 w-12 bg-muted rounded" />
+        <div className="h-3.5 w-28 bg-muted rounded" />
       </div>
-      <div className="h-3.5 w-28 bg-muted rounded mb-3" />
-      <div className="h-6 w-20 bg-muted rounded-full" />
-    </div>
+      <div className="h-3.5 w-full max-w-md bg-muted rounded mt-1.5 sm:mt-0" />
+    </li>
   );
 }
 
@@ -77,11 +71,11 @@ function SectionSkeleton() {
         <div className="h-5 w-48 bg-muted rounded mb-1 animate-pulse" />
         <div className="h-3 w-64 bg-muted rounded animate-pulse" />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <DiscoverRows>
         {[1, 2, 3, 4].map((i) => (
-          <CardSkeleton key={i} />
+          <RowSkeleton key={i} />
         ))}
-      </div>
+      </DiscoverRows>
     </div>
   );
 }
@@ -218,59 +212,13 @@ export default function DiscoverPage() {
         {!loading && latestPick && (
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="From the ledger" />
-            <Link
-              href="/ivy/trades"
-              className="flex items-center gap-3 hover:opacity-80 transition-opacity group"
-            >
-              <span className="font-display text-sm font-bold text-foreground">
-                {latestPick.symbol}
-              </span>
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide ${
-                latestPick.picked_direction === "bullish"
-                  ? "bg-success/10 text-success"
-                  : "bg-destructive/10 text-destructive"
-              }`}>
-                {latestPick.picked_direction === "bullish" ? "Bullish" : "Bearish"}
-              </span>
-              {latestPick.strategy && (
-                <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                  {latestPick.strategy}
-                </span>
-              )}
-              <span className="text-xs text-muted-foreground font-mono">
-                {fmtPrice(latestPick.entry_price)}
-              </span>
-              {latestPick.current_price != null && (
-                <>
-                  <span className="text-[11px] text-muted-foreground">{"\u2192"}</span>
-                  <span className="text-xs font-mono text-muted-foreground">
-                    {fmtPrice(latestPick.current_price)}
-                  </span>
-                </>
-              )}
-              {latestPick.unrealized_move_pct != null && (
-                <span className={`text-xs font-mono font-semibold ${
-                  latestPick.unrealized_move_pct === 0 ? "text-muted-foreground" :
-                  (latestPick.picked_direction === "bullish" ? latestPick.unrealized_move_pct > 0 : latestPick.unrealized_move_pct < 0) ? "text-success" : "text-destructive"
-                }`}>
-                  {latestPick.unrealized_move_pct > 0 ? "+" : ""}{latestPick.unrealized_move_pct.toFixed(1)}%
-                </span>
-              )}
-              {latestPick.status === "closed" && latestPick.option_pnl_pct != null && (
-                <span className={`text-[10px] font-semibold ${
-                  latestPick.option_pnl_pct >= 0 ? "text-success" : "text-destructive"
-                }`}>
-                  P&L {latestPick.option_pnl_pct > 0 ? "+" : ""}{latestPick.option_pnl_pct.toFixed(0)}%
-                </span>
-              )}
-              <span className={`ml-auto text-[10px] font-medium rounded-full px-2 py-0.5 ${
-                latestPick.status === "open"
-                  ? "bg-cool/10 text-cool"
-                  : "bg-muted text-muted-foreground"
-              }`}>
-                {latestPick.status}
-              </span>
-            </Link>
+            <DiscoverRows>
+              <DiscoverRow
+                symbol={latestPick.symbol}
+                price={quotes.get(latestPick.symbol)?.price != null ? fmtPrice(quotes.get(latestPick.symbol)!.price) : undefined}
+                sentence={latestPickSentence(latestPick)}
+              />
+            </DiscoverRows>
           </section>
         )}
 
@@ -288,33 +236,17 @@ export default function DiscoverPage() {
                 Nothing reporting in the next 7 days.
               </p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {reportingSoon?.items.map((item) => {
-                  const days = daysUntil(item.earnings_date);
-                  const q = quotes.get(item.symbol);
-                  const prox = earningsProximity(Math.max(days, 0));
-                  const tagLabel = earningsProximityText(Math.max(days, 0));
-                  return (
-                    <DiscoverCard
-                      key={item.symbol}
-                      symbol={item.symbol}
-                      name={item.name}
-                      sector={item.sector}
-                      industry={item.industry}
-                      price={q?.price != null ? fmtPrice(q.price) : undefined}
-                      insight={item.insight}
-                      volRegime={item.vol_regime}
-                      sourceNote={cardEarningsNote(item.earnings_date, item.source, item.checked_at, item.confirmation, item.confirmation_note)}
-                      badge={
-                        <span className={`inline-flex items-center gap-1.5 rounded-full ${prox?.className ?? ""} px-2.5 py-1 text-[11px] font-semibold tracking-wide`}>
-                          <span className="text-[8px]">{"\u25CF"}</span>
-                          {tagLabel}
-                        </span>
-                      }
-                    />
-                  );
-                })}
-              </div>
+              <DiscoverRows>
+                {reportingSoon?.items.map((item) => (
+                  <DiscoverRow
+                    key={item.symbol}
+                    symbol={item.symbol}
+                    name={item.name}
+                    price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    sentence={reportingSoonSentence(item)}
+                  />
+                ))}
+              </DiscoverRows>
             )}
           </section>
         ) : null}
@@ -328,50 +260,17 @@ export default function DiscoverPage() {
             <h2 className="font-display text-xl font-bold text-foreground">Just reported</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings reactions in the last 5 days</p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {justReported?.items.map((item) => {
-                  const move = item.pct_change_1d;
-                  const outcomeLabel =
-                    item.outcome === "beat"
-                      ? "Beat"
-                      : item.outcome === "miss"
-                        ? "Missed"
-                        : item.outcome === "meet"
-                          ? "Met"
-                          : "\u2014";
-                  const moveColor =
-                    move != null && move > 0
-                      ? "text-success"
-                      : move != null && move < 0
-                        ? "text-destructive"
-                        : "text-muted-foreground";
-                  const moveStr =
-                    move != null
-                      ? `${move > 0 ? "+" : ""}${move.toFixed(1)}%`
-                      : "";
-
-                  return (
-                    <DiscoverCard
-                      key={item.symbol}
-                      symbol={item.symbol}
-                      name={item.name}
-                      sector={item.sector}
-                      industry={item.industry}
-                      price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                      insight={item.insight}
-                      volRegime={item.vol_regime}
-                      badge={
-                        <span className="inline-flex items-center gap-2 rounded-full bg-muted text-foreground px-2.5 py-1 text-[11px] font-semibold tracking-wide">
-                          {outcomeLabel}
-                          {moveStr && (
-                            <span className={moveColor}>{moveStr}</span>
-                          )}
-                        </span>
-                      }
-                    />
-                  );
-                })}
-              </div>
+            <DiscoverRows>
+              {justReported?.items.map((item) => (
+                <DiscoverRow
+                  key={item.symbol}
+                  symbol={item.symbol}
+                  name={item.name}
+                  price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                  sentence={justReportedSentence(item)}
+                />
+              ))}
+            </DiscoverRows>
           </section>
         ) : null}
 
@@ -389,21 +288,17 @@ export default function DiscoverPage() {
                 No standout setups right now.
               </p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <DiscoverRows>
                 {suggestions?.map((item) => (
-                  <DiscoverCard
+                  <DiscoverRow
                     key={item.symbol}
                     symbol={item.symbol}
                     name={item.name}
-                    sector={item.sector}
-                    industry={item.industry}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    insight={item.insight}
-                    volRegime={item.vol_regime}
-                    sourceNote={cardEarningsNote(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note)}
+                    sentence={suggestionSentence(item)}
                   />
                 ))}
-              </div>
+              </DiscoverRows>
             )}
           </section>
         ) : null}
@@ -417,31 +312,17 @@ export default function DiscoverPage() {
             <h2 className="font-display text-xl font-bold text-foreground">Unusually active</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Volatility high vs. their own norm</p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {unusuallyActive.map((item) => {
-                const tier = discoverRvTier(item.rv_rank);   // the API's 85/93 cutoffs; item.tier is the same word
-                const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${tier.label}`;
-                return (
-                  <DiscoverCard
-                    key={item.symbol}
-                    symbol={item.symbol}
-                    name={item.name}
-                    sector={item.sector}
-                    industry={item.industry}
-                    price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    insight={item.insight}
-                    volRegime={item.vol_regime}
-                    sourceNote={cardEarningsNote(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note)}
-                    badge={
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted text-foreground px-2.5 py-1 text-[11px] font-semibold tracking-wide">
-                        <span className="text-[8px]">{"\u25CF"}</span>
-                        {tagLabel}
-                      </span>
-                    }
-                  />
-                );
-              })}
-            </div>
+            <DiscoverRows>
+              {unusuallyActive.map((item) => (
+                <DiscoverRow
+                  key={item.symbol}
+                  symbol={item.symbol}
+                  name={item.name}
+                  price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                  sentence={unusuallyActiveSentence(item)}
+                />
+              ))}
+            </DiscoverRows>
           </section>
         ) : null}
       </div>
