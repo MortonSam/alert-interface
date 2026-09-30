@@ -469,17 +469,19 @@ export default function WatchlistPage() {
                 Refresh prices
               </button>
             )}
-            <button
-              onClick={() => setShowCreate((v) => !v)}
-              className="text-xs text-muted-foreground hover:text-foreground border rounded-md px-3 py-1.5 transition-colors"
-            >
-              + New watchlist
-            </button>
+            {wlStatus === "done" && (
+              <button
+                onClick={() => setShowCreate((v) => !v)}
+                className="text-xs text-muted-foreground hover:text-foreground border rounded-md px-3 py-1.5 transition-colors"
+              >
+                + New watchlist
+              </button>
+            )}
           </div>
         </div>
 
         {/* Create watchlist form */}
-        {showCreate && (
+        {wlStatus === "done" && showCreate && (
           <div className="mb-6 rounded-lg border border-border/60 bg-transparent px-5 py-4 flex items-center gap-3">
             <input
               type="text"

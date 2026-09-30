@@ -32,6 +32,7 @@ import {
   type HealthStatus,
   type GenerationPolicy,
 } from "@/lib/api";
+import { OWNER_REGENERATES, isSignedIn } from "@/lib/session";
 import { cn, fmtMarketCap } from "@/lib/utils";
 import { fmtPnlPct } from "@/lib/pnl";
 import { fmtPct } from "./fmtPct";
@@ -1460,9 +1461,10 @@ export default function TickerPage() {
       });
   }, [upperSymbol]);
 
-  // Check if ticker is on the watchlist
+  // Check if ticker is on the watchlist (a personal read: not asked without a key, it would only answer 401)
   useEffect(() => {
     if (!ticker) return;
+    if (!isSignedIn()) { setWatched(false); return; }
     api.watchlists.list().then(wls => {
       if (wls.length === 0) { setWatched(false); return; }
       const wl = wls[0]; // use first watchlist
@@ -1744,8 +1746,8 @@ export default function TickerPage() {
       setNote(n);
       setNoteStatus("done");
     } catch (e: unknown) {
-      if (e instanceof ApiError && (e.status === 429 || e.status === 403)) {
-        setGenerateRefusal(e.message);   // the API's own sentence: the limit and when it lifts, or owner-only
+      if (e instanceof ApiError && (e.status === 429 || e.status === 403 || e.status === 409)) {
+        setGenerateRefusal(e.message);   // the API's own sentence: the limit and when it lifts, owner-only, or a note that exists
         return;
       }
       setNote((prev) =>
@@ -1764,6 +1766,7 @@ export default function TickerPage() {
   // ── Theses (positions) ────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (!isSignedIn()) { setThesesLoaded(true); return; }   // a personal read: nothing to ask for without a key
     api.theses
       .list({ symbol: upperSymbol })
       .then((rows) => { setTheses(rows); setThesesLoaded(true); })
@@ -2923,12 +2926,16 @@ export default function TickerPage() {
                 {note.error || "An unknown error occurred."}
               </Callout>
               {generateRefusal && <Callout severity="caution">{generateRefusal}</Callout>}
-              <button
-                onClick={() => void handleGenerate()}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Try Again
-              </button>
+              {genPolicy?.can_generate ? (
+                <button
+                  onClick={() => void handleGenerate()}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Try Again
+                </button>
+              ) : (
+                <p className="text-sm text-muted-foreground">{genPolicy?.owner_only_message ?? OWNER_REGENERATES}</p>
+              )}
             </div>
           )}
 
@@ -2957,12 +2964,14 @@ export default function TickerPage() {
                   <span>
                     {noteStaleness.reason}. Last generated {new Date(note.generated_at).toLocaleDateString()}.
                   </span>
-                  <button
-                    onClick={handleRegenerate}
-                    className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                  >
-                    Regenerate
-                  </button>
+                  {genPolicy?.can_regenerate && (
+                    <button
+                      onClick={handleRegenerate}
+                      className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
+                    >
+                      Regenerate
+                    </button>
+                  )}
                 </div>
               )}
               <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
@@ -2973,12 +2982,14 @@ export default function TickerPage() {
                   )}
                   {" · "}{note.input_tokens + note.output_tokens} tokens
                 </span>
-                <button
-                  onClick={handleRegenerate}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-                >
-                  Regenerate
-                </button>
+                {genPolicy?.can_regenerate && (
+                  <button
+                    onClick={handleRegenerate}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+                  >
+                    Regenerate
+                  </button>
+                )}
               </div>
               {note.structured_content ? (
                 <StructuredNoteView

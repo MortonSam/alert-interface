@@ -35,6 +35,8 @@ router = APIRouter(prefix="/research-notes", tags=["research-notes"])
 # the Railway variable is enough.
 
 OWNER_ONLY_MESSAGE = "Note generation is currently limited to the site owner"
+NOTE_EXISTS_MESSAGE = "A note for this ticker already exists; only the site owner can regenerate it"
+NOTE_UNPUBLISHED_MESSAGE = "A note for this ticker exists but did not pass verification; only the site owner can regenerate it"
 EXPECTED_WAIT_SECONDS = (30, 60)   # what the page tells a visitor while a note generates
 FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -47,7 +49,8 @@ def generation_policy(admin: bool) -> dict:
     public = public_generation_enabled()
     return {
         "public": public,
-        "can_generate": public or admin,
+        "can_generate": public or admin,          # a first note for a ticker that has none
+        "can_regenerate": admin,                  # replacing a note that exists, whatever its state
         "owner_only_message": None if public else OWNER_ONLY_MESSAGE,
         "per_ip_hour": RESEARCH_GENERATION_POLICY.per_ip_hour,
         "per_ip_day": RESEARCH_GENERATION_POLICY.per_ip_day,
@@ -89,8 +92,16 @@ async def generate(
     ticker = await _resolve_ticker(db, payload.ticker_id, payload.symbol)
     now = datetime.now(timezone.utc)
     existing = await get_research_note(db, ticker.id, None)
-    if existing is not None and _has_note_from_today(existing, now) and not (admin and force):
-        response.status_code = 200   # nothing generated, nothing charged: today's note is returned
+    if existing is not None and existing.status != "failed" and not admin:
+        # a visitor generates only where no note exists: a completed note (from any day), one in progress or one
+        # that did not pass verification is the owner's to replace. A failed generation produced no note, so the
+        # visitor may try again. Nothing generated, nothing charged here.
+        if verification_failed(existing):
+            raise HTTPException(status_code=409, detail=NOTE_UNPUBLISHED_MESSAGE)
+        response.status_code = 200
+        return note_for_reader(existing, admin)
+    if existing is not None and _has_note_from_today(existing, now) and not force:
+        response.status_code = 200   # the owner without force: today's note is returned
         return note_for_reader(existing, admin)
 
     client_ip = get_client_ip(request)

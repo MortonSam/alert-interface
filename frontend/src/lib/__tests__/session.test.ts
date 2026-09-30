@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SAVE_REQUIRES_SIGN_IN, SIGN_IN_PROMPT, WATCHLISTS_SIGN_IN_PROMPT, myTradesView } from "@/lib/session";
+import { OWNER_REGENERATES, SAVE_REQUIRES_SIGN_IN, SIGN_IN_PROMPT, THESIS_SIGN_IN_PROMPT, WATCHLISTS_SIGN_IN_PROMPT, myTradesView } from "@/lib/session";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -87,6 +87,41 @@ describe("a reviewer key in the same slot", () => {
     for (const page of ["app/ivy/page.tsx", "app/ivy/desk/page.tsx", "app/ivy/trades/page.tsx"]) {
       const src = read(page);
       expect(src).not.toMatch(/isSignedIn|admin_token|ADMIN_TOKEN_KEY/);
+    }
+  });
+});
+
+describe("signed-out pages ask nothing personal of the API (audit item 18)", () => {
+  it("the thesis detail shows the notice, never a raw error, and asks only once signed in", () => {
+    const src = read("app/theses/[id]/page.tsx");
+    expect(src.indexOf("if (!isSignedIn())")).toBeGreaterThan(0);
+    expect(src.indexOf("if (!isSignedIn())")).toBeLessThan(src.indexOf("api.theses.get(id)"));
+    expect(src).toMatch(/signedIn === false\) \{[\s\S]{0,300}<SignedOutNotice title=\{THESIS_SIGN_IN_PROMPT\.title\}/);
+    expect(src).toContain("e.status === 401) setSignedIn(false)");
+    expect(src).not.toContain("String(e)");
+    expect(src).toContain("visitorMessage(e,");
+    expect(THESIS_SIGN_IN_PROMPT.body).toContain("this browser is not signed in");
+  });
+  it("Watchlists signed out shows the notice and no create control", () => {
+    const src = read("app/watchlist/page.tsx");
+    expect(src).toMatch(/\{wlStatus === "done" && \(\s*<button\s+onClick=\{\(\) => setShowCreate/);
+    expect(src).toContain('{wlStatus === "done" && showCreate && (');
+  });
+  it("the ticker page skips the watchlist star and positions reads without a key", () => {
+    const src = read("app/tickers/[symbol]/page.tsx");
+    expect(src).toMatch(/if \(!isSignedIn\(\)\) \{ setWatched\(false\); return; \}\s*api\.watchlists\.list\(\)/);
+    expect(src).toMatch(/if \(!isSignedIn\(\)\) \{ setThesesLoaded\(true\); return; \}[\s\S]{0,80}api\.theses\s*\.list\(/);
+    expect(OWNER_REGENERATES).toContain("site owner");
+  });
+  it("every personal read on mount comes after the page's sign-in check", () => {
+    for (const page of ["app/theses/page.tsx", "app/theses/[id]/page.tsx", "app/watchlist/page.tsx", "app/tickers/[symbol]/page.tsx"]) {
+      const src = read(page);
+      const guard = src.indexOf("if (!isSignedIn())");
+      expect(guard, page).toBeGreaterThan(0);
+      for (const call of ["api.theses.get(", "api.theses.list(", "api.theses\n      .list(", "api.watchlists.list("]) {
+        const at = src.indexOf(call);
+        if (at >= 0) expect(at, `${page}: ${call.trim()}`).toBeGreaterThan(guard);   // the first read sits below the guard
+      }
     }
   });
 });

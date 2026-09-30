@@ -318,7 +318,8 @@ export interface StructuredNote {
 /** GET /research-notes/policy: who may generate a note, the limits, the expected wait. Rendered, never retyped. */
 export interface GenerationPolicy {
   public: boolean;
-  can_generate: boolean;            // public, or this request carried the admin token
+  can_generate: boolean;            // a first note for a ticker that has none: public, or this request carried the admin token
+  can_regenerate: boolean;          // replacing a note that exists, whatever its state: the admin token only
   owner_only_message: string | null;
   per_ip_hour: number | null;
   per_ip_day: number;

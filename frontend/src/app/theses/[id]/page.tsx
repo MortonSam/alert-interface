@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
+  ApiError,
   api, type Thesis, type ThesisMarkRead, type StrategyData,
 } from "@/lib/api";
 import {
@@ -12,6 +13,9 @@ import {
   type Leg, dateMs,
 } from "@/lib/black-scholes";
 import { cn } from "@/lib/utils";
+import { THESIS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
+import { visitorMessage } from "@/lib/errors";
+import SignedOutNotice from "@/components/SignedOutNotice";
 import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
 import { markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
 import { fmtPnlPct } from "@/lib/pnl";
@@ -94,15 +98,26 @@ export default function ThesisDetailPage() {
   const [thesisError, setThesisError]   = useState<string | null>(null);
   const [markError, setMarkError]       = useState<string | null>(null);
 
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+
   useEffect(() => {
     if (!id) return;
+    if (!isSignedIn()) {
+      // No key, no request: the endpoint would answer 401 and the notice is the whole page.
+      setSignedIn(false);
+      setThesisState("error");
+      setMarkState("error");
+      setSdState("error");
+      return;
+    }
+    setSignedIn(true);
     api.theses.get(id)
       .then(t => {
         setThesis(t);
         setThesisState("done");
         api.theses.mark(id)
           .then(m => { setMark(m); setMarkState("done"); })
-          .catch(e => { setMarkError(String(e)); setMarkState("error"); });
+          .catch(e => { setMarkError(visitorMessage(e, "The mark could not be loaded just now.")); setMarkState("error"); });
         if (t.ticker_symbol) {
           api.tickers.strategyData(t.ticker_symbol, t.option_expiration)
             .then(sd => { setStrategyData(sd); setSdState("done"); })
@@ -112,7 +127,8 @@ export default function ThesisDetailPage() {
         }
       })
       .catch(e => {
-        setThesisError(String(e));
+        if (e instanceof ApiError && e.status === 401) setSignedIn(false);   // a key the backend rejected
+        setThesisError(visitorMessage(e, "This trade could not be loaded just now."));
         setThesisState("error");
         setMarkState("error");
         setSdState("error");
@@ -301,6 +317,14 @@ export default function ThesisDetailPage() {
       <div className="max-w-3xl mx-auto px-4 py-10 space-y-4">
         <div className="h-4 w-32 bg-secondary rounded animate-pulse" />
         <div className="h-64 bg-card border border-border rounded-2xl animate-pulse" />
+      </div>
+    );
+  }
+
+  if (signedIn === false) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-10">
+        <SignedOutNotice title={THESIS_SIGN_IN_PROMPT.title} body={THESIS_SIGN_IN_PROMPT.body} openPath={{ href: "/theses", label: "Back to My Trades" }} />
       </div>
     );
   }

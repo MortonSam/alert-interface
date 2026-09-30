@@ -17,10 +17,17 @@ describe("Research section: generation rules come from the API", () => {
     expect(page).not.toMatch(/~40 seconds|30 to 60 seconds|5 per hour/);
   });
   it("a 429 or 403 shows the API's sentence and does not mark the note failed", () => {
-    expect(page).toMatch(/e\.status === 429 \|\| e\.status === 403\)\) \{\s*setGenerateRefusal\(e\.message\);[^\n]*\n\s*return;/);
+    expect(page).toMatch(/e\.status === 429 \|\| e\.status === 403 \|\| e\.status === 409\)\) \{\s*setGenerateRefusal\(e\.message\);[^\n]*\n\s*return;/);
     expect(page).toMatch(/\{generateRefusal && \(\s*<Callout severity="caution">\{generateRefusal\}<\/Callout>/);
   });
-  it("only the owner's regenerate passes force", () => {
+  it("only the owner's regenerate passes force, and only the owner sees a Regenerate or Try Again (audit item 13)", () => {
     expect(page).toMatch(/function handleRegenerate\(\) \{[\s\S]{0,200}handleGenerate\(\{ force: true \}\)/);
+    expect(page.match(/genPolicy\?\.can_regenerate && \(\s*<button\s+onClick=\{handleRegenerate\}/g)?.length).toBe(2);
+    // a failed generation produced no note, so Try Again is a first generation: gated like one, never with force
+    expect(page).toMatch(/genPolicy\?\.can_generate \? \(\s*<button\s+onClick=\{\(\) => void handleGenerate\(\)\}[\s\S]{0,300}Try Again/);
+    expect(page).toContain("?? OWNER_REGENERATES}");
+    expect(page.match(/onClick=\{handleRegenerate\}/g)?.length).toBe(2);
+    // the first note for a ticker that has none is still the visitor's to ask for
+    expect(page).toMatch(/noteStatus === "empty" && \([\s\S]{0,300}genPolicy\.can_generate && \(/);
   });
 });

@@ -40,6 +40,14 @@ export const WATCHLISTS_SIGN_IN_PROMPT = {
   body: `Watchlists belong to the signed-in account, and this browser is not signed in. ${NO_PUBLIC_SIGN_IN}`,
 };
 
+export const THESIS_SIGN_IN_PROMPT = {
+  title: "Sign in to see this trade",
+  body: `A saved trade belongs to the signed-in account, and this browser is not signed in. ${NO_PUBLIC_SIGN_IN}`,
+};
+
+/** Under a failed or stale note for a visitor: only the owner replaces a note that exists. */
+export const OWNER_REGENERATES = "Only the site owner can regenerate a note that already exists.";
+
 export const SAVE_REQUIRES_SIGN_IN =
   `Saving needs a signed-in account, and this browser is not signed in: this trade can be built and previewed but not saved. ${NO_PUBLIC_SIGN_IN}`;
 
