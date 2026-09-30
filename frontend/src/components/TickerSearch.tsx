@@ -1,17 +1,24 @@
 "use client";
 
-// The ticker search box: in the header on every page, and at the top of the home page. Symbol or company
-// name, the same matcher as Build a Trade (lib/tickerSearch); Enter or a click opens /tickers/SYMBOL.
-// In the header at phone width it collapses to an icon that opens the box.
+// The ticker search box in the header on every page. Symbol or company name, the same matcher as Build a
+// Trade (lib/tickerSearch); Enter or a click opens /tickers/SYMBOL. At phone width it collapses to an icon
+// that opens the box. The home page's "Look up a stock" button opens and focuses the same box, through
+// the OPEN_SEARCH_EVENT: at phone width that is what the icon does.
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, type Ticker } from "@/lib/api";
 import { matchTickers, tickerPath } from "@/lib/tickerSearch";
 
-export const HOME_SEARCH_LABEL = "Look up a stock";
-/** Tailwind's sm breakpoint, the one the header collapses at: the home box takes focus on load only from here up. */
+export const LOOK_UP_LABEL = "Look up a stock";
+/** Fired on window to open and focus the header search box (the hero button); the header listens. */
+export const OPEN_SEARCH_EVENT = "ticker-search:open";
+/** Tailwind's sm breakpoint, the one the header collapses at. */
 export const DESKTOP_QUERY = "(min-width: 640px)";
+
+export function openHeaderSearch(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT));
+}
 export const SEARCH_PLACEHOLDER = "Symbol or company name";
 
 let cached: Promise<Ticker[]> | null = null;
@@ -21,10 +28,10 @@ function tickerList(): Promise<Ticker[]> {
   return cached;
 }
 
-function SearchBox({ inputClassName, autoFocus, label, onNavigate }: {
+function SearchBox({ inputClassName, autoFocus, focusOnEvent, onNavigate }: {
   inputClassName: string;
-  autoFocus?: boolean | "desktop";   // "desktop": focus on load only from the sm breakpoint up, so a phone keyboard never opens over the page
-  label?: string;
+  autoFocus?: boolean;       // focus when mounted (the phone box, opened by the icon or the hero button)
+  focusOnEvent?: boolean;    // focus when OPEN_SEARCH_EVENT fires (the desktop box, from the hero button)
   onNavigate?: () => void;
 }) {
   const router = useRouter();
@@ -40,10 +47,15 @@ function SearchBox({ inputClassName, autoFocus, label, onNavigate }: {
   }
   useEffect(() => {
     if (!autoFocus) return;
-    if (autoFocus === "desktop" && !window.matchMedia(DESKTOP_QUERY).matches) return;
     inputRef.current?.focus();
     load();
   }, [autoFocus]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!focusOnEvent) return;
+    function onOpen() { inputRef.current?.focus(); load(); }
+    window.addEventListener(OPEN_SEARCH_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SEARCH_EVENT, onOpen);
+  }, [focusOnEvent]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const matches = useMemo(() => matchTickers(tickers ?? [], query), [tickers, query]);
 
@@ -65,7 +77,6 @@ function SearchBox({ inputClassName, autoFocus, label, onNavigate }: {
 
   return (
     <div ref={containerRef} className="relative w-full">
-      {label && <label htmlFor={id} className="block font-mono text-xs uppercase tracking-[.16em] text-primary mb-2">{label}</label>}
       <input
         ref={inputRef}
         id={id}
@@ -73,7 +84,7 @@ function SearchBox({ inputClassName, autoFocus, label, onNavigate }: {
         role="combobox"
         aria-expanded={open && matches.length > 0}
         aria-autocomplete="list"
-        aria-label={label ?? "Search tickers"}
+        aria-label="Search tickers"
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); load(); }}
         onFocus={() => { setOpen(true); load(); }}
@@ -116,10 +127,16 @@ function SearchBox({ inputClassName, autoFocus, label, onNavigate }: {
 /** The header box: an input from sm up; at phone width an icon that opens the box on its own row. */
 export function HeaderTickerSearch() {
   const [openOnPhone, setOpenOnPhone] = useState(false);
+  useEffect(() => {
+    // the hero button: at phone width open the box (what the icon does); from sm up the desktop box focuses itself
+    function onOpen() { if (!window.matchMedia(DESKTOP_QUERY).matches) setOpenOnPhone(true); }
+    window.addEventListener(OPEN_SEARCH_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SEARCH_EVENT, onOpen);
+  }, []);
   return (
     <>
       <div className="hidden sm:block ml-auto w-56">
-        <SearchBox inputClassName="w-full h-8 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
+        <SearchBox focusOnEvent inputClassName="w-full h-8 rounded-lg border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
       </div>
       <button
         type="button"
@@ -143,12 +160,11 @@ export function HeaderTickerSearch() {
   );
 }
 
-/** The home page box: labelled, above the copy, focused on load from the sm breakpoint up. */
-export function HomeTickerSearch() {
+/** The hero's orange button: opens and focuses the header search box (at phone width, what the icon does). */
+export function HeroSearchButton({ className }: { className: string }) {
   return (
-    <div className="w-full max-w-md mx-auto" data-testid="home-search">
-      <SearchBox autoFocus="desktop" label={HOME_SEARCH_LABEL}
-        inputClassName="w-full h-12 rounded-xl border bg-background px-4 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-    </div>
+    <button type="button" onClick={openHeaderSearch} className={className} data-testid="hero-search-button">
+      {LOOK_UP_LABEL}
+    </button>
   );
 }

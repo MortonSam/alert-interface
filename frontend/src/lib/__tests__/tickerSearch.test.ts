@@ -38,7 +38,7 @@ describe("one ticker matcher for every search box", () => {
     expect(box).toContain("go(`/tickers/${t.symbol}`)");
   });
 
-  it("the header carries the box on every page, collapsed to an icon at phone width; the home page has it first, labelled", () => {
+  it("the header carries the box on every page, collapsed to an icon at phone width; the home page has no box of its own", () => {
     const layout = read("app/layout.tsx");
     expect(layout).toContain("<HeaderTickerSearch />");
     expect(layout.indexOf("<NavLinks />")).toBeLessThan(layout.indexOf("<HeaderTickerSearch />"));
@@ -46,18 +46,25 @@ describe("one ticker matcher for every search box", () => {
     expect(box).toContain('className="hidden sm:block ml-auto w-56"');
     expect(box).toMatch(/className="sm:hidden ml-auto[^"]*"\s+data-testid="header-search-toggle"/);
     expect(box).toContain('<div className="sm:hidden basis-full pb-1">');
-    expect(box).toContain('export const HOME_SEARCH_LABEL = "Look up a stock";');
+    expect(box).not.toMatch(/HomeTickerSearch|HOME_SEARCH_LABEL|autoFocus === "desktop"/);
     const home = read("app/page.tsx");
-    expect(home.indexOf("<HomeTickerSearch />")).toBeLessThan(home.indexOf('<h1 className="hero-h1'));
-    expect(box).toMatch(/export function HomeTickerSearch\(\) \{[\s\S]{0,300}<SearchBox autoFocus="desktop" label=\{HOME_SEARCH_LABEL\}/);
+    expect(home).not.toMatch(/HomeTickerSearch|<SearchBox|Look up a stock/);
+    expect(home).not.toMatch(/autoFocus/);
   });
 
-  it("the home box takes focus on load from the header's breakpoint up, and never at phone width", () => {
+  it("the hero's orange button is 'Look up a stock' and opens and focuses the header box; at phone width it opens the box like the icon", () => {
+    const home = read("app/page.tsx");
+    expect(home).toContain('<HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />');
+    expect(home).not.toMatch(/Browse the market ↓|href="#market"/);
+    expect(home).toContain('id="market"');   // the market section itself stays
     const box = read("components/TickerSearch.tsx");
-    expect(box).toContain('export const DESKTOP_QUERY = "(min-width: 640px)";');   // Tailwind sm, where the header collapses
-    expect(box).toMatch(/if \(autoFocus === "desktop" && !window\.matchMedia\(DESKTOP_QUERY\)\.matches\) return;\s*inputRef\.current\?\.focus\(\);/);
-    expect(box).not.toMatch(/autoFocus=\{autoFocus\}/);      // focus is decided in the effect, never by the attribute
-    expect(readFileSync(join(SRC, "../tailwind.config.ts"), "utf8")).not.toMatch(/screens:\s*\{[^}]*sm:/);   // sm is Tailwind's default 640px
-    expect(box).toContain("hidden sm:block");   // the header collapses at the same breakpoint
+    expect(box).toContain('export const LOOK_UP_LABEL = "Look up a stock";');
+    expect(box).toMatch(/export function HeroSearchButton[\s\S]{0,300}onClick=\{openHeaderSearch\}[\s\S]{0,200}\{LOOK_UP_LABEL\}/);
+    expect(box).toContain('window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))');
+    expect(box).toMatch(/function onOpen\(\) \{ if \(!window\.matchMedia\(DESKTOP_QUERY\)\.matches\) setOpenOnPhone\(true\); \}/);
+    expect(box).toMatch(/function onOpen\(\) \{ inputRef\.current\?\.focus\(\); load\(\); \}/);
+    expect(box).toContain("<SearchBox focusOnEvent inputClassName");
+    expect(box).toContain('export const DESKTOP_QUERY = "(min-width: 640px)";');
+    expect(readFileSync(join(SRC, "../tailwind.config.ts"), "utf8")).not.toMatch(/screens:\s*\{[^}]*sm:/);
   });
 });

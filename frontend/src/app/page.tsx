@@ -1,6 +1,6 @@
 import Link from "next/link";
 import LatestVerifiedNote from "@/components/LatestVerifiedNote";
-import { HomeTickerSearch } from "@/components/TickerSearch";
+import { HeroSearchButton } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline, SiteCounters } from "@/components/IvyCopy";
@@ -46,9 +46,6 @@ export default function Home() {
         {/* ── 1. Hero ────────────────────────────────────────────── */}
         <section className="min-h-[100svh] flex flex-col bg-background">
           <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-4 sm:px-8">
-            <div className="w-full mb-10 text-left">
-              <HomeTickerSearch />
-            </div>
             <h1 className="hero-h1 font-display font-extrabold uppercase">
               <span data-hero-line className="block text-foreground">
                 Stock research
@@ -67,12 +64,7 @@ export default function Home() {
             </p>
 
             <div data-hero-fade className="flex flex-wrap gap-[13px] justify-center mt-8">
-              <a
-                href="#market"
-                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity"
-              >
-                Browse the market ↓
-              </a>
+              <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
               <Link
                 href="/build"
                 className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
