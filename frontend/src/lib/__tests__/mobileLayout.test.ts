@@ -51,4 +51,12 @@ describe("390px layout (audit item 24)", () => {
     expect(build).not.toMatch(/<div className="flex gap-3 pt-1">/);
     expect(build.match(/bg-transparent px-4 sm:px-6 py-6/g)?.length).toBe(2);
   });
+
+  it("the Put/Call row keeps its label on one line and stacks the value block beneath it on a phone", () => {
+    const ticker = read("app/tickers/[symbol]/page.tsx");
+    expect(ticker).toContain('className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 py-1.5 border-b border-border/40" data-testid="put-call-row"');
+    const row = ticker.slice(ticker.indexOf('data-testid="put-call-row"'), ticker.indexOf("{dataError &&"));
+    expect(row).toContain('text-sm text-muted-foreground whitespace-nowrap');
+    expect(row).toContain('font-mono text-sm font-medium tabular-nums sm:text-right');
+  });
 });

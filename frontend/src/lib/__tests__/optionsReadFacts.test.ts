@@ -119,3 +119,21 @@ describe("IV unavailable and the spread row always carry their reason", () => {
     expect(spreadUnavailableReason(present, null, "done", true)).toBeNull();
   });
 });
+
+describe("the absent read's sentence", () => {
+  it("a read the nightly has not written yet is not 'Unavailable', and the sentence mirrors the backend's", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { READ_PENDING_NIGHTLY, absentReadLine } = await import("@/lib/optionsReadFacts");
+    expect(absentReadLine(READ_PENDING_NIGHTLY)).toBe("Ivy's Read for today's options data arrives after the nightly run");
+    expect(absentReadLine("no fresh options chain")).toBe("Unavailable. no fresh options chain");
+    expect(absentReadLine(null)).toBe("Unavailable.");
+    const backend = readFileSync(join(__dirname, "../../../../backend/app/routers/tickers.py"), "utf8");
+    expect(backend).toContain(`READ_PENDING_NIGHTLY = "${READ_PENDING_NIGHTLY}"`);
+    expect(backend).toContain('return absent(READ_PENDING_NIGHTLY, "cache miss, no admin token")');
+    expect(backend).not.toContain("has not been generated for the latest options data yet");
+    const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(page).toContain("{absentReadLine(optionsRead.reason)}");
+    expect(page).not.toContain("Unavailable. {optionsRead.reason}");
+  });
+});

@@ -2,7 +2,7 @@
 
 import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
-import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason , ivUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
+import { absentReadLine, displayedOptionFacts, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
@@ -2569,9 +2569,9 @@ export default function TickerPage() {
                     </span>
                   </div>
                 )}
-                <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                  <span className="text-sm text-muted-foreground"><ExplainTip term="put/call ratio" metric="put_call" symbol={upperSymbol}>Put/Call ratio</ExplainTip></span>
-                  <span className="font-mono text-sm font-medium tabular-nums">
+                <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 py-1.5 border-b border-border/40" data-testid="put-call-row">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap"><ExplainTip term="put/call ratio" metric="put_call" symbol={upperSymbol}>Put/Call ratio</ExplainTip></span>
+                  <span className="font-mono text-sm font-medium tabular-nums sm:text-right">
                     {pcRatio != null ? (
                       <>
                         {pcRatio.toFixed(2)}
@@ -2612,7 +2612,7 @@ export default function TickerPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2">
                 Ivy&apos;s Read
               </p>
-              <p className="text-sm text-muted-foreground">Unavailable. {optionsRead.reason}</p>
+              <p className="text-sm text-muted-foreground">{absentReadLine(optionsRead.reason)}</p>
             </div>
           )}
           {orStatus === "done" && optionsRead && optionsRead.model_used !== "none" && (

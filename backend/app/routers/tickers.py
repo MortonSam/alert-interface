@@ -153,6 +153,10 @@ def _build_plain_summary(
 
 from app.services.implied_move import mid_or_last as _mid_or_last, span_days, straddle_implied_move  # noqa: E402
 
+# The one absent-read reason that is not a failure: the warm step writes the read for the latest chain every night.
+# The page shows this sentence alone, without "Unavailable."; frontend lib/optionsReadFacts.ts mirrors it by test.
+READ_PENDING_NIGHTLY = "Ivy's Read for today's options data arrives after the nightly run"
+
 
 _IV_TRUST_CAP = 1.0  # 100% annualized IV — above this is a calc artifact on normal equities
 
@@ -1346,7 +1350,7 @@ async def get_options_read(
     if settings.admin_token and token != settings.admin_token:
         if stale_fact:
             return absent(stale_reason(stale_fact), f"stale cached read ({stale_fact} servable now), no admin token")
-        return absent("Ivy's Read has not been generated for the latest options data yet", "cache miss, no admin token")
+        return absent(READ_PENDING_NIGHTLY, "cache miss, no admin token")
 
     # ── Finnhub quote. RV comes from the stored snapshot or is absent. ─────────
     finnhub = FinnhubClient()

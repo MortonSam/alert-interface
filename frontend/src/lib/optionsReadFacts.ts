@@ -143,3 +143,12 @@ export function spreadUnavailableReason(
   if (!spreadShown) return "IV-RV spread unavailable: the stored spread does not match the IV and RV shown";
   return null;
 }
+
+/** The absent-read reason that is not a failure (mirrors READ_PENDING_NIGHTLY in backend routers/tickers.py, by test). */
+export const READ_PENDING_NIGHTLY = "Ivy's Read for today's options data arrives after the nightly run";
+
+/** What the block says when no read is shown: the pending sentence alone, or "Unavailable. <reason>". */
+export function absentReadLine(reason: string | null | undefined): string {
+  if (reason === READ_PENDING_NIGHTLY) return reason;
+  return reason ? `Unavailable. ${reason}` : "Unavailable.";
+}
