@@ -3,7 +3,7 @@
 import { cardEarningsNote } from "@/lib/earningsSource";
 
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
-import { rvTier } from "@/lib/encodings/rvTier";
+import { discoverRvTier } from "@/lib/encodings/rvTier";
 import { earningsProximity, earningsProximityText } from "@/lib/encodings/earningsProximity";
 import { freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
@@ -164,6 +164,9 @@ export default function DiscoverPage() {
     api.system.health().then(setHealth).catch(() => {});
   }, []);
 
+  // Sections are numbered as they render, so a hidden one (Just reported off, no ledger pick, no active names) never leaves a gap.
+  let sectionN = 0;
+  const nextIndex = () => String(++sectionN).padStart(2, "0");
   return (
     <main className="min-h-screen p-8">
       <div className="max-w-6xl mx-auto">
@@ -214,7 +217,7 @@ export default function DiscoverPage() {
         {/* ── 01 · Ivy's Pick ──────────────────────────── */}
         {!loading && latestPick && (
           <section className="border-t border-border py-10">
-            <SectionKicker index="01" label="From the ledger" />
+            <SectionKicker index={nextIndex()} label="From the ledger" />
             <Link
               href="/ivy/trades"
               className="flex items-center gap-3 hover:opacity-80 transition-opacity group"
@@ -276,7 +279,7 @@ export default function DiscoverPage() {
           <SectionSkeleton />
         ) : !fetchError ? (
           <section className="border-t border-border py-10">
-            <SectionKicker index="02" label="The calendar" />
+            <SectionKicker index={nextIndex()} label="The calendar" />
             <h2 className="font-display text-xl font-bold text-foreground">Reporting soon</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings in the next 7 days</p>
 
@@ -321,7 +324,7 @@ export default function DiscoverPage() {
           <SectionSkeleton />
         ) : !fetchError && justReported && justReported.items.length === 0 ? null : !fetchError ? (
           <section className="border-t border-border py-10">
-            <SectionKicker index="03" label="The results" />
+            <SectionKicker index={nextIndex()} label="The results" />
             <h2 className="font-display text-xl font-bold text-foreground">Just reported</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings reactions in the last 5 days</p>
 
@@ -372,14 +375,14 @@ export default function DiscoverPage() {
           </section>
         ) : null}
 
-        {/* ── 04 · Ivy's Picks (hidden when all picks duplicate Reporting soon) */}
+        {/* ── Worth a look: the discover suggestion score, not Ivy's rule (hidden when every name duplicates Reporting soon) */}
         {!fetchError && loading ? (
           <SectionSkeleton />
         ) : !fetchError && suggestionsAddValue ? (
           <section className="border-t border-border py-10">
-            <SectionKicker index="04" label="From Ivy" />
-            <h2 className="font-display text-xl font-bold text-foreground">Ivy&apos;s Picks</h2>
-            <p className="text-sm text-muted-foreground mt-1 mb-6">Stocks Ivy thinks are worth a look right now</p>
+            <SectionKicker index={nextIndex()} label="Suggestion score" />
+            <h2 className="font-display text-xl font-bold text-foreground">Worth a look</h2>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">Ranked by a simple score: earnings soon, a recent reaction, realized volatility. Not Ivy&apos;s rule; her picks are on the ledger.</p>
 
             {suggestions && suggestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -410,13 +413,14 @@ export default function DiscoverPage() {
           <SectionSkeleton />
         ) : !fetchError && unusuallyActive && unusuallyActive.length > 0 ? (
           <section className="border-t border-border py-10">
-            <SectionKicker index="05" label="The tape" />
+            <SectionKicker index={nextIndex()} label="The tape" />
             <h2 className="font-display text-xl font-bold text-foreground">Unusually active</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Volatility high vs. their own norm</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {unusuallyActive.map((item) => {
-                const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${rvTier(item.rv_rank).label}`;
+                const tier = discoverRvTier(item.rv_rank);   // the API's 85/93 cutoffs; item.tier is the same word
+                const tagLabel = `RV ${Math.round(item.rv_rank)} \u00B7 ${tier.label}`;
                 return (
                   <DiscoverCard
                     key={item.symbol}

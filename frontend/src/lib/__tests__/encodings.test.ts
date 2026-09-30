@@ -4,13 +4,13 @@ import { describe, it, expect } from "vitest";
 import type { LegendItem } from "../encodings/types";
 import { PAYOFF_CHART_ENCODING, payoffChartLegend, payoffMark } from "../encodings/payoffChart";
 import { EARNINGS_MARKER_ENCODING, earningsMarkerColor, earningsMarkerLegend } from "../encodings/earningsMarkers";
-import { RV_TIER_ENCODING, rvTier, rvTierLegend } from "../encodings/rvTier";
+import { RV_TIER_ENCODING, discoverRvTier, rvTier, rvTierLegend } from "../encodings/rvTier";
 import { VOL_REGIME_ENCODING, volRegime, volRegimeLegend } from "../encodings/volRegime";
 import { EARNINGS_PROXIMITY_ENCODING, earningsProximity, earningsProximityLegend, earningsProximityText } from "../encodings/earningsProximity";
 import { PICK_MOVE_ENCODING, PICK_RESULT_ENCODING, pickMove, pickResult, pickResultLegend } from "../encodings/pickResult";
 import { MARK_BASIS_LABELS, markBasisLegend } from "../marks";
 import { rvRankShort } from "../utils";
-import { DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP, RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL } from "../thresholds";
+import { DISCOVER_ELEVATED_RV, DISCOVER_EXTREME_RV, DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP, RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL } from "../thresholds";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -70,11 +70,18 @@ describe("RV tier", () => {
     expect(rvTier(RV_RANK_EXTREME - 0.1).key).toBe("elevated");
     expect(rvTier(RV_RANK_EXTREME).key).toBe("extreme");
   });
-  it("one function serves the watchlist, Build and discover", () => {
+  it("one function serves the watchlist and Build; discover's badge uses the API's own cutoffs", () => {
     expect(rvRankShort(92).tag).toBe(rvTier(92).label);
-    expect(read("app/discover/page.tsx")).toContain("rvTier(item.rv_rank).label");
-    expect(read("app/discover/page.tsx")).not.toContain("item.tier}");
+    const discover = read("app/discover/page.tsx");
+    expect(discover).toContain("discoverRvTier(item.rv_rank)");
+    expect(discover).not.toMatch(/[^r]rvTier\(/);
     expect(read("lib/utils.ts")).not.toMatch(/rank < (25|70|90)/);
+    // the API admits a name at DISCOVER_ELEVATED_RV and calls it extreme from DISCOVER_EXTREME_RV (backend discover_rv_tier)
+    expect(discoverRvTier(DISCOVER_ELEVATED_RV).key).toBe("elevated");
+    expect(discoverRvTier(92).key).toBe("elevated");           // the general scale would say extreme here
+    expect(discoverRvTier(DISCOVER_EXTREME_RV).key).toBe("extreme");
+    expect(discoverRvTier(93).rule).toContain(String(DISCOVER_EXTREME_RV));
+    expect(discoverRvTier(85).rule).toBe(`RV rank ${DISCOVER_ELEVATED_RV} to ${DISCOVER_EXTREME_RV - 1}`);
   });
   it("legend covers every tier and states its rule", () => {
     expectLegendCovers(rvTierLegend(), Object.keys(RV_TIER_ENCODING));

@@ -3,6 +3,8 @@
  * Written for someone who has never traded options.
  */
 
+import { PC_CALL_HEAVY, PC_PUT_HEAVY } from "@/lib/thresholds";
+
 const GLOSSARY: Record<string, string> = {
   straddle:
     "Buying both a call and put at the same strike. The total cost reflects the market's expected move.",
@@ -23,7 +25,7 @@ const GLOSSARY: Record<string, string> = {
   "iv/rv spread":
     "The gap between implied volatility and realized volatility. Positive means options are priced above recent actual movement.",
   "put/call ratio":
-    "Total put volume divided by call volume. Above 1.0 means more bearish bets; below 1.0 means more bullish bets.",
+    `Total put volume divided by call volume. The label beside it applies one rule: above ${PC_PUT_HEAVY} reads put-heavy, below ${PC_CALL_HEAVY} reads call-heavy, and in between reads balanced.`,
   breakeven:
     "The stock price where an option trade starts to profit, accounting for the premium paid.",
   beat:
@@ -39,7 +41,7 @@ const GLOSSARY: Record<string, string> = {
   "stock-split":
     "A corporate action that divides existing shares into multiple new shares, lowering the per-share price proportionally while keeping total market value unchanged.",
   "index-removal":
-    "This stock was removed from the S&P 500 index. It remains tradable and data continues to update normally.",
+    "This stock left the S&P 500 index. While it stays in this site's active set its data refreshes nightly like any other; once it is retired from the set, updates stop and it drops out of the lists.",
   "analyst-action":
     "A Wall Street analyst changed their rating, price target, or coverage status on this stock.",
   meet:
@@ -55,7 +57,7 @@ const GLOSSARY: Record<string, string> = {
   "magnitude trend":
     "Whether recent earnings moves have been getting bigger or smaller compared to earlier ones. Look for 'heating up' or 'cooling' to gauge if reactions are growing or fading.",
   "peer average":
-    "The average one-day earnings move across other stocks in the same sector. Compare this company's typical move to the peer average to see if it reacts more or less than its sector.",
+    "The average one-day earnings move across the stocks in this company's sector, this company included. Compare its typical move with that average to see whether it reacts more or less than its sector.",
   "priced in":
     "When a stock drops after beating estimates, the market may have already expected the good news and bid the price up beforehand. A high priced-in rate means beats often do not lead to gains.",
   "median event-day move":
