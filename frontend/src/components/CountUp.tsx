@@ -29,13 +29,15 @@ export function CountUp({
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReduced) return;
 
-    setDisplay("0");
-
+    // The real number is rendered from the first paint and stays unless the counter is seen: a headless or
+    // non-scrolling render, a background tab or a throttled frame never shows 0. The count-up runs only
+    // once the element is 30% visible, and then from 0 to the value.
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting && !triggered.current) {
           triggered.current = true;
           observer.disconnect();
+          setDisplay("0");
           const start = performance.now();
           function tick(now: number) {
             const elapsed = now - start;

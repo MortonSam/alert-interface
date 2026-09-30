@@ -6,12 +6,18 @@
 import { useEffect, useState } from "react";
 import { api, type SiteStats } from "@/lib/api";
 import { CountUp } from "@/components/CountUp";
-import { fmtLongDate, ledgerRecordSentence, scoreKeepingPhrase } from "@/lib/ivyRule";
+import { fmtLongDate, ledgerRecordSentence, ledgerVisibilityClause, scoreKeepingPhrase } from "@/lib/ivyRule";
 import { useIvyRule } from "@/lib/useIvyRule";
 
 export function LedgerStartDate({ fallback = "its start date" }: { fallback?: string }) {
   const ivy = useIvyRule();
   return <>{ivy ? fmtLongDate(ivy.rule.ledger_start) : fallback}</>;
+}
+
+/** The disclosures' clause on who sees the picks, from the flag. Before the rule loads it makes no claim. */
+export function LedgerVisibilityClause() {
+  const ivy = useIvyRule();
+  return <>{ivy ? ledgerVisibilityClause(ivy.rule) : "and are recorded nightly"}</>;
 }
 
 export function HomeLedgerHeadline() {

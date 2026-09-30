@@ -3,11 +3,12 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   type IvyBacktest, type IvyRule,
-  chainFreshnessSentence, exitRuleSentence, ledgerRecordSentence, noForcedCallsSentence,
-  oneRuleParagraph, restOfRecordPhrase, scoreKeepingPhrase, whoSheIsLine,
+  chainFreshnessSentence, exitRuleSentence, ledgerHeadline, ledgerLinkLabel, ledgerRecordSentence, ledgerVisibilityClause,
+  liveRecordPhrase, noForcedCallsSentence, oneRuleParagraph, restOfRecordPhrase, scoreKeepingPhrase, smallEdgeSentence, whoSheIsLine,
 } from "../ivyRule";
 
 const SRC = join(__dirname, "../..");
+const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 
 const RULE: IvyRule = {
   momentum_cutoff_pct: -10, momentum_lookback_days: 20, min_prior_quarters: 8, implied_move_multiple: 1.2,
@@ -31,7 +32,7 @@ describe("the One rule paragraph", () => {
       "Ivy looks for one setup. A company reports earnings in the next few days, its stock has fallen more than 10% over the prior 20 trading days, and it has at least 8 quarters of earnings history. " +
       "That rule was tested against 2023, 2024, and 2025-26. Across 365 setups the stock was higher five days later 54.2% of the time, against 52.4% for all earnings reports in those years. " +
       "That edge is small, and most of it came in 2023 (59.6% against 51.5%). Since then it has been about a point. " +
-      "Those years chose the rule as much as tested it, so the only test that counts is the live record, kept since September 15, 2026. A small edge you can check beats a large one you can't. " +
+      "Those years chose the rule as much as tested it, so the only test that counts is the live record, kept nightly since September 15, 2026 and public at launch. A small edge you will be able to check beats a large one you can't. " +
       "Before she buys anything, Ivy checks what the options market is pricing. If the implied move is more than 1.2 times the stock's usual earnings move, she refuses. " +
       "Every pick carries its receipt, with the number of comparable setups, the base rate, the expected move, and what the options were pricing. She makes no bearish calls. The data has not earned them yet.",
     );
@@ -43,7 +44,7 @@ describe("the One rule paragraph", () => {
     expect(text).toContain("more than 15%");
     expect(text).toContain("at least 12 quarters");
     expect(text).toContain("more than 1.5 times");
-    expect(text).toContain("kept since January 4, 2027");
+    expect(text).toContain("kept nightly since January 4, 2027 and public at launch");
   });
 
   it("'about a point' is computed, not assumed", () => {
@@ -58,7 +59,7 @@ describe("the One rule paragraph", () => {
   it("says nothing about a backtest when none is stored", () => {
     const text = oneRuleParagraph(RULE, null);
     expect(text).not.toContain("tested against");
-    expect(text).toContain("kept since September 15, 2026");
+    expect(text).toContain("kept nightly since September 15, 2026 and public at launch");
   });
 });
 
@@ -111,4 +112,33 @@ describe("no page types Ivy's numbers by hand", () => {
       for (const [re, what] of BANNED) expect(src, `${what} typed by hand`).not.toMatch(re);
     });
   }
+});
+
+
+describe("ledger copy follows the flag (audit item 10)", () => {
+  const priv = { ...RULE, ledger_public: false };
+  const pub = { ...RULE, ledger_public: true };
+  it("says the record is private wherever a page speaks of checking it", () => {
+    expect(ledgerHeadline(priv)).toBe("One rule, and a record kept nightly, public at launch");
+    expect(ledgerHeadline(pub)).toBe("One rule, and a record you can check");
+    expect(ledgerLinkLabel(priv)).toBe("Her record, public at launch \u2192");
+    expect(ledgerLinkLabel(pub)).toBe("Her full record \u2192");
+    expect(liveRecordPhrase(priv)).toBe("the live record, kept nightly since September 15, 2026 and public at launch");
+    expect(liveRecordPhrase(pub)).toBe("the live record, kept since September 15, 2026");
+    expect(smallEdgeSentence(priv)).toContain("will be able to check");
+    expect(smallEdgeSentence(pub)).toBe("A small edge you can check beats a large one you can't.");
+    expect(ledgerVisibilityClause(priv)).toBe("and are recorded nightly; at launch they are published to every visitor identically");
+    expect(ledgerVisibilityClause(pub)).toBe("and are published to every visitor identically");
+    expect(oneRuleParagraph(pub, BACKTEST)).toContain("the live record, kept since September 15, 2026. A small edge you can check");
+  });
+  it("no page types the public wording itself", () => {
+    const ivy = read("app/ivy/page.tsx");
+    expect(ivy).toContain("ledgerHeadline(ivy.rule)");
+    expect(ivy).toContain("ledgerLinkLabel(ivy.rule)");
+    expect(ivy).not.toMatch(/record you can check|Her full record/);
+    const disc = read("app/disclosures/page.tsx");
+    expect(disc).toContain("<LedgerVisibilityClause />");
+    expect(disc).not.toContain("published to every visitor identically");
+    expect(read("components/IvyCopy.tsx")).toContain("ledgerVisibilityClause(ivy.rule)");
+  });
 });

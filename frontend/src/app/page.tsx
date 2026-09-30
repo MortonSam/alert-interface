@@ -6,16 +6,17 @@ import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
 
-// ── Static sample data for the note preview ──────────────────────────────────
+// ── An illustration of a note. Every figure below is typed: it is not a generated note and not AAPL's.
+// The block says so in its heading and its status line, so no number here can be read as a real one.
 
 function NotePreview() {
   return (
     <div className="relative rounded-2xl border border-border bg-card">
       {/* Status line */}
       <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border bg-secondary/40">
-        <span className="h-2 w-2 rounded-full bg-success" />
+        <span className="h-2 w-2 rounded-full bg-muted-foreground/50" />
         <span className="font-mono text-[11px] text-muted-foreground">
-          Generated &amp; verified
+          Illustration, not a generated note
         </span>
       </div>
 
@@ -115,8 +116,7 @@ function NotePreview() {
       {/* Caption pill */}
       <div className="flex justify-center py-4 border-t border-border">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
-          <span className="text-[8px] text-success">{"\u25CF"}</span>
-          Sample note from Q2 2026
+          Illustrative figures, not a company&apos;s
         </span>
       </div>
     </div>
@@ -177,7 +177,7 @@ export default function Home() {
 
             <p data-hero-fade className="text-foreground/70 text-lg mt-6 max-w-[42em]">
               One workspace for the retail investor, starting with the S&amp;P 500.
-              Every number explained, every claim checked before you see it.
+              Every number explained; every claim checked, and the unsupported ones shown as unsupported.
             </p>
 
             <div data-hero-fade className="flex flex-wrap gap-[13px] justify-center mt-8">
@@ -234,7 +234,7 @@ export default function Home() {
               </p>
               <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
                 One workspace where every number comes with its meaning
-                attached, and every claim is checked before you see it.
+                attached, and every claim is checked, with unsupported ones shown as unsupported.
               </h2>
             </div>
 
@@ -244,8 +244,8 @@ export default function Home() {
                   Grounded in real data
                 </h3>
                 <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
-                  Every figure (earnings, margins, valuation) comes straight from filings
-                  and market data. The AI writes the analysis; the numbers are exact.
+                  Every figure (earnings, margins, valuation) comes from filings and
+                  market data, not from the model. The AI writes the analysis around them.
                 </p>
               </div>
               <div className="border-t border-border pt-4 pb-5">
@@ -262,8 +262,9 @@ export default function Home() {
                   Claims you can verify
                 </h3>
                 <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
-                  A second model cross-checks every statement against the source filing
-                  and flags anything it can&#39;t support. No confident hallucinations.
+                  A second model checks every statement against the source filing and
+                  marks each one supported, unsupported or contradicted. The marks are
+                  shown with the note; the check reduces errors, it does not remove them.
                 </p>
               </div>
             </div>
@@ -307,16 +308,19 @@ export default function Home() {
           <section className="max-w-3xl mx-auto px-8 py-24">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
-                See it in action
+                Illustration
               </p>
               <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-                The note does the explaining
+                What a note looks like: an illustration
               </h2>
               <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
-                Earnings, financials, and risk analysis, with every number you can hover to understand.
+                Earnings, financials, and risk analysis. On a real note each number opens its explanation; the figures below are illustrative.
               </p>
             </div>
             <NotePreview />
+            <p className="text-center text-xs text-muted-foreground mt-4">
+              <Link href="/tickers/AAPL" className="underline underline-offset-2 hover:text-foreground">See a generated note</Link>
+            </p>
           </section>
         </ScrollReveal>
 

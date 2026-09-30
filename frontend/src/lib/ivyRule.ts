@@ -89,12 +89,10 @@ export function oneRuleParagraph(rule: IvyRule, backtest: IvyBacktest | null): s
       ` That edge is small, and most of it came in ${best.f.label}` +
       ` (${pct(best.f.hit_rate ?? 0)}% against ${pct(best.f.base_rate ?? 0)}%).` +
       ` ${restOfRecordPhrase(backtest, best.i)}` +
-      ` Those years chose the rule as much as tested it, so the only test that counts is the live record,` +
-      ` kept since ${fmtLongDate(rule.ledger_start)}. A small edge you can check beats a large one you can't.`;
+      ` Those years chose the rule as much as tested it, so the only test that counts is ${liveRecordPhrase(rule)}.` +
+      ` ${smallEdgeSentence(rule)}`;
   } else {
-    tested =
-      ` The only test that counts is the live record, kept since ${fmtLongDate(rule.ledger_start)}.` +
-      ` A small edge you can check beats a large one you can't.`;
+    tested = ` The only test that counts is ${liveRecordPhrase(rule)}. ${smallEdgeSentence(rule)}`;
   }
 
   const gate =
@@ -104,6 +102,38 @@ export function oneRuleParagraph(rule: IvyRule, backtest: IvyBacktest | null): s
     `She makes no bearish calls. The data has not earned them yet.`;
 
   return setup + tested + gate;
+}
+
+/** "the live record, kept since ..." once public; while private, the record is kept nightly and public at launch. */
+export function liveRecordPhrase(rule: Pick<IvyRule, "ledger_public" | "ledger_start">): string {
+  const since = fmtLongDate(rule.ledger_start);
+  return rule.ledger_public
+    ? `the live record, kept since ${since}`
+    : `the live record, kept nightly since ${since} and public at launch`;
+}
+
+/** "A small edge you can check" is a claim only once the record can be checked. */
+export function smallEdgeSentence(rule: Pick<IvyRule, "ledger_public">): string {
+  return rule.ledger_public
+    ? "A small edge you can check beats a large one you can't."
+    : "A small edge you will be able to check beats a large one you can't.";
+}
+
+/** The Ivy page's "How she decides" heading. */
+export function ledgerHeadline(rule: Pick<IvyRule, "ledger_public">): string {
+  return rule.ledger_public ? "One rule, and a record you can check" : "One rule, and a record kept nightly, public at launch";
+}
+
+/** The link to the trades page. */
+export function ledgerLinkLabel(rule: Pick<IvyRule, "ledger_public">): string {
+  return rule.ledger_public ? "Her full record \u2192" : "Her record, public at launch \u2192";
+}
+
+/** The disclosures' clause on who sees the picks: only true as written once the ledger is public. */
+export function ledgerVisibilityClause(rule: Pick<IvyRule, "ledger_public">): string {
+  return rule.ledger_public
+    ? "and are published to every visitor identically"
+    : "and are recorded nightly; at launch they are published to every visitor identically";
 }
 
 /** "keeps score in public" is only true once the ledger is public. */

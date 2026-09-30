@@ -1,7 +1,7 @@
 "use client";
 
 import { optionsDataPhrase } from "@/lib/freshness";
-import { ledgerRecordSentence, noForcedCallsSentence, oneRuleParagraph, whoSheIsLine } from "@/lib/ivyRule";
+import { ledgerHeadline, ledgerLinkLabel, ledgerRecordSentence, noForcedCallsSentence, oneRuleParagraph, whoSheIsLine } from "@/lib/ivyRule";
 import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -180,7 +180,7 @@ export default function MeetIvyPage() {
         <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="How she decides" />
           <h2 className="font-display text-2xl font-bold text-foreground">
-            One rule, and a record you can check
+            {ivy ? ledgerHeadline(ivy.rule) : "One rule, and a record"}
           </h2>
           <p className="text-base text-muted-foreground leading-relaxed mt-3 max-w-prose">
             {ivy ? oneRuleParagraph(ivy.rule, ivy.backtest) : ""}
@@ -221,7 +221,7 @@ export default function MeetIvyPage() {
                 href="/ivy/trades"
                 className="border border-border text-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:border-foreground/40 transition-colors whitespace-nowrap"
               >
-                Her full record →
+                {ivy ? ledgerLinkLabel(ivy.rule) : "Her record \u2192"}
               </Link>
             </div>
           </div>
