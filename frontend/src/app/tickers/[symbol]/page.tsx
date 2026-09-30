@@ -506,7 +506,7 @@ function PctCell({ value }: { value: string | null }) {
 
 function StatNum({ value }: { value: number }) {
   return (
-    <span className="tabular-nums font-medium text-sm text-foreground">
+    <span className="tabular-nums font-medium text-xs sm:text-sm text-foreground">
       {value > 0 ? "+" : ""}
       {value.toFixed(2)}%
     </span>
@@ -586,15 +586,15 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full table-fixed text-xs">
               <thead>
                 <tr className="border-b border-border/40">
-                  <th className="text-left font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4 w-8" />
-                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Avg</th>
-                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Median</th>
-                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Max</th>
-                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-4">Min</th>
-                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2">N</th>
+                  <th className="text-left font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-2 sm:pr-4 w-8" />
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-2 sm:pr-4">Avg</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-2 sm:pr-4">Median</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-2 sm:pr-4">Max</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 pr-2 sm:pr-4">Min</th>
+                  <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-2 w-8">N</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -606,13 +606,13 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
                   ] as [string, MoveStats | null][]
                 ).map(([label, s]) => (
                   <tr key={label}>
-                    <td className="py-1.5 pr-4 text-muted-foreground font-medium"><ExplainTip term={REACTION_WINDOW_TEXT[mode].glossaryTerm[label as "1d" | "3d" | "5d"]}>{label}</ExplainTip></td>
+                    <td className="py-1.5 pr-2 sm:pr-4 text-muted-foreground font-medium"><ExplainTip term={REACTION_WINDOW_TEXT[mode].glossaryTerm[label as "1d" | "3d" | "5d"]}>{label}</ExplainTip></td>
                     {s ? (
                       <>
-                        <td className="py-1.5 pr-4 text-right"><StatNum value={s.avg} /></td>
-                        <td className="py-1.5 pr-4 text-right"><StatNum value={s.median} /></td>
-                        <td className="py-1.5 pr-4 text-right"><StatNum value={s.max} /></td>
-                        <td className="py-1.5 pr-4 text-right"><StatNum value={s.min} /></td>
+                        <td className="py-1.5 pr-2 sm:pr-4 text-right"><StatNum value={s.avg} /></td>
+                        <td className="py-1.5 pr-2 sm:pr-4 text-right"><StatNum value={s.median} /></td>
+                        <td className="py-1.5 pr-2 sm:pr-4 text-right"><StatNum value={s.max} /></td>
+                        <td className="py-1.5 pr-2 sm:pr-4 text-right"><StatNum value={s.min} /></td>
                         <td className="py-1.5 text-right tabular-nums text-muted-foreground">{s.count}</td>
                       </>
                     ) : (
@@ -1297,8 +1297,8 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
   }, [sections]);
 
   return (
-    <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-8 px-8">
-      <div className="max-w-6xl mx-auto flex gap-6 overflow-x-auto py-3">
+    <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-4 px-4 sm:-mx-8 sm:px-8">
+      <div className="max-w-6xl mx-auto flex flex-wrap gap-x-4 gap-y-1.5 sm:gap-6 py-3">
         {sections.map((s) => (
           <a
             key={s.id}
@@ -1815,7 +1815,7 @@ export default function TickerPage() {
 
   if (tickerStatus === "loading") {
     return (
-      <main className="min-h-screen p-8">
+      <main className="min-h-screen p-4 sm:p-8">
         <div className="max-w-6xl mx-auto animate-pulse space-y-4">
           <div className="h-4 bg-muted rounded w-16" />
           <div className="h-14 bg-muted rounded w-40 mt-6" />
@@ -1830,7 +1830,7 @@ export default function TickerPage() {
 
   if (tickerStatus === "error") {
     return (
-      <main className="min-h-screen p-8">
+      <main className="min-h-screen p-4 sm:p-8">
         <div className="max-w-6xl mx-auto">
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             Failed to load ticker: {tickerError}
@@ -1843,7 +1843,7 @@ export default function TickerPage() {
   if (!ticker) return null;
 
   return (
-    <main className="min-h-screen p-8">
+    <main className="min-h-screen p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← All tickers

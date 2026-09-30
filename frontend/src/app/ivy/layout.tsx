@@ -58,7 +58,7 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
             {stripText}
           </p>
         )}
-        <nav className="flex gap-1 border-b mb-6">
+        <nav className="flex flex-wrap gap-1 border-b mb-6">
           {tabs.map(({ href, label }) => {
             const active =
               href === "/ivy" ? pathname === "/ivy" : pathname.startsWith(href);

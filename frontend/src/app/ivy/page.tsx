@@ -206,11 +206,11 @@ export default function MeetIvyPage() {
         {/* 04 CTA row */}
         <div className="hidden lg:block border-t border-border pt-10" />
         <section className="border-t border-border pt-10 pb-4">
-          <div className="flex items-center justify-between gap-6">
-            <h3 className="font-display text-xl font-bold text-foreground whitespace-nowrap">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 sm:gap-6">
+            <h3 className="font-display text-xl font-bold text-foreground">
               See what Ivy&apos;s working on
             </h3>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Link
                 href="/ivy/desk"
                 className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:opacity-90 transition-opacity whitespace-nowrap"

@@ -162,7 +162,7 @@ export default function Home() {
       <StoryFlow>
         {/* ── 1. Hero ────────────────────────────────────────────── */}
         <section className="min-h-[100svh] flex flex-col bg-background">
-          <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-8">
+          <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-4 sm:px-8">
             <h1 className="hero-h1 font-display font-extrabold uppercase">
               <span data-hero-line className="block text-foreground">
                 Stock research
@@ -202,12 +202,12 @@ export default function Home() {
         </section>
 
         {/* ── 2. Big three numbers ──────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
           <SiteCounters />
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
@@ -226,7 +226,7 @@ export default function Home() {
         </section>
 
         {/* ── 4. The Solution ──────────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
@@ -272,7 +272,7 @@ export default function Home() {
         </section>
 
         {/* ── 5. The Analyst ───────────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-8">
+        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
@@ -305,7 +305,7 @@ export default function Home() {
       <div>
         {/* ── 6. Note preview ──────────────────────────────────── */}
         <ScrollReveal>
-          <section className="max-w-3xl mx-auto px-8 py-24">
+          <section className="max-w-3xl mx-auto px-4 sm:px-8 py-24">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Illustration
@@ -326,7 +326,7 @@ export default function Home() {
 
         {/* ── 7. Market grid ───────────────────────────────────── */}
         <ScrollReveal>
-          <section id="market" className="max-w-7xl mx-auto px-8 py-24">
+          <section id="market" className="max-w-7xl mx-auto px-4 sm:px-8 py-24">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Start anywhere
@@ -344,7 +344,7 @@ export default function Home() {
 
         {/* ── 8. Closing CTA ───────────────────────────────────── */}
         <ScrollReveal>
-          <section className="max-w-4xl mx-auto px-8 py-24 text-center">
+          <section className="max-w-4xl mx-auto px-4 sm:px-8 py-24 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point
             </p>

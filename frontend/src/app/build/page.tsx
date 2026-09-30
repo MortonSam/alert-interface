@@ -497,7 +497,7 @@ function DraftDisplay({
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Position cost &amp; risk · per contract
           </p>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
               <p className="font-mono text-3xl font-semibold tabular-nums">
@@ -600,7 +600,7 @@ function DraftDisplay({
                   {altResult.strategy && (
                     <p className="text-lg font-bold text-foreground">{altResult.strategy}</p>
                   )}
-                  <div className="grid grid-cols-3 gap-4 pt-0.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-0.5">
                     <div className="border border-border/60 bg-transparent rounded-md p-5">
                       <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
                       <p className="font-mono text-3xl font-semibold tabular-nums">
@@ -658,7 +658,7 @@ function DraftDisplay({
       </p>
 
       {/* K) CTA row */}
-      <div className="flex gap-3 pt-1">
+      <div className="flex flex-wrap gap-3 pt-1">
         <button
           type="button"
           onClick={handleAccept}
@@ -941,7 +941,7 @@ function BuildTradePageContent() {
 
   if (step === "done" && savedThesis) {
     return (
-      <main className="min-h-screen p-8">
+      <main className="min-h-screen p-4 sm:p-8">
         <div className="max-w-2xl mx-auto">
           <div className="mb-8">
             <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
@@ -990,7 +990,7 @@ function BuildTradePageContent() {
   // ── Flow steps ───────────────────────────────────────────────────────────────
 
   return (
-    <main className="min-h-screen p-8">
+    <main className="min-h-screen p-4 sm:p-8">
       <div className="max-w-2xl mx-auto">
 
         {/* Page header */}
@@ -1116,7 +1116,7 @@ function BuildTradePageContent() {
                 </div>
               )}
 
-              <div className={cn("grid gap-4", ivyDecided ? "grid-cols-2" : "grid-cols-3")}>
+              <div className={cn("grid gap-4 grid-cols-1", ivyDecided ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
                 <button
                   type="button"
                   onClick={() => pickDirection("bullish")}
@@ -1244,7 +1244,7 @@ function BuildTradePageContent() {
                 </div>
               )}
 
-              <div className="rounded-xl border border-border/60 bg-transparent px-6 py-6">
+              <div className="rounded-xl border border-border/60 bg-transparent px-4 sm:px-6 py-6">
                 <DraftDisplay
                   draft={draft}
                   onAccept={handleAcceptDraft}
@@ -1272,9 +1272,9 @@ function BuildTradePageContent() {
           {(step === "confirm" || step === "saving") && (
             <section className="space-y-4">
               <StepHeader n={4} label="Confirm &amp; save" />
-              <div className="rounded-xl border border-border/60 bg-transparent px-6 py-6 space-y-5">
+              <div className="rounded-xl border border-border/60 bg-transparent px-4 sm:px-6 py-6 space-y-5">
 
-                <div className="grid grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-2">
                       Conviction
@@ -1356,7 +1356,7 @@ function BuildTradePageContent() {
                   </p>
                 )}
 
-                <div className="flex gap-3 pt-1">
+                <div className="flex flex-wrap gap-3 pt-1">
                   {signedIn !== false && (
                     <button
                       type="button"

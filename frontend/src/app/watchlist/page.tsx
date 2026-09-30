@@ -442,7 +442,7 @@ export default function WatchlistPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <main className="min-h-screen p-8">
+    <main className="min-h-screen p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
 
         {/* Header */}

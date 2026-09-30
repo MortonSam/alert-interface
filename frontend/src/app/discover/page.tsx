@@ -168,7 +168,7 @@ export default function DiscoverPage() {
   let sectionN = 0;
   const nextIndex = () => String(++sectionN).padStart(2, "0");
   return (
-    <main className="min-h-screen p-8">
+    <main className="min-h-screen p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-10">
