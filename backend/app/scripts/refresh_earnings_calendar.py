@@ -543,7 +543,7 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
         if not entries:
             print("Finnhub returned no entries; nothing changed and no ticker marked checked.")
             if step_label:
-                await record_step_fields(step_label, {"checked": 0, "error": "Finnhub returned no calendar entries"})
+                await record_step_fields(step_label, outcome_fields({"checked": 0, "error": "Finnhub returned no calendar entries"}, 1, now))
             return 1
         fin_future, fin_actual = finnhub_by_symbol(entries, today)
 
@@ -619,8 +619,15 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
             print(f"\n  {title} ({'all' if limit == len(rows) else 'first 10'}):")
             print("\n".join(f"    {r}" for r in rows[:limit]))
     if write and step_label:
-        await record_step_fields(step_label, plan.fields())
+        await record_step_fields(step_label, outcome_fields(plan.fields(), 0, now))
     return 0
+
+
+def outcome_fields(fields: dict, exit_code: int, started: datetime) -> dict:
+    """The step's fields with exit, at and seconds: /health reads a missing exit as a failure, and a manual run
+    (restore_yfinance_estimates) has no refresh.py wrapper to write them."""
+    now = datetime.now(timezone.utc)
+    return {**fields, "exit": exit_code, "at": now.isoformat(), "seconds": round((now - started).total_seconds(), 1)}
 
 
 async def main() -> int:

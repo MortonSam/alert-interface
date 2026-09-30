@@ -93,21 +93,37 @@ class TestMissingStockClose:
         pick = SimpleNamespace(entry_price=None)
         assert _compute_stock_move(pick, 105.0) is None
 
-    def test_close_price_stays_null_when_stock_unavailable(self):
-        """Verify that a pick object's close_price is not overwritten
-        with entry_price when stock close is unavailable.
+    def test_a_pick_is_never_closed_without_its_close_jbl_exactly(self):
+        """JBL, production, 2026-09-30: exit_date Sep 30, the nightly ran at 06:59Z before that session, Yahoo had no
+        Sep 30 bar and the chain was Sep 29's. The old closer marked it closed with close_price null on the day-before
+        spread mark. Now it waits with the reason, closes the next run on the Sep 30 close and a Sep 30 chain, and
+        expiration is a hard stop only with a valid close."""
+        from datetime import date
+        from app.scripts.close_alert_picks import settle_decision
+        exit_date, expiration = date(2026, 9, 30), "2026-10-02"
+        # 06:59Z on exit_date: no Sep 30 close yet, chain dated Sep 29
+        assert settle_decision(exit_date, expiration, date(2026, 9, 30), 12.4, None, "2026-09-29T20:00:00+00:00", None) == \
+            ("wait", "no stock close for 2026-09-30 yet")
+        # the next run: the close exists but the chain is still Sep 29's: the exit mark is not there yet
+        assert settle_decision(exit_date, expiration, date(2026, 10, 1), 12.4, None, "2026-09-29T20:00:00+00:00", 320.1) == \
+            ("wait", "chain dated 2026-09-29, the exit mark needs 2026-09-30 or later")
+        # close and a Sep 30 chain: closes
+        assert settle_decision(exit_date, expiration, date(2026, 10, 1), 12.4, None, "2026-09-30T20:00:00+00:00", 320.1) == ("close", "")
+        assert settle_decision(exit_date, expiration, date(2026, 10, 1), 0.0, None, "2026-10-01", 320.1) == ("close", "")   # worthless spread still closes
+        # no chain at all: waits with the store's note, and after expiration becomes the hard stop
+        assert settle_decision(exit_date, expiration, date(2026, 10, 1), None, "no chain for 2026-10-02", None, 320.1) == ("wait", "no chain for 2026-10-02")
+        assert settle_decision(exit_date, expiration, date(2026, 10, 3), None, "no chain for 2026-10-02", None, 320.1) == ("hard_stop", "no chain for 2026-10-02")
+        assert settle_decision(exit_date, expiration, date(2026, 10, 3), 12.4, None, "2026-09-29", None) == ("hard_stop", "no stock close for 2026-09-30 yet")
 
-        This tests the contract: if get_close_on_date fails, close_price
-        and stock_move_5d remain None. The pick still closes because the
-        option P&L from the chain is sufficient.
-        """
-        # Simulate a pick with entry_price set but close_price not yet set
-        pick = SimpleNamespace(
-            close_price=None,
-            stock_move_5d=None,
-            entry_price=Decimal("150.00"),
-        )
-        # After the fix, we simply do NOT touch close_price when stock is unavailable.
-        # Verify the fields remain None (no fabrication).
-        assert pick.close_price is None
-        assert pick.stock_move_5d is None
+    def test_the_closer_only_closes_through_the_decision_and_can_reopen_a_pick_closed_without_a_close(self):
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "close_alert_picks.py").read_text()
+        v2 = src[src.index("async def _close_v2_picks"):src.index("async def _reopen_null_close")]
+        # every closed status in the v2 path sits under the decision's close branch or a valid expiration close
+        assert v2.count('pick.status = "closed"') == 2
+        assert 'if action == "close":' in v2 and 'if _is_valid_price(exp_close):' in v2
+        assert "stock close unavailable" not in src
+        non_v2 = src[src.index("async def _close_picks"):src.index("async def _resolve_close_from_iv_history")]
+        assert "if not _is_valid_price(close_price):" in non_v2 and non_v2.index("if not _is_valid_price(close_price):") < non_v2.index('pick.status = "closed"')
+        assert '"--reopen-null-close" in sys.argv' in src
+        assert 'record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting})' in src

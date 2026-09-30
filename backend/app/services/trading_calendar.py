@@ -7,7 +7,7 @@ OHLCV data).
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 from pandas.tseries.holiday import (
@@ -42,6 +42,28 @@ class NYSEHolidayCalendar(AbstractHolidayCalendar):
 
 
 _NYSE_BDAY = CustomBusinessDay(calendar=NYSEHolidayCalendar())
+
+
+def is_trading_day(d: date) -> bool:
+    """A weekday that is not an NYSE holiday."""
+    if d.weekday() >= 5:
+        return False
+    holidays = NYSEHolidayCalendar().holidays(pd.Timestamp(d), pd.Timestamp(d))
+    return len(holidays) == 0
+
+
+def is_half_day(d: date) -> bool:
+    """An NYSE early close (1 p.m.): the day after Thanksgiving, Christmas Eve on a weekday, and July 3 on a
+    weekday when Independence Day is on a weekday too."""
+    if not is_trading_day(d):
+        return False
+    if d.month == 11 and d.weekday() == 4 and 23 <= d.day <= 29 and not is_trading_day(d - timedelta(days=1)):
+        return True                       # the Friday after Thanksgiving
+    if d.month == 12 and d.day == 24:
+        return True
+    if d.month == 7 and d.day == 3 and date(d.year, 7, 4).weekday() < 5:
+        return True
+    return False
 
 
 def nth_trading_day_after(event_date: date, n: int = 5) -> date:

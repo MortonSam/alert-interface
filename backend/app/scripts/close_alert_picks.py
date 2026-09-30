@@ -1,8 +1,15 @@
 """Close expired alert picks by fetching their official close price.
 
+A pick is never marked closed without its close. A v2 pick settles on exit_date at that session's close: the
+stock close for exit_date must exist (the nightly runs at 06:00Z, before exit_date's session, so the first
+run on exit_date waits) and the chain the spread is marked on must be dated on or after exit_date (an
+earlier chain is the day-before mark). Otherwise the pick stays open with the reason, recorded in the step
+outcome, and is retried next run; expiration is the hard stop, and even that needs a valid close.
+
 Usage:
     python -m app.scripts.close_alert_picks
     python -m app.scripts.close_alert_picks --backfill
+    python -m app.scripts.close_alert_picks --reopen-null-close   # a pick marked closed without a close goes back to open
     make close-picks
 """
 from __future__ import annotations
@@ -23,9 +30,47 @@ from app.models.iv_history import IVHistory
 from app.models.shadow_pick import ShadowPick
 from app.services import chain_store
 from app.services.pnl_math import compute_option_pnl_at_expiry, pnl_percent
+from app.services.step_outcomes import record_step_fields
 from app.services.yfinance_client import YFinanceClient
 
 logger = logging.getLogger(__name__)
+
+STEP_LABEL = "Close expired alert picks"
+
+
+def _chain_date(chain_last_trade) -> date | None:
+    """The date of a chain's last trade, from the ISO string or datetime the chain store keeps."""
+    if chain_last_trade is None:
+        return None
+    if isinstance(chain_last_trade, datetime):
+        return chain_last_trade.date()
+    if isinstance(chain_last_trade, date):
+        return chain_last_trade
+    try:
+        return date.fromisoformat(str(chain_last_trade)[:10])
+    except ValueError:
+        return None
+
+
+def settle_decision(exit_date: date, expiration: str | None, today: date, spread_mid: float | None, mark_note: str | None,
+                    chain_last_trade, close_price) -> tuple[str, str]:
+    """What the closer does with a v2 pick due for exit: ('close', ''), ('hard_stop', why) or ('wait', why).
+
+    'close' needs a valid stock close for exit_date and a spread mark on a chain dated on or after exit_date.
+    'hard_stop' is expiration passed with no usable exit mark: the caller closes at the expiration close, and only
+    with a valid one. Anything else waits, with the reason, and is retried next run."""
+    chain_date = _chain_date(chain_last_trade)
+    if not _is_valid_price(close_price):
+        why = f"no stock close for {exit_date.isoformat()} yet"
+    elif spread_mid is None:
+        why = mark_note or "no spread mark"
+    elif chain_date is None or chain_date < exit_date:
+        why = f"chain dated {chain_date.isoformat() if chain_date else 'unknown'}, the exit mark needs {exit_date.isoformat()} or later"
+    else:
+        return "close", ""
+    if expiration and expiration < today.isoformat():
+        return "hard_stop", why
+    return "wait", why
 
 
 def _is_valid_price(price) -> bool:
@@ -123,16 +168,14 @@ def _compute_stock_move(pick: AlertPick, close_price: float) -> Decimal | None:
     return Decimal(str(round((close_price - entry) / entry * 100, 4)))
 
 
-async def _close_v2_picks() -> int:
-    """Close v2 picks that have reached their exit_date.
+async def _close_v2_picks() -> tuple[list[str], list[str]]:
+    """Close v2 picks that have reached their exit_date at exit_date's close (see settle_decision).
 
-    V2 picks close on exit_date using the chain-store spread mid,
-    not at expiration. stock_move_5d is persisted alongside option P&L.
-    Expiration remains a hard stop if exit_date close was missed.
-    """
+    Returns (closed, waiting) labels for the step outcome."""
     today = date.today()
+    closed_labels: list[str] = []
+    waiting: list[str] = []
     async with AsyncSessionLocal() as session:
-        # v2 picks due for exit: exit_date is set and <= today
         rows = (await session.execute(
             select(AlertPick).where(
                 AlertPick.status == "open",
@@ -143,77 +186,77 @@ async def _close_v2_picks() -> int:
 
         if not rows:
             print("[close-v2] No v2 picks due for exit.")
-            return 0
+            return closed_labels, waiting
 
-        closed = 0
         for pick in rows:
-            # Warn if we are late (more than 1 day past exit_date)
             days_late = (today - pick.exit_date).days
             if days_late > 1:
-                logger.warning(
-                    "[close-v2] %s exit_date=%s is %d day(s) late",
-                    pick.symbol, pick.exit_date, days_late,
-                )
+                logger.warning("[close-v2] %s exit_date=%s is %d day(s) late", pick.symbol, pick.exit_date, days_late)
 
-            # Try chain-store spread mid first
             spread_mid, mark_note = await _compute_spread_mid(session, pick)
+            chain_last_trade = None
+            result = await chain_store.get_chain(session, pick.symbol, pick.expiration) if pick.expiration else None
+            if result is not None:
+                chain_last_trade = result[1]
+            close_price = YFinanceClient.get_close_on_date(pick.symbol, pick.exit_date.isoformat())
+            action, why = settle_decision(pick.exit_date, pick.expiration, today, spread_mid, mark_note, chain_last_trade, close_price)
 
-            if spread_mid is not None:
-                # Compute option P&L from spread mid (0.0 is a valid worthless close)
+            if action == "close":
                 cost = float(pick.cost_to_enter) if pick.cost_to_enter else None
                 if cost and cost > 0:
                     pnl_d = round((spread_mid - cost) * 100, 2)
                     pnl_p = pnl_percent(spread_mid - cost, cost)
                     pick.option_pnl_dollars = Decimal(str(pnl_d))
                     pick.option_pnl_pct = Decimal(str(pnl_p))
-
-                # Get stock close price for stock_move_5d
-                close_price = YFinanceClient.get_close_on_date(
-                    pick.symbol, pick.exit_date.isoformat(),
-                )
-                if _is_valid_price(close_price):
-                    pick.close_price = close_price
-                    pick.stock_move_5d = _compute_stock_move(pick, float(close_price))
-                # else: leave close_price and stock_move_5d null
-
-                close_note = ""
-                if days_late > 0:
-                    close_note = f" (marked {days_late} day(s) late)"
-
+                pick.close_price = close_price
+                pick.stock_move_5d = _compute_stock_move(pick, float(close_price))
                 pick.status = "closed"
                 pick.closed_at = datetime.now(timezone.utc)
-                closed += 1
+                late = f" (marked {days_late} day(s) late)" if days_late > 0 else ""
                 pnl_msg = f" option_pnl=${pick.option_pnl_dollars}" if pick.option_pnl_dollars is not None else ""
                 move_msg = f" stock_move={pick.stock_move_5d}%" if pick.stock_move_5d is not None else ""
-                stock_note = "" if pick.close_price is not None else " (stock close unavailable)"
-                print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: "
-                      f"spread_mid=${spread_mid}{pnl_msg}{move_msg}{close_note}{stock_note}")
-            else:
-                # No chain available -- check if expiration is a hard stop
-                exp_str = pick.expiration or ""
-                if exp_str < today.isoformat():
-                    # Hard stop: fall back to yfinance close at expiration
-                    close_price = YFinanceClient.get_close_on_date(pick.symbol, exp_str)
-                    if _is_valid_price(close_price):
-                        pick.close_price = close_price
-                        pick.stock_move_5d = _compute_stock_move(pick, float(close_price))
-                        _store_option_pnl(pick, float(close_price))
-                        pick.status = "closed"
-                        pick.closed_at = datetime.now(timezone.utc)
-                        closed += 1
-                        logger.warning(
-                            "[close-v2] %s: no chain at exit_date, closed at expiration hard stop",
-                            pick.symbol,
-                        )
-                        print(f"[close-v2] {pick.symbol}: closed at expiration hard stop ${close_price}")
-                    else:
-                        print(f"[close-v2] {pick.symbol}: no chain and no valid expiration close, leaving open")
+                print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: spread_mid=${spread_mid} close=${close_price}{pnl_msg}{move_msg}{late}")
+                closed_labels.append(f"{pick.symbol}@{pick.exit_date.isoformat()}")
+            elif action == "hard_stop":
+                exp_close = YFinanceClient.get_close_on_date(pick.symbol, pick.expiration)
+                if _is_valid_price(exp_close):
+                    pick.close_price = exp_close
+                    pick.stock_move_5d = _compute_stock_move(pick, float(exp_close))
+                    _store_option_pnl(pick, float(exp_close))
+                    pick.status = "closed"
+                    pick.closed_at = datetime.now(timezone.utc)
+                    logger.warning("[close-v2] %s: %s; closed at expiration hard stop", pick.symbol, why)
+                    print(f"[close-v2] {pick.symbol}: {why}; closed at expiration {pick.expiration} hard stop ${exp_close}")
+                    closed_labels.append(f"{pick.symbol}@{pick.expiration} (hard stop)")
                 else:
-                    print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: "
-                          f"{mark_note}, will retry next run")
+                    reason = f"{why}; no valid close at expiration {pick.expiration} either"
+                    print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: {reason}, stays open, will retry next run")
+                    waiting.append(f"{pick.symbol}@{pick.exit_date.isoformat()}: {reason}")
+            else:
+                print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: {why}, stays open, will retry next run")
+                waiting.append(f"{pick.symbol}@{pick.exit_date.isoformat()}: {why}")
 
         await session.commit()
-        print(f"[close-v2] Done. Closed {closed}/{len(rows)} v2 picks.")
+        print(f"[close-v2] Done. Closed {len(closed_labels)}/{len(rows)} v2 picks; {len(waiting)} waiting.")
+    return closed_labels, waiting
+
+
+async def _reopen_null_close() -> int:
+    """A pick marked closed without a close (the bug this module's docstring describes) goes back to open, so the
+    closer settles it at its real exit close on the next run."""
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(AlertPick).where(AlertPick.status == "closed", AlertPick.close_price.is_(None))
+        )).scalars().all()
+        for pick in rows:
+            pick.status = "open"
+            pick.closed_at = None
+            pick.option_pnl_dollars = None
+            pick.option_pnl_pct = None
+            pick.stock_move_5d = None
+            print(f"[reopen] {pick.symbol} exit={pick.exit_date} expiration={pick.expiration}: reopened, closed with no close")
+        await session.commit()
+        print(f"[reopen] Done. Reopened {len(rows)} pick(s).")
     return 0
 
 
@@ -454,14 +497,17 @@ async def _main() -> int:
     """Single event loop for all close operations."""
     await _settle_shadow_picks()
     await _settle_credit_shadows()
-    await _close_v2_picks()
+    closed, waiting = await _close_v2_picks()
     await _close_picks()
+    await record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting})
     return 0
 
 
 def main() -> int:
     if "--backfill" in sys.argv:
         return asyncio.run(_backfill())
+    if "--reopen-null-close" in sys.argv:
+        return asyncio.run(_reopen_null_close())
     return asyncio.run(_main())
 
 

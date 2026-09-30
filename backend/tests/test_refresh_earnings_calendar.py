@@ -267,9 +267,9 @@ async def test_production_2026_09_29_a_silent_yahoo_drops_nothing_unh_uber_and_n
 
 @pytest.mark.asyncio
 async def test_a_stored_estimate_is_dropped_only_by_its_own_source_or_a_higher_one_and_a_dry_run_writes_nothing():
-    """VEEV holds Finnhub's Nov 18 (what the bad run left) and Yahoo now says Nov 25: Yahoo outranks Finnhub for the
-    same quarter, so Nov 18 is replaced. A Finnhub estimate that Finnhub itself now lists elsewhere is dropped with
-    the reason. With write=False the same plan is computed and nothing reaches the table."""
+    """VEEV holds Finnhub's Nov 18 and Yahoo now says Nov 25: both full sessions, neither confirmed, so the stored
+    date stands and Yahoo's day goes in the note. A Finnhub estimate that Finnhub itself now lists elsewhere is
+    dropped with the reason. With write=False the same plan is computed and nothing reaches the table."""
     async with ScriptSessionLocal() as s:
         await _cleanup(s)
         await _ticker(s, VEEV); await _ticker(s, UNH)
@@ -284,10 +284,8 @@ async def test_a_stored_estimate_is_dropped_only_by_its_own_source_or_a_higher_o
         async with ScriptSessionLocal() as s:
             tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_((VEEV, UNH))).order_by(Ticker.symbol))).scalars().all())
             dry = await reconcile(s, tickers, sources, NOW, edgar=None, write=False)
-        assert dry.dropped == [f"{UNH}: dropped 2026-10-13 (finnhub); Finnhub now lists 2027-01-25",
-                               f"{VEEV}: dropped 2026-11-18 (finnhub); replaced by 2026-11-25 (Yahoo Finance)"]
-        assert dry.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub); the last report was 2026-07-16, so a quarterly report would usually be due around 2026-10-15",
-                                f"{VEEV}: 2026-11-25 estimated (Yahoo Finance); Finnhub says 2026-11-18"]
+        assert dry.dropped == [f"{UNH}: dropped 2026-10-13 (finnhub); Finnhub now lists 2027-01-25"]
+        assert dry.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub); the last report was 2026-07-16, so a quarterly report would usually be due around 2026-10-15"]
         async with ScriptSessionLocal() as s:
             assert await _rows(s, (VEEV, UNH)) == [(UNH, date(2026, 10, 13), "finnhub", False, "estimated (Finnhub)"),
                                                     (VEEV, date(2026, 11, 18), "finnhub", False, "estimated (Finnhub)")]
@@ -299,7 +297,10 @@ async def test_a_stored_estimate_is_dropped_only_by_its_own_source_or_a_higher_o
             wet = await reconcile(s, tickers, sources, NOW, edgar=None)
         assert (wet.dropped, wet.inserted) == (dry.dropped, dry.inserted)
         async with ScriptSessionLocal() as s:
-            assert [r[:3] for r in await _rows(s, (VEEV, UNH))] == [(UNH, date(2027, 1, 25), "finnhub"), (VEEV, date(2026, 11, 25), "yfinance")]
+            assert await _rows(s, (VEEV, UNH)) == [
+                (UNH, date(2027, 1, 25), "finnhub", False, "estimated (Finnhub); the last report was 2026-07-16, so a quarterly report would usually be due around 2026-10-15"),
+                (VEEV, date(2026, 11, 18), "finnhub", False, "estimated (Finnhub); Yahoo Finance says 2026-11-25"),   # both full sessions: the stored date stands
+            ]
     finally:
         async with ScriptSessionLocal() as s:
             await _cleanup(s)
@@ -356,3 +357,17 @@ def test_no_ticker_is_unreached_three_runs_in_a_row_when_a_run_reaches_a_third_o
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
     assert '"yfinance_unreached": self.yfinance_unreached' in src and 'last.get("yfinance_unreached_streak")' in src
     assert 'yfinance_unreached_3_runs' in src
+
+
+def test_a_manual_restore_records_its_exit_so_health_does_not_read_it_as_a_failure():
+    from app.scripts.refresh_earnings_calendar import outcome_fields
+    started = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
+    got = outcome_fields({"checked": 512}, 0, started)
+    assert got["checked"] == 512 and got["exit"] == 0 and got["seconds"] >= 0 and got["at"].endswith("+00:00")
+    assert outcome_fields({}, 1, started)["exit"] == 1
+    src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
+    assert "record_step_fields(step_label, outcome_fields(plan.fields(), 0, now))" in src
+    assert 'outcome_fields({"checked": 0, "error": "Finnhub returned no calendar entries"}, 1, now)' in src
+    # the health page's rule this satisfies
+    from app.services.nightly_run import auto_pick_status
+    assert auto_pick_status({"Auto-pick": {"at": "2026-09-30T06:30:00+00:00"}}).failed is True

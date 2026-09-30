@@ -21,10 +21,10 @@ drop a date that came from a calendar source and that no company confirmed.
 An empty or failed fetch is never evidence. A stored calendar estimate is that source's standing word
 until the same source returns future dates for the ticker: standing_candidates() puts it back among the
 candidates when its source is silent, so it is dropped only when the same source now returns a
-different date, or a higher-precedence source (company announcement, then Yahoo Finance over Finnhub)
-contradicts it within the quarterly cadence. Two dates within SAME_REPORT_DAYS of each other are the
-same report, never two: a farther calendar date never displaces a nearer stored estimate for the same
-quarter, it is recorded in the note ("Finnhub says ...") instead.
+different date, or a company announcement contradicts it within the quarterly cadence. Two dates within
+SAME_REPORT_DAYS of each other are the same report, never two: when Finnhub and Yahoo Finance disagree
+and no one confirmed either, tie_break() decides (a market holiday, half day or weekend loses; else the
+stored date stands) and the other day is kept in the note ("Finnhub says ...").
 """
 from __future__ import annotations
 
@@ -117,11 +117,30 @@ def standing_candidates(stored: list[StoredDate], answered: set[str], today: dat
     return out
 
 
+def tie_break(fin: Candidate, yf: Candidate) -> tuple[Candidate, Candidate]:
+    """(kept, other) when Finnhub and Yahoo Finance estimate different days for the same quarter and no one
+    confirmed either. Neither source is preferred by name: a day the market is closed or closes early (a weekend,
+    an NYSE holiday, a half day) loses; otherwise the stored date stands (the standing candidate) and the other
+    source's day goes in the note; with neither stored, the nearer day is kept."""
+    from app.services.trading_calendar import is_half_day, is_trading_day
+
+    def full_session(c: Candidate) -> bool:
+        return is_trading_day(c.day) and not is_half_day(c.day)
+
+    a, b = full_session(fin), full_session(yf)
+    if a != b:
+        return (fin, yf) if a else (yf, fin)
+    if fin.standing != yf.standing:
+        return (fin, yf) if fin.standing else (yf, fin)
+    return (fin, yf) if fin.day <= yf.day else (yf, fin)
+
+
 def merge_future(candidates: list[Candidate], last_report: date | None, today: date) -> list[FutureDate]:
     """Decide the stored future dates from every source's candidates (all on or after today).
 
     Within a report's cluster each source's nearest date is its word; a company announcement wins, then the
-    two calendar sources agreeing on a day, then Yahoo Finance over Finnhub (Finnhub's day is kept in the note).
+    two calendar sources agreeing on a day; two different estimates go to tie_break (a market holiday, half
+    day or weekend loses, else the stored date stands), and the other day is kept in the note.
     """
     decided: list[FutureDate] = []
     for group in _cluster([c for c in candidates if c.day >= today]):
@@ -135,9 +154,12 @@ def merge_future(candidates: list[Candidate], last_report: date | None, today: d
         elif fin is not None and yf is not None and fin.day == yf.day:
             decided.append(FutureDate(fin.day, True, AGREEMENT_NOTE, "finnhub",
                                       fin.timing if fin.timing != "unknown" else yf.timing))
+        elif fin is not None and yf is not None:
+            keep, other = tie_break(fin, yf)
+            note = f"estimated ({SOURCE_LABELS[keep.source]}); {SOURCE_LABELS[other.source]} says {other.day.isoformat()}"
+            decided.append(FutureDate(keep.day, False, note, keep.source, keep.timing if keep.timing != "unknown" else other.timing))
         elif yf is not None:
-            note = "estimated (Yahoo Finance)" + (f"; Finnhub says {fin.day.isoformat()}" if fin is not None else "")
-            decided.append(FutureDate(yf.day, False, note, "yfinance", yf.timing if yf.timing != "unknown" else (fin.timing if fin else "unknown")))
+            decided.append(FutureDate(yf.day, False, "estimated (Yahoo Finance)", "yfinance", yf.timing))
         elif fin is not None:
             decided.append(FutureDate(fin.day, False, "estimated (Finnhub)", "finnhub", fin.timing))
     if decided:

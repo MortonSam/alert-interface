@@ -76,8 +76,10 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
-    ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
+    # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
+    # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
+    ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
