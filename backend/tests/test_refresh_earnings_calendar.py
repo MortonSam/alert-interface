@@ -7,6 +7,7 @@ A second ticker with nothing but a passed estimate ends as 'expected around'. A 
 date at all is still marked checked. Uses synthetic tickers removed afterwards.
 """
 from datetime import date, datetime, timedelta, timezone
+import re
 from pathlib import Path
 
 import pytest
@@ -312,7 +313,7 @@ def test_the_yahoo_pass_rotates_daily_treats_an_empty_frame_as_no_answer_and_the
     assert sorted(yfinance_order(syms, date(2026, 9, 30))) == syms and yfinance_order([], TODAY) == []
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
     assert "if df is None or df.empty:\n        return None" in src
-    assert "if isinstance(res, Exception) or res is None:\n                    continue" in src
+    assert re.search(r"if isinstance\(res, Exception\) or res is None:\s+continue", src)
     restore = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "restore_yfinance_estimates.py").read_text()
     assert "run(yf_budget_s=None, announce_budget_s=None, write=write" in restore and 'write = "--write" in argv' in restore
     # who is asked for an announcement: a date within 60 days, or a report due with nothing on the calendar (NKE with Yahoo silent)
