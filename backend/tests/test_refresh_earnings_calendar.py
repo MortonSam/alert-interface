@@ -7,6 +7,7 @@ A second ticker with nothing but a passed estimate ends as 'expected around'. A 
 date at all is still marked checked. Uses synthetic tickers removed afterwards.
 """
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select, text
@@ -318,3 +319,39 @@ def test_the_yahoo_pass_rotates_daily_treats_an_empty_frame_as_no_answer_and_the
     got = announcement_targets(["NKE", "UNH", "FAR"], {"NKE": {date(2026, 12, 16): "unknown"}, "FAR": {date(2027, 1, 25): "unknown"}},
                                {}, {"UNH": [date(2026, 10, 13)]}, {"NKE": date(2026, 6, 30), "UNH": date(2026, 7, 16), "FAR": date(2026, 8, 20)}, TODAY)
     assert got == ["NKE", "UNH"]
+
+
+def test_no_ticker_is_unreached_three_runs_in_a_row_when_a_run_reaches_a_third_of_them():
+    """The pass asks last run's unreached tickers first, then rotates. With a budget that reaches a third of the
+    active tickers per run, every ticker is asked within three runs from any starting day; a ticker Yahoo never
+    answers for is asked first every run, and its streak names it in the outcome."""
+    import math
+    from app.scripts.refresh_earnings_calendar import UNREACHED_RUNS_WARN, unreached_streak, yfinance_order
+    symbols = [f"T{i:03d}" for i in range(512)]
+    per_run = math.ceil(len(symbols) / 3)
+    for first_day in range(7):
+        streak, seen = {}, set()
+        for run in range(3):
+            order = yfinance_order(symbols, date(2026, 9, 29) + timedelta(days=first_day + run), streak)
+            assert sorted(order) == symbols
+            reached = set(order[:per_run])            # the budget runs out after a third of the list
+            seen |= reached
+            unreached = [s for s in symbols if s not in reached]
+            streak = unreached_streak(streak, unreached)
+        assert seen == set(symbols), f"unreached after three runs from day {first_day}: {sorted(set(symbols) - seen)[:5]}"
+        assert max(streak.values(), default=0) < UNREACHED_RUNS_WARN
+
+    # a ticker Yahoo never answers for: asked first each run, counted, named at three
+    streak = {}
+    for run in range(3):
+        order = yfinance_order(symbols, date(2026, 10, 1) + timedelta(days=run), streak)
+        if run:
+            assert order.index("T100") < per_run, "asked again every run, ahead of the rotation"
+        reached = set(order[:per_run + 1]) - {"T100"}      # the budget covers a third of the tickers plus the failure
+        unreached = [s for s in symbols if s not in reached]
+        streak = unreached_streak(streak, unreached)
+    assert streak["T100"] == 3 and UNREACHED_RUNS_WARN == 3
+    assert all(n < 3 for s, n in streak.items() if s != "T100")
+    src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
+    assert '"yfinance_unreached": self.yfinance_unreached' in src and 'last.get("yfinance_unreached_streak")' in src
+    assert 'yfinance_unreached_3_runs' in src

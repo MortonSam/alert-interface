@@ -4,7 +4,9 @@ Sources, per run:
   Finnhub   one /calendar/earnings call, today-60 .. today+LOOKAHEAD_DAYS: future estimates and, in the
             past part, which reports carried an actual EPS.
   Yahoo     per-ticker earnings_dates (future estimates with their time of day; reported EPS for the past),
-            in a thread pool inside YFINANCE_BUDGET_SECONDS; tickers not reached keep Finnhub only.
+            paced in a thread pool inside YFINANCE_BUDGET_SECONDS, unanswered tickers asked once more; the
+            pass asks tickers not reached in recent runs first, then rotates its start daily, and the outcome
+            records which tickers were not reached and for how many runs in a row.
   Company   Finnhub company news and EDGAR 8-K Items 7.01/8.01 (report_announcements) for tickers whose
             nearest candidate is within ANNOUNCE_WINDOW_DAYS: the one source that confirms a date.
   EDGAR     8-K Item 2.02 for an estimate that passed in the last few days with no report found.
@@ -51,8 +53,15 @@ from app.services.step_outcomes import record_step_fields
 
 LOOKAHEAD_DAYS = 120
 PAST_LOOKBACK_DAYS = 60          # past estimated events this old are re-resolved
-YFINANCE_BUDGET_SECONDS = 300
-YFINANCE_WORKERS = 6
+# Measured 2026-09-30 from the backend container, 512 active tickers: 6 workers with no pause finished in 58 s but
+# Yahoo answered only 377 (it serves pages without the earnings table once a burst is sustained; the misses came in
+# blocks); 3 workers with 0.3 s between batches answered 60 of 60 at 0.35 s per ticker, so a full pass is ~180 s.
+# The budget covers a full paced pass, the 30 s retry pause and a retry of every miss, with margin.
+YFINANCE_BUDGET_SECONDS = 420
+YFINANCE_WORKERS = 3
+YFINANCE_PAUSE_SECONDS = 0.3
+YFINANCE_RETRY_PAUSE_SECONDS = 30
+UNREACHED_RUNS_WARN = 3          # a ticker Yahoo has not answered for this many runs in a row is named in the outcome
 ANNOUNCE_WINDOW_DAYS = 60        # look for a company announcement when the nearest candidate or stored date is this close
 ANNOUNCE_BUDGET_SECONDS = 240
 REPORT_DUE_DAYS = 75             # no reaction row this recent: a report is due, ask for an announcement whatever the calendar says
@@ -77,6 +86,9 @@ class Plan:
     yfinance_reached: int = 0
     yfinance_silent: int = 0          # active tickers Yahoo gave no future date for (not reached, failed, or none listed)
     yfinance_started_at: str = ""     # the symbol the Yahoo pass started from
+    yfinance_seconds: float = 0.0
+    yfinance_unreached: list[str] = field(default_factory=list)      # not asked (budget) or no answer this run
+    yfinance_unreached_streak: dict = field(default_factory=dict)    # {symbol: runs in a row unreached}, from the last outcome
     announcements_checked: int = 0
     announcements_found: int = 0
 
@@ -87,7 +99,9 @@ class Plan:
             "confirmed": len(self.confirmed), "unresolved": len(self.unresolved),
             "reported": len(self.reported), "superseded": len(self.superseded), "unchanged": self.unchanged,
             "no_date": len(self.no_date), "yfinance_reached": self.yfinance_reached, "yfinance_silent": self.yfinance_silent,
-            "yfinance_started_at": self.yfinance_started_at,
+            "yfinance_started_at": self.yfinance_started_at, "yfinance_seconds": round(self.yfinance_seconds, 1),
+            "yfinance_unreached": self.yfinance_unreached, "yfinance_unreached_streak": self.yfinance_unreached_streak,
+            "yfinance_unreached_3_runs": sorted(s for s, n in self.yfinance_unreached_streak.items() if n >= UNREACHED_RUNS_WARN),
             "announcements_checked": self.announcements_checked, "announcements_found": self.announcements_found,
             "unresolved_list": self.unresolved[:50], "confirmed_examples": self.confirmed[:10],
             "replaced_examples": self.replaced[:10], "dropped_examples": self.dropped[:10], "kept_examples": self.kept[:10],
@@ -149,36 +163,77 @@ def _yf_fetch(symbol: str) -> tuple[dict[date, str], list[date]] | None:
     return future, reported
 
 
-def yfinance_order(symbols: list[str], today: date) -> list[str]:
-    """The Yahoo pass starts at a different ticker each day, so a budget that runs out leaves a different tail."""
+def yfinance_order(symbols: list[str], today: date, streak: dict | None = None) -> list[str]:
+    """The order the Yahoo pass asks in: tickers not reached in recent runs first, longest streak first, then the
+    rest starting at a different ticker each day. A run that reaches at least a third of the tickers therefore asks
+    every ticker within three runs (tested); a ticker Yahoo never answers for is asked first every run and counted."""
     if not symbols:
         return []
-    start = today.toordinal() % len(symbols)
-    return symbols[start:] + symbols[:start]
+    streak = streak or {}
+    first = sorted((s for s in symbols if streak.get(s)), key=lambda s: (-int(streak[s]), s))
+    rest = [s for s in symbols if s not in set(first)]
+    start = today.toordinal() % len(rest) if rest else 0
+    return first + rest[start:] + rest[:start]
+
+
+def unreached_streak(previous: dict, unreached_now: list[str]) -> dict:
+    """{symbol: runs in a row unreached}: the last run's streak plus one for each still unreached, others cleared."""
+    return {s: int(previous.get(s, 0)) + 1 for s in unreached_now}
+
+
+async def _last_outcome(label: str) -> dict:
+    """The fields this step recorded last run, or {}."""
+    import json
+    from app.services.system_metadata_service import get_value
+    try:
+        async with ScriptSessionLocal() as session:
+            raw = await get_value(session, "step_outcomes")
+        return (json.loads(raw) if raw else {}).get(label) or {}
+    except Exception as exc:
+        print(f"  [WARN] could not read the last outcome for {label}: {exc}", flush=True)
+        return {}
 
 
 async def yfinance_by_symbol(symbols: list[str], budget_s: float | None) -> tuple[dict[str, dict[date, str]], dict[str, list[date]], set[str]]:
     """Per-ticker Yahoo fetch inside a budget (None: no budget). Returns (future, reported, reached).
 
     A ticker is reached only when Yahoo answered with rows; an exception or an empty frame leaves it out, and
-    the calendar treats it as unanswered (its stored estimate stands)."""
+    the calendar treats it as unanswered (its stored estimate stands). Yahoo throttles bursts by serving pages
+    without the earnings table, so batches are paced (YFINANCE_WORKERS at a time, YFINANCE_PAUSE_SECONDS between)
+    and, when budget remains, the tickers it did not answer are asked once more after YFINANCE_RETRY_PAUSE_SECONDS."""
     loop = asyncio.get_event_loop()
     future: dict[str, dict[date, str]] = {}
     reported: dict[str, list[date]] = {}
     reached: set[str] = set()
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=YFINANCE_WORKERS) as pool:
-        for i in range(0, len(symbols), YFINANCE_WORKERS):
-            if budget_s is not None and time.monotonic() - started > budget_s:
-                print(f"  yfinance: budget of {budget_s:.0f}s reached after {len(reached)} tickers", flush=True)
-                break
-            batch = symbols[i:i + YFINANCE_WORKERS]
-            results = await asyncio.gather(*[loop.run_in_executor(pool, _yf_fetch, s) for s in batch], return_exceptions=True)
-            for sym, res in zip(batch, results):
-                if isinstance(res, Exception) or res is None:
-                    continue
-                future[sym], reported[sym] = res
-                reached.add(sym)
+
+    def remaining() -> float | None:
+        return None if budget_s is None else budget_s - (time.monotonic() - started)
+
+    async def one_pass(todo: list[str], label: str) -> None:
+        with ThreadPoolExecutor(max_workers=YFINANCE_WORKERS) as pool:
+            for i in range(0, len(todo), YFINANCE_WORKERS):
+                left = remaining()
+                if left is not None and left <= 0:
+                    print(f"  yfinance: budget of {budget_s:.0f}s reached after {len(reached)} tickers ({label})", flush=True)
+                    return
+                batch = todo[i:i + YFINANCE_WORKERS]
+                results = await asyncio.gather(*[loop.run_in_executor(pool, _yf_fetch, s) for s in batch], return_exceptions=True)
+                for sym, res in zip(batch, results):
+                    if isinstance(res, Exception) or res is None:
+                        continue
+                    future[sym], reported[sym] = res
+                    reached.add(sym)
+                if YFINANCE_PAUSE_SECONDS:
+                    await asyncio.sleep(YFINANCE_PAUSE_SECONDS)
+
+    await one_pass(symbols, "first pass")
+    missed = [s for s in symbols if s not in reached]
+    left = remaining()
+    if missed and (left is None or left > YFINANCE_RETRY_PAUSE_SECONDS + len(missed) * YFINANCE_PAUSE_SECONDS / YFINANCE_WORKERS):
+        print(f"  yfinance: {len(missed)} tickers unanswered; asking again after {YFINANCE_RETRY_PAUSE_SECONDS}s", flush=True)
+        await asyncio.sleep(YFINANCE_RETRY_PAUSE_SECONDS)
+        await one_pass(missed, "retry")
     return future, reported, reached
 
 
@@ -509,11 +564,19 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
                 stored_future.setdefault(ids[tid], []).append(d)
         symbols = [t.symbol for t in tickers]
 
-        order = yfinance_order(symbols, today)
+        last = await _last_outcome(step_label) if step_label else {}
+        order = yfinance_order(symbols, today, last.get("yfinance_unreached_streak") or {})
+        started = time.monotonic()
         yf_future, yf_reported, reached = await yfinance_by_symbol(order, yf_budget_s)
+        yf_seconds = time.monotonic() - started
         silent = [s for s in symbols if not yf_future.get(s)]
-        print(f"Yahoo Finance reached {len(reached)} of {len(symbols)} tickers (pass started at {order[0] if order else '-'}); "
-              f"{len(silent)} with no future date from Yahoo: their stored Yahoo estimates stand.")
+        unreached = [s for s in symbols if s not in reached]
+        streak = unreached_streak(last.get("yfinance_unreached_streak") or {}, unreached)
+        print(f"Yahoo Finance reached {len(reached)} of {len(symbols)} tickers in {yf_seconds:.0f}s (pass started at {order[0] if order else '-'}); "
+              f"{len(unreached)} not reached, {len(silent)} with no future date from Yahoo: their stored Yahoo estimates stand.")
+        stuck = sorted(s for s, n in streak.items() if n >= UNREACHED_RUNS_WARN)
+        if stuck:
+            print(f"  [WARN] not reached by Yahoo {UNREACHED_RUNS_WARN} runs in a row: {', '.join(stuck)}", flush=True)
 
         near = announcement_targets(symbols, fin_future, yf_future, stored_future, last_report, today)
         company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s)
@@ -529,6 +592,9 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
         plan.yfinance_reached = len(reached)
         plan.yfinance_silent = len(silent)
         plan.yfinance_started_at = order[0] if order else ""
+        plan.yfinance_seconds = yf_seconds
+        plan.yfinance_unreached = unreached
+        plan.yfinance_unreached_streak = streak
         plan.announcements_checked = len(near)
         plan.announcements_found = len(company)
     finally:

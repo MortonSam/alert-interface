@@ -84,7 +84,7 @@ STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 
 STEP_TIMEOUTS: dict[str, int] = {
     "Refresh profiles (Finnhub)": 300,
-    "Refresh earnings calendar (Finnhub)": 900,   # Finnhub once, Yahoo per ticker (300s budget), announcements (240s budget)
+    "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
     "Analyst recommendations (Finnhub)": 300,
     "Historical reactions (--all)": 1800,
     "Missed reports (catch_up_reports)": 600,     # one Finnhub call, a few EDGAR calls, re-seed of a few tickers
