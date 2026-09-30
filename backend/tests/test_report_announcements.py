@@ -1,7 +1,7 @@
 """A company announcement of a results date is recognised from wire copy and 8-K text, and nothing else."""
 from datetime import date
 
-from app.services.report_announcements import edgar_ir_8ks, find_announced_date, from_news, issuer_forms, names_issuer
+from app.services.report_announcements import edgar_ir_8ks, find_announced_date, from_news, is_period_date, issuer_forms, names_issuer
 
 TODAY = date(2026, 9, 29)
 NKE_RELEASE = ("NIKE, Inc. to Announce First Quarter Fiscal 2027 Results. BEAVERTON, Ore.--(BUSINESS WIRE)--Aug 28, 2026-- "
@@ -94,3 +94,52 @@ def test_the_calendar_step_passes_each_tickers_stored_name_to_the_matcher():
     assert "names = {t.symbol: t.name for t in tickers if t.name}" in src
     assert "hit = from_news(news, today, names.get(sym))" in src
     assert "fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names)" in src
+
+
+# ── A period date is never the results date (production dry run, 2026-09-30: ARES matched to its quarter-end) ──
+
+ARES_HEADLINE = "Ares Management Corporation Schedules Earnings Release and Conference Call for the Third Quarter 2026"
+ARES_BODY = ("NEW YORK--(BUSINESS WIRE)--Ares Management Corporation (NYSE: ARES) will release its financial results for the "
+             "third quarter ended September 30, 2026 on Wednesday, November 4, 2026, before the market opens.")
+ARES_PERIOD_ONLY = ("Ares Management Corporation (NYSE: ARES) will release its financial results for the third quarter ended "
+                    "September 30, 2026 on a date to be announced.")
+ARES_TODAY = date(2026, 9, 29)
+
+
+def test_ares_the_quarter_end_is_the_period_and_the_results_date_is_nov_4():
+    assert find_announced_date(ARES_HEADLINE, ARES_TODAY, "x") is None          # no results date in the headline
+    hit = find_announced_date(f"{ARES_HEADLINE}. {ARES_BODY}", ARES_TODAY, "x")
+    assert hit is not None and hit.day == date(2026, 11, 4) and hit.timing == "bmo"
+    assert find_announced_date(f"{ARES_HEADLINE}. {ARES_PERIOD_ONLY}", ARES_TODAY, "x") is None
+    item = {"datetime": 1790700000, "headline": ARES_HEADLINE, "summary": ARES_BODY}
+    assert from_news([item], ARES_TODAY, issuer="Ares Management Corporation").day == date(2026, 11, 4)
+    assert from_news([{"datetime": 1790700000, "headline": ARES_HEADLINE, "summary": ARES_PERIOD_ONLY}], ARES_TODAY,
+                     issuer="Ares Management Corporation") is None
+    for phrase in ("quarter ended", "quarter ending", "period ended", "fiscal year ended", "as of", "three months ended", "nine months ending"):
+        sentence = f"The company will report results for the {phrase} September 30, 2026."
+        assert is_period_date(sentence, sentence.index("September")), phrase
+        assert find_announced_date(sentence, ARES_TODAY, "x") is None, phrase
+    # the results date must follow the release verb: a date before it is not attached to it
+    assert find_announced_date("On October 20, 2026 the board met; the company will report results later.", ARES_TODAY, "x") is None
+    assert find_announced_date("Third quarter 2026 results: the earnings release date of October 20, 2026 is confirmed and the company will report results then.",
+                               ARES_TODAY, "x").day == date(2026, 10, 20)
+
+
+def test_the_eleven_dated_headlines_from_the_dry_run_still_name_their_results_date():
+    dated = [
+        ("Bristol Myers Squibb to Report Results for Third Quarter 2026 on October 29, 2026", date(2026, 10, 29)),
+        ("BXP to Release Third Quarter 2026 Financial Results on October 27, 2026", date(2026, 10, 27)),
+        ("Conagra Brands to Release Fiscal 2027 First Quarter Earnings on September 30, 2026", date(2026, 9, 30)),
+        ("CHIPOTLE MEXICAN GRILL TO ANNOUNCE THIRD QUARTER 2026 RESULTS ON OCTOBER 28, 2026", date(2026, 10, 28)),
+        ("Quest Diagnostics to Release Third Quarter Financial Results on October 22, 2026", date(2026, 10, 22)),
+        ("Genuine Parts Company to Report Third Quarter 2026 Results on October 20, 2026", date(2026, 10, 20)),
+        ("Hasbro to Announce Third Quarter 2026 Earnings on October 20, 2026", date(2026, 10, 20)),
+        ("International Paper to Release Third-Quarter 2026 Earnings on October 28, 2026", date(2026, 10, 28)),
+        ("IQVIA to Announce Third-Quarter 2026 Results on October 27, 2026", date(2026, 10, 27)),
+        ("Prologis to Announce Third Quarter 2026 Results October 15, 2026", date(2026, 10, 15)),
+        ("Verizon to report third-quarter earnings October 26, 2026", date(2026, 10, 26)),
+    ]
+    assert len(dated) == 11
+    for headline, day in dated:
+        hit = find_announced_date(headline, ARES_TODAY, "x")
+        assert hit is not None and hit.day == day, headline

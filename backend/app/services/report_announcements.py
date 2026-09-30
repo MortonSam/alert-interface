@@ -25,6 +25,13 @@ _DATE = re.compile(rf"(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\s+)?({_MON
 _RESULTS = re.compile(
     r"\b(?:will|to|plans? to|expects? to|intends? to|is scheduled to)\s+(?:announce|report|release|host|hold)\b[^.]{0,160}?"
     r"\b(?:results|earnings)\b", re.I)
+# a date that closes a period is never the results date
+_PERIOD = re.compile(r"(?:quarter|period|year|months?|half)\s+(?:ended|ending|end)|fiscal\s+year\s+(?:ended|ending)|as\s+of|"
+                     r"(?:three|six|nine|twelve)\s+months\s+(?:ended|ending)", re.I)
+# the results date is attached to the release verb or a results-date phrase that precedes it
+_ANCHOR = re.compile(r"\b(?:announces?d?|reports?|releases?d?|hosts?|holds?|webcasts?|results\s+on|date\s+(?:of|for)|scheduled\s+for)\b", re.I)
+PERIOD_WINDOW = 40   # characters before a date in which a period phrase disqualifies it
+
 _TIMING_AMC = re.compile(r"after (?:the )?(?:market|close|closing)|after the close|following the (?:market )?close", re.I)
 _TIMING_BMO = re.compile(r"before (?:the )?(?:market|open|opening)|before the (?:market )?open|pre-?market", re.I)
 
@@ -44,16 +51,30 @@ def _to_date(m: re.Match) -> date | None:
         return None
 
 
+def is_period_date(sentence: str, start: int, after: int = 0) -> bool:
+    """True when the date starting at `start` closes a period ("quarter ended September 30, 2026", "as of ...").
+    The window looked at ends at the date and never reaches back past `after` (the end of an earlier date)."""
+    return bool(_PERIOD.search(sentence[max(after, start - PERIOD_WINDOW):start]))
+
+
 def find_announced_date(text: str, today: date, evidence: str) -> Announcement | None:
-    """The results date a passage announces, if it names one within the horizon."""
+    """The results date a passage announces, if it names one within the horizon.
+
+    In a sentence that says results will be announced, the date must follow a release verb or a results-date
+    phrase, and a date preceded by a period phrase (quarter ended, period ending, fiscal year ended, as of,
+    three months ended) is the period, never the results date. A sentence with only period dates names none."""
     if not text:
         return None
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
         if not _RESULTS.search(sentence):
             continue
+        previous_end = 0
         for m in _DATE.finditer(sentence):
-            d = _to_date(m)
+            d, start = _to_date(m), m.start()
+            period, previous_end = is_period_date(sentence, start, previous_end), m.end()
             if d is None or d < today or (d - today).days > ANNOUNCE_HORIZON_DAYS:
+                continue
+            if period or not _ANCHOR.search(sentence[:start]):
                 continue
             timing = "amc" if _TIMING_AMC.search(sentence) else "bmo" if _TIMING_BMO.search(sentence) else "unknown"
             return Announcement(d, timing, evidence)
