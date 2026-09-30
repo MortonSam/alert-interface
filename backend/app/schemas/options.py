@@ -29,12 +29,11 @@ class OptionsChainRead(BaseModel):
 
 
 class HistoricalMoveStats(BaseModel):
+    """One-day earnings moves. Not compared with the implied move, whose window is the whole span to expiry."""
     avg_abs_move_pct: float   # 0–1 decimal (0.052 = 5.2%)
     max_abs_move_pct: float
     min_abs_move_pct: float
     sample_size: int
-    above_expected: int   # past earnings where |1d move| > implied expected move
-    below_expected: int
 
 
 class ExpectedMoveRead(BaseModel):
@@ -45,6 +44,8 @@ class ExpectedMoveRead(BaseModel):
     implied_range_low: float | None
     implied_range_high: float | None
     expiration_used: str | None          # "YYYY-MM-DD"
+    chain_date: str | None = None        # the chain's own date ("YYYY-MM-DD"), the start of the span the move covers
+    span_days: int | None = None         # days from chain_date to expiration_used: the window the implied move covers
     earnings_date: str | None            # "YYYY-MM-DD"
     days_expiration_past_earnings: int | None  # how many calendar days after earnings the expiration falls
     straddle_price: float | None

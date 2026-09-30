@@ -436,14 +436,17 @@ export interface OptionsChain {
   price_as_of?: string | null;                 // ISO last-trade time of the quote, set whatever the state
 }
 export interface HistoricalMoveStats {
+  // one-day earnings moves; never counted against the implied move, whose window is the whole span to expiry
   avg_abs_move_pct: number; max_abs_move_pct: number; min_abs_move_pct: number;
-  sample_size: number; above_expected: number; below_expected: number;
+  sample_size: number;
 }
 export interface ExpectedMove {
   symbol: string; current_price: number | null;
   expected_move_pct: number | null; expected_move_dollars: number | null;
   implied_range_low: number | null; implied_range_high: number | null;
   expiration_used: string | null; earnings_date: string | null;
+  chain_date?: string | null;          // the chain's own date: the start of the span the implied move covers
+  span_days?: number | null;           // days from chain_date to expiration_used
   days_expiration_past_earnings: number | null;
   straddle_price: number | null; atm_strike: number | null;
   historical_stats: HistoricalMoveStats | null;
@@ -774,7 +777,9 @@ export interface ThesisDraftRead {
   fact_block: {
     current_price: number;
     price_as_of: string | null;      // ISO last-trade time of the quote
-    options_as_of?: string | null;   // YYYY-MM-DD of the options chain the draft used
+    options_as_of?: string | null;   // YYYY-MM-DD of the options chain the draft used; current_price is that chain's spot
+    quote_price?: number | null;     // the stock now: the quote, whose last-trade time is price_as_of
+    span_days?: number | null;       // days from options_as_of to expiration_used: the window the implied move covers
     atm_strike: number | null;
     earnings_date: string | null;
     earnings_source?: string | null;

@@ -1,7 +1,7 @@
 "use client";
 
 import { volRegime } from "@/lib/encodings/volRegime";
-import { premiumSourcePhrase } from "@/lib/freshness";
+import { impliedSpanPhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -194,8 +194,8 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
 
   return {
     legs,
-    spot: fb.current_price,
-    currentPrice: fb.current_price,
+    spot: fb.current_price,                  // the chain's spot: what the premiums were priced against
+    currentPrice: fb.quote_price ?? null,    // the stock now, for the "Current" line; absent when no quote came
     symbol: draft.symbol,
     expirationMs: dateMs(fb.expiration_used),
     mult: 100,
@@ -203,6 +203,7 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
     xMax: fb.implied_range_high ?? fb.current_price * 1.2,
     earningsMs: fb.earnings_date ? dateMs(fb.earnings_date) : null,
     ivContext: { expiration: fb.expiration_used, chainDate: fb.options_as_of ?? null },
+    pricing: pricedAtLine(fb, fmtTimestamp),
     usingIVFallback,
     sdFailed: false,
   };
@@ -452,12 +453,15 @@ function DraftDisplay({
 
       {/* G) Fact grid */}
       <div className="border border-border/60 bg-transparent rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
-        <span>Price: <span className="font-mono text-foreground">${fb.current_price.toFixed(2)}</span>{fmtTimestamp(fb.price_as_of) && <span className="text-muted-foreground/60 ml-1">last trade {fmtTimestamp(fb.price_as_of)}</span>}{fb.options_as_of && <span className="text-muted-foreground/60 ml-1">· options data as of {fb.options_as_of}</span>}</span>
+        <span className="sm:col-span-2">Price: <span className="text-foreground">{pricedAtLine(fb, fmtTimestamp)}</span></span>
         <span>
           Implied move:{" "}
           <span className="font-mono text-foreground">
             ±{fb.expected_move_pct?.toFixed(1) ?? "n/a"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "n/a"})
           </span>
+          {impliedSpanPhrase(fb.expiration_used, fb.span_days, fb.options_as_of) && (
+            <span className="text-muted-foreground/60 ml-1">{impliedSpanPhrase(fb.expiration_used, fb.span_days, fb.options_as_of)}</span>
+          )}
         </span>
         <span>
           Range:{" "}
@@ -467,7 +471,7 @@ function DraftDisplay({
         </span>
         <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>
         <span>
-          Hist avg ±:{" "}
+          One-day earnings move, avg ±:{" "}
           <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span>
         </span>
         <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "n/a"}%</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>

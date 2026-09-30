@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import { PRICE_FRESHNESS, freshnessLine, optionsDataPhrase, premiumSourcePhrase, priceStateLine, priceAsOfPhrase } from "../freshness";
 
 const SRC = join(__dirname, "../..");
+const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -69,5 +70,38 @@ describe("withheld price wording", () => {
     expect(priceAsOfPhrase("2026-09-10T19:59:00+00:00")).toBe("price as of 2026-09-10");
     expect(priceAsOfPhrase(null)).toBeNull();
     expect(priceAsOfPhrase("chain as of 2026-09-18")).toBeNull();
+  });
+});
+
+describe("priced from the options data, the stock now from its quote (audit item 4)", () => {
+  it("the Build price line names both prices by their own dates", async () => {
+    const { pricedAtLine, impliedSpanPhrase, oneDayHistoryLine } = await import("@/lib/freshness");
+    const fb = { current_price: 339.85, options_as_of: "2026-09-28", quote_price: 332.35, price_as_of: "2026-09-29T13:31:00+00:00" };
+    expect(pricedAtLine(fb, () => "09:31:00")).toBe("priced at $339.85 from the 2026-09-28 options data; the stock is now $332.35 (last trade 09:31:00)");
+    expect(pricedAtLine(fb, () => null)).toBe("priced at $339.85 from the 2026-09-28 options data; the stock is now $332.35");
+    expect(pricedAtLine({ current_price: 339.85, options_as_of: "2026-09-28" }, () => "09:31:00")).toBe("priced at $339.85 from the 2026-09-28 options data");
+    expect(pricedAtLine({ current_price: 339.85 }, () => null)).not.toMatch(/\d{4}-\d{2}-\d{2}/);   // no date it does not have
+    // item 7: the implied move is labelled with its span, from the data; history is one-day and never counted against it
+    expect(impliedSpanPhrase("2026-11-20", 53, "2026-09-28")).toBe("through 2026-11-20, 53 days from the 2026-09-28 options data");
+    expect(impliedSpanPhrase("2026-11-20", 1, "2026-11-19")).toBe("through 2026-11-20, 1 day from the 2026-11-19 options data");
+    expect(impliedSpanPhrase("2026-11-20", null, null)).toBe("through 2026-11-20");
+    expect(impliedSpanPhrase(null, 53, "2026-09-28")).toBeNull();
+    expect(oneDayHistoryLine({ avg_abs_move_pct: 0.052, max_abs_move_pct: 0.11, sample_size: 12 })).toBe("One-day earnings moves: avg ±5.2%, max ±11.0% over 12 prints");
+    expect(oneDayHistoryLine({ avg_abs_move_pct: 0.052, max_abs_move_pct: 0.11, sample_size: 2 })).toBeNull();
+  });
+
+  it("the pages render those sentences and never pair the chain's spot with the quote's time or count history against the move", () => {
+    const build = read("app/build/page.tsx");
+    expect(build).toContain("{pricedAtLine(fb, fmtTimestamp)}");
+    expect(build).toContain("pricing: pricedAtLine(fb, fmtTimestamp)");
+    expect(build).toContain("impliedSpanPhrase(fb.expiration_used, fb.span_days, fb.options_as_of)");
+    expect(build).not.toMatch(/current_price\.toFixed\(2\)\}<\/span>\{fmtTimestamp\(fb\.price_as_of\)/);
+    expect(build).toContain("currentPrice: fb.quote_price ?? null");
+    expect(read("components/PayoffSimulator.tsx")).toContain("{pricing && <p className=\"text-xs text-muted-foreground\">{symbol} {pricing}</p>}");
+    const ticker = read("app/tickers/[symbol]/page.tsx");
+    expect(ticker).not.toMatch(/above implied|above_expected|below_expected/);
+    expect(ticker).toContain("oneDayHistoryLine(hist)");
+    expect(ticker).toContain("impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date)");
+    expect(read("lib/api.ts")).not.toMatch(/above_expected|below_expected/);
   });
 });

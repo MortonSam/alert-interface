@@ -64,10 +64,7 @@ router = APIRouter(prefix="/theses", tags=["theses"])
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
 
-def _mid_or_last(bid, ask, last):
-    if bid and ask and bid > 0 and ask > 0:
-        return (bid + ask) / 2.0
-    return last if last and last > 0 else None
+from app.services.implied_move import mid_or_last as _mid_or_last, span_days, straddle_implied_move  # noqa: E402
 
 
 def _to_read(thesis: Thesis) -> ThesisRead:
@@ -467,18 +464,18 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     atm_iv: float | None = None
 
     intersection = {c["strike"] for c in calls_raw} & {p["strike"] for p in puts_raw}
-    if intersection:
+    im = straddle_implied_move(calls_raw, puts_raw, draft_spot)   # the one computation every page uses
+    if im is not None:
+        atm_strike            = im.atm_strike
+        expected_move_pct     = im.pct
+        expected_move_dollars = im.straddle
+        implied_range_low     = im.low
+        implied_range_high    = im.high
+    elif intersection:
         atm_strike = min(intersection, key=lambda s: abs(s - draft_spot))
+    if atm_strike is not None:
         atm_call = next((c for c in calls_raw if c["strike"] == atm_strike), None)
         atm_put  = next((p for p in puts_raw  if p["strike"] == atm_strike), None)
-        cp = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
-        pp = _mid_or_last(atm_put["bid"],  atm_put["ask"],  atm_put["lastPrice"])  if atm_put  else None
-        if cp and pp:
-            straddle = cp + pp
-            expected_move_pct     = straddle / draft_spot
-            expected_move_dollars = straddle
-            implied_range_low     = draft_spot - straddle
-            implied_range_high    = draft_spot + straddle
         ivs = [c["impliedVolatility"] for c in [atm_call, atm_put]
                if c and c.get("impliedVolatility") is not None]
         atm_iv = sum(ivs) / len(ivs) if ivs else None
@@ -728,8 +725,9 @@ async def _run_draft_generation(
         "symbol":                    sym,
         "direction":                 direction,
         "aggressiveness":            aggressiveness,
-        "current_price":             round(current_price, 2),
-        "price_as_of":               price_as_of,
+        "current_price":             round(current_price, 2),     # the spot the options were priced at: the chain's own
+        "price_as_of":               price_as_of,                 # the live quote's last-trade time (see quote_price)
+        "quote_price":               round(data["current_price"], 2) if data.get("current_price") else None,   # the stock now
         "atm_strike":                atm_strike,
         "earnings_date":             data.get("earnings_shown") or earnings_str,
         "earnings_source":           data.get("earnings_source"),
@@ -738,6 +736,7 @@ async def _run_draft_generation(
         "earnings_note":             data.get("earnings_note"),
         "expiration_used":           chosen_exp,
         "days_to_expiration":        days_to_exp,
+        "span_days":                 span_days(options_as_of, chosen_exp),   # the window the implied move covers, from the chain's date
         "expected_move_pct":         round(expected_move_pct * 100, 2) if expected_move_pct else None,
         "expected_move_dollars":     round(expected_move_dollars, 2) if expected_move_dollars else None,
         "implied_range_low":         round(implied_range_low, 2) if implied_range_low else None,

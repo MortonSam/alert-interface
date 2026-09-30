@@ -6,7 +6,7 @@ import { displayedOptionFacts, priceDriftNote, priceLabel , rvUnavailableReason 
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { priceStateLine, priceAsOfPhrase } from "@/lib/freshness";
+import { impliedSpanPhrase, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -2452,17 +2452,18 @@ export default function TickerPage() {
                     <span className="font-semibold tabular-nums">{fmtRange(low, high)}</span>
                   </p>
                 )}
+                {emPct != null && impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date) && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date)}
+                  </p>
+                )}
                 {emDol != null && facts.atm_strike != null && (
                   <p className="text-sm text-muted-foreground mt-1">
                     <ExplainTip term="atm">ATM</ExplainTip> {fmtDollars(facts.atm_strike)} <ExplainTip term="straddle">straddle</ExplainTip> at {fmtDollars(emDol)}
-                    {facts.expiration_used && ` exp ${facts.expiration_used}`}
                   </p>
                 )}
-                {hist && hist.sample_size >= 3 && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Historical: avg ±{(hist.avg_abs_move_pct * 100).toFixed(1)}% over {hist.sample_size} prints,
-                    above implied {hist.above_expected} / below {hist.below_expected}
-                  </p>
+                {oneDayHistoryLine(hist) && (
+                  <p className="text-xs text-muted-foreground mt-2">{oneDayHistoryLine(hist)}</p>
                 )}
               </div>
             );

@@ -151,10 +151,7 @@ def _build_plain_summary(
     return " ".join(parts)
 
 
-def _mid_or_last(bid, ask, last):
-    if bid and ask and bid > 0 and ask > 0:
-        return (bid + ask) / 2.0
-    return last if last and last > 0 else None
+from app.services.implied_move import mid_or_last as _mid_or_last, span_days, straddle_implied_move  # noqa: E402
 
 
 _IV_TRUST_CAP = 1.0  # 100% annualized IV — above this is a calc artifact on normal equities
@@ -778,29 +775,13 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
     calls = chain.get("calls", [])
     puts = chain.get("puts", [])
 
-    call_strikes = {c["strike"] for c in calls}
-    put_strikes = {p["strike"] for p in puts}
-    intersection = call_strikes & put_strikes
-
-    atm_strike: float | None = None
-    straddle_price: float | None = None
-    expected_move_pct: float | None = None
-    expected_move_dollars: float | None = None
-    implied_range_low: float | None = None
-    implied_range_high: float | None = None
-
-    if intersection and current_price:
-        atm_strike = min(intersection, key=lambda s: abs(s - current_price))
-        atm_call = next((c for c in calls if c["strike"] == atm_strike), None)
-        atm_put = next((p for p in puts if p["strike"] == atm_strike), None)
-        call_price = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
-        put_price = _mid_or_last(atm_put["bid"], atm_put["ask"], atm_put["lastPrice"]) if atm_put else None
-        if call_price is not None and put_price is not None:
-            straddle_price = call_price + put_price
-            expected_move_pct = straddle_price / current_price
-            expected_move_dollars = straddle_price
-            implied_range_low = current_price - straddle_price
-            implied_range_high = current_price + straddle_price
+    im = straddle_implied_move(calls, puts, current_price)
+    atm_strike = im.atm_strike if im else None
+    straddle_price = im.straddle if im else None
+    expected_move_pct = im.pct if im else None
+    expected_move_dollars = im.straddle if im else None
+    implied_range_low = im.low if im else None
+    implied_range_high = im.high if im else None
 
     # Historical stats (none for a ticker on the price-history exclusion list)
     historical_stats: HistoricalMoveStats | None = None
@@ -818,8 +799,6 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
                 max_abs_move_pct=max(abs_moves),
                 min_abs_move_pct=min(abs_moves),
                 sample_size=len(abs_moves),
-                above_expected=sum(1 for m in abs_moves if expected_move_pct is not None and m > expected_move_pct),
-                below_expected=sum(1 for m in abs_moves if expected_move_pct is None or m <= expected_move_pct),
             )
 
     plain_summary = _build_plain_summary(
@@ -842,6 +821,8 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         implied_range_low=implied_range_low,
         implied_range_high=implied_range_high,
         expiration_used=chosen_exp,
+        chain_date=str(chain_last_trade)[:10] if chain_last_trade else None,
+        span_days=span_days(chain_last_trade, chosen_exp),
         earnings_date=earnings_str,
         days_expiration_past_earnings=days_expiration_past_earnings,
         straddle_price=straddle_price,
@@ -1174,26 +1155,14 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     intersection = call_strikes & put_strikes
     all_strike_vals = sorted(call_strikes | put_strikes)
 
-    # ── ATM + straddle + expected move ────────────────────────────────────────
-    atm_strike: float | None = None
-    straddle_price: float | None = None
-    expected_move_pct: float | None = None
-    expected_move_dollars: float | None = None
-    implied_range_low: float | None = None
-    implied_range_high: float | None = None
-
-    if intersection and current_price:
-        atm_strike = min(intersection, key=lambda s: abs(s - current_price))
-        atm_call = next((c for c in calls_raw if c["strike"] == atm_strike), None)
-        atm_put = next((p for p in puts_raw if p["strike"] == atm_strike), None)
-        call_price = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
-        put_price = _mid_or_last(atm_put["bid"], atm_put["ask"], atm_put["lastPrice"]) if atm_put else None
-        if call_price is not None and put_price is not None:
-            straddle_price = call_price + put_price
-            expected_move_pct = straddle_price / current_price
-            expected_move_dollars = straddle_price
-            implied_range_low = current_price - straddle_price
-            implied_range_high = current_price + straddle_price
+    # ── ATM + straddle + expected move: the one computation every page uses ──
+    im = straddle_implied_move(calls_raw, puts_raw, current_price)
+    atm_strike = im.atm_strike if im else None
+    straddle_price = im.straddle if im else None
+    expected_move_pct = im.pct if im else None
+    expected_move_dollars = im.straddle if im else None
+    implied_range_low = im.low if im else None
+    implied_range_high = im.high if im else None
 
     # ── Historical stats ──────────────────────────────────────────────────────
     historical_stats: HistoricalMoveStats | None = None
@@ -1211,8 +1180,6 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
                 max_abs_move_pct=max(abs_moves),
                 min_abs_move_pct=min(abs_moves),
                 sample_size=len(abs_moves),
-                above_expected=sum(1 for m in abs_moves if expected_move_pct is not None and m > expected_move_pct),
-                below_expected=sum(1 for m in abs_moves if expected_move_pct is None or m <= expected_move_pct),
             )
 
     plain_summary = _build_plain_summary(
@@ -1228,7 +1195,8 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
         symbol=sym, current_price=current_price,
         expected_move_pct=expected_move_pct, expected_move_dollars=expected_move_dollars,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
-        expiration_used=chosen_exp, earnings_date=earnings_str,
+        expiration_used=chosen_exp, chain_date=str(chain_last_trade)[:10] if chain_last_trade else None,
+        span_days=span_days(chain_last_trade, chosen_exp), earnings_date=earnings_str,
         days_expiration_past_earnings=days_expiration_past_earnings,
         straddle_price=straddle_price, atm_strike=atm_strike,
         historical_stats=historical_stats, plain_summary=plain_summary,

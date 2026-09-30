@@ -112,6 +112,7 @@ export interface PayoffSimulatorProps {
   xMax: number;              // x-axis upper bound, already fallback-resolved by caller
   earningsMs: number | null; // for the IV-crush caveat; null = no caveat
   ivContext?: { expiration: string | null; chainDate: string | null };  // the chain the IVs came from
+  pricing?: string | null;   // "priced at $X from the <date> options data; the stock is now $Y (last trade ...)", from the fact block
   usingIVFallback: boolean;  // true if any IV came from BS_IV_DEFAULT
   sdFailed: boolean;         // true if strategyData fetch failed (different warning message)
 }
@@ -120,7 +121,7 @@ export interface PayoffSimulatorProps {
 
 export default function PayoffSimulator({
   legs, spot, currentPrice, symbol, expirationMs, mult, xMin, xMax,
-  earningsMs, ivContext, usingIVFallback, sdFailed,
+  earningsMs, ivContext, pricing, usingIVFallback, sdFailed,
 }: PayoffSimulatorProps) {
 
   const nowMs = Date.now();
@@ -206,6 +207,7 @@ export default function PayoffSimulator({
         </span>
         <span className="text-xs text-muted-foreground">Black-Scholes projection</span>
       </div>
+      {pricing && <p className="text-xs text-muted-foreground">{symbol} {pricing}</p>}
 
       {/* IV disclosure — always show what IV the simulation holds constant */}
       {ivLabel && !sdFailed && !usingIVFallback && (
