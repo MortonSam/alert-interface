@@ -15,8 +15,8 @@ from app.database import ScriptSessionLocal
 from app.models.ticker import Ticker
 from app.scripts.refresh_earnings_calendar import LOOKAHEAD_DAYS, finnhub_by_symbol, reconcile
 
-NKE, LONE, NONE, CCL = "ZZNKE", "ZZLONE", "ZZNONE", "ZZCCL"
-SYMS = (NKE, LONE, NONE, CCL)
+NKE, LONE, NONE, CCL, UNH, UBER, VEEV = "ZZNKE", "ZZLONE", "ZZNONE", "ZZCCL", "ZZUNH", "ZZUBER", "ZZVEEV"
+SYMS = (NKE, LONE, NONE, CCL, UNH, UBER, VEEV)
 NOW = datetime(2026, 9, 29, 16, 2, 47, tzinfo=timezone.utc)
 TODAY = NOW.date()
 
@@ -151,11 +151,12 @@ async def test_ccl_the_edgar_report_date_is_kept_and_finnhubs_dec_18_is_added_as
             (date(2026, 9, 29), "edgar", True, "reported on 2026-09-29 per EDGAR (8-K Item 2.02)", NOW),
             (date(2026, 12, 18), "finnhub", False, "estimated (Finnhub)", NOW),
         ]
-        from app.services.next_earnings import batch_next_earnings
+        from app.models.event import Event
+        from app.services.next_earnings import choose
         async with ScriptSessionLocal() as s:
             tid = (await s.execute(select(Ticker.id).where(Ticker.symbol == CCL))).scalar()
-            picked = (await batch_next_earnings(s, [tid]))[tid]
-        assert (picked.date, picked.source, picked.confirmation) == (date(2026, 9, 29), "edgar", "confirmed")
+            events = list((await s.execute(select(Event).where(Event.ticker_id == tid))).scalars().all())
+        assert choose(events, TODAY)[:3] == (date(2026, 9, 29), "edgar", "confirmed")
 
         # a second run with Yahoo now also listing Sep 30 for the same report: absorbed, not inserted beside it
         sources["yfinance_future"] = {CCL: {date(2026, 9, 30): "bmo", date(2026, 12, 18): "amc"}}
@@ -181,3 +182,139 @@ async def test_ccl_the_edgar_report_date_is_kept_and_finnhubs_dec_18_is_added_as
 def test_a_finnhub_entry_with_an_actual_eps_is_evidence_whatever_its_date():
     future, actual = finnhub_by_symbol([{"symbol": "CCL", "date": TODAY.isoformat(), "epsActual": 1.51, "hour": "bmo"}], TODAY)
     assert future == {} and actual == {"CCL": [TODAY]}
+
+
+async def _ticker(s, sym):
+    await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at) VALUES (gen_random_uuid(), :s, 'calendar test', true, now(), now())"), {"s": sym})
+
+
+async def _rows(s, syms, since=None):
+    rows = (await s.execute(text("""
+        SELECT t.symbol, e.event_date, e.source::text, e.is_confirmed, e.confirmation_note
+        FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND e.event_type = 'earnings'
+        AND e.event_date >= CAST(:d AS date) ORDER BY t.symbol, e.event_date"""), {"s": list(syms), "d": since or date(2000, 1, 1)})).all()
+    return [tuple(r) for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_production_2026_09_29_a_silent_yahoo_drops_nothing_unh_uber_and_nke_exactly():
+    """The step's Yahoo pass ran out of budget before the U-Z tail. Before the fix it dropped UNH's Oct 13 for
+    Finnhub's Jan 25 and UBER's Nov 3 for nothing, and left NKE (Yahoo also silent) with Sep 28 unresolved and
+    Dec 16. Now: an unanswered source drops nothing; UNH keeps Oct 13 and gains Jan 25 as the following estimate,
+    UBER keeps Nov 3, NKE is unchanged, and Yahoo's answer on the next run confirms the standing dates."""
+    syms = (UNH, UBER, NKE)
+    async with ScriptSessionLocal() as s:
+        await _cleanup(s)
+        for sym in syms:
+            await _ticker(s, sym)
+        await _event(s, UNH, date(2026, 7, 16), "yfinance"); await _event(s, UNH, date(2026, 7, 28), "yfinance")
+        await _event(s, UNH, date(2026, 10, 13), "yfinance", note="estimated (Yahoo Finance)")
+        await _reaction(s, UNH, date(2026, 4, 21), 6.85, 6.75); await _reaction(s, UNH, date(2026, 7, 16), 4.08, 4.48)
+        await _event(s, UBER, date(2026, 8, 5), "yfinance"); await _event(s, UBER, date(2026, 11, 3), "yfinance", note="estimated (Yahoo Finance)")
+        await _reaction(s, UBER, date(2026, 5, 6), 0.83, 0.51); await _reaction(s, UBER, date(2026, 8, 5), 0.63, 0.62)
+        await _event(s, NKE, date(2026, 9, 28), "finnhub", note="estimated (Finnhub)"); await _event(s, NKE, date(2026, 12, 16), "finnhub", note="estimated (Finnhub)")
+        await _reaction(s, NKE, date(2026, 3, 31), 0.35, 0.28); await _reaction(s, NKE, date(2026, 6, 30), 0.72, 0.13)
+        await s.commit()
+    # what the sources returned that run: Finnhub's calendar, Yahoo nothing for these three
+    silent = {"finnhub_future": {UNH: {date(2027, 1, 25): "unknown"}, NKE: {date(2026, 12, 16): "unknown"}}, "finnhub_actual": {},
+              "yfinance_future": {}, "yfinance_reported": {}, "company": {}}
+    try:
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_(syms)).order_by(Ticker.symbol))).scalars().all())
+            plan = await reconcile(s, tickers, silent, NOW, edgar=None)
+        assert plan.dropped == [] and plan.replaced == [] and plan.superseded == [] and plan.no_date == []
+        assert plan.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub)"]
+        assert plan.standing == [
+            f"{UBER}: 2026-11-03 (yfinance) stands; Yahoo Finance returned no future date this run",
+            f"{UNH}: 2026-10-13 (yfinance) stands; Yahoo Finance returned no future date this run",
+        ]
+        assert plan.unresolved == [f"{NKE}: 2026-09-28 expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
+        async with ScriptSessionLocal() as s:
+            got = await _rows(s, syms, since=date(2026, 9, 1))
+        assert got == [
+            (NKE, date(2026, 9, 28), "finnhub", False, "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"),
+            (NKE, date(2026, 12, 16), "finnhub", False, "estimated (Finnhub); the last report was 2026-06-30, so a quarterly report would usually be due around 2026-09-29"),
+            (UBER, date(2026, 11, 3), "yfinance", False, "estimated (Yahoo Finance)"),
+            (UNH, date(2026, 10, 13), "yfinance", False, "estimated (Yahoo Finance)"),
+            (UNH, date(2027, 1, 25), "finnhub", False, "estimated (Finnhub)"),
+        ]
+
+        # the next run reaches Yahoo (what it answers when asked, probed 2026-09-30): the standing dates are its word
+        answered = {"finnhub_future": silent["finnhub_future"], "finnhub_actual": {},
+                    "yfinance_future": {UNH: {date(2026, 10, 13): "bmo"}, UBER: {date(2026, 11, 3): "bmo"}, NKE: {date(2026, 10, 1): "amc"}},
+                    "yfinance_reported": {UNH: [date(2026, 7, 16)], UBER: [date(2026, 8, 5)], NKE: [date(2026, 6, 30)]}, "company": {}}
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_(syms)).order_by(Ticker.symbol))).scalars().all())
+            plan = await reconcile(s, tickers, answered, NOW, edgar=None)
+        assert plan.standing == [] and plan.dropped == []
+        assert plan.inserted == [f"{NKE}: 2026-10-01 estimated (Yahoo Finance)"]
+        assert plan.superseded == [f"{NKE}: 2026-09-28 replaced by the 2026-10-01 estimate"]
+        async with ScriptSessionLocal() as s:
+            got = await _rows(s, syms, since=date(2026, 9, 1))
+        assert got == [
+            (NKE, date(2026, 10, 1), "yfinance", False, "estimated (Yahoo Finance)"),
+            (NKE, date(2026, 12, 16), "finnhub", False, "estimated (Finnhub)"),
+            (UBER, date(2026, 11, 3), "yfinance", False, "estimated (Yahoo Finance)"),
+            (UNH, date(2026, 10, 13), "yfinance", False, "estimated (Yahoo Finance)"),
+            (UNH, date(2027, 1, 25), "finnhub", False, "estimated (Finnhub)"),
+        ]
+    finally:
+        async with ScriptSessionLocal() as s:
+            await _cleanup(s)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_estimate_is_dropped_only_by_its_own_source_or_a_higher_one_and_a_dry_run_writes_nothing():
+    """VEEV holds Finnhub's Nov 18 (what the bad run left) and Yahoo now says Nov 25: Yahoo outranks Finnhub for the
+    same quarter, so Nov 18 is replaced. A Finnhub estimate that Finnhub itself now lists elsewhere is dropped with
+    the reason. With write=False the same plan is computed and nothing reaches the table."""
+    async with ScriptSessionLocal() as s:
+        await _cleanup(s)
+        await _ticker(s, VEEV); await _ticker(s, UNH)
+        await _event(s, VEEV, date(2026, 11, 18), "finnhub", note="estimated (Finnhub)")
+        await _reaction(s, VEEV, date(2026, 8, 26), 1.9, 1.8)
+        await _event(s, UNH, date(2026, 10, 13), "finnhub", note="estimated (Finnhub)")
+        await _reaction(s, UNH, date(2026, 7, 16), 4.08, 4.48)
+        await s.commit()
+    sources = {"finnhub_future": {UNH: {date(2027, 1, 25): "unknown"}, VEEV: {date(2026, 11, 18): "unknown"}}, "finnhub_actual": {},
+               "yfinance_future": {VEEV: {date(2026, 11, 25): "amc"}}, "yfinance_reported": {}, "company": {}}
+    try:
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_((VEEV, UNH))).order_by(Ticker.symbol))).scalars().all())
+            dry = await reconcile(s, tickers, sources, NOW, edgar=None, write=False)
+        assert dry.dropped == [f"{UNH}: dropped 2026-10-13 (finnhub); Finnhub now lists 2027-01-25",
+                               f"{VEEV}: dropped 2026-11-18 (finnhub); replaced by 2026-11-25 (Yahoo Finance)"]
+        assert dry.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub); the last report was 2026-07-16, so a quarterly report would usually be due around 2026-10-15",
+                                f"{VEEV}: 2026-11-25 estimated (Yahoo Finance); Finnhub says 2026-11-18"]
+        async with ScriptSessionLocal() as s:
+            assert await _rows(s, (VEEV, UNH)) == [(UNH, date(2026, 10, 13), "finnhub", False, "estimated (Finnhub)"),
+                                                    (VEEV, date(2026, 11, 18), "finnhub", False, "estimated (Finnhub)")]
+            checked = (await s.execute(text("SELECT earnings_checked_at FROM tickers WHERE symbol = :s"), {"s": VEEV})).scalar()
+            assert checked is None, "a dry run marks nothing checked"
+
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_((VEEV, UNH))).order_by(Ticker.symbol))).scalars().all())
+            wet = await reconcile(s, tickers, sources, NOW, edgar=None)
+        assert (wet.dropped, wet.inserted) == (dry.dropped, dry.inserted)
+        async with ScriptSessionLocal() as s:
+            assert [r[:3] for r in await _rows(s, (VEEV, UNH))] == [(UNH, date(2027, 1, 25), "finnhub"), (VEEV, date(2026, 11, 25), "yfinance")]
+    finally:
+        async with ScriptSessionLocal() as s:
+            await _cleanup(s)
+
+
+def test_the_yahoo_pass_rotates_daily_treats_an_empty_frame_as_no_answer_and_the_restore_runs_the_step_without_budgets():
+    from pathlib import Path
+    from app.scripts.refresh_earnings_calendar import announcement_targets, yfinance_order
+    syms = ["A", "B", "C", "D"]
+    assert yfinance_order(syms, date(2026, 9, 29)) != yfinance_order(syms, date(2026, 9, 30))
+    assert sorted(yfinance_order(syms, date(2026, 9, 30))) == syms and yfinance_order([], TODAY) == []
+    src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
+    assert "if df is None or df.empty:\n        return None" in src
+    assert "if isinstance(res, Exception) or res is None:\n                    continue" in src
+    restore = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "restore_yfinance_estimates.py").read_text()
+    assert "run(yf_budget_s=None, announce_budget_s=None, write=write" in restore and 'write = "--write" in argv' in restore
+    # who is asked for an announcement: a date within 60 days, or a report due with nothing on the calendar (NKE with Yahoo silent)
+    got = announcement_targets(["NKE", "UNH", "FAR"], {"NKE": {date(2026, 12, 16): "unknown"}, "FAR": {date(2027, 1, 25): "unknown"}},
+                               {}, {"UNH": [date(2026, 10, 13)]}, {"NKE": date(2026, 6, 30), "UNH": date(2026, 7, 16), "FAR": date(2026, 8, 20)}, TODAY)
+    assert got == ["NKE", "UNH"]

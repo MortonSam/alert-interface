@@ -17,13 +17,22 @@ that rests on stronger evidence, a reaction row, an actual EPS, an EDGAR filing 
 announcement, is never dropped, moved or downgraded because a calendar source lists something else;
 a calendar date near it is the same report and is absorbed. A calendar source may only replace or
 drop a date that came from a calendar source and that no company confirmed.
+
+An empty or failed fetch is never evidence. A stored calendar estimate is that source's standing word
+until the same source returns future dates for the ticker: standing_candidates() puts it back among the
+candidates when its source is silent, so it is dropped only when the same source now returns a
+different date, or a higher-precedence source (company announcement, then Yahoo Finance over Finnhub)
+contradicts it within the quarterly cadence. Two dates within SAME_REPORT_DAYS of each other are the
+same report, never two: a farther calendar date never displaces a nearer stored estimate for the same
+quarter, it is recorded in the note ("Finnhub says ...") instead.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-NEAR_DAYS = 3                        # candidates this close from different sources are the same report
+NEAR_DAYS = 3                        # candidates this close from different sources are the same report (same day: they agree)
+SAME_REPORT_DAYS = 60                # two dates closer than this are the same quarterly report; quarters are ~91 days apart
 FAR_AFTER_LAST_REPORT_DAYS = 100     # a next date this long after the last report is not the next quarter
 QUARTER_DAYS = 91
 SUPERSEDED_DAYS = 21                 # a reaction row this close to a past estimate: the quarter was reported
@@ -42,6 +51,7 @@ class Candidate:
     source: str          # "finnhub" | "yfinance" | "company"
     timing: str = "unknown"
     evidence: str = ""   # for "company": what was fetched, e.g. "8-K Item 7.01 filed 2026-08-28"
+    standing: bool = False   # a stored estimate standing in for a source that returned nothing this run
 
 
 @dataclass
@@ -59,6 +69,7 @@ class StoredDate:
     source: str          # events.source value: "finnhub" | "yfinance" | "edgar" | "manual" | ...
     confirmed: bool
     note: str | None
+    timing: str = "unknown"
 
 
 @dataclass
@@ -70,20 +81,53 @@ class PastResolution:
 
 
 def _cluster(cands: list[Candidate]) -> list[list[Candidate]]:
+    """Candidates within SAME_REPORT_DAYS of the group's first day are the same report."""
     out: list[list[Candidate]] = []
     for c in sorted(cands, key=lambda c: (c.day, c.source)):
-        if out and (c.day - out[-1][0].day).days <= NEAR_DAYS:
+        if out and (c.day - out[-1][0].day).days < SAME_REPORT_DAYS:
             out[-1].append(c)
         else:
             out.append([c])
     return out
 
 
+def far_note(day: date, last_report: date | None) -> str | None:
+    """For a nearest date more than FAR_AFTER_LAST_REPORT_DAYS after the last report: when one is usually due."""
+    if last_report is None or (day - last_report).days <= FAR_AFTER_LAST_REPORT_DAYS:
+        return None
+    due = last_report + timedelta(days=QUARTER_DAYS)
+    return f"the last report was {last_report.isoformat()}, so a quarterly report would usually be due around {due.isoformat()}"
+
+
+def standing_candidates(stored: list[StoredDate], answered: set[str], today: date) -> list[Candidate]:
+    """Stored calendar estimates whose source returned no future date this run, as that source's standing word.
+
+    `answered` holds the calendar sources that returned at least one future date for the ticker. A date two
+    sources agreed on stands for each of them that is silent. Dates beyond a calendar source's reach are not
+    candidates (they are kept outright); past dates are resolved separately.
+    """
+    out: list[Candidate] = []
+    for s in stored:
+        if s.day < today or s.source not in CALENDAR_SOURCES:
+            continue
+        sources = list(CALENDAR_SOURCES) if s.note == AGREEMENT_NOTE else [s.source]
+        for src in sources:
+            if src not in answered:
+                out.append(Candidate(s.day, src, s.timing, standing=True))
+    return out
+
+
 def merge_future(candidates: list[Candidate], last_report: date | None, today: date) -> list[FutureDate]:
-    """Decide the stored future dates from every source's candidates (all on or after today)."""
+    """Decide the stored future dates from every source's candidates (all on or after today).
+
+    Within a report's cluster each source's nearest date is its word; a company announcement wins, then the
+    two calendar sources agreeing on a day, then Yahoo Finance over Finnhub (Finnhub's day is kept in the note).
+    """
     decided: list[FutureDate] = []
     for group in _cluster([c for c in candidates if c.day >= today]):
-        by = {c.source: c for c in group}
+        by: dict[str, Candidate] = {}
+        for c in group:
+            by.setdefault(c.source, c)       # sorted by day: the nearest per source
         company, fin, yf = by.get("company"), by.get("finnhub"), by.get("yfinance")
         if company is not None:
             decided.append(FutureDate(company.day, True, f"confirmed: {company.evidence or 'company announcement'}",
@@ -96,11 +140,10 @@ def merge_future(candidates: list[Candidate], last_report: date | None, today: d
             decided.append(FutureDate(yf.day, False, note, "yfinance", yf.timing if yf.timing != "unknown" else (fin.timing if fin else "unknown")))
         elif fin is not None:
             decided.append(FutureDate(fin.day, False, "estimated (Finnhub)", "finnhub", fin.timing))
-    if decided and last_report is not None:
-        first = decided[0]
-        if (first.day - last_report).days > FAR_AFTER_LAST_REPORT_DAYS:
-            due = last_report + timedelta(days=QUARTER_DAYS)
-            first.note += f"; the last report was {last_report.isoformat()}, so a quarterly report would usually be due around {due.isoformat()}"
+    if decided:
+        note = far_note(decided[0].day, last_report)
+        if note:
+            decided[0].note += "; " + note
     return decided
 
 

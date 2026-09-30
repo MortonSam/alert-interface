@@ -109,3 +109,65 @@ def test_a_company_confirmation_is_kept_but_two_calendar_sources_agreeing_is_sti
     # the agreement note is the one merge_future writes, so the exemption cannot drift from it
     decided = merge_future([Candidate(date(2026, 10, 29), "finnhub"), Candidate(date(2026, 10, 29), "yfinance")], None, TODAY)
     assert decided[0].note == AGREEMENT_NOTE and decided[0].confirmed
+
+
+# ── An empty or failed fetch is never evidence: production, 2026-09-29 ────────────────────────────────
+# The Yahoo pass ran out of budget before the U-Z tail; the step then dropped UNH's Oct 13 for Finnhub's Jan 25
+# and UBER's Nov 3 for nothing. Yahoo answers Oct 13 / Nov 3 / Oct 1 / Nov 25 when asked (probed 2026-09-30).
+
+def test_unh_a_silent_yahoo_leaves_oct_13_standing_and_finnhubs_jan_25_is_the_following_estimate():
+    from app.services.earnings_calendar import StoredDate, standing_candidates
+    stored = [StoredDate(date(2026, 10, 13), "yfinance", False, "estimated (Yahoo Finance)", "bmo")]
+    standing = standing_candidates(stored, answered={"finnhub"}, today=TODAY)
+    assert [(c.day, c.source, c.timing, c.standing) for c in standing] == [(date(2026, 10, 13), "yfinance", "bmo", True)]
+    decided = merge_future(standing + [Candidate(date(2027, 1, 25), "finnhub")], last_report=date(2026, 7, 16), today=TODAY)
+    assert [(f.day, f.source, f.confirmed, f.note) for f in decided] == [
+        (date(2026, 10, 13), "yfinance", False, "estimated (Yahoo Finance)"),
+        (date(2027, 1, 25), "finnhub", False, "estimated (Finnhub)"),
+    ]
+    # once Yahoo answers with the same date, nothing stands in: Yahoo's word is its answer
+    assert standing_candidates(stored, answered={"finnhub", "yfinance"}, today=TODAY) == []
+
+
+def test_uber_a_silent_yahoo_and_a_silent_finnhub_leave_nov_3_standing():
+    from app.services.earnings_calendar import StoredDate, standing_candidates
+    stored = [StoredDate(date(2026, 11, 3), "yfinance", False, "estimated (Yahoo Finance)", "bmo")]
+    decided = merge_future(standing_candidates(stored, set(), TODAY), last_report=date(2026, 8, 5), today=TODAY)
+    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 11, 3), "yfinance", "estimated (Yahoo Finance)")]
+
+
+def test_nke_with_yahoo_silent_dec_16_stands_and_nothing_else_is_decided():
+    from app.services.earnings_calendar import StoredDate, standing_candidates
+    stored = [StoredDate(date(2026, 12, 16), "finnhub", False, "estimated (Finnhub)")]
+    cands = [Candidate(date(2026, 12, 16), "finnhub")] + standing_candidates(stored, answered={"finnhub"}, today=TODAY)
+    decided = merge_future(cands, last_report=date(2026, 6, 30), today=TODAY)
+    assert [(f.day, f.source) for f in decided] == [(date(2026, 12, 16), "finnhub")]
+    assert "usually be due around 2026-09-29" in decided[0].note
+
+
+def test_a_nearer_stored_estimate_outranks_a_farther_calendar_date_for_the_same_quarter():
+    from app.services.earnings_calendar import SAME_REPORT_DAYS, StoredDate, standing_candidates
+    # VEEV: Yahoo's Nov 25 stands (Yahoo silent); Finnhub says Nov 18: one report, Yahoo's day, Finnhub's in the note
+    stored = [StoredDate(date(2026, 11, 25), "yfinance", False, "estimated (Yahoo Finance)", "amc")]
+    decided = merge_future(standing_candidates(stored, {"finnhub"}, TODAY) + [Candidate(date(2026, 11, 18), "finnhub")], None, TODAY)
+    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 11, 25), "yfinance", "estimated (Yahoo Finance); Finnhub says 2026-11-18")]
+    # a stored Finnhub estimate with Finnhub silent and Yahoo naming a day in the same quarter: Yahoo outranks it
+    stored = [StoredDate(date(2026, 10, 13), "finnhub", False, "estimated (Finnhub)")]
+    decided = merge_future(standing_candidates(stored, {"yfinance"}, TODAY) + [Candidate(date(2026, 10, 20), "yfinance")], None, TODAY)
+    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 10, 20), "yfinance", "estimated (Yahoo Finance); Finnhub says 2026-10-13")]
+    # the same source returning a different date is a retraction: nothing stands in for it
+    assert standing_candidates(stored, {"finnhub"}, TODAY) == []
+    assert [f.day for f in merge_future([Candidate(date(2027, 1, 25), "finnhub")], None, TODAY)] == [date(2027, 1, 25)]
+    assert SAME_REPORT_DAYS == 60
+
+
+def test_a_date_two_sources_agreed_on_stands_for_each_that_is_silent():
+    from app.services.earnings_calendar import AGREEMENT_NOTE, StoredDate, standing_candidates
+    stored = [StoredDate(date(2026, 10, 29), "finnhub", True, AGREEMENT_NOTE, "amc")]
+    both = standing_candidates(stored, set(), TODAY)
+    assert sorted((c.source, c.day) for c in both) == [("finnhub", date(2026, 10, 29)), ("yfinance", date(2026, 10, 29))]
+    assert merge_future(both, None, TODAY)[0].note == AGREEMENT_NOTE
+    only_yahoo_silent = standing_candidates(stored, {"finnhub"}, TODAY)
+    assert [c.source for c in only_yahoo_silent] == ["yfinance"]
+    # past dates and dates beyond a calendar source's reach are not candidates
+    assert standing_candidates([StoredDate(date(2026, 9, 28), "finnhub", False, None), StoredDate(date(2026, 10, 1), "edgar", True, None)], set(), TODAY) == []
