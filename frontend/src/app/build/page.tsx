@@ -26,6 +26,7 @@ import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
 import { NO_DRAFT_NOT_CHARGED, ivyDecisionSentence } from "@/lib/ivyOutcomes";
 import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
 import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
+import { matchTickers } from "@/lib/tickerSearch";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
@@ -79,28 +80,7 @@ function TickerPicker({ tickers, onSelect }: { tickers: Ticker[]; onSelect: (t: 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const matches = useMemo(() => {
-    if (!query.trim()) return [];
-    const q = query.toLowerCase();
-    return tickers
-      .filter(
-        (t) =>
-          t.symbol.toLowerCase().includes(q) ||
-          (t.name ?? "").toLowerCase().includes(q),
-      )
-      .sort((a, b) => {
-        // Exact symbol match first, then starts-with, then by market cap
-        const q2 = query.toUpperCase();
-        if (a.symbol === q2 && b.symbol !== q2) return -1;
-        if (b.symbol === q2 && a.symbol !== q2) return 1;
-        const aStarts = a.symbol.startsWith(q2);
-        const bStarts = b.symbol.startsWith(q2);
-        if (aStarts && !bStarts) return -1;
-        if (!aStarts && bStarts) return 1;
-        return (b.market_cap ?? 0) - (a.market_cap ?? 0);
-      })
-      .slice(0, 8);
-  }, [tickers, query]);
+  const matches = useMemo(() => matchTickers(tickers, query), [tickers, query]);
 
   function handleSelect(t: Ticker) {
     onSelect(t);

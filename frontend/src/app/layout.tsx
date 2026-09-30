@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bricolage_Grotesque, Schibsted_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import Link from "next/link";
 import NavLinks from "@/components/NavLinks";
+import { HeaderTickerSearch } from "@/components/TickerSearch";
 import PostHogProvider from "@/components/PostHogProvider";
 import "./globals.css";
 
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Alert Interface
               </Link>
               <NavLinks />
+              <HeaderTickerSearch />
             </div>
           </header>
           {children}

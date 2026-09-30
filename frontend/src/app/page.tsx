@@ -1,5 +1,6 @@
 import Link from "next/link";
 import LatestVerifiedNote from "@/components/LatestVerifiedNote";
+import { HomeTickerSearch } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline, SiteCounters } from "@/components/IvyCopy";
@@ -45,6 +46,9 @@ export default function Home() {
         {/* ── 1. Hero ────────────────────────────────────────────── */}
         <section className="min-h-[100svh] flex flex-col bg-background">
           <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-4 sm:px-8">
+            <div className="w-full mb-10 text-left">
+              <HomeTickerSearch />
+            </div>
             <h1 className="hero-h1 font-display font-extrabold uppercase">
               <span data-hero-line className="block text-foreground">
                 Stock research
