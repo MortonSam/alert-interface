@@ -1,129 +1,11 @@
 import Link from "next/link";
+import LatestVerifiedNote from "@/components/LatestVerifiedNote";
 import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline, SiteCounters } from "@/components/IvyCopy";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
-
-// ── An illustration of a note. Every figure below is typed: it is not a generated note and not AAPL's.
-// The block says so in its heading and its status line, so no number here can be read as a real one.
-
-function NotePreview() {
-  return (
-    <div className="relative rounded-2xl border border-border bg-card">
-      {/* Status line */}
-      <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border bg-secondary/40">
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/50" />
-        <span className="font-mono text-[11px] text-muted-foreground">
-          Illustration, not a generated note
-        </span>
-      </div>
-
-      <div className="px-6 py-5 space-y-5">
-        {/* Hero */}
-        <div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3 className="font-display text-xl font-bold text-foreground leading-tight">
-                AAPL
-              </h3>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Apple Inc.
-              </p>
-            </div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold tracking-wide bg-cool/10 text-cool border-cool/25">
-              <span className="text-[8px]">{"\u25CF"}</span>
-              Neutral
-            </span>
-          </div>
-          <p className="font-mono text-xs text-muted-foreground/70 mt-2">
-            Information Technology {"\u00b7"} Technology Hardware {"\u00b7"} $4.30T
-          </p>
-        </div>
-
-        {/* Stat strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Market Cap</span>
-            <span className="font-mono text-sm font-semibold text-foreground">$4.30T</span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">EPS</span>
-            <span className="font-mono text-sm font-semibold text-foreground">$2.01</span>
-            <span className="text-[11px] text-success">vs $1.94 est {"\u00b7"} +3.6%</span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Beat Streak</span>
-            <span className="font-mono text-sm font-semibold text-foreground">18/20</span>
-            <span className="text-[11px] text-muted-foreground">EPS beats</span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">Latest Move</span>
-            <span className="font-mono text-sm font-semibold text-success">+3.56%</span>
-            <span className="text-[11px] text-muted-foreground">post-earnings 1d {"\u00b7"} beat</span>
-          </div>
-        </div>
-
-        {/* What They Do */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="h-2 w-2 rounded-full bg-cool" />
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-cool">
-              What They Do
-            </span>
-          </div>
-          <p className="text-[13px] text-foreground/85 leading-[1.65]">
-            Apple designs, manufactures, and markets smartphones, personal computers,
-            tablets, wearables, and accessories. Services (including the App Store,
-            Apple Music, iCloud, and Apple Pay) now represent a growing share of revenue
-            with higher margins than hardware.
-          </p>
-        </div>
-
-        {/* Recent Highlights */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="h-2 w-2 rounded-full bg-success" />
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-success">
-              Recent Highlights
-            </span>
-            <span className="text-[11px] text-muted-foreground/50">2 points</span>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="border-l-2 border-l-success/30 bg-success/[0.04] pl-3.5 py-1 rounded-r-md">
-              <p className="text-[13px] font-semibold text-foreground leading-snug">
-                Services revenue hit $26.3B
-              </p>
-              <p className="text-[13px] text-foreground/80 leading-[1.65] mt-0.5">
-                Services grew 14% YoY and now carry a gross margin above 75%, providing a
-                durable profit engine even if hardware cycles slow.
-              </p>
-            </div>
-            <div className="border-l-2 border-l-success/30 bg-success/[0.04] pl-3.5 py-1 rounded-r-md">
-              <p className="text-[13px] font-semibold text-foreground leading-snug">
-                18 of 20 quarters beat
-              </p>
-              <p className="text-[13px] text-foreground/80 leading-[1.65] mt-0.5">
-                The consistency of EPS beats suggests conservative guidance and reliable
-                execution, though markets may already price in a beat.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Caption pill */}
-      <div className="flex justify-center py-4 border-t border-border">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-[11px] font-mono text-muted-foreground">
-          Illustrative figures, not a company&apos;s
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Home() {
   return (
@@ -308,19 +190,16 @@ export default function Home() {
           <section className="max-w-3xl mx-auto px-4 sm:px-8 py-24">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
-                Illustration
+                See it in action
               </p>
               <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-                What a note looks like: an illustration
+                The latest verified note
               </h2>
               <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
-                Earnings, financials, and risk analysis. On a real note each number opens its explanation; the figures below are illustrative.
+                Rendered from the stored note: its own figures, its own words, and what the second model found.
               </p>
             </div>
-            <NotePreview />
-            <p className="text-center text-xs text-muted-foreground mt-4">
-              <Link href="/tickers/AAPL" className="underline underline-offset-2 hover:text-foreground">See a generated note</Link>
-            </p>
+            <LatestVerifiedNote />
           </section>
         </ScrollReveal>
 

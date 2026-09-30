@@ -1,12 +1,28 @@
 import type { Metadata } from "next";
 import DisclosuresTracker from "./tracker";
-import { LedgerStartDate, LedgerVisibilityClause } from "@/components/IvyCopy";
+import { LedgerVisibilityClause } from "@/components/IvyCopy";
+import { fmtLongDate } from "@/lib/ivyRule";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+
+/** LEDGER_START from the API on the server, so the HTML carries the date itself and never a placeholder. */
+async function ledgerStart(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API}/v1/theses/ivy-rule`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { rule?: { ledger_start?: string } };
+    return body.rule?.ledger_start ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export const metadata: Metadata = {
   title: "Disclosures | Alert Interface",
 };
 
-export default function DisclosuresPage() {
+export default async function DisclosuresPage() {
+  const start = await ledgerStart();
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16">
       <DisclosuresTracker />
@@ -36,8 +52,9 @@ export default function DisclosuresPage() {
           include commissions, fees, slippage, bid-ask spread costs, assignment,
           or early exercise, and a real trade would not have filled at these
           prices. Hypothetical results have inherent limitations and past
-          results do not indicate future results. The ledger began{" "}
-          <LedgerStartDate />. Picks generated before that date, during
+          results do not indicate future results.{" "}
+          {start ? <>The ledger began {fmtLongDate(start)}.</> : <>The ledger&apos;s start date is shown on Ivy&apos;s page.</>}{" "}
+          Picks generated before that date, during
           development, are not published.
         </p>
       </section>

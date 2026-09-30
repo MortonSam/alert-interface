@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_draft_caller, is_admin, require_admin
 from app.database import get_db
 from app.models.research_note import ResearchNote
+from app.models.ticker import Ticker
+from app.schemas.research_note import LatestVerifiedNoteRead
+from sqlalchemy import select
 from app.schemas.research_note import (
     ResearchNoteGenerateRequest,
     ResearchNoteRead,
@@ -152,6 +155,29 @@ def visitor_failure_reason(note: ResearchNote) -> str:
     if note.error and "timed out" in note.error.lower():
         return "Generation timed out before a note was produced. Your limit was not charged."
     return "Generation failed before a note was produced. Your limit was not charged."
+
+
+@router.get("/latest-verified", response_model=LatestVerifiedNoteRead)
+async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedNoteRead:
+    """The most recently verified complete note on an active ticker, for the home page. 404 when there is none."""
+    row = (await db.execute(
+        select(ResearchNote, Ticker.symbol, Ticker.name)
+        .join(Ticker, Ticker.id == ResearchNote.ticker_id)
+        .where(ResearchNote.status == "complete", ResearchNote.verification.is_not(None), Ticker.is_active.is_(True))
+        .order_by(ResearchNote.verified_at.desc().nulls_last(), ResearchNote.generated_at.desc())
+        .limit(1)
+    )).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No verified research note yet")
+    note, symbol, name = row
+    if not is_verified(note):
+        raise HTTPException(status_code=404, detail="No verified research note yet")
+    sc = note.structured_content or {}
+    return LatestVerifiedNoteRead(
+        symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
+        rating=sc.get("rating"), stats=sc.get("stats"), highlights=list(sc.get("highlights") or [])[:2],
+        verification_summary=(note.verification or {}).get("summary"),
+    )
 
 
 @router.get("", response_model=ResearchNoteRead)

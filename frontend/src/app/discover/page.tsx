@@ -184,7 +184,7 @@ export default function DiscoverPage() {
             Discover
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            What&apos;s worth researching across your universe right now.
+            What&apos;s worth researching across the S&amp;P 500 right now.
           </p>
           {(health?.last_refreshed_at || quotes.size > 0) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">

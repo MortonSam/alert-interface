@@ -71,3 +71,15 @@ class ResearchNoteVerifyRequest(BaseModel):
         if self.ticker_id is None and self.symbol is None:
             raise ValueError("Either ticker_id or symbol is required")
         return self
+
+
+class LatestVerifiedNoteRead(BaseModel):
+    """The most recently verified research note, as the home page shows it: its own stored figures, never a sample."""
+    symbol: str
+    company_name: str | None
+    generated_at: datetime
+    verified_at: datetime | None
+    rating: str | None                 # structured_content.rating: bullish | neutral | bearish
+    stats: dict | None                 # structured_content.stats: the note's own fact figures
+    highlights: list[dict]             # structured_content.highlights: [{lead, detail}], the note's own words
+    verification_summary: dict | None  # {supported, unsupported, contradicted}

@@ -270,6 +270,18 @@ export interface StructuredNoteItem {
   detail: string;
 }
 
+/** The most recently verified note, as the home page shows it: the note's own figures, never a sample. */
+export interface LatestVerifiedNote {
+  symbol: string;
+  company_name: string | null;
+  generated_at: string;
+  verified_at: string | null;
+  rating: "bullish" | "neutral" | "bearish" | null;
+  stats: StructuredNoteStats | null;
+  highlights: StructuredNoteItem[];
+  verification_summary: { supported: number; unsupported: number; contradicted: number } | null;
+}
+
 export interface StructuredNoteStats {
   market_cap: number | null;
   eps_estimate: number | null;
@@ -1075,6 +1087,7 @@ export const api = {
   },
 
   researchNotes: {
+    latestVerified: () => request<LatestVerifiedNote>("/research-notes/latest-verified"),
     get: (symbol: string) =>
       request<ResearchNote>(`/research-notes?symbol=${encodeURIComponent(symbol)}`),
     generate: (symbol: string, opts?: { force?: boolean }) =>
