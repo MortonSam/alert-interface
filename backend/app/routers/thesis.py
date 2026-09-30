@@ -41,6 +41,11 @@ from app.schemas.thesis import (
     ThesisStockMarkRead,
 )
 from app.constants import LEDGER_PUBLIC, LEDGER_START
+from app.services.ivy_outcomes import ivy_outcome_label
+
+# What a visitor reads when a draft cannot be made. Never the exception: that goes to the log.
+MARKET_DATA_UNAVAILABLE = "Market data for this ticker could not be fetched just now. Try again in a minute."
+DRAFT_UNAVAILABLE = "The draft could not be generated just now. Try again in a minute."
 from app.services.anthropic_client import AnthropicClient
 from app.services import chain_store, quote_cache
 from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
@@ -338,7 +343,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
             ),
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Market data fetch failed: {exc}")
+        print(f"[draft] {sym}: market data fetch failed: {exc}", flush=True)
+        raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
     finally:
         await finnhub.close()
 
@@ -925,7 +931,8 @@ Return ONLY this JSON object (no other text):
         try:
             gen = await client.generate_thesis_draft(current_prompt)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
+            print(f"[thesis-draft] {sym}: AI generation failed: {exc}", flush=True)
+            raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
         print(f"[thesis-draft] {sym} attempt={attempt}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
 
@@ -933,7 +940,8 @@ Return ONLY this JSON object (no other text):
         try:
             parsed = _extract_json(gen["content"])
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}")
+            print(f"[thesis-draft] {sym}: AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}", flush=True)
+            raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
         suggested_target = parsed.get("suggested_target")
         suggested_strike = parsed.get("suggested_strike")
@@ -1630,10 +1638,18 @@ async def alert_pick(
     await check_draft_limit(db, user_id, client_ip)
     pick_source = "visitor" if user_id == "anon" else "manual"
     result = await compute_alert_pick(payload.symbol.upper(), db, source=pick_source)
-    await record_draft(db, user_id, client_ip, payload.symbol.upper())
+    if result["draft"] is not None:
+        # a draft slot pays for a draft: an outcome that produces none (refused, passed, holding) is free
+        await record_draft(db, user_id, client_ip, payload.symbol.upper())
+    outcome = result["outcome"]
+    direction = result.get("picked_direction")
     return AlertPickRead(
         symbol=payload.symbol.upper(),
-        picked_direction=result.get("picked_direction", result["outcome"]),
+        outcome=outcome,
+        outcome_label=ivy_outcome_label(outcome),
+        note=(result.get("note") or None) if outcome != "structure_failed" else None,   # structure_failed's note is the exception
+        # a direction only where the outcome names one: a refusal's "bullish" placeholder is not Ivy's call
+        picked_direction=direction if outcome in ("picked", "open_pick_exists", "mixed_evidence") and direction in ("bullish", "bearish", "mixed_evidence") else None,
         leans=result["leans"] or [],
         draft=result["draft"],
         generated_at=result["generated_at"],
@@ -2083,7 +2099,8 @@ async def draft_alternative(
     try:
         quote = await finnhub.get_quote(sym)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Market data fetch failed: {exc}")
+        print(f"[draft] {sym}: market data fetch failed: {exc}", flush=True)
+        raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
     finally:
         await finnhub.close()
 
@@ -2239,7 +2256,8 @@ Return ONLY this JSON object (no other text):
     try:
         gen = await client.generate_thesis_draft_alternative(prompt)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
+        print(f"[draft-alternative] {sym}: AI generation failed: {exc}", flush=True)
+        raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
     print(
         f"[draft-alternative] {sym}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}",
@@ -2250,10 +2268,8 @@ Return ONLY this JSON object (no other text):
     try:
         parsed = _extract_json(gen["content"])
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}",
-        )
+        print(f"[draft-alternative] {sym}: AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}", flush=True)
+        raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
     fits              = bool(parsed.get("fits", False))
     strategy          = parsed.get("strategy")

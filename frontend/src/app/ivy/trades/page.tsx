@@ -8,6 +8,7 @@ import { type IvyRule, exitRuleSentence, fmtLongDate } from "@/lib/ivyRule";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { averagePnlPct, fmtPnlPct } from "@/lib/pnl";
+import { TRADES_FAILED, visitorMessage } from "@/lib/errors";
 import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
 import { capture } from "@/lib/analytics";
 
@@ -319,7 +320,7 @@ export default function IvyTradesPage() {
           capture("ivy_trades_viewed");
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load picks");
+        if (!cancelled) setError(visitorMessage(err, TRADES_FAILED));
       } finally {
         if (!cancelled) setLoading(false);
       }

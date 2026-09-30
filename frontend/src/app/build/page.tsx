@@ -23,6 +23,8 @@ import Callout from "@/components/Callout";
 import { GiBull, GiBearFace } from "react-icons/gi";
 import { HiSparkles } from "react-icons/hi2";
 import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
+import { NO_DRAFT_NOT_CHARGED, ivyDecisionSentence } from "@/lib/ivyOutcomes";
+import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
 import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
@@ -297,7 +299,7 @@ function DraftDisplay({
   const [altBudgetInput, setAltBudgetInput] = useState("");
   const [altLoading, setAltLoading] = useState(false);
   const [altResult, setAltResult] = useState<ThesisDraftAlternativeRead | null>(null);
-  const [altError, setAltError] = useState(false);
+  const [altError, setAltError] = useState<string | null>(null);
 
   const altBudgetParsed = parseFloat(altBudgetInput);
   const altBudgetValid =
@@ -326,14 +328,14 @@ function DraftDisplay({
     setAltOpen(false);
     setAltBudgetInput("");
     setAltResult(null);
-    setAltError(false);
+    setAltError(null);
   }
 
   async function handleGenerateAlternative() {
     if (!altBudgetValid || costPerContract == null || draft.suggested_strike == null) return;
     setAltLoading(true);
     setAltResult(null);
-    setAltError(false);
+    setAltError(null);
     try {
       const result = await api.theses.draftAlternative({
         symbol: draft.symbol,
@@ -345,8 +347,8 @@ function DraftDisplay({
         best_cost: costPerContract,
       });
       setAltResult(result);
-    } catch {
-      setAltError(true);
+    } catch (err) {
+      setAltError(visitorMessage(err, ALTERNATIVE_FAILED));   // a 429 shows the limit and when it lifts
     } finally {
       setAltLoading(false);
     }
@@ -558,7 +560,7 @@ function DraftDisplay({
                   onChange={(e) => {
                     setAltBudgetInput(e.target.value);
                     setAltResult(null);
-                    setAltError(false);
+                    setAltError(null);
                   }}
                   placeholder="e.g. 2000"
                   className="w-32 rounded-lg border bg-background px-3 py-1.5 text-sm"
@@ -582,9 +584,7 @@ function DraftDisplay({
               </div>
 
               {altError && (
-                <p className="text-xs text-muted-foreground">
-                  Couldn&apos;t generate an alternative. Try again.
-                </p>
+                <p className="text-xs text-muted-foreground">{altError}</p>
               )}
 
               {altResult?.fits && (
@@ -729,6 +729,8 @@ function BuildTradePageContent() {
   const [direction, setDirection] = useState<"bullish" | "bearish" | "auto" | null>(null);
   const [aggressiveness, setAggressiveness] = useState<"conservative" | "moderate" | "aggressive">("moderate");
   const [alertPick, setAlertPick] = useState<AlertPickRead | null>(null);
+  // Ivy answered without a draft (refused, passed, holding, or an existing pick): the tile gives way to her sentence
+  const ivyDecided = !!alertPick && !alertPick.draft && alertPick.outcome !== "picked";
 
   // Step 3 — draft
   const [draft, setDraft] = useState<ThesisDraftRead | null>(null);
@@ -804,17 +806,18 @@ function BuildTradePageContent() {
     }
   }
 
-  async function handleGenerate() {
-    if (!selectedTicker || !direction) return;
+  async function handleGenerate(chosen?: "bullish" | "bearish") {
+    const dir = chosen ?? (direction === "bullish" || direction === "bearish" ? direction : null);
+    if (!selectedTicker || !dir) return;
     setStep("generating");
     setDraftError(null);
     try {
-      const d = await api.theses.draft({ symbol: selectedTicker.symbol, direction: direction as "bullish" | "bearish", aggressiveness });
+      const d = await api.theses.draft({ symbol: selectedTicker.symbol, direction: dir, aggressiveness });
       setDraft(d);
       setStep("review_draft");
-      capture("build_trade_generated", { symbol: selectedTicker.symbol, direction });
+      capture("build_trade_generated", { symbol: selectedTicker.symbol, direction: dir });
     } catch (err) {
-      const reason = err instanceof Error ? err.message : "Generation failed. Please try again.";
+      const reason = visitorMessage(err, DRAFT_FAILED);   // the API's sentence (a limit, a ticker not found) or a plain one
       setDraftError(reason);
       setStep("pick_direction");
       capture("build_trade_refused", { symbol: selectedTicker.symbol, reason });
@@ -829,23 +832,26 @@ function BuildTradePageContent() {
     try {
       const result = await api.theses.alertPick({ symbol: selectedTicker.symbol });
       setAlertPick(result);
-      if (result.existing_pick) {
-        // Duplicate refusal — show existing pick info, don't generate
-        setStep("pick_direction");
-        setDirection(null);
-        capture("build_trade_refused", { symbol: selectedTicker.symbol, reason: "duplicate_pick" });
-      } else if (result.picked_direction === "mixed_evidence") {
-        setStep("pick_direction");
-        setDirection(null);         // reset so user can pick manually
-        capture("build_trade_refused", { symbol: selectedTicker.symbol, reason: "mixed_evidence" });
-      } else {
-        setDirection(result.picked_direction as "bullish" | "bearish");
+      const dir = result.picked_direction === "bullish" || result.picked_direction === "bearish" ? result.picked_direction : null;
+      if (result.draft && dir) {
+        // an engine that drafted: show the draft
+        setDirection(dir);
         setDraft(result.draft);
         setStep("review_draft");
-        capture("build_trade_generated", { symbol: selectedTicker.symbol, direction: result.picked_direction });
+        capture("build_trade_generated", { symbol: selectedTicker.symbol, direction: dir });
+      } else if (result.outcome === "picked" && dir) {
+        // Ivy picked a direction but the engine writes no draft: draft it (the one charged call)
+        setDirection(dir);
+        capture("build_trade_ivy_picked", { symbol: selectedTicker.symbol, direction: dir });
+        await handleGenerate(dir);
+      } else {
+        // no draft: one sentence names the outcome (refused, passed, holding), the slot is not used
+        setStep("pick_direction");
+        setDirection(null);
+        capture("build_trade_refused", { symbol: selectedTicker.symbol, reason: result.outcome });
       }
     } catch (err) {
-      const reason = err instanceof Error ? err.message : "Generation failed";
+      const reason = visitorMessage(err, DRAFT_FAILED);
       setDraftError(reason);
       setStep("pick_direction");
       setDirection(null);
@@ -901,7 +907,7 @@ function BuildTradePageContent() {
         setSignedIn(false);
         setSaveError(SAVE_REQUIRES_SIGN_IN);
       } else {
-        setSaveError(err instanceof Error ? err.message : "Save failed. Please try again.");
+        setSaveError(visitorMessage(err, SAVE_FAILED));
       }
       setStep("confirm");
     }
@@ -1081,30 +1087,32 @@ function BuildTradePageContent() {
                 </div>
               )}
 
-              {/* Mixed-evidence fallback — shown when Alert couldn't pick */}
-              {alertPick?.picked_direction === "mixed_evidence" && !alertPick?.existing_pick && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4">
-                  <p className="text-sm font-medium">Evidence conflicts: Ivy can&apos;t pick a clear direction</p>
-                  <div className="text-xs text-muted-foreground space-y-1.5">
-                    {alertPick.leans.map((lean) => (
-                      <div key={lean.signal} className="flex items-start gap-2">
-                        <span className={cn(
-                          "mt-0.5 w-2 h-2 rounded-full shrink-0",
-                          lean.direction === "bullish" ? "bg-green-500" :
-                          lean.direction === "bearish" ? "bg-red-500" : "bg-zinc-400"
-                        )} />
-                        <span>
-                          <span className="font-medium capitalize">{lean.signal}:</span>{" "}
-                          {lean.justification}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">Pick a direction manually below.</p>
+              {/* Ivy's decision when the engine produced no draft: one sentence, the reason, the slot kept */}
+              {alertPick && !alertPick.existing_pick && !alertPick.draft && alertPick.outcome !== "picked" && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4" data-testid="ivy-decision">
+                  <p className="text-sm font-medium">{ivyDecisionSentence(alertPick.symbol, alertPick.outcome, alertPick.outcome_label)}</p>
+                  {alertPick.leans.length > 0 && (
+                    <div className="text-xs text-muted-foreground space-y-1.5">
+                      {alertPick.leans.map((lean) => (
+                        <div key={lean.signal} className="flex items-start gap-2">
+                          <span className={cn(
+                            "mt-0.5 w-2 h-2 rounded-full shrink-0",
+                            lean.direction === "bullish" ? "bg-green-500" :
+                            lean.direction === "bearish" ? "bg-red-500" : "bg-zinc-400"
+                          )} />
+                          <span>
+                            <span className="font-medium capitalize">{lean.signal}:</span>{" "}
+                            {lean.justification}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">{NO_DRAFT_NOT_CHARGED} Pick a direction manually below.</p>
                 </div>
               )}
 
-              <div className={cn("grid gap-4", (alertPick?.picked_direction === "mixed_evidence" || alertPick?.existing_pick) ? "grid-cols-2" : "grid-cols-3")}>
+              <div className={cn("grid gap-4", ivyDecided ? "grid-cols-2" : "grid-cols-3")}>
                 <button
                   type="button"
                   onClick={() => pickDirection("bullish")}
@@ -1135,8 +1143,8 @@ function BuildTradePageContent() {
                   <div className="text-xs opacity-60 mt-1">expecting the stock price to fall</div>
                 </button>
 
-                {/* "Let Alert decide" — hidden after mixed_evidence or duplicate refusal */}
-                {alertPick?.picked_direction !== "mixed_evidence" && !alertPick?.existing_pick && (
+                {/* "Let Ivy decide" — hidden once Ivy has answered without a draft */}
+                {!ivyDecided && (
                   <button
                     type="button"
                     onClick={() => { setDirection("auto"); handleAlertPick(); }}
@@ -1177,7 +1185,7 @@ function BuildTradePageContent() {
                   </div>
                   <button
                     type="button"
-                    onClick={handleGenerate}
+                    onClick={() => { void handleGenerate(); }}
                     disabled={step === "generating"}
                     className="rounded-lg bg-primary text-primary-foreground px-6 py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                   >
@@ -1207,7 +1215,7 @@ function BuildTradePageContent() {
               <StepHeader n={3} label="Review the suggestion" />
 
               {/* Alert's Pick leans panel */}
-              {alertPick && alertPick.picked_direction !== "mixed_evidence" && (
+              {alertPick && (alertPick.picked_direction === "bullish" || alertPick.picked_direction === "bearish") && alertPick.leans.length > 0 && (
                 <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 px-5 py-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">

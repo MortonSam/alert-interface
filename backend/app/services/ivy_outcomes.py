@@ -18,6 +18,7 @@ IVY_OUTCOMES: dict[str, dict[str, str]] = {
     "momentum_gate":        {"category": PASSED,  "label": "Passed: no momentum setup"},
     "insufficient_history": {"category": PASSED,  "label": "Passed: not enough earnings history"},
     "no_features":          {"category": PASSED,  "label": "Passed: no data for this name"},
+    "skipped":              {"category": PASSED,  "label": "Passed: no setup for this name"},
     "open_pick_exists":     {"category": HOLDING, "label": "Holding: already has an open pick in this name"},
     "cap_reached":          {"category": PASSED,  "label": "Passed: pick limit reached"},
     "mixed_evidence":       {"category": PASSED,  "label": "Passed: signals disagreed (earlier engine)"},
@@ -56,3 +57,8 @@ def implied_reason_for_display(implied_move_pct: float | None, stored_reason: st
     if implied_move_pct is not None:
         return None
     return stored_reason or NOT_PRICED_UNRECORDED
+
+
+def ivy_outcome_label(outcome: str) -> str:
+    """The label for an outcome code, or the error label for one this table does not know."""
+    return IVY_OUTCOMES.get(outcome, IVY_OUTCOMES["error"])["label"]

@@ -5,6 +5,7 @@ import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMo
 import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { DESK_FAILED, visitorMessage } from "@/lib/errors";
 import { api, type IvyActivity, type IvyWorksheetRow } from "@/lib/api";
 import { capture } from "@/lib/analytics";
 
@@ -81,7 +82,7 @@ export default function IvyDeskPage() {
     api.theses
       .ivyActivity()
       .then((a) => { setActivity(a); capture("ivy_desk_viewed"); })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
+      .catch((err) => setError(visitorMessage(err, DESK_FAILED)))
       .finally(() => setLoading(false));
   }, []);
 

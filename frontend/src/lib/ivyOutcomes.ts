@@ -10,6 +10,7 @@ export const IVY_OUTCOME_LABELS: Record<string, string> = {
   momentum_gate: "Passed: no momentum setup",
   insufficient_history: "Passed: not enough earnings history",
   no_features: "Passed: no data for this name",
+  skipped: "Passed: no setup for this name",
   open_pick_exists: "Holding: already has an open pick in this name",
   cap_reached: "Passed: pick limit reached",
   mixed_evidence: "Passed: signals disagreed (earlier engine)",
@@ -19,6 +20,25 @@ export const IVY_OUTCOME_LABELS: Record<string, string> = {
 export function ivyOutcomeLabel(outcome: string): string {
   return IVY_OUTCOME_LABELS[outcome] ?? "Outcome not recognised";
 }
+
+/**
+ * The one sentence Build a Trade shows when "Let Ivy decide" produces no draft:
+ * "Ivy refused AAPL: options too expensive for the edge", "Ivy passed on AAPL: no data for this name".
+ * The verb is the label's category (the desk's own words), the reason is the label's own text.
+ */
+export function ivyDecisionSentence(symbol: string, outcome: string, label?: string): string {
+  const text = label ?? ivyOutcomeLabel(outcome);
+  const [head, ...rest] = text.split(": ");
+  const reason = rest.join(": ");
+  if (outcome === "picked") return `Ivy picked ${symbol}.`;
+  if (head === "Refused") return `Ivy refused ${symbol}: ${reason}`;
+  if (head === "Passed") return `Ivy passed on ${symbol}: ${reason}`;
+  if (head === "Holding") return `Ivy is holding ${symbol}: ${reason}`;
+  return `Ivy could not evaluate ${symbol}: ${text.toLowerCase()}`;
+}
+
+/** Shown under the sentence: what the visitor keeps. */
+export const NO_DRAFT_NOT_CHARGED = "No draft was made, so this did not use one of your free drafts.";
 
 interface NightCounts { evaluated: number; picked: number; refused: number; passed: number; holding?: number; errors: number }
 
