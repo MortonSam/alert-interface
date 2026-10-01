@@ -15,6 +15,7 @@ Usage
 -----
     python -m app.scripts.shadow_intrinio prices MU,CAT,AAPL
     python -m app.scripts.shadow_intrinio prices ALL
+    python -m app.scripts.shadow_intrinio prices ALL --from-stored          # bars from price_bars_shadow, no requests
     python -m app.scripts.shadow_intrinio chains MU=1078.04,CAT=827.02       # SYMBOL=page quote for the second ATM pick
 """
 from __future__ import annotations
@@ -34,6 +35,7 @@ from app.scripts.compute_analyst_reactions import _compute_pre_market
 from app.scripts.seed_historical_reactions import _build_date_cache, _compute, _compute_v3
 from app.services import chain_store
 from app.services.intrinio_client import IntrinioClient
+from app.services.price_bars_shadow import adjusted_frame
 
 START = date(2021, 7, 1)
 TOLERANCE_PP = 0.01
@@ -66,8 +68,19 @@ def recompute(row, hist: pd.DataFrame, dates, sessions) -> dict | None:
         return None
 
 
-async def prices(symbols: list[str], client: IntrinioClient, today: date) -> dict:
-    spy = frame(await client.daily_prices("SPY", START, today + timedelta(days=1)))
+async def stored_bars(symbol: str) -> pd.DataFrame:
+    """The symbol's bars from price_bars_shadow, adjusted by the stored factors."""
+    async with ScriptSessionLocal() as s:
+        rows = (await s.execute(text("""select date, open, high, low, close, volume, factor, split_ratio
+                                        from price_bars_shadow where symbol = :s order by date"""), {"s": symbol})).mappings().all()
+    return adjusted_frame([dict(r) for r in rows])
+
+
+async def prices(symbols: list[str], client: IntrinioClient | None, today: date) -> dict:
+    """client None: every frame comes from price_bars_shadow (the nightly fetch), no requests."""
+    async def bars(sym: str) -> pd.DataFrame:
+        return await stored_bars(sym) if client is None else frame(await client.daily_prices(sym, START, today + timedelta(days=1)))
+    spy = await bars("SPY")
     sessions = _build_date_cache(spy)
     async with ScriptSessionLocal() as s:
         rows = (await s.execute(text("""
@@ -79,7 +92,7 @@ async def prices(symbols: list[str], client: IntrinioClient, today: date) -> dic
     out = {"tickers": {}, "diffs": []}
     for sym in symbols:
         try:
-            hist = frame(await client.daily_prices(sym, START, today + timedelta(days=1)))
+            hist = await bars(sym)
         except Exception as exc:
             out["tickers"][sym] = {"error": str(exc)[:120]}
             continue
@@ -204,7 +217,8 @@ async def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[0] not in ("prices", "chains"):
         print(__doc__)
         return 2
-    client = IntrinioClient()
+    from_stored = "--from-stored" in argv
+    client = None if from_stored and argv[0] == "prices" else IntrinioClient()
     try:
         if argv[0] == "prices":
             if argv[1] == "ALL":
@@ -213,7 +227,9 @@ async def main(argv: list[str]) -> int:
             else:
                 symbols = [x.strip().upper() for x in argv[1].split(",") if x.strip()]
             out = await prices(symbols, client, date.today())
-            print_prices(out, client.request_count, client.log.retries)
+            print_prices(out, client.request_count if client else 0, client.log.retries if client else 0)
+            if from_stored:
+                print("  bars: price_bars_shadow (stored nightly from Intrinio by security record id), adjusted from the stored factors")
         else:
             targets = {}
             for part in argv[1].split(","):
@@ -222,7 +238,8 @@ async def main(argv: list[str]) -> int:
             await chains(targets, client)
             print(f"\nrequests {client.request_count}")
     finally:
-        await client.close()
+        if client is not None:
+            await client.close()
     return 0
 
 

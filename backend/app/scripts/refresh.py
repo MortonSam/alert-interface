@@ -55,6 +55,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Ticker data (seed_sp500)",              ["python", "-m", "app.scripts.seed_sp500"]),
     ("Refresh profiles (Finnhub)",            ["python", "-m", "app.scripts.refresh_profiles"]),
     ("Security records (Intrinio)",           ["python", "-m", "app.scripts.build_security_records", "--write"]),
+    ("Price bars shadow (Intrinio)",          ["python", "-m", "app.scripts.shadow_price_bars"]),
     ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
@@ -88,6 +89,7 @@ STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 STEP_TIMEOUTS: dict[str, int] = {
     "Refresh profiles (Finnhub)": 300,
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
+    "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
     "Analyst recommendations (Finnhub)": 300,
     "Historical reactions (--all)": 1800,

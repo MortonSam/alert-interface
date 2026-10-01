@@ -25,6 +25,7 @@ from app.database import ScriptSessionLocal
 from app.models.security_record import SecurityRecord
 from app.models.ticker import Ticker
 from app.services.intrinio_client import IntrinioAuthError, IntrinioClient
+from app.services.price_bars_shadow import BENCHMARKS
 from app.services.security_records import CURRENT, Record, plan_records
 from app.services.step_outcomes import record_step_fields
 
@@ -68,6 +69,7 @@ async def main(argv: list[str]) -> int:
     write = "--write" in argv
     async with ScriptSessionLocal() as session:
         symbols = list((await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
+    symbols = sorted(set(symbols) | set(BENCHMARKS))     # SPY gives the seeder its session calendar
     client = IntrinioClient()
     resolved: list[str] = []
     missing: list[str] = []

@@ -1963,10 +1963,11 @@ async def check_security_record_coverage(session) -> CheckResult:
     oldest stored reaction with price data and today; ERROR when a current record's last Intrinio price is more
     than STALE_SESSIONS old (the stock stopped trading or the ticker moved to a new record)."""
     from app.models.security_record import SecurityRecord
-    from app.services.security_records import CURRENT, Record, STALE_SESSIONS, coverage_problems
+    from app.services.price_bars_shadow import BENCHMARKS
+    from app.services.security_records import CURRENT, Record, STALE_SESSIONS, STORED_START, coverage_problems
     from app.services.trading_calendar import sessions_after
     today = date.today()
-    tickers = (await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)))).scalars().all()
+    tickers = list((await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)))).scalars().all()) + list(BENCHMARKS)
     oldest = dict((await session.execute(
         select(Ticker.symbol, func.min(HistoricalReaction.event_date)).join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
         .where(Ticker.is_active.is_(True), HistoricalReaction.close_before.isnot(None)).group_by(Ticker.symbol)
@@ -1980,7 +1981,7 @@ async def check_security_record_coverage(session) -> CheckResult:
             last_price[r.symbol] = r.last_price_date
     problems: list[str] = []
     for sym in sorted(tickers):
-        start = oldest.get(sym) or today
+        start = STORED_START if sym in BENCHMARKS else (oldest.get(sym) or today)
         for p in coverage_problems(by.get(sym, []), start, today):
             problems.append(f"{sym}: {p}")
         lp = last_price.get(sym)
