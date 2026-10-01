@@ -14,7 +14,7 @@ import type {
   SuggestionItem,
   UnusuallyActiveItem,
 } from "@/lib/api";
-import { CALENDAR_SOURCE, checkedPhrase, confirmedBy, earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
+import { CALENDAR_SOURCE, checkedPhrase, earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
 import { discoverRvTier } from "@/lib/encodings/rvTier";
 import { volRegime } from "@/lib/encodings/volRegime";
 
@@ -46,7 +46,26 @@ export function ivClause(regime: string | null | undefined): string | null {
   return v ? v.label.replace(/^IV (\w+)/, (_, w: string) => `IV ${w.toLowerCase()}`) : null;
 }
 
-/** The level and its evidence: "confirmed, press release", "estimated, Finnhub, checked today". */
+/**
+ * What kind of source confirmed a date, from the type prefix the calendar refresh writes into the note
+ * (backend report_announcements / earnings_calendar). Never the headline or the filing date that follow it.
+ */
+export const CONFIRMED_KIND = {
+  pressRelease: "company press release",   // "confirmed: press release via Finnhub news <date>: <headline>"
+  secFiling: "SEC filing",                 // "confirmed: 8-K Item 7.01 filed <date>"
+  calendars: "Finnhub and Yahoo Finance agree",   // AGREEMENT_NOTE: two calendars on the same day
+  company: "company announcement",         // a company confirmation with no recorded evidence, or a note of no known type
+} as const;
+
+export function confirmedKind(note: string | null | undefined): string {
+  const body = (note ?? "").replace(/^confirmed:\s*/i, "").trim();
+  if (/^press release\b/i.test(body)) return CONFIRMED_KIND.pressRelease;
+  if (/^8-K\b/i.test(body)) return CONFIRMED_KIND.secFiling;
+  if (/^Finnhub and Yahoo Finance agree$/i.test(body)) return CONFIRMED_KIND.calendars;
+  return CONFIRMED_KIND.company;
+}
+
+/** The level and its evidence: "confirmed, company press release", "estimated, Finnhub, checked today". */
 function levelNote(
   confirmation: string | null | undefined,
   note: string | null | undefined,
@@ -54,7 +73,7 @@ function levelNote(
   checkedAt: string | null | undefined,
   now: Date,
 ): string {
-  if (confirmation === "confirmed") return `confirmed, ${confirmedBy(note, source)}`;
+  if (confirmation === "confirmed") return `confirmed, ${confirmedKind(note)}`;
   const level = confirmation === "expected_unconfirmed" ? "not confirmed" : "estimated";
   return `${level}, ${earningsSourceNote(source, checkedAt, now)}`;
 }
@@ -87,7 +106,7 @@ function whenPhrase(days: number): string {
   return d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`;
 }
 
-/** The calendar: "Reports tomorrow (confirmed, press release); beat 7 of 8, averaging +3.1% ...". */
+/** The calendar: "Reports tomorrow (confirmed, company press release); beat 7 of 8, averaging +3.1% ...". */
 export function reportingSoonSentence(item: ReportingSoonItem, now: Date = new Date()): string {
   const days = daysUntil(item.earnings_date, now);
   const lvl = levelNote(item.confirmation, item.confirmation_note, item.source, item.checked_at, now);

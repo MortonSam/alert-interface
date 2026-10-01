@@ -56,7 +56,7 @@ export function noDateLine(checkedAt: string | null | undefined): string {
 export type Confirmation = "confirmed" | "estimated" | "expected_unconfirmed";
 
 /** The evidence phrase after "confirmed": from the API note, e.g. "confirmed: Finnhub and Yahoo Finance agree". */
-export function confirmedBy(note: string | null | undefined, source: string | null | undefined): string {
+function confirmedBy(note: string | null | undefined, source: string | null | undefined): string {
   const stripped = (note ?? "").replace(/^confirmed:\s*/i, "").split(";")[0].trim();
   return stripped || sourceLabel(source) || "company";
 }

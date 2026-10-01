@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { JustReportedItem, LatestPickItem, ReportingSoonItem, SuggestionItem, UnusuallyActiveItem, EarningsOutcome } from "@/lib/api";
 import {
+  CONFIRMED_KIND,
   OUTCOME_LEAD,
+  confirmedKind,
   earningsClause,
   justReportedSentence,
   latestPickSentence,
@@ -64,17 +66,44 @@ describe("row sentences", () => {
   it("the calendar: when, the level with its source in parentheses, then the stored blurb", () => {
     const item: ReportingSoonItem = {
       ...base, symbol: "ACME", earnings_date: "2026-09-30", is_confirmed: true, source: "finnhub",
-      checked_at: TODAY_CHECK, confirmation: "confirmed", confirmation_note: "confirmed: press release",
+      checked_at: TODAY_CHECK, confirmation: "confirmed",
+      confirmation_note: "confirmed: press release via Finnhub news 2026-09-02: Acme Corp to Announce Fiscal 2027 First Quarter Results",
       insight: "Beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat", vol_regime: "iv_rich",
     };
     expect(reportingSoonSentence(item, NOW)).toBe(
-      "Reports tomorrow (confirmed, press release); beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat; IV rich");
+      "Reports tomorrow (confirmed, company press release); beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat; IV rich");
 
     const estimated = { ...item, earnings_date: "2026-10-02", confirmation: "estimated", confirmation_note: null, insight: null, vol_regime: null };
     expect(reportingSoonSentence(estimated, NOW)).toBe("Reports in 3 days (estimated, Finnhub, checked today)");
 
     const today = { ...estimated, earnings_date: "2026-09-29", confirmation: "expected_unconfirmed", source: "yfinance", vol_regime: "iv_fair" };
     expect(reportingSoonSentence(today, NOW)).toBe("Expected to report today (not confirmed, Yahoo Finance, checked today)");
+  });
+
+  it("a confirmed date names its source type, never the headline or the announcement date", () => {
+    const headline = "confirmed: press release via Finnhub news 2026-09-02: Acme Corp to Announce Fiscal 2027 First Quarter Results";
+    const filing = "confirmed: 8-K Item 8.01 filed 2026-09-15";
+    expect(confirmedKind(headline)).toBe("company press release");
+    expect(confirmedKind(filing)).toBe("SEC filing");
+    expect(confirmedKind("confirmed: Finnhub and Yahoo Finance agree")).toBe(CONFIRMED_KIND.calendars);
+    expect(confirmedKind("confirmed: company announcement")).toBe(CONFIRMED_KIND.company);
+    expect(confirmedKind("confirmed: something new the refresh starts writing 2026-09-01")).toBe(CONFIRMED_KIND.company);
+    expect(confirmedKind(null)).toBe(CONFIRMED_KIND.company);
+
+    const item: ReportingSoonItem = {
+      ...base, symbol: "ACME", earnings_date: "2026-10-01", is_confirmed: true, source: "edgar",
+      checked_at: TODAY_CHECK, confirmation: "confirmed", confirmation_note: headline, insight: null, vol_regime: null,
+    };
+    for (const note of [headline, filing]) {
+      const s = reportingSoonSentence({ ...item, confirmation_note: note }, NOW);
+      expect(s).not.toMatch(/2026|Announce|Item|Finnhub news|filed/);
+    }
+    expect(reportingSoonSentence(item, NOW)).toBe("Reports in 2 days (confirmed, company press release)");
+    expect(reportingSoonSentence({ ...item, confirmation_note: filing }, NOW)).toBe("Reports in 2 days (confirmed, SEC filing)");
+    expect(earningsClause("2026-10-21", "edgar", TODAY_CHECK, "confirmed", headline, NOW)).toBe("reports Oct 21 (confirmed, company press release)");
+    // estimated dates keep the source and when it was checked
+    expect(reportingSoonSentence({ ...item, confirmation: "estimated", source: "yfinance", is_confirmed: false }, NOW)).toBe(
+      "Reports in 2 days (estimated, Yahoo Finance, checked today)");
   });
 
   it("a ticker with no confirmed date says so and when the calendar was checked", () => {
@@ -106,15 +135,15 @@ describe("row sentences", () => {
       ...base, symbol: "VOLT", rv_rank: 91.6, rv_20d: 0.62, tier: "elevated",
       insight: "IV rich at +12pp vs realized · RV rank 92, extreme", vol_regime: "iv_rich",
       earnings_date: "2026-10-21", earnings_source: "edgar", earnings_checked_at: TODAY_CHECK,
-      earnings_confirmation: "confirmed", earnings_note: "confirmed: company press release",
+      earnings_confirmation: "confirmed", earnings_note: "confirmed: 8-K Item 7.01 filed 2026-09-15",
     };
     expect(unusuallyActiveSentence(u, NOW)).toBe(
-      "RV rank 92, elevated for this stock; IV rich at +12pp vs realized; reports Oct 21 (confirmed, company press release)");
+      "RV rank 92, elevated for this stock; IV rich at +12pp vs realized; reports Oct 21 (confirmed, SEC filing)");
     // the tier word follows the API's cutoffs, not the general scale
     expect(unusuallyActiveSentence({ ...u, rv_rank: DISCOVER_EXTREME_RV, insight: null, vol_regime: null, earnings_date: null }, NOW)).toBe(
       `RV rank ${DISCOVER_EXTREME_RV}, extreme for this stock; no confirmed date yet (Finnhub, checked today)`);
     expect(unusuallyActiveSentence({ ...u, rv_rank: DISCOVER_ELEVATED_RV, insight: "RV rank 85, elevated", vol_regime: null }, NOW)).toBe(
-      `RV rank ${DISCOVER_ELEVATED_RV}, elevated for this stock; reports Oct 21 (confirmed, company press release)`);
+      `RV rank ${DISCOVER_ELEVATED_RV}, elevated for this stock; reports Oct 21 (confirmed, SEC filing)`);
   });
 
   it("just reported: the outcome, then the move against its typical one", () => {
