@@ -1,10 +1,11 @@
-"""Seed macro calendar events — FOMC meetings, CPI, NFP, and PPI releases.
+"""Seed macro calendar events — CPI, NFP, and PPI releases.
+
+FOMC decision days are not scraped here any more: services/fomc_calendar.py holds them as data and is the
+only writer of "FOMC Meeting" events (two writers once produced two rows for one meeting); the nightly
+validate check reads the Fed page and errors when the page and the module disagree.
 
 Sources
 -------
-FOMC  : https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
-        Scraped directly — no auth required. Uses the concluding day of each
-        two-day meeting (i.e. the day the statement is released).
 
 CPI / NFP / PPI:
         Primary  — FRED API release-dates endpoint (free key, set FRED_API_KEY
@@ -40,7 +41,6 @@ from app.models.event import Event
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 FRED_BASE = "https://api.stlouisfed.org/fred"
 BLS_BASE  = "https://www.bls.gov/schedule/news_release"
 
@@ -75,75 +75,6 @@ class MacroEvent(NamedTuple):
     event_date: date
     title: str
     source: DataSource
-
-
-# ── FOMC scraper ──────────────────────────────────────────────────────────────
-
-def _parse_fomc_html(html: str) -> list[MacroEvent]:
-    """
-    Parse upcoming FOMC meeting dates from the Fed's calendar page.
-
-    HTML structure (stable since ~2018):
-      <div class="panel-default">
-        <h4><a id="42828">2026 FOMC Meetings</a></h4>
-        ...
-        <div class="row fomc-meeting">
-          <div class="fomc-meeting__month ..."><strong>January</strong></div>
-          <div class="fomc-meeting__date ...">27-28</div>   ← range; we take last day
-        </div>
-        ...
-      </div>
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    today  = date.today()
-    cutoff = today + timedelta(days=LOOKAHEAD_DAYS)
-    events: list[MacroEvent] = []
-
-    for panel in soup.find_all("div", class_="panel-default"):
-        heading = panel.find("h4")
-        if not heading:
-            continue
-        m = re.search(r"(\d{4})\s+FOMC", heading.get_text())
-        if not m:
-            continue
-        year = int(m.group(1))
-
-        current_month: int | None = None
-        for row in panel.find_all("div", class_="fomc-meeting"):
-            month_div = row.find("div", class_="fomc-meeting__month")
-            if month_div:
-                name = month_div.get_text(strip=True).lower()
-                current_month = MONTH_MAP.get(name)
-
-            date_div = row.find("div", class_="fomc-meeting__date")
-            if date_div and current_month:
-                raw = date_div.get_text(strip=True).rstrip("*").strip()
-                try:
-                    # "27-28" → take end day; "28" → single day
-                    day = int(raw.split("-")[-1])
-                    d = date(year, current_month, day)
-                    if today <= d <= cutoff:
-                        events.append(MacroEvent(d, "FOMC Meeting", DataSource.FRED))
-                except (ValueError, TypeError):
-                    pass
-
-    return sorted(events)
-
-
-async def fetch_fomc(client: httpx.AsyncClient) -> list[MacroEvent]:
-    print("\n── FOMC Meetings ─────────────────────────────────────")
-    try:
-        resp = await client.get(FOMC_URL, headers=_BROWSER_HEADERS, timeout=20)
-        resp.raise_for_status()
-    except Exception as exc:
-        print(f"  ERROR: could not fetch Fed calendar — {exc}")
-        return []
-
-    events = _parse_fomc_html(resp.text)
-    print(f"  Found {len(events)} upcoming meetings")
-    for ev in events:
-        print(f"    {ev.event_date}  {ev.title}")
-    return events
 
 
 # ── FRED API ──────────────────────────────────────────────────────────────────
@@ -268,8 +199,6 @@ async def main() -> None:
     all_events: list[MacroEvent] = []
 
     async with httpx.AsyncClient() as client:
-        all_events.extend(await fetch_fomc(client))
-
         print("\n── BLS Economic Releases ─────────────────────────────")
         fred_key = (settings.fred_api_key or "").strip()
         if fred_key:

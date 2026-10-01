@@ -37,6 +37,7 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.services.fomc_calendar import FOMC_EVENT_TITLE, ensure_fomc_events, is_decision_day
 from app.services.price_history_exclusion import exclusion_list, excluded_symbols
 from app.services.step_outcomes import record_step_fields
 from app.models.historical_reaction import HistoricalReaction
@@ -54,66 +55,14 @@ from app.scripts.seed_historical_reactions import (
 )
 
 
-# ── Historical FOMC decision dates ───────────────────────────────────────────
-# Second day (decision day) of each scheduled FOMC meeting, Jan 2021 – present.
-# Source: Federal Reserve Board public calendar.
-
-FOMC_DECISION_DATES: list[date] = [
-    # 2021
-    date(2021, 1, 27), date(2021, 3, 17), date(2021, 4, 28),
-    date(2021, 6, 16), date(2021, 7, 28), date(2021, 9, 22),
-    date(2021, 11, 3), date(2021, 12, 15),
-    # 2022
-    date(2022, 1, 26), date(2022, 3, 16), date(2022, 5, 4),
-    date(2022, 6, 15), date(2022, 7, 27), date(2022, 9, 21),
-    date(2022, 11, 2), date(2022, 12, 14),
-    # 2023
-    date(2023, 2, 1),  date(2023, 3, 22), date(2023, 5, 3),
-    date(2023, 6, 14), date(2023, 7, 26), date(2023, 9, 20),
-    date(2023, 11, 1), date(2023, 12, 13),
-    # 2024
-    date(2024, 1, 31), date(2024, 3, 20), date(2024, 5, 1),
-    date(2024, 6, 12), date(2024, 7, 31), date(2024, 9, 18),
-    date(2024, 11, 7), date(2024, 12, 18),
-    # 2025
-    date(2025, 1, 29), date(2025, 3, 19), date(2025, 5, 7),
-    date(2025, 6, 18), date(2025, 7, 30), date(2025, 9, 17),
-    date(2025, 10, 29), date(2025, 12, 17),
-    # 2026
-    date(2026, 1, 28), date(2026, 3, 18), date(2026, 4, 29),
-    date(2026, 6, 17), date(2026, 7, 29), date(2026, 9, 17),
-    date(2026, 10, 29), date(2026, 12, 16),
-]
-
-
-# ── Ensure FOMC events exist in DB ──────────────────────────────────────────
+# ── FOMC decision dates ──────────────────────────────────────────────────────
+# services/fomc_calendar.py holds the official decision days and is the only writer of "FOMC Meeting"
+# events. This seeder measures official days only: a stray event row on another day is never seeded.
 
 async def _ensure_fomc_events() -> int:
-    """Insert historical FOMC dates into events table if missing.
-    Matches the existing pattern: event_type='macro', title='FOMC Meeting', source='fred'.
-    Returns count of newly inserted rows."""
-    inserted = 0
+    """Insert the official decision days into the events table if missing. Returns the count inserted."""
     async with AsyncSessionLocal() as session:
-        for d in FOMC_DECISION_DATES:
-            existing = await session.scalar(
-                select(Event.id).where(
-                    Event.event_type == EventType.MACRO,
-                    Event.title == "FOMC Meeting",
-                    Event.event_date == d,
-                )
-            )
-            if existing is not None:
-                continue
-            session.add(Event(
-                ticker_id=None,
-                event_type=EventType.MACRO,
-                event_date=d,
-                title="FOMC Meeting",
-                source=DataSource.FRED,
-                is_confirmed=True,
-                metadata_={},
-            ))
-            inserted += 1
+        inserted = await ensure_fomc_events(session)
         await session.commit()
     return inserted
 
@@ -136,14 +85,14 @@ async def _load_fomc_dates() -> list[tuple[date, str]]:
             select(Event.event_date, Event.id)
             .where(
                 Event.event_type == EventType.MACRO,
-                Event.title == "FOMC Meeting",
+                Event.title == FOMC_EVENT_TITLE,
                 Event.event_date >= lookback,
                 Event.event_date <= cutoff,
             )
             .order_by(Event.event_date)
         )).all()
 
-    return [(r.event_date, str(r.id)) for r in rows]
+    return [(r.event_date, str(r.id)) for r in rows if is_decision_day(r.event_date)]
 
 
 # ── DB upsert ────────────────────────────────────────────────────────────────

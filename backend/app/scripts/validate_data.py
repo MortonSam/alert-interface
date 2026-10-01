@@ -1956,6 +1956,62 @@ async def check_options_read_coverage(session) -> CheckResult:
     )
 
 
+# ── FOMC decision days: the module, the page and the rows agree ───────────────
+
+async def check_fomc_dates_official(session) -> CheckResult:
+    """ERROR if any "FOMC Meeting" event or any fomc reaction row sits on a day that is not an official decision day."""
+    from app.services.fomc_calendar import FOMC_EVENT_TITLE, is_decision_day
+    event_days = (await session.execute(
+        select(Event.event_date, func.count()).where(Event.ticker_id.is_(None), Event.title == FOMC_EVENT_TITLE).group_by(Event.event_date)
+    )).all()
+    reaction_days = (await session.execute(
+        select(HistoricalReaction.event_date, func.count()).where(HistoricalReaction.event_type == EventType.FOMC).group_by(HistoricalReaction.event_date)
+    )).all()
+    bad = [f"event {d.isoformat()} ({n} row{'s' if n != 1 else ''})" for d, n in event_days if not is_decision_day(d)]
+    bad += [f"reactions {d.isoformat()} ({n} rows)" for d, n in reaction_days if not is_decision_day(d)]
+    if bad:
+        return CheckResult("fomc_dates_official", ERROR,
+                           f"{len(bad)} FOMC date(s) that are not official decision days (run repair_fomc_dates)", sorted(bad))
+    return CheckResult("fomc_dates_official", PASS, f"Every FOMC event and reaction date is an official decision day ({len(event_days)} event dates)")
+
+
+async def check_fomc_events_unique(session) -> CheckResult:
+    """ERROR if two "FOMC Meeting" events fall within MEETING_GAP_DAYS of each other: one meeting written twice."""
+    from app.services.fomc_calendar import FOMC_EVENT_TITLE, MEETING_GAP_DAYS
+    days = sorted((await session.execute(
+        select(Event.event_date).where(Event.ticker_id.is_(None), Event.title == FOMC_EVENT_TITLE)
+    )).scalars().all())
+    pairs = [f"{a.isoformat()} and {b.isoformat()}" for a, b in zip(days, days[1:]) if (b - a).days < MEETING_GAP_DAYS]
+    if pairs:
+        return CheckResult("fomc_events_unique", ERROR, f"{len(pairs)} pair(s) of FOMC events within {MEETING_GAP_DAYS} days", pairs)
+    return CheckResult("fomc_events_unique", PASS, f"No two FOMC events within {MEETING_GAP_DAYS} days ({len(days)} events)")
+
+
+async def check_fomc_calendar_matches_fed(session) -> CheckResult:
+    """ERROR when the Fed's page disagrees with fomc_calendar.py on any past day or the next 12 months;
+    WARN when the page cannot be fetched or the module has no dates for next year."""
+    import httpx
+    from app.services.fomc_calendar import FED_CALENDAR_URL, disagreements, next_year_covered, parse_fed_calendar
+    today = date.today()
+    try:
+        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "Mozilla/5.0 (alert-interface validate)"}) as client:
+            resp = await client.get(FED_CALENDAR_URL)
+            resp.raise_for_status()
+        page = parse_fed_calendar(resp.text)
+    except Exception as exc:
+        return CheckResult("fomc_calendar_matches_fed", WARN, f"Fed calendar page could not be fetched or read: {exc}")
+    if not page:
+        return CheckResult("fomc_calendar_matches_fed", WARN, "Fed calendar page fetched but no meetings were parsed")
+    diffs = disagreements(page, today)
+    if diffs:
+        return CheckResult("fomc_calendar_matches_fed", ERROR,
+                           f"{len(diffs)} FOMC date(s) differ between the Fed page and fomc_calendar.py", diffs)
+    if not next_year_covered(today):
+        return CheckResult("fomc_calendar_matches_fed", WARN, f"fomc_calendar.py has no decision days for {today.year + 1}")
+    years = ", ".join(str(y) for y in sorted(page))
+    return CheckResult("fomc_calendar_matches_fed", PASS, f"Fed page and fomc_calendar.py agree on every decision day through {today.year + 1} (page years {years})")
+
+
 # ── FOMC pre-listing guard ────────────────────────────────────────────────────
 
 async def check_fomc_pre_listing(session) -> CheckResult:
@@ -2424,6 +2480,10 @@ CHECKS = [
     check_options_read_coverage,
     # Duplicate reactions
     check_duplicate_earnings_reactions,
+    # FOMC decision days: official set, one event per meeting, the Fed page agrees
+    check_fomc_dates_official,
+    check_fomc_events_unique,
+    check_fomc_calendar_matches_fed,
     # Pre-listing FOMC guard
     check_fomc_pre_listing,
     # v3 reaction checks
