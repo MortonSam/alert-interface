@@ -1956,6 +1956,57 @@ async def check_options_read_coverage(session) -> CheckResult:
     )
 
 
+# ── Security records: every active ticker resolves to exactly one Intrinio record per date ─────────────
+
+async def check_security_record_coverage(session) -> CheckResult:
+    """ERROR when an active ticker has no record, two records on a date, or a gap holding a session between its
+    oldest stored reaction with price data and today; ERROR when a current record's last Intrinio price is more
+    than STALE_SESSIONS old (the stock stopped trading or the ticker moved to a new record)."""
+    from app.models.security_record import SecurityRecord
+    from app.services.security_records import CURRENT, Record, STALE_SESSIONS, coverage_problems
+    from app.services.trading_calendar import sessions_after
+    today = date.today()
+    tickers = (await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)))).scalars().all()
+    oldest = dict((await session.execute(
+        select(Ticker.symbol, func.min(HistoricalReaction.event_date)).join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+        .where(Ticker.is_active.is_(True), HistoricalReaction.close_before.isnot(None)).group_by(Ticker.symbol)
+    )).all())
+    rows = (await session.execute(select(SecurityRecord).where(SecurityRecord.symbol.in_(list(tickers))))).scalars().all()
+    by: dict[str, list[Record]] = {}
+    last_price: dict[str, date | None] = {}
+    for r in rows:
+        by.setdefault(r.symbol, []).append(Record(r.symbol, r.intrinio_security_id, r.figi, r.composite_figi, r.name, r.valid_from, r.valid_to, r.role, r.source))
+        if r.role == CURRENT:
+            last_price[r.symbol] = r.last_price_date
+    problems: list[str] = []
+    for sym in sorted(tickers):
+        start = oldest.get(sym) or today
+        for p in coverage_problems(by.get(sym, []), start, today):
+            problems.append(f"{sym}: {p}")
+        lp = last_price.get(sym)
+        if sym in by and lp is not None and sessions_after(lp, today) > STALE_SESSIONS:
+            problems.append(f"{sym}: current record's last Intrinio price is {lp.isoformat()}, {sessions_after(lp, today)} sessions ago")
+    if not rows:
+        return CheckResult("security_record_coverage", ERROR, "No security records: run build_security_records --write")
+    if problems:
+        return CheckResult("security_record_coverage", ERROR, f"{len(problems)} coverage problem(s) across active tickers", problems[:60])
+    return CheckResult("security_record_coverage", PASS, f"Every active ticker resolves to exactly one record per date ({len(tickers)} tickers, {len(rows)} records)")
+
+
+async def check_figi_change(session) -> CheckResult:
+    """ERROR when Intrinio's current FIGI for a ticker (figi_seen at the last refresh) differs from the stored one:
+    the ticker now points at a different security and the record map needs a new row."""
+    from app.models.security_record import SecurityRecord
+    from app.services.security_records import CURRENT
+    rows = (await session.execute(select(SecurityRecord).where(SecurityRecord.role == CURRENT))).scalars().all()
+    changed = [f"{r.symbol}: stored FIGI {r.figi}, Intrinio now {r.figi_seen} (checked {r.checked_at.date().isoformat() if r.checked_at else '?'})"
+               for r in rows if r.figi and r.figi_seen and r.figi != r.figi_seen]
+    if changed:
+        return CheckResult("figi_change", ERROR, f"{len(changed)} ticker(s) whose current record moved to a new FIGI", sorted(changed))
+    unchecked = sum(1 for r in rows if r.figi_seen is None)
+    return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + (f" ({unchecked} not yet refreshed)" if unchecked else ""))
+
+
 # ── FOMC decision days: the module, the page and the rows agree ───────────────
 
 async def check_fomc_dates_official(session) -> CheckResult:
@@ -2480,6 +2531,9 @@ CHECKS = [
     check_options_read_coverage,
     # Duplicate reactions
     check_duplicate_earnings_reactions,
+    # Security records: one Intrinio record per ticker per date, FIGI unchanged
+    check_security_record_coverage,
+    check_figi_change,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

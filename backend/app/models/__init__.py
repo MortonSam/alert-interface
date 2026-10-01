@@ -23,3 +23,4 @@ from app.models.earnings_report_timing import EarningsReportTiming  # noqa: F401
 from app.models.ivy_train_log import IvyTrainLog  # noqa: F401
 from app.models.eps_basis_check import EpsBasisCheck  # noqa: F401
 from app.models.refused_earnings_date import RefusedEarningsDate  # noqa: F401
+from app.models.security_record import SecurityRecord  # noqa: F401
