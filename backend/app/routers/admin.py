@@ -44,6 +44,7 @@ class ChainIngestItem(BaseModel):
     puts: list[dict]
     chain_last_trade: str | None = None
     underlying_price: float | None = None
+    chain_captured_at: str | None = None      # the courier's capture time on the New York clock, with offset
 
 
 class ChainIngestRequest(BaseModel):
@@ -79,7 +80,7 @@ async def ingest_options_chains(
             continue
         try:
             chain_dict = _sanitize_floats(chain_store.build_courier_chain(
-                item.calls, item.puts, item.expiration, item.chain_last_trade, item.underlying_price))
+                item.calls, item.puts, item.expiration, item.chain_last_trade, item.underlying_price, item.chain_captured_at))
             await chain_store.put_chain(db, sym, item.expiration, chain_dict, chain_store.COURIER)
             ingested.append(sym)
             # Track nearest future expiration per symbol for put/call

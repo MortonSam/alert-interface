@@ -22,6 +22,15 @@ from datetime import date, datetime, timedelta
 import httpx
 import yfinance as yf
 
+from zoneinfo import ZoneInfo
+
+CAPTURE_CLOCK = "America/New_York"   # the market's clock; launchd fires this courier at 16:05 on it (the Mac is on that zone)
+
+
+def capture_stamp(now: datetime | None = None) -> str:
+    """When this chain was captured, on the market's clock with its offset, e.g. 2026-10-05T16:06:12-04:00."""
+    return (now or datetime.now(ZoneInfo(CAPTURE_CLOCK))).astimezone(ZoneInfo(CAPTURE_CLOCK)).replace(microsecond=0).isoformat()
+
 # ── Fallback tickers (used only if the API is unreachable) ────────────────────
 
 FALLBACK_TICKERS = [
@@ -116,6 +125,7 @@ def _fetch_chain(symbol: str, expiration: str) -> dict:
                     "calls": calls, "puts": puts, "expiration": expiration,
                     "chain_last_trade": chain_last_trade.isoformat() if chain_last_trade else None,
                     "underlying_price": underlying_price,
+                    "chain_captured_at": capture_stamp(),
                 }
         except Exception:
             pass
@@ -312,6 +322,7 @@ def process_ticker(
                 "puts": chain["puts"],
                 "chain_last_trade": chain.get("chain_last_trade"),
                 "underlying_price": chain.get("underlying_price"),
+                "chain_captured_at": chain.get("chain_captured_at"),
             })
 
         result["strikes"] = total_strikes
@@ -368,7 +379,7 @@ def main() -> int:
 
     t_start = time.monotonic()
 
-    print(f"Chain courier → {base}")
+    print(f"Chain courier → {base}   capture clock {CAPTURE_CLOCK}, now {capture_stamp()}")
     print(f"Tickers: {len(tickers)} ({', '.join(tickers[:10])}{'…' if len(tickers) > 10 else ''})")
 
     # Fetch stored expirations so we can refresh every priced chain

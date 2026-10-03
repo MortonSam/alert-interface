@@ -38,10 +38,11 @@ def chain_source(chain: dict | None) -> str:
 
 
 def build_courier_chain(calls: list[dict], puts: list[dict], expiration: str, chain_last_trade: str | None,
-                        underlying_price: float | None) -> dict:
-    """The dict the ingest endpoint stores for a courier chain (before float sanitising)."""
+                        underlying_price: float | None, chain_captured_at: str | None = None) -> dict:
+    """The dict the ingest endpoint stores for a courier chain (before float sanitising). chain_captured_at is the
+    courier's capture time on the New York clock; a chain without one was captured before the field existed."""
     return {"calls": calls, "puts": puts, "expiration": expiration, "chain_last_trade": chain_last_trade,
-            "underlying_price": underlying_price, "chain_source": COURIER}
+            "underlying_price": underlying_price, "chain_source": COURIER, "chain_captured_at": chain_captured_at}
 
 
 async def put_chain(db: AsyncSession, sym: str, exp: str, chain: dict, source: str) -> str:

@@ -12,9 +12,10 @@ from app.scripts import refresh
 from app.scripts.shadow_option_chains import STEP_LABEL
 from app.scripts.validate_data import CHECKS, ERROR, PASS, WARN, check_chain_shadow, run_checks
 from app.services import chain_store
-from app.services.chain_shadow import (IMPLIED_MOVE_TOLERANCE_PP, MIN_NIGHTS, PER_TICKER_COLUMNS, SCHEDULE_CLOCK, SCHEDULED_LOCAL,
-                                       clock_fields, compare_front, criteria_failures, evaluate, expected_session, front_expiration,
-                                       night_totals, to_stored_chain, wait_seconds)
+from app.scripts.chain_courier import capture_stamp
+from app.services.chain_shadow import (IMPLIED_MOVE_TOLERANCE_PP, INTRADAY_NOTE, MIN_NIGHTS, PER_TICKER_COLUMNS, SCHEDULE_CLOCK, SCHEDULED_LOCAL,
+                                       captured_after_close, clock_fields, compare_front, criteria_failures, evaluate, expected_session,
+                                       front_expiration, night_totals, to_stored_chain, wait_seconds)
 
 NY = ZoneInfo("America/New_York")
 
@@ -73,8 +74,9 @@ def test_to_stored_chain_keeps_quote_timestamps_sets_the_eod_date_and_names_the_
 def test_chain_keys_and_sources_are_told_apart_and_the_courier_dict_names_its_source():
     assert chain_store.chain_key("MU", "2026-10-09") == "chain:MU:2026-10-09"
     assert chain_store.chain_key("MU", "2026-10-09", chain_store.INTRINIO) == "intrinio_chain:MU:2026-10-09"
-    c = chain_store.build_courier_chain([], [], "2026-10-09", "2026-10-01", 100.0)
-    assert c["chain_source"] == "courier" and chain_store.chain_source(c) == "courier"
+    c = chain_store.build_courier_chain([], [], "2026-10-09", "2026-10-01", 100.0, "2026-10-01T16:06:12-04:00")
+    assert c["chain_source"] == "courier" and chain_store.chain_source(c) == "courier" and c["chain_captured_at"] == "2026-10-01T16:06:12-04:00"
+    assert chain_store.build_courier_chain([], [], "2026-10-09", "2026-10-01", 100.0)["chain_captured_at"] is None   # a pre-stamp courier
     assert chain_store.chain_source({"calls": []}) == "courier"            # stored before the field existed
     assert chain_store.chain_source({"chain_source": "intrinio"}) == "intrinio"
 
@@ -92,7 +94,7 @@ def side(rows):
     return [{"strike": k, "bid": b, "ask": a, "lastPrice": (b + a) / 2} for k, b, a in rows]
 
 
-COURIER = {"expiration": "2026-10-09", "chain_last_trade": "2026-10-01", "underlying_price": 100.0,
+COURIER = {"expiration": "2026-10-09", "chain_last_trade": "2026-10-01", "underlying_price": 100.0, "chain_captured_at": "2026-10-01T16:06:12-04:00",
            "calls": side([(95, 6.0, 6.4), (100, 2.0, 2.4), (105, 0.5, 0.7)]),
            "puts": side([(95, 0.4, 0.6), (100, 1.8, 2.2), (105, 5.0, 5.4)])}
 
@@ -120,19 +122,49 @@ def test_identical_chains_compare_clean_and_a_strike_missing_on_one_side_is_coun
     assert g["atm_call_mid_intrinio"] == 2.21
 
 
+def test_the_courier_capture_is_stamped_on_the_new_york_clock_and_carried_into_the_row():
+    stamp = capture_stamp(datetime(2026, 10, 5, 20, 6, 12, tzinfo=timezone.utc))
+    assert stamp == "2026-10-05T16:06:12-04:00"
+    assert captured_after_close(stamp) is True
+    assert captured_after_close("2026-10-01T14:31:03-04:00") is False          # the old 2:30pm schedule
+    assert captured_after_close("2026-10-01T20:00:00+00:00") is True          # 16:00 New York exactly, in UTC
+    assert captured_after_close(None) is None and captured_after_close("not a time") is None
+    f = compare_front(COURIER, {**COURIER, "late": False})
+    assert f["chain_captured_at"] == "2026-10-01T16:06:12-04:00" and f["courier_after_close"] is True
+    g = compare_front({**COURIER, "chain_captured_at": "2026-10-01T14:31:03-04:00"}, {**COURIER, "late": False})
+    assert g["courier_after_close"] is False
+
+
+def test_an_intraday_capture_is_not_judged_on_implied_move_and_a_night_of_them_says_so():
+    close_row = compare_front(COURIER, {**COURIER, "late": False})
+    intraday_row = compare_front({**COURIER, "chain_captured_at": "2026-10-01T14:31:03-04:00"}, {**COURIER, "underlying_price": 90.0, "late": False})
+    unstamped_row = compare_front({**COURIER, "chain_captured_at": None}, {**COURIER, "late": False})
+    t = night_totals("2026-10-01", {"A": close_row, "B": intraday_row, "C": unstamped_row}, [])
+    assert (t["implied_move_judged"], t["implied_move_intraday"], t["implied_move_within_tolerance"], t["implied_move_share"]) == (1, 2, 1, 1.0)
+    assert criteria_failures(t) == []
+    all_intraday = night_totals("2026-10-01", {"B": intraday_row, "C": unstamped_row}, [])
+    assert all_intraday["implied_move_judged"] == 0 and all_intraday["implied_move_share"] is None
+    assert criteria_failures(all_intraday) == []                                  # intraday: not judged, not failed
+    v = evaluate([all_intraday])
+    assert v.level == "warn" and INTRADAY_NOTE in v.rows[0] and "at or after 16:00 New York" in v.rows[0]
+    bad = night_totals("2026-10-01", {"A": compare_front(COURIER, {**COURIER, "underlying_price": 90.0, "late": False})}, [])
+    assert any("closing-capture tickers" in f and "below 95%" in f for f in criteria_failures(bad))
+
+
 def test_the_intrinio_implied_move_uses_its_own_spot_and_is_absent_without_one():
     intr = {**COURIER, "underlying_price": None, "late": False}
     f = compare_front(COURIER, intr)
     assert f["implied_move_intrinio_pct"] is None and f["implied_move_courier_pct"] == 4.2
     t = night_totals("2026-10-01", {"MU": f}, [])
-    assert t["implied_move_within_tolerance"] == 0 and t["implied_move_share"] == 0
+    assert t["implied_move_judged"] == 1 and t["implied_move_within_tolerance"] == 0 and t["implied_move_share"] == 0
 
 
 # ── the week's verdict ────────────────────────────────────────────────────────
 
 def clean_night(d, **over):
     t = {"date": d, "tickers_both": 400, "tickers_missing_intrinio": 0, "missing_intrinio": [], "tickers_with_courier_only_strikes": [],
-         "courier_only_strikes": 0, "intrinio_only_strikes": 12, "implied_move_within_tolerance": 392, "implied_move_share": 0.98,
+         "courier_only_strikes": 0, "intrinio_only_strikes": 12, "implied_move_judged": 400, "implied_move_intraday": 0,
+         "implied_move_within_tolerance": 392, "implied_move_share": 0.98,
          "mid_median_of_medians": 0.0, "mid_mean_abs_mean": 0.02, "late": []}
     t.update(over)
     return t
