@@ -1,5 +1,8 @@
 """Read helper for iv_history. The only way ATM implied volatility reaches a response.
 
+Only courier rows (iv_source = 'courier') are served; the solver's rows (iv_source = 'intrinio_mid') sit beside
+them and reach no response.
+
 get_servable_iv(db, symbol) -> IVState(value, as_of, reason)
 
 The newest row within IV_WINDOW_DAYS whose atm_iv is not null is served, dated
@@ -28,12 +31,12 @@ class IVState:
 
 _WINDOW_SQL = sa.text("""
     SELECT date, atm_iv, atm_iv_reason FROM iv_history
-    WHERE symbol = :s AND date >= :cutoff
+    WHERE symbol = :s AND iv_source = 'courier' AND date >= :cutoff
     ORDER BY date DESC
 """)
 _LAST_GOOD_SQL = sa.text("""
     SELECT date, atm_iv FROM iv_history
-    WHERE symbol = :s AND atm_iv IS NOT NULL
+    WHERE symbol = :s AND iv_source = 'courier' AND atm_iv IS NOT NULL
     ORDER BY date DESC LIMIT 1
 """)
 

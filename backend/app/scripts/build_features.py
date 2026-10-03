@@ -33,7 +33,7 @@ from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.earnings_feature import EarningsFeature
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
-from app.models.iv_history import IVHistory
+from app.models.iv_history import COURIER_SOURCE, IVHistory
 from app.models.ticker import Ticker
 
 # ── V1 thresholds (exact match to thesis.py lines 1032-1155) ────────────────
@@ -234,7 +234,7 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
 
         # 4. Pre-load IV history
         iv_result = await session.execute(
-            select(IVHistory).order_by(IVHistory.symbol, IVHistory.date)
+            select(IVHistory).where(IVHistory.iv_source == COURIER_SOURCE).order_by(IVHistory.symbol, IVHistory.date)
         )
         all_iv = iv_result.scalars().all()
         iv_by_symbol: dict[str, list[IVHistory]] = defaultdict(list)

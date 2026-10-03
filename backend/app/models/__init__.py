@@ -25,3 +25,4 @@ from app.models.eps_basis_check import EpsBasisCheck  # noqa: F401
 from app.models.refused_earnings_date import RefusedEarningsDate  # noqa: F401
 from app.models.security_record import SecurityRecord  # noqa: F401
 from app.models.price_bar_shadow import PriceBarShadow  # noqa: F401
+from app.models.rate import Rate  # noqa: F401

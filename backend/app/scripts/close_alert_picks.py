@@ -26,7 +26,7 @@ from sqlalchemy import select, text
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick
 from app.models.credit_shadow_pick import CreditShadowPick
-from app.models.iv_history import IVHistory
+from app.models.iv_history import COURIER_SOURCE, IVHistory
 from app.models.shadow_pick import ShadowPick
 from app.services import chain_store
 from app.services.pnl_math import compute_option_pnl_at_expiry, pnl_percent
@@ -305,6 +305,7 @@ async def _resolve_close_from_iv_history(
         select(IVHistory.current_price)
         .where(
             IVHistory.symbol == symbol,
+            IVHistory.iv_source == COURIER_SOURCE,
             IVHistory.date <= exp_date,
             IVHistory.current_price.is_not(None),
         )

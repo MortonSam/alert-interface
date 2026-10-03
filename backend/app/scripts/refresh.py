@@ -80,6 +80,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     # Scheduled at 03:05 America/New_York by the script itself (it waits when reached early); shadow only, no reader switches.
     ("Options chains (Intrinio)",      ["python", "-m", "app.scripts.shadow_option_chains"]),
+    ("ATM IV (solver)",                ["python", "-m", "app.scripts.solve_atm_iv"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),

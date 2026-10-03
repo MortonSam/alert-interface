@@ -501,7 +501,7 @@ async def check_iv_history_out_of_band(session) -> CheckResult:
         text("""
             SELECT symbol, date, atm_iv
             FROM iv_history
-            WHERE date >= :cutoff
+            WHERE date >= :cutoff AND iv_source = 'courier'
               AND atm_iv IS NOT NULL
               AND (atm_iv < 0.05 OR atm_iv > 4.0)
             ORDER BY date DESC, symbol
@@ -578,7 +578,7 @@ async def check_price_history_stale(session) -> CheckResult:
         quote AS (
             SELECT DISTINCT ON (symbol) symbol, date AS quote_date, current_price
             FROM iv_history
-            WHERE current_price IS NOT NULL AND current_price > 0
+            WHERE iv_source = 'courier' AND current_price IS NOT NULL AND current_price > 0
             ORDER BY symbol, date DESC
         )
         SELECT l.*, q.quote_date, q.current_price
@@ -918,7 +918,7 @@ async def check_cached_reads_stale(session) -> CheckResult:
     rv_ok = await get_latest_rv_bulk(session, symbols)
     iv_ok = set((await session.execute(text("""
         SELECT DISTINCT symbol FROM iv_history
-        WHERE symbol = ANY(:s) AND atm_iv IS NOT NULL AND date >= current_date - 3
+        WHERE symbol = ANY(:s) AND iv_source = 'courier' AND atm_iv IS NOT NULL AND date >= current_date - 3
     """), {"s": symbols})).scalars().all())
     excluded = await excluded_symbols(session)
     with_reactions = set((await session.execute(text("""
@@ -1203,7 +1203,7 @@ async def check_quote_sanity(session) -> CheckResult:
             SELECT DISTINCT ON (ih.symbol) ih.symbol, ih.date, ih.current_price
             FROM iv_history ih
             JOIN tickers t ON t.symbol = ih.symbol AND t.is_active = true
-            WHERE ih.current_price IS NOT NULL
+            WHERE ih.iv_source = 'courier' AND ih.current_price IS NOT NULL
             ORDER BY ih.symbol, ih.date DESC
         )
         SELECT symbol, date, current_price FROM latest WHERE current_price <= 0
@@ -1217,7 +1217,7 @@ async def check_quote_sanity(session) -> CheckResult:
                    LAG(ih.current_price) OVER (PARTITION BY ih.symbol ORDER BY ih.date) AS prev_price
             FROM iv_history ih
             JOIN tickers t ON t.symbol = ih.symbol AND t.is_active = true
-            WHERE ih.current_price IS NOT NULL AND ih.current_price > 0
+            WHERE ih.iv_source = 'courier' AND ih.current_price IS NOT NULL AND ih.current_price > 0
               AND ih.date >= CURRENT_DATE - 30
         )
         SELECT d.symbol, d.date, d.current_price, d.prev_price,
@@ -1302,7 +1302,7 @@ async def check_iv_history_price_drift(session) -> CheckResult:
                    LAG(current_price) OVER (PARTITION BY symbol ORDER BY date) AS prev_price,
                    LAG(date) OVER (PARTITION BY symbol ORDER BY date) AS prev_date
             FROM iv_history
-            WHERE current_price IS NOT NULL
+            WHERE iv_source = 'courier' AND current_price IS NOT NULL
               AND current_price != 'NaN'::numeric
               AND current_price > 0
         )
@@ -2009,6 +2009,58 @@ async def check_figi_change(session) -> CheckResult:
     return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + (f" ({unchecked} not yet refreshed)" if unchecked else ""))
 
 
+# ── IV solver: solved ATM IV against the vendor's, and the solver's own sanity band ─────────────────────
+
+IV_VENDOR_GAP = 0.10            # |solved - vendor| above this is a gap
+IV_VENDOR_GAP_SHARE = 0.05      # WARN when more than this share of the night's tickers gap
+IV_VENDOR_LARGEST = 10
+
+
+async def check_iv_vendor_band(session) -> CheckResult:
+    """The latest solver night: WARN when more than IV_VENDOR_GAP_SHARE of tickers with a solved and a vendor ATM IV
+    differ by more than IV_VENDOR_GAP. Always reports the count and the ten largest gaps with their inputs."""
+    from app.models.iv_history import SOLVER_SOURCE
+    night = (await session.execute(text("SELECT max(date) FROM iv_history WHERE iv_source = :src"), {"src": SOLVER_SOURCE})).scalar()
+    if night is None:
+        return CheckResult("iv_vendor_band", PASS, "No solver rows yet")
+    rows = (await session.execute(text("""
+        SELECT symbol, atm_iv, vendor_iv, solved_call_iv, solved_put_iv, vendor_call_iv, vendor_put_iv, atm_call_mid, atm_put_mid,
+               current_price, atm_strike, rate, days_to_expiry, expiration, atm_iv_reason
+        FROM iv_history WHERE iv_source = :src AND date = :d ORDER BY symbol
+    """), {"src": SOLVER_SOURCE, "d": night})).all()
+    both = [r for r in rows if r.atm_iv is not None and r.vendor_iv is not None]
+    gaps = sorted(((abs(float(r.atm_iv) - float(r.vendor_iv)), r) for r in both), key=lambda x: -x[0])
+    over = [g for g in gaps if g[0] > IV_VENDOR_GAP]
+    share = len(over) / len(both) if both else 0.0
+    detail = [f"{len(rows)} solver row(s) on {night.isoformat()}, {len(both)} with both IVs, {len(rows) - len(both)} without "
+              f"({', '.join(sorted({(r.atm_iv_reason or 'no vendor IV')[:40] for r in rows if r.atm_iv is None or r.vendor_iv is None})) or 'none'})"]
+    for gap, r in gaps[:IV_VENDOR_LARGEST]:
+        detail.append(f"{r.symbol}: solved {float(r.atm_iv):.4f} (call {r.solved_call_iv}, put {r.solved_put_iv}) vendor {float(r.vendor_iv):.4f} "
+                      f"(call {r.vendor_call_iv}, put {r.vendor_put_iv}) gap {gap:.4f}; mids {r.atm_call_mid}/{r.atm_put_mid}, spot {r.current_price}, "
+                      f"strike {r.atm_strike}, rate {r.rate}, days {r.days_to_expiry}, expiry {r.expiration}")
+    msg = f"{len(over)}/{len(both)} ticker(s) ({share * 100:.1f}%) differ from the vendor by more than {IV_VENDOR_GAP} on {night.isoformat()}"
+    return CheckResult("iv_vendor_band", WARN if share > IV_VENDOR_GAP_SHARE else PASS, msg, detail)
+
+
+async def check_iv_solver_band(session) -> CheckResult:
+    """ERROR on any solved IV (either side or the ATM mean) outside [IV_SANITY_MIN, IV_SANITY_MAX]."""
+    from app.models.iv_history import SOLVER_SOURCE
+    from app.services.iv_solver import IV_SANITY_MAX, IV_SANITY_MIN
+    rows = (await session.execute(text("""
+        SELECT symbol, date, atm_iv, solved_call_iv, solved_put_iv FROM iv_history
+        WHERE iv_source = :src AND (
+            (atm_iv IS NOT NULL AND (atm_iv < :lo OR atm_iv > :hi)) OR
+            (solved_call_iv IS NOT NULL AND (solved_call_iv < :lo OR solved_call_iv > :hi)) OR
+            (solved_put_iv IS NOT NULL AND (solved_put_iv < :lo OR solved_put_iv > :hi)))
+        ORDER BY date DESC, symbol
+    """), {"src": SOLVER_SOURCE, "lo": IV_SANITY_MIN, "hi": IV_SANITY_MAX})).all()
+    if rows:
+        return CheckResult("iv_solver_band", ERROR, f"{len(rows)} solver row(s) with an IV outside [{IV_SANITY_MIN}, {IV_SANITY_MAX}]",
+                           [f"{r.symbol} {r.date}: atm {r.atm_iv} call {r.solved_call_iv} put {r.solved_put_iv}" for r in rows[:30]])
+    n = (await session.execute(text("SELECT count(*) FROM iv_history WHERE iv_source = :src"), {"src": SOLVER_SOURCE})).scalar()
+    return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
+
+
 # ── Chain shadow: Intrinio's EOD chain against the courier's, night by night ──────────────────────────
 
 async def check_chain_shadow(session) -> CheckResult:
@@ -2605,6 +2657,9 @@ CHECKS = [
     check_figi_change,
     # Chain shadow: Intrinio's EOD chain against the courier's, judged over a week
     check_chain_shadow,
+    # IV solver: against the vendor, and within its own band
+    check_iv_vendor_band,
+    check_iv_solver_band,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

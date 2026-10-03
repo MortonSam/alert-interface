@@ -87,7 +87,7 @@ async def _backfill_cleanup() -> None:
             WITH updated AS (
                 UPDATE iv_history
                 SET atm_iv = NULL, atm_iv_reason = 'ATM implied volatility below ' || :iv_min || ', cleared by backfill cleanup'
-                WHERE atm_iv IS NOT NULL AND atm_iv < :iv_min
+                WHERE atm_iv IS NOT NULL AND atm_iv < :iv_min AND iv_source = 'courier'
                 RETURNING symbol
             )
             SELECT symbol, COUNT(*) as cnt
@@ -116,7 +116,7 @@ async def _get_ingested_chain(
     Picks the nearest expiration >= today + 7 days.
     Returns (parsed chain dict, chosen expiration) or (None, None).
     """
-    min_exp = (today + timedelta(days=7)).isoformat()
+    from app.services.iv_solver import choose_expiration     # one expiry rule for the courier snapshot and the solver
 
     result = await session.execute(
         sa.text(
@@ -130,25 +130,11 @@ async def _get_ingested_chain(
     if not rows:
         return None, None
 
-    candidates = []
-    for row in rows:
-        parts = row.key.split(":")
-        if len(parts) >= 3:
-            exp_str = parts[2]
-            if exp_str >= min_exp:
-                candidates.append((exp_str, row.value))
-
-    # If nothing >= min_exp, use the farthest available
-    if not candidates:
-        parts = rows[-1].key.split(":")
-        if len(parts) >= 3:
-            candidates = [(parts[2], rows[-1].value)]
-
-    if not candidates:
+    by_exp = {row.key.split(":")[2]: row.value for row in rows if len(row.key.split(":")) >= 3}
+    exp_str = choose_expiration(list(by_exp), today)
+    if exp_str is None:
         return None, None
-
-    candidates.sort(key=lambda x: x[0])
-    exp_str, chain_json = candidates[0]
+    chain_json = by_exp[exp_str]
 
     try:
         return json.loads(chain_json), exp_str
@@ -239,7 +225,7 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
         async with AsyncSessionLocal() as sess:
             prev_row = (await sess.execute(sa.text("""
                 SELECT date, current_price FROM iv_history
-                WHERE symbol = :sym AND current_price IS NOT NULL
+                WHERE iv_source = 'courier' AND symbol = :sym AND current_price IS NOT NULL
                   AND current_price != 'NaN'::numeric
                 ORDER BY date DESC LIMIT 1
             """), {"sym": symbol})).first()
@@ -262,12 +248,12 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
     # ── Upsert ────────────────────────────────────────────────────────────────
     stmt = sa.text("""
         INSERT INTO iv_history
-            (id, symbol, date, atm_iv, atm_iv_reason, realized_vol_20d,
+            (id, symbol, date, iv_source, atm_iv, atm_iv_reason, realized_vol_20d,
              atm_strike, current_price, created_at)
         VALUES
-            (gen_random_uuid(), :symbol, :date,
+            (gen_random_uuid(), :symbol, :date, 'courier',
              :atm_iv, :atm_iv_reason, :realized_vol_20d, :atm_strike, :current_price, now())
-        ON CONFLICT (symbol, date) DO UPDATE SET
+        ON CONFLICT (symbol, date, iv_source) DO UPDATE SET
             atm_iv           = EXCLUDED.atm_iv,
             atm_iv_reason    = EXCLUDED.atm_iv_reason,
             realized_vol_20d = EXCLUDED.realized_vol_20d,

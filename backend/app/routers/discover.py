@@ -266,7 +266,7 @@ async def _batch_vol_regime(
     iv_stmt = sa.text("""
         SELECT DISTINCT ON (symbol) symbol, atm_iv, date
         FROM iv_history
-        WHERE symbol = ANY(:syms)
+        WHERE symbol = ANY(:syms) AND iv_source = 'courier'
         ORDER BY symbol, date DESC
     """)
     iv_result = await db.execute(iv_stmt, {"syms": symbols})

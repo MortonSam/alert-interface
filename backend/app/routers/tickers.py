@@ -14,7 +14,7 @@ from app.auth import require_admin, _get_admin_token
 from app.config import settings
 from app.database import get_db
 from app.models.event import Event
-from app.models.iv_history import IVHistory
+from app.models.iv_history import COURIER_SOURCE, IVHistory
 from app.models.rv_snapshot import RVSnapshot
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
@@ -643,7 +643,7 @@ async def get_ticker_chart(
     if ref_price is None:
         ref_price = await db.scalar(
             select(IVHistory.current_price)
-            .where(IVHistory.symbol == sym, IVHistory.current_price.isnot(None))
+            .where(IVHistory.symbol == sym, IVHistory.iv_source == COURIER_SOURCE, IVHistory.current_price.isnot(None))
             .order_by(IVHistory.date.desc())
             .limit(1)
         )
