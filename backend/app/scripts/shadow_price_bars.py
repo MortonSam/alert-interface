@@ -106,7 +106,7 @@ async def main(argv: list[str]) -> int:
     for e in errors[:20]:
         print("   ", e)
     await record_step_fields(STEP_LABEL, {"fetches": len(fetches), "requests": client.request_count, "retries": client.log.retries, "bars": written,
-                                          "symbols": len(symbols), "errors": errors[:50]})
+                                          "symbols": len(symbols), "errors": errors[:50], "error": None})
     return 0 if not errors else 1
 
 

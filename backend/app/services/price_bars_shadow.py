@@ -28,9 +28,9 @@ class Fetch:
 
 def plan_fetches(records_by_symbol: dict[str, list[Record]], last_stored: dict[str, date | None], today: date,
                  start: date = STORED_START) -> list[Fetch]:
-    """One fetch per Intrinio record whose span still has days to fetch: from max(start, record start, the day
-    after the last stored bar less the overlap) to min(record end, today). stored_history rows fetch nothing.
-    Predecessor records whose bars are already stored fetch nothing: their end is in the past."""
+    """One fetch per Intrinio record whose span still has days to fetch: from max(start, record start, the last
+    stored bar less the overlap) to min(record end, today). stored_history rows fetch nothing. A closed record
+    (a predecessor, a delisted ticker's last record) whose bars reach its end fetches nothing."""
     out: list[Fetch] = []
     for sym, records in sorted(records_by_symbol.items()):
         last = last_stored.get(sym)
@@ -40,8 +40,8 @@ def plan_fetches(records_by_symbol: dict[str, list[Record]], last_stored: dict[s
                 continue
             a = max(floor, r.valid_from)
             b = min(r.valid_to or today, today)
-            if last is not None and r.valid_to is not None and r.valid_to <= last - timedelta(days=OVERLAP_DAYS):
-                continue
+            if last is not None and r.valid_to is not None and r.valid_to <= last:
+                continue            # a closed record (predecessor, delisted) whose bars are complete
             if a <= b:
                 out.append(Fetch(sym, r, a, b))
     return out

@@ -2,10 +2,19 @@
 
 Intrinio reuses tickers across companies (PARA is Banzai International today) and gives a re-domiciled
 company a new record with a new FIGI, so every read goes by record id, never by ticker, and every date
-resolves to exactly one record. The build script fetches each active ticker's current record; the
-predecessors below are data, found by the security-history endpoint on 2026-10-01; PSKY keeps its stored
-rows before 2025-08-07 under a stored_history row because its predecessor, Paramount Global class B, is a
-different security.
+resolves to exactly one record. The build script fetches each active ticker's current record; everything
+declared below is data, checked against Intrinio on 2026-10-01 and 2026-10-03:
+
+  PREDECESSORS        the record before a re-domicile (OKE, TEL, FERG, CRH), and WBD's own record split
+                      around three sessions it has no bars for.
+  STORED_HISTORY_ROWS spans no Intrinio record covers, where the stored rows keep their yfinance values
+                      (price_source yfinance) and are never recomputed: PSKY before its 2025-08-07 listing
+                      (its predecessor, Paramount Global class B, is a different security), the when-issued
+                      session each of CEG, HONA and Q reported in before Intrinio's first bar, and WBD's
+                      2022-04-06..08.
+  DELISTED            tickers whose stock stopped trading: the build marks them inactive (rows kept, hidden
+                      at read time like the price-history exclusion) and closes their current record on the
+                      last session.
 """
 from __future__ import annotations
 
@@ -31,7 +40,7 @@ class Record:
     source: str
 
 
-# symbol -> (predecessor record, its FIGI, its name, its first price date, its last price date, the current record's first day)
+# symbol -> the record before the current one: id, FIGIs, name, its first and last price dates, the current record's first day
 PREDECESSORS: dict[str, dict] = {
     "OKE":  {"id": "sec_ybYl7z", "figi": "BBG000BQHJ81", "composite_figi": "BBG000BQHGR6", "name": "Oneok Inc.",
              "valid_from": date(1985, 7, 1), "valid_to": date(2026, 9, 14), "current_from": date(2026, 9, 15)},
@@ -41,13 +50,38 @@ PREDECESSORS: dict[str, dict] = {
              "valid_from": date(2019, 5, 17), "valid_to": date(2024, 7, 31), "current_from": date(2024, 8, 1)},
     "CRH":  {"id": "sec_5ydnRX", "figi": "BBG000BBLSM3", "composite_figi": "BBG000BBLR09", "name": "CRH Plc",
              "valid_from": date(1993, 2, 19), "valid_to": date(2023, 9, 22), "current_from": date(2023, 9, 25)},
+    # the same record as WBD's current one (sec_Xnq2jn carries Discovery's history), split around 2022-04-06..08,
+    # three sessions of the merger close for which Intrinio has no bars; STORED_HISTORY_ROWS covers those days
+    "WBD":  {"id": "sec_Xnq2jn", "figi": "BBG016HRQKM0", "composite_figi": "BBG011386VF4", "name": "Warner Bros. Discovery Inc",
+             "valid_from": date(2006, 12, 29), "valid_to": date(2022, 4, 5), "current_from": date(2022, 4, 11)},
 }
 
 # symbol -> the span the stored rows keep their yfinance history for, and the day the current record takes over
 STORED_HISTORY_ROWS: dict[str, dict] = {
     "PSKY": {"valid_from": STORED_START, "valid_to": date(2025, 8, 6), "current_from": date(2025, 8, 7),
              "name": "Paramount Global class B (Intrinio sec_gVN622, a different security): stored yfinance history"},
+    "CEG":  {"valid_from": date(2022, 1, 26), "valid_to": date(2022, 2, 1), "current_from": date(2022, 2, 2),
+             "name": "Constellation Energy when-issued trading before Intrinio's first bar: stored yfinance history"},
+    "HONA": {"valid_from": date(2026, 6, 17), "valid_to": date(2026, 6, 28), "current_from": date(2026, 6, 29),
+             "name": "Honeywell Aerospace when-issued trading before Intrinio's first bar: stored yfinance history"},
+    "Q":    {"valid_from": date(2025, 10, 29), "valid_to": date(2025, 11, 3), "current_from": date(2025, 11, 4),
+             "name": "Qnity when-issued trading before Intrinio's first bar: stored yfinance history"},
+    "WBD":  {"valid_from": date(2022, 4, 6), "valid_to": date(2022, 4, 8), "current_from": date(2022, 4, 11),
+             "name": "Warner Bros. Discovery merger-close sessions Intrinio has no bars for: stored yfinance history"},
 }
+
+# symbol -> the stock stopped trading: last session, and why. The build marks the ticker inactive and closes its record.
+DELISTED: dict[str, dict] = {
+    "AVB": {"last_trade": date(2026, 8, 14),
+            "note": "merged into Equity Residential on 2026-08-17 (2.793 EQR shares per AVB share); the combined company trades as VMRK from 2026-08-18"},
+}
+
+
+def _current_from(symbol: str, first: date) -> date:
+    pred, stored = PREDECESSORS.get(symbol), STORED_HISTORY_ROWS.get(symbol)
+    if pred and stored and pred["current_from"] != stored["current_from"]:
+        raise ValueError(f"{symbol}: predecessor and stored-history rows disagree on when the current record starts")
+    return (pred or stored or {}).get("current_from", first)
 
 
 def plan_records(symbol: str, current: dict) -> list[Record]:
@@ -56,19 +90,24 @@ def plan_records(symbol: str, current: dict) -> list[Record]:
     stored = STORED_HISTORY_ROWS.get(symbol)
     first = current.get("first_stock_price")
     first = date.fromisoformat(first) if isinstance(first, str) else (first or STORED_START)
-    if pred:
-        current_from = pred["current_from"]
-    elif stored:
-        current_from = stored["current_from"]
-    else:
-        current_from = first
+    delisted = DELISTED.get(symbol)
     rows = [Record(symbol, current.get("id"), current.get("figi"), current.get("composite_figi"), current.get("name"),
-                   current_from, None, CURRENT, INTRINIO)]
+                   _current_from(symbol, first), delisted["last_trade"] if delisted else None, CURRENT, INTRINIO)]
     if pred:
         rows.append(Record(symbol, pred["id"], pred["figi"], pred["composite_figi"], pred["name"], pred["valid_from"], pred["valid_to"], PREDECESSOR, INTRINIO))
     if stored:
         rows.append(Record(symbol, None, None, None, stored["name"], stored["valid_from"], stored["valid_to"], STORED_HISTORY, STORED))
     return sorted(rows, key=lambda r: r.valid_from)
+
+
+def rests_on_stored_history(records: list[Record], event_day: date, session_before: date | None) -> bool:
+    """Whether a reaction row keeps its stored values: its event day, or the session before it (its close_before),
+    falls in a stored_history span. Such rows are never recomputed from Intrinio."""
+    for d in (event_day, session_before):
+        r = resolve(records, d) if d is not None else None
+        if r is not None and r.role == STORED_HISTORY:
+            return True
+    return False
 
 
 def resolve(records: list[Record], on: date) -> Record | None:

@@ -73,6 +73,14 @@ def test_predecessor_and_current_records_are_fetched_by_their_own_ids_over_their
     assert [f.record.intrinio_security_id for f in later] == ["sec_zq8bAk"]
 
 
+def test_a_closed_record_whose_bars_reach_its_end_fetches_nothing_more():
+    """A delisted ticker's record ends on its last session; once that bar is stored the nightly sends no request for it."""
+    avb = [rec("AVB", "sec_NX6ajg", date(1994, 3, 11), date(2026, 8, 14))]
+    assert [(f.start, f.end) for f in plan_fetches({"AVB": avb}, {}, TODAY)] == [(STORED_START, date(2026, 8, 14))]
+    assert plan_fetches({"AVB": avb}, {"AVB": date(2026, 8, 14)}, TODAY) == []
+    assert [f.start for f in plan_fetches({"AVB": avb}, {"AVB": date(2026, 8, 12)}, TODAY)] == [date(2026, 8, 12 - OVERLAP_DAYS)]
+
+
 def test_a_stored_history_row_fetches_nothing_and_a_record_ending_before_the_window_fetches_nothing():
     psky = [rec("PSKY", None, STORED_START, date(2025, 8, 6), STORED_HISTORY, "stored"), rec("PSKY", "sec_z9qYDq", date(2025, 8, 7))]
     plan = plan_fetches({"PSKY": psky}, {}, TODAY)

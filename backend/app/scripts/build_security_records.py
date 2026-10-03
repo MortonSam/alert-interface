@@ -1,8 +1,8 @@
 """Resolve every active ticker to its Intrinio security record, by id, and keep the map fresh.
 
 For each active ticker: one request to /securities/{ticker}; the current row is written from it, the
-predecessor rows for OKE, TEL, FERG and CRH and PSKY's stored_history row come from
-services/security_records (data). Every refresh also records what Intrinio returned (figi_seen,
+predecessor rows, stored_history rows and delistings come from
+services/security_records (data); a delisted ticker is marked inactive here, its rows kept. Every refresh also records what Intrinio returned (figi_seen,
 last_price_date, checked_at) on the current row, which the validate checks security_record_coverage
 and figi_change read without touching the network.
 
@@ -26,7 +26,7 @@ from app.models.security_record import SecurityRecord
 from app.models.ticker import Ticker
 from app.services.intrinio_client import IntrinioAuthError, IntrinioClient
 from app.services.price_bars_shadow import BENCHMARKS
-from app.services.security_records import CURRENT, Record, plan_records
+from app.services.security_records import CURRENT, DELISTED, Record, plan_records
 from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Security records (Intrinio)"
@@ -65,11 +65,21 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
     return inserted, updated, changed
 
 
+async def apply_delistings(session, delisted: dict[str, dict] = DELISTED) -> list[str]:
+    """Mark each delisted ticker inactive (rows kept; lists and detail routes hide inactive tickers at read time).
+    Returns the symbols flipped by this call."""
+    rows = (await session.execute(select(Ticker).where(Ticker.symbol.in_(list(delisted)), Ticker.is_active.is_(True)))).scalars().all()
+    for t in rows:
+        t.is_active = False
+        print(f"  {t.symbol}: inactive; last session {delisted[t.symbol]['last_trade'].isoformat()}; {delisted[t.symbol]['note']}", flush=True)
+    return sorted(t.symbol for t in rows)
+
+
 async def main(argv: list[str]) -> int:
     write = "--write" in argv
     async with ScriptSessionLocal() as session:
         symbols = list((await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
-    symbols = sorted(set(symbols) | set(BENCHMARKS))     # SPY gives the seeder its session calendar
+    symbols = sorted(set(symbols) | set(BENCHMARKS) | set(DELISTED))   # SPY gives the seeder its session calendar; delisted rows stay resolvable
     client = IntrinioClient()
     resolved: list[str] = []
     missing: list[str] = []
@@ -108,9 +118,15 @@ async def main(argv: list[str]) -> int:
           f"{inserted} inserted, {updated} updated, {len(figi_changes)} FIGI change(s); {client.request_count} request(s)\n{'─' * 60}")
     for m in missing[:20]:
         print("   missing:", m)
+    deactivated: list[str] = []
     if write:
+        async with ScriptSessionLocal() as session:
+            deactivated = await apply_delistings(session)
+            await session.commit()
         await record_step_fields(STEP_LABEL, {"resolved": len(resolved), "missing": missing[:50], "inserted": inserted, "updated": updated,
-                                              "figi_changes": figi_changes, "requests": client.request_count})
+                                              "figi_changes": figi_changes, "requests": client.request_count,
+                                              "delisted": {sym: d["last_trade"].isoformat() for sym, d in DELISTED.items()},
+                                              "deactivated_this_run": deactivated, "error": None})
     return 0
 
 

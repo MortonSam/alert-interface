@@ -6,11 +6,11 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.scripts import refresh
-from app.scripts.build_security_records import STEP_LABEL, upsert
+from app.scripts.build_security_records import STEP_LABEL, apply_delistings, upsert
 from app.scripts.validate_data import CHECKS, ERROR, PASS, check_figi_change, check_security_record_coverage, run_checks
 from app.services.security_records import (
-    CURRENT, PREDECESSOR, PREDECESSORS, STORED, STORED_HISTORY, STORED_HISTORY_ROWS, STORED_START,
-    Record, coverage_problems, plan_records, resolve,
+    CURRENT, DELISTED, PREDECESSOR, PREDECESSORS, STORED, STORED_HISTORY, STORED_HISTORY_ROWS, STORED_START,
+    Record, coverage_problems, plan_records, resolve, rests_on_stored_history,
 )
 from app.services.trading_calendar import is_trading_day
 
@@ -45,16 +45,47 @@ def test_psky_keeps_its_stored_history_before_the_current_record():
     assert cur.valid_from == date(2025, 8, 7)
 
 
-def test_every_declared_predecessor_hands_over_with_no_session_between():
-    """The declared spans are data: each predecessor's last day and the successor's first day enclose no session."""
-    for sym, p in PREDECESSORS.items():
-        assert p["valid_to"] < p["current_from"], sym
-        d = p["valid_to"]
-        while (d := d.fromordinal(d.toordinal() + 1)) < p["current_from"]:
-            assert not is_trading_day(d), f"{sym}: {d} is a session nobody covers"
-    for sym, s in STORED_HISTORY_ROWS.items():
-        assert s["valid_to"] < s["current_from"], sym
-        assert not any(is_trading_day(date.fromordinal(o)) for o in range(s["valid_to"].toordinal() + 1, s["current_from"].toordinal())), sym
+def test_every_declared_symbol_tiles_the_stored_window_with_exactly_one_record_per_session():
+    """The declared spans are data: for each symbol the rows plan_records builds cover its first declared day..today
+    with no gap holding a session and no overlap (a predecessor's handover, a stored-history span, WBD's split).
+    CEG, HONA and Q start at their when-issued row; the coverage check starts at each ticker's oldest row with data."""
+    for sym in set(PREDECESSORS) | set(STORED_HISTORY_ROWS):
+        rows = plan_records(sym, body(id="sec_cur", figi="BBG_CUR", first="2026-01-01"))
+        assert coverage_problems(rows, max(STORED_START, min(r.valid_from for r in rows)), TODAY) == [], sym
+
+
+def test_the_stored_history_list_is_exactly_the_five_declared_spans():
+    assert {sym: (r["valid_from"], r["valid_to"]) for sym, r in STORED_HISTORY_ROWS.items()} == {
+        "PSKY": (STORED_START, date(2025, 8, 6)),
+        "CEG": (date(2022, 1, 26), date(2022, 2, 1)),
+        "HONA": (date(2026, 6, 17), date(2026, 6, 28)),
+        "Q": (date(2025, 10, 29), date(2025, 11, 3)),
+        "WBD": (date(2022, 4, 6), date(2022, 4, 8)),
+    }
+
+
+def test_wbd_is_one_record_split_around_the_three_sessions_it_has_no_bars_for():
+    rows = plan_records("WBD", body(id="sec_Xnq2jn", figi="BBG016HRQKM0", first="2006-12-29"))
+    assert [(r.role, r.intrinio_security_id, r.valid_from, r.valid_to) for r in rows] == [
+        (PREDECESSOR, "sec_Xnq2jn", date(2006, 12, 29), date(2022, 4, 5)),
+        (STORED_HISTORY, None, date(2022, 4, 6), date(2022, 4, 8)),
+        (CURRENT, "sec_Xnq2jn", date(2022, 4, 11), None),
+    ]
+
+
+def test_a_row_rests_on_stored_history_when_its_event_day_or_the_session_before_is_in_the_span():
+    wbd = plan_records("WBD", body(id="sec_Xnq2jn", figi="BBG016HRQKM0", first="2006-12-29"))
+    assert rests_on_stored_history(wbd, date(2022, 4, 11), date(2022, 4, 8))        # close_before falls in the gap
+    assert not rests_on_stored_history(wbd, date(2022, 4, 12), date(2022, 4, 11))
+    ceg = plan_records("CEG", body(id="sec_c", figi="f", first="2022-02-02"))
+    assert rests_on_stored_history(ceg, date(2022, 1, 26), date(2022, 1, 25))      # the when-issued row itself
+    assert not rests_on_stored_history(plan_records("AAPL", body()), date(2026, 9, 30), date(2026, 9, 29))
+
+
+def test_a_delisted_ticker_s_current_record_closes_on_its_last_session():
+    assert DELISTED["AVB"]["last_trade"] == date(2026, 8, 14)
+    rows = plan_records("AVB", body(id="sec_NX6ajg", figi="BBG000BLPDS4", first="1994-03-11", last="2026-08-14"))
+    assert [(r.role, r.valid_to) for r in rows] == [(CURRENT, date(2026, 8, 14))]
 
 
 # ── resolve and coverage_problems ─────────────────────────────────────────────
@@ -135,3 +166,24 @@ async def test_figi_change_passes_when_every_current_record_still_has_its_figi()
     """The local build wrote every current record with figi == figi_seen; nothing synthetic is left behind."""
     result = (await run_checks([check_figi_change]))[0]
     assert result.level == PASS, result.message
+
+
+@pytest.mark.asyncio
+async def test_a_delisted_ticker_is_marked_inactive_once_and_its_rows_stay():
+    sym = "ZZDEL"
+    try:
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active) VALUES (gen_random_uuid(), :s, 'Delisted test', true)"), {"s": sym})
+            await s.commit()
+        listing = {sym: {"last_trade": date(2026, 8, 14), "note": "test"}}
+        async with ScriptSessionLocal() as s:
+            assert await apply_delistings(s, listing) == [sym]
+            await s.commit()
+        async with ScriptSessionLocal() as s:
+            assert await apply_delistings(s, listing) == []          # already inactive: nothing to flip, nothing to report
+            active, = (await s.execute(text("SELECT is_active FROM tickers WHERE symbol = :s"), {"s": sym})).one()
+        assert active is False
+    finally:
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
+            await s.commit()

@@ -42,7 +42,8 @@ class RequestLog:
 
 class IntrinioClient:
     def __init__(self, api_key: str | None = None, min_interval: float = MIN_INTERVAL_SECONDS, timeout: float = 30.0):
-        self.api_key = (api_key or os.environ.get("INTRINIO_API_KEY") or "").strip()
+        from app.config import settings
+        self.api_key = (api_key or os.environ.get("INTRINIO_API_KEY") or settings.intrinio_api_key or "").strip()
         self.min_interval = min_interval
         self._client = httpx.AsyncClient(base_url=BASE_URL, timeout=timeout)
         self._last_at = 0.0

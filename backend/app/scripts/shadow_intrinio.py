@@ -36,6 +36,7 @@ from app.scripts.seed_historical_reactions import _build_date_cache, _compute, _
 from app.services import chain_store
 from app.services.intrinio_client import IntrinioClient
 from app.services.price_bars_shadow import adjusted_frame
+from app.services.security_records import Record, rests_on_stored_history
 
 START = date(2021, 7, 1)
 TOLERANCE_PP = 0.01
@@ -76,8 +77,24 @@ async def stored_bars(symbol: str) -> pd.DataFrame:
     return adjusted_frame([dict(r) for r in rows])
 
 
+async def security_records(symbols: list[str]) -> dict[str, list[Record]]:
+    async with ScriptSessionLocal() as s:
+        rows = (await s.execute(text("""select symbol, intrinio_security_id, figi, composite_figi, name, valid_from, valid_to, role, source
+                                        from security_records where symbol = any(:s)"""), {"s": symbols})).all()
+    by: dict[str, list[Record]] = {}
+    for r in rows:
+        by.setdefault(r.symbol, []).append(Record(*r))
+    return by
+
+
+def session_before(sessions, day: date) -> date | None:
+    earlier = [d for d in sessions if d < day]
+    return earlier[-1] if earlier else None
+
+
 async def prices(symbols: list[str], client: IntrinioClient | None, today: date) -> dict:
-    """client None: every frame comes from price_bars_shadow (the nightly fetch), no requests."""
+    """client None: every frame comes from price_bars_shadow (the nightly fetch), no requests. Rows resting on a
+    stored_history span (security_records) keep their stored values and are counted, not recomputed."""
     async def bars(sym: str) -> pd.DataFrame:
         return await stored_bars(sym) if client is None else frame(await client.daily_prices(sym, START, today + timedelta(days=1)))
     spy = await bars("SPY")
@@ -89,6 +106,7 @@ async def prices(symbols: list[str], client: IntrinioClient | None, today: date)
     by: dict[str, list] = {}
     for r in rows:
         by.setdefault(r["symbol"], []).append(r)
+    records = await security_records(symbols)
     out = {"tickers": {}, "diffs": []}
     for sym in symbols:
         try:
@@ -100,9 +118,12 @@ async def prices(symbols: list[str], client: IntrinioClient | None, today: date)
             out["tickers"][sym] = {"error": "no bars"}
             continue
         dates = _build_date_cache(hist)
-        stat = {"rows": 0, "reproduced": 0, "differ": 0, "stored_null": 0, "intrinio_null": 0, "first_bar": str(dates[0])}
+        stat = {"rows": 0, "reproduced": 0, "differ": 0, "stored_null": 0, "intrinio_null": 0, "stored_history": 0, "first_bar": str(dates[0])}
         for r in by.get(sym, []):
             stat["rows"] += 1
+            if rests_on_stored_history(records.get(sym, []), r["event_date"], session_before(sessions, r["event_date"])):
+                stat["stored_history"] += 1
+                continue
             got = recompute(r, hist, dates, sessions)
             g1, s1 = (_f(got.get("pct_change_1d")) if got else None), _f(r["pct_change_1d"])
             if s1 is None and g1 is None:
@@ -126,16 +147,17 @@ async def prices(symbols: list[str], client: IntrinioClient | None, today: date)
 
 def print_prices(out: dict, requests: int, retries: int) -> None:
     ok = {s: v for s, v in out["tickers"].items() if "error" not in v}
-    print(f"\n{'ticker':6} {'rows':>5} {'repro':>6} {'differ':>6} {'s_null':>6} {'i_null':>6}  first bar")
+    print(f"\n{'ticker':6} {'rows':>5} {'repro':>6} {'differ':>6} {'s_null':>6} {'i_null':>6} {'stored':>6}  first bar")
     for sym, v in out["tickers"].items():
         if "error" in v:
             print(f"{sym:6} error: {v['error']}")
         else:
-            print(f"{sym:6} {v['rows']:5} {v['reproduced']:6} {v['differ']:6} {v['stored_null']:6} {v['intrinio_null']:6}  {v['first_bar']}")
-    tot = {k: sum(v[k] for v in ok.values()) for k in ("rows", "reproduced", "differ", "stored_null", "intrinio_null")}
+            print(f"{sym:6} {v['rows']:5} {v['reproduced']:6} {v['differ']:6} {v['stored_null']:6} {v['intrinio_null']:6} {v['stored_history']:6}  {v['first_bar']}")
+    tot = {k: sum(v[k] for v in ok.values()) for k in ("rows", "reproduced", "differ", "stored_null", "intrinio_null", "stored_history")}
     print(f"\ntotals over {len(ok)} ticker(s): {tot}   requests {requests}, retries {retries}")
     print("  reproduced: stored and recomputed pct_change_1d within %.2f pp, or both null" % TOLERANCE_PP)
     print("  s_null: stored pct null where Intrinio computes a value; i_null: stored value where Intrinio has no bar")
+    print("  stored: rows on a stored_history span (security_records), kept as stored (price_source yfinance), never recomputed")
     diffs = sorted((d for d in out["diffs"] if d["delta"] is not None), key=lambda d: -d["delta"])
     if diffs:
         print("\nten largest differences (stored vs Intrinio pct_change_1d; close_before/open_after/close_after):")

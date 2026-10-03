@@ -1961,7 +1961,8 @@ async def check_options_read_coverage(session) -> CheckResult:
 async def check_security_record_coverage(session) -> CheckResult:
     """ERROR when an active ticker has no record, two records on a date, or a gap holding a session between its
     oldest stored reaction with price data and today; ERROR when a current record's last Intrinio price is more
-    than STALE_SESSIONS old (the stock stopped trading or the ticker moved to a new record)."""
+    than STALE_SESSIONS old (the stock stopped trading or the ticker moved to a new record). Inactive tickers
+    (delisted, see security_records.DELISTED) are not checked: their rows are kept and hidden at read time."""
     from app.models.security_record import SecurityRecord
     from app.services.price_bars_shadow import BENCHMARKS
     from app.services.security_records import CURRENT, Record, STALE_SESSIONS, STORED_START, coverage_problems
