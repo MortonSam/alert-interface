@@ -12,6 +12,7 @@ Usage
 -----
     python -m app.scripts.build_security_records
     python -m app.scripts.build_security_records --write
+    python -m app.scripts.build_security_records --write --symbols=MU,CAT
 """
 from __future__ import annotations
 
@@ -58,6 +59,7 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
         if row.figi is None:
             row.figi = r.figi
         if r.role == CURRENT:
+            row.intrinio_ticker = seen.get("ticker")
             row.figi_seen = seen.get("figi")
             lp = seen.get("last_stock_price")
             row.last_price_date = date.fromisoformat(lp) if isinstance(lp, str) else lp
@@ -77,9 +79,12 @@ async def apply_delistings(session, delisted: dict[str, dict] = DELISTED) -> lis
 
 async def main(argv: list[str]) -> int:
     write = "--write" in argv
+    only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
     async with ScriptSessionLocal() as session:
         symbols = list((await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
     symbols = sorted(set(symbols) | set(BENCHMARKS) | set(DELISTED))   # SPY gives the seeder its session calendar; delisted rows stay resolvable
+    if only:
+        symbols = [s for s in symbols if s in {x.strip().upper() for x in only.split(",")}]
     client = IntrinioClient()
     resolved: list[str] = []
     missing: list[str] = []

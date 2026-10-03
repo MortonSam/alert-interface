@@ -21,6 +21,7 @@ class SecurityRecord(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     symbol: Mapped[str] = mapped_column(String(10), nullable=False)
     intrinio_security_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    intrinio_ticker: Mapped[str | None] = mapped_column(Text, nullable=True)      # the ticker Intrinio files the record under (EQR's record is VMRK)
     figi: Mapped[str | None] = mapped_column(Text, nullable=True)
     composite_figi: Mapped[str | None] = mapped_column(Text, nullable=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)

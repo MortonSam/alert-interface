@@ -17,6 +17,7 @@ from app.database import get_db
 from app.models.credit_shadow_pick import CreditShadowPick
 from app.models.shadow_pick import ShadowPick
 from app.models.system_metadata import SystemMetadata
+from app.services import chain_store
 from app.services.system_metadata_service import set_value
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -77,15 +78,9 @@ async def ingest_options_chains(
             errors.append(f"{sym}: {len(item.calls)}c/{len(item.puts)}p exceeds {MAX_CONTRACTS_PER_SIDE}")
             continue
         try:
-            chain_dict = _sanitize_floats({
-                "calls": item.calls,
-                "puts": item.puts,
-                "expiration": item.expiration,
-                "chain_last_trade": item.chain_last_trade,
-                "underlying_price": item.underlying_price,
-            })
-            key = f"chain:{sym}:{item.expiration}"
-            await set_value(db, key, json.dumps(chain_dict))
+            chain_dict = _sanitize_floats(chain_store.build_courier_chain(
+                item.calls, item.puts, item.expiration, item.chain_last_trade, item.underlying_price))
+            await chain_store.put_chain(db, sym, item.expiration, chain_dict, chain_store.COURIER)
             ingested.append(sym)
             # Track nearest future expiration per symbol for put/call
             if item.expiration >= today_str:

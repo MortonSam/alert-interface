@@ -2009,6 +2009,73 @@ async def check_figi_change(session) -> CheckResult:
     return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + (f" ({unchecked} not yet refreshed)" if unchecked else ""))
 
 
+# ── Chain shadow: Intrinio's EOD chain against the courier's, night by night ──────────────────────────
+
+async def check_chain_shadow(session) -> CheckResult:
+    """For every ticker with a courier chain and an Intrinio chain dated the same day, compare the front expiry
+    (services/chain_shadow.compare_front). Tonight's per-ticker figures and totals go to chain_shadow:{date} and
+    to the "Options chains (Intrinio)" step outcome. WARN until MIN_NIGHTS nights exist, then ERROR unless the
+    last MIN_NIGHTS all pass the retirement criteria."""
+    import json as _json
+    from app.services import chain_store
+    from app.services.chain_shadow import MIN_NIGHTS, PER_TICKER_COLUMNS, compare_front, evaluate, front_expiration, night_totals
+    from app.services.step_outcomes import record_step_fields
+    from app.services.system_metadata_service import set_value
+    keys = (await session.execute(select(SystemMetadata.key).where(SystemMetadata.key.like("intrinio_chain:%")))).scalars().all()
+    by_sym: dict[str, list[str]] = {}
+    for k in keys:
+        parts = k.split(":")
+        if len(parts) == 3:
+            by_sym.setdefault(parts[1], []).append(parts[2])
+    per_ticker: dict[str, dict] = {}
+    missing_intrinio: list[str] = []
+    chain_date: str | None = None
+    for sym in sorted(by_sym):
+        courier_exps = await chain_store.get_ingested_expirations(session, sym)
+        if not courier_exps:
+            continue
+        got = await chain_store.get_chain(session, sym, courier_exps[0])
+        if not got or not got[1]:
+            continue
+        cdate = str(got[1])[:10]
+        front = front_expiration(courier_exps, cdate)
+        if not front:
+            continue
+        courier = (await chain_store.get_chain(session, sym, front))
+        intrinio = await chain_store.get_chain(session, sym, front, chain_store.INTRINIO)
+        if not courier:
+            continue
+        if not intrinio or str(intrinio[1])[:10] != cdate:
+            missing_intrinio.append(sym)
+            continue
+        chain_date = chain_date or cdate
+        if cdate != chain_date:
+            continue                        # a courier chain from another day: compared on its own night
+        per_ticker[sym] = compare_front(courier[0], intrinio[0])
+    # tickers with a courier chain but no Intrinio chain at all tonight
+    courier_syms = {k.split(":")[1] for k in (await session.execute(select(SystemMetadata.key).where(SystemMetadata.key.like("chain:%")))).scalars().all() if len(k.split(":")) == 3}
+    if chain_date:
+        for sym in sorted(courier_syms - set(by_sym)):
+            if (await chain_store.get_latest_chain_date(session, sym)) == chain_date:
+                missing_intrinio.append(sym)
+    if chain_date:
+        totals = night_totals(chain_date, per_ticker, missing_intrinio)
+        await set_value(session, f"chain_shadow:{chain_date}", _json.dumps({"totals": totals, "per_ticker": per_ticker}))
+        await session.commit()
+        compact = {sym: [f.get(c) if c != "courier_only_strikes" else len(f[c]) for c in PER_TICKER_COLUMNS] for sym, f in per_ticker.items()}
+        await record_step_fields("Options chains (Intrinio)", {"comparison": {"totals": totals, "per_ticker_columns": PER_TICKER_COLUMNS, "per_ticker": compact}})
+    raws = (await session.execute(select(SystemMetadata.value).where(SystemMetadata.key.like("chain_shadow:%")))).scalars().all()
+    nights = []
+    for raw in raws:
+        try:
+            nights.append(_json.loads(raw)["totals"])
+        except (ValueError, KeyError, TypeError):
+            continue
+    v = evaluate(nights, MIN_NIGHTS)
+    level = {"pass": PASS, "warn": WARN, "error": ERROR}[v.level]
+    return CheckResult("chain_shadow", level, v.message, v.rows)
+
+
 # ── FOMC decision days: the module, the page and the rows agree ───────────────
 
 async def check_fomc_dates_official(session) -> CheckResult:
@@ -2536,6 +2603,8 @@ CHECKS = [
     # Security records: one Intrinio record per ticker per date, FIGI unchanged
     check_security_record_coverage,
     check_figi_change,
+    # Chain shadow: Intrinio's EOD chain against the courier's, judged over a week
+    check_chain_shadow,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

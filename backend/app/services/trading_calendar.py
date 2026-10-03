@@ -76,6 +76,11 @@ def nth_trading_day_after(event_date: date, n: int = 5) -> date:
     return ts.date()
 
 
+def last_session_before(d: date) -> date:
+    """The latest NYSE session strictly before `d`."""
+    return (pd.Timestamp(d) - _NYSE_BDAY).date()
+
+
 def sessions_after(last: date, ref: date) -> int:
     """NYSE sessions strictly after `last` and strictly before `ref`.
 
