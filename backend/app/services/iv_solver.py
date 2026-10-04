@@ -26,6 +26,8 @@ BRENT_MAXITER = 200
 MIN_EXPIRY_DAYS = 7          # the expiry rule snapshot_iv uses: the nearest expiry at least this many days out, else the farthest
 IV_SANITY_MIN = 0.02         # validate's solver band: a solved IV outside [IV_SANITY_MIN, IV_SANITY_MAX] is an ERROR
 IV_SANITY_MAX = 5.0
+MIN_ATM_MID = 0.05           # an ATM call or put mid below five cents is not a standard chain (adjusted deliverable, a separation, a stub):
+                             # the ticker is skipped for the night and named in the step outcome under skipped_nonstandard
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,11 @@ class AtmSolve:
             return "no strike quoted on both sides"
         parts = [f"{side}: {s.reason}" for side, s in (("call", self.call), ("put", self.put)) if s.iv is None]
         return "; ".join(parts) or None
+
+
+def nonstandard_mids(call_mid: float | None, put_mid: float | None, floor: float = MIN_ATM_MID) -> bool:
+    """Whether either ATM mid is quoted below `floor`: a chain the solver must not read as volatility."""
+    return any(m is not None and m < floor for m in (call_mid, put_mid))
 
 
 def solve_atm(chain: dict, spot: float, chain_date: date, expiration: date, rate: float) -> AtmSolve:

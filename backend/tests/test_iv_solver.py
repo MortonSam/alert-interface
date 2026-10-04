@@ -11,8 +11,8 @@ from app.scripts import refresh
 from app.scripts.solve_atm_iv import STEP_LABEL
 from app.scripts.validate_data import CHECKS, ERROR, PASS, WARN, check_iv_solver_band, check_iv_vendor_band, run_checks
 from app.services.iv_solver import (DAY_COUNT, DIVIDEND_YIELD, IV_BRACKET_HIGH, IV_BRACKET_LOW, IV_SANITY_MAX, IV_SANITY_MIN, IV_SOLVER_VERSION,
-                                    MIN_EXPIRY_DAYS, RATE_MAX_AGE_SESSIONS, RATE_SCALE, RATE_SERIES, bs_price, choose_expiration, implied_vol,
-                                    mid, solve_atm, time_to_expiry)
+                                    MIN_ATM_MID, MIN_EXPIRY_DAYS, RATE_MAX_AGE_SESSIONS, RATE_SCALE, RATE_SERIES, bs_price, choose_expiration,
+                                    implied_vol, mid, nonstandard_mids, solve_atm, time_to_expiry)
 from app.services.rates import parse_fred_csv, pick_rate
 
 
@@ -68,6 +68,23 @@ def test_solve_atm_takes_the_strike_quoted_on_both_sides_nearest_the_spot_and_ke
     assert bs_price("call", 1097.39, 1095, 8 / 365, 0.04, a.call.iv) == pytest.approx(36.125, abs=1e-6)
     half = solve_atm({"calls": chain["calls"], "puts": [{"strike": 1095, "bid": 0, "ask": 34.5}]}, 1097.39, date(2026, 10, 1), date(2026, 10, 9), 0.04)
     assert half.put.iv is None and half.atm_iv == half.call.iv and half.reason.startswith("put: no mid")
+
+
+def test_a_penny_atm_mid_marks_the_chain_nonstandard_and_the_step_writes_no_row_for_it():
+    """WBD on 2026-10-02: spot 30.94, strike 31, call mid 0.015, put mid 0.045: a separated deliverable, not a 1.5% vol."""
+    assert MIN_ATM_MID == 0.05
+    assert nonstandard_mids(0.015, 0.045) and nonstandard_mids(1.20, 0.04) and nonstandard_mids(None, 0.01)
+    assert not nonstandard_mids(0.05, 0.05) and not nonstandard_mids(36.125, 33.125) and not nonstandard_mids(None, None)
+    wbd = {"calls": [{"strike": 31, "bid": 0.01, "ask": 0.02, "impliedVolatility": 0.0164}], "puts": [{"strike": 31, "bid": 0.04, "ask": 0.05, "impliedVolatility": 0.0164}]}
+    a = solve_atm(wbd, 30.94, date(2026, 10, 2), date(2026, 10, 9), 0.04)
+    assert (a.call_mid, a.put_mid) == (0.015, 0.045) and nonstandard_mids(a.call_mid, a.put_mid)
+    # the step's branch: what the outcome records and that no row is planned
+    import inspect
+    from app.scripts import solve_atm_iv
+    src = inspect.getsource(solve_atm_iv.run)
+    assert "if nonstandard_mids(a.call_mid, a.put_mid):" in src and "skipped_nonstandard[sym]" in src
+    branch = src.split("if nonstandard_mids(a.call_mid, a.put_mid):")[1].split("continue")[0]
+    assert all(k in branch for k in ('"spot"', '"strike"', '"call_mid"', '"put_mid"', "DELETE FROM iv_history"))   # recorded, stale row removed, then continue
 
 
 # ── the rate ──────────────────────────────────────────────────────────────────

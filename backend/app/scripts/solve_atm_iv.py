@@ -5,7 +5,8 @@ snapshot_iv's rule picks (services/iv_solver.choose_expiration) on the chain's o
 date as spot (the chain's underlying_price, from price_bars_shadow), the FRED DTB3 rate for that date (fetched and
 stored first; the step fails closed when no rate within RATE_MAX_AGE_SESSIONS sessions exists), and Brent's method
 on the ATM call and put mids. One iv_history row per ticker and chain date with iv_source "intrinio_mid",
-iv_version IV_SOLVER_VERSION, the inputs, both solved sides and the vendor's IVs beside them.
+iv_version IV_SOLVER_VERSION, the inputs, both solved sides and the vendor's IVs beside them. A ticker whose ATM call
+or put mid is below MIN_ATM_MID (a nonstandard chain) gets no row and is named in the outcome under skipped_nonstandard.
 
 Usage
 -----
@@ -24,7 +25,7 @@ from sqlalchemy import select, text
 from app.database import ScriptSessionLocal
 from app.models.iv_history import SOLVER_SOURCE
 from app.models.system_metadata import SystemMetadata
-from app.services.iv_solver import IV_SOLVER_VERSION, choose_expiration, solve_atm
+from app.services.iv_solver import IV_SOLVER_VERSION, MIN_ATM_MID, choose_expiration, nonstandard_mids, solve_atm
 from app.services.rates import fetch_series, rate_on, store_rates
 from app.services.step_outcomes import record_step_fields
 
@@ -87,6 +88,7 @@ async def run(argv: list[str]) -> int:
     written = 0
     solved_both = solved_one = 0
     skipped: dict[str, str] = {}
+    skipped_nonstandard: dict[str, dict] = {}
     rates_used: dict[str, str] = {}
     for sym in sorted(chains):
         exps = chains[sym]
@@ -106,6 +108,16 @@ async def run(argv: list[str]) -> int:
             skipped[sym] = "no stored close for the chain date"
             continue
         a = solve_atm(chain, float(spot), chain_date, date.fromisoformat(exp), r.rate)
+        if nonstandard_mids(a.call_mid, a.put_mid):
+            # no row: a solved number from a penny quote would be a wrong IV, and iv_solver_band is for real solves.
+            # A row an earlier run wrote for this ticker and date is removed, so a rerun leaves nothing behind.
+            skipped_nonstandard[sym] = {"spot": float(spot), "strike": a.strike, "call_mid": round(a.call_mid, 4) if a.call_mid is not None else None,
+                                        "put_mid": round(a.put_mid, 4) if a.put_mid is not None else None, "expiration": exp, "floor": MIN_ATM_MID}
+            async with ScriptSessionLocal() as s:
+                await s.execute(text("DELETE FROM iv_history WHERE symbol = :s AND date = :d AND iv_source = :src"),
+                                {"s": sym, "d": chain_date, "src": SOLVER_SOURCE})
+                await s.commit()
+            continue
         async with ScriptSessionLocal() as s:
             await s.execute(UPSERT, {
                 "symbol": sym, "date": chain_date, "iv_source": SOLVER_SOURCE, "iv_version": IV_SOLVER_VERSION, "expiration": date.fromisoformat(exp),
@@ -122,10 +134,14 @@ async def run(argv: list[str]) -> int:
         if n == 0:
             skipped[sym] = a.reason or "unsolved"
     fields = {"tickers": len(chains), "written": written, "solved_both_sides": solved_both, "solved_one_side": solved_one, "unsolved": len(skipped),
-              "unsolved_detail": dict(list(skipped.items())[:30]), "rates_used": rates_used, "rates_stored": stored,
+              "unsolved_detail": dict(list(skipped.items())[:30]), "skipped_nonstandard": skipped_nonstandard,
+              "rates_used": rates_used, "rates_stored": stored,
               "rate_fetch_error": rate_fetch_error, "iv_version": IV_SOLVER_VERSION, "error": None}
     print(f"{STEP_LABEL}: {len(chains)} ticker(s), {written} row(s) written (v{IV_SOLVER_VERSION}), both sides {solved_both}, one side {solved_one}, "
-          f"unsolved {len(skipped)}; rates {rates_used}; {stored} rate row(s) stored" + (f"; rate fetch failed: {rate_fetch_error}" if rate_fetch_error else ""))
+          f"unsolved {len(skipped)}, skipped as nonstandard (an ATM mid under ${MIN_ATM_MID:.2f}) {len(skipped_nonstandard)}; rates {rates_used}; "
+          f"{stored} rate row(s) stored" + (f"; rate fetch failed: {rate_fetch_error}" if rate_fetch_error else ""))
+    for k, v in skipped_nonstandard.items():
+        print(f"   nonstandard {k}: spot {v['spot']} strike {v['strike']} mids {v['call_mid']}/{v['put_mid']} ({v['expiration']})")
     for k, v in list(skipped.items())[:10]:
         print(f"   {k}: {v}")
     await record_step_fields(STEP_LABEL, fields)
