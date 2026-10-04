@@ -137,7 +137,7 @@ async def test_vendor_band_counts_gaps_and_the_solver_band_errors_outside_it():
         assert vendor.level == WARN and vendor.message.startswith("1/3 ticker(s) (33.3%) differ")          # ZZIV1 gaps; ZZIV2 has no vendor IV
         assert vendor.rows[0].startswith("4 solver row(s) on 2099-01-02, 3 with both IVs, 1 without")
         assert vendor.rows[1].startswith(f"{syms[1]}: solved 0.5000") and "gap 0.2000" in vendor.rows[1] and "mids None/None, spot 100" in vendor.rows[1]
-        assert band.level == PASS
+        assert not any(sym in r for sym in syms for r in band.rows)      # the synthetic rows are inside the band (other rows may not be)
         async with ScriptSessionLocal() as s:
             await s.execute(text("UPDATE iv_history SET solved_put_iv = 6.5 WHERE symbol = :s AND date = :d"), {"s": syms[3], "d": d})
             await s.commit()

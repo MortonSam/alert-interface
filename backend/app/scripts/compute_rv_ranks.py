@@ -1,6 +1,6 @@
 """Precompute RV rank/percentile for all active tickers and store in rv_snapshots.
 
-Uses bulk yf.download() in batches of 100 for speed, with per-ticker straggler
+Reads the stored Intrinio shadow bars (services/price_bars) in batches, with a per-ticker straggler read
 retry for any symbols missing from the bulk response.
 
 Usage
@@ -18,14 +18,15 @@ import time
 from datetime import date, timedelta
 
 import sqlalchemy as sa
-import yfinance as yf
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
 from app.services.corporate_actions import load_action_dates
+from app.services import price_bars
 from app.services.rv_math import compute_rv_metrics
 from app.services.system_metadata_service import set_value
 
+RV_HISTORY_DAYS = 731        # two years of bars for the trailing-year rank
 BATCH_SIZE = 100
 STRAGGLER_BACKOFF = (2, 5, 12)
 
@@ -104,46 +105,13 @@ def _bars(frame) -> "pd.DataFrame | None":
 
 
 def _fetch_bulk(symbols: list[str]) -> dict:
-    """Bulk download 2y daily bars. Returns {symbol: DataFrame[Close, Volume]}."""
-    import pandas as pd
-
-    data = yf.download(
-        symbols,
-        period="2y",
-        interval="1d",
-        auto_adjust=True,
-        group_by="ticker",
-        threads=True,
-        progress=False,
-    )
-    result = {}
-    if data is None or data.empty:
-        return result
-
-    for sym in symbols:
-        try:
-            bars = _bars(data if len(symbols) == 1 else data[sym])
-            if bars is not None:
-                result[sym] = bars
-        except (KeyError, TypeError):
-            pass
-    return result
+    """Two years of stored daily bars for the batch, one query. Returns {symbol: DataFrame[Close, Volume]}, adjusted."""
+    return price_bars.bulk_closes_sync(symbols, date.today() - timedelta(days=RV_HISTORY_DAYS))
 
 
 def _fetch_single(symbol: str):
-    """Straggler retry: per-ticker fetch with backoff."""
-    import pandas as pd
-
-    for wait in STRAGGLER_BACKOFF:
-        try:
-            hist = yf.Ticker(symbol).history(period="2y", interval="1d", auto_adjust=True)
-            bars = _bars(hist)
-            if bars is not None:
-                return bars
-        except Exception:
-            pass
-        time.sleep(wait)
-    return None
+    """One symbol the bulk read had no bars for: read it alone (a symbol with no stored bars stays None)."""
+    return price_bars.closes_sync(symbol, date.today() - timedelta(days=RV_HISTORY_DAYS))
 
 
 async def main(only_symbol: str | None = None) -> int:

@@ -24,7 +24,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pandas as pd
-import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -33,6 +32,7 @@ from app.models.analyst_recommendation import AnalystRecommendation
 from app.models.earnings_feature import EarningsFeature
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
+from app.services import price_bars
 from app.models.iv_history import COURIER_SOURCE, IVHistory
 from app.models.ticker import Ticker
 
@@ -133,21 +133,16 @@ def _buy_share(row: AnalystRecommendation) -> tuple[float, int]:
     return ((row.strong_buy + row.buy) / total, total)
 
 
-# ── yfinance price fetch ────────────────────────────────────────────────────
+# ── stored price bars ────────────────────────────────────────────────────
 
 def _fetch_prices(symbol: str, start: date, end: date) -> pd.DataFrame | None:
-    """Fetch daily close prices for a ticker."""
+    """Daily closes for a ticker from the stored shadow bars (services/price_bars); None without bars."""
     try:
-        t = yf.Ticker(symbol)
-        df = t.history(
-            start=start.isoformat(),
-            end=(end + timedelta(days=5)).isoformat(),
-            timeout=YF_TIMEOUT,
-        )
+        df = price_bars.bars_sync(symbol, start, end + timedelta(days=5))
         if df is not None and not df.empty:
             return df
     except Exception as e:
-        print(f"  yfinance error for {symbol}: {e}")
+        print(f"  stored bars error for {symbol}: {e}")
     return None
 
 
@@ -267,7 +262,7 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                 last_date = events[-1].event_date
                 symbols_to_fetch.append((tid, sym, first_date, last_date))
 
-            print(f"Fetching yfinance prices for {len(symbols_to_fetch)} tickers...")
+            print(f"Loading stored bars for {len(symbols_to_fetch)} tickers...")
             for i in range(0, len(symbols_to_fetch), BATCH_SIZE):
                 batch = symbols_to_fetch[i:i + BATCH_SIZE]
                 for tid, sym, start, end in batch:

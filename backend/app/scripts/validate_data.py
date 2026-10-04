@@ -2009,6 +2009,45 @@ async def check_figi_change(session) -> CheckResult:
     return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + (f" ({unchecked} not yet refreshed)" if unchecked else ""))
 
 
+# ── Reaction price sources: every row names its bars, and a ticker mixes sources only across a stored_history span ──
+
+async def check_reaction_source_coverage(session) -> CheckResult:
+    """After recompute_reactions_intrinio --write no row has price_source null. WARN while no row has one yet
+    (the recompute has not run); ERROR when some rows have a source and others none."""
+    rows = (await session.execute(text("SELECT coalesce(price_source, 'null') AS src, count(*) FROM historical_reactions GROUP BY 1 ORDER BY 1"))).all()
+    counts = {r.src: r.count for r in rows}
+    nulls = counts.get("null", 0)
+    named = sum(v for k, v in counts.items() if k != "null")
+    if nulls and not named:
+        return CheckResult("reaction_source_coverage", WARN, f"No reaction row has a price_source yet ({nulls} rows): run recompute_reactions_intrinio --write")
+    if nulls:
+        return CheckResult("reaction_source_coverage", ERROR, f"{nulls} reaction row(s) with price_source null beside {named} with one", [f"{k}: {v}" for k, v in sorted(counts.items())])
+    return CheckResult("reaction_source_coverage", PASS, "Every reaction row names its price source: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+
+
+async def check_reaction_source_consistency(session) -> CheckResult:
+    """Within one ticker and event type the rows share one price source, except intrinio beside stored_history for a
+    ticker that has a stored_history span (security_records). yfinance beside another source, or stored_history on a
+    ticker without a span, is an ERROR."""
+    from app.services.security_records import STORED_HISTORY_ROWS
+    rows = (await session.execute(text("""
+        SELECT t.symbol, hr.event_type::text AS event_type, array_agg(DISTINCT hr.price_source) AS sources
+        FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE hr.price_source IS NOT NULL GROUP BY t.symbol, hr.event_type"""))).all()
+    bad, across = [], 0
+    for r in rows:
+        srcs = set(r.sources)
+        if len(srcs) == 1 and srcs != {"stored_history"}:
+            continue
+        if srcs <= {"intrinio", "stored_history"} and r.symbol in STORED_HISTORY_ROWS:
+            across += 1
+            continue
+        bad.append(f"{r.symbol} {r.event_type}: {sorted(srcs)}" + ("" if r.symbol in STORED_HISTORY_ROWS else " (no stored_history span declared)"))
+    if bad:
+        return CheckResult("reaction_source_consistency", ERROR, f"{len(bad)} ticker/event type(s) mixing price sources outside a stored_history span", bad[:40])
+    return CheckResult("reaction_source_consistency", PASS, f"Sources consistent across {len(rows)} ticker/event type(s); {across} mix intrinio with stored_history across a declared span")
+
+
 # ── IV solver: solved ATM IV against the vendor's, and the solver's own sanity band ─────────────────────
 
 IV_VENDOR_GAP = 0.10            # |solved - vendor| above this is a gap
@@ -2660,6 +2699,9 @@ CHECKS = [
     # IV solver: against the vendor, and within its own band
     check_iv_vendor_band,
     check_iv_solver_band,
+    # Reaction rows name their bars; sources mix only across a stored_history span
+    check_reaction_source_coverage,
+    check_reaction_source_consistency,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

@@ -15,7 +15,6 @@ import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +33,7 @@ from app.services import chain_store
 
 MOMENTUM_CUTOFF = -0.10       # 20d return ≤ -10% qualifies (momentum reversal signal)
 MOMENTUM_LOOKBACK_DAYS = 20   # trading days the momentum is measured over
+MOMENTUM_HISTORY_DAYS = 60     # two months of bars: 21 sessions before the event plus slack
 MIN_PRIOR_N = 8               # minimum prior earnings events with actual_5d
 IV_PREMIUM_CAP = 1.20         # implied move cannot exceed 1.2× historical expected move
 EXIT_TRADING_DAYS = 5         # a pick is closed this many trading days after the earnings date
@@ -140,12 +140,12 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
         beats = sum(1 for r in reactions if r.outcome and r.outcome.value == "beat")
         beat_rate = round(beats / len(reactions) * 100, 4)
 
-    # ── Momentum 20d from yfinance (one call) ────────────────────────────
+    # ── Momentum 20d from the stored shadow bars (services/price_bars) ───
     momentum_20d = None
     momentum_reason: str | None = "no price history"
     try:
-        t = yf.Ticker(symbol)
-        hist = t.history(period="2mo", timeout=30)
+        from app.services import price_bars
+        hist = await price_bars.bars(db, symbol, today - timedelta(days=MOMENTUM_HISTORY_DAYS), today)
         if hist is not None and len(hist) >= 2:
             dates = hist.index.date
             before_mask = dates < today
@@ -167,10 +167,7 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
                         )
                         momentum_reason = None
     except Exception:
-        # Fall back: try loading from price history already in DB
-        # (historical_reactions has close_before for each event, but
-        # that's not a continuous series — momentum stays None)
-        momentum_reason = "price history fetch failed"
+        momentum_reason = "stored price bars could not be read"
 
     return LiveFeatures(
         symbol=symbol,

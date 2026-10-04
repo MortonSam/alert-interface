@@ -15,6 +15,13 @@ if TYPE_CHECKING:
     from app.models.ticker import Ticker
 
 
+# price_source values: which daily bars the row's prices and moves were computed from
+SOURCE_YFINANCE = "yfinance"              # rows written before the Intrinio cutover
+SOURCE_INTRINIO = "intrinio"              # the stored shadow bars (price_bars_shadow) through the security record map
+SOURCE_STORED_HISTORY = "stored_history"  # a span no Intrinio record covers (security_records.STORED_HISTORY_ROWS): kept as stored, never recomputed
+PRICE_SOURCES = (SOURCE_YFINANCE, SOURCE_INTRINIO, SOURCE_STORED_HISTORY)
+
+
 class HistoricalReaction(Base):
     __tablename__ = "historical_reactions"
     __table_args__ = (
@@ -51,6 +58,7 @@ class HistoricalReaction(Base):
     )
     computation_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
     report_timing: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
+    price_source: Mapped[str | None] = mapped_column(String(20), nullable=True)   # one of PRICE_SOURCES; null before the recompute
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticker: Mapped["Ticker"] = relationship(back_populates="historical_reactions")

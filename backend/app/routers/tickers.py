@@ -47,6 +47,7 @@ def _to_options_lr(lv: object) -> OptionsLabelRule | None:
     if lv is None:
         return None
     return OptionsLabelRule(label=lv.label, rule=lv.rule)  # type: ignore[union-attr]
+from app.services import price_bars
 from app.services.yfinance_client import YFinanceClient
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
@@ -251,7 +252,7 @@ async def create_ticker(payload: TickerCreate, db: AsyncSession = Depends(get_db
 
 @router.get("/quote/{symbol}", response_model=TickerQuoteRead)
 async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
-    """Real-time quote (Finnhub, shared 60s cache) + 30-day daily sparkline (yfinance)."""
+    """Real-time quote (Finnhub, shared 60s cache) + 30-day daily sparkline from the stored shadow bars."""
     sym = symbol.upper()
     loop = asyncio.get_event_loop()
 
@@ -259,13 +260,13 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
     cached = quote_cache.get(sym)
     if cached is not None:
         quote_data = cached
-        candles = await loop.run_in_executor(None, YFinanceClient.get_daily_closes, sym, "1mo")
+        candles = await loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo")
     else:
         finnhub = FinnhubClient()
         try:
             raw_quote, candles = await asyncio.gather(
                 finnhub.get_quote(sym),
-                loop.run_in_executor(None, YFinanceClient.get_daily_closes, sym, "1mo"),
+                loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo"),
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Quote fetch failed: {exc}")
@@ -595,9 +596,11 @@ async def get_ticker_chart(
     sym = symbol.upper()
 
     loop = asyncio.get_event_loop()
-    chart_result: dict = await loop.run_in_executor(
-        None, YFinanceClient.get_chart_history, sym, period
-    )
+    # Intraday periods come from yfinance (the accepted exception); every daily period from the stored shadow bars.
+    if period in price_bars.INTRADAY_PERIODS:
+        chart_result: dict = await loop.run_in_executor(None, YFinanceClient.get_chart_history, sym, period)
+    else:
+        chart_result = await loop.run_in_executor(None, price_bars.chart_history_daily_sync, sym, period)
     history_raw: list[dict] = chart_result["history"]
     start_price: float | None = chart_result["start_price"]
 

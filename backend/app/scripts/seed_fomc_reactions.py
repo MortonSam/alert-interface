@@ -35,7 +35,8 @@ from app.constants import LISTING_DATE_OVERRIDES
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
-from app.models.historical_reaction import HistoricalReaction
+from app.models.historical_reaction import SOURCE_INTRINIO, HistoricalReaction
+from app.services import price_bars
 from app.models.ticker import Ticker
 from app.services.fomc_calendar import FOMC_EVENT_TITLE, ensure_fomc_events, is_decision_day
 from app.services.price_history_exclusion import exclusion_list, excluded_symbols
@@ -105,6 +106,7 @@ async def _upsert_fomc_reaction(
     data: dict,
 ) -> bool:
     """Upsert on (ticker_id, event_date, event_type=FOMC). Returns True if inserted."""
+    data = {**data, "price_source": SOURCE_INTRINIO}
     values = dict(
         ticker_id=ticker.id,
         event_type=EventType.FOMC,
@@ -186,11 +188,10 @@ async def seed(symbol: str) -> None:
     print(f"  Found {len(fomc_dates)} FOMC dates in lookback window")
 
     lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
-    yf_ticker = yf.Ticker(sym)
 
-    print("  Fetching price history...")
+    print("  Loading stored price bars...")
     try:
-        hist = _fetch_price_history(yf_ticker, lookback)
+        hist = _fetch_price_history(sym, lookback)
     except Exception as exc:
         print(f"  ERROR: price history failed — {exc}")
         return
@@ -205,8 +206,10 @@ async def seed(symbol: str) -> None:
 
     inserted = updated = skipped = 0
     async with AsyncSessionLocal() as session:
+        kept = await price_bars.stored_history_dates(session, sym, [d for d, _ in fomc_dates], load_reference_sessions())
+        await price_bars.mark_stored_history(session, ticker.id, EventType.FOMC, kept)
         for event_date, event_id in fomc_dates:
-            if floor_date and event_date < floor_date:
+            if (floor_date and event_date < floor_date) or event_date in kept:
                 skipped += 1
                 continue
             data = _compute(hist, dates_cache, event_date, load_reference_sessions())
@@ -226,10 +229,9 @@ async def seed(symbol: str) -> None:
 # ── Bulk infrastructure ──────────────────────────────────────────────────────
 
 def _fetch_price_sync(symbol: str) -> pd.DataFrame:
-    """Sync yfinance fetch — called via run_in_executor."""
+    """The stored shadow bars for the seeder's window (services/price_bars) — called via run_in_executor."""
     lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
-    yf_ticker = yf.Ticker(symbol)
-    return _fetch_price_history(yf_ticker, lookback)
+    return _fetch_price_history(symbol, lookback)
 
 
 FOMC_STEP_LABEL = "FOMC reactions"       # the label in refresh.STEPS
@@ -270,9 +272,11 @@ async def _seed_ticker_bulk(
     inserted = updated = no_price = 0
 
     async with AsyncSessionLocal() as session:
+        kept = await price_bars.stored_history_dates(session, ticker.symbol, [d for d, _ in fomc_dates], load_reference_sessions())
+        await price_bars.mark_stored_history(session, ticker.id, EventType.FOMC, kept)
         for event_date, event_id in fomc_dates:
-            if floor_date and event_date < floor_date:
-                no_price += 1
+            if (floor_date and event_date < floor_date) or event_date in kept:
+                no_price += 1           # before listing, or on a stored_history span: kept as stored
                 continue
             data = _compute(hist, dates_cache, event_date, load_reference_sessions())
             if data is None:

@@ -47,9 +47,10 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.earnings_report_timing import EarningsReportTiming
 from app.models.enums import EarningsOutcome, EventType
 from app.models.event import Event
-from app.models.historical_reaction import HistoricalReaction
+from app.models.historical_reaction import SOURCE_INTRINIO, HistoricalReaction
 from app.models.refused_earnings_date import RefusedEarningsDate
 from app.models.ticker import Ticker
+from app.services import price_bars
 from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.price_history_exclusion import exclusion_list, excluded_symbols
 from app.services.split_basis import (
@@ -177,12 +178,11 @@ def _fetch_earnings_dates(t: yf.Ticker) -> list[tuple[date, Decimal | None, Deci
     return sorted(results, key=lambda x: x[0])
 
 
-def _fetch_price_history(t: yf.Ticker, lookback: date) -> pd.DataFrame:
-    """Fetch daily OHLCV from lookback-30d to today+2d for roll-forward buffer."""
-    start = (lookback - timedelta(days=30)).isoformat()
-    end   = (date.today() + timedelta(days=2)).isoformat()
-    hist = t.history(start=start, end=end, auto_adjust=True)
-    return hist.sort_index()
+def _fetch_price_history(t: "yf.Ticker | str", lookback: date) -> pd.DataFrame:
+    """Daily OHLCV from lookback-30d to today+2d, from the stored Intrinio shadow bars (services/price_bars), adjusted
+    from the stored factors. Takes a symbol or a yf.Ticker (its symbol is used; nothing is fetched from Yahoo)."""
+    symbol = t if isinstance(t, str) else t.ticker
+    return price_bars.history_sync(symbol, lookback).sort_index()
 
 
 # ── Reaction computation ──────────────────────────────────────────────────────
@@ -192,15 +192,15 @@ _reference_sessions: np.ndarray | None = None
 
 
 def load_reference_sessions() -> np.ndarray:
-    """Sorted array of exchange session dates, taken from SPY's daily bars.
+    """Sorted array of exchange session dates, taken from SPY's stored daily bars.
 
-    Fetched once per process. Raises if SPY cannot be fetched: computing moves
+    Loaded once per process. Raises if no SPY bars are stored: computing moves
     without a session calendar is how wrong windows got stored.
     """
     global _reference_sessions
     if _reference_sessions is None:
         lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
-        hist = _fetch_price_history(yf.Ticker(REFERENCE_SYMBOL), lookback)
+        hist = _fetch_price_history(REFERENCE_SYMBOL, lookback)
         if hist.empty:
             raise RuntimeError(f"no {REFERENCE_SYMBOL} history, cannot validate reaction windows")
         _reference_sessions = _build_date_cache(hist)
@@ -523,9 +523,11 @@ async def upsert_reaction(
     if basis_unclear and event_date in basis_unclear:
         data["outcome"] = update_data["outcome"] = EarningsOutcome.UNKNOWN
 
-    # Always stamp the computation version and report_timing on insert and update.
+    # Always stamp the computation version, the price source and report_timing on insert and update.
     data["computation_version"] = COMPUTATION_VERSION
     update_data["computation_version"] = COMPUTATION_VERSION
+    data["price_source"] = SOURCE_INTRINIO
+    update_data["price_source"] = SOURCE_INTRINIO
     # report_timing is passed in data dict by the caller if available
     if "report_timing" in data:
         update_data["report_timing"] = data["report_timing"]
@@ -712,8 +714,13 @@ async def seed(symbol: str) -> None:
         timing_map = {r.event_date: r.timing for r in timing_rows}
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
         basis_unclear = await basis_mismatch_dates(session, ticker.id)
+        kept = await price_bars.stored_history_dates(session, sym, [d for d, _, _ in earnings_entries], load_reference_sessions())
+        await price_bars.mark_stored_history(session, ticker.id, EventType.EARNINGS, kept)
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
+            if event_date in kept:
+                skipped += 1            # rests on a stored_history span: kept as stored, never recomputed
+                continue
             report_timing = timing_map.get(event_date, "unknown")
             data = _compute_v3(hist, dates_cache, event_date, report_timing, load_reference_sessions())
             if data is None:
@@ -766,7 +773,11 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
     inserted = updated = no_price = 0
 
     async with AsyncSessionLocal() as session:
-        # Delete reactions whose event_date precedes available price history.
+        # Delete reactions whose event_date precedes available price history; rows on a stored_history span
+        # (before the Intrinio record begins) are kept, so the floor is the earlier of the two.
+        floor = await price_bars.stored_history_floor(session, ticker.symbol)
+        if floor is not None:
+            first_hist_date = min(first_hist_date, floor)
         del_result = await session.execute(
             sa_delete(HistoricalReaction).where(
                 HistoricalReaction.ticker_id == ticker.id,
@@ -789,8 +800,13 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
         timing_map = {r.event_date: r.timing for r in timing_rows}
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
         basis_unclear = await basis_mismatch_dates(session, ticker.id)
+        kept = await price_bars.stored_history_dates(session, ticker.symbol, [d for d, _, _ in earnings_entries], load_reference_sessions())
+        await price_bars.mark_stored_history(session, ticker.id, EventType.EARNINGS, kept)
 
         for event_date, eps_estimate, eps_actual in earnings_entries:
+            if event_date in kept:
+                no_price += 1           # rests on a stored_history span: kept as stored, never recomputed
+                continue
             report_timing = timing_map.get(event_date, "unknown")
             data = _compute_v3(hist, dates_cache, event_date, report_timing, load_reference_sessions())
             if data is None:

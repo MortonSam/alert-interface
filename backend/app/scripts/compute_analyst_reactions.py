@@ -41,7 +41,8 @@ from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.analyst_reaction_stats import AnalystReactionStats
 from app.models.enums import EventType
 from app.models.event import Event
-from app.models.historical_reaction import HistoricalReaction
+from app.models.historical_reaction import SOURCE_INTRINIO, SOURCE_STORED_HISTORY, HistoricalReaction
+from app.services import price_bars
 from app.models.ticker import Ticker
 from app.services.price_history_exclusion import exclusion_list
 from app.scripts.seed_historical_reactions import (
@@ -68,10 +69,9 @@ COMPUTATION_VERSION = 3  # v3: aggregates count distinct sessions, not actions
 # ── yfinance fetch ───────────────────────────────────────────────────────────
 
 def _fetch_history_sync(symbol: str) -> pd.DataFrame:
-    """Fetch ~5 years of daily OHLCV for a ticker."""
+    """~5 years of daily OHLCV for a ticker, from the stored shadow bars (services/price_bars)."""
     lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
-    t = yf.Ticker(symbol)
-    return _fetch_price_history(t, lookback)
+    return _fetch_price_history(symbol, lookback)
 
 
 # ── Pre-market reaction computation ─────────────────────────────────────────
@@ -212,6 +212,19 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
 
         dates_cache = _build_date_cache(hist)
 
+        # Events on a stored_history span keep their stored values: read them before the delete below.
+        kept = await price_bars.stored_history_dates(session, symbol, [e.event_date for e in events], load_reference_sessions())
+        kept_rows: dict = {}
+        if kept:
+            for r in (await session.execute(
+                select(HistoricalReaction).where(
+                    HistoricalReaction.ticker_id == ticker.id,
+                    HistoricalReaction.event_type == EventType.ANALYST_ACTION,
+                    HistoricalReaction.event_date.in_(sorted(kept)),
+                )
+            )).scalars().all():
+                kept_rows.setdefault((r.event_date, r.event_id), r)
+
         # 3. Delete existing analyst_action reactions (will be re-inserted below)
         await session.execute(
             delete(HistoricalReaction).where(
@@ -223,17 +236,26 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
         # 4. Compute and persist per-event reactions
         computed = 0
         for event in events:
-            reaction = _compute_pre_market(hist, dates_cache, event.event_date, load_reference_sessions())
-
             pct_1d = None
             pct_5d = None
             close_before = None
             close_after = None
-            if reaction is not None:
-                pct_1d = reaction["pct_change_1d"]
-                pct_5d = reaction["pct_change_5d"]
-                close_before = reaction.get("close_before")
-                close_after = reaction.get("close_after")
+            if event.event_date in kept:
+                prev = kept_rows.get((event.event_date, event.id)) or next((r for (d, _), r in kept_rows.items() if d == event.event_date), None)
+                price_source = SOURCE_STORED_HISTORY
+                if prev is not None:
+                    pct_1d = float(prev.pct_change_1d) if prev.pct_change_1d is not None else None
+                    pct_5d = float(prev.pct_change_5d) if prev.pct_change_5d is not None else None
+                    close_before = float(prev.close_before) if prev.close_before is not None else None
+                    close_after = float(prev.close_after) if prev.close_after is not None else None
+            else:
+                price_source = SOURCE_INTRINIO
+                reaction = _compute_pre_market(hist, dates_cache, event.event_date, load_reference_sessions())
+                if reaction is not None:
+                    pct_1d = reaction["pct_change_1d"]
+                    pct_5d = reaction["pct_change_5d"]
+                    close_before = reaction.get("close_before")
+                    close_after = reaction.get("close_after")
 
             # Persist to historical_reactions
             session.add(HistoricalReaction(
@@ -246,6 +268,7 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
                 pct_change_1d=Decimal(str(pct_1d)) if pct_1d is not None else None,
                 pct_change_5d=Decimal(str(pct_5d)) if pct_5d is not None else None,
                 computation_version=COMPUTATION_VERSION,
+                price_source=price_source,
             ))
 
             if pct_1d is not None:

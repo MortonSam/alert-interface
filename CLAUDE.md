@@ -15,7 +15,7 @@
 
 Nothing wrong reaches the screen silently. Every displayed number must come from a stored, dated source (never a live fetch that can fail or return padded values); a missing value is shown as absent, never estimated; every metric has a sanity band enforced in validate_data; and any change to how a number is computed bumps the relevant version so history stays comparable.
 
-Accepted exceptions: yfinance daily price history (chart candles, sparklines, reaction settlement). Everything else displayed must come from stored, dated sources.
+Accepted exceptions: yfinance for the two intraday chart periods (1d and 7d bars) and for the earnings calendar (report dates, not prices). Every daily price series comes from the stored Intrinio shadow bars (`price_bars_shadow`, read through `services/price_bars.py` by security record): reactions, realized volatility, momentum, pick settlement closes, sparklines and the daily chart periods. Everything else displayed must come from stored, dated sources.
 
 ### Displayed claims
 

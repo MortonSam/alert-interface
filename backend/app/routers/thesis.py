@@ -57,6 +57,7 @@ from app.services.rv_store import get_latest_rv
 from app.models.system_metadata import SystemMetadata
 from app.services.draft_limiter import check_draft_limit, get_client_ip, record_draft
 from app.services.system_metadata_service import get_value
+from app.services import price_bars
 from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/theses", tags=["theses"])
@@ -188,7 +189,7 @@ async def _compute_option_mark(
         if current_price is None:
             exp_str_for_close = exp_date.isoformat()
             settlement = await loop.run_in_executor(
-                None, YFinanceClient.get_close_on_date, sym, exp_str_for_close,
+                None, price_bars.close_on_date_sync, sym, exp_str_for_close,     # the stored shadow bar, as close_alert_picks settles
             )
             if settlement is not None:
                 current_price = settlement

@@ -31,7 +31,7 @@ from app.models.shadow_pick import ShadowPick
 from app.services import chain_store
 from app.services.pnl_math import compute_option_pnl_at_expiry, pnl_percent
 from app.services.step_outcomes import record_step_fields
-from app.services.yfinance_client import YFinanceClient
+from app.services import price_bars
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ async def _close_v2_picks() -> tuple[list[str], list[str]]:
             result = await chain_store.get_chain(session, pick.symbol, pick.expiration) if pick.expiration else None
             if result is not None:
                 chain_last_trade = result[1]
-            close_price = YFinanceClient.get_close_on_date(pick.symbol, pick.exit_date.isoformat())
+            close_price = await price_bars.close_on_date(session, pick.symbol, pick.exit_date)
             action, why = settle_decision(pick.exit_date, pick.expiration, today, spread_mid, mark_note, chain_last_trade, close_price)
 
             if action == "close":
@@ -218,7 +218,7 @@ async def _close_v2_picks() -> tuple[list[str], list[str]]:
                 print(f"[close-v2] {pick.symbol} exit={pick.exit_date}: spread_mid=${spread_mid} close=${close_price}{pnl_msg}{move_msg}{late}")
                 closed_labels.append(f"{pick.symbol}@{pick.exit_date.isoformat()}")
             elif action == "hard_stop":
-                exp_close = YFinanceClient.get_close_on_date(pick.symbol, pick.expiration)
+                exp_close = await price_bars.close_on_date(session, pick.symbol, pick.expiration)
                 if _is_valid_price(exp_close):
                     pick.close_price = exp_close
                     pick.stock_move_5d = _compute_stock_move(pick, float(exp_close))
@@ -278,7 +278,7 @@ async def _close_picks() -> int:
 
         closed = 0
         for pick in rows:
-            close_price = YFinanceClient.get_close_on_date(pick.symbol, pick.expiration)
+            close_price = await price_bars.close_on_date(session, pick.symbol, pick.expiration)
             if not _is_valid_price(close_price):
                 print(f"[close-picks] {pick.symbol} exp={pick.expiration}: no valid close, leaving open for retry")
                 continue
@@ -344,21 +344,21 @@ async def _backfill() -> int:
                     print(f"[backfill] {pick.symbol}: no close_price and no expiration, skipping")
                     continue
 
-                # Try yfinance first (authoritative)
-                yf_price = YFinanceClient.get_close_on_date(pick.symbol, pick.expiration)
+                # The stored shadow bar first (authoritative)
+                yf_price = await price_bars.close_on_date(session, pick.symbol, pick.expiration)
                 if _is_valid_price(yf_price):
                     pick.close_price = yf_price
                     close_price = yf_price
-                    print(f"[backfill] {pick.symbol}: resolved close=${yf_price} from yfinance")
+                    print(f"[backfill] {pick.symbol}: resolved close=${yf_price} from the stored bars")
                 else:
                     # Fall back to iv_history
                     ih_price = await _resolve_close_from_iv_history(session, pick.symbol, pick.expiration)
                     if ih_price is None:
-                        print(f"[backfill] {pick.symbol}: no valid close from yfinance or iv_history for {pick.expiration}, skipping")
+                        print(f"[backfill] {pick.symbol}: no valid close from the stored bars or iv_history for {pick.expiration}, skipping")
                         continue
                     pick.close_price = ih_price
                     close_price = ih_price
-                    print(f"[backfill] {pick.symbol}: resolved close=${ih_price} from iv_history (yfinance unavailable)")
+                    print(f"[backfill] {pick.symbol}: resolved close=${ih_price} from iv_history (no stored bar)")
 
             # Clear any NaN P&L before recomputing
             pick.option_pnl_dollars = None
@@ -397,10 +397,10 @@ async def _settle_shadow_picks() -> int:
         settled = 0
         for sp in rows:
             # Get the 5-day move: compare close on event_date to close 5 trading days later
-            close_before = YFinanceClient.get_close_on_date(sp.symbol, sp.event_date.isoformat())
+            close_before = await price_bars.close_on_date(session, sp.symbol, sp.event_date)
             # Approximate 5 trading days after event: +7 calendar days
             settle_date = sp.event_date + timedelta(days=7)
-            close_after = YFinanceClient.get_close_on_date(sp.symbol, settle_date.isoformat())
+            close_after = await price_bars.close_on_date(session, sp.symbol, settle_date)
 
             if not _is_valid_price(close_before) or not _is_valid_price(close_after):
                 continue
@@ -473,9 +473,7 @@ async def _settle_credit_shadows() -> int:
             csp.pnl_pct = Decimal(str(pnl_pct))
 
             # Stock move
-            close_price = YFinanceClient.get_close_on_date(
-                csp.symbol, csp.exit_date.isoformat(),
-            )
+            close_price = await price_bars.close_on_date(session, csp.symbol, csp.exit_date)
             if _is_valid_price(close_price):
                 spot = float(csp.spot)
                 if spot > 0:

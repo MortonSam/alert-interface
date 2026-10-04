@@ -27,18 +27,20 @@ def _history(last_close):
 
 @pytest.mark.asyncio
 async def test_nan_close_gives_momentum_none_with_a_reason(monkeypatch):
-    class FakeTicker:
-        def __init__(self, sym): pass
-        def history(self, period, timeout): return _history(float("nan"))
-    monkeypatch.setattr(ivy_v2.yf, "Ticker", FakeTicker)
+    """Momentum reads the stored shadow bars (services/price_bars.bars); a non-finite close there is None with a reason."""
+    from app.services import price_bars
+
+    async def nan_bars(session, symbol, start=None, end=None):
+        return _history(float("nan"))
+    monkeypatch.setattr(price_bars, "bars", nan_bars)
     async with ScriptSessionLocal() as s:
         lf = await compute_live_features("COST", s)
     assert lf is not None and lf.momentum_20d is None
     assert lf.momentum_reason == "price history has a non-finite close"
 
-    class FiniteTicker(FakeTicker):
-        def history(self, period, timeout): return _history(880.0)
-    monkeypatch.setattr(ivy_v2.yf, "Ticker", FiniteTicker)
+    async def finite_bars(session, symbol, start=None, end=None):
+        return _history(880.0)
+    monkeypatch.setattr(price_bars, "bars", finite_bars)
     async with ScriptSessionLocal() as s:
         lf = await compute_live_features("COST", s)
     assert lf.momentum_20d == 10.0 and lf.momentum_reason is None
