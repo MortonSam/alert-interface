@@ -820,6 +820,7 @@ export interface ThesisDraftRead {
     iv_rv_spread_pp: number | null;
     primary_strikes: ThesisDraftStrike[];
     secondary_strikes: ThesisDraftStrike[];
+    fact_reasons?: Record<string, string>;   // why an absent fact is absent, per key, from the API (thesis.fact_absence_reasons)
     [key: string]: unknown;
   };
   model_used: string;

@@ -1025,6 +1025,7 @@ function PriceChart({
   impliedRangeLow,
   impliedRangeHigh,
   impliedExpiration,
+  impliedChainDate,
 }: {
   symbol: string;
   period: ChartPeriod;

@@ -697,6 +697,7 @@ type BuildStep =
 function BuildTradePageContent() {
   const searchParams = useSearchParams();
   const tickerParam = searchParams.get("ticker");
+  const ivyRule = useIvyRule();          // the cadence phrase in the header reads the same rule record as the rest of the page
 
   // Ticker list
   const [tickers, setTickers] = useState<Ticker[]>([]);
@@ -1373,7 +1374,6 @@ function absentCell(fb: { fact_reasons?: Record<string, string> } | null | undef
 }
 
 export default function BuildTradePage() {
-  const ivyRule = useIvyRule();
   return (
     <Suspense>
       <BuildTradePageContent />
