@@ -45,9 +45,9 @@ export function splitTerms(text: string): TextPart[] {
   return parts;
 }
 
-/** The receipt shown on hover: how the block was computed and the date it rests on. */
-export function sentenceReceipt(s: BriefingSentence): { how: string | null; asOf: string | null } {
-  return { how: computedHowLine(s.rule), asOf: insightAsOfLine(s.as_of) };
+/** The receipt: `what` and `asOf` are the two short hover lines; `how` (the full rule) is for the Sources expander only. */
+export function sentenceReceipt(s: BriefingSentence): { what: string; asOf: string | null; how: string | null } {
+  return { what: BLOCK_LABELS[s.key] ?? s.key, asOf: insightAsOfLine(s.as_of), how: computedHowLine(s.rule) };
 }
 
 /** One line per input for the Sources list: "name: value (as of …; source)". Dates come from the input itself. */

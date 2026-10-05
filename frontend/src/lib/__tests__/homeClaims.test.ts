@@ -58,52 +58,41 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(ticker).toMatch(/contradicted\} contradicted/);
   });
 
-  it("the four counters come from /system/stats, each dated by its own newest row, and the row renders nothing without them", async () => {
+  it("the four counters are live counts from /system/stats, first under the hero, with only the as-of date on hover", async () => {
+    const home = read("app/page.tsx");
+    expect(home).toContain("<SiteCounters />");
+    expect(home.indexOf("<SiteCounters />")).toBeLessThan(home.indexOf("The challenge"));             // the first thing under the hero
+    expect(home).toContain("font-variant-numeric: tabular-nums");
+    expect(home).not.toMatch(/stat-number[^}]*border|since 2011|Analyst actions since/);
     const block = read("components/SiteCounters.tsx");
     expect(block).toContain("api.system.stats()");
     expect(block).toContain("if (!rows.length) return null;");
-    expect(block).toContain("title={row.asOf ?? undefined}");                                 // the date lives on the number's hover title
-    expect(block).not.toMatch(/\{row\.asOf\}<\/p>/);                                         // and is not a line under it
-    expect(block.replace(/className="[^"]*"/g, "")).not.toMatch(/[0-9]{2,}/);                // no typed figure or year outside class names
-    expect(block).not.toMatch(/since/i);
+    expect(block).toContain("title={row.title ?? undefined}");                                       // the date lives on the number's hover title
+    expect(block).toMatch(/stat-number[^"]*text-primary[^"]*tabular-nums/);                           // the accent, the largest numeric size, tabular figures
+    expect(block).not.toMatch(/border|rounded|shadow/);                                               // no card
+    expect(block.replace(/className="[^"]*"/g, "")).not.toMatch(/[0-9]{2,}/);                        // no typed figure or year
     const { counterRows } = await import("@/lib/siteCounters");
-    const rows = counterRows({ active_stocks_covered: 503, active_stocks_as_of: "2026-10-05", earnings_reports_measured: 9894, earnings_reports_as_of: "2026-09-11",
-      fomc_reactions_measured: 20650, fomc_reactions_as_of: "2026-09-17", analyst_reactions_measured: 9781, analyst_reactions_as_of: "2026-09-22",
-      analyst_actions: 170645, analyst_actions_since: "2011-12-08" });
-    expect(rows.map((r) => [r.label, r.value, r.asOf])).toEqual([
-      ["Active S&P 500 stocks covered", 503, "As of Oct 5, 2026"],
-      ["Earnings reactions measured", 9894, "Through Sep 11, 2026"],        // the newest report measured, not a snapshot date
-      ["Fed-day reactions measured", 20650, "Through Sep 17, 2026"],
-      ["Analyst actions measured", 9781, "Through Sep 22, 2026"],
+    const rows = counterRows({ option_contracts_captured: 2787, option_contracts_as_of: "2026-10-01", option_contracts_source: "courier chains", licensed_daily_prices: 663960,
+      licensed_daily_prices_as_of: "2026-10-02", earnings_reports_measured: 9894, earnings_reports_as_of: "2026-09-11", analyst_reactions_measured: 9781, analyst_reactions_as_of: "2026-09-22" });
+    expect(rows.map((r) => [r.label, r.value, r.title])).toEqual([
+      ["option contracts captured nightly", 2787, "As of Oct 1, 2026 (courier chains)"],
+      ["licensed daily prices", 663960, "As of Oct 2, 2026"],
+      ["earnings reactions measured", 9894, "As of Sep 11, 2026"],
+      ["analyst actions measured", 9781, "As of Sep 22, 2026"],
     ]);
-    const home = read("app/page.tsx");
-    const section = home.slice(home.indexOf("<SiteCounters />") - 400, home.indexOf("<RealStockPage />") + 40);
-    expect(section).toContain("space-y-16");                                                   // spacing only between present children
-    expect(section).not.toMatch(/min-h-|h-\[|gap-/);                                          // nothing reserved when a child renders nothing
-    expect(rows.some((r) => r.label.includes("since"))).toBe(false);
-    expect(counterRows({ active_stocks_covered: 1, active_stocks_as_of: null, earnings_reports_measured: 0, earnings_reports_as_of: null, fomc_reactions_measured: 0,
-      fomc_reactions_as_of: null, analyst_reactions_measured: 0, analyst_reactions_as_of: null, analyst_actions: 0, analyst_actions_since: null })[0].asOf).toBeNull();
     expect(counterRows(null)).toEqual([]);
   });
 
-  it("the real-page block is the nightly rule's pick rendered through the ticker page's own Briefing component, fetched on the server", async () => {
+  it("the ticker page mounts the Briefing with the question-strip slot and the home page has no featured block", async () => {
     const home = read("app/page.tsx");
-    expect(home).toContain("<RealStockPage />");
-    const block = read("components/RealStockPage.tsx");
-    expect(block).toContain("export default async function RealStockPage()");
-    expect(block).toContain("/v1/discover/featured");
-    expect(block).toContain("<Briefing sentences={view.sentences} />");
-    expect(block).toContain("if (!view) return null;");
-    expect(block).toContain("See {view.name ?? view.symbol}&apos;s full page");
-    expect(block).not.toMatch(/REAL_PAGE_SYMBOL|"MU"|InsightHeadline|[0-9]+%|\$[0-9]/);                 // no typed symbol or figure
+    expect(home).not.toMatch(/RealStockPage|From a real stock page|featured/i);
     const ticker = read("app/tickers/[symbol]/page.tsx");
     expect(ticker).toContain("<Briefing sentences={briefing.sentences} />");
     expect(ticker).toContain("api.tickers.briefing(upperSymbol)");
-    expect(ticker).toContain('data-slot="question-strip"');                                             // the slot for a later block
+    expect(ticker).toContain('data-slot="question-strip"');
     expect(ticker).not.toMatch(/InsightHeadline|api\.discover\.insight/);
     const { computedHowLine, insightAsOfLine } = await import("@/lib/insightHeadline");
-    expect(computedHowLine("Compared this stock's beat rate to the S&P 500 median beat rate")).toBe("How this was computed: Compared this stock's beat rate to the S&P 500 median beat rate");
-    expect(computedHowLine(null)).toBeNull();
+    expect(computedHowLine("x")).toBe("How this was computed: x");
     expect(insightAsOfLine("2026-09-24")).toBe("As of Sep 24, 2026");
     expect(insightAsOfLine(null)).toBeNull();
   });

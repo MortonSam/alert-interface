@@ -4,7 +4,6 @@ import { HeroSearchButton } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
-import RealStockPage from "@/components/RealStockPage";
 import { SiteCounters } from "@/components/SiteCounters";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
@@ -27,6 +26,12 @@ export default function Home() {
           font-size: clamp(40px, 10vw, 120px);
           line-height: 1.05;
           letter-spacing: -.03em;
+        }
+        .stat-number {
+          font-size: clamp(40px, 5.5vw, 84px);
+          line-height: 1;
+          letter-spacing: -.02em;
+          font-variant-numeric: tabular-nums;
         }
         .statement-h2 {
           font-size: clamp(32px, 6vw, 72px);
@@ -76,14 +81,9 @@ export default function Home() {
           </p>
         </section>
 
-        {/* ── 2. The counts and the featured stock block, one section. Each child renders nothing when it has
-               nothing (the counters until they arrive, the block when no ticker qualifies), and the spacing between
-               them exists only when both are present: nothing is reserved. ── */}
-        <section className="px-4 sm:px-8 py-24">
-          <div className="max-w-3xl w-full mx-auto space-y-16">
-            <SiteCounters />
-            <RealStockPage />
-          </div>
+        {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero ── */}
+        <section className="px-4 sm:px-8 py-28 sm:py-36">
+          <SiteCounters />
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}

@@ -69,11 +69,34 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> SystemStatus:
     )
 
 
+_CONTRACTS_CACHE: dict = {"at": None, "value": None}
+CONTRACTS_CACHE_SECONDS = 900          # the latest night's chain count changes once a day; counting it scans every stored chain
+CONTRACTS_SOURCE = "courier chains"    # the chains the pages read; the Intrinio shadow chains are stored under another prefix
+
+
+async def latest_night_contracts(db: AsyncSession) -> tuple[int, str | None]:
+    """(contracts across the latest night's stored courier chains, that night's chain date). Counted from the stored
+    chain JSON by text (one "strike" per contract), dated by each chain's own chain_last_trade."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+    now = datetime.now(timezone.utc)
+    if _CONTRACTS_CACHE["at"] and (now - _CONTRACTS_CACHE["at"]).total_seconds() < CONTRACTS_CACHE_SECONDS:
+        return _CONTRACTS_CACHE["value"]
+    row = (await db.execute(text("""
+        WITH c AS (
+            SELECT substring(value from '"chain_last_trade": ?"([0-9]{4}-[0-9]{2}-[0-9]{2})') AS d,
+                   (length(value) - length(replace(value, '"strike"', ''))) / length('"strike"') AS n
+            FROM system_metadata WHERE key LIKE 'chain:%' AND key NOT LIKE 'chain:%:%:%')
+        SELECT d, sum(n) FROM c WHERE d IS NOT NULL AND d = (SELECT max(d) FROM c) GROUP BY d"""))).first()
+    value = (int(row[1] or 0), row[0]) if row else (0, None)
+    _CONTRACTS_CACHE.update(at=now, value=value)
+    return value
+
+
 @router.get("/stats")
 async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
-    """Real counts behind the homepage counters, each with the date of the newest row it rests on. Nothing here is
-    typed by hand. "Measured" means a stored reaction row with a one-day move; analyst_actions (stored analyst
-    events, measured or not) stays for older readers."""
+    """The homepage counters: four live counts from stored tables, each with the date of the newest row it rests on.
+    Nothing here is typed by hand. "Measured" means a stored reaction row with a one-day move."""
     from sqlalchemy import text
     from app.services.price_history_exclusion import EXCLUDED_SYMBOLS_SQL
 
@@ -84,24 +107,18 @@ async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
         ))).one()
         return int(row[0] or 0), row[1].isoformat() if row[1] else None
 
-    covered = (await db.execute(text(
-        "SELECT count(*), max(updated_at) FROM tickers WHERE is_active AND index_member"
-    ))).one()
+    contracts, contracts_as_of = await latest_night_contracts(db)
+    prices = (await db.execute(text("SELECT count(*), max(date) FROM price_bars_shadow"))).one()
     earnings_n, earnings_as_of = await measured("earnings")
-    fomc_n, fomc_as_of = await measured("fomc")
     analyst_n, analyst_as_of = await measured("analyst_action")
-    analyst = (await db.execute(text(
-        "SELECT count(*), min(event_date) FROM events WHERE event_type = 'analyst_action'"
-    ))).one()
     return {
-        "active_stocks_covered": int(covered[0] or 0),
-        "active_stocks_as_of": covered[1].date().isoformat() if covered[1] else None,
+        "option_contracts_captured": contracts,
+        "option_contracts_as_of": contracts_as_of,
+        "option_contracts_source": CONTRACTS_SOURCE,
+        "licensed_daily_prices": int(prices[0] or 0),
+        "licensed_daily_prices_as_of": prices[1].isoformat() if prices[1] else None,
         "earnings_reports_measured": earnings_n,
         "earnings_reports_as_of": earnings_as_of,
-        "fomc_reactions_measured": fomc_n,
-        "fomc_reactions_as_of": fomc_as_of,
         "analyst_reactions_measured": analyst_n,
         "analyst_reactions_as_of": analyst_as_of,
-        "analyst_actions": int(analyst[0] or 0),
-        "analyst_actions_since": analyst[1].isoformat() if analyst[1] else None,
     }

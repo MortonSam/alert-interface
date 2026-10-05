@@ -1147,14 +1147,6 @@ async def latest_pick(
     )
 
 
-@router.get("/featured")
-async def get_featured(db: AsyncSession = Depends(get_db)) -> dict:
-    """The home page's featured example: the nightly rule's pick (scripts/pick_featured_example) with its catalyst and
-    pattern sentences from the same briefing the ticker page shows; symbol null when no ticker qualifies."""
-    from app.services.briefing_build import featured_example
-    return await featured_example(db)
-
-
 @router.get("/insight/{symbol}", response_model=InsightResponse)
 async def ticker_insight(
     symbol: str,

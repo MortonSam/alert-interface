@@ -5,23 +5,18 @@ export interface CounterRow {
   key: string;
   value: number;
   label: string;
-  asOf: string | null;     // "As of Oct 5, 2026" for a snapshot count, "Through Sep 11, 2026" for a count whose newest row is a report; null without a date
+  title: string | null;     // the hover: only the date the count rests on ("As of Oct 1, 2026"; the chain count adds its source)
 }
 
-/** "Through Sep 11, 2026": the newest report a reaction count has measured, in the same date format as the as-of line. */
-export function throughLine(iso: string | null): string | null {
-  const line = insightAsOfLine(iso);
-  return line ? line.replace(/^As of /, "Through ") : null;
-}
-
-/** The four homepage counters, each from a stored count and dated by its own newest row. The stocks-covered count is a
- * snapshot ("As of"); the three reaction counts run through their newest measured report ("Through"). Nothing typed. */
+/** The four homepage counters, each a live count from a stored table, dated by its own newest row. Labels as written. */
 export function counterRows(stats: SiteStats | null): CounterRow[] {
   if (!stats) return [];
+  const contractsAsOf = insightAsOfLine(stats.option_contracts_as_of);
   return [
-    { key: "stocks", value: stats.active_stocks_covered, label: "Active S&P 500 stocks covered", asOf: insightAsOfLine(stats.active_stocks_as_of) },
-    { key: "earnings", value: stats.earnings_reports_measured, label: "Earnings reactions measured", asOf: throughLine(stats.earnings_reports_as_of) },
-    { key: "fomc", value: stats.fomc_reactions_measured, label: "Fed-day reactions measured", asOf: throughLine(stats.fomc_reactions_as_of) },
-    { key: "analyst", value: stats.analyst_reactions_measured, label: "Analyst actions measured", asOf: throughLine(stats.analyst_reactions_as_of) },
+    { key: "contracts", value: stats.option_contracts_captured, label: "option contracts captured nightly",
+      title: contractsAsOf ? `${contractsAsOf} (${stats.option_contracts_source})` : null },
+    { key: "prices", value: stats.licensed_daily_prices, label: "licensed daily prices", title: insightAsOfLine(stats.licensed_daily_prices_as_of) },
+    { key: "earnings", value: stats.earnings_reports_measured, label: "earnings reactions measured", title: insightAsOfLine(stats.earnings_reports_as_of) },
+    { key: "analyst", value: stats.analyst_reactions_measured, label: "analyst actions measured", title: insightAsOfLine(stats.analyst_reactions_as_of) },
   ];
 }

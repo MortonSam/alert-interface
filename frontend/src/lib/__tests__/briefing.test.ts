@@ -19,8 +19,8 @@ const S: BriefingSentence[] = [
 describe("the briefing renders the API's sentences and receipts, nothing typed", () => {
   it("joins the sentences in API order and reads each receipt from the sentence", () => {
     expect(briefingParagraph(S)).toBe(S[0].text + " " + S[1].text);
-    expect(sentenceReceipt(S[0])).toEqual({ how: "How this was computed: Next report from the stored earnings calendar.", asOf: "As of Oct 14, 2026" });
-    expect(sentenceReceipt({ ...S[1], rule: "", as_of: null })).toEqual({ how: null, asOf: null });
+    expect(sentenceReceipt(S[0])).toEqual({ what: "What's been happening", asOf: "As of Oct 14, 2026", how: "How this was computed: Next report from the stored earnings calendar." });
+    expect(sentenceReceipt({ ...S[1], rule: "", as_of: null })).toEqual({ what: "What it is", asOf: null, how: null });
     expect(sourceLine(S[0].inputs[0])).toBe("next earnings date: Oct 14, 2026 (As of Oct 14, 2026; finnhub)");
     expect(sourceLine({ name: "quote time", value: "Oct 5, 4:00 PM ET", as_of: "Oct 5, 4:00 PM ET", source: "last trade" })).toBe("quote time: Oct 5, 4:00 PM ET (Oct 5, 4:00 PM ET; last trade)");
     expect(sourceLine({ name: "days away", value: "9", as_of: null, source: null })).toBe("days away: 9");
@@ -42,6 +42,19 @@ describe("the briefing renders the API's sentences and receipts, nothing typed",
     expect(splitTerms("")).toEqual([]);
     for (const [, term] of GLOSSARY_LINKS) expect(GLOSSARY[term], term).toMatch(/\. .+\.$/);      // an entry exists and has two sentences
     expect(BLOCK_LABELS).toEqual({ profile: "What it is", happening: "What's been happening" });
+  });
+
+  it("the hover receipt is two short lines above the text and the rule lives in Sources only", () => {
+    const src = read("components/Briefing.tsx");
+    const start = src.indexOf('role="tooltip"');
+    const tooltip = src.slice(start, src.indexOf("\n            )}", start));            // the whole tooltip element
+    expect(tooltip).toContain("bottom-full");                                   // above the trigger, never over the text it explains
+    expect(tooltip).not.toContain("top-full");
+    expect(tooltip).toContain("{r.what}");
+    expect(tooltip).toContain("{r.asOf}");
+    expect(tooltip).not.toContain("r.how");                                     // the rule is not in the hover
+    const sources = src.slice(src.indexOf("<details"));
+    expect(sources).toContain("{r.how}");                                       // it is in Sources
   });
 
   it("the component carries no number, date or threshold of its own and renders nothing without sentences", () => {

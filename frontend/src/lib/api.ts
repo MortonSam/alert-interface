@@ -1024,23 +1024,17 @@ export interface BriefingResponse {
   sentences: BriefingSentence[];
 }
 
-export interface FeaturedExample extends BriefingResponse {
-  picked_on: string | null;      // the night the rule chose it
-  earnings_date: string | null;
-  rule: string | null;
-}
 
 export interface SiteStats {
-  active_stocks_covered: number;
-  active_stocks_as_of: string | null;          // YYYY-MM-DD: the newest ticker-row update among active index members
-  earnings_reports_measured: number;
-  earnings_reports_as_of: string | null;       // newest measured earnings reaction
-  fomc_reactions_measured: number;
-  fomc_reactions_as_of: string | null;
-  analyst_reactions_measured: number;
+  option_contracts_captured: number;         // contracts across the latest night's stored courier chains
+  option_contracts_as_of: string | null;     // that night's chain date (YYYY-MM-DD)
+  option_contracts_source: string;           // "courier chains"
+  licensed_daily_prices: number;             // rows in price_bars_shadow
+  licensed_daily_prices_as_of: string | null;
+  earnings_reports_measured: number;         // earnings reactions with a stored 1-day move
+  earnings_reports_as_of: string | null;
+  analyst_reactions_measured: number;        // analyst actions with a stored 1-day move
   analyst_reactions_as_of: string | null;
-  analyst_actions: number;                     // stored analyst events, measured or not
-  analyst_actions_since: string | null;
 }
 
 export interface HealthStatus {
@@ -1219,7 +1213,6 @@ export const api = {
       request<LatestPickResponse>(`/discover/latest-pick`),
     insight: (symbol: string) =>
       request<{ insight: string | null; rule: string | null; as_of: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
-    featured: () => request<FeaturedExample>(`/discover/featured`),
   },
 
   reactions: {

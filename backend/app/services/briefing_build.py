@@ -1,11 +1,10 @@
 """Gathers the stored rows a ticker's briefing rests on and composes the sentences (services/briefing).
 
 Every input is a stored, dated row or the quote cache behind the same freshness test the quote endpoint uses; an
-input that is absent, stale or excluded drops its clause. The home page's featured example reads the same builder.
+input that is absent, stale or excluded drops its clause.
 """
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -26,8 +25,6 @@ from app.services.price_history_exclusion import is_excluded
 from app.services.rv_store import get_servable_rv
 from app.services.ticker_aliases import resolve_symbol
 
-FEATURED_KEY = "featured_example"          # system_metadata: the home page's nightly pick, {symbol, earnings_date, picked_on, ...}
-FEATURED_SENTENCES = ("profile", "happening")       # the home block shows the same two blocks
 
 
 def _f(x) -> float | None:
@@ -164,15 +161,3 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     if s2:
         sentences.append(s2)
     return {"symbol": sym, "name": ticker.name, "state": None, "sentences": sentences}
-
-
-async def featured_example(db: AsyncSession, today: date | None = None) -> dict:
-    """The home page's example: the nightly pick from system_metadata with its catalyst and pattern sentences; symbol None when none qualifies."""
-    from app.services.system_metadata_service import get_value
-    raw = await get_value(db, FEATURED_KEY)
-    pick = json.loads(raw) if raw else {}
-    if not pick.get("symbol"):
-        return {"symbol": None, "name": None, "state": None, "picked_on": None, "earnings_date": None, "rule": pick.get("rule"), "sentences": []}
-    brief = await build_briefing(db, pick["symbol"], today)
-    return {"symbol": brief["symbol"], "name": brief["name"], "state": brief.get("state"), "picked_on": pick.get("picked_on"), "earnings_date": pick.get("earnings_date"),
-            "rule": pick.get("rule"), "sentences": [s for s in brief["sentences"] if s["key"] in FEATURED_SENTENCES]}

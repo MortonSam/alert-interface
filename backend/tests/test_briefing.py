@@ -6,7 +6,6 @@ from datetime import date, timedelta
 import pytest
 
 from app.services import briefing as B
-from app.scripts.pick_featured_example import FEATURED_MIN_QUARTERS, choose_featured
 
 T = date(2026, 10, 5)             # a Monday
 NUM = re.compile(r"(?<![\d:])\d+(?:,\d{3})*(?:\.\d+)?(?![\d:])")      # numbers, not the digits of a clock time
@@ -178,20 +177,10 @@ def test_no_number_in_a_block_is_a_literal_of_its_template():
         assert isinstance(const, int)
 
 
-# ── the featured example and the route ───────────────────────────────────────
-
-def test_featured_pick_is_the_nearest_confirmed_report_with_enough_quarters_ties_to_market_cap():
-    cands = [{"symbol": "A", "earnings_date": date(2026, 10, 14), "confirmation": "estimated", "quarters": 40, "market_cap": 9e12},
-             {"symbol": "B", "earnings_date": date(2026, 10, 15), "confirmation": "confirmed", "quarters": 19, "market_cap": 9e12},
-             {"symbol": "C", "earnings_date": date(2026, 10, 16), "confirmation": "confirmed", "quarters": 20, "market_cap": 1e9},
-             {"symbol": "D", "earnings_date": date(2026, 10, 16), "confirmation": "confirmed", "quarters": 24, "market_cap": 5e9},
-             {"symbol": "E", "earnings_date": None, "confirmation": "confirmed", "quarters": 60, "market_cap": 1e12}]
-    assert choose_featured(cands)["symbol"] == "D" and FEATURED_MIN_QUARTERS == 20
-    assert choose_featured(cands[:2]) is None
-
+# ── the route ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_the_route_serves_the_two_blocks_an_inactive_state_and_the_home_block_reads_the_same_two():
+async def test_the_route_serves_the_two_blocks_and_an_inactive_state():
     from httpx import ASGITransport, AsyncClient
     from app.main import app
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -203,8 +192,7 @@ async def test_the_route_serves_the_two_blocks_an_inactive_state_and_the_home_bl
         cag = (await c.get("/api/v1/tickers/CAG/briefing"))
         assert cag.status_code == 200 and cag.json()["sentences"] == [] and cag.json()["state"]       # inactive: a state, not a page of nothing
         assert (await c.get("/api/v1/tickers/ZZNOPE/briefing")).status_code == 404
-        feat = (await c.get("/api/v1/discover/featured")).json()
-        assert set(s["key"] for s in feat["sentences"]) <= {"profile", "happening"}
+        assert (await c.get("/api/v1/discover/featured")).status_code == 404                      # the featured block is gone
 
 
 @pytest.mark.asyncio
@@ -222,3 +210,32 @@ async def test_the_builder_reads_the_move_from_the_stored_bars_with_the_seeders_
         pytest.skip("no recent MSFT reaction stored locally")
     got = move_from_bars(df, row[0], row[1])
     assert got is not None and abs(got - float(row[2])) < 0.011
+
+
+@pytest.mark.asyncio
+async def test_a_reports_confirmation_reads_the_same_on_the_overview_and_on_discover():
+    """One date can never read confirmed on one page and estimated on another: both read services.earnings_calendar.level_of
+    on the same event row. STZ is the case that was questioned; any ticker with a report inside the Discover window works."""
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+    from app.services.earnings_calendar import level_of
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        soon = (await c.get("/api/v1/discover/reporting-soon?days=14")).json()           # the page's own window
+        listed = soon if isinstance(soon, list) else next((v for v in soon.values() if isinstance(v, list)), [])
+        rows = {i["symbol"]: i for i in listed if isinstance(i, dict) and "symbol" in i}
+        sym = "STZ" if "STZ" in rows else next(iter(rows), None)
+        if sym is None:
+            pytest.skip("no report inside Discover's window locally")
+        brief = (await c.get(f"/api/v1/tickers/{sym}/briefing")).json()
+        by_symbol = (await c.get(f"/api/v1/tickers/by-symbol/{sym}")).json()
+        happening = next((s for s in brief["sentences"] if s["key"] == "happening"), None)
+        confidence = next((i["value"] for i in (happening or {}).get("inputs", []) if i["name"] == "confidence"), None)
+        if confidence is None:
+            pytest.skip(f"{sym}'s Overview is not on its next report today (another branch won)")
+        assert confidence == rows[sym]["confirmation"] == by_symbol["next_earnings_confirmation"]
+        assert B.confidence_phrase(confidence) in happening["text"]
+        assert B.confidence_phrase(rows[sym]["confirmation"]) == B.confidence_phrase(confidence)
+    # every level the shared function can return has a phrase on the Overview
+    for level in ("confirmed", "estimated", "expected_unconfirmed"):
+        assert B.confidence_phrase(level)
+    assert level_of(True, None) == "confirmed" and level_of(False, None) == "estimated" and level_of(True, date(2026, 10, 1)) == "expected_unconfirmed"
