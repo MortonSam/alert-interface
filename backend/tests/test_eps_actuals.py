@@ -6,7 +6,8 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.scripts import refresh
-from app.scripts.seed_eps_actuals import finnhub_rows
+from app.scripts.seed_eps_actuals import finnhub_rows, since_arg
+from app.scripts.dedupe_earnings_events import dedupe_plan
 from app.scripts.validate_data import PASS, WARN, check_eps_actuals_fresh, run_checks
 from app.services.eps_actuals import LOOKBACK_SESSIONS, eps_outcome, fill_plan, is_stale, match_row, sessions_back
 
@@ -66,3 +67,17 @@ async def test_validate_warns_on_a_reported_event_without_its_eps():
             await s.execute(text("DELETE FROM events WHERE ticker_id = (SELECT id FROM tickers WHERE symbol = :s)"), {"s": sym})
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
+
+
+def test_since_flag_and_the_dedupe_plan_keep_the_oldest_row_and_fill_what_it_lacks():
+    assert since_arg(["--since", "2026-09-01"]) == date(2026, 9, 1) and since_arg(["--since=2026-09-01"]) == date(2026, 9, 1) and since_arg([]) is None
+    rows = [{"id": "b", "ticker_id": "t1", "symbol": "PAYX", "event_date": date(2026, 9, 23), "created_at": datetime(2026, 9, 29, tzinfo=timezone.utc), "eps_actual": 1.34, "eps_estimate": 1.35,
+             "eps_source": "finnhub", "eps_fetched_at": NOW, "confirmation_note": None, "report_timing": "bmo", "report_timing_source": "finnhub"},
+            {"id": "a", "ticker_id": "t1", "symbol": "PAYX", "event_date": date(2026, 9, 23), "created_at": datetime(2026, 7, 6, tzinfo=timezone.utc), "eps_actual": None, "eps_estimate": None,
+             "eps_source": None, "eps_fetched_at": None, "confirmation_note": "reported per EDGAR", "report_timing": "unknown", "report_timing_source": "unknown"},
+            {"id": "c", "ticker_id": "t2", "symbol": "MU", "event_date": date(2026, 9, 30), "created_at": NOW, "eps_actual": None, "eps_estimate": None, "eps_source": None,
+             "eps_fetched_at": None, "confirmation_note": None, "report_timing": "amc", "report_timing_source": "finnhub"}]
+    plans = dedupe_plan(rows)
+    assert plans == [{"symbol": "PAYX", "event_date": date(2026, 9, 23), "keep": "a", "drop": ["b"],
+                      "fill": {"eps_actual": 1.34, "eps_estimate": 1.35, "eps_source": "finnhub", "eps_fetched_at": NOW, "report_timing": "bmo", "report_timing_source": "finnhub"}}]
+    assert dedupe_plan(rows[2:]) == []

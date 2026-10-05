@@ -26,7 +26,7 @@ from app.services.rv_store import get_servable_rv
 from app.services.ticker_aliases import resolve_symbol
 
 FEATURED_KEY = "featured_example"          # system_metadata: the home page's nightly pick, {symbol, earnings_date, picked_on, ...}
-FEATURED_SENTENCES = ("catalyst", "pattern")
+FEATURED_SENTENCES = ("profile", "happening")       # the home block shows the same two blocks
 
 
 def _f(x) -> float | None:
@@ -86,7 +86,7 @@ async def _implied(db: AsyncSession, sym: str, spot: float | None, min_date: dat
 
 
 async def build_briefing(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
-    """{symbol, name, sentences: [...]} for one ticker; sentences is empty when nothing is stored for it."""
+    """{symbol, name, sentences: [profile?, happening?]} for one ticker; empty when nothing is stored for it."""
     today = today or date.today()
     sym = await resolve_symbol(db, symbol.upper())
     ticker = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -94,17 +94,21 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         return {"symbol": sym, "name": None, "sentences": []}
     sentences: list[dict] = []
 
-    # 1. position
+    # block 1: what it is
+    prof = (await db.execute(text("SELECT short_description, sector, industry_group, industry_category, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
+    if prof:
+        s1 = B.profile_sentence(short_description=prof["short_description"], sector=prof["sector"], industry=prof["industry_category"] or prof["industry_group"],   # the category reads as a name; the group is a SIC phrase
+                                profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
+                                market_cap=_f(ticker.market_cap), market_cap_as_of=ticker.market_cap_updated_at.date() if ticker.market_cap_updated_at else None)
+        if s1:
+            sentences.append(s1)
+
+    # block 2: what's been happening
     q = await _quote(sym)
     df = await price_bars.bars(db, sym, today - timedelta(days=B.WINDOW_52W_DAYS + 7))
     facts = bar_facts(df, today)
-    rv_row, _ = await get_servable_rv(db, sym)
-    s = B.position_sentence(sym, quote_price=(q.price if q and q.state == "ok" else None), quote_ts=(q.traded_on_ts if q else None),
-                            rv_rank=_f(rv_row.rv_rank) if rv_row is not None else None, rv_as_of=rv_row.as_of_date if rv_row is not None else None, **facts)
-    if s:
-        sentences.append(s)
+    price = {"quote_price": q.price if q and q.state == "ok" else None, "quote_ts": q.traded_on_ts if q else None, **facts}
 
-    # the earnings sample: stored reactions with a 1-day move, EPS-basis-unclear quarters and excluded symbols left out
     excluded = await is_excluded(db, sym)
     mismatch = await basis_mismatch_dates(db, ticker.id)
     rows = (await db.execute(text("""
@@ -113,55 +117,29 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     sample = [] if excluded else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
     sample_as_of = sample[-1]["event_date"] if sample else None
 
-    # 2. catalyst, or the reported state inside a report's reaction window
+    reported = upcoming = None
     latest = (await db.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date <= today)
                                .order_by(Event.event_date.desc()).limit(1))).scalar_one_or_none()
     if latest is not None and B.in_reaction_window(latest.event_date, today):
         hr = next((r for r in rows if r["event_date"] == latest.event_date), None)
         timing = hr["report_timing"] if hr and hr["report_timing"] else latest.report_timing
+        actual = _f(latest.eps_actual if latest.eps_actual is not None else (hr["eps_actual"] if hr else None))
+        estimate = _f(latest.eps_estimate if latest.eps_estimate is not None else (hr["eps_estimate"] if hr else None))
         stored = _f(hr["pct_change_1d"]) if hr else None
-        sentences.append(B.reported_sentence(
-            today=today, event_date=latest.event_date, timing=timing, bars_through=facts.get("last_close_date"),
-            eps_actual=_f(latest.eps_actual if latest.eps_actual is not None else (hr["eps_actual"] if hr else None)),
-            eps_estimate=_f(latest.eps_estimate if latest.eps_estimate is not None else (hr["eps_estimate"] if hr else None)),
-            outcome=eps_outcome(_f(latest.eps_actual if latest.eps_actual is not None else (hr["eps_actual"] if hr else None)),
-                                _f(latest.eps_estimate if latest.eps_estimate is not None else (hr["eps_estimate"] if hr else None))),
-            pct_change_1d=stored if stored is not None else move_from_bars(df, latest.event_date, timing)))
+        reported = {"today": today, "event_date": latest.event_date, "timing": timing, "eps_actual": actual, "eps_estimate": estimate,
+                    "outcome": eps_outcome(actual, estimate), "bars_through": facts.get("last_close_date"),
+                    "pct_change_1d": stored if stored is not None else move_from_bars(df, latest.event_date, timing)}
     else:
         ne = await next_earnings_for(db, ticker.id, today)
-        timing = None
         if ne.date:
             ev = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
-            timing = ev if ev in B.TIMING_PHRASE else None
-        implied = await _implied(db, sym, q.price if q and q.state == "ok" else None, ne.date or today + timedelta(days=7), today)
-        avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
-        s = B.catalyst_sentence(today=today, next_date=ne.date, confirmation=ne.confirmation, note=ne.note, source=ne.source, timing=timing,
-                                avg_abs_1d=avg_abs, sample_n=len(sample), sample_as_of=sample_as_of, **implied)
-        if s:
-            sentences.append(s)
-
-    # 3. pattern
-    beats = [r for r in sample if r["outcome"] == "beat"]
-    s = B.pattern_sentence(total=len(sample), beat_count=len(beats), fell_after_beat=sum(1 for r in beats if float(r["pct_change_1d"]) < 0),
-                           as_of=sample_as_of, basis_excluded=sum(1 for r in rows if r["event_date"] in mismatch and r["pct_change_1d"] is not None))
-    if s:
-        sentences.append(s)
-
-    # 4. street
-    acts = (await db.execute(text("""
-        SELECT event_date, metadata->>'action' AS action, metadata->>'price_target' AS price_target FROM events
-        WHERE ticker_id = :t AND event_type = 'analyst_action' AND event_date >= :since"""), {"t": ticker.id, "since": today - timedelta(days=B.STREET_DAYS)})).mappings().all()
-    stats = (await db.execute(text("SELECT median_1d_upgrade, upgrade_sessions, computed_at FROM analyst_reaction_stats WHERE symbol = :s"), {"s": sym})).mappings().first()
-    s = B.street_sentence(today=today, actions=[{"date": a["event_date"], "action": a["action"], "price_target": a["price_target"]} for a in acts],
-                          median_1d_upgrade=_f(stats["median_1d_upgrade"]) if stats else None, upgrade_sessions=stats["upgrade_sessions"] if stats else None,
-                          stats_as_of=stats["computed_at"].date() if stats and stats["computed_at"] else None)
-    if s:
-        sentences.append(s)
-
-    # 5. risk
-    s = B.risk_sentence(moves=[(r["event_date"], float(r["pct_change_1d"])) for r in sample])
-    if s:
-        sentences.append(s)
+            implied = await _implied(db, sym, q.price if q and q.state == "ok" else None, ne.date, today)
+            avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
+            upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
+                        "timing": ev if ev in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
+    s2 = B.happening_sentence(sym, price=price, reported=reported, upcoming=upcoming)
+    if s2:
+        sentences.append(s2)
     return {"symbol": sym, "name": ticker.name, "sentences": sentences}
 
 

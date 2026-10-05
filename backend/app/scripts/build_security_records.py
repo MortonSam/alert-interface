@@ -71,6 +71,25 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
     return inserted, updated, changed
 
 
+PROFILE_MAX_AGE_DAYS = 30      # a company profile older than this is fetched again (descriptions and sectors change rarely)
+PROFILE_FIELDS = ("name", "short_description", "sector", "industry_category", "industry_group", "employees", "stock_exchange", "latest_filing_date")
+
+
+async def store_profile(session, symbol: str, body: dict, fetched_at) -> None:
+    """Upsert the Intrinio company profile for `symbol`, dated by this fetch."""
+    from datetime import date as _date
+    lfd = body.get("latest_filing_date")
+    await session.execute(text("""
+        INSERT INTO company_profiles (symbol, name, short_description, sector, industry_category, industry_group, employees, exchange, latest_filing_date, source, fetched_at)
+        VALUES (:s, :name, :desc, :sector, :cat, :grp, :emp, :exch, :lfd, 'intrinio', :at)
+        ON CONFLICT (symbol) DO UPDATE SET name = EXCLUDED.name, short_description = EXCLUDED.short_description, sector = EXCLUDED.sector,
+            industry_category = EXCLUDED.industry_category, industry_group = EXCLUDED.industry_group, employees = EXCLUDED.employees,
+            exchange = EXCLUDED.exchange, latest_filing_date = EXCLUDED.latest_filing_date, source = 'intrinio', fetched_at = EXCLUDED.fetched_at"""),
+        {"s": symbol, "name": body.get("name"), "desc": body.get("short_description"), "sector": body.get("sector"), "cat": body.get("industry_category"),
+         "grp": body.get("industry_group"), "emp": body.get("employees"), "exch": body.get("stock_exchange"),
+         "lfd": _date.fromisoformat(lfd[:10]) if lfd else None, "at": fetched_at})
+
+
 STALE_SESSIONS_FOR_DELISTING = 2        # a current record missing this many completed sessions (today excluded) is stale
 
 
@@ -115,6 +134,7 @@ async def main(argv: list[str]) -> int:
     symbols = sorted(set(symbols) | set(BENCHMARKS))     # SPY gives the seeder its session calendar
     async with ScriptSessionLocal() as session:
         stored_ids = dict((await session.execute(text("SELECT symbol, intrinio_security_id FROM security_records WHERE role = 'current'"))).all())
+        profile_ages = dict((await session.execute(text("SELECT symbol, fetched_at FROM company_profiles"))).all())
         all_symbols = set((await session.execute(text("SELECT symbol FROM tickers"))).scalars().all())
     if only:
         symbols = [s for s in symbols if s in {x.strip().upper() for x in only.split(",")}]
@@ -123,6 +143,8 @@ async def main(argv: list[str]) -> int:
     missing: list[str] = []
     figi_changes: list[str] = []
     renamed: dict[str, dict] = {}
+    profiles_refreshed: list[str] = []
+    profile_failures: list[str] = []
     inserted = updated = 0
     try:
         for sym in symbols:
@@ -153,6 +175,17 @@ async def main(argv: list[str]) -> int:
                 renamed[sym] = {"to": new_symbol, "record": current["id"], "dry_run": True}
             rows = plan_records(sym, current)
             resolved.append(sym)
+            # the company profile behind the Overview's "What it is", refreshed when absent or old
+            fetched = profile_ages.get(sym)
+            if write and (fetched is None or (datetime.now(timezone.utc) - fetched).days >= PROFILE_MAX_AGE_DAYS):
+                try:
+                    body = await client._get(f"/companies/{sym}", {})
+                    async with ScriptSessionLocal() as session:
+                        await store_profile(session, sym, body, datetime.now(timezone.utc))
+                        await session.commit()
+                    profiles_refreshed.append(sym)
+                except Exception as exc:
+                    profile_failures.append(f"{sym}: {str(exc)[:80]}")
             if write:
                 async with ScriptSessionLocal() as session:
                     ins, upd, changed = await upsert(session, rows, current)
@@ -177,7 +210,8 @@ async def main(argv: list[str]) -> int:
             await session.commit()
         await record_step_fields(STEP_LABEL, {"resolved": len(resolved), "missing": missing[:50], "inserted": inserted, "updated": updated,
                                               "figi_changes": figi_changes, "requests": client.request_count,
-                                              "renamed": renamed, "deactivated_this_run": deactivated, "error": None})
+                                              "renamed": renamed, "deactivated_this_run": deactivated,
+                                              "profiles_refreshed": len(profiles_refreshed), "profile_failures": profile_failures[:40], "error": None})
     elif renamed:
         print("  renames the write would apply:", renamed)
     return 0

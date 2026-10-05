@@ -11,7 +11,7 @@ const GLOSSARY: Record<string, string> = {
   "atm strike":
     "The strike price closest to where the stock trades right now.",
   "implied move":
-    "How much the options market expects the stock to move, in either direction, by expiration.",
+    "How much the options market expects the stock to move, in either direction, by expiration. It comes from the price of the at-the-money straddle and is a size, not a direction.",
   "implied range":
     "The price band the market expects the stock to stay within by expiration.",
   "realized volatility":
@@ -80,6 +80,14 @@ const GLOSSARY: Record<string, string> = {
     "Realized volatility measures how much the stock has actually moved recently, based on daily price changes. Higher RV means the stock has been swinging more than usual.",
   atm:
     "At the money - the strike price closest to where the stock trades right now. ATM options have the highest time value and are the most sensitive to price changes.",
+  "52-week high":
+    "The highest closing price of the past year, from the stored daily bars. The distance below it says how far the stock has come off its best level, not whether it will get back there.",
+  "after the close":
+    "The company reports after the market closes, so the first trading on the news is the next session. The 1-day move for such a report runs from the report day's close to the next session's close.",
+  "before the open":
+    "The company reports before the market opens, so that same session trades on the news. The 1-day move for such a report runs from the prior close to the report day's close.",
+  "1-day move":
+    "The stock's percentage change over the one session that first trades on the report, close to close. For an after-close report that is the next session; for a before-open report it is the report day itself.",
 };
 
 export default GLOSSARY;

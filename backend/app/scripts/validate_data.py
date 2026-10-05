@@ -2137,6 +2137,23 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── One earnings event per ticker and date ────────────────────────────────────────────────────────────
+
+async def check_earnings_events_unique(session) -> CheckResult:
+    """ERROR when a ticker has two earnings events on one date, or when the unique index that prevents it is missing
+    (scripts/dedupe_earnings_events --write removes the duplicates and creates the index)."""
+    dups = (await session.execute(text("""
+        SELECT t.symbol, e.event_date, count(*) FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE e.event_type = 'earnings' GROUP BY t.symbol, e.event_date HAVING count(*) > 1 ORDER BY 2 DESC, 1"""))).all()
+    has_index = (await session.execute(text("SELECT 1 FROM pg_indexes WHERE indexname = 'uq_events_earnings_ticker_date'"))).scalar()
+    rows = [f"{r[0]} {r[1].isoformat()}: {r[2]} rows" for r in dups]
+    if not has_index:
+        rows.append("unique index uq_events_earnings_ticker_date is missing (run dedupe_earnings_events --write)")
+    if rows:
+        return CheckResult("earnings_events_unique", ERROR, f"{len(dups)} report(s) stored twice" + ("" if has_index else "; no unique index"), rows[:40])
+    return CheckResult("earnings_events_unique", PASS, "One earnings event per ticker and date, enforced by uq_events_earnings_ticker_date")
+
+
 # ── EPS actuals arrive the night of the report ─────────────────────────────────────────────────────────
 
 async def check_eps_actuals_fresh(session) -> CheckResult:
@@ -2195,6 +2212,7 @@ PENDING_REPAIRS = (
     ("fomc_events_unique", (ERROR,), "python -m app.scripts.repair_fomc_dates --write"),
     ("duplicate_earnings_reactions", (ERROR, WARN), "python -m app.scripts.dedupe_earnings_reactions --write"),
     ("refused_earnings_dates", (ERROR,), "python -m app.scripts.repair_refused_dates --write"),
+    ("earnings_events_unique", (ERROR,), "python -m app.scripts.dedupe_earnings_events --write"),
 )
 
 
@@ -2794,6 +2812,8 @@ CHECKS = [
     check_pending_repairs,
     # EPS actuals the night of the report
     check_eps_actuals_fresh,
+    # one earnings event per ticker and date
+    check_earnings_events_unique,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

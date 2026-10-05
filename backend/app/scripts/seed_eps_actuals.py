@@ -3,6 +3,7 @@ last LOOKBACK_SESSIONS sessions, from Finnhub's earnings calendar (one call for 
 as the second source where Finnhub has nothing. A value already stored is never overwritten unless it was null.
 
     python -m app.scripts.seed_eps_actuals
+    python -m app.scripts.seed_eps_actuals --since 2026-09-01     # a one-time backfill of older events validate warns about
 """
 from __future__ import annotations
 
@@ -64,9 +65,19 @@ def yfinance_rows(symbol: str) -> dict[date, tuple[float | None, float | None]]:
     return out
 
 
-async def run(today: date | None = None) -> int:
+def since_arg(argv: list[str]) -> date | None:
+    """--since YYYY-MM-DD, else None (the nightly's LOOKBACK_SESSIONS window)."""
+    for i, a in enumerate(argv):
+        if a.startswith("--since="):
+            return date.fromisoformat(a.split("=", 1)[1])
+        if a == "--since" and i + 1 < len(argv):
+            return date.fromisoformat(argv[i + 1])
+    return None
+
+
+async def run(today: date | None = None, since: date | None = None) -> int:
     today = today or date.today()
-    start = sessions_back(today, LOOKBACK_SESSIONS)
+    start = since or sessions_back(today, LOOKBACK_SESSIONS)
     now = datetime.now(timezone.utc)
     async with ScriptSessionLocal() as s:
         events = (await s.execute(
@@ -82,8 +93,15 @@ async def run(today: date | None = None) -> int:
         if due:
             client = FinnhubClient()
             try:
-                payload = await client.get_earnings_calendar(start.isoformat(), today.isoformat())
-                by_symbol = finnhub_rows(payload.get("earningsCalendar") or [])
+                from datetime import timedelta
+                cursor = start
+                entries: list[dict] = []
+                while cursor <= today:
+                    stop = min(cursor + timedelta(days=89), today)
+                    payload = await client.get_earnings_calendar(cursor.isoformat(), stop.isoformat())
+                    entries += payload.get("earningsCalendar") or []
+                    cursor = stop + timedelta(days=1)
+                by_symbol = finnhub_rows(entries)
             except Exception as exc:
                 error = f"finnhub calendar: {exc}"
                 print(f"  [WARN] {error}", flush=True)
@@ -117,4 +135,4 @@ async def run(today: date | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(run()))
+    sys.exit(asyncio.run(run(since=since_arg(sys.argv[1:]))))
