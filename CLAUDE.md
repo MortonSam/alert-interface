@@ -7,6 +7,10 @@
 - Use the dev server's own compile output (watch for "Compiled successfully" or errors in the terminal).
 - If a production build is needed, stop the dev server first (`kill` the port 3000 process), then build, then restart.
 
+## Frontend Build Check
+
+**Every commit that touches `frontend/` runs `npm run build` in `frontend/` first**, with the dev server stopped before it and restarted after it (the two share `.next`; see above). If `next build` exits non-zero, the commit does not happen until it exits 0. Type errors only surface in the production build, and a bad push leaves Vercel serving the previous deploy.
+
 ## Backend Import Check
 
 **After any backend edit, run `docker compose exec backend python -c "import app.main"` before committing.** Python syntax errors and decorator misordering only surface at import time. A bad push crashes production at boot with no fallback.
