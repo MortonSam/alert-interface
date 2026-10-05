@@ -76,11 +76,14 @@ export default function Home() {
           </p>
         </section>
 
-        {/* ── 2. The counts, then one block from a real stock page: stored counts dated by their newest rows, and
-               the same component and stored stat the ticker page shows ── */}
-        <section className="flex flex-col items-center justify-center gap-16 px-4 sm:px-8 py-24">
-          <SiteCounters />
-          <RealStockPage />
+        {/* ── 2. The counts and the featured stock block, one section. Each child renders nothing when it has
+               nothing (the counters until they arrive, the block when no ticker qualifies), and the spacing between
+               them exists only when both are present: nothing is reserved. ── */}
+        <section className="px-4 sm:px-8 py-24">
+          <div className="max-w-3xl w-full mx-auto space-y-16">
+            <SiteCounters />
+            <RealStockPage />
+          </div>
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}

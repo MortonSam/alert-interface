@@ -70,10 +70,14 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
       analyst_actions: 170645, analyst_actions_since: "2011-12-08" });
     expect(rows.map((r) => [r.label, r.value, r.asOf])).toEqual([
       ["Active S&P 500 stocks covered", 503, "As of Oct 5, 2026"],
-      ["Earnings reactions measured", 9894, "As of Sep 11, 2026"],
-      ["Fed-day reactions measured", 20650, "As of Sep 17, 2026"],
-      ["Analyst actions measured", 9781, "As of Sep 22, 2026"],
+      ["Earnings reactions measured", 9894, "Through Sep 11, 2026"],        // the newest report measured, not a snapshot date
+      ["Fed-day reactions measured", 20650, "Through Sep 17, 2026"],
+      ["Analyst actions measured", 9781, "Through Sep 22, 2026"],
     ]);
+    const home = read("app/page.tsx");
+    const section = home.slice(home.indexOf("<SiteCounters />") - 400, home.indexOf("<RealStockPage />") + 40);
+    expect(section).toContain("space-y-16");                                                   // spacing only between present children
+    expect(section).not.toMatch(/min-h-|h-\[|gap-/);                                          // nothing reserved when a child renders nothing
     expect(rows.some((r) => r.label.includes("since"))).toBe(false);
     expect(counterRows({ active_stocks_covered: 1, active_stocks_as_of: null, earnings_reports_measured: 0, earnings_reports_as_of: null, fomc_reactions_measured: 0,
       fomc_reactions_as_of: null, analyst_reactions_measured: 0, analyst_reactions_as_of: null, analyst_actions: 0, analyst_actions_since: null })[0].asOf).toBeNull();
