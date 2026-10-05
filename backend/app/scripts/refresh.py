@@ -73,6 +73,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Analyst reaction stats",         ["python", "-m", "app.scripts.compute_analyst_reactions"]),
     # rows still without a price source, and windows touching a session the calendar corrected, from the stored bars
     ("Recompute reactions (Intrinio)", ["python", "-m", "app.scripts.recompute_reactions_intrinio", "--nightly"]),
+    ("Featured example",               ["python", "-m", "app.scripts.pick_featured_example"]),
     ("Sector peer snapshot",            ["python", "-m", "app.scripts.compute_sector_peers"]),
     ("Magnitude trend snapshot",        ["python", "-m", "app.scripts.compute_magnitude_trends"]),
     # RV ranks first: snapshot_iv reads realized vol from the rv_snapshots row written here.

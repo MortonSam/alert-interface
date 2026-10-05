@@ -48,11 +48,11 @@ def choose(events: list[Event], today: date) -> tuple[date | None, str | None, s
     return pick.event_date, src, level_of(pick.is_confirmed, pick.unresolved_since), pick.confirmation_note
 
 
-async def batch_next_earnings(session: AsyncSession, ticker_ids: list) -> dict:
-    """{ticker_id: NextEarnings} for the given tickers."""
+async def batch_next_earnings(session: AsyncSession, ticker_ids: list, today: date | None = None) -> dict:
+    """{ticker_id: NextEarnings} for the given tickers, judged as of `today` (the real date unless a caller fixes one)."""
     if not ticker_ids:
         return {}
-    today = date.today()
+    today = today or date.today()
     tickers = (await session.execute(select(Ticker.id, Ticker.earnings_checked_at).where(Ticker.id.in_(ticker_ids)))).all()
     out = {t.id: NextEarnings(checked_at=t.earnings_checked_at) for t in tickers}
     rows = (await session.execute(
@@ -71,5 +71,5 @@ async def batch_next_earnings(session: AsyncSession, ticker_ids: list) -> dict:
     return out
 
 
-async def next_earnings_for(session: AsyncSession, ticker_id) -> NextEarnings:
-    return (await batch_next_earnings(session, [ticker_id])).get(ticker_id, NextEarnings())
+async def next_earnings_for(session: AsyncSession, ticker_id, today: date | None = None) -> NextEarnings:
+    return (await batch_next_earnings(session, [ticker_id], today)).get(ticker_id, NextEarnings())

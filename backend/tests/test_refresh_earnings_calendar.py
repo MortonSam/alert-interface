@@ -97,7 +97,7 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
         from app.services.next_earnings import batch_next_earnings
         async with ScriptSessionLocal() as s:
             ids = {t.symbol: t.id for t in (await s.execute(select(Ticker).where(Ticker.symbol.in_(SYMS)))).scalars().all()}
-            picked = await batch_next_earnings(s, [ids[NKE], ids[LONE], ids[NONE]])
+            picked = await batch_next_earnings(s, [ids[NKE], ids[LONE], ids[NONE]], today=TODAY)   # judged on the fixture's day, not the real one
         nke, lone, none = picked[ids[NKE]], picked[ids[LONE]], picked[ids[NONE]]
         assert (nke.date, nke.source, nke.confirmation, nke.note) == (date(2026, 10, 1), "yfinance", "estimated", "estimated (Yahoo Finance)")
         assert (lone.date, lone.confirmation) == (date(2026, 9, 28), "expected_unconfirmed")

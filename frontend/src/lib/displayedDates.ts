@@ -5,6 +5,8 @@
 export interface DateRule { file: string; forbid: RegExp; because: string }
 
 export const DATE_RULES: DateRule[] = [
+  { file: "components/Briefing.tsx", forbid: /new Date\(|Date\.now\(|toLocaleDateString\(\)|last_refreshed_at/, because: "a briefing date comes from its sentence or input, never from the request time" },
+  { file: "components/RealStockPage.tsx", forbid: /new Date\(|Date\.now\(|REAL_PAGE_SYMBOL|"MU"/, because: "the featured example is the nightly rule's pick, never a typed symbol or today's date" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /today&apos;s range|today's range/, because: "the band is labelled by the chain date" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /as of \{fmtQuoteTime\(/, because: "a quote shows its date and time (fmtQuoteDateTime)" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /"1d": "today"/, because: "the 1d change is since the prior close, not necessarily today" },
@@ -20,6 +22,9 @@ export const DATE_RULES: DateRule[] = [
 ];
 
 export const DATE_REQUIREMENTS: { file: string; require: RegExp; because: string }[] = [
+  { file: "components/Briefing.tsx", require: /sentenceReceipt\(s\)/, because: "every briefing sentence shows how it was computed and its own as-of date, from the API" },
+  { file: "components/Briefing.tsx", require: /sourceLine\(inp\)/, because: "every input is listed with its own date and source" },
+  { file: "components/RealStockPage.tsx", require: /insightAsOfLine\(view\.picked_on\)/, because: "the featured example names the night the rule chose it, from the stored pick" },
   { file: "app/tickers/[symbol]/page.tsx", require: /Last bar \{chartLastBar\}/, because: "the chart names its last bar" },
   { file: "app/tickers/[symbol]/page.tsx", require: /putCall\.snapshot_date/, because: "the put/call ratio shows its snapshot date" },
   { file: "app/tickers/[symbol]/page.tsx", require: /realizedVol\?\.as_of/, because: "RV and RV rank show their snapshot date" },

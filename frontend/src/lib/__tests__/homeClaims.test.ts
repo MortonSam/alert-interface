@@ -80,30 +80,25 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(counterRows(null)).toEqual([]);
   });
 
-  it("the real-page block is the ticker page's own headline component on the stored MU stat, fetched on the server", async () => {
+  it("the real-page block is the nightly rule's pick rendered through the ticker page's own Briefing component, fetched on the server", async () => {
     const home = read("app/page.tsx");
     expect(home).toContain("<RealStockPage />");
-    expect(home).toContain("<SiteCounters />");
-    expect(home.indexOf("<SiteCounters />")).toBeLessThan(home.indexOf("<RealStockPage />"));
-    expect(home).not.toMatch(/stat-number|since 2011|Analyst actions since/);
     const block = read("components/RealStockPage.tsx");
     expect(block).toContain("export default async function RealStockPage()");
-    expect(block).toContain("/v1/discover/insight/${REAL_PAGE_SYMBOL}");
-    expect(block).toContain('REAL_PAGE_SYMBOL = "MU"');
-    expect(block).toContain("if (!hasInsight(view)) return null;");
-    expect(block).toContain("<InsightHeadline insight={view.insight} rule={view.rule} asOf={view.as_of} />");
-    expect(block).toContain("See {REAL_PAGE_NAME}&apos;s full page");
-    expect(block).not.toMatch(/[0-9]+%|\$[0-9]/);                                   // no typed figure
+    expect(block).toContain("/v1/discover/featured");
+    expect(block).toContain("<Briefing sentences={view.sentences} />");
+    expect(block).toContain("if (!view) return null;");
+    expect(block).toContain("See {view.name ?? view.symbol}&apos;s full page");
+    expect(block).not.toMatch(/REAL_PAGE_SYMBOL|"MU"|InsightHeadline|[0-9]+%|\$[0-9]/);                 // no typed symbol or figure
     const ticker = read("app/tickers/[symbol]/page.tsx");
-    expect(ticker).toContain("<InsightHeadline insight={insight} rule={insightRule} asOf={insightAsOf} />");
-    expect(ticker).not.toContain("How this was computed: {insightRule}");             // one rendering, not two
-    const { computedHowLine, insightAsOfLine, hasInsight } = await import("@/lib/insightHeadline");
+    expect(ticker).toContain("<Briefing sentences={briefing.sentences} />");
+    expect(ticker).toContain("api.tickers.briefing(upperSymbol)");
+    expect(ticker).toContain('data-slot="question-strip"');                                             // the slot for a later block
+    expect(ticker).not.toMatch(/InsightHeadline|api\.discover\.insight/);
+    const { computedHowLine, insightAsOfLine } = await import("@/lib/insightHeadline");
     expect(computedHowLine("Compared this stock's beat rate to the S&P 500 median beat rate")).toBe("How this was computed: Compared this stock's beat rate to the S&P 500 median beat rate");
     expect(computedHowLine(null)).toBeNull();
     expect(insightAsOfLine("2026-09-24")).toBe("As of Sep 24, 2026");
     expect(insightAsOfLine(null)).toBeNull();
-    expect(hasInsight({ insight: "x", rule: null, as_of: null })).toBe(true);
-    expect(hasInsight({ insight: null, rule: null, as_of: null })).toBe(false);
-    expect(hasInsight(null)).toBe(false);
   });
 });

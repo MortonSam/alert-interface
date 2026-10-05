@@ -1988,6 +1988,16 @@ async def get_put_call(
     )
 
 
+@router.get("/{symbol}/briefing")
+async def get_briefing(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """The overview briefing: ordered sentences from stored rows, each with its rule, date and inputs (services/briefing)."""
+    from app.services.briefing_build import build_briefing
+    out = await build_briefing(db, symbol)
+    if out["name"] is None and not out["sentences"]:
+        raise HTTPException(status_code=404, detail=f"Ticker {symbol.upper()} not found")
+    return out
+
+
 @router.get("/by-symbol/{symbol}", response_model=TickerRead)
 async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) -> TickerRead:
     """Look up a single ticker by symbol. An old symbol resolves to the ticker's current one. Returns 404 if not found."""

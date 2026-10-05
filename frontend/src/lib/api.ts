@@ -1001,6 +1001,33 @@ export interface SystemStatus {
   cadence?: Cadence | null;
 }
 
+export interface BriefingInput {
+  name: string;
+  value: string;
+  as_of: string | null;      // the date of the row the value came from (YYYY-MM-DD, or a quote time)
+  source: string | null;
+}
+
+export interface BriefingSentence {
+  key: "position" | "catalyst" | "pattern" | "street" | "risk" | string;
+  text: string;
+  rule: string;              // how it was computed, rendered from the backend's constants
+  as_of: string | null;      // the newest date among its inputs
+  inputs: BriefingInput[];
+}
+
+export interface BriefingResponse {
+  symbol: string;
+  name: string | null;
+  sentences: BriefingSentence[];
+}
+
+export interface FeaturedExample extends BriefingResponse {
+  picked_on: string | null;      // the night the rule chose it
+  earnings_date: string | null;
+  rule: string | null;
+}
+
 export interface SiteStats {
   active_stocks_covered: number;
   active_stocks_as_of: string | null;          // YYYY-MM-DD: the newest ticker-row update among active index members
@@ -1040,6 +1067,7 @@ export interface Watchlist {
 
 export const api = {
   tickers: {
+    briefing: (symbol: string) => request<BriefingResponse>(`/tickers/${encodeURIComponent(symbol)}/briefing`),
     list: (activeOnly = true) =>
       request<Ticker[]>(`/tickers?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),
@@ -1189,6 +1217,7 @@ export const api = {
       request<LatestPickResponse>(`/discover/latest-pick`),
     insight: (symbol: string) =>
       request<{ insight: string | null; rule: string | null; as_of: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
+    featured: () => request<FeaturedExample>(`/discover/featured`),
   },
 
   reactions: {

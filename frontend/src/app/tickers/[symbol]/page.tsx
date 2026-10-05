@@ -46,7 +46,8 @@ import { capture } from "@/lib/analytics";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
-import { InsightHeadline } from "@/components/InsightHeadline";
+import { Briefing } from "@/components/Briefing";
+import { hasBriefing, type BriefingResponse } from "@/lib/briefing";
 import StructuredNoteView from "@/components/StructuredNoteView";
 
 // Extracted components
@@ -1444,10 +1445,8 @@ export default function TickerPage() {
   const [marksAsOf, setMarksAsOf]     = useState<Date | null>(null);
   const [marksRefreshing, setMarksRefreshing] = useState(false);
 
-  // Insight
-  const [insight, setInsight] = useState<string | null>(null);
-  const [insightRule, setInsightRule] = useState<string | null>(null);
-  const [insightAsOf, setInsightAsOf] = useState<string | null>(null);
+  // Overview briefing: templated sentences from stored rows, each with its receipt
+  const [briefing, setBriefing] = useState<BriefingResponse | null>(null);
 
   // Watchlist
   const [watched, setWatched] = useState<boolean | null>(null); // null = loading
@@ -1603,7 +1602,7 @@ export default function TickerPage() {
   useEffect(() => {
     api.tickers.quote(upperSymbol).then(setQuote).catch(() => null);
     api.system.health().then(setHealth).catch(() => {});
-    api.discover.insight(upperSymbol).then(r => { setInsight(r.insight); setInsightRule(r.rule ?? null); setInsightAsOf(r.as_of ?? null); }).catch(() => {});
+    api.tickers.briefing(upperSymbol).then(setBriefing).catch(() => setBriefing(null));
   }, [upperSymbol]);
 
   useEffect(() => {
@@ -1990,10 +1989,12 @@ export default function TickerPage() {
         {/* Section nav */}
         <SectionNav sections={sections} />
 
-        {/* Overview kicker + insight dek */}
+        {/* Overview kicker + briefing: templated sentences from stored rows, each with its receipt */}
         <div className="mt-10 mb-16">
           <SectionKicker index="01" label="Overview" />
-          {insight && <InsightHeadline insight={insight} rule={insightRule} asOf={insightAsOf} />}
+          {hasBriefing(briefing) && <Briefing sentences={briefing.sentences} />}
+          {/* QUESTION STRIP SLOT: the question strip renders here in a later block; nothing is mounted yet. */}
+          <div data-slot="question-strip" aria-hidden="true" />
         </div>
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
