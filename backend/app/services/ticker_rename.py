@@ -27,15 +27,23 @@ def canonical_symbol(symbol: str | None) -> str:
 
 
 async def unique_keys(session, table: str, column: str) -> list[list[str]]:
-    """The other columns of every unique index on `table` that includes `column` (partial indexes included)."""
+    """The other columns of every unique index on `table` that includes `column`. A partial index contributes the
+    columns its predicate names too (uq_events_earnings_ticker_date on (ticker_id, event_date) WHERE event_type =
+    'earnings' is a key on event_type and event_date), so rows of another type never collide through it."""
+    import re
     rows = (await session.execute(text("""
-        SELECT array_agg(a.attname ORDER BY k.ord) FROM pg_index i
+        SELECT array_agg(a.attname ORDER BY k.ord), pg_get_expr(i.indpred, i.indrelid) FROM pg_index i
         JOIN pg_class c ON c.oid = i.indrelid
         JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ord) ON true
         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
         WHERE i.indisunique AND c.relname = :t AND c.relnamespace = 'public'::regnamespace
-        GROUP BY i.indexrelid"""), {"t": table})).scalars().all()
-    keys = [[c for c in cols if c != column] for cols in rows if column in cols]
+        GROUP BY i.indexrelid, i.indpred, i.indrelid"""), {"t": table})).all()
+    keys = []
+    for cols, pred in rows:
+        if column not in cols:
+            continue
+        pred_cols = [c for c in re.findall(r"\(?\b([a-z_]+)\b\s*=", pred or "") if c not in cols]
+        keys.append(pred_cols + [c for c in cols if c != column])
     if not keys and table in NATURAL_KEYS:
         keys = [NATURAL_KEYS[table]]
     return keys
