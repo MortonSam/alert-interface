@@ -34,6 +34,7 @@ from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Recompute reactions (Intrinio)"
 TOLERANCE_PP = Decimal("0.01")
+BARS_BATCH = 50          # symbols whose bars are read in one query
 LARGEST = 10
 VALUE_KEYS = {"earnings": ("close_before", "open_after", "close_after", "pct_change_1d", "pct_change_3d", "pct_change_5d", "volume_after"),
               "fomc": ("close_before", "open_after", "close_after", "pct_change_1d", "pct_change_3d", "pct_change_5d", "volume_after"),
@@ -110,7 +111,7 @@ async def run(argv: list[str]) -> int:
             select hr.id, t.symbol, hr.event_type::text as event_type, hr.event_date, hr.report_timing, hr.close_before, hr.open_after, hr.close_after,
                    hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d, hr.computation_version, hr.price_source
             from historical_reactions hr join tickers t on t.id = hr.ticker_id order by t.symbol, hr.event_type, hr.event_date"""))).mappings().all()
-    spy = price_bars.history_sync(REFERENCE_SYMBOL, STORED_START)
+    spy = price_bars.history_sync(REFERENCE_SYMBOL, STORED_START)          # one query; the session calendar
     if spy.empty:
         print(f"{STEP_LABEL}: no {REFERENCE_SYMBOL} bars stored; nothing can be computed")
         return 1
@@ -123,11 +124,18 @@ async def run(argv: list[str]) -> int:
     tallies = {t: Tally() for t in VALUE_KEYS}
     updates: list[dict] = []
     stored_marks: list = []
-    for sym in sorted(by):
-        hist = price_bars.history_sync(sym, STORED_START)
-        dates = _build_date_cache(hist) if not hist.empty else np.array([])
-        async with ScriptSessionLocal() as s:
-            kept = await price_bars.stored_history_dates(s, sym, [r["event_date"] for r in by[sym]], sessions)
+    records = price_bars.record_map_sync()                     # security_records once, not once per ticker
+    symbols = sorted(by)
+    frames: dict[str, object] = {}
+    for i in range(0, len(symbols), BARS_BATCH):               # bars for many symbols per query
+        frames.update(price_bars.bulk_bars_sync(symbols[i:i + BARS_BATCH], STORED_START))
+    for sym in symbols:
+        hist = frames.get(sym)
+        dates = _build_date_cache(hist) if hist is not None and not hist.empty else np.array([])
+        if hist is None:
+            import pandas as pd
+            hist = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+        kept = records.stored_history_dates(sym, [r["event_date"] for r in by[sym]], sessions)
         for r in by[sym]:
             t = tallies[r["event_type"]]
             t.rows += 1

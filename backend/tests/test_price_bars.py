@@ -70,6 +70,9 @@ async def test_sparkline_chart_and_bulk_readers_serve_adjusted_closes_from_the_s
         assert price_bars.INTRADAY_PERIODS == ("1d", "7d")
         bulk = price_bars.bulk_closes_sync([SYM, "ZZNONE"], date(2024, 6, 1))
         assert set(bulk) == {SYM} and list(bulk[SYM].columns) == ["Close", "Volume"] and len(bulk[SYM]) == 6
+        full = price_bars.bulk_bars_sync([SYM], date(2024, 6, 6), date(2024, 6, 7))
+        assert list(full[SYM].columns) == ["Open", "High", "Low", "Close", "Volume"] and len(full[SYM]) == 2
+        assert abs(full[SYM]["Close"].iloc[-1] - 1208.88 * 0.1 * 0.9999178914525) < 1e-6      # still adjusted by the later split
         single = price_bars.closes_sync(SYM, date(2024, 6, 10))
         assert len(single) == 3 and price_bars.closes_sync("ZZNONE", date(2024, 6, 10)) is None
     finally:
@@ -113,8 +116,10 @@ async def test_rows_on_a_stored_history_span_are_found_and_stamped_without_touch
             await s.commit()
         import numpy as np
         sessions = np.array([date(2022, 1, 25), date(2022, 1, 26), date(2022, 2, 1), date(2022, 2, 2), date(2022, 5, 2), date(2022, 5, 3)], dtype=object)
+        price_bars.reset_record_map()                 # the map is loaded once per process; the rows above are new
         async with ScriptSessionLocal() as s:
             kept = await price_bars.stored_history_dates(s, sym, [date(2022, 1, 26), date(2022, 2, 2), date(2022, 5, 3)], sessions)
+            assert len((await price_bars.record_map(s)).by) > 500 and price_bars.record_map_sync().stored_history_floor("PSKY") is not None
             assert kept == {date(2022, 1, 26), date(2022, 2, 2)}          # 02-02's prior session 02-01 is in the span
             assert await price_bars.stored_history_floor(s, sym) == date(2022, 1, 26)
             assert await price_bars.mark_stored_history(s, tid, EventType.EARNINGS, kept) == 2
@@ -129,6 +134,15 @@ async def test_rows_on_a_stored_history_span_are_found_and_stamped_without_touch
             await s.execute(text("DELETE FROM security_records WHERE symbol = :s"), {"s": sym})
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
+        price_bars.reset_record_map()
+
+
+def test_bulk_bars_read_many_symbols_in_one_query_and_the_recompute_reads_in_batches():
+    import inspect
+    from app.scripts import recompute_reactions_intrinio as rr
+    src = inspect.getsource(rr.run)
+    assert "record_map_sync()" in src and "bulk_bars_sync(" in src and "stored_history_dates(s," not in src
+    assert rr.BARS_BATCH >= 25
 
 
 async def _no_span_dates(sym):

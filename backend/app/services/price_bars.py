@@ -7,7 +7,9 @@ dividend after the fetch adjusts the past the same way yfinance's auto_adjust di
 seeders their session calendar.
 
 Sync readers serve the seeders and executors (they open their own short connection); async readers take a session.
-Nothing here fetches from the network: an empty frame means no stored bar, and the caller says so.
+Bulk readers take many symbols in one query; the record map (security_records) is loaded once per process and
+answers every stored-history question without a round trip. Nothing here fetches from the network: an empty frame
+means no stored bar, and the caller says so.
 """
 from __future__ import annotations
 
@@ -69,18 +71,21 @@ def history_sync(symbol: str, lookback: date) -> pd.DataFrame:
 
 def bulk_closes_sync(symbols: list[str], start: date) -> dict[str, pd.DataFrame]:
     """{symbol: DataFrame[Close, Volume]} adjusted, for the realized-vol job; symbols without bars are absent."""
+    return {sym: df[["Close", "Volume"]] for sym, df in bulk_bars_sync(symbols, start).items()}
+
+
+def bulk_bars_sync(symbols: list[str], start: date | None = None, end: date | None = None) -> dict[str, pd.DataFrame]:
+    """{symbol: adjusted bars} for many symbols in one query; symbols without bars are absent."""
+    more, params = "", {"syms": list(symbols)}
+    if start is not None:
+        more, params["a"] = " AND date >= :a", start
     with _engine().connect() as conn:
         rows = conn.execute(text("SELECT symbol, date, open, high, low, close, volume, factor, split_ratio FROM price_bars_shadow "
-                                 "WHERE symbol = ANY(:syms) AND date >= :a ORDER BY symbol, date"), {"syms": list(symbols), "a": start}).all()
+                                 f"WHERE symbol = ANY(:syms){more} ORDER BY symbol, date"), params).all()
     by: dict[str, list] = {}
     for r in rows:
         by.setdefault(r.symbol, []).append(r)
-    out = {}
-    for sym, rs in by.items():
-        df = _frame(rs, start, None)
-        if not df.empty:
-            out[sym] = df[["Close", "Volume"]]
-    return out
+    return {sym: df for sym, rs in by.items() if not (df := _frame(rs, start, end)).empty}
 
 
 def closes_sync(symbol: str, start: date) -> pd.DataFrame | None:
@@ -129,30 +134,73 @@ def chart_history_daily_sync(symbol: str, period: str, today: date | None = None
     return {"history": history, "start_price": history[0]["close"] if history else None}
 
 
-# ── stored-history spans: rows kept as stored, never recomputed ───────────────
+# ── the record map: security_records loaded once per process ─────────────────
+
+_RECORDS_SQL = """select symbol, intrinio_security_id, figi, composite_figi, name, valid_from, valid_to, role, source from security_records"""
+
+
+class RecordMap:
+    """Every security record, by symbol, loaded once per process. Answers stored-history questions without a query."""
+
+    def __init__(self, rows):
+        from app.services.security_records import Record
+        self.by: dict[str, list] = {}
+        for r in rows:
+            self.by.setdefault(r[0], []).append(Record(*r))
+
+    def stored_history_floor(self, symbol: str) -> date | None:
+        """The first day of the symbol's earliest stored_history span, or None."""
+        starts = [r.valid_from for r in self.by.get(symbol, []) if r.role == "stored_history"]
+        return min(starts) if starts else None
+
+    def stored_history_dates(self, symbol: str, event_dates, sessions) -> set[date]:
+        """The event dates (of those given) whose row rests on a stored_history span: the event day or the session
+        before it falls in a span (security_records.rests_on_stored_history)."""
+        import numpy as np
+        from app.services.security_records import rests_on_stored_history
+        records = self.by.get(symbol, [])
+        if not any(r.role == "stored_history" for r in records):
+            return set()
+        out = set()
+        for d in event_dates:
+            earlier = sessions[sessions < d] if sessions is not None and len(sessions) else np.array([])
+            before = earlier[-1] if len(earlier) else None
+            if rests_on_stored_history(records, d, before):
+                out.add(d)
+        return out
+
+
+_record_map: RecordMap | None = None
+
+
+async def record_map(session) -> RecordMap:
+    """The process's record map, loaded on first use (one query per process)."""
+    global _record_map
+    if _record_map is None:
+        _record_map = RecordMap((await session.execute(text(_RECORDS_SQL))).all())
+    return _record_map
+
+
+def record_map_sync() -> RecordMap:
+    global _record_map
+    if _record_map is None:
+        with _engine().connect() as conn:
+            _record_map = RecordMap(conn.execute(text(_RECORDS_SQL)).all())
+    return _record_map
+
+
+def reset_record_map() -> None:
+    """Forget the cached map (tests, or after the records step rewrites the table in the same process)."""
+    global _record_map
+    _record_map = None
+
 
 async def stored_history_dates(session, symbol: str, event_dates, sessions) -> set[date]:
-    """The event dates (of those given) whose row rests on a stored_history span: the event day or the session
-    before it falls in a span (security_records.rests_on_stored_history)."""
-    from app.services.security_records import Record, rests_on_stored_history
-    rows = (await session.execute(text("""select symbol, intrinio_security_id, figi, composite_figi, name, valid_from, valid_to, role, source
-                                          from security_records where symbol = :s"""), {"s": symbol})).all()
-    records = [Record(*r) for r in rows]
-    if not any(r.role == "stored_history" for r in records):
-        return set()
-    import numpy as np
-    out = set()
-    for d in event_dates:
-        earlier = sessions[sessions < d] if sessions is not None and len(sessions) else np.array([])
-        before = earlier[-1] if len(earlier) else None
-        if rests_on_stored_history(records, d, before):
-            out.add(d)
-    return out
+    return (await record_map(session)).stored_history_dates(symbol, event_dates, sessions)
 
 
 async def stored_history_floor(session, symbol: str) -> date | None:
-    """The first day of the symbol's earliest stored_history span, or None."""
-    return (await session.execute(text("select min(valid_from) from security_records where symbol = :s and role = 'stored_history'"), {"s": symbol})).scalar()
+    return (await record_map(session)).stored_history_floor(symbol)
 
 
 async def mark_stored_history(session, ticker_id, event_type, dates: set[date]) -> int:

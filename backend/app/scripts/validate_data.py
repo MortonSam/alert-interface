@@ -1253,8 +1253,19 @@ async def check_quote_sanity(session) -> CheckResult:
     )
 
 
+def fresh_chain_symbols(rows, today: date | None = None) -> set[str]:
+    """Pure: symbols whose newest courier chain date is within CHAIN_FRESH_TRADING_DAYS. `rows`: (key, chain_last_trade)."""
+    newest: dict[str, str] = {}
+    for key, d in rows:
+        parts = key.split(":")
+        if len(parts) == 3 and d:
+            newest[parts[1]] = max(newest.get(parts[1], ""), str(d)[:10])
+    return {sym for sym, d in newest.items() if chain_store.is_fresh(d)}
+
+
 async def check_chain_coverage(session) -> CheckResult:
-    """Percent of active tickers with a chain no older than 2 trading days."""
+    """Percent of active tickers with a courier chain no older than 2 trading days. One query: the chain dates are
+    extracted server-side, no chain body is transferred."""
     active_syms = (await session.execute(
         select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
     )).scalars().all()
@@ -1262,19 +1273,9 @@ async def check_chain_coverage(session) -> CheckResult:
     if not active_syms:
         return CheckResult("chain_coverage", PASS, "No active tickers")
 
-    stale: list[str] = []
-    for sym in active_syms:
-        exps = await chain_store.get_ingested_expirations(session, sym)
-        fresh = False
-        for exp in reversed(exps):
-            result = await chain_store.get_chain(session, sym, exp)
-            if result:
-                _, chain_last_trade = result
-                if chain_store.is_fresh(chain_last_trade):
-                    fresh = True
-                    break
-        if not fresh:
-            stale.append(sym)
+    rows = (await session.execute(text("SELECT key, value::json->>'chain_last_trade' FROM system_metadata WHERE key LIKE 'chain:%'"))).all()
+    fresh = fresh_chain_symbols(rows)
+    stale = [sym for sym in active_syms if sym not in fresh]
 
     covered = len(active_syms) - len(stale)
     pct = covered / len(active_syms) * 100
@@ -2103,58 +2104,11 @@ async def check_iv_solver_band(session) -> CheckResult:
 # ── Chain shadow: Intrinio's EOD chain against the courier's, night by night ──────────────────────────
 
 async def check_chain_shadow(session) -> CheckResult:
-    """For every ticker with a courier chain and an Intrinio chain dated the same day, compare the front expiry
-    (services/chain_shadow.compare_front). Tonight's per-ticker figures and totals go to chain_shadow:{date} and
-    to the "Options chains (Intrinio)" step outcome. WARN until MIN_NIGHTS nights exist, then ERROR unless the
-    last MIN_NIGHTS all pass the retirement criteria."""
+    """Judges the stored shadow nights (chain_shadow:{date}, written by the Options chains step as it stores each
+    night's Intrinio chains and compares the front expiry with the courier's). One query. WARN until MIN_NIGHTS nights
+    exist, then ERROR unless the last MIN_NIGHTS all pass the retirement criteria."""
     import json as _json
-    from app.services import chain_store
-    from app.services.chain_shadow import MIN_NIGHTS, PER_TICKER_COLUMNS, compare_front, evaluate, front_expiration, night_totals
-    from app.services.step_outcomes import record_step_fields
-    from app.services.system_metadata_service import set_value
-    keys = (await session.execute(select(SystemMetadata.key).where(SystemMetadata.key.like("intrinio_chain:%")))).scalars().all()
-    by_sym: dict[str, list[str]] = {}
-    for k in keys:
-        parts = k.split(":")
-        if len(parts) == 3:
-            by_sym.setdefault(parts[1], []).append(parts[2])
-    per_ticker: dict[str, dict] = {}
-    missing_intrinio: list[str] = []
-    chain_date: str | None = None
-    for sym in sorted(by_sym):
-        courier_exps = await chain_store.get_ingested_expirations(session, sym)
-        if not courier_exps:
-            continue
-        got = await chain_store.get_chain(session, sym, courier_exps[0])
-        if not got or not got[1]:
-            continue
-        cdate = str(got[1])[:10]
-        front = front_expiration(courier_exps, cdate)
-        if not front:
-            continue
-        courier = (await chain_store.get_chain(session, sym, front))
-        intrinio = await chain_store.get_chain(session, sym, front, chain_store.INTRINIO)
-        if not courier:
-            continue
-        if not intrinio or str(intrinio[1])[:10] != cdate:
-            missing_intrinio.append(sym)
-            continue
-        chain_date = chain_date or cdate
-        if cdate != chain_date:
-            continue                        # a courier chain from another day: compared on its own night
-        per_ticker[sym] = compare_front(courier[0], intrinio[0])
-    # tickers with a courier chain but no Intrinio chain at all tonight
-    courier_syms = {k.split(":")[1] for k in (await session.execute(select(SystemMetadata.key).where(SystemMetadata.key.like("chain:%")))).scalars().all() if len(k.split(":")) == 3}
-    if chain_date:
-        for sym in sorted(courier_syms - set(by_sym)):
-            if (await chain_store.get_latest_chain_date(session, sym)) == chain_date:
-                missing_intrinio.append(sym)
-    if chain_date:
-        totals = night_totals(chain_date, per_ticker, missing_intrinio)
-        await set_value(session, f"chain_shadow:{chain_date}", _json.dumps({"totals": totals, "per_ticker": per_ticker}))
-        await session.commit()
-        compact = {sym: [f.get(c) if c != "courier_only_strikes" else len(f[c]) for c in PER_TICKER_COLUMNS] for sym, f in per_ticker.items()}
-        await record_step_fields("Options chains (Intrinio)", {"comparison": {"totals": totals, "per_ticker_columns": PER_TICKER_COLUMNS, "per_ticker": compact}})
+    from app.services.chain_shadow import MIN_NIGHTS, evaluate
     raws = (await session.execute(select(SystemMetadata.value).where(SystemMetadata.key.like("chain_shadow:%")))).scalars().all()
     nights = []
     for raw in raws:

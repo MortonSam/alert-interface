@@ -1,5 +1,7 @@
 """Nightly: the in-house ATM implied volatility from Intrinio's stored chains, written beside the courier rows, served nowhere.
 
+Round trips are few: one query indexes every Intrinio chain key with its date (extracted server-side), then chains are
+loaded, solved and written BATCH at a time, with the rate looked up once per chain date and progress recorded per batch.
 For every ticker with an Intrinio chain (intrinio_chain:{SYM}:{EXP}, scripts/shadow_option_chains.py): the expiry
 snapshot_iv's rule picks (services/iv_solver.choose_expiration) on the chain's own date, the stored close of that
 date as spot (the chain's underlying_price, from price_bars_shadow), the FRED DTB3 rate for that date (fetched and
@@ -20,11 +22,11 @@ import json
 import sys
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.models.iv_history import SOLVER_SOURCE
-from app.models.system_metadata import SystemMetadata
+from app.services import chain_store
 from app.services.iv_solver import IV_SOLVER_VERSION, MIN_ATM_MID, choose_expiration, nonstandard_mids, solve_atm
 from app.services.rates import fetch_series, rate_on, store_rates
 from app.services.step_outcomes import record_step_fields
@@ -37,20 +39,66 @@ def _arg(argv: list[str], name: str) -> str | None:
     return next((a.split("=", 1)[1] for a in argv if a.startswith(f"--{name}=")), None)
 
 
-async def _intrinio_chains(only: set[str] | None) -> dict[str, dict[str, dict]]:
-    """{symbol: {expiration: chain}} from the stored Intrinio chains."""
+async def chain_index(only: set[str] | None) -> dict[str, dict[str, str]]:
+    """{symbol: {expiration: chain_date}} from the stored Intrinio chain keys, with the date extracted server-side:
+    one query, no chain bodies transferred."""
     async with ScriptSessionLocal() as s:
-        rows = (await s.execute(select(SystemMetadata.key, SystemMetadata.value).where(SystemMetadata.key.like("intrinio_chain:%")))).all()
-    out: dict[str, dict[str, dict]] = {}
-    for k, v in rows:
-        parts = k.split(":")
-        if len(parts) != 3 or (only and parts[1] not in only):
+        rows = (await s.execute(text("SELECT key, value::json->>'chain_last_trade' FROM system_metadata WHERE key LIKE 'intrinio_chain:%'"))).all()
+    out: dict[str, dict[str, str]] = {}
+    for key, d in rows:
+        parts = key.split(":")
+        if len(parts) == 3 and d and (not only or parts[1] in only):
+            out.setdefault(parts[1], {})[parts[2]] = str(d)[:10]
+    return out
+
+
+def choose_targets(index: dict[str, dict[str, str]], on: str | None) -> list[tuple[str, str, date]]:
+    """(symbol, expiration, chain_date) per symbol: the expiry the shared rule picks on the chain's own date.
+    `on` keeps only chains dated that session."""
+    out = []
+    for sym in sorted(index):
+        exps = {e: d for e, d in index[sym].items() if not on or d == on}
+        if not exps:
             continue
+        chain_date = date.fromisoformat(max(exps.values()))
+        exp = choose_expiration([e for e, d in exps.items() if d == chain_date.isoformat()], chain_date)
+        if exp:
+            out.append((sym, exp, chain_date))
+    return out
+
+
+async def load_chains(keys: list[str]) -> dict[str, dict]:
+    """The chain bodies for these keys, one query."""
+    async with ScriptSessionLocal() as s:
+        rows = (await s.execute(text("SELECT key, value FROM system_metadata WHERE key = ANY(:k)"), {"k": keys})).all()
+    out = {}
+    for k, v in rows:
         try:
-            out.setdefault(parts[1], {})[parts[2]] = json.loads(v)
+            out[k] = json.loads(v)
         except (ValueError, TypeError):
             continue
     return out
+
+
+def solve_target(sym: str, chain: dict, exp: str, chain_date: date, rate, rate_date) -> tuple[str, dict]:
+    """One ticker's outcome: ("row", upsert params) | ("nonstandard", what the outcome records) | ("skip", {"reason"})."""
+    spot = chain.get("underlying_price")
+    if not spot:
+        return "skip", {"reason": "no stored close for the chain date"}
+    a = solve_atm(chain, float(spot), chain_date, date.fromisoformat(exp), rate)
+    if nonstandard_mids(a.call_mid, a.put_mid):
+        # no row: a solved number from a penny quote would be a wrong IV, and iv_solver_band is for real solves
+        return "nonstandard", {"spot": float(spot), "strike": a.strike, "call_mid": round(a.call_mid, 4) if a.call_mid is not None else None,
+                               "put_mid": round(a.put_mid, 4) if a.put_mid is not None else None, "expiration": exp, "floor": MIN_ATM_MID}
+    return "row", {"symbol": sym, "date": chain_date, "iv_source": SOLVER_SOURCE, "iv_version": IV_SOLVER_VERSION, "expiration": date.fromisoformat(exp),
+                   "atm_strike": a.strike, "current_price": float(spot), "atm_iv": a.atm_iv, "atm_iv_reason": a.reason,
+                   "atm_call_mid": a.call_mid, "atm_put_mid": a.put_mid, "solved_call_iv": a.call.iv, "solved_put_iv": a.put.iv,
+                   "vendor_call_iv": a.vendor_call_iv, "vendor_put_iv": a.vendor_put_iv, "vendor_iv": a.vendor_iv,
+                   "rate": rate, "rate_date": rate_date, "days_to_expiry": a.days,
+                   "_sides": sum(1 for x in (a.call, a.put) if x.iv is not None)}
+
+
+BATCH = 25      # chains loaded, solved and written per round trip; bounds memory to a few MB of chain JSON at a time
 
 
 UPSERT = text("""
@@ -81,63 +129,60 @@ async def run(argv: list[str]) -> int:
             await s.commit()
     except Exception as exc:
         rate_fetch_error, stored = str(exc)[:160], 0
-    chains = await _intrinio_chains(only)
-    if on_arg:
-        chains = {sym: {e: c for e, c in exps.items() if str(c.get("chain_last_trade"))[:10] == on_arg} for sym, exps in chains.items()}
-        chains = {sym: exps for sym, exps in chains.items() if exps}
+    # 2. which chain per ticker, from keys and dates only
+    targets = choose_targets(await chain_index(only), on_arg)
+    rates: dict[date, object] = {}
     written = 0
     solved_both = solved_one = 0
     skipped: dict[str, str] = {}
     skipped_nonstandard: dict[str, dict] = {}
-    rates_used: dict[str, str] = {}
-    for sym in sorted(chains):
-        exps = chains[sym]
-        chain_date = date.fromisoformat(str(next(iter(exps.values())).get("chain_last_trade"))[:10])
+    for i in range(0, len(targets), BATCH):
+        batch = targets[i:i + BATCH]
+        for _, _, d in batch:
+            if d not in rates:
+                async with ScriptSessionLocal() as s:
+                    rates[d] = await rate_on(s, d)
+                if rates[d].rate is None:
+                    r = rates[d]
+                    await record_step_fields(STEP_LABEL, {"error": f"no rate: {r.reason}" + (f"; fetch failed: {rate_fetch_error}" if rate_fetch_error else ""),
+                                                          "rates_stored": stored, "written": written, "progress": {"done": i, "of": len(targets)}})
+                    print(f"{STEP_LABEL}: failed closed, {r.reason}" + (f" (fetch: {rate_fetch_error})" if rate_fetch_error else ""))
+                    return 1
+        chains = await load_chains([chain_store.chain_key(sym, exp, chain_store.INTRINIO) for sym, exp, _ in batch])
+        rows_out: list[dict] = []
+        stale: list[tuple[str, date]] = []
+        for sym, exp, d in batch:
+            chain = chains.get(chain_store.chain_key(sym, exp, chain_store.INTRINIO))
+            if chain is None:
+                skipped[sym] = "chain missing"
+                continue
+            kind, info = solve_target(sym, chain, exp, d, rates[d].rate, rates[d].rate_date)
+            if kind == "skip":
+                skipped[sym] = info["reason"]
+            elif kind == "nonstandard":
+                skipped_nonstandard[sym] = info
+                stale.append((sym, d))          # a row an earlier run wrote for this ticker and date is removed
+            else:
+                sides = info.pop("_sides")
+                rows_out.append(info)
+                solved_both += sides == 2
+                solved_one += sides == 1
+                if sides == 0:
+                    skipped[sym] = info["atm_iv_reason"] or "unsolved"
         async with ScriptSessionLocal() as s:
-            r = await rate_on(s, chain_date)
-        if r.rate is None:
-            await record_step_fields(STEP_LABEL, {"error": f"no rate: {r.reason}" + (f"; fetch failed: {rate_fetch_error}" if rate_fetch_error else ""),
-                                                  "rates_stored": stored, "written": written})
-            print(f"{STEP_LABEL}: failed closed, {r.reason}" + (f" (fetch: {rate_fetch_error})" if rate_fetch_error else ""))
-            return 1
-        rates_used[chain_date.isoformat()] = f"{r.rate:.4%} ({r.rate_date.isoformat()})"
-        exp = choose_expiration(list(exps), chain_date)
-        chain = exps[exp]
-        spot = chain.get("underlying_price")
-        if not spot:
-            skipped[sym] = "no stored close for the chain date"
-            continue
-        a = solve_atm(chain, float(spot), chain_date, date.fromisoformat(exp), r.rate)
-        if nonstandard_mids(a.call_mid, a.put_mid):
-            # no row: a solved number from a penny quote would be a wrong IV, and iv_solver_band is for real solves.
-            # A row an earlier run wrote for this ticker and date is removed, so a rerun leaves nothing behind.
-            skipped_nonstandard[sym] = {"spot": float(spot), "strike": a.strike, "call_mid": round(a.call_mid, 4) if a.call_mid is not None else None,
-                                        "put_mid": round(a.put_mid, 4) if a.put_mid is not None else None, "expiration": exp, "floor": MIN_ATM_MID}
-            async with ScriptSessionLocal() as s:
-                await s.execute(text("DELETE FROM iv_history WHERE symbol = :s AND date = :d AND iv_source = :src"),
-                                {"s": sym, "d": chain_date, "src": SOLVER_SOURCE})
-                await s.commit()
-            continue
-        async with ScriptSessionLocal() as s:
-            await s.execute(UPSERT, {
-                "symbol": sym, "date": chain_date, "iv_source": SOLVER_SOURCE, "iv_version": IV_SOLVER_VERSION, "expiration": date.fromisoformat(exp),
-                "atm_strike": a.strike, "current_price": float(spot), "atm_iv": a.atm_iv, "atm_iv_reason": a.reason,
-                "atm_call_mid": a.call_mid, "atm_put_mid": a.put_mid, "solved_call_iv": a.call.iv, "solved_put_iv": a.put.iv,
-                "vendor_call_iv": a.vendor_call_iv, "vendor_put_iv": a.vendor_put_iv, "vendor_iv": a.vendor_iv,
-                "rate": r.rate, "rate_date": r.rate_date, "days_to_expiry": a.days,
-            })
+            if rows_out:
+                await s.execute(UPSERT, rows_out)
+            for sym, d in stale:
+                await s.execute(text("DELETE FROM iv_history WHERE symbol = :s AND date = :d AND iv_source = :src"), {"s": sym, "d": d, "src": SOLVER_SOURCE})
             await s.commit()
-        written += 1
-        n = sum(1 for x in (a.call, a.put) if x.iv is not None)
-        solved_both += n == 2
-        solved_one += n == 1
-        if n == 0:
-            skipped[sym] = a.reason or "unsolved"
-    fields = {"tickers": len(chains), "written": written, "solved_both_sides": solved_both, "solved_one_side": solved_one, "unsolved": len(skipped),
+        written += len(rows_out)
+        await record_step_fields(STEP_LABEL, {"progress": {"done": min(i + BATCH, len(targets)), "of": len(targets)}})
+    rates_used = {d.isoformat(): f"{r.rate:.4%} ({r.rate_date.isoformat()})" for d, r in rates.items() if r.rate is not None}
+    fields = {"tickers": len(targets), "written": written, "solved_both_sides": solved_both, "solved_one_side": solved_one, "unsolved": len(skipped),
               "unsolved_detail": dict(list(skipped.items())[:30]), "skipped_nonstandard": skipped_nonstandard,
-              "rates_used": rates_used, "rates_stored": stored,
-              "rate_fetch_error": rate_fetch_error, "iv_version": IV_SOLVER_VERSION, "error": None}
-    print(f"{STEP_LABEL}: {len(chains)} ticker(s), {written} row(s) written (v{IV_SOLVER_VERSION}), both sides {solved_both}, one side {solved_one}, "
+              "rates_used": rates_used, "rates_stored": stored, "rate_fetch_error": rate_fetch_error, "iv_version": IV_SOLVER_VERSION,
+              "progress": {"done": len(targets), "of": len(targets)}, "batch": BATCH, "error": None}
+    print(f"{STEP_LABEL}: {len(targets)} ticker(s), {written} row(s) written (v{IV_SOLVER_VERSION}), both sides {solved_both}, one side {solved_one}, "
           f"unsolved {len(skipped)}, skipped as nonstandard (an ATM mid under ${MIN_ATM_MID:.2f}) {len(skipped_nonstandard)}; rates {rates_used}; "
           f"{stored} rate row(s) stored" + (f"; rate fetch failed: {rate_fetch_error}" if rate_fetch_error else ""))
     for k, v in skipped_nonstandard.items():

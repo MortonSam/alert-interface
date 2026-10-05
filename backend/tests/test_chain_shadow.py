@@ -204,33 +204,39 @@ def test_the_step_runs_before_validate_with_room_to_wait_and_the_check_is_regist
     assert check_chain_shadow in CHECKS
 
 
-# ── a synthetic night through the check, against the database ────────────────
+# ── a synthetic night: the step records it, the check judges it ──────────────
 
 @pytest.mark.asyncio
-async def test_a_synthetic_night_with_a_missing_strike_is_recorded_and_the_check_warns_until_the_week_is_in():
-    sym = "ZZSHD"
-    intr = {"expiration": "2026-10-09", "chain_last_trade": "2026-10-01", "underlying_price": 100.0, "chain_source": "intrinio", "late": False,
+async def test_a_synthetic_night_with_a_missing_strike_is_recorded_by_the_step_and_judged_by_the_check():
+    from app.scripts.shadow_option_chains import record_night
+    sym, night = "ZZSHD", "2099-01-02"
+    intr = {"expiration": "2026-10-09", "chain_last_trade": night, "underlying_price": 100.0, "chain_source": "intrinio", "late": False,
             "calls": side([(95, 6.0, 6.4), (100, 2.0, 2.4)]), "puts": side([(95, 0.4, 0.6), (100, 1.8, 2.2)])}     # no 105 strike
-    courier = {**COURIER, "chain_source": "courier"}
+    courier = {**COURIER, "chain_last_trade": night, "chain_source": "courier"}
     try:
-        async with ScriptSessionLocal() as s:
-            await chain_store.put_chain(s, sym, "2026-10-09", courier, chain_store.COURIER)
-            await chain_store.put_chain(s, sym, "2026-10-09", intr, chain_store.INTRINIO)
-            await s.commit()
+        totals = await record_night(night, {sym: compare_front(courier, intr)}, ["ZZMISS"])
+        assert totals["courier_only_strikes"] == 1 and totals["tickers_missing_intrinio"] == 1
         result = (await run_checks([check_chain_shadow]))[0]
         assert result.level in (WARN, ERROR), result.message
         async with ScriptSessionLocal() as s:
-            raw = (await s.execute(text("select value from system_metadata where key = 'chain_shadow:2026-10-01'"))).scalar()
+            raw = (await s.execute(text("select value from system_metadata where key = :k"), {"k": f"chain_shadow:{night}"})).scalar()
             outcome = json.loads((await s.execute(text("select value from system_metadata where key = 'step_outcomes'"))).scalar())
-        night = json.loads(raw)
-        assert night["per_ticker"][sym]["courier_only_strikes"] == [105.0]
-        assert night["totals"]["courier_only_strikes"] >= 1 and sym in night["totals"]["tickers_with_courier_only_strikes"]
+        stored = json.loads(raw)
+        assert stored["per_ticker"][sym]["courier_only_strikes"] == [105.0] and sym in stored["totals"]["tickers_with_courier_only_strikes"]
         comp = outcome[STEP_LABEL]["comparison"]
         assert comp["per_ticker_columns"] == PER_TICKER_COLUMNS
         assert comp["per_ticker"][sym][PER_TICKER_COLUMNS.index("courier_only_strikes")] == 1
-        assert any("courier strike(s) absent" in r for r in result.rows)
+        assert any("courier strike(s) absent" in r or "no Intrinio chain" in r for r in result.rows)
     finally:
         async with ScriptSessionLocal() as s:
-            await s.execute(text("delete from system_metadata where key in (:a, :b, 'chain_shadow:2026-10-01')"),
-                            {"a": chain_store.chain_key(sym, "2026-10-09"), "b": chain_store.chain_key(sym, "2026-10-09", chain_store.INTRINIO)})
+            await s.execute(text("delete from system_metadata where key = :k"), {"k": f"chain_shadow:{night}"})
             await s.commit()
+
+
+def test_the_check_is_one_query_over_stored_nights_and_coverage_is_one_query_over_chain_dates():
+    import inspect
+    from app.scripts.validate_data import check_chain_coverage, fresh_chain_symbols
+    assert inspect.getsource(check_chain_shadow).count("await session.execute") == 1
+    assert inspect.getsource(check_chain_coverage).count("await session.execute") == 2       # the active tickers, then every chain date
+    rows = [("chain:MU:2026-10-09", date.today().isoformat()), ("chain:MU:2027-01-15", "2026-01-02"), ("chain:OLD:2026-10-09", "2026-01-02"), ("junk", None)]
+    assert fresh_chain_symbols(rows) == {"MU"}

@@ -78,13 +78,25 @@ def test_a_penny_atm_mid_marks_the_chain_nonstandard_and_the_step_writes_no_row_
     wbd = {"calls": [{"strike": 31, "bid": 0.01, "ask": 0.02, "impliedVolatility": 0.0164}], "puts": [{"strike": 31, "bid": 0.04, "ask": 0.05, "impliedVolatility": 0.0164}]}
     a = solve_atm(wbd, 30.94, date(2026, 10, 2), date(2026, 10, 9), 0.04)
     assert (a.call_mid, a.put_mid) == (0.015, 0.045) and nonstandard_mids(a.call_mid, a.put_mid)
-    # the step's branch: what the outcome records and that no row is planned
-    import inspect
-    from app.scripts import solve_atm_iv
-    src = inspect.getsource(solve_atm_iv.run)
-    assert "if nonstandard_mids(a.call_mid, a.put_mid):" in src and "skipped_nonstandard[sym]" in src
-    branch = src.split("if nonstandard_mids(a.call_mid, a.put_mid):")[1].split("continue")[0]
-    assert all(k in branch for k in ('"spot"', '"strike"', '"call_mid"', '"put_mid"', "DELETE FROM iv_history"))   # recorded, stale row removed, then continue
+    # the step's per-ticker outcome: no row, and what the outcome records
+    from app.scripts.solve_atm_iv import solve_target
+    kind, info = solve_target("WBD", {**wbd, "underlying_price": 30.94}, "2026-10-09", date(2026, 10, 2), 0.04, date(2026, 10, 1))
+    assert kind == "nonstandard" and info == {"spot": 30.94, "strike": 31.0, "call_mid": 0.015, "put_mid": 0.045, "expiration": "2026-10-09", "floor": 0.05}
+    assert solve_target("X", {**wbd, "underlying_price": None}, "2026-10-09", date(2026, 10, 2), 0.04, date(2026, 10, 1)) == ("skip", {"reason": "no stored close for the chain date"})
+    ok = {"calls": [{"strike": 1095, "bid": 35.25, "ask": 37.0, "impliedVolatility": 0.57}], "puts": [{"strike": 1095, "bid": 31.75, "ask": 34.5, "impliedVolatility": 0.50}], "underlying_price": 1097.39}
+    kind, row = solve_target("MU", ok, "2026-10-09", date(2026, 10, 1), 0.04, date(2026, 10, 1))
+    assert kind == "row" and row["_sides"] == 2 and row["iv_source"] == "intrinio_mid" and row["iv_version"] == 1 and row["rate_date"] == date(2026, 10, 1)
+
+
+def test_the_solver_picks_one_chain_per_ticker_from_keys_and_dates_alone():
+    """The index holds only keys and dates (no chain bodies); the shared expiry rule picks the expiry on the chain's own date."""
+    from app.scripts.solve_atm_iv import BATCH, choose_targets
+    index = {"MU": {"2026-10-02": "2026-10-01", "2026-10-09": "2026-10-01", "2026-10-16": "2026-10-01", "2027-01-15": "2026-10-01"},
+             "CAT": {"2026-10-09": "2026-10-02", "2026-10-16": "2026-10-02"},
+             "OLD": {"2026-10-09": "2026-09-30"}}
+    assert choose_targets(index, None) == [("CAT", "2026-10-09", date(2026, 10, 2)), ("MU", "2026-10-09", date(2026, 10, 1)), ("OLD", "2026-10-09", date(2026, 9, 30))]
+    assert choose_targets(index, "2026-10-01") == [("MU", "2026-10-09", date(2026, 10, 1))]
+    assert choose_targets({}, None) == [] and 10 <= BATCH <= 100
 
 
 # ── the rate ──────────────────────────────────────────────────────────────────

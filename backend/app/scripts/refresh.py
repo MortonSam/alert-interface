@@ -104,6 +104,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Auto-pick": 600,
     "Shadow eval": 600,
     "Options chains (Intrinio)": 3 * 3600 + 1800,   # may wait up to MAX_WAIT_SECONDS for 03:05 New York, then ~2 requests per ticker
+    "ATM IV (solver)": 1200,                        # batched: ~60 round trips for 510 tickers; the backstop covers a slow database link
     "Warm options reads": 3600,
 }
 
