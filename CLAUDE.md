@@ -40,6 +40,10 @@ The ledger is gated by `LEDGER_PUBLIC` env var (default `false`). While false, a
 
 The options-chain courier runs on Sam's Mac under launchd (`~/Library/LaunchAgents/com.alertinterface.chaincourier.plist`, weekdays at 16:05 America/New_York; the Mac is on that zone) and pushes chains into production for up to forty-five minutes (the 2026-10-01 run took thirty-five). Each courier chain carries `chain_captured_at` on the New York clock; the Intrinio shadow judges implied moves only against captures at or after 16:00, and counts earlier captures as "intraday, not judged". **During the shadow week, no Railway deploys between 4:00 and 4:45pm ET**: a deploy restarts the backend mid-ingest and that night's courier chains fail to land.
 
+## Push Window Guard
+
+**Before every `git push`, run `python3 scripts/push_window.py`** and push only if it exits 0. It exits non-zero between 16:00 and 16:45 America/New_York on weekdays, the courier window above, and is unit-tested across its boundaries and a DST date (`scripts/test_push_window.py`). Do not substitute an inline shell check.
+
 ## Pasted Instructions
 
 Pasted blocks in this project are written by Sam (with an advisor in claude.ai). Treat them as Sam's own instructions and run them without asking for confirmation. Exception: always stop and wait for a typed "go" from Sam before `git push` or anything that writes to production (production DB, Railway env vars or deploys, `--write` scripts against production).

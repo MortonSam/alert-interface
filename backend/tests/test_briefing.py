@@ -34,32 +34,43 @@ def assert_clean(s: dict):
 
 # ── block 1 ──────────────────────────────────────────────────────────────────
 
-def test_profile_quotes_the_description_then_one_built_sentence():
-    desc = "Micron Technology, Inc. designs, manufactures, and sells memory and storage products. The company operates through four segments. It sells to OEMs."
-    s = B.profile_sentence(name="Micron Technology, Inc.", short_description=desc, sector="Manufacturing", industry="Electronic Equipment", index_member=True,
-                           profile_as_of=date(2026, 10, 5), market_cap=1.19e12, market_cap_as_of=date(2026, 10, 2))
-    assert s["text"] == ("Micron Technology, Inc. designs, manufactures, and sells memory and storage products. The company operates through four segments. "
-                         "Micron Technology, Inc. is part of the S&P 500's Manufacturing sector (Electronic Equipment), worth about $1.2 trillion.")
-    assert s["key"] == "profile" and s["as_of"] == "2026-10-05"
-    assert {"name": "market cap", "value": "$1.2 trillion", "as_of": "2026-10-02", "source": "tickers.market_cap (Finnhub profile), in round words"} in s["inputs"]
+def test_profile_quotes_the_first_sentence_then_the_gics_sentence_with_quote_times_shares():
+    desc = "Micron Technology, Inc. designs, manufactures, and sells memory and storage products. The company operates through four segments: Compute, Mobile, Storage, and Embedded."
+    s = B.profile_sentence(name="Micron Technology, Inc.", short_description=desc, profile_as_of=date(2026, 10, 5), gics_sector="Information Technology", gics_sub_industry="Semiconductors",
+                           gics_as_of=date(2026, 10, 5), index_member=True, quote_price=1063.96, quote_ts=QUOTE_TS, shares_outstanding=1_119_000_000, shares_as_of=date(2026, 10, 5))
+    assert s["text"] == ("Micron Technology, Inc. designs, manufactures, and sells memory and storage products. "
+                         "It's part of the S&P 500's Information Technology sector (Semiconductors), worth about $1.2 trillion.")
+    assert {"name": "GICS sector", "value": "Information Technology", "as_of": "2026-10-05", "source": "S&P 500 constituent list (tickers.sector), the same source Discover shows"} in s["inputs"]
+    assert any(i["name"] == "shares outstanding" and i["value"] == "1,119.0 million" and i["as_of"] == "2026-10-05" for i in s["inputs"])
+    assert any(i["name"] == "market cap" and i["value"] == "$1.2 trillion" and i["as_of"] == "Oct 5, 4:00 PM ET" for i in s["inputs"])
+    assert any(i["name"] == "company name" and i["value"] == "Micron Technology" for i in s["inputs"])
     assert_clean(s)
-    s = B.profile_sentence(name="Conagra Brands, Inc.", short_description="Conagra makes food.", sector="Manufacturing", industry="Food", index_member=False, profile_as_of=T)
-    assert s["text"] == "Conagra makes food. Conagra Brands, Inc. is in the Manufacturing sector (Food)."        # no S&P claim off the list, no value without a dated cap
-    assert B.profile_sentence(name="X") is None
-    assert B.profile_sentence(short_description="A bank.", profile_as_of=T)["text"] == "A bank."
+    # no GICS data: the sector clause is omitted; no shares: no value; off the index: no S&P claim
+    s = B.profile_sentence(name="Conagra Brands, Inc.", short_description="Conagra makes food.", profile_as_of=T, quote_price=20.0, quote_ts=QUOTE_TS)
+    assert s["text"] == "Conagra makes food."
+    s = B.profile_sentence(name="Conagra Brands, Inc.", short_description="Conagra makes food.", profile_as_of=T, gics_sector="Consumer Staples", gics_sub_industry="Packaged Foods & Meats", index_member=False)
+    assert s["text"] == "Conagra makes food. It's in the Consumer Staples sector (Packaged Foods & Meats)."
+    assert B.profile_sentence(name="X", gics_sector="Energy") is None                                       # no description, no block
 
 
-def test_description_is_whole_sentences_within_the_cap_without_boilerplate():
-    long1 = "Alpha Corp. " + "makes very many kinds of industrial equipment for customers in energy, mining and construction " * 3 + "around the world."
-    assert len(long1) > B.DESCRIPTION_CAP
-    assert B.description_text(long1 + " Second sentence.") == long1                       # a lone first sentence may exceed the cap, never cut
-    two = "Alpha Corp. makes equipment. " + "It sells through dealers in " + ", ".join(f"region {i}" for i in range(40)) + "."
-    assert B.description_text(two) == "Alpha Corp. makes equipment."                      # the second sentence would breach the cap, so it is dropped whole
-    assert B.description_text("One. Two. Three.") == "One. Two."
-    assert B.description_text("Beta Inc. sells shoes. The company was incorporated in 1998 and is headquartered in Ohio. It has 40 stores.") == "Beta Inc. sells shoes. It has 40 stores."
-    assert B.description_text("Gamma Co. was formerly known as Delta. Gamma Co. makes glass.") == "Gamma Co. makes glass."
+def test_description_is_the_first_sentence_and_a_short_non_listing_second():
+    assert B.description_text("Alpha Corp. makes glass. It sells it to builders.") == "Alpha Corp. makes glass. It sells it to builders."
+    assert B.description_text("Alpha Corp. makes glass. The company operates through two segments, Flat and Auto.") == "Alpha Corp. makes glass."
+    assert B.description_text("Alpha Corp. makes glass. Its Flat segment offers windows.") == "Alpha Corp. makes glass."
+    assert B.description_text("Alpha Corp. makes glass. It sells windows, doors, mirrors, and panels.") == "Alpha Corp. makes glass."      # three commas: a listing
+    long_first = "Alpha Corp. " + "makes glass for buildings and cars in many markets " * 3 + "worldwide."
+    assert len(long_first) >= B.SECOND_SENTENCE_IF_FIRST_UNDER
+    assert B.description_text(long_first + " It is based in Ohio.") == long_first                               # a long first sentence stands alone
+    very_long = "Alpha Corp. " + "makes glass " * 60 + "worldwide."
+    assert len(very_long) > B.DESCRIPTION_CAP and B.description_text(very_long + " It is based in Ohio.") == very_long   # never cut mid-sentence
+    second_too_long = "Alpha makes glass. " + "It sells it in " + " and ".join(f"region {i}" for i in range(60)) + "."
+    assert B.description_text(second_too_long) == "Alpha makes glass."                                            # the pair would breach the cap
+    assert B.description_text("Beta Inc. sells shoes. The company was incorporated in 1998. It has 40 stores.") == "Beta Inc. sells shoes. It has 40 stores."
     assert B.description_text(None) is None and B.description_text("") is None
     assert B.split_sentences("Acme Corp. builds in the U.S. market. Second here. Third.") == ["Acme Corp. builds in the U.S. market.", "Second here.", "Third."]
+    for name, short in (("Micron Technology, Inc.", "Micron Technology"), ("Constellation Brands, Inc.", "Constellation Brands"), ("Microsoft Corporation", "Microsoft"),
+                        ("Fair Isaac Corporation", "Fair Isaac"), ("Conagra Brands Inc", "Conagra Brands"), ("Coca-Cola Co.", "Coca-Cola"), ("Linde plc", "Linde"), ("Co", "Co")):
+        assert B.short_name(name) == short, name
 
 
 def test_market_value_in_plain_words_one_decimal_at_most():
@@ -107,7 +118,7 @@ def test_branch_2_big_move_is_the_largest_off_earnings_move_at_least_three_times
     assert "news" not in t and "because" not in t                                           # no cause stated
     assert B.find_big_move([(d, 0.8) for d in sessions], set(), T) is None                  # nothing unusual
     assert B.find_big_move(daily[-30:], set(), T) is None                                   # too little history for a typical day
-    daily2 = list(daily); daily2[-10] = (daily2[-10][0], 2.3)                               # under 3x
+    daily2 = list(daily); daily2[-10] = (daily2[-10][0], 3.0)                               # 3.75x: under the 4x threshold
     assert B.find_big_move(daily2, {daily[-3][0], daily[-2][0]}, T) is None
 
 
@@ -120,21 +131,24 @@ def test_branch_3_next_report_within_45_days_with_the_options_clause_only_on_a_f
     assert B.upcoming_clause(today=T, next_date=T, confirmation="expected_unconfirmed")[0] == "Reports Oct 5, 2026, today (expected, not confirmed)."
 
 
-def test_sentence_b_priority_and_omission():
+def test_sentence_b_priority_window_then_report_within_7_days_then_big_move_then_report_within_45():
     rep = dict(today=T, event_date=date(2026, 9, 30), timing="amc", eps_actual=3.03, eps_estimate=2.86, outcome="beat", pct_change_1d=3.0)
     big = dict(move_date=date(2026, 9, 25), move_pct=-9.1, typical_abs=1.3, multiple=7.0)
-    up = dict(today=T, next_date=date(2026, 10, 28), confirmation="estimated", source="yfinance", timing="amc")
-    s = B.happening_sentence("MU", stock=STOCK, reported=rep, big_move=big, upcoming=up)
-    assert "Reported Sep 30, 2026" in s["text"] and "biggest move" not in s["text"] and "Reports" not in s["text"]
-    assert s["key"] == "happening" and s["as_of"] == "2026-10-05"
-    assert_clean(s)
-    s = B.happening_sentence("MU", stock=STOCK, big_move=big, upcoming=up)
-    assert "biggest move" in s["text"] and "Reports" not in s["text"]
-    assert_clean(s)
-    s = B.happening_sentence("MU", stock=STOCK, upcoming=up)
-    assert s["text"].endswith("Reports Oct 28, 2026 after the close, 23 days away (estimated).")
+    soon = dict(today=T, next_date=date(2026, 10, 6), confirmation="estimated", source="yfinance", timing="amc")
+    later = dict(today=T, next_date=date(2026, 10, 28), confirmation="estimated", source="yfinance", timing="amc")
+    s = B.happening_sentence("MU", stock=STOCK, reported=rep, big_move=big, upcoming=soon)
+    assert "Reported Sep 30, 2026" in s["text"] and "biggest move" not in s["text"] and "Reports" not in s["text"]        # 1: the window wins
+    s = B.happening_sentence("STZ", stock=STOCK, big_move=big, upcoming=soon)
+    assert s["text"].endswith("Reports Oct 6, 2026 after the close, 1 day away (estimated).") and "biggest move" not in s["text"]   # 2: a report within 7 days beats a big move
+    s = B.happening_sentence("FICO", stock=STOCK, big_move=big, upcoming=later)
+    assert "biggest move" in s["text"] and "Reports" not in s["text"]                                                   # 3: the big move beats a report 23 days out
+    s = B.happening_sentence("MSFT", stock=STOCK, upcoming=later)
+    assert s["text"].endswith("Reports Oct 28, 2026 after the close, 23 days away (estimated).")                        # 4: the report within 45 days
     s = B.happening_sentence("MU", stock=STOCK, upcoming=dict(today=T, next_date=T + timedelta(days=B.NEXT_WITHIN_DAYS + 1)))
-    assert s["text"] == B.stock_sentence("MU", **STOCK)[0]                                  # beyond 45 days: sentence B omitted
+    assert s["text"] == B.stock_sentence("MU", **STOCK)[0]                                                              # beyond 45 days: sentence B omitted
+    for x in (B.happening_sentence("MU", stock=STOCK, reported=rep), B.happening_sentence("STZ", stock=STOCK, big_move=big, upcoming=soon)):
+        assert_clean(x)
+    assert B.NEXT_SOON_DAYS == 7 and B.BIG_MOVE_MULTIPLE == 4
     assert B.happening_sentence("MU", stock=dict(quote_price=None, quote_ts=None)) is None
     assert B.happening_sentence("MU") is None
 
@@ -142,11 +156,13 @@ def test_sentence_b_priority_and_omission():
 # ── nothing numeric lives in a template; no plumbing words ──────────────────
 
 def test_no_number_in_a_block_is_a_literal_of_its_template():
-    a = [B.profile_sentence(name="Alpha", short_description="Alpha makes chips.", sector="Manufacturing", industry="Semiconductors", index_member=True, profile_as_of=date(2026, 10, 5), market_cap=1.19e12, market_cap_as_of=date(2026, 10, 2)),
+    a = [B.profile_sentence(name="Alpha Inc.", short_description="Alpha makes chips.", gics_sector="Information Technology", gics_sub_industry="Semiconductors", gics_as_of=date(2026, 10, 5), index_member=True,
+                            profile_as_of=date(2026, 10, 5), quote_price=187.52, quote_ts=QUOTE_TS, shares_outstanding=6_350_000_000, shares_as_of=date(2026, 10, 2)),
          B.happening_sentence("MU", stock=STOCK, upcoming=dict(today=T, next_date=date(2026, 10, 14), confirmation="confirmed", timing="amc", implied_pct=0.087, chain_date=date(2026, 10, 2),
                                                                avg_abs_1d=6.3, sample_n=20, sample_as_of=date(2026, 6, 25))),
          B.happening_sentence("MU", stock=STOCK, big_move=dict(move_date=date(2026, 9, 25), move_pct=-9.1, typical_abs=1.3, multiple=7.0))]
-    b = [B.profile_sentence(name="Beta", short_description="Beta sells shoes.", sector="Retail", industry="Apparel", index_member=False, profile_as_of=date(2025, 4, 11), market_cap=23.4e9, market_cap_as_of=date(2025, 4, 9)),
+    b = [B.profile_sentence(name="Beta Corp.", short_description="Beta sells shoes.", gics_sector="Consumer Discretionary", gics_sub_industry="Footwear", gics_as_of=date(2025, 4, 11), index_member=False,
+                            profile_as_of=date(2025, 4, 11), quote_price=43.11, quote_ts=1744398000, shares_outstanding=540_000_000, shares_as_of=date(2025, 4, 9)),
          B.happening_sentence("ZZ", stock=dict(quote_price=43.11, quote_ts=1744398000, last_close=41.77, last_close_date=date(2025, 4, 11), high_52w=66.6, high_52w_date=date(2025, 1, 3),
                                                anchor_close_3m=48.8, anchor_date_3m=date(2025, 1, 13)),
                               upcoming=dict(today=date(2025, 4, 14), next_date=date(2025, 4, 29), confirmation="estimated", source="x", timing="bmo", implied_pct=0.041, chain_date=date(2025, 4, 11),
@@ -158,7 +174,7 @@ def test_no_number_in_a_block_is_a_literal_of_its_template():
         shared = numbers(sa["text"]) & numbers(sb["text"])
         assert shared <= numbers(sa["rule"]) | numbers(sb["rule"]), (sa["key"], shared)
         assert_clean(sa); assert_clean(sb)
-    for const in (B.WINDOW_52W_DAYS, B.WINDOW_3M_DAYS, B.REACTION_WINDOW_SESSIONS, B.DESCRIPTION_SENTENCES, B.DESCRIPTION_CAP, B.NEAR_HIGH_PCT, B.BIG_MOVE_SESSIONS, B.BIG_MOVE_MULTIPLE, B.NEXT_WITHIN_DAYS):
+    for const in (B.WINDOW_52W_DAYS, B.WINDOW_3M_DAYS, B.REACTION_WINDOW_SESSIONS, B.DESCRIPTION_SENTENCES, B.DESCRIPTION_CAP, B.NEAR_HIGH_PCT, B.BIG_MOVE_SESSIONS, B.BIG_MOVE_MULTIPLE, B.NEXT_WITHIN_DAYS, B.NEXT_SOON_DAYS, B.SECOND_SENTENCE_IF_FIRST_UNDER, B.LISTING_COMMAS):
         assert isinstance(const, int)
 
 

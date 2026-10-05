@@ -106,21 +106,26 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         return {"symbol": sym, "name": ticker.name, "state": ticker.inactive_reason or "not an active ticker", "sentences": []}
     sentences: list[dict] = []
 
-    # block 1: what it is
-    prof = (await db.execute(text("SELECT short_description, sector, industry_category, industry_group, source, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
+    # the quote serves both blocks: the market value and sentence A
+    q = await _quote(sym)
+    quote_price = q.price if q and q.state == "ok" else None
+    quote_ts = q.traded_on_ts if q else None
+
+    # block 1: what it is (description from the stored Intrinio profile; sector and sub-industry are GICS from the constituent list)
+    prof = (await db.execute(text("SELECT short_description, source, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
     if prof:
-        s1 = B.profile_sentence(name=ticker.name, short_description=prof["short_description"], sector=prof["sector"], industry=prof["industry_category"] or prof["industry_group"],
-                                index_member=bool(ticker.index_member), profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
-                                profile_source=(prof["source"] or "intrinio").capitalize(),
-                                market_cap=_f(ticker.market_cap), market_cap_as_of=ticker.market_cap_updated_at.date() if ticker.market_cap_updated_at else None)
+        s1 = B.profile_sentence(name=ticker.name, short_description=prof["short_description"], profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
+                                profile_source=(prof["source"] or "intrinio").capitalize(), gics_sector=ticker.sector, gics_sub_industry=ticker.industry,
+                                gics_as_of=ticker.updated_at.date() if ticker.updated_at else None, index_member=bool(ticker.index_member),
+                                quote_price=quote_price, quote_ts=quote_ts, shares_outstanding=_f(ticker.shares_outstanding),
+                                shares_as_of=ticker.shares_as_of.date() if ticker.shares_as_of else None)
         if s1:
             sentences.append(s1)
 
     # block 2: what's been happening
-    q = await _quote(sym)
     df = await price_bars.bars(db, sym, today - timedelta(days=B.WINDOW_52W_DAYS + 7))
     facts = bar_facts(df, today)
-    stock = {"quote_price": q.price if q and q.state == "ok" else None, "quote_ts": q.traded_on_ts if q else None, **facts}
+    stock = {"quote_price": quote_price, "quote_ts": quote_ts, **facts}
 
     excluded = await is_excluded(db, sym)
     mismatch = await basis_mismatch_dates(db, ticker.id)
@@ -144,18 +149,17 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         reported = {"today": today, "event_date": latest, "timing": timing, "eps_actual": actual, "eps_estimate": estimate, "outcome": eps_outcome(actual, estimate),
                     "bars_through": facts.get("last_close_date"), "pct_change_1d": stored if stored is not None else move_from_bars(df, latest, timing)}
     else:
+        ne = await next_earnings_for(db, ticker.id, today)
+        if ne.date and 0 <= (ne.date - today).days <= B.NEXT_WITHIN_DAYS:
+            ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
+            implied = await _implied(db, sym, quote_price, ne.date, today)
+            avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
+            upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
+                        "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
         exclude = set()
         for d in earnings_dates:
             exclude.add(d); exclude.add(nth_trading_day_after(d, 1))
         big = B.find_big_move(daily_moves(df), exclude, today)
-        if big is None:
-            ne = await next_earnings_for(db, ticker.id, today)
-            if ne.date:
-                ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
-                implied = await _implied(db, sym, q.price if q and q.state == "ok" else None, ne.date, today)
-                avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
-                upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
-                            "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
     s2 = B.happening_sentence(sym, stock=stock, reported=reported, big_move=big, upcoming=upcoming)
     if s2:
         sentences.append(s2)

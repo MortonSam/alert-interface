@@ -28,10 +28,15 @@ WINDOW_3M_DAYS = 92            # calendar days behind "three months"
 NEAR_HIGH_PCT = 2              # within this many percent of the 52-week high reads "near its 52-week high"
 REACTION_WINDOW_SESSIONS = 5   # a report is "inside its reaction window" through this many sessions after it
 BIG_MOVE_SESSIONS = 20         # "the past month": sessions searched for the biggest non-earnings daily move
-BIG_MOVE_MULTIPLE = 3          # a move at least this many times the median absolute daily move of the past year is big
+BIG_MOVE_MULTIPLE = 4          # a move at least this many times the median absolute daily move of the past year is big
+NEXT_SOON_DAYS = 7             # a report this close outranks a big move
 NEXT_WITHIN_DAYS = 45          # the next report is worth a sentence only this close
 DESCRIPTION_SENTENCES = 2      # at most this many sentences of the company's description
 DESCRIPTION_CAP = 280          # characters; whole sentences are dropped to fit, never cut (a lone first sentence may exceed it)
+SECOND_SENTENCE_IF_FIRST_UNDER = 120   # characters: the second sentence joins only after a short first one
+LISTING_COMMAS = 3             # a sentence with this many commas is a list of segments, products or brands, not a description
+LISTING_STARTS = ("the company operates through", "it operates through", "its ")   # "Its <x> segment offers ..." is a listing
+NAME_SUFFIXES = ("incorporated", "inc", "corporation", "corp", "company", "co", "plc", "ltd", "limited", "holdings")   # stripped from the end of a company name
 TIMING_PHRASE = {"bmo": "before the open", "amc": "after the close"}
 SOURCE_NAMES = {"yfinance": "Yahoo Finance", "finnhub": "Finnhub", "company": "the company", "edgar": "EDGAR"}   # reader-facing names; receipts keep the technical ones
 ABBREVIATIONS = {"inc", "corp", "co", "ltd", "plc", "llc", "lp", "sa", "nv", "ag", "mr", "ms", "dr", "st", "no", "vs", "u.s", "e.g", "i.e"}
@@ -111,49 +116,71 @@ def split_sentences(text: str) -> list[str]:
     return out
 
 
+def is_listing(sentence: str) -> bool:
+    """A sentence that lists segments, products or brands: starts like one, or carries LISTING_COMMAS commas or more."""
+    low = sentence.strip().lower()
+    return low.startswith(LISTING_STARTS) or sentence.count(",") >= LISTING_COMMAS
+
+
 def description_text(short_description: str | None) -> str | None:
-    """The first DESCRIPTION_SENTENCES sentences of the description, minus boilerplate, within DESCRIPTION_CAP characters by
-    dropping whole sentences; a first sentence that alone exceeds the cap is used anyway."""
+    """The first sentence of the description (boilerplate dropped); the second joins only when the first is under
+    SECOND_SENTENCE_IF_FIRST_UNDER characters, the second is not a listing, and the pair fits DESCRIPTION_CAP."""
     if not short_description:
         return None
-    sentences = [s for s in split_sentences(short_description) if not any(b in s.lower() for b in BOILERPLATE)][:DESCRIPTION_SENTENCES]
-    while len(sentences) > 1 and len(" ".join(sentences)) > DESCRIPTION_CAP:
-        sentences.pop()
-    return " ".join(sentences) or None
-
-
-def profile_sentence(*, name: str | None = None, short_description: str | None = None, sector: str | None = None, industry: str | None = None,
-                     index_member: bool = False, profile_as_of: date | None = None, profile_source: str | None = "Intrinio",
-                     market_cap: float | None = None, market_cap_as_of: date | None = None) -> dict | None:
-    """The description, then "<Name> is part of the S&P 500's <sector> sector (<industry>), worth about <value>." None without a profile."""
-    desc = description_text(short_description)
-    if not desc and not sector:
+    sentences = [x for x in split_sentences(short_description) if not any(b in x.lower() for b in BOILERPLATE)]
+    if not sentences:
         return None
-    inputs: list[dict] = []
-    dates: list[date] = []
-    if desc:
-        inputs.append(_input("description", desc, profile_as_of, f"{profile_source} company profile, short_description"))
-    who = name or "The company"
-    built = None
-    if sector:
-        place = f"is part of the S&P 500's {sector} sector" if index_member else f"is in the {sector} sector"
-        built = f"{who} {place}" + (f" ({industry})" if industry else "")
-        inputs.append(_input("sector", sector, profile_as_of, f"{profile_source} company profile"))
-        if industry:
-            inputs.append(_input("industry", industry, profile_as_of, f"{profile_source} company profile, industry_category"))
+    out = [sentences[0]]
+    if len(sentences) > 1 and len(sentences[0]) < SECOND_SENTENCE_IF_FIRST_UNDER and not is_listing(sentences[1]) \
+            and len(sentences[0]) + 1 + len(sentences[1]) <= DESCRIPTION_CAP:
+        out.append(sentences[1])
+    return " ".join(out)
+
+
+def short_name(name: str | None) -> str | None:
+    """"Micron Technology" from "Micron Technology, Inc."; "Constellation Brands" from "Constellation Brands, Inc."."""
+    if not name:
+        return None
+    words = name.replace(",", " ").split()
+    while len(words) > 1 and words[-1].lower().rstrip(".") in NAME_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
+def profile_sentence(*, name: str | None = None, short_description: str | None = None, profile_as_of: date | None = None, profile_source: str | None = "Intrinio",
+                     gics_sector: str | None = None, gics_sub_industry: str | None = None, gics_as_of: date | None = None, index_member: bool = False,
+                     quote_price: float | None = None, quote_ts: int | None = None, shares_outstanding: float | None = None, shares_as_of: date | None = None) -> dict | None:
+    """The description, then "It's part of the S&P 500's <GICS sector> sector (<sub-industry>), worth about <quote x shares>." None without a profile."""
+    desc = description_text(short_description)
+    if not desc:
+        return None
+    inputs = [_input("description", desc, profile_as_of, f"{profile_source} company profile, short_description")]
+    dates: list[date] = [d for d in (profile_as_of,) if d]
+    if name:
+        inputs.append(_input("company name", short_name(name), profile_as_of, f"tickers.name, read as {name!r} with its corporate suffix dropped"))
+    bits = []
+    if gics_sector:
+        bits.append((f"part of the S&P 500's {gics_sector} sector" if index_member else f"in the {gics_sector} sector") + (f" ({gics_sub_industry})" if gics_sub_industry else ""))
+        inputs.append(_input("GICS sector", gics_sector, gics_as_of, "S&P 500 constituent list (tickers.sector), the same source Discover shows"))
+        if gics_sub_industry:
+            inputs.append(_input("GICS sub-industry", gics_sub_industry, gics_as_of, "S&P 500 constituent list (tickers.industry)"))
         if index_member:
-            inputs.append(_input("index membership", "S&P 500", profile_as_of, "tickers.index_member, from the nightly constituent list"))
-    mv = market_value_words(market_cap)
-    if mv and market_cap_as_of:
-        built = (built or who) + f", worth about {mv}" if built else f"{who} is worth about {mv} at market"
-        inputs.append(_input("market cap", mv, market_cap_as_of, "tickers.market_cap (Finnhub profile), in round words"))
-        dates.append(market_cap_as_of)
-    if profile_as_of:
-        dates.append(profile_as_of)
-    text = " ".join(t for t in (desc, (built + ".") if built else None) if t)
-    rule = (f"The first {DESCRIPTION_SENTENCES} complete sentences of the company's description within {DESCRIPTION_CAP} characters (whole sentences dropped, never cut; "
-            "incorporation and renaming boilerplate removed), as stored by the nightly records step and dated by that fetch; sector and industry from the same profile; "
-            "the market value is the stored market cap in round words, one decimal at most, dated by its own refresh; S&P 500 membership from the nightly constituent list.")
+            inputs.append(_input("index membership", "S&P 500", gics_as_of, "tickers.index_member, from the nightly constituent list"))
+        if gics_as_of:
+            dates.append(gics_as_of)
+    mv = market_value_words(quote_price * shares_outstanding) if quote_price and shares_outstanding else None
+    if mv and quote_ts and shares_as_of:
+        bits.append(f"worth about {mv}")
+        t = fmt_quote_time(quote_ts)
+        inputs += [_input("market cap", mv, t, "latest quote times shares outstanding"), _input("quote", fmt_money(quote_price), t, "quote cache, dated by its last trade"),
+                   _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "tickers.shares_outstanding (Finnhub profile)")]
+        dates += [datetime.fromtimestamp(int(quote_ts), NY).date(), shares_as_of]
+    text = desc + (f" It's {', '.join(bits)}." if bits else "")
+    rule = (f"The first sentence of the company's description as stored by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
+            f"{SECOND_SENTENCE_IF_FIRST_UNDER} characters and when it is not a list of segments, products or brands; incorporation and renaming boilerplate removed; "
+            f"{DESCRIPTION_CAP} characters at most, whole sentences only). Sector and sub-industry are GICS from the S&P 500 constituent list, never the profile vendor's "
+            "categories; membership from the nightly list. The market value is the latest quote times the shares outstanding from the Finnhub profile, in round words, "
+            "one decimal at most, each dated.")
     return _sentence("profile", text, rule, max(dates) if dates else None, inputs)
 
 
@@ -319,11 +346,14 @@ def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict
     a = stock_sentence(symbol, **stock) if stock else None
     if a:
         parts.append(a)
+    days_to_report = (upcoming["next_date"] - upcoming["today"]).days if upcoming and upcoming.get("next_date") else None
     if reported:
         parts.append(reported_clause(**reported))
+    elif days_to_report is not None and 0 <= days_to_report <= NEXT_SOON_DAYS:
+        parts.append(upcoming_clause(**upcoming))
     elif big_move:
         parts.append(big_move_clause(**big_move))
-    elif upcoming and upcoming.get("next_date") and 0 <= (upcoming["next_date"] - upcoming["today"]).days <= NEXT_WITHIN_DAYS:
+    elif days_to_report is not None and 0 <= days_to_report <= NEXT_WITHIN_DAYS:
         parts.append(upcoming_clause(**upcoming))
     if not parts:
         return None
@@ -332,10 +362,10 @@ def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict
     dates = [d for p in parts for d in p[2]]
     rule = (f"The stock: the latest quote dated by its last trade, against its 52-week high (the highest stored close over {WINDOW_52W_DAYS} days; within {NEAR_HIGH_PCT}% reads near) and the "
             f"first stored close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, the EPS on the event row against "
-            "the estimate (actual above estimate is a beat) and the 1-day move from the stored bars through the seeder's window; else the largest daily move of the last "
-            f"{BIG_MOVE_SESSIONS} sessions off earnings dates when it is at least {BIG_MOVE_MULTIPLE} times the median absolute daily move of the past year, with no cause "
-            f"stated; else the next report within {NEXT_WITHIN_DAYS} days from the stored calendar, with the at-the-money straddle over spot from the latest fresh chain "
-            "against the mean absolute 1-day move after past reports.")
+            f"the estimate (actual above estimate is a beat) and the 1-day move from the stored bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "
+            f"else the largest daily move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates when it is at least {BIG_MOVE_MULTIPLE} times the median absolute daily "
+            f"move of the past year, with no cause stated; else the next report within {NEXT_WITHIN_DAYS} days. A report comes from the stored calendar, with the at-the-money "
+            "straddle over spot from the latest fresh chain against the mean absolute 1-day move after past reports.")
     return _sentence("happening", text, rule, max(dates) if dates else None, inputs)
 
 

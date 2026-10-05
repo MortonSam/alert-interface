@@ -54,6 +54,11 @@ async def main() -> int:
                         ticker.market_cap = int(float(mcap_m) * 1_000_000)
                     # else: keep existing market_cap (integrity rule)
 
+                    shares_m = profile.get("shareOutstanding")
+                    if shares_m and float(shares_m) > 0:
+                        ticker.shares_outstanding = int(float(shares_m) * 1_000_000)
+                        ticker.shares_as_of = datetime.now(timezone.utc)
+
                     name = profile.get("name")
                     if ticker.name is None and name:
                         ticker.name = name
