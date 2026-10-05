@@ -980,12 +980,6 @@ export interface SystemStatus {
   most_recent_reaction_date: string | null;
 }
 
-export interface SiteStats {
-  earnings_reports_measured: number;
-  analyst_actions: number;
-  analyst_actions_since: string | null;   // YYYY-MM-DD of the earliest stored action
-}
-
 export interface HealthStatus {
   status: string;
   refresh_in_progress: boolean;
@@ -1108,7 +1102,6 @@ export const api = {
   system: {
     status: () => request<SystemStatus>("/system/status"),
     health: () => request<HealthStatus>("/health"),
-    stats: () => request<SiteStats>("/system/stats"),
   },
 
   theses: {
@@ -1157,7 +1150,7 @@ export const api = {
     latestPick: () =>
       request<LatestPickResponse>(`/discover/latest-pick`),
     insight: (symbol: string) =>
-      request<{ insight: string | null; rule: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
+      request<{ insight: string | null; rule: string | null; as_of: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
   },
 
   reactions: {

@@ -47,3 +47,33 @@ def test_every_card_renders_through_the_blurb_module():
     assert "reaction_blurb(pct_1d, outcome, cond)" in DISCOVER
     assert "insight=_reporting_soon_insight(cond, r.symbol)" in DISCOVER
     assert "insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol)" in DISCOVER
+
+
+def test_the_insight_carries_the_date_of_the_stat_it_rests_on():
+    from app.routers.discover import insight_as_of
+    cond, buy = {"as_of": "2026-09-24", "total": 20}, {"as_of": "2026-10-01", "delta": 0.1}
+    assert insight_as_of("beat_rate", cond, buy) == "2026-09-24"
+    assert insight_as_of("avg_move", cond, None) == "2026-09-24"
+    assert insight_as_of("buy_delta", cond, buy) == "2026-10-01"
+    assert insight_as_of("buy_delta", cond, None) is None and insight_as_of(None, cond, buy) is None
+    assert "as_of" in DISCOVER.split("class InsightResponse")[1].split("class ")[0]
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_mu_insight_as_of_is_the_newest_quarter_or_the_latest_recommendation_period():
+    from sqlalchemy import text
+    from app.database import ScriptSessionLocal
+    from app.routers.discover import ticker_insight
+    async with ScriptSessionLocal() as s:
+        r = await ticker_insight("MU", s)
+        newest = (await s.execute(text("""select max(hr.event_date) from historical_reactions hr join tickers t on t.id = hr.ticker_id
+                                           where t.symbol = 'MU' and hr.event_type = 'earnings' and hr.pct_change_1d is not null"""))).scalar()
+        period = (await s.execute(text("select max(period) from analyst_recommendations ar join tickers t on t.id = ar.ticker_id where t.symbol = 'MU'"))).scalar()
+    if r.insight is None:
+        assert r.as_of is None and r.rule is None
+    else:
+        assert r.as_of in {d.isoformat() for d in (newest, period) if d is not None}
+        assert r.rule

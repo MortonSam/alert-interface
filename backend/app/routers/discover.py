@@ -147,6 +147,7 @@ class UnusuallyActiveResponse(BaseModel):
 class InsightResponse(BaseModel):
     insight: str | None = None
     rule: str | None = None
+    as_of: str | None = None      # the date of the stored stat the line rests on: the newest earnings reaction, or the latest recommendation period
 
 
 INSIGHT_GENERATOR_RULES: dict[str, str] = {
@@ -196,6 +197,7 @@ async def _batch_conditional_stats(
             Ticker.symbol,
             HistoricalReaction.outcome,
             HistoricalReaction.pct_change_1d,
+            HistoricalReaction.event_date,
             EpsBasisCheck.basis_mismatch,
         )
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
@@ -215,11 +217,14 @@ async def _batch_conditional_stats(
     # Aggregate per symbol; quarters whose EPS basis is unclear leave every count
     by_sym: dict[str, list[tuple]] = {}
     excluded: dict[str, int] = {}
+    newest: dict[str, date] = {}            # the newest quarter in each symbol's sample: the stat's as-of date
     for r in rows:
         if r.basis_mismatch:
             excluded[r.symbol] = excluded.get(r.symbol, 0) + 1
             continue
         by_sym.setdefault(r.symbol, []).append((r.outcome, float(r.pct_change_1d)))
+        if r.symbol not in newest or r.event_date > newest[r.symbol]:
+            newest[r.symbol] = r.event_date
 
     out: dict[str, dict] = {}
     for sym, quarters in by_sym.items():
@@ -239,6 +244,7 @@ async def _batch_conditional_stats(
         avg_abs_1d = round(sum(all_abs) / len(all_abs), 2) if all_abs else None
 
         out[sym] = {
+            "as_of": newest[sym].isoformat(),
             "total": total,
             "beat_count": beat_count,
             "miss_count": miss_count,
@@ -404,7 +410,7 @@ async def _batch_buy_share_delta(
         es, et = bs(earlier)
         if et < 5:
             continue
-        out[sym] = {"buy_share": ls, "delta": ls - es, "total": lt}
+        out[sym] = {"buy_share": ls, "delta": ls - es, "total": lt, "as_of": latest.period.isoformat()}
 
     return out
 
@@ -1151,4 +1157,13 @@ async def ticker_insight(
         cond.get(upper), None, buy_share.get(upper), base, upper,
     )
     rule = INSIGHT_GENERATOR_RULES.get(gen) if gen else None
-    return InsightResponse(insight=line, rule=rule)
+    return InsightResponse(insight=line, rule=rule, as_of=insight_as_of(gen, cond.get(upper), buy_share.get(upper)))
+
+
+def insight_as_of(gen: str | None, cond: dict | None, buy_share: dict | None) -> str | None:
+    """The date the chosen generator's stat is as of: the buy-share line rests on the latest recommendation period,
+    every other line on the newest earnings quarter in the sample."""
+    if gen is None:
+        return None
+    src = buy_share if gen == "buy_delta" else cond
+    return (src or {}).get("as_of")

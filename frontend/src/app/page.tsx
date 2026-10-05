@@ -3,7 +3,8 @@ import LatestVerifiedNote from "@/components/LatestVerifiedNote";
 import { HeroSearchButton } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
-import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline, SiteCounters } from "@/components/IvyCopy";
+import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
+import RealStockPage from "@/components/RealStockPage";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
@@ -79,9 +80,9 @@ export default function Home() {
           </p>
         </section>
 
-        {/* ── 2. Big three numbers ──────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
-          <SiteCounters />
+        {/* ── 2. From a real stock page: the same component and stored stat the ticker page shows ── */}
+        <section className="flex items-center justify-center px-4 sm:px-8 py-24">
+          <RealStockPage />
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}

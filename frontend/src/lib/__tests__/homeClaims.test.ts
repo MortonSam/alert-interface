@@ -58,13 +58,28 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(ticker).toMatch(/contradicted\} contradicted/);
   });
 
-  it("the counters render the real number first and animate only once seen", () => {
-    const src = read("components/CountUp.tsx");
-    expect(src).toContain('useState(value.toLocaleString("en-US"))');
-    const observer = src.indexOf("new IntersectionObserver(");
-    const zero = src.indexOf('setDisplay("0")');
-    expect(src.split('setDisplay("0")').length - 1).toBe(1);
-    expect(zero).toBeGreaterThan(observer);                       // only inside the observer's callback
-    expect(zero).toBeGreaterThan(src.indexOf("triggered.current = true;"));
+  it("the real-page block is the ticker page's own headline component on the stored MU stat, fetched on the server", async () => {
+    const home = read("app/page.tsx");
+    expect(home).toContain("<RealStockPage />");
+    expect(home).not.toMatch(/SiteCounters|CountUp|Earnings reactions measured|Analyst actions since/);
+    const block = read("components/RealStockPage.tsx");
+    expect(block).toContain("export default async function RealStockPage()");
+    expect(block).toContain("/v1/discover/insight/${REAL_PAGE_SYMBOL}");
+    expect(block).toContain('REAL_PAGE_SYMBOL = "MU"');
+    expect(block).toContain("if (!hasInsight(view)) return null;");
+    expect(block).toContain("<InsightHeadline insight={view.insight} rule={view.rule} asOf={view.as_of} />");
+    expect(block).toContain("See {REAL_PAGE_NAME}&apos;s full page");
+    expect(block).not.toMatch(/[0-9]+%|\$[0-9]/);                                   // no typed figure
+    const ticker = read("app/tickers/[symbol]/page.tsx");
+    expect(ticker).toContain("<InsightHeadline insight={insight} rule={insightRule} asOf={insightAsOf} />");
+    expect(ticker).not.toContain("How this was computed: {insightRule}");             // one rendering, not two
+    const { computedHowLine, insightAsOfLine, hasInsight } = await import("@/lib/insightHeadline");
+    expect(computedHowLine("Compared this stock's beat rate to the S&P 500 median beat rate")).toBe("How this was computed: Compared this stock's beat rate to the S&P 500 median beat rate");
+    expect(computedHowLine(null)).toBeNull();
+    expect(insightAsOfLine("2026-09-24")).toBe("As of Sep 24, 2026");
+    expect(insightAsOfLine(null)).toBeNull();
+    expect(hasInsight({ insight: "x", rule: null, as_of: null })).toBe(true);
+    expect(hasInsight({ insight: null, rule: null, as_of: null })).toBe(false);
+    expect(hasInsight(null)).toBe(false);
   });
 });
