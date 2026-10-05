@@ -6,42 +6,46 @@ export type { BriefingInput, BriefingResponse, BriefingSentence } from "@/lib/ap
 /** The Overview's block labels, by sentence key. A key the API adds later renders unlabelled until named here. */
 export const BLOCK_LABELS: Record<string, string> = { profile: "What it is", happening: "What's been happening" };
 
-/** Phrases in block text that open a glossary entry in place, mapped to the glossary key. Longest first so
- * "52-week high" wins over any shorter overlap. */
+/** Glossary terms the Overview links, as [phrase in the text, glossary key]. Longest first so "52-week high" wins over
+ * any shorter overlap. Only whole words match ("estimated" is not "estimate"), and each term links once per block. */
 export const GLOSSARY_LINKS: ReadonlyArray<readonly [string, string]> = [
   ["52-week high", "52-week high"],
   ["after the close", "after the close"],
   ["before the open", "before the open"],
   ["implied move", "implied move"],
   ["1-day move", "1-day move"],
+  ["market cap", "market cap"],
+  ["estimate", "estimate"],
+  ["sector", "sector"],
+  ["beat", "beat"],
+  ["EPS", "eps"],
 ];
 
 export interface TextPart { text: string; term?: string }
 
-/** Split a block's text into plain runs and glossary-linked runs, in order. Pure; the component wraps the linked runs. */
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Split a block's text into plain runs and glossary-linked runs: the first whole-word occurrence of each term, in order. Pure. */
 export function splitTerms(text: string): TextPart[] {
-  const parts: TextPart[] = [];
-  let rest = text;
-  while (rest.length) {
-    let best: { index: number; phrase: string; term: string } | null = null;
-    for (const [phrase, term] of GLOSSARY_LINKS) {
-      const index = rest.indexOf(phrase);
-      if (index >= 0 && (!best || index < best.index || (index === best.index && phrase.length > best.phrase.length))) best = { index, phrase, term };
-    }
-    if (!best) { parts.push({ text: rest }); break; }
-    if (best.index > 0) parts.push({ text: rest.slice(0, best.index) });
-    parts.push({ text: best.phrase, term: best.term });
-    rest = rest.slice(best.index + best.phrase.length);
+  const hits: { index: number; phrase: string; term: string }[] = [];
+  for (const [phrase, term] of GLOSSARY_LINKS) {
+    const m = new RegExp(`(^|[^A-Za-z0-9-])(${escape(phrase)})(?![A-Za-z0-9-])`).exec(text);
+    if (m && m.index >= 0) hits.push({ index: m.index + m[1].length, phrase, term });
   }
+  hits.sort((a, b) => a.index - b.index || b.phrase.length - a.phrase.length);
+  const parts: TextPart[] = [];
+  let cursor = 0;
+  for (const h of hits) {
+    if (h.index < cursor) continue;                       // inside a longer term already linked
+    if (h.index > cursor) parts.push({ text: text.slice(cursor, h.index) });
+    parts.push({ text: h.phrase, term: h.term });
+    cursor = h.index + h.phrase.length;
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor) });
   return parts;
 }
 
-/** The sentences as one paragraph, in the order the API gives them. */
-export function briefingParagraph(sentences: BriefingSentence[]): string {
-  return sentences.map((s) => s.text).join(" ");
-}
-
-/** The receipt shown on hover: how the sentence was computed and the date it rests on. */
+/** The receipt shown on hover: how the block was computed and the date it rests on. */
 export function sentenceReceipt(s: BriefingSentence): { how: string | null; asOf: string | null } {
   return { how: computedHowLine(s.rule), asOf: insightAsOfLine(s.as_of) };
 }
@@ -51,6 +55,11 @@ export function sourceLine(i: { name: string; value: string; as_of: string | nul
   const asOf = i.as_of && /^\d{4}-\d{2}-\d{2}$/.test(i.as_of) ? insightAsOfLine(i.as_of) : i.as_of;
   const tail = [asOf, i.source].filter(Boolean).join("; ");
   return `${i.name}: ${i.value}` + (tail ? ` (${tail})` : "");
+}
+
+/** The blocks as one string, in API order (tests and plain-text uses). */
+export function briefingParagraph(sentences: BriefingSentence[]): string {
+  return sentences.map((s) => s.text).join(" ");
 }
 
 export function hasBriefing(b: BriefingResponse | null | undefined): b is BriefingResponse {

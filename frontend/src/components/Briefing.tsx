@@ -14,14 +14,14 @@ import { BLOCK_LABELS, sentenceReceipt, sourceLine, splitTerms } from "@/lib/bri
 export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
   if (!sentences.length) return null;
   return (
-    <div className="space-y-7">
+    <div className="space-y-8 max-w-[65ch]">
       {sentences.map((s, i) => {
         const r = sentenceReceipt(s);
         const receipt = [r.how, r.asOf].filter(Boolean).join(" · ");
         return (
           <div key={s.key + i} className="group relative" tabIndex={0}>
             <p className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground mb-2">{BLOCK_LABELS[s.key] ?? s.key}</p>
-            <p className="text-xl sm:text-2xl font-display text-foreground/80 leading-relaxed">
+            <p className="text-lg text-foreground/90 leading-relaxed">
               {splitTerms(s.text).map((part, j) =>
                 part.term ? (
                   <ExplainTip key={j} term={part.term}>

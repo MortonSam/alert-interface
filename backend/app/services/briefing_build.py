@@ -19,6 +19,7 @@ from app.services import briefing as B
 from app.services import chain_store, price_bars
 from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.eps_actuals import eps_outcome
+from app.services.trading_calendar import nth_trading_day_after
 from app.services.implied_move import straddle_implied_move
 from app.services.next_earnings import next_earnings_for
 from app.services.price_history_exclusion import is_excluded
@@ -85,20 +86,32 @@ async def _implied(db: AsyncSession, sym: str, spot: float | None, min_date: dat
     return {"implied_pct": im.pct, "chain_date": date.fromisoformat(str(got[1])[:10]), "expiration": date.fromisoformat(exp)}
 
 
+def daily_moves(df) -> list[tuple[date, float]]:
+    """[(session, close-to-close percent move)] ascending from an adjusted frame."""
+    if df is None or df.empty or "Close" not in df:
+        return []
+    closes = df["Close"].dropna()
+    pct = closes.pct_change().dropna() * 100
+    return [(ts.date(), float(v)) for ts, v in pct.items()]
+
+
 async def build_briefing(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
-    """{symbol, name, sentences: [profile?, happening?]} for one ticker; empty when nothing is stored for it."""
+    """{symbol, name, state, sentences: [profile?, happening?]}; an inactive ticker returns no sentences and its state."""
     today = today or date.today()
     sym = await resolve_symbol(db, symbol.upper())
     ticker = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     if ticker is None:
-        return {"symbol": sym, "name": None, "sentences": []}
+        return {"symbol": sym, "name": None, "state": None, "sentences": []}
+    if not ticker.is_active:
+        return {"symbol": sym, "name": ticker.name, "state": ticker.inactive_reason or "not an active ticker", "sentences": []}
     sentences: list[dict] = []
 
     # block 1: what it is
-    prof = (await db.execute(text("SELECT short_description, sector, industry_group, industry_category, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
+    prof = (await db.execute(text("SELECT short_description, sector, industry_category, industry_group, source, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
     if prof:
-        s1 = B.profile_sentence(short_description=prof["short_description"], sector=prof["sector"], industry=prof["industry_category"] or prof["industry_group"],   # the category reads as a name; the group is a SIC phrase
-                                profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
+        s1 = B.profile_sentence(name=ticker.name, short_description=prof["short_description"], sector=prof["sector"], industry=prof["industry_category"] or prof["industry_group"],
+                                index_member=bool(ticker.index_member), profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
+                                profile_source=(prof["source"] or "intrinio").capitalize(),
                                 market_cap=_f(ticker.market_cap), market_cap_as_of=ticker.market_cap_updated_at.date() if ticker.market_cap_updated_at else None)
         if s1:
             sentences.append(s1)
@@ -107,7 +120,7 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     q = await _quote(sym)
     df = await price_bars.bars(db, sym, today - timedelta(days=B.WINDOW_52W_DAYS + 7))
     facts = bar_facts(df, today)
-    price = {"quote_price": q.price if q and q.state == "ok" else None, "quote_ts": q.traded_on_ts if q else None, **facts}
+    stock = {"quote_price": q.price if q and q.state == "ok" else None, "quote_ts": q.traded_on_ts if q else None, **facts}
 
     excluded = await is_excluded(db, sym)
     mismatch = await basis_mismatch_dates(db, ticker.id)
@@ -116,31 +129,37 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         FROM historical_reactions WHERE ticker_id = :t AND event_type = 'earnings' ORDER BY event_date"""), {"t": ticker.id})).mappings().all()
     sample = [] if excluded else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
     sample_as_of = sample[-1]["event_date"] if sample else None
+    earnings_dates = (await db.execute(select(Event.event_date).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS,
+                                                                       Event.event_date >= today - timedelta(days=60), Event.event_date <= today))).scalars().all()
 
-    reported = upcoming = None
-    latest = (await db.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date <= today)
-                               .order_by(Event.event_date.desc()).limit(1))).scalar_one_or_none()
-    if latest is not None and B.in_reaction_window(latest.event_date, today):
-        hr = next((r for r in rows if r["event_date"] == latest.event_date), None)
-        timing = hr["report_timing"] if hr and hr["report_timing"] else latest.report_timing
-        actual = _f(latest.eps_actual if latest.eps_actual is not None else (hr["eps_actual"] if hr else None))
-        estimate = _f(latest.eps_estimate if latest.eps_estimate is not None else (hr["eps_estimate"] if hr else None))
+    reported = big = upcoming = None
+    latest = max(earnings_dates, default=None)
+    if latest is not None and B.in_reaction_window(latest, today):
+        ev = (await db.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == latest))).scalars().first()
+        hr = next((r for r in rows if r["event_date"] == latest), None)
+        timing = hr["report_timing"] if hr and hr["report_timing"] else (ev.report_timing if ev else None)
+        actual = _f(ev.eps_actual if ev and ev.eps_actual is not None else (hr["eps_actual"] if hr else None))
+        estimate = _f(ev.eps_estimate if ev and ev.eps_estimate is not None else (hr["eps_estimate"] if hr else None))
         stored = _f(hr["pct_change_1d"]) if hr else None
-        reported = {"today": today, "event_date": latest.event_date, "timing": timing, "eps_actual": actual, "eps_estimate": estimate,
-                    "outcome": eps_outcome(actual, estimate), "bars_through": facts.get("last_close_date"),
-                    "pct_change_1d": stored if stored is not None else move_from_bars(df, latest.event_date, timing)}
+        reported = {"today": today, "event_date": latest, "timing": timing, "eps_actual": actual, "eps_estimate": estimate, "outcome": eps_outcome(actual, estimate),
+                    "bars_through": facts.get("last_close_date"), "pct_change_1d": stored if stored is not None else move_from_bars(df, latest, timing)}
     else:
-        ne = await next_earnings_for(db, ticker.id, today)
-        if ne.date:
-            ev = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
-            implied = await _implied(db, sym, q.price if q and q.state == "ok" else None, ne.date, today)
-            avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
-            upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
-                        "timing": ev if ev in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
-    s2 = B.happening_sentence(sym, price=price, reported=reported, upcoming=upcoming)
+        exclude = set()
+        for d in earnings_dates:
+            exclude.add(d); exclude.add(nth_trading_day_after(d, 1))
+        big = B.find_big_move(daily_moves(df), exclude, today)
+        if big is None:
+            ne = await next_earnings_for(db, ticker.id, today)
+            if ne.date:
+                ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
+                implied = await _implied(db, sym, q.price if q and q.state == "ok" else None, ne.date, today)
+                avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
+                upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
+                            "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
+    s2 = B.happening_sentence(sym, stock=stock, reported=reported, big_move=big, upcoming=upcoming)
     if s2:
         sentences.append(s2)
-    return {"symbol": sym, "name": ticker.name, "sentences": sentences}
+    return {"symbol": sym, "name": ticker.name, "state": None, "sentences": sentences}
 
 
 async def featured_example(db: AsyncSession, today: date | None = None) -> dict:
@@ -149,7 +168,7 @@ async def featured_example(db: AsyncSession, today: date | None = None) -> dict:
     raw = await get_value(db, FEATURED_KEY)
     pick = json.loads(raw) if raw else {}
     if not pick.get("symbol"):
-        return {"symbol": None, "name": None, "picked_on": None, "earnings_date": None, "rule": pick.get("rule"), "sentences": []}
+        return {"symbol": None, "name": None, "state": None, "picked_on": None, "earnings_date": None, "rule": pick.get("rule"), "sentences": []}
     brief = await build_briefing(db, pick["symbol"], today)
-    return {"symbol": brief["symbol"], "name": brief["name"], "picked_on": pick.get("picked_on"), "earnings_date": pick.get("earnings_date"),
+    return {"symbol": brief["symbol"], "name": brief["name"], "state": brief.get("state"), "picked_on": pick.get("picked_on"), "earnings_date": pick.get("earnings_date"),
             "rule": pick.get("rule"), "sentences": [s for s in brief["sentences"] if s["key"] in FEATURED_SENTENCES]}

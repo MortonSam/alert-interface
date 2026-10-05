@@ -29,7 +29,7 @@ const GLOSSARY: Record<string, string> = {
   breakeven:
     "The stock price where an option trade starts to profit, accounting for the premium paid.",
   beat:
-    "The company reported earnings per share above analyst estimates.",
+    "The company reported earnings per share above analyst estimates. How the stock reacts depends on what was already expected, so a beat is not by itself good news for the share price.",
   miss:
     "The company reported earnings per share below analyst estimates.",
   expiration:
@@ -86,6 +86,14 @@ const GLOSSARY: Record<string, string> = {
     "The company reports after the market closes, so the first trading on the news is the next session. The 1-day move for such a report runs from the report day's close to the next session's close.",
   "before the open":
     "The company reports before the market opens, so that same session trades on the news. The 1-day move for such a report runs from the prior close to the report day's close.",
+  eps:
+    "Earnings per share: the company's profit for the quarter divided by its number of shares. It is the headline number a report is judged on.",
+  estimate:
+    "What analysts expected the company to earn per share before the report. Beating or missing it moves the stock more than the raw number does.",
+  "market cap":
+    "The stock market's price for the whole company: share price times shares outstanding. It says how big the company is, not whether it is cheap.",
+  sector:
+    "The broad industry group a company belongs to, such as Manufacturing or Finance. Stocks in a sector often move together when news hits the group.",
   "1-day move":
     "The stock's percentage change over the one session that first trades on the report, close to close. For an after-close report that is the next session; for a before-open report it is the report day itself.",
 };

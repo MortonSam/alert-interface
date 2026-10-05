@@ -2140,18 +2140,19 @@ async def check_iv_solver_band(session) -> CheckResult:
 # ── One earnings event per ticker and date ────────────────────────────────────────────────────────────
 
 async def check_earnings_events_unique(session) -> CheckResult:
-    """ERROR when a ticker has two earnings events on one date, or when the unique index that prevents it is missing
-    (scripts/dedupe_earnings_events --write removes the duplicates and creates the index)."""
+    """ERROR when a ticker has two events of one type on one date (analyst actions exempt), or when the unique index that
+    prevents it is missing (scripts/dedupe_earnings_events --write)."""
+    from app.scripts.dedupe_earnings_events import INDEX_NAME
     dups = (await session.execute(text("""
-        SELECT t.symbol, e.event_date, count(*) FROM events e JOIN tickers t ON t.id = e.ticker_id
-        WHERE e.event_type = 'earnings' GROUP BY t.symbol, e.event_date HAVING count(*) > 1 ORDER BY 2 DESC, 1"""))).all()
-    has_index = (await session.execute(text("SELECT 1 FROM pg_indexes WHERE indexname = 'uq_events_earnings_ticker_date'"))).scalar()
-    rows = [f"{r[0]} {r[1].isoformat()}: {r[2]} rows" for r in dups]
+        SELECT t.symbol, e.event_type::text, e.event_date, count(*) FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE e.event_type <> 'analyst_action' GROUP BY t.symbol, e.event_type, e.event_date HAVING count(*) > 1 ORDER BY 3 DESC, 1"""))).all()
+    has_index = (await session.execute(text("SELECT 1 FROM pg_indexes WHERE indexname = :n"), {"n": INDEX_NAME})).scalar()
+    rows = [f"{r[0]} {r[1]} {r[2].isoformat()}: {r[3]} rows" for r in dups]
     if not has_index:
-        rows.append("unique index uq_events_earnings_ticker_date is missing (run dedupe_earnings_events --write)")
+        rows.append(f"unique index {INDEX_NAME} is missing (run dedupe_earnings_events --write)")
     if rows:
-        return CheckResult("earnings_events_unique", ERROR, f"{len(dups)} report(s) stored twice" + ("" if has_index else "; no unique index"), rows[:40])
-    return CheckResult("earnings_events_unique", PASS, "One earnings event per ticker and date, enforced by uq_events_earnings_ticker_date")
+        return CheckResult("earnings_events_unique", ERROR, f"{len(dups)} event(s) stored twice" + ("" if has_index else "; no unique index"), rows[:40])
+    return CheckResult("earnings_events_unique", PASS, f"One event per ticker, type and date (analyst actions exempt), enforced by {INDEX_NAME}")
 
 
 # ── EPS actuals arrive the night of the report ─────────────────────────────────────────────────────────

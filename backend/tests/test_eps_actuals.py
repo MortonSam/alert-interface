@@ -69,15 +69,29 @@ async def test_validate_warns_on_a_reported_event_without_its_eps():
             await s.commit()
 
 
-def test_since_flag_and_the_dedupe_plan_keep_the_oldest_row_and_fill_what_it_lacks():
+def test_since_flag_and_the_dedupe_plan_keep_the_richest_row_and_fill_what_it_lacks():
+    from app.scripts.dedupe_earnings_events import DuplicateEventsRemain, assert_no_duplicates, richness
     assert since_arg(["--since", "2026-09-01"]) == date(2026, 9, 1) and since_arg(["--since=2026-09-01"]) == date(2026, 9, 1) and since_arg([]) is None
-    rows = [{"id": "b", "ticker_id": "t1", "symbol": "PAYX", "event_date": date(2026, 9, 23), "created_at": datetime(2026, 9, 29, tzinfo=timezone.utc), "eps_actual": 1.34, "eps_estimate": 1.35,
-             "eps_source": "finnhub", "eps_fetched_at": NOW, "confirmation_note": None, "report_timing": "bmo", "report_timing_source": "finnhub"},
-            {"id": "a", "ticker_id": "t1", "symbol": "PAYX", "event_date": date(2026, 9, 23), "created_at": datetime(2026, 7, 6, tzinfo=timezone.utc), "eps_actual": None, "eps_estimate": None,
-             "eps_source": None, "eps_fetched_at": None, "confirmation_note": "reported per EDGAR", "report_timing": "unknown", "report_timing_source": "unknown"},
-            {"id": "c", "ticker_id": "t2", "symbol": "MU", "event_date": date(2026, 9, 30), "created_at": NOW, "eps_actual": None, "eps_estimate": None, "eps_source": None,
-             "eps_fetched_at": None, "confirmation_note": None, "report_timing": "amc", "report_timing_source": "finnhub"}]
-    plans = dedupe_plan(rows)
-    assert plans == [{"symbol": "PAYX", "event_date": date(2026, 9, 23), "keep": "a", "drop": ["b"],
-                      "fill": {"eps_actual": 1.34, "eps_estimate": 1.35, "eps_source": "finnhub", "eps_fetched_at": NOW, "report_timing": "bmo", "report_timing_source": "finnhub"}}]
-    assert dedupe_plan(rows[2:]) == []
+    old_poor = {"id": "a", "ticker_id": "t1", "symbol": "PAYX", "event_type": "earnings", "event_date": date(2026, 9, 23), "created_at": datetime(2026, 7, 6, tzinfo=timezone.utc),
+                "is_confirmed": False, "eps_actual": None, "eps_estimate": None, "eps_source": None, "eps_fetched_at": None, "confirmation_note": None, "report_timing": "unknown", "report_timing_source": "unknown"}
+    new_rich = {"id": "b", "ticker_id": "t1", "symbol": "PAYX", "event_type": "earnings", "event_date": date(2026, 9, 23), "created_at": datetime(2026, 9, 29, tzinfo=timezone.utc),
+                "is_confirmed": True, "eps_actual": 1.34, "eps_estimate": 1.35, "eps_source": "finnhub", "eps_fetched_at": NOW, "confirmation_note": "reported per EDGAR", "report_timing": "bmo", "report_timing_source": "finnhub"}
+    assert richness(old_poor) == 0 and richness(new_rich) == 5
+    plans = dedupe_plan([old_poor, new_rich])
+    assert plans == [{"symbol": "PAYX", "event_type": "earnings", "event_date": date(2026, 9, 23), "keep": "b", "drop": ["a"], "fill": {}}]     # the richer row wins, whatever its age
+    tie_old = dict(old_poor, id="c", confirmation_note="per EDGAR", report_timing="bmo")
+    tie_new = dict(new_rich, id="d", eps_actual=None, eps_estimate=None, eps_source=None, eps_fetched_at=None, confirmation_note=None, report_timing="unknown", is_confirmed=True, created_at=NOW)
+    plans = dedupe_plan([tie_old, tie_new])
+    assert plans[0]["keep"] == "c" and plans[0]["drop"] == ["d"] and plans[0]["fill"] == {"report_timing_source": "finnhub"}   # richer (2 vs 1) wins and takes what it lacks
+    assert dedupe_plan([old_poor]) == []
+    assert_no_duplicates(0)
+    with pytest.raises(DuplicateEventsRemain):
+        assert_no_duplicates(1)
+
+
+@pytest.mark.asyncio
+async def test_the_migrations_guard_finds_no_duplicates_locally_and_the_index_exists():
+    from app.scripts.dedupe_earnings_events import INDEX_NAME, REMAINING_SQL
+    async with ScriptSessionLocal() as s:
+        assert (await s.execute(text(REMAINING_SQL))).scalar() == 0
+        assert (await s.execute(text("SELECT 1 FROM pg_indexes WHERE indexname = :n"), {"n": INDEX_NAME})).scalar() == 1

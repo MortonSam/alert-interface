@@ -29,11 +29,15 @@ describe("the briefing renders the API's sentences and receipts, nothing typed",
     expect(hasBriefing(null)).toBe(false);
   });
 
-  it("glossary terms in block text are split out, longest first, and every linked term has a glossary entry", () => {
+  it("glossary terms link once per block, whole words only, longest first, and every linked term has an entry", () => {
     expect(splitTerms("MU sits 12.3% below its 52-week high of $1,213.37; reported after the close, the 1-day move was +3.0%.")).toEqual([
       { text: "MU sits 12.3% below its " }, { text: "52-week high", term: "52-week high" }, { text: " of $1,213.37; reported " },
       { text: "after the close", term: "after the close" }, { text: ", the " }, { text: "1-day move", term: "1-day move" }, { text: " was +3.0%." },
     ]);
+    // once per block: the second "sector" and the second "EPS" stay plain; "estimated" is not "estimate"
+    const parts = splitTerms("EPS $2.03 against a $1.91 estimate, a beat. The sector is Finance; a sector peer reports Oct 6 (estimated). EPS again.");
+    expect(parts.filter((p) => p.term).map((p) => [p.text, p.term])).toEqual([["EPS", "eps"], ["estimate", "estimate"], ["beat", "beat"], ["sector", "sector"]]);
+    expect(parts.map((p) => p.text).join("")).toBe("EPS $2.03 against a $1.91 estimate, a beat. The sector is Finance; a sector peer reports Oct 6 (estimated). EPS again.");
     expect(splitTerms("Nothing to link.")).toEqual([{ text: "Nothing to link." }]);
     expect(splitTerms("")).toEqual([]);
     for (const [, term] of GLOSSARY_LINKS) expect(GLOSSARY[term], term).toMatch(/\. .+\.$/);      // an entry exists and has two sentences

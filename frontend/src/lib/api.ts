@@ -1020,6 +1020,7 @@ export interface BriefingSentence {
 export interface BriefingResponse {
   symbol: string;
   name: string | null;
+  state?: string | null;         // why there is nothing to show for an inactive ticker (its stored inactive_reason)
   sentences: BriefingSentence[];
 }
 
