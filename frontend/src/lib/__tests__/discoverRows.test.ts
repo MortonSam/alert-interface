@@ -56,7 +56,7 @@ describe("Discover is a list of rows, not a card grid", () => {
   });
 
   it("keeps the freshness line and numbers sections as they render", () => {
-    expect(page).toContain("freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo))");
+    expect(page).toContain("freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo), health?.cadence)");
     expect(page).not.toContain("health.last_refreshed_at");            // the global stamp dates nothing a visitor sees
     expect(page.match(/index=\{nextIndex\(\)\}/g)?.length).toBe(5);
     expect(page).toContain('<div className="max-w-6xl mx-auto">');

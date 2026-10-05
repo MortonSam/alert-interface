@@ -1,7 +1,8 @@
 "use client";
 
 import { volRegime } from "@/lib/encodings/volRegime";
-import { impliedSpanPhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
+import { impliedSpanPhrase, optionsCadencePhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
+import { useIvyRule } from "@/lib/useIvyRule";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -437,7 +438,7 @@ function DraftDisplay({
         <span>
           Implied move:{" "}
           <span className="font-mono text-foreground">
-            ±{fb.expected_move_pct?.toFixed(1) ?? "n/a"}% (±${fb.expected_move_dollars?.toFixed(2) ?? "n/a"})
+            {fb.expected_move_pct != null && fb.expected_move_dollars != null ? `±${fb.expected_move_pct.toFixed(1)}% (±$${fb.expected_move_dollars.toFixed(2)})` : absentCell(fb, "expected_move_pct", "no priced ATM straddle on the chain")}
           </span>
           {impliedSpanPhrase(fb.expiration_used, fb.span_days, fb.options_as_of) && (
             <span className="text-muted-foreground/60 ml-1">{impliedSpanPhrase(fb.expiration_used, fb.span_days, fb.options_as_of)}</span>
@@ -446,18 +447,18 @@ function DraftDisplay({
         <span>
           Range:{" "}
           <span className="font-mono text-foreground">
-            ${fb.implied_range_low?.toFixed(2) ?? "n/a"} - ${fb.implied_range_high?.toFixed(2) ?? "n/a"}
+            {fb.implied_range_low != null && fb.implied_range_high != null ? `$${fb.implied_range_low.toFixed(2)} - $${fb.implied_range_high.toFixed(2)}` : absentCell(fb, "implied_range_low", "no priced ATM straddle on the chain")}
           </span>
         </span>
         <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>
         <span>
           One-day earnings move, avg ±:{" "}
-          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct?.toFixed(2) ?? "n/a"}%</span>
+          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct != null ? `${fb.hist_avg_abs_move_pct.toFixed(2)}%` : absentCell(fb, "hist_avg_abs_move_pct", "no stored earnings reactions with a one-day move")}</span>
         </span>
-        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct?.toFixed(0) ?? "n/a"}%</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
-        <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct?.toFixed(1) ?? "n/a"}%</span></span>
-        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : <span className="font-mono text-foreground">n/a</span>}</span>
-        <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : "n/a"}</span></span>
+        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no stored quarters with an EPS outcome")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
+        <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
+        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
+        <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
         {draft.vol_regime && (
           <span>
             Vol regime:{" "}
@@ -481,26 +482,26 @@ function DraftDisplay({
             <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
               <p className="font-mono text-3xl font-semibold tabular-nums">
-                {costPerContract != null ? `$${Math.round(costPerContract)}` : "n/a"}
+                {costPerContract != null ? `$${Math.round(costPerContract)}` : "absent: no priced contract at this strike"}
               </p>
             </div>
             <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Max loss</p>
               <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
-                {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "n/a"}
+                {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "absent: no priced contract at this strike"}
               </p>
             </div>
             <div className="border border-border/60 bg-transparent rounded-md p-5">
               <p className="text-xs text-muted-foreground mb-2">Max gain</p>
               {isSpread ? (
                 <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "n/a"}
+                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "absent: no priced contract at this strike"}
                 </p>
               ) : draft.direction === "bullish" ? (
                 <p className="text-xl font-semibold text-success">Unlimited</p>
               ) : (
                 <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "n/a"}
+                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "absent: no priced contract at this strike"}
                 </p>
               )}
             </div>
@@ -584,13 +585,13 @@ function DraftDisplay({
                     <div className="border border-border/60 bg-transparent rounded-md p-5">
                       <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
                       <p className="font-mono text-3xl font-semibold tabular-nums">
-                        {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "n/a"}
+                        {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "absent: no priced contract at this strike"}
                       </p>
                     </div>
                     <div className="border border-border/60 bg-transparent rounded-md p-5">
                       <p className="text-xs text-muted-foreground mb-2">Max loss</p>
                       <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
-                        {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "n/a"}
+                        {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "absent: no priced contract at this strike"}
                       </p>
                     </div>
                     <div className="border border-border/60 bg-transparent rounded-md p-5">
@@ -599,7 +600,7 @@ function DraftDisplay({
                         <p className="text-xl font-semibold text-success">Unlimited</p>
                       ) : (
                         <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                          {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "n/a"}
+                          {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "absent: no priced contract at this strike"}
                         </p>
                       )}
                     </div>
@@ -980,7 +981,7 @@ function BuildTradePageContent() {
           </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Ivy drafts the idea from stored options data (updated once a day), earnings history, and volatility.
+            Ivy drafts the idea from stored options data{optionsCadencePhrase(ivyRule?.rule.cadence) ? ` (${optionsCadencePhrase(ivyRule?.rule.cadence)})` : ""}, earnings history, and volatility.
             Not financial advice.
           </p>
         </div>
@@ -1366,7 +1367,13 @@ function BuildTradePageContent() {
   );
 }
 
+/** "absent: <reason>" for a fact the draft could not compute: the API's reason when it gives one, else the stated default. */
+function absentCell(fb: { fact_reasons?: Record<string, string> } | null | undefined, key: string, fallback: string): string {
+  return `absent: ${fb?.fact_reasons?.[key] ?? fallback}`;
+}
+
 export default function BuildTradePage() {
+  const ivyRule = useIvyRule();
   return (
     <Suspense>
       <BuildTradePageContent />

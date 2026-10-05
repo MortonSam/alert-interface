@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
+from app.services.cadence import cadence
 from app.services.system_metadata_service import get_value
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -21,6 +22,7 @@ class SystemStatus(BaseModel):
     total_reactions: int
     most_recent_reaction_date: date | None
     datasets: dict = {}                         # per dataset: at, ok, failed, steps (services/dataset_freshness)
+    cadence: dict | None = None                 # services/cadence: what "nightly" and "once a day" mean
 
 
 @router.get("/status", response_model=SystemStatus)
@@ -63,6 +65,7 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> SystemStatus:
         total_reactions=total_reactions,
         most_recent_reaction_date=most_recent_reaction_date,
         datasets=datasets,
+        cadence=cadence(),
     )
 
 

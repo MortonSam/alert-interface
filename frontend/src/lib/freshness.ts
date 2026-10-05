@@ -1,13 +1,45 @@
-// How fresh each kind of data is, said once. Every page that shows a price, or
-// talks about options data, renders these instead of writing its own sentence.
-//
-// Facts they describe:
-//   quotes   Finnhub, behind a 60s cache, not real-time. A quote whose last trade
-//            is more than 3 sessions old is withheld by the API (quote_state).
-//   options  chains are uploaded once a day; each carries its own chain date.
-//   research nightly refresh.
+// Freshness wording, built from the data's own dates and the API's cadence record (backend services/cadence).
+// Nothing here types a cadence or a delay: "nightly", "once a day" and the price source come from the record, and
+// every quote and chain is named by its own date.
+import type { Cadence } from "@/lib/api";
 
-export const PRICE_FRESHNESS = "Prices from Finnhub, may be delayed up to 15 minutes";
+const MARKET_TZ = "America/New_York";
+
+/** "nightly" when the record says one run a day; otherwise the count. Null without a record: callers omit the word. */
+export function nightlyWord(cadence: Cadence | null | undefined): string | null {
+  if (!cadence) return null;
+  return cadence.nightly.per_day === 1 ? "nightly" : `${cadence.nightly.per_day} times a day`;
+}
+
+/** "updated once a day" from the options cadence; null without a record. */
+export function optionsCadencePhrase(cadence: Cadence | null | undefined): string | null {
+  if (!cadence) return null;
+  return cadence.options.per_day === 1 ? "updated once a day" : `updated ${cadence.options.per_day} times a day`;
+}
+
+/** The price source line: the source named by the record, each quote dated by its own last trade. No delay figure is
+ * typed; the record says whether the source states one. */
+export function priceSourceLine(cadence: Cadence | null | undefined): string {
+  const source = cadence?.quotes.source ?? "the quote source";
+  const delay = cadence?.quotes.delay_statement;
+  return delay ? `Prices from ${source}, ${delay}` : `Prices from ${source}, each dated by its last trade`;
+}
+
+/** A quote's own time, always with its date, on the market clock: "Oct 5, 4:00 PM ET". */
+export function fmtQuoteDateTime(unix: number | null | undefined): string | null {
+  if (unix == null) return null;
+  const d = new Date(unix * 1000);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: MARKET_TZ }) + " ET";
+}
+
+/** An ISO timestamp the same way. */
+export function fmtIsoDateTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: MARKET_TZ }) + " ET";
+}
 
 /** The nightly datasets a page shows, by the keys /health and /system/status publish (services/dataset_freshness). */
 export const DATASET_LABELS: Record<string, string> = {
@@ -31,7 +63,7 @@ export function datasetAgeLine(
   const [key, oldest] = dated.reduce((a, b) => (new Date(b[1].at as string) < new Date(a[1].at as string) ? b : a));
   const label = DATASET_LABELS[key] ?? key;
   const failed = known.filter(([, d]) => !d.ok).map(([k]) => DATASET_LABELS[k] ?? k);
-  return `${label} as of ${ago(oldest.at as string)}` + (failed.length ? ` · last nightly step failed for ${failed.join(", ")}` : "");
+  return `${label} as of ${ago(oldest.at as string)}` + (failed.length ? ` · last refresh step failed for ${failed.join(", ")}` : "");
 }
 
 /** The oldest named dataset is older than `days`: the line turns amber. */
@@ -43,16 +75,19 @@ export function datasetsStale(datasets: Record<string, DatasetAgeLike> | null | 
   });
 }
 
-/** The freshness line a list page shows: the price source, then the dataset line when there is one. */
-export function freshnessLine(datasetLine: string | null | undefined): string {
-  return `${PRICE_FRESHNESS} · ${datasetLine ?? "Research data refreshed nightly"}`;
+/** The freshness line a list page shows: the price source from the cadence record, then the dataset line. Without a
+ * dataset line the research clause names the cadence only when the record gives it. */
+export function freshnessLine(datasetLine: string | null | undefined, cadence?: Cadence | null): string {
+  const word = nightlyWord(cadence);
+  const research = datasetLine ?? (word ? `Research data refreshed ${word}` : "Research data from the stored refresh steps");
+  return `${priceSourceLine(cadence)} · ${research}`;
 }
 
-/** Names the options data by its own date. Never falls back to today. */
-export function optionsDataPhrase(chainDate: string | null | undefined): string {
-  return chainDate
-    ? `options data as of ${chainDate}, updated once a day`
-    : "the latest stored options data, updated once a day";
+/** Names the options data by its own date, and its cadence by the record. Never falls back to today. */
+export function optionsDataPhrase(chainDate: string | null | undefined, cadence?: Cadence | null): string {
+  const cad = optionsCadencePhrase(cadence);
+  const base = chainDate ? `options data as of ${chainDate}` : "the latest stored options data";
+  return cad ? `${base}, ${cad}` : base;
 }
 
 export function premiumSourcePhrase(chainDate: string | null | undefined): string {

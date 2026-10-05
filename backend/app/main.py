@@ -79,6 +79,7 @@ async def health_check():
         "step_health": {},
         "step_outcomes": {},           # per step: exit, seconds, at, stderr_head / stderr_tail (traceback's last lines)
         "failed_steps": [],            # steps whose latest run exited non-zero or timed out; status is "degraded" while any exist
+        "cadence": None,               # the nightly, options and quote cadence (services/cadence)
         "datasets": {},                # per dataset: at (oldest last success of its steps), ok, failed steps (dataset_freshness)
         "research_generation": None,   # today's note generations and their estimated spend (see research_cost)
     }
@@ -146,6 +147,12 @@ async def health_check():
                 import json as _json
                 raw = await get_value(session, "step_outcomes")
                 result["step_outcomes"] = _json.loads(raw) if raw else {}
+            except Exception:
+                result["status"] = "degraded"
+
+            try:
+                from app.services.cadence import cadence
+                result["cadence"] = cadence()
             except Exception:
                 result["status"] = "degraded"
 

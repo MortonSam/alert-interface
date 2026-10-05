@@ -4,7 +4,7 @@ import SignedOutNotice from "@/components/SignedOutNotice";
 import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
 
 import { earningsProximity } from "@/lib/encodings/earningsProximity";
-import { PRICE_FRESHNESS, datasetAgeLine } from "@/lib/freshness";
+import { datasetAgeLine, priceSourceLine } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
@@ -690,7 +690,7 @@ export default function WatchlistPage() {
 
                 <div className="px-4 py-3 bg-muted/20 border-t border-border">
                   <p className="text-[11px] text-muted-foreground/60">
-                    {PRICE_FRESHNESS}. Implied move derived from near-term options straddle.
+                    {priceSourceLine(health?.cadence)}. Implied move derived from near-term options straddle.
                     RV rank: where this stock&apos;s current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute).
                   </p>
                 </div>

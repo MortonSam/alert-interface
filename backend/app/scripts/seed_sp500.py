@@ -170,6 +170,15 @@ async def build_skip_set(session) -> set[str]:
 
 # ── DB upserts ────────────────────────────────────────────────────────────────
 
+async def mark_index_members(session, members: list[str]) -> list[str]:
+    """Set index_member = (symbol in members) for every active ticker. Returns the symbols cleared this run."""
+    from sqlalchemy import text as _text
+    cleared = (await session.execute(_text(
+        "UPDATE tickers SET index_member = (symbol = ANY(:m)) WHERE is_active AND index_member <> (symbol = ANY(:m)) RETURNING symbol, index_member"
+    ), {"m": list(members)})).all()
+    return sorted(sym for sym, member in cleared if not member)
+
+
 async def upsert_ticker(session, data: dict) -> None:
     stmt = (
         pg_insert(Ticker)
@@ -273,6 +282,13 @@ async def main(retry_only: bool, limit: int | None, force_update: bool = False) 
         existing_failed = load_failed()
         merged_failed   = sorted(set(existing_failed) | set(failed) - set(succeeded))
         save_failed(merged_failed)
+        # index_member follows tonight's constituent list: a name that left the index keeps its rows but leaves
+        # the "S&P 500" medians (one statement, every active ticker)
+        async with AsyncSessionLocal() as session:
+            left = await mark_index_members(session, [r["symbol"] for r in candidates])
+            await session.commit()
+        if left:
+            print(f"  index_member cleared for {len(left)} active ticker(s) no longer in the list: {', '.join(left)}", flush=True)
 
     # 5. Summary
     print()

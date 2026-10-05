@@ -21,15 +21,26 @@ export const metadata: Metadata = {
   title: "Disclosures | Alert Interface",
 };
 
+/** The nightly's cadence word from the rule's cadence record, fetched on the server with the ledger start. */
+async function refreshCadenceWord(): Promise<string> {
+  try {
+    const res = await fetch(`${API}/v1/theses/ivy-rule`, { cache: "no-store" });
+    if (!res.ok) return "on its stored schedule";
+    const body = (await res.json()) as { rule?: { cadence?: { nightly: { per_day: number } } } };
+    const n = body.rule?.cadence?.nightly.per_day;
+    return n === 1 ? "nightly" : n ? `${n} times a day` : "on its stored schedule";
+  } catch {
+    return "on its stored schedule";
+  }
+}
+
 export default async function DisclosuresPage() {
   const start = await ledgerStart();
+  const refreshWord = await refreshCadenceWord();
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16">
       <DisclosuresTracker />
       <h1 className="text-2xl font-semibold text-foreground">Disclosures</h1>
-      <p className="text-sm text-muted-foreground mt-1">
-        Last updated September 14, 2026
-      </p>
 
       <section className="mt-8">
         <p className="text-sm leading-normal text-muted-foreground">
@@ -82,7 +93,7 @@ export default async function DisclosuresPage() {
           <span className="font-bold text-foreground">4. Data and AI-generated content.</span>{" "}
           Price and option data come from third-party providers and may be
           delayed, incomplete, or wrong. Reference data (earnings history,
-          analyst actions, volatility) refreshes nightly. Research notes are
+          analyst actions, volatility) refreshes {refreshWord}. Research notes are
           written by an AI model and checked by a second model against source
           filings: each claim is marked supported, unsupported or contradicted,
           and the marks are shown with the note. The check reduces errors but

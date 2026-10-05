@@ -6,7 +6,7 @@ import { absentReadLine, displayedOptionFacts, ivUnavailableReason, priceDriftNo
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { datasetAgeLine, impliedSpanPhrase, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtQuoteDateTime, impliedSpanPhrase, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
@@ -109,11 +109,6 @@ function timeAgoUnix(secs: number): string {
   return timeAgo(new Date(secs * 1000).toISOString());
 }
 
-function fmtQuoteTime(unix: number | null | undefined): string {
-  if (unix == null) return "";
-  const d = new Date(unix * 1000);
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
 
 // ── Catalyst section helpers ──────────────────────────────────────────────────
 
@@ -366,6 +361,7 @@ function HistoryInsightsPanel({
           {ce!.magnitude_trend_labeled?.rule && (
             <span className="text-xs ml-1">({ce!.magnitude_trend_labeled.rule})</span>
           )}
+          {ce!.magnitude_trend_as_of && <span className="text-xs ml-1">as of {ce!.magnitude_trend_as_of}</span>}
         </p>
       )}
       {/* Basis line */}
@@ -957,7 +953,7 @@ const PERIOD_LABELS: Record<ChartPeriod, string> = {
 };
 
 const PERIOD_WINDOW_LABEL: Record<ChartPeriod, string> = {
-  "1d": "today",
+  "1d": "since prior close",
   "7d": "past 1w",
   "1mo": "past month",
   "3mo": "past 3 months",
@@ -1036,6 +1032,7 @@ function PriceChart({
   impliedRangeLow?: number | null;
   impliedRangeHigh?: number | null;
   impliedExpiration?: string | null;   // the expiration the implied range is for
+  impliedChainDate?: string | null;    // the options data's own date: the band is labelled by it, never "today"
 }) {
   const [chartData, setChartData] = useState<TickerChart | null>(null);
 
@@ -1059,6 +1056,7 @@ function PriceChart({
   }, [chartData]);
 
   const isIntraday = period === "1d" || period === "7d";
+  const chartLastBar = !isIntraday && chartData?.history?.length ? chartData.history[chartData.history.length - 1].date : null;
 
   const lineData = useMemo(() => {
     if (!chartData) return [];
@@ -1207,12 +1205,13 @@ function PriceChart({
             />
           </LineChart>
         </ResponsiveContainer>
-        {!isIntraday && (earningsMarkers.length > 0 || (impliedRangeLow != null && impliedRangeHigh != null)) && (
+        {!isIntraday && (earningsMarkers.length > 0 || (impliedRangeLow != null && impliedRangeHigh != null) || chartLastBar) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[10px] text-muted-foreground px-1">
+            {chartLastBar && <span>Last bar {chartLastBar}</span>}
             {impliedRangeLow != null && impliedRangeHigh != null && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
-                Shaded band: today&apos;s range implied by options{impliedExpiration ? ` expiring ${impliedExpiration}` : ""}
+                Shaded band: range implied by {impliedChainDate ? `the ${impliedChainDate} options data` : "the stored options data"}{impliedExpiration ? ` for options expiring ${impliedExpiration}` : ""}
               </span>
             )}
             {earningsMarkers.length > 0 && (
@@ -1960,13 +1959,13 @@ export default function TickerPage() {
                 <span className="text-xs text-muted-foreground ml-auto">
                   H&nbsp;{quote.high.toFixed(2)} · L&nbsp;{quote.low.toFixed(2)}
                   {quote.timestamp != null && (
-                    <span className="text-muted-foreground/50 ml-2">as of {fmtQuoteTime(quote.timestamp)}</span>
+                    <span className="text-muted-foreground/50 ml-2">as of {fmtQuoteDateTime(quote.timestamp)}</span>
                   )}
                 </span>
               )}
               {(quote.high == null || quote.low == null) && quote.timestamp != null && (
                 <span className="text-xs text-muted-foreground/50 ml-auto">
-                  as of {fmtQuoteTime(quote.timestamp)}
+                  as of {fmtQuoteDateTime(quote.timestamp)}
                 </span>
               )}
             </div>
@@ -1981,6 +1980,7 @@ export default function TickerPage() {
             impliedRangeLow={shownOptionFacts.implied_range_low}
             impliedRangeHigh={shownOptionFacts.implied_range_high}
             impliedExpiration={shownOptionFacts.expiration_used}
+            impliedChainDate={shownOptionFacts.chain_date}
           />
 
         {/* Section nav */}
@@ -2527,7 +2527,7 @@ export default function TickerPage() {
                   </span>
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {rvVal != null
-                      ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback)</span></>
+                      ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback{realizedVol?.as_of ? `, as of ${realizedVol.as_of.slice(0, 10)}` : ""})</span></>
                       : <span className="text-muted-foreground" title={rvUnavailableReason(shown, realizedVol, rvStatus)}>
                           RV unavailable<span className="block text-xs font-sans font-normal">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
@@ -2564,7 +2564,7 @@ export default function TickerPage() {
                     </span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {rvRk.toFixed(1)} <span className={rvColor}>{rvLabeled.label}</span>
-                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule})</span>
+                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule}{realizedVol?.as_of ? `; as of ${realizedVol.as_of.slice(0, 10)}` : ""})</span>
                     </span>
                   </div>
                 )}
@@ -2581,7 +2581,7 @@ export default function TickerPage() {
                           </>
                         )}
                         {putCall?.expiration_used && (
-                          <span className="text-muted-foreground text-xs ml-1">(volume, exp {putCall.expiration_used})</span>
+                          <span className="text-muted-foreground text-xs ml-1">(volume, exp {putCall.expiration_used}{putCall.snapshot_date ? `, as of ${putCall.snapshot_date}` : ""})</span>
                         )}
                       </>
                     ) : (

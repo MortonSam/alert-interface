@@ -31,7 +31,6 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tqdm import tqdm
 
-from app.constants import LISTING_DATE_OVERRIDES
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
@@ -136,14 +135,14 @@ async def _upsert_fomc_reaction(
 
 # ── Skip logic ───────────────────────────────────────────────────────────────
 
-async def _build_fomc_skip_set(session, fomc_dates: list[date]) -> set[str]:
+async def _build_fomc_skip_set(session, fomc_dates: list[date], floors: dict[str, date] | None = None) -> set[str]:
     """Return symbols that already have a FOMC reaction for every expected date.
 
-    Past FOMC dates are fixed, so a ticker with a row for every processable
-    date has nothing new to compute. Dates before a LISTING_DATE_OVERRIDES
-    entry are never seeded, so they count as satisfied: only rows and expected
-    dates on/after the override are compared.
+    Past FOMC dates are fixed, so a ticker with a row for every processable date has nothing new to compute.
+    Dates before a ticker's first stored bar (`floors`, from price_bars) are never seeded, so they count as
+    satisfied: only rows and expected dates on/after the first bar are compared.
     """
+    floors = floors or {}
     rows = (await session.execute(
         select(Ticker.symbol, HistoricalReaction.event_date)
         .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
@@ -151,13 +150,13 @@ async def _build_fomc_skip_set(session, fomc_dates: list[date]) -> set[str]:
     )).all()
     have: dict[str, int] = {}
     for sym, d in rows:
-        floor = LISTING_DATE_OVERRIDES.get(sym)
+        floor = floors.get(sym)
         if floor is None or d >= floor:
             have[sym] = have.get(sym, 0) + 1
 
     skip: set[str] = set()
     for sym, n in have.items():
-        floor = LISTING_DATE_OVERRIDES.get(sym)
+        floor = floors.get(sym)
         expected = sum(1 for d in fomc_dates if floor is None or d >= floor)
         if n >= expected:
             skip.add(sym)
@@ -202,7 +201,7 @@ async def seed(symbol: str) -> None:
 
     dates_cache = _build_date_cache(hist)
 
-    floor_date = LISTING_DATE_OVERRIDES.get(sym)
+    floor_date = price_bars.first_bar_dates_sync([sym]).get(sym)      # the company's own history begins here
 
     inserted = updated = skipped = 0
     async with AsyncSessionLocal() as session:
@@ -347,7 +346,8 @@ async def main_bulk(limit: int | None) -> int:
     # 3. Build skip set — skip tickers that already have all expected dates
     expected = len(fomc_dates)
     async with AsyncSessionLocal() as session:
-        skip_set = await _build_fomc_skip_set(session, [d for d, _ in fomc_dates])
+        floors = await price_bars.first_bar_dates(session, [t.symbol for t in candidates])     # each company's first stored bar
+        skip_set = await _build_fomc_skip_set(session, [d for d, _ in fomc_dates], floors)
 
     to_process = [t for t in candidates if t.symbol not in skip_set]
     n_skipped = len(candidates) - len(to_process)
@@ -393,7 +393,7 @@ async def main_bulk(limit: int | None) -> int:
                 print(f"  Time budget reached; {len(rest)} ticker(s) wait for the next run", flush=True)
                 break
             tasks = [
-                _process_ticker_bulk(t, fomc_dates, loop, LISTING_DATE_OVERRIDES.get(t.symbol))
+                _process_ticker_bulk(t, fomc_dates, loop, floors.get(t.symbol))
                 for t in batch
             ]
             results = await asyncio.gather(*tasks)

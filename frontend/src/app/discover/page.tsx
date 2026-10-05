@@ -1,7 +1,7 @@
 "use client";
 
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
-import { datasetAgeLine, freshnessLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtQuoteDateTime, freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
@@ -39,11 +39,6 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function fmtQuoteTime(unix: number | null | undefined): string {
-  if (unix == null) return "";
-  const d = new Date(unix * 1000);
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
 
 function fmtPrice(n: number | null | undefined): string {
   return n == null ? "" : `$${n.toFixed(2)}`;
@@ -185,12 +180,12 @@ export default function DiscoverPage() {
           </p>
           {(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) || quotes.size > 0) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">
-              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && <>{freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo))}</>}
+              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && <>{freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo), health?.cadence)}</>}
               {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && quotes.size > 0 && " · "}
               {quotes.size > 0 && (() => {
                 const ts = [...quotes.values()].map(q => q.timestamp).filter(Boolean);
                 const latest = ts.length > 0 ? Math.max(...(ts as number[])) : null;
-                return latest ? <>Quotes as of {fmtQuoteTime(latest)}</> : null;
+                return latest ? <>Quotes as of {fmtQuoteDateTime(latest)}</> : null;
               })()}
             </p>
           )}
@@ -219,6 +214,7 @@ export default function DiscoverPage() {
               <DiscoverRow
                 symbol={latestPick.symbol}
                 price={quotes.get(latestPick.symbol)?.price != null ? fmtPrice(quotes.get(latestPick.symbol)!.price) : undefined}
+                priceAsOf={fmtQuoteDateTime(quotes.get(latestPick.symbol)?.timestamp)}
                 sentence={latestPickSentence(latestPick)}
               />
             </DiscoverRows>
@@ -246,6 +242,7 @@ export default function DiscoverPage() {
                     symbol={item.symbol}
                     name={item.name}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
                     sentence={reportingSoonSentence(item)}
                   />
                 ))}
@@ -270,6 +267,7 @@ export default function DiscoverPage() {
                   symbol={item.symbol}
                   name={item.name}
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
                   sentence={justReportedSentence(item)}
                 />
               ))}
@@ -298,6 +296,7 @@ export default function DiscoverPage() {
                     symbol={item.symbol}
                     name={item.name}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
                     sentence={suggestionSentence(item)}
                   />
                 ))}
@@ -322,6 +321,7 @@ export default function DiscoverPage() {
                   symbol={item.symbol}
                   name={item.name}
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
+                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
                   sentence={unusuallyActiveSentence(item)}
                 />
               ))}

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { PRICE_FRESHNESS, datasetAgeLine, datasetsStale, freshnessLine, optionsDataPhrase, premiumSourcePhrase, priceStateLine, priceAsOfPhrase } from "../freshness";
+import { datasetAgeLine, datasetsStale, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, nightlyWord, optionsCadencePhrase, optionsDataPhrase, premiumSourcePhrase, priceSourceLine, priceStateLine, priceAsOfPhrase } from "../freshness";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -15,10 +15,25 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe("freshness wording", () => {
-  it("says quotes may be delayed and never calls them live", () => {
-    expect(PRICE_FRESHNESS.toLowerCase()).toContain("delayed");
-    expect(freshnessLine("Earnings history as of 5h ago")).toBe(`${PRICE_FRESHNESS} · Earnings history as of 5h ago`);
-    expect(freshnessLine(null)).toBe(`${PRICE_FRESHNESS} · Research data refreshed nightly`);
+  it("the price source, the cadence words and every quote's date come from the record and the data, never from copy", () => {
+    const cadence = { nightly: { per_day: 1, utc_hour: 6, local_time: "02:00", clock: "America/New_York" },
+                      options: { per_day: 1, captured_local: "16:05", clock: "America/New_York", fresh_sessions: 2 },
+                      quotes: { source: "Finnhub", delay_statement: null, delay_checked: "2026-10-05", dated_by: "each quote's own last-trade time" } };
+    expect(priceSourceLine(cadence)).toBe("Prices from Finnhub, each dated by its last trade");
+    expect(priceSourceLine({ ...cadence, quotes: { ...cadence.quotes, delay_statement: "delayed 15 minutes" } })).toBe("Prices from Finnhub, delayed 15 minutes");
+    expect(priceSourceLine(null)).toBe("Prices from the quote source, each dated by its last trade");
+    expect(nightlyWord(cadence)).toBe("nightly");
+    expect(nightlyWord({ ...cadence, nightly: { ...cadence.nightly, per_day: 2 } })).toBe("2 times a day");
+    expect(nightlyWord(null)).toBeNull();
+    expect(optionsCadencePhrase(cadence)).toBe("updated once a day");
+    expect(optionsDataPhrase("2026-10-01", cadence)).toBe("options data as of 2026-10-01, updated once a day");
+    expect(optionsDataPhrase("2026-10-01")).toBe("options data as of 2026-10-01");           // no record: no cadence claim
+    expect(freshnessLine("Earnings history as of 5h ago", cadence)).toBe("Prices from Finnhub, each dated by its last trade · Earnings history as of 5h ago");
+    expect(freshnessLine(null, cadence)).toBe("Prices from Finnhub, each dated by its last trade · Research data refreshed nightly");
+    expect(freshnessLine(null)).toBe("Prices from the quote source, each dated by its last trade · Research data from the stored refresh steps");
+    expect(fmtQuoteDateTime(1759694400)).toBe("Oct 5, 4:00 PM ET");                            // 2026-10-05 20:00Z
+    expect(fmtIsoDateTime("2026-10-05T20:00:00+00:00")).toBe("Oct 5, 4:00 PM ET");
+    expect(fmtQuoteDateTime(null)).toBeNull();
     // each page dates its line by the oldest dataset it shows, never by the global stamp
     const ago = (iso: string) => (iso.startsWith("2026-10-05") ? "2h ago" : "30h ago");
     const datasets = {
@@ -29,7 +44,7 @@ describe("freshness wording", () => {
     };
     expect(datasetAgeLine(datasets, ["reactions"], ago)).toBe("Earnings history as of 2h ago");
     expect(datasetAgeLine(datasets, ["reactions", "analyst"], ago)).toBe("Analyst data as of 30h ago");
-    expect(datasetAgeLine(datasets, ["reactions", "iv"], ago)).toBe("Earnings history as of 2h ago · last nightly step failed for Implied volatility");
+    expect(datasetAgeLine(datasets, ["reactions", "iv"], ago)).toBe("Earnings history as of 2h ago · last refresh step failed for Implied volatility");
     expect(datasetAgeLine(datasets, ["chains"], ago)).toBeNull();            // never succeeded: no claim
     expect(datasetAgeLine(null, ["reactions"], ago)).toBeNull();
     expect(datasetsStale(datasets, ["reactions"], 3, Date.parse("2026-10-05T09:00:00Z"))).toBe(false);
@@ -53,7 +68,7 @@ describe("freshness wording", () => {
       /Chains refresh during market hours/i, /May be delayed up to 15 min/,
     ];
     for (const file of sourceFiles(SRC)) {
-      if (file.endsWith("lib/freshness.ts")) continue;
+      if (file.endsWith("lib/freshness.ts") || file.endsWith("freshness.test.ts")) continue;
       const src = readFileSync(file, "utf8");
       for (const re of banned) expect(src, `${file} contains ${re}`).not.toMatch(re);
     }
@@ -61,7 +76,7 @@ describe("freshness wording", () => {
 
   it("every page that shows a price list renders the shared string", () => {
     for (const p of ["app/ticker-grid.tsx", "app/discover/page.tsx", "app/ivy/layout.tsx", "app/watchlist/page.tsx"]) {
-      expect(readFileSync(join(SRC, p), "utf8"), p).toMatch(/freshnessLine\(|PRICE_FRESHNESS/);
+      expect(readFileSync(join(SRC, p), "utf8"), p).toMatch(/freshnessLine\(|priceSourceLine\(/);
     }
   });
 

@@ -134,6 +134,19 @@ def chart_history_daily_sync(symbol: str, period: str, today: date | None = None
     return {"history": history, "start_price": history[0]["close"] if history else None}
 
 
+def first_bar_dates_sync(symbols: list[str]) -> dict[str, date]:
+    """{symbol: first stored bar date}: the day a company's own history begins in the store (a recycled symbol or a
+    merger has no earlier bars), one query. Replaces hand-typed listing dates."""
+    with _engine().connect() as conn:
+        rows = conn.execute(text("SELECT symbol, min(date) FROM price_bars_shadow WHERE symbol = ANY(:s) GROUP BY symbol"), {"s": list(symbols)}).all()
+    return {r[0]: r[1] for r in rows}
+
+
+async def first_bar_dates(session, symbols: list[str]) -> dict[str, date]:
+    rows = (await session.execute(text("SELECT symbol, min(date) FROM price_bars_shadow WHERE symbol = ANY(:s) GROUP BY symbol"), {"s": list(symbols)})).all()
+    return {r[0]: r[1] for r in rows}
+
+
 # ── the record map: security_records loaded once per process ─────────────────
 
 _RECORDS_SQL = """select symbol, intrinio_security_id, figi, composite_figi, name, valid_from, valid_to, role, source from security_records"""

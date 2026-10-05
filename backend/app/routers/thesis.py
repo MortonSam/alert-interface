@@ -754,6 +754,7 @@ async def _run_draft_generation(
         "rv_20d_pct":                round(current_rv * 100, 1) if current_rv else None,
         "rv_rank":                   rv_rank,
         "iv_rv_spread_pp":           iv_rv_spread_pp,
+        "fact_reasons":              fact_absence_reasons(atm_iv, current_rv, rv_rank, iv_rv_spread_pp, data.get("chosen_exp"), data.get("chain_last_trade")),
         "vol_regime":                vol_regime,
         # Conditional earnings
         "avg_1d_on_beat":            avg_1d_on_beat,
@@ -1680,6 +1681,23 @@ from app.services.pnl_math import (
     pnl_percent,
     target_reached as _target_reached,
 )
+
+
+def fact_absence_reasons(atm_iv, current_rv, rv_rank, spread, chosen_exp, chain_last_trade) -> dict[str, str]:
+    """Why a Build fact is absent, keyed by the fact block field, so the grid says "absent: <reason>" instead of n/a."""
+    from app.services.rv_store import _FRESHNESS_DAYS
+    out: dict[str, str] = {}
+    if atm_iv is None:
+        out["atm_iv_pct"] = (f"no implied volatility on the ATM strike of the {chosen_exp} chain (options data as of {chain_last_trade})"
+                             if chosen_exp else "no options chain to read an ATM implied volatility from")
+    if rv_rank is None:
+        out["rv_rank"] = f"no realized-volatility snapshot within {_FRESHNESS_DAYS} days that passed the price-history check"
+    if current_rv is None and "rv_rank" not in out:
+        out["rv_20d_pct"] = f"no realized-volatility snapshot within {_FRESHNESS_DAYS} days that passed the price-history check"
+    if spread is None:
+        missing = [n for n, v in (("implied volatility", atm_iv), ("realized volatility", current_rv)) if v is None]
+        out["iv_rv_spread_pp"] = "needs " + " and ".join(missing) if missing else "not computed"
+    return out
 
 
 @router.get("/ivy-rule")

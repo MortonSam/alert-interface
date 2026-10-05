@@ -28,7 +28,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, select
 
-from app.constants import LISTING_DATE_OVERRIDES
+from app.services import price_bars
 from app.database import ScriptSessionLocal
 from app.models.enums import EventType
 from app.models.event import Event
@@ -51,8 +51,10 @@ class Plan:
 
 
 def plan(reaction_days: dict[date, int], event_days: dict[date, int], symbols_with_rows: dict[date, set[str]],
-         candidates: list[str], today: date) -> Plan:
-    """Pure: what to delete, insert and seed, from what is stored. `candidates` are active, non-excluded symbols."""
+         candidates: list[str], today: date, floors: dict[str, date] | None = None) -> Plan:
+    """Pure: what to delete, insert and seed, from what is stored. `candidates` are active, non-excluded symbols;
+    `floors` is each symbol's first stored bar (price_bars.first_bar_dates): no seeding before a company's own history."""
+    floors = floors or {}
     p = Plan()
     p.delete_reactions = {d: n for d, n in sorted(reaction_days.items()) if not is_decision_day(d)}
     p.delete_events = {d: n for d, n in sorted(event_days.items()) if not is_decision_day(d)}
@@ -61,7 +63,7 @@ def plan(reaction_days: dict[date, int], event_days: dict[date, int], symbols_wi
     cutoff = today - timedelta(days=MIN_AGE_DAYS)
     for d in decision_days(lookback, cutoff):
         have = symbols_with_rows.get(d, set())
-        need = [s for s in candidates if s not in have and (LISTING_DATE_OVERRIDES.get(s) is None or d >= LISTING_DATE_OVERRIDES[s])]
+        need = [s for s in candidates if s not in have and (floors.get(s) is None or d >= floors[s])]
         if need and len(have) < len(candidates) // 2:      # a day the seeder never ran, not a few stragglers
             p.seed[d] = need
     return p
@@ -102,7 +104,8 @@ def print_plan(p: Plan, write: bool) -> None:
         print("      " + ", ".join(syms))
 
 
-async def apply(p: Plan) -> None:
+async def apply(p: Plan, floors: dict[str, date] | None = None) -> None:
+    floors = floors or {}
     async with ScriptSessionLocal() as session:
         for d in p.delete_reactions:
             await session.execute(delete(HistoricalReaction).where(HistoricalReaction.event_type == EventType.FOMC, HistoricalReaction.event_date == d))
@@ -119,7 +122,7 @@ async def apply(p: Plan) -> None:
     for d, syms in p.seed.items():
         ok = failed = 0
         for sym in syms:
-            good, *_rest, reason = await _process_ticker_bulk(tickers[sym], [(d, event_ids[d])], loop, LISTING_DATE_OVERRIDES.get(sym))
+            good, *_rest, reason = await _process_ticker_bulk(tickers[sym], [(d, event_ids[d])], loop, floors.get(sym))
             if good:
                 ok += 1
             else:
@@ -132,10 +135,11 @@ async def main(argv: list[str]) -> int:
     write = "--write" in argv
     async with ScriptSessionLocal() as session:
         reaction_days, event_days, with_rows, candidates = await _stored(session)
-    p = plan(reaction_days, event_days, with_rows, candidates, date.today())
+        floors = await price_bars.first_bar_dates(session, candidates)
+    p = plan(reaction_days, event_days, with_rows, candidates, date.today(), floors)
     print_plan(p, write)
     if write and not p.empty():
-        await apply(p)
+        await apply(p, floors)
     return 0
 
 

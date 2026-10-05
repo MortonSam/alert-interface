@@ -205,7 +205,7 @@ export function TickerGrid() {
             datasetsStale(systemStatus?.datasets, GRID_DATASETS) ? "text-warning" : "text-muted-foreground"
           }`}
         >
-          {freshnessLine(datasetAgeLine(systemStatus?.datasets, GRID_DATASETS, fmtAgo))}
+          {freshnessLine(datasetAgeLine(systemStatus?.datasets, GRID_DATASETS, fmtAgo), systemStatus?.cadence)}
         </span>
       </div>
 

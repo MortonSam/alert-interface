@@ -2215,40 +2215,54 @@ async def check_fomc_calendar_matches_fed(session) -> CheckResult:
 
 # ── FOMC pre-listing guard ────────────────────────────────────────────────────
 
-async def check_fomc_pre_listing(session) -> CheckResult:
-    """ERROR if any FOMC reaction before a LISTING_DATE_OVERRIDES date has a non-null pct."""
-    from app.constants import LISTING_DATE_OVERRIDES
+async def check_fomc_before_first_bar(session) -> CheckResult:
+    """ERROR when a FOMC reaction carries a move dated before the ticker's first stored bar: the company's own
+    history begins at that bar (a recycled symbol, a merger), so an earlier move is another company's. A row on a
+    declared stored_history span (security_records) is that company's own history kept from yfinance and is exempt.
+    One query; this replaces the hand-typed listing overrides."""
+    rows = (await session.execute(text("""
+        SELECT t.symbol, hr.event_date, b.first_bar, hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d
+        FROM historical_reactions hr
+        JOIN tickers t ON t.id = hr.ticker_id
+        JOIN (SELECT symbol, min(date) AS first_bar FROM price_bars_shadow GROUP BY symbol) b ON b.symbol = t.symbol
+        WHERE hr.event_type = 'fomc' AND hr.event_date < b.first_bar
+          AND (hr.pct_change_1d IS NOT NULL OR hr.pct_change_3d IS NOT NULL OR hr.pct_change_5d IS NOT NULL)
+          AND COALESCE(hr.price_source, '') <> 'stored_history'
+          AND NOT EXISTS (SELECT 1 FROM security_records sr WHERE sr.symbol = t.symbol AND sr.role = 'stored_history'
+                          AND hr.event_date BETWEEN sr.valid_from AND sr.valid_to)
+        ORDER BY t.symbol, hr.event_date"""))).all()
+    if not rows:
+        return CheckResult("fomc_before_first_bar", PASS, "No FOMC move is dated before its ticker's first stored bar")
+    return CheckResult("fomc_before_first_bar", ERROR, f"{len(rows)} FOMC move(s) dated before the ticker's first stored bar",
+                       [f"{r.symbol}  fomc={r.event_date}  first bar={r.first_bar}  1d={r.pct_change_1d}  3d={r.pct_change_3d}  5d={r.pct_change_5d}" for r in rows[:40]])
 
-    offenders = []
-    for symbol, listed in sorted(LISTING_DATE_OVERRIDES.items()):
-        rows = (await session.execute(text("""
-            SELECT hr.event_date, hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d
-            FROM historical_reactions hr
-            JOIN tickers t ON t.id = hr.ticker_id
-            WHERE t.symbol = :symbol
-              AND hr.event_type = 'fomc'
-              AND hr.event_date < :listed
-              AND (hr.pct_change_1d IS NOT NULL
-                   OR hr.pct_change_3d IS NOT NULL
-                   OR hr.pct_change_5d IS NOT NULL)
-            ORDER BY hr.event_date
-        """), {"symbol": symbol, "listed": listed})).all()
-        offenders.extend(
-            f"{symbol}  fomc={r.event_date}  listed={listed}  "
-            f"1d={r.pct_change_1d}  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
-            for r in rows
-        )
 
-    if not offenders:
-        return CheckResult(
-            "fomc_pre_listing", PASS,
-            f"No FOMC pct values before listing date ({', '.join(sorted(LISTING_DATE_OVERRIDES))})",
-        )
-    return CheckResult(
-        "fomc_pre_listing", ERROR,
-        f"{len(offenders)} FOMC reaction(s) with pct values before the ticker's listing date",
-        offenders,
-    )
+def calendar_mismatches(bar_dates: set, start: date, end: date) -> list[str]:
+    """Pure: days in [start, end] where the trading calendar and SPY's stored bars disagree."""
+    from app.services.trading_calendar import is_trading_day
+    out = []
+    d = start
+    while d <= end:
+        session_by_calendar, bar = is_trading_day(d), d in bar_dates
+        if session_by_calendar and not bar:
+            out.append(f"{d.isoformat()}: the calendar calls it a session but SPY has no bar")
+        elif bar and not session_by_calendar:
+            out.append(f"{d.isoformat()}: SPY has a bar but the calendar calls it closed")
+        d += timedelta(days=1)
+    return out
+
+
+async def check_calendar_matches_spy_bars(session) -> CheckResult:
+    """ERROR when the trading calendar (services/trading_calendar) and SPY's stored bars disagree on any day from the
+    first stored bar to the last: a session with no bar, or a bar on a day the calendar calls closed."""
+    from app.services.security_records import STORED_START
+    rows = (await session.execute(text("SELECT date FROM price_bars_shadow WHERE symbol = 'SPY' AND date >= :s ORDER BY date"), {"s": STORED_START})).scalars().all()
+    if not rows:
+        return CheckResult("calendar_matches_spy_bars", WARN, "No SPY bars stored: the calendar cannot be checked")
+    bad = calendar_mismatches(set(rows), rows[0], rows[-1])
+    if bad:
+        return CheckResult("calendar_matches_spy_bars", ERROR, f"{len(bad)} day(s) where the trading calendar and SPY's bars disagree ({rows[0]}..{rows[-1]})", bad[:40])
+    return CheckResult("calendar_matches_spy_bars", PASS, f"The trading calendar matches SPY's bars on every day {rows[0]}..{rows[-1]} ({len(rows)} sessions)")
 
 
 # ── Duplicate reaction detection ─────────────────────────────────────────────
@@ -2701,7 +2715,9 @@ CHECKS = [
     check_fomc_events_unique,
     check_fomc_calendar_matches_fed,
     # Pre-listing FOMC guard
-    check_fomc_pre_listing,
+    check_fomc_before_first_bar,
+    # The trading calendar agrees with the stored sessions
+    check_calendar_matches_spy_bars,
     # v3 reaction checks
     check_no_mixed_computation_version,
     check_report_timing_unknown_share,

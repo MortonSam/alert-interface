@@ -31,7 +31,7 @@ describe("tooltips describe what the code does (audit item 11)", () => {
   it("the index-removal tooltip says updates stop once the name is retired, which deactivate_tickers does", async () => {
     const { default: GLOSSARY } = await import("@/lib/glossary");
     expect(GLOSSARY["index-removal"]).toContain("updates stop");
-    expect(GLOSSARY["index-removal"]).toContain("refreshes nightly like any other");
+    expect(GLOSSARY["index-removal"]).toContain("refreshes on the same schedule as every other");
     expect(GLOSSARY["index-removal"]).not.toContain("continues to update normally");
     expect(readFileSync(join(BACKEND, "scripts/deactivate_tickers.py"), "utf8")).toContain("is_active");
     expect(readFileSync(join(BACKEND, "scripts/audit_sp500.py"), "utf8")).toContain("index_member");

@@ -410,6 +410,7 @@ async def get_conditional_earnings(
     recent_avg: float | None = None
     prior_avg: float | None = None
     magnitude_trend: str | None = None
+    magnitude_trend_as_of: str | None = None
 
     mag_snap = (await db.execute(
         select(MagnitudeTrendSnapshot)
@@ -422,6 +423,7 @@ async def get_conditional_earnings(
         recent_avg = round(float(mag_snap.recent_avg_abs_1d), 2) if mag_snap.recent_avg_abs_1d is not None else None
         prior_avg = round(float(mag_snap.prior_avg_abs_1d), 2) if mag_snap.prior_avg_abs_1d is not None else None
         magnitude_trend = mag_snap.trend
+        magnitude_trend_as_of = mag_snap.as_of_date.isoformat()
 
     return ConditionalEarningsRead(
         symbol=sym,
@@ -446,6 +448,7 @@ async def get_conditional_earnings(
         recent_avg_abs_1d=recent_avg,
         prior_avg_abs_1d=prior_avg,
         magnitude_trend=magnitude_trend,
+        magnitude_trend_as_of=magnitude_trend_as_of,
         magnitude_trend_labeled=_to_lr(magnitude_trend_label(magnitude_trend)),
         last_event_date=max(r.event_date for r in rows).isoformat() if rows else None,
     )

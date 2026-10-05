@@ -1,9 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import {
-  IVY_OUTCOME_LABELS, NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary,
-} from "../ivyOutcomes";
+import { IVY_OUTCOME_LABELS, NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary, privateLedgerBody } from "../ivyOutcomes";
 import { runFailureLine, summaryCounts } from "../ivyOutcomes";
 
 const SRC = join(__dirname, "../..");
@@ -55,11 +53,13 @@ describe("Ivy's desk outcomes", () => {
   it("the desk and the trades page tell an anonymous visitor the same thing", () => {
     for (const p of ["app/ivy/desk/page.tsx", "app/ivy/trades/page.tsx"]) {
       const src = readFileSync(join(SRC, p), "utf8");
-      expect(src, p).toContain("PRIVATE_LEDGER_BODY");
+      expect(src, p).toContain("privateLedgerBody(ivy?.rule.cadence)");
       expect(src, p).toContain("nightSummary(activity)");
       expect(src, p).not.toMatch(/passed on \{/);
     }
     expect(PRIVATE_LEDGER_BODY).toContain("go public at launch");
+    expect(PRIVATE_LEDGER_BODY).toContain("recorded on schedule");                                   // no record given: no cadence typed
+    expect(privateLedgerBody({ nightly: { per_day: 1 } })).toContain("recorded every night");
     const desk = readFileSync(join(SRC, "app/ivy/desk/page.tsx"), "utf8");
     expect(desk).not.toContain("depends on market hours");
     expect(desk).toContain("chainFreshnessSentence(");

@@ -1,6 +1,6 @@
 "use client";
 
-import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, nightSummary } from "@/lib/ivyOutcomes";
+import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, nightSummary, privateLedgerBody } from "@/lib/ivyOutcomes";
 import EncodingLegend from "@/components/EncodingLegend";
 import { pickMove, pickResult, pickResultLegend } from "@/lib/encodings/pickResult";
 import { useIvyRule } from "@/lib/useIvyRule";
@@ -475,7 +475,7 @@ export default function IvyTradesPage() {
           {activity && !activity.ledger_public ? (
             <>
               <p className="text-lg font-medium">{PRIVATE_LEDGER_TITLE}</p>
-              <p className="text-sm text-muted-foreground mt-1">{PRIVATE_LEDGER_BODY}</p>
+              <p className="text-sm text-muted-foreground mt-1">{privateLedgerBody(ivy?.rule.cadence)}</p>
             </>
           ) : (
             <>

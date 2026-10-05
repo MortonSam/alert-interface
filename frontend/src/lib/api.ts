@@ -209,6 +209,7 @@ export interface ConditionalEarningsRead {
   recent_avg_abs_1d: number | null;
   prior_avg_abs_1d: number | null;
   magnitude_trend: string | null;
+  magnitude_trend_as_of?: string | null;   // the snapshot's own date
   magnitude_trend_labeled: LabelRule | null;
   last_event_date: string | null;
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
@@ -627,6 +628,8 @@ export interface LatestPickItem {
   entry_price: number;
   current_price: number | null;
   unrealized_move_pct: number | null;
+  price_as_of?: string | null;          // ISO last-trade time of the quote shown
+  quote_reason?: string | null;         // why no current price is shown
   status: string;
   generated_at: string;
   expiration: string | null;
@@ -973,6 +976,13 @@ export interface ThesisContextItem {
   insight: string | null;             // conditional-stats one-liner
 }
 
+/** The cadence record (backend services/cadence): what "nightly", "once a day" and the price source mean, never typed in copy. */
+export interface Cadence {
+  nightly: { per_day: number; utc_hour: number; local_time: string; clock: string };
+  options: { per_day: number; captured_local: string; clock: string; fresh_sessions: number };
+  quotes: { source: string; delay_statement: string | null; delay_checked: string; dated_by: string };
+}
+
 /** One dataset's age from /health or /system/status: the oldest last success among the nightly steps that produce it. */
 export interface DatasetAge {
   at: string | null;        // ISO; null when a producing step has never succeeded
@@ -988,6 +998,7 @@ export interface SystemStatus {
   total_reactions: number;
   most_recent_reaction_date: string | null;
   datasets?: DatasetAges;
+  cadence?: Cadence | null;
 }
 
 export interface HealthStatus {
@@ -1000,6 +1011,7 @@ export interface HealthStatus {
   step_health: Record<string, string | null>;
   failed_steps?: string[];
   datasets?: DatasetAges;
+  cadence?: Cadence | null;
 }
 
 export interface Watchlist {

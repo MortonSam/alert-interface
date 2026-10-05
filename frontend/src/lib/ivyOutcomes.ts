@@ -79,9 +79,13 @@ export function impliedMoveAbsentLabel(outcome: string, impliedReason?: string |
 }
 
 /** What an anonymous visitor sees while the ledger is private: the same wording on the desk and the trades page. */
-export const PRIVATE_LEDGER_TITLE = "Recording nightly";
-export const PRIVATE_LEDGER_BODY =
-  "Ivy's worksheet and ledger are recorded every night and go public at launch. Every pick is timestamped before the outcome is known.";
+export const PRIVATE_LEDGER_TITLE = "Recording on schedule";
+/** The private-ledger explanation, its cadence word from the rule's cadence record. */
+export function privateLedgerBody(cadence?: { nightly: { per_day: number } } | null): string {
+  const when = cadence ? (cadence.nightly.per_day === 1 ? "every night" : `${cadence.nightly.per_day} times a day`) : "on schedule";
+  return `Ivy's worksheet and ledger are recorded ${when} and go public at launch. Every pick is timestamped before the outcome is known.`;
+}
+export const PRIVATE_LEDGER_BODY = privateLedgerBody(null);
 
 /** "06:16Z" from an ISO UTC timestamp; the nightly is a UTC event. */
 function fmtUtcClock(iso: string): string {

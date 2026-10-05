@@ -1,7 +1,7 @@
 "use client";
 
 import { chainFreshnessSentence } from "@/lib/ivyRule";
-import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary, runFailureLine } from "@/lib/ivyOutcomes";
+import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary, privateLedgerBody, runFailureLine } from "@/lib/ivyOutcomes";
 import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -117,7 +117,7 @@ export default function IvyDeskPage() {
         {activity && !activity.ledger_public ? (
           <>
             <p className="text-lg font-medium mt-3">{PRIVATE_LEDGER_TITLE}</p>
-            <p className="text-sm text-muted-foreground mt-1">{PRIVATE_LEDGER_BODY}</p>
+            <p className="text-sm text-muted-foreground mt-1">{privateLedgerBody(ivy?.rule.cadence)}</p>
           </>
         ) : (
           <p className="text-lg text-muted-foreground mt-3">

@@ -20,6 +20,7 @@ from pandas.tseries.holiday import (
     USPresidentsDay,
     USThanksgivingDay,
     nearest_workday,
+    sunday_to_monday,
 )
 from pandas.tseries.offsets import CustomBusinessDay
 
@@ -27,7 +28,7 @@ from pandas.tseries.offsets import CustomBusinessDay
 class NYSEHolidayCalendar(AbstractHolidayCalendar):
     """Holidays when the NYSE is closed."""
     rules = [
-        Holiday("New Year's Day", month=1, day=1, observance=nearest_workday),
+        Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),   # NYSE: no Friday observance when Jan 1 is a Saturday (2021-12-31 traded)
         USMartinLutherKingJr,
         USPresidentsDay,
         GoodFriday,
@@ -41,12 +42,17 @@ class NYSEHolidayCalendar(AbstractHolidayCalendar):
     ]
 
 
-_NYSE_BDAY = CustomBusinessDay(calendar=NYSEHolidayCalendar())
+# Closures no rule derives: the exchange announced them. validate's calendar_matches_spy_bars check finds a missing one.
+SPECIAL_CLOSURES: dict[date, str] = {
+    date(2025, 1, 9): "National Day of Mourning for President Carter",
+}
+
+_NYSE_BDAY = CustomBusinessDay(calendar=NYSEHolidayCalendar(), holidays=[pd.Timestamp(d) for d in SPECIAL_CLOSURES])
 
 
 def is_trading_day(d: date) -> bool:
-    """A weekday that is not an NYSE holiday."""
-    if d.weekday() >= 5:
+    """A weekday that is not an NYSE holiday or a special closure."""
+    if d.weekday() >= 5 or d in SPECIAL_CLOSURES:
         return False
     holidays = NYSEHolidayCalendar().holidays(pd.Timestamp(d), pd.Timestamp(d))
     return len(holidays) == 0

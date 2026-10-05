@@ -41,7 +41,7 @@ const GLOSSARY: Record<string, string> = {
   "stock-split":
     "A corporate action that divides existing shares into multiple new shares, lowering the per-share price proportionally while keeping total market value unchanged.",
   "index-removal":
-    "This stock left the S&P 500 index. While it stays in this site's active set its data refreshes nightly like any other; once it is retired from the set, updates stop and it drops out of the lists.",
+    "This stock left the S&P 500 index. While it stays in this site's active set its data refreshes on the same schedule as every other; once it is retired from the set, updates stop and it drops out of the lists.",
   "analyst-action":
     "A Wall Street analyst changed their rating, price target, or coverage status on this stock.",
   meet:

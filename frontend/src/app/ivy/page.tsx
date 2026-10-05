@@ -159,7 +159,7 @@ export default function MeetIvyPage() {
             {ivy ? whoSheIsLine(ivy.rule) : "She reads the tape overnight and makes a call only when her one setup appears."}
           </p>
           <p className="text-base text-muted-foreground leading-relaxed mt-4 max-w-prose">
-            She reads each company&apos;s earnings history and {optionsDataPhrase(health?.options_data_date)},
+            She reads each company&apos;s earnings history and {optionsDataPhrase(health?.options_data_date, health?.cadence)},
             applies one rule the backtest supports, and refuses when the
             options are too expensive for the edge.
           </p>

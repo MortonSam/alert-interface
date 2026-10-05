@@ -14,6 +14,9 @@ const RULE: IvyRule = {
   momentum_cutoff_pct: -10, momentum_lookback_days: 20, min_prior_quarters: 8, implied_move_multiple: 1.2,
   exit_trading_days: 5, candidate_window_days: 7, max_new_picks_per_night: 3, max_open_picks: 10,
   ledger_start: "2026-09-15", ledger_public: false, chain_fresh_trading_days: 2,
+  cadence: { nightly: { per_day: 1, utc_hour: 6, local_time: "02:00", clock: "America/New_York" },
+             options: { per_day: 1, captured_local: "16:05", clock: "America/New_York", fresh_sessions: 2 },
+             quotes: { source: "Finnhub", delay_statement: null, delay_checked: "2026-10-05", dated_by: "each quote's own last-trade time" } },
 };
 
 const BACKTEST: IvyBacktest = {

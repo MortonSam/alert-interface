@@ -64,16 +64,14 @@ async def delete_expired(db: AsyncSession, source: str, before: date) -> list[st
 
 
 def trading_days_since(trade_date_str: str, today: date | None = None) -> int:
-    """Count trading days (Mon-Fri) between trade_date and today, inclusive of today."""
+    """Sessions after trade_date through today, inclusive of today, on the NYSE calendar (services/trading_calendar):
+    weekends and exchange holidays do not count."""
+    from app.services.trading_calendar import is_trading_day, sessions_after
     trade_date = date.fromisoformat(str(trade_date_str)[:10])
     today = today or date.today()
-    count = 0
-    d = trade_date
-    while d < today:
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            count += 1
-    return count
+    if today <= trade_date:
+        return 0
+    return sessions_after(trade_date, today) + (1 if is_trading_day(today) else 0)
 
 
 CHAIN_FRESH_TRADING_DAYS = 2   # a chain older than this many trading days is not used

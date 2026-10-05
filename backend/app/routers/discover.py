@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query
@@ -166,6 +166,8 @@ class LatestPickItem(BaseModel):
     strategy: str | None
     entry_price: float
     current_price: float | None
+    price_as_of: str | None = None       # ISO last-trade time of the quote shown; never the request time
+    quote_reason: str | None = None      # why no current price is shown (price_freshness)
     unrealized_move_pct: float | None
     status: str
     generated_at: str
@@ -444,6 +446,7 @@ async def _get_base_rates(db: AsyncSession) -> dict:
             HistoricalReaction.event_type == EventType.EARNINGS,
             HistoricalReaction.pct_change_1d.isnot(None),
             Ticker.is_active.is_(True),
+            Ticker.index_member.is_(True),          # "the S&P 500 median" means index members; seed_sp500 keeps the flag nightly
             not_excluded(Ticker.symbol),
         )
     )
@@ -1066,6 +1069,8 @@ async def latest_pick(
     option_pnl_pct: float | None = None
     current_price: float | None = None
     unrealized_move_pct: float | None = None
+    price_as_of: str | None = None
+    quote_reason: str | None = None
 
     entry = float(pick.entry_price) if pick.entry_price else None
 
@@ -1091,31 +1096,36 @@ async def latest_pick(
                 intrinsic = min(intrinsic, width)
             option_pnl_pct = pnl_percent(intrinsic - cost, cost)
     elif entry:
-        # For open picks: try to get current price from Finnhub
+        # For open picks: the current price from Finnhub, shown only when its last trade is recent (price_freshness),
+        # and dated by that trade
         try:
             from app.services import quote_cache
             from app.services.finnhub_client import FinnhubClient
+            from app.services.price_freshness import assess_quote
             cached = quote_cache.get(pick.symbol)
             if cached is not None:
-                cp = cached.get("price")
+                cp, ts = cached.get("price"), cached.get("timestamp")
             else:
                 finnhub = FinnhubClient()
                 try:
                     q = await finnhub.get_quote(pick.symbol)
                     cp = float(q.get("c") or 0) or None
+                    ts = int(q["t"]) if q.get("t") else None
                     if cp:
                         change = float(q.get("d")) if q.get("d") is not None else None
                         change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-                        quote_cache.set(pick.symbol, {"price": cp, "change": change, "change_pct": change_pct})
+                        quote_cache.set(pick.symbol, {"price": cp, "change": change, "change_pct": change_pct, "timestamp": ts})
                 finally:
                     await finnhub.close()
-            if cp:
-                current_price = round(cp, 2)
-                unrealized_move_pct = round(
-                    (current_price - entry) / entry * 100, 2,
-                )
-        except Exception:
-            pass
+            state = assess_quote(cp, ts)
+            if state.price is not None:
+                current_price = round(state.price, 2)
+                unrealized_move_pct = round((current_price - entry) / entry * 100, 2)
+                price_as_of = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            else:
+                quote_reason = state.reason
+        except Exception as exc:
+            quote_reason = f"price unavailable ({type(exc).__name__})"
 
     return LatestPickResponse(
         pick=LatestPickItem(
@@ -1126,6 +1136,8 @@ async def latest_pick(
             entry_price=float(pick.entry_price) if pick.entry_price else 0,
             current_price=current_price,
             unrealized_move_pct=unrealized_move_pct,
+            price_as_of=price_as_of,
+            quote_reason=quote_reason,
             status=pick.status,
             generated_at=pick.generated_at.isoformat() if pick.generated_at else "",
             expiration=pick.expiration,

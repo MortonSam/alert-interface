@@ -37,4 +37,4 @@ def test_the_script_is_a_dry_run_unless_told_to_write():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "repair_fomc_dates.py").read_text()
     assert 'write = "--write" in argv' in src and "if write and not p.empty():" in src
-    assert src.index("print_plan(p, write)") < src.index("await apply(p)")
+    assert src.index("print_plan(p, write)") < src.index("await apply(p, floors)")

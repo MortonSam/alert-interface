@@ -4,12 +4,13 @@ interface DiscoverRowProps {
   symbol: string;
   name?: string | null;
   price?: string; // pre-formatted, e.g. "$142.50"
+  priceAsOf?: string | null; // the quote's own date and time, shown under the price; a price never appears without it
   /** Why this stock is in this section, one sentence (lib/discoverSentences). Wraps; never cut short. */
   sentence: string;
 }
 
 /** One stock on /discover: ticker, company, last price, then the reason. The whole row opens the ticker page. */
-export default function DiscoverRow({ symbol, name, price, sentence }: DiscoverRowProps) {
+export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence }: DiscoverRowProps) {
   return (
     <li>
       <Link
@@ -21,7 +22,11 @@ export default function DiscoverRow({ symbol, name, price, sentence }: DiscoverR
             {symbol}
           </span>
           {name && <span className="text-sm text-muted-foreground min-w-0 break-words">{name}</span>}
-          {price && <span className="ml-auto pl-2 font-mono text-xs text-muted-foreground shrink-0">{price}</span>}
+          {price && priceAsOf && (
+            <span className="ml-auto pl-2 font-mono text-xs text-muted-foreground shrink-0 text-right">
+              {price}<span className="block text-[10px] text-muted-foreground/60 font-sans">as of {priceAsOf}</span>
+            </span>
+          )}
         </div>
         <p className="mt-0.5 sm:mt-0 text-sm text-foreground/80 leading-snug break-words">{sentence}</p>
       </Link>

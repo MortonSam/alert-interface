@@ -119,6 +119,7 @@ class ConditionalEarningsRead(BaseModel):
     recent_avg_abs_1d: float | None            # last 4 prints avg |pct_change_1d|
     prior_avg_abs_1d: float | None             # prior 4 prints avg |pct_change_1d|
     magnitude_trend: str | None                # "increasing" | "decreasing" | "stable"
+    magnitude_trend_as_of: str | None = None   # the snapshot's own date
     magnitude_trend_labeled: LabelRule | None = None  # human-friendly label + rule
     last_event_date: str | None = None         # ISO date of most recent earnings in sample
 

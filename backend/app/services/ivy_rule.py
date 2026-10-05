@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.services import chain_store
+from app.services.cadence import cadence
 from app.services.ivy_v2 import (
     CANDIDATE_WINDOW_DAYS,
     EXIT_TRADING_DAYS,
@@ -33,4 +34,5 @@ def ivy_rule() -> dict:
         "ledger_start": LEDGER_START.isoformat(),
         "ledger_public": LEDGER_PUBLIC,
         "chain_fresh_trading_days": chain_store.CHAIN_FRESH_TRADING_DAYS,
+        "cadence": cadence(),                     # the nightly, options and quote cadence every page words itself from
     }

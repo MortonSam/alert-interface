@@ -43,7 +43,7 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
     stripText = "Ivy is refreshing her data…";
     pulse = true;
   } else if (datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo)) {
-    stripText = freshnessLine(datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo));
+    stripText = freshnessLine(datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo), health?.cadence);
   }
 
   const isWide = pathname === "/ivy" || pathname === "/ivy/desk";

@@ -1,3 +1,4 @@
+import { fmtIsoDateTime } from "@/lib/freshness";
 /**
  * The one sentence under each Discover row: why this stock is in this section.
  *
@@ -168,8 +169,14 @@ function fmtPrice(n: number): string {
 export function latestPickSentence(pick: LatestPickItem): string {
   const dir = pick.picked_direction === "bullish" ? "Bullish" : "Bearish";
   let lead = `${dir} pick${pick.strategy ? ` (${pick.strategy})` : ""}, entered at ${fmtPrice(pick.entry_price)}`;
-  if (pick.current_price != null) lead += `, now ${fmtPrice(pick.current_price)}`;
-  if (pick.unrealized_move_pct != null) lead += ` (stock ${fmtMove(pick.unrealized_move_pct)})`;
+  if (pick.current_price != null) {
+    lead += `, now ${fmtPrice(pick.current_price)}`;
+    if (pick.unrealized_move_pct != null) lead += ` (stock ${fmtMove(pick.unrealized_move_pct)})`;
+    const asOf = fmtIsoDateTime(pick.price_as_of);
+    if (asOf) lead += ` as of ${asOf}`;
+  } else if (pick.quote_reason) {
+    lead += ` (no current price: ${pick.quote_reason})`;
+  }
   const status = pick.status === "closed" && pick.option_pnl_pct != null
     ? `closed, option P&L ${pick.option_pnl_pct > 0 ? "+" : ""}${pick.option_pnl_pct.toFixed(0)}%`
     : pick.status;

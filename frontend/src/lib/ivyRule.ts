@@ -2,6 +2,9 @@
 // results or her ledger's start date: they come from GET /theses/ivy-rule, which
 // the backend builds from ivy_v2.py, constants.py and the stored backtest run.
 
+import type { Cadence } from "@/lib/api";
+import { nightlyWord, optionsCadencePhrase } from "@/lib/freshness";
+
 export interface IvyRule {
   momentum_cutoff_pct: number;        // -10: qualifies at or below this 20-day return
   momentum_lookback_days: number;
@@ -14,6 +17,7 @@ export interface IvyRule {
   ledger_start: string;               // YYYY-MM-DD
   ledger_public: boolean;
   chain_fresh_trading_days: number;
+  cadence?: Cadence;                   // the one cadence record copy words itself from (backend services/cadence)
 }
 
 export interface IvyBacktestFold {
@@ -104,12 +108,17 @@ export function oneRuleParagraph(rule: IvyRule, backtest: IvyBacktest | null): s
   return setup + tested + gate;
 }
 
-/** "the live record, kept since ..." once public; while private, the record is kept nightly and public at launch. */
-export function liveRecordPhrase(rule: Pick<IvyRule, "ledger_public" | "ledger_start">): string {
+/** The record's cadence word from the rule's cadence record; "on schedule" when the rule arrived without one. */
+export function cadenceWord(rule: Pick<IvyRule, "cadence">): string {
+  return nightlyWord(rule.cadence) ?? "on schedule";
+}
+
+/** "the live record, kept since ..." once public; while private, the record is kept at the cadence the rule names. */
+export function liveRecordPhrase(rule: Pick<IvyRule, "ledger_public" | "ledger_start" | "cadence">): string {
   const since = fmtLongDate(rule.ledger_start);
   return rule.ledger_public
     ? `the live record, kept since ${since}`
-    : `the live record, kept nightly since ${since} and public at launch`;
+    : `the live record, kept ${cadenceWord(rule)} since ${since} and public at launch`;
 }
 
 /** "A small edge you can check" is a claim only once the record can be checked. */
@@ -120,8 +129,8 @@ export function smallEdgeSentence(rule: Pick<IvyRule, "ledger_public">): string 
 }
 
 /** The Ivy page's "How she decides" heading. */
-export function ledgerHeadline(rule: Pick<IvyRule, "ledger_public">): string {
-  return rule.ledger_public ? "One rule, and a record you can check" : "One rule, and a record kept nightly, public at launch";
+export function ledgerHeadline(rule: Pick<IvyRule, "ledger_public" | "cadence">): string {
+  return rule.ledger_public ? "One rule, and a record you can check" : `One rule, and a record kept ${cadenceWord(rule)}, public at launch`;
 }
 
 /** The link to the trades page. */
@@ -130,10 +139,10 @@ export function ledgerLinkLabel(rule: Pick<IvyRule, "ledger_public">): string {
 }
 
 /** The disclosures' clause on who sees the picks: only true as written once the ledger is public. */
-export function ledgerVisibilityClause(rule: Pick<IvyRule, "ledger_public">): string {
+export function ledgerVisibilityClause(rule: Pick<IvyRule, "ledger_public" | "cadence">): string {
   return rule.ledger_public
     ? "and are published to every visitor identically"
-    : "and are recorded nightly; at launch they are published to every visitor identically";
+    : `and are recorded ${cadenceWord(rule)}; at launch they are published to every visitor identically`;
 }
 
 /** "keeps score in public" is only true once the ledger is public. */
@@ -142,7 +151,7 @@ export function scoreKeepingPhrase(rule: Pick<IvyRule, "ledger_public">): string
 }
 
 export function whoSheIsLine(rule: IvyRule): string {
-  return `She reads the tape overnight, makes a call only when her one setup appears, and ${scoreKeepingPhrase(rule)}.`;
+  return `She reads the tape ${rule.cadence ? `at ${rule.cadence.nightly.local_time} New York` : "on schedule"}, makes a call only when her one setup appears, and ${scoreKeepingPhrase(rule)}.`;
 }
 
 /** v2 has one rule and no "mixed evidence" state. */
@@ -167,7 +176,7 @@ export function exitRuleSentence(rule: IvyRule, exitDate?: string | null): strin
 
 export function chainFreshnessSentence(rule: IvyRule): string {
   return (
-    `Options data is uploaded once a day. A chain more than ${rule.chain_fresh_trading_days} trading days old is not used, ` +
+    `Options data is ${optionsCadencePhrase(rule.cadence) ?? "uploaded on its own schedule"}. A chain more than ${rule.chain_fresh_trading_days} trading days old is not used, ` +
     `so a name can show no implied move even when it has options.`
   );
 }
