@@ -21,6 +21,7 @@ class DataSource(str, enum.Enum):
     POLYGON = "polygon"
     MANUAL = "manual"
     FINNHUB = "finnhub"
+    INTRINIO = "intrinio"
 
 
 class EarningsOutcome(str, enum.Enum):

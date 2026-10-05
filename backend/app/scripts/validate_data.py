@@ -2010,6 +2010,29 @@ async def check_figi_change(session) -> CheckResult:
     return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + (f" ({unchecked} not yet refreshed)" if unchecked else ""))
 
 
+# ── Splits: every stored split has its factor on the shadow bars within one session ──────────────────────
+
+async def check_split_factor_match(session) -> CheckResult:
+    """ERROR when a stored split (on or after the first stored bar) has no bar with a split factor for the symbol within
+    one session, or the bar's ratio differs. Two queries; the session calendar is SPY's stored bars."""
+    from app.scripts.seed_historical_reactions import REFERENCE_SYMBOL, _build_date_cache
+    from app.services import price_bars
+    from app.services.corporate_actions import splits_from_adjustments, unmatched_splits
+    from app.services.security_records import STORED_START
+    stored = [{"symbol": r.symbol, "date": r.event_date, "split_ratio": r.split_ratio} for r in (await session.execute(text("""
+        select t.symbol, e.event_date, e.metadata->>'split_ratio' as split_ratio from events e join tickers t on t.id = e.ticker_id
+        where e.event_type = 'split' and e.event_date >= :start and t.is_active"""), {"start": STORED_START})).all()]
+    if not stored:
+        return CheckResult("split_factor_match", PASS, "No stored splits inside the shadow bars' window")
+    bar_rows = (await session.execute(text("select symbol, date, split_ratio, factor, dividend from price_bars_shadow where split_ratio <> 1 or (factor <> 1 and dividend = 0)"))).all()
+    bar_splits = [{"symbol": r.symbol, **sp} for r in bar_rows for sp in splits_from_adjustments([r])]
+    sessions = _build_date_cache(price_bars.history_sync(REFERENCE_SYMBOL, STORED_START))
+    bad = unmatched_splits(stored, bar_splits, sessions)
+    if bad:
+        return CheckResult("split_factor_match", ERROR, f"{len(bad)} of {len(stored)} stored split(s) since {STORED_START} have no matching factor on the shadow bars", bad[:40])
+    return CheckResult("split_factor_match", PASS, f"Every stored split since {STORED_START} ({len(stored)}) matches a factor on the shadow bars within one session")
+
+
 # ── Reaction price sources: every row names its bars, and a ticker mixes sources only across a stored_history span ──
 
 async def check_reaction_source_coverage(session) -> CheckResult:
@@ -2656,6 +2679,8 @@ CHECKS = [
     # Reaction rows name their bars; sources mix only across a stored_history span
     check_reaction_source_coverage,
     check_reaction_source_consistency,
+    # Stored splits agree with the shadow bars' factors
+    check_split_factor_match,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

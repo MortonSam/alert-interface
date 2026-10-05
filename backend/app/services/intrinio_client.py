@@ -106,6 +106,14 @@ class IntrinioClient:
                                  "stock_prices")
         return sorted(rows, key=lambda r: r["date"])
 
+    async def price_adjustments(self, identifier: str, start: date | None = None, end: date | None = None) -> list[dict]:
+        """Every split and dividend adjustment for a security, ascending by date:
+        [{date, factor, dividend, dividend_currency, split_ratio}] (split_ratio is the price factor: 0.1 for a 10-for-1)."""
+        rows = await self._paged(f"/securities/{identifier}/prices/adjustments",
+                                 {"start_date": start.isoformat() if start else None, "end_date": end.isoformat() if end else None, "page_size": PAGE_SIZE},
+                                 "stock_price_adjustments")
+        return sorted(rows, key=lambda r: r["date"])
+
     async def options_expirations_eod(self, symbol: str, after: date | None = None, before: date | None = None) -> list[str]:
         body = await self._get(f"/options/expirations/{symbol}/eod",
                                {"after": after.isoformat() if after else None, "before": before.isoformat() if before else None})

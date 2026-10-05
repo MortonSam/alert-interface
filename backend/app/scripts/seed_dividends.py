@@ -1,186 +1,120 @@
-"""Seed ex-dividend dates from yfinance into the events table.
+"""Seed ex-dividend dates from Intrinio's price adjustments into the events table.
 
-For each ticker, fetches exDividendDate from yfinance's Ticker.info and
-upserts into events with event_type=EX_DIVIDEND.
+By default the dates come from the stored shadow bars (price_bars_shadow.dividend, one query, no requests): a bar
+with a cash dividend is an ex-dividend date, and the amount stored is that cash per share (metadata.dividend_amount,
+basis per_share). The nightly reads the last WINDOW_DAYS; --full reads Intrinio's adjustments endpoint by security
+record (current and predecessors) for all history. Rows are inserted once per (ticker, date); existing rows are
+never rewritten.
+
+Intrinio's price adjustments are past adjustments only. A declared future ex-dividend date is not in this plan's
+data (the dividends endpoint is not licensed), so the forward "Ex-Div" catalyst is not seeded here; rows that other
+sources wrote stay as they are.
 
 CLI
 ---
-    python -m app.scripts.seed_dividends
+    python -m app.scripts.seed_dividends                # nightly: the last WINDOW_DAYS from the stored bars
+    python -m app.scripts.seed_dividends --full         # every stored bar, then the adjustments endpoint for every record
     python -m app.scripts.seed_dividends --limit 5
 """
-
 from __future__ import annotations
 
 import argparse
 import asyncio
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
-import yfinance as yf
-from sqlalchemy import select
-from tqdm import tqdm
+from sqlalchemy import select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
+from app.services.corporate_actions import dividends_from_adjustments
+from app.services.intrinio_client import IntrinioClient
 
-BATCH_SIZE = 5
-BATCH_SLEEP = 2.0
-RETRY_DELAYS = (3, 8, 15)
-
-
-# ── yfinance fetch ───────────────────────────────────────────────────────────
-
-def _fetch_dividend_info_sync(symbol: str) -> dict | None:
-    """Fetch ex-dividend date and dividend rate from yfinance.
-    Returns dict with keys: ex_date, dividend_rate, or None if unavailable."""
-    try:
-        info = yf.Ticker(symbol).info
-    except Exception:
-        return None
-
-    ex_ts = info.get("exDividendDate")
-    if ex_ts is None:
-        return None
-
-    # exDividendDate is a Unix timestamp
-    try:
-        ex_date = datetime.fromtimestamp(ex_ts, tz=timezone.utc).date()
-    except (TypeError, ValueError, OSError):
-        return None
-
-    # Only keep if within 30 days past or any future date
-    if ex_date < date.today() - timedelta(days=30):
-        return None
-
-    dividend_rate = info.get("dividendRate")
-    return {
-        "ex_date": ex_date,
-        "dividend_rate": float(dividend_rate) if dividend_rate else None,
-    }
+WINDOW_DAYS = 14          # the nightly looks this far back on the bars; the ex-date is on the bar, so a few days of slack is plenty
+DIVIDEND_BASIS = "per_share"
 
 
-# ── DB upsert ────────────────────────────────────────────────────────────────
+async def dividends_from_bars(symbols: list[str], since: date | None) -> dict[str, list[dict]]:
+    """{symbol: [{date, amount}]} from every stored bar with a cash dividend on or after `since`, one query."""
+    more = " AND date >= :since" if since else ""
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(text(f"SELECT symbol, date, dividend FROM price_bars_shadow WHERE dividend <> 0 AND symbol = ANY(:s){more} ORDER BY symbol, date"),
+                                {"s": symbols, **({"since": since} if since else {})})).all()
+    by: dict[str, list] = {}
+    for r in rows:
+        by.setdefault(r.symbol, []).append(r)
+    return {sym: dividends_from_adjustments(rs) for sym, rs in by.items()}
 
-async def _upsert_dividend_event(
-    session,
-    ticker: Ticker,
-    ex_date: date,
-    dividend_rate: float | None,
-) -> bool:
-    """Insert ex-dividend event if not already present. Returns True if inserted."""
-    existing = await session.scalar(
-        select(Event.id).where(
-            Event.ticker_id == ticker.id,
-            Event.event_date == ex_date,
-            Event.event_type == EventType.EX_DIVIDEND,
-        )
-    )
+
+async def dividends_from_api(symbol: str, client: IntrinioClient) -> list[dict]:
+    async with AsyncSessionLocal() as s:
+        ids = (await s.execute(text("SELECT intrinio_security_id FROM security_records WHERE symbol = :s AND intrinio_security_id IS NOT NULL ORDER BY valid_from"),
+                               {"s": symbol})).scalars().all()
+    out: dict[date, dict] = {}
+    for sid in ids:
+        for dv in dividends_from_adjustments(await client.price_adjustments(sid)):
+            out.setdefault(dv["date"], dv)
+    return [out[d] for d in sorted(out)]
+
+
+async def _upsert_dividend_event(session, ticker: Ticker, ex_date: date, dividend_amount: float | None) -> bool:
+    """Insert the ex-dividend date if not already present. Returns True if inserted."""
+    existing = await session.scalar(select(Event.id).where(Event.ticker_id == ticker.id, Event.event_date == ex_date, Event.event_type == EventType.EX_DIVIDEND))
     if existing is not None:
         return False
-
-    metadata = {}
-    if dividend_rate is not None:
-        metadata["dividend_amount"] = dividend_rate
-
-    event = Event(
-        ticker_id=ticker.id,
-        event_type=EventType.EX_DIVIDEND,
-        event_date=ex_date,
-        title=f"{ticker.symbol} Ex-Dividend",
-        source=DataSource.YFINANCE,
-        is_confirmed=True,
-        metadata_=metadata,
-    )
-    session.add(event)
+    meta = {"basis": DIVIDEND_BASIS}
+    if dividend_amount is not None:
+        meta["dividend_amount"] = dividend_amount
+    session.add(Event(ticker_id=ticker.id, event_type=EventType.EX_DIVIDEND, event_date=ex_date, title=f"{ticker.symbol} Ex-Dividend",
+                      source=DataSource.INTRINIO, is_confirmed=True, metadata_=meta))
     return True
 
 
-# ── Per-ticker bulk processing ───────────────────────────────────────────────
-
-async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, bool]:
-    """Fetch + upsert with retries. Returns (ok, inserted)."""
-    last_exc: Exception | None = None
-    for attempt, delay in enumerate(RETRY_DELAYS, start=1):
-        try:
-            info = await loop.run_in_executor(
-                None, _fetch_dividend_info_sync, ticker.symbol
-            )
-            if info is None:
-                return True, False  # ok but no dividend data
-
-            async with AsyncSessionLocal() as session:
-                inserted = await _upsert_dividend_event(
-                    session, ticker, info["ex_date"], info["dividend_rate"]
-                )
-                await session.commit()
-            return True, inserted
-        except Exception as exc:
-            last_exc = exc
-            if attempt < len(RETRY_DELAYS):
-                await asyncio.sleep(delay)
-
-    tqdm.write(f"  ✗ {ticker.symbol}: failed after {len(RETRY_DELAYS)} attempts — {last_exc}")
-    return False, False
-
-
-# ── Main ─────────────────────────────────────────────────────────────────────
-
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed ex-dividend dates from yfinance")
-    parser.add_argument("--limit", type=int, default=None, metavar="N",
-                        help="Cap the candidate list at N (for testing)")
+    parser = argparse.ArgumentParser(description="Seed ex-dividend dates from Intrinio's price adjustments")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--full", action="store_true", help="every stored bar, then the adjustments endpoint by security record")
     args = parser.parse_args()
 
     async with AsyncSessionLocal() as session:
-        all_tickers: list[Ticker] = list(
-            (await session.execute(
-                select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
-            )).scalars().all()
-        )
+        tickers = list((await session.execute(select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
+    if args.limit:
+        tickers = tickers[:args.limit]
+    since = None if args.full else date.today() - timedelta(days=WINDOW_DAYS)
+    print(f"Dividend calendar (stored shadow bars{' then the adjustments endpoint' if args.full else f', last {WINDOW_DAYS} days'}): {len(tickers)} ticker(s)", flush=True)
 
-    candidates = all_tickers
-    if args.limit is not None:
-        candidates = candidates[:args.limit]
-        print(f"--limit {args.limit}: processing first {len(candidates)} tickers.", flush=True)
-
-    if not candidates:
-        print("No tickers in database.")
-        return 0
-
-    loop = asyncio.get_event_loop()
-    succeeded = 0
-    inserted_count = 0
-    failed_list: list[str] = []
-
-    batches = [candidates[i:i + BATCH_SIZE] for i in range(0, len(candidates), BATCH_SIZE)]
-
-    with tqdm(total=len(candidates), unit="ticker", dynamic_ncols=True) as bar:
-        for batch_idx, batch in enumerate(batches):
-            tasks = [_process_ticker(t, loop) for t in batch]
-            results = await asyncio.gather(*tasks)
-
-            for ticker, (ok, inserted) in zip(batch, results):
-                if ok:
-                    succeeded += 1
-                    if inserted:
-                        inserted_count += 1
-                else:
-                    failed_list.append(ticker.symbol)
-                bar.update(1)
-                bar.set_postfix(ok=succeeded, new=inserted_count, fail=len(failed_list))
-
-            if batch_idx < len(batches) - 1:
-                await asyncio.sleep(BATCH_SLEEP)
-
-    print()
-    print(f"{'─' * 50}")
-    print(f"  ✓ {succeeded} tickers processed  📊 {inserted_count} ex-div events inserted  ✗ {len(failed_list)} failed")
-    if failed_list:
-        print(f"\n  Failed: {', '.join(failed_list)}")
-    print(f"{'─' * 50}")
-    return 1 if failed_list else 0
+    inserted = 0
+    requests = 0
+    failed: list[str] = []
+    found = await dividends_from_bars([t.symbol for t in tickers], since)
+    client = IntrinioClient() if args.full else None
+    try:
+        for t in tickers:
+            try:
+                divs = {d["date"]: d for d in found.get(t.symbol, [])}
+                if args.full:
+                    for d in await dividends_from_api(t.symbol, client):
+                        divs.setdefault(d["date"], d)
+                if not divs:
+                    continue
+                async with AsyncSessionLocal() as session:
+                    n = 0
+                    for d in sorted(divs):
+                        n += await _upsert_dividend_event(session, t, d, divs[d]["amount"])
+                    await session.commit()
+                inserted += n
+            except Exception as exc:
+                failed.append(f"{t.symbol}: {str(exc)[:80]}")
+    finally:
+        if client is not None:
+            requests = client.request_count
+            await client.close()
+    print(f"  {inserted} ex-dividend date(s) inserted, {len(failed)} failed, {requests} request(s)")
+    for f in failed[:10]:
+        print("   ", f)
+    return 1 if len(failed) > 10 else 0
 
 
 if __name__ == "__main__":
