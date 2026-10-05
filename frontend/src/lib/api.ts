@@ -1001,6 +1001,19 @@ export interface SystemStatus {
   cadence?: Cadence | null;
 }
 
+export interface SiteStats {
+  active_stocks_covered: number;
+  active_stocks_as_of: string | null;          // YYYY-MM-DD: the newest ticker-row update among active index members
+  earnings_reports_measured: number;
+  earnings_reports_as_of: string | null;       // newest measured earnings reaction
+  fomc_reactions_measured: number;
+  fomc_reactions_as_of: string | null;
+  analyst_reactions_measured: number;
+  analyst_reactions_as_of: string | null;
+  analyst_actions: number;                     // stored analyst events, measured or not
+  analyst_actions_since: string | null;
+}
+
 export interface HealthStatus {
   status: string;                      // "ok" | "degraded" | "error"; degraded names failed_steps
   refresh_in_progress: boolean;
@@ -1126,6 +1139,7 @@ export const api = {
   system: {
     status: () => request<SystemStatus>("/system/status"),
     health: () => request<HealthStatus>("/health"),
+    stats: () => request<SiteStats>("/system/stats"),
   },
 
   theses: {

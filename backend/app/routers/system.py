@@ -71,19 +71,37 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> SystemStatus:
 
 @router.get("/stats")
 async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
-    """Real counts behind the homepage counters. Nothing here is typed by hand."""
+    """Real counts behind the homepage counters, each with the date of the newest row it rests on. Nothing here is
+    typed by hand. "Measured" means a stored reaction row with a one-day move; analyst_actions (stored analyst
+    events, measured or not) stays for older readers."""
     from sqlalchemy import text
     from app.services.price_history_exclusion import EXCLUDED_SYMBOLS_SQL
 
-    earnings_measured = await db.scalar(text(
-        "SELECT count(*) FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id "
-        "WHERE hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL AND t.symbol NOT IN " + EXCLUDED_SYMBOLS_SQL
-    )) or 0
+    async def measured(event_type: str) -> tuple[int, str | None]:
+        row = (await db.execute(text(
+            "SELECT count(*), max(hr.event_date) FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id "
+            f"WHERE hr.event_type = '{event_type}' AND hr.pct_change_1d IS NOT NULL AND t.symbol NOT IN " + EXCLUDED_SYMBOLS_SQL
+        ))).one()
+        return int(row[0] or 0), row[1].isoformat() if row[1] else None
+
+    covered = (await db.execute(text(
+        "SELECT count(*), max(updated_at) FROM tickers WHERE is_active AND index_member"
+    ))).one()
+    earnings_n, earnings_as_of = await measured("earnings")
+    fomc_n, fomc_as_of = await measured("fomc")
+    analyst_n, analyst_as_of = await measured("analyst_action")
     analyst = (await db.execute(text(
         "SELECT count(*), min(event_date) FROM events WHERE event_type = 'analyst_action'"
     ))).one()
     return {
-        "earnings_reports_measured": int(earnings_measured),
+        "active_stocks_covered": int(covered[0] or 0),
+        "active_stocks_as_of": covered[1].date().isoformat() if covered[1] else None,
+        "earnings_reports_measured": earnings_n,
+        "earnings_reports_as_of": earnings_as_of,
+        "fomc_reactions_measured": fomc_n,
+        "fomc_reactions_as_of": fomc_as_of,
+        "analyst_reactions_measured": analyst_n,
+        "analyst_reactions_as_of": analyst_as_of,
         "analyst_actions": int(analyst[0] or 0),
         "analyst_actions_since": analyst[1].isoformat() if analyst[1] else None,
     }

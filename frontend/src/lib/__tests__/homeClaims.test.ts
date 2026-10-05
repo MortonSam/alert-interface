@@ -58,10 +58,34 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(ticker).toMatch(/contradicted\} contradicted/);
   });
 
+  it("the four counters come from /system/stats, each dated by its own newest row, and the row renders nothing without them", async () => {
+    const block = read("components/SiteCounters.tsx");
+    expect(block).toContain("api.system.stats()");
+    expect(block).toContain("if (!rows.length) return null;");
+    expect(block.replace(/className="[^"]*"/g, "")).not.toMatch(/[0-9]{2,}/);                // no typed figure or year outside class names
+    expect(block).not.toMatch(/since/i);
+    const { counterRows } = await import("@/lib/siteCounters");
+    const rows = counterRows({ active_stocks_covered: 503, active_stocks_as_of: "2026-10-05", earnings_reports_measured: 9894, earnings_reports_as_of: "2026-09-11",
+      fomc_reactions_measured: 20650, fomc_reactions_as_of: "2026-09-17", analyst_reactions_measured: 9781, analyst_reactions_as_of: "2026-09-22",
+      analyst_actions: 170645, analyst_actions_since: "2011-12-08" });
+    expect(rows.map((r) => [r.label, r.value, r.asOf])).toEqual([
+      ["Active S&P 500 stocks covered", 503, "As of Oct 5, 2026"],
+      ["Earnings reactions measured", 9894, "As of Sep 11, 2026"],
+      ["Fed-day reactions measured", 20650, "As of Sep 17, 2026"],
+      ["Analyst actions measured", 9781, "As of Sep 22, 2026"],
+    ]);
+    expect(rows.some((r) => r.label.includes("since"))).toBe(false);
+    expect(counterRows({ active_stocks_covered: 1, active_stocks_as_of: null, earnings_reports_measured: 0, earnings_reports_as_of: null, fomc_reactions_measured: 0,
+      fomc_reactions_as_of: null, analyst_reactions_measured: 0, analyst_reactions_as_of: null, analyst_actions: 0, analyst_actions_since: null })[0].asOf).toBeNull();
+    expect(counterRows(null)).toEqual([]);
+  });
+
   it("the real-page block is the ticker page's own headline component on the stored MU stat, fetched on the server", async () => {
     const home = read("app/page.tsx");
     expect(home).toContain("<RealStockPage />");
-    expect(home).not.toMatch(/SiteCounters|CountUp|Earnings reactions measured|Analyst actions since/);
+    expect(home).toContain("<SiteCounters />");
+    expect(home.indexOf("<SiteCounters />")).toBeLessThan(home.indexOf("<RealStockPage />"));
+    expect(home).not.toMatch(/stat-number|since 2011|Analyst actions since/);
     const block = read("components/RealStockPage.tsx");
     expect(block).toContain("export default async function RealStockPage()");
     expect(block).toContain("/v1/discover/insight/${REAL_PAGE_SYMBOL}");

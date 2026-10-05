@@ -5,6 +5,7 @@ import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
 import RealStockPage from "@/components/RealStockPage";
+import { SiteCounters } from "@/components/SiteCounters";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
@@ -26,11 +27,6 @@ export default function Home() {
           font-size: clamp(40px, 10vw, 120px);
           line-height: 1.05;
           letter-spacing: -.03em;
-        }
-        .stat-number {
-          font-size: clamp(40px, 5.5vw, 84px);
-          line-height: 1;
-          letter-spacing: -.02em;
         }
         .statement-h2 {
           font-size: clamp(32px, 6vw, 72px);
@@ -80,8 +76,10 @@ export default function Home() {
           </p>
         </section>
 
-        {/* ── 2. From a real stock page: the same component and stored stat the ticker page shows ── */}
-        <section className="flex items-center justify-center px-4 sm:px-8 py-24">
+        {/* ── 2. The counts, then one block from a real stock page: stored counts dated by their newest rows, and
+               the same component and stored stat the ticker page shows ── */}
+        <section className="flex flex-col items-center justify-center gap-16 px-4 sm:px-8 py-24">
+          <SiteCounters />
           <RealStockPage />
         </section>
 
