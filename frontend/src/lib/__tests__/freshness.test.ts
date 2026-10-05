@@ -16,7 +16,7 @@ function sourceFiles(dir: string): string[] {
 
 describe("freshness wording", () => {
   it("the price source, the cadence words and every quote's date come from the record and the data, never from copy", () => {
-    const cadence = { nightly: { per_day: 1, utc_hour: 6, local_time: "02:00", clock: "America/New_York" },
+    const cadence = { nightly: { per_day: 1, local_time: "02:30", clock: "America/New_York" },
                       options: { per_day: 1, captured_local: "16:05", clock: "America/New_York", fresh_sessions: 2 },
                       quotes: { source: "Finnhub", delay_statement: null, delay_checked: "2026-10-05", dated_by: "each quote's own last-trade time" } };
     expect(priceSourceLine(cadence)).toBe("Prices from Finnhub, each dated by its last trade");

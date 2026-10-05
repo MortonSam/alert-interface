@@ -978,7 +978,7 @@ export interface ThesisContextItem {
 
 /** The cadence record (backend services/cadence): what "nightly", "once a day" and the price source mean, never typed in copy. */
 export interface Cadence {
-  nightly: { per_day: number; utc_hour: number; local_time: string; clock: string };
+  nightly: { per_day: number; local_time: string; clock: string; utc_today?: string };
   options: { per_day: number; captured_local: string; clock: string; fresh_sessions: number };
   quotes: { source: string; delay_statement: string | null; delay_checked: string; dated_by: string };
 }

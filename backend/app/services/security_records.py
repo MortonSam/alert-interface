@@ -12,9 +12,7 @@ declared below is data, checked against Intrinio on 2026-10-01 and 2026-10-03:
                       (its predecessor, Paramount Global class B, is a different security), the when-issued
                       session each of CEG, HONA and Q reported in before Intrinio's first bar, and WBD's
                       2022-04-06..08.
-  DELISTED            tickers whose stock stopped trading: the build marks them inactive (rows kept, hidden
-                      at read time like the price-history exclusion) and closes their current record on the
-                      last session.
+  Delisting is a rule in scripts/build_security_records (three signals), not a list here.
 """
 from __future__ import annotations
 
@@ -70,11 +68,6 @@ STORED_HISTORY_ROWS: dict[str, dict] = {
              "name": "Warner Bros. Discovery merger-close sessions Intrinio has no bars for: stored yfinance history"},
 }
 
-# symbol -> the stock stopped trading: last session, and why. The build marks the ticker inactive and closes its record.
-DELISTED: dict[str, dict] = {
-    "AVB": {"last_trade": date(2026, 8, 14),
-            "note": "merged into Equity Residential on 2026-08-17 (2.793 EQR shares per AVB share); the combined company trades as VMRK from 2026-08-18"},
-}
 
 
 def _current_from(symbol: str, first: date) -> date:
@@ -90,9 +83,8 @@ def plan_records(symbol: str, current: dict) -> list[Record]:
     stored = STORED_HISTORY_ROWS.get(symbol)
     first = current.get("first_stock_price")
     first = date.fromisoformat(first) if isinstance(first, str) else (first or STORED_START)
-    delisted = DELISTED.get(symbol)
     rows = [Record(symbol, current.get("id"), current.get("figi"), current.get("composite_figi"), current.get("name"),
-                   _current_from(symbol, first), delisted["last_trade"] if delisted else None, CURRENT, INTRINIO)]
+                   _current_from(symbol, first), None, CURRENT, INTRINIO)]
     if pred:
         rows.append(Record(symbol, pred["id"], pred["figi"], pred["composite_figi"], pred["name"], pred["valid_from"], pred["valid_to"], PREDECESSOR, INTRINIO))
     if stored:

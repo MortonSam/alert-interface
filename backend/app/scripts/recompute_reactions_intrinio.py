@@ -12,13 +12,14 @@ Usage
     python -m app.scripts.recompute_reactions_intrinio                 # dry run, every ticker
     python -m app.scripts.recompute_reactions_intrinio --symbols=MU,CAT
     python -m app.scripts.recompute_reactions_intrinio --write
+    python -m app.scripts.recompute_reactions_intrinio --nightly        # the nightly step: rows without a source, corrected windows
 """
 from __future__ import annotations
 
 import asyncio
 import sys
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import numpy as np
@@ -94,6 +95,31 @@ class Tally:
                 "largest": [{"delta_pp": float(d), "symbol": s, "date": dt, "stored_1d": a, "intrinio_1d": b} for d, s, dt, a, b in self.largest]}
 
 
+WINDOW_BEFORE_DAYS = 12      # calendar days before a corrected session within which an event's window (T-1..T+5 sessions) can touch it
+WINDOW_AFTER_DAYS = 1
+
+
+def nightly_where() -> str:
+    """The nightly acts on rows without a price source, and on rows whose window touches a calendar correction and
+    whose prices were written before the correction landed (services/trading_calendar.CALENDAR_CORRECTIONS)."""
+    from app.services.trading_calendar import CALENDAR_CORRECTIONS
+    clauses = ["hr.price_source IS NULL"]
+    for i, (d, (_, applied)) in enumerate(sorted(CALENDAR_CORRECTIONS.items())):
+        clauses.append(f"(hr.event_date BETWEEN :c{i}_from AND :c{i}_to AND (hr.price_computed_at IS NULL OR hr.price_computed_at < :c{i}_applied))")
+    return "WHERE " + " OR ".join(clauses)
+
+
+def nightly_params() -> dict:
+    from datetime import timedelta
+    from app.services.trading_calendar import CALENDAR_CORRECTIONS
+    out: dict = {}
+    for i, (d, (_, applied)) in enumerate(sorted(CALENDAR_CORRECTIONS.items())):
+        out[f"c{i}_from"] = d - timedelta(days=WINDOW_BEFORE_DAYS)
+        out[f"c{i}_to"] = d + timedelta(days=WINDOW_AFTER_DAYS)
+        out[f"c{i}_applied"] = datetime.combine(applied, datetime.min.time(), tzinfo=timezone.utc)
+    return out
+
+
 def plan_update(row, got: dict | None) -> dict:
     """The columns --write sets for a non-stored-history row (None values clear the field)."""
     keys = VALUE_KEYS[row["event_type"]]
@@ -103,14 +129,21 @@ def plan_update(row, got: dict | None) -> dict:
 
 
 async def run(argv: list[str]) -> int:
-    write = "--write" in argv
+    nightly = "--nightly" in argv
+    write = "--write" in argv or nightly
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
     only_set = {x.strip().upper() for x in only.split(",")} if only else None
+    where = nightly_where() if nightly else ""
     async with ScriptSessionLocal() as s:
-        rows = (await s.execute(text("""
+        rows = (await s.execute(text(f"""
             select hr.id, t.symbol, hr.event_type::text as event_type, hr.event_date, hr.report_timing, hr.close_before, hr.open_after, hr.close_after,
                    hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d, hr.computation_version, hr.price_source
-            from historical_reactions hr join tickers t on t.id = hr.ticker_id order by t.symbol, hr.event_type, hr.event_date"""))).mappings().all()
+            from historical_reactions hr join tickers t on t.id = hr.ticker_id {where} order by t.symbol, hr.event_type, hr.event_date"""),
+                                 nightly_params() if nightly else {})).mappings().all()
+    if nightly and not rows:
+        print(f"{STEP_LABEL} (nightly): nothing to recompute: every row has a price source and no corrected window is pending")
+        await record_step_fields(STEP_LABEL, {"nightly": True, "rows": 0, "changed": 0, "filled": 0, "emptied": 0, "stored_history": 0, "error": None})
+        return 0
     spy = price_bars.history_sync(REFERENCE_SYMBOL, STORED_START)          # one query; the session calendar
     if spy.empty:
         print(f"{STEP_LABEL}: no {REFERENCE_SYMBOL} bars stored; nothing can be computed")
@@ -169,13 +202,15 @@ async def run(argv: list[str]) -> int:
                 if not batch:
                     continue
                 sets = ", ".join(f"{k} = :{k}" for k in keys)
-                await s.execute(text(f"UPDATE historical_reactions SET {sets}, price_source = :price_source WHERE id = :id"), batch)
+                await s.execute(text(f"UPDATE historical_reactions SET {sets}, price_source = :price_source, price_computed_at = now() WHERE id = :id"), batch)
             if stored_marks:
                 await s.execute(text("UPDATE historical_reactions SET price_source = :src WHERE id = ANY(:ids)"), {"src": SOURCE_STORED_HISTORY, "ids": stored_marks})
             await s.commit()
         print(f"  written: {len(updates)} row(s) recomputed and stamped {SOURCE_INTRINIO}, {len(stored_marks)} stamped {SOURCE_STORED_HISTORY}; computation_version kept")
-        await record_step_fields(STEP_LABEL, {"tickers": len(by), "written": len(updates), "stored_history": len(stored_marks), "tolerance_pp": float(TOLERANCE_PP),
-                                              "by_type": {n: t.summary() for n, t in tallies.items()}, "at": date.today().isoformat()})
+        await record_step_fields(STEP_LABEL, {"nightly": nightly, "tickers": len(by), "written": len(updates), "stored_history": len(stored_marks), "tolerance_pp": float(TOLERANCE_PP),
+                                              "changed": sum(t.changed for t in tallies.values()), "filled": sum(t.filled for t in tallies.values()),
+                                              "emptied": sum(t.emptied for t in tallies.values()),
+                                              "by_type": {n: t.summary() for n, t in tallies.items()}, "at": date.today().isoformat(), "error": None})
     return 0
 
 

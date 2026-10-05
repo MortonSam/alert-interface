@@ -59,6 +59,25 @@ app.include_router(thesis.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 
+@app.middleware("http")
+async def ticker_alias_redirect(request, call_next):
+    """A path segment that is a ticker's old symbol redirects (308) to the same path under its current symbol, so
+    /api/v1/tickers/EQR and every sibling route keep working after a rename (services/ticker_aliases)."""
+    try:
+        from app.services.ticker_aliases import alias_map, redirect_path
+        async with AsyncSessionLocal() as session:
+            aliases = await alias_map(session)
+        if aliases:
+            new_path = redirect_path(request.url.path, aliases)
+            if new_path:
+                from starlette.responses import RedirectResponse
+                target = new_path + (f"?{request.url.query}" if request.url.query else "")
+                return RedirectResponse(url=target, status_code=308)
+    except Exception:
+        pass
+    return await call_next(request)
+
+
 @app.get("/health", tags=["meta"])
 @app.get("/api/v1/health", tags=["meta"])
 async def health_check():

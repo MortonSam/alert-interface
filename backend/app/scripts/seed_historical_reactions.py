@@ -32,7 +32,7 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -528,6 +528,7 @@ async def upsert_reaction(
     update_data["computation_version"] = COMPUTATION_VERSION
     data["price_source"] = SOURCE_INTRINIO
     update_data["price_source"] = SOURCE_INTRINIO
+    data["price_computed_at"] = update_data["price_computed_at"] = datetime.now(timezone.utc)
     # report_timing is passed in data dict by the caller if available
     if "report_timing" in data:
         update_data["report_timing"] = data["report_timing"]

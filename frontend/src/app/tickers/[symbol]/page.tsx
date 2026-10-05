@@ -14,7 +14,7 @@ import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, notFound } from "next/navigation";
+import { useParams, useRouter, notFound } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
@@ -1369,6 +1369,7 @@ type SectionStatus = "loading" | "done" | "error";
 
 export default function TickerPage() {
   const { symbol } = useParams<{ symbol: string }>();
+  const router = useRouter();
   const upperSymbol = symbol.toUpperCase();
 
   const [ticker, setTicker]             = useState<Ticker | null>(null);
@@ -1459,7 +1460,10 @@ export default function TickerPage() {
   useEffect(() => {
     api.tickers
       .bySymbol(upperSymbol)
-      .then((t) => { setTicker(t); setTickerStatus("found"); capture("ticker_viewed", { symbol: upperSymbol }); })
+      .then((t) => {
+        if (t.symbol && t.symbol !== upperSymbol) { router.replace(`/tickers/${t.symbol}`); return; }   // an old symbol: the API answered with the current one
+        setTicker(t); setTickerStatus("found"); capture("ticker_viewed", { symbol: upperSymbol });
+      })
       .catch((e: unknown) => {
         if (e instanceof ApiError && e.status === 404) { setTickerStatus("missing"); }
         else { setTickerError(e instanceof Error ? e.message : String(e)); setTickerStatus("error"); }

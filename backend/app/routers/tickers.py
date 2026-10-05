@@ -1990,8 +1990,9 @@ async def get_put_call(
 
 @router.get("/by-symbol/{symbol}", response_model=TickerRead)
 async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) -> TickerRead:
-    """Look up a single ticker by symbol. Returns 404 if not found."""
-    sym = symbol.upper()
+    """Look up a single ticker by symbol. An old symbol resolves to the ticker's current one. Returns 404 if not found."""
+    from app.services.ticker_aliases import resolve_symbol
+    sym = await resolve_symbol(db, symbol.upper())
     ticker = (
         await db.execute(select(Ticker).where(Ticker.symbol == sym))
     ).scalar_one_or_none()

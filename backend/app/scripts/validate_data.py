@@ -2137,6 +2137,67 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── Identity: the symbol is Intrinio's, nothing half-delisted stays active, pending repairs are named ──────
+
+async def check_symbol_matches_record(session) -> CheckResult:
+    """ERROR when an active ticker's symbol differs from its current record's intrinio_ticker (Intrinio's dot for a
+    share class read as the app's hyphen): Intrinio renamed the security and the records build has not followed
+    (it does, on its next write)."""
+    rows = (await session.execute(text("""
+        SELECT t.symbol, sr.intrinio_ticker, sr.intrinio_security_id FROM tickers t
+        JOIN security_records sr ON sr.symbol = t.symbol AND sr.role = 'current'
+        WHERE t.is_active AND sr.intrinio_ticker IS NOT NULL AND replace(upper(sr.intrinio_ticker), '.', '-') <> t.symbol ORDER BY t.symbol"""))).all()
+    if rows:
+        return CheckResult("symbol_matches_record", ERROR, f"{len(rows)} active ticker(s) whose symbol differs from Intrinio's",
+                           [f"{r.symbol}: Intrinio record {r.intrinio_security_id} trades as {r.intrinio_ticker}" for r in rows])
+    n = (await session.execute(text("SELECT count(*) FROM tickers t JOIN security_records sr ON sr.symbol = t.symbol AND sr.role = 'current' WHERE t.is_active"))).scalar()
+    return CheckResult("symbol_matches_record", PASS, f"Every active ticker's symbol is its Intrinio record's ticker ({n} checked)")
+
+
+async def check_delisting_signals(session) -> CheckResult:
+    """ERROR on any active ticker showing two of the three delisting signals (stale Intrinio price, Intrinio inactive,
+    absent from the constituent list); the nightly delists only on all three (build_security_records)."""
+    from app.scripts.build_security_records import delisting_signals
+    rows = (await session.execute(text("""
+        SELECT t.symbol, t.index_member, sr.last_price_date, sr.intrinio_active FROM tickers t
+        JOIN security_records sr ON sr.symbol = t.symbol AND sr.role = 'current' WHERE t.is_active ORDER BY t.symbol"""))).all()
+    today = date.today()
+    bad = []
+    for r in rows:
+        signals = delisting_signals(r.last_price_date, r.intrinio_active, r.index_member, today)
+        if len(signals) >= 2:
+            bad.append(f"{r.symbol}: " + "; ".join(signals))
+    if bad:
+        return CheckResult("delisting_signals", ERROR, f"{len(bad)} active ticker(s) show two or more delisting signals", bad[:40])
+    return CheckResult("delisting_signals", PASS, f"No active ticker shows two delisting signals ({len(rows)} checked)")
+
+
+PENDING_REPAIRS = (
+    # (check that states the precondition, levels that mean the repair is pending, the command)
+    ("fomc_dates_official", (ERROR,), "python -m app.scripts.repair_fomc_dates --write"),
+    ("fomc_events_unique", (ERROR,), "python -m app.scripts.repair_fomc_dates --write"),
+    ("duplicate_earnings_reactions", (ERROR, WARN), "python -m app.scripts.dedupe_earnings_reactions --write"),
+    ("refused_earnings_dates", (ERROR,), "python -m app.scripts.repair_refused_dates --write"),
+)
+
+
+async def check_pending_repairs(session) -> CheckResult:
+    """WARN naming each one-off repair whose precondition holds tonight, with the command. Reads the other checks'
+    verdicts (PENDING_REPAIRS) rather than re-deciding them."""
+    by_name = {c.__name__.replace("check_", ""): c for c in CHECKS}
+    pending = []
+    for name, levels, command in PENDING_REPAIRS:
+        fn = by_name.get(name)
+        if fn is None:
+            continue
+        r = (await run_checks([fn]))[0]
+        if r.level in levels:
+            pending.append(f"{command}  ({name}: {r.message[:100]})")
+    if pending:
+        return CheckResult("pending_repairs", WARN, f"{len(pending)} one-off repair(s) have their precondition tonight", sorted(set(pending)))
+    return CheckResult("pending_repairs", PASS, "No one-off repair has its precondition tonight")
+
+
 # ── Chain shadow: Intrinio's EOD chain against the courier's, night by night ──────────────────────────
 
 async def check_chain_shadow(session) -> CheckResult:
@@ -2710,6 +2771,10 @@ CHECKS = [
     check_split_factor_match,
     # Someone is told when something fails
     check_alerting_configured,
+    # Identity: symbols follow Intrinio, half-delisted tickers do not stay active, pending repairs are named
+    check_symbol_matches_record,
+    check_delisting_signals,
+    check_pending_repairs,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

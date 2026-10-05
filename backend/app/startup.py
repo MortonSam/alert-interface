@@ -27,6 +27,7 @@ Design notes
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -36,7 +37,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.services.nightly_clock import LAST_NIGHTLY_SLOT_KEY, NIGHTLY_RUN_UTC_HOUR, latest_slot, nightly_due, slot_key
+from app.services.nightly_clock import LAST_NIGHTLY_SLOT_KEY, NIGHTLY_CLOCK, NIGHTLY_LOCAL_TIME, latest_slot, nightly_due, slot_key
 from app.services.system_metadata_service import get_value, set_value
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -97,27 +98,20 @@ async def _background_refresh(nightly_slot: str | None = None) -> None:
 
         _log("Pipeline starting in background thread …")
         loop = asyncio.get_event_loop()
-        exit_code: int = await loop.run_in_executor(None, pipeline.main)
-
-        # Write last_refreshed_at regardless of exit code — the pipeline ran
-        # to completion.  step_health tracks per-step truth.
+        exit_code: int = await loop.run_in_executor(None, functools.partial(pipeline.main, slot=nightly_slot))
+        # The runner itself writes last_refreshed_at, and only when every data step exited 0 (refresh.should_record_refresh).
+        # The slot is marked done here: it ran to completion, whatever the exit code; a resumed run completes the same slot.
         try:
-            now_iso = datetime.now(tz=timezone.utc).isoformat()
             async with AsyncSessionLocal() as session:
-                await set_value(session, _KEY_LAST_REFRESHED, now_iso)
                 if nightly_slot:
-                    await set_value(session, LAST_NIGHTLY_SLOT_KEY, nightly_slot)   # ran, whatever the exit code
+                    await set_value(session, LAST_NIGHTLY_SLOT_KEY, nightly_slot)
                 await session.commit()
         except Exception:
             pass
-
         if exit_code == 0:
-            _log("Pipeline completed successfully — last_refreshed_at updated.")
+            _log("Pipeline completed successfully.")
         else:
-            _log(
-                f"Pipeline exited with code {exit_code} (some steps failed).  "
-                "last_refreshed_at updated; check step_health for details."
-            )
+            _log(f"Pipeline exited with code {exit_code} (some steps failed); see /health failed_steps and step_outcomes.")
     except Exception as exc:
         _log(f"Pipeline raised an unexpected exception: {exc}.  Old data and timestamp preserved.")
         logger.exception("[startup-refresh] Exception detail:")
@@ -174,7 +168,7 @@ async def _refresh_loop() -> None:
                 continue
 
             slot = slot_key(latest_slot(now))
-            _log(f"Refresh loop: nightly slot {slot} ({NIGHTLY_RUN_UTC_HOUR:02d}:00Z) is due — starting refresh.")
+            _log(f"Refresh loop: nightly slot {slot} ({NIGHTLY_LOCAL_TIME.strftime('%H:%M')} {NIGHTLY_CLOCK}) is due — starting or resuming refresh.")
             _refresh_in_progress = True
             await _write_sentinel(now.isoformat())
             asyncio.create_task(_background_refresh(nightly_slot=slot))

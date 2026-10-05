@@ -59,6 +59,7 @@ class HistoricalReaction(Base):
     computation_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
     report_timing: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     price_source: Mapped[str | None] = mapped_column(String(20), nullable=True)   # one of PRICE_SOURCES; null before the recompute
+    price_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # when the prices and moves were last written
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticker: Mapped["Ticker"] = relationship(back_populates="historical_reactions")

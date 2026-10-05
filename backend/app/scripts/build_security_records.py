@@ -1,8 +1,10 @@
 """Resolve every active ticker to its Intrinio security record, by id, and keep the map fresh.
 
 For each active ticker: one request to /securities/{ticker}; the current row is written from it, the
-predecessor rows, stored_history rows and delistings come from
-services/security_records (data); a delisted ticker is marked inactive here, its rows kept. Every refresh also records what Intrinio returned (figi_seen,
+predecessor rows and stored_history rows come from services/security_records (data). Delisting is a rule, not a
+list: a ticker whose current record has no Intrinio price for more than two sessions, is inactive at Intrinio, and
+is absent from the constituent list is marked inactive with the date and reason in the outcome (rows kept, hidden
+at read time). A record that comes back under a new ticker is a rename, applied in place with an alias. Every refresh also records what Intrinio returned (figi_seen,
 last_price_date, checked_at) on the current row, which the validate checks security_record_coverage
 and figi_change read without touching the network.
 
@@ -20,14 +22,15 @@ import asyncio
 import sys
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.database import ScriptSessionLocal
 from app.models.security_record import SecurityRecord
 from app.models.ticker import Ticker
 from app.services.intrinio_client import IntrinioAuthError, IntrinioClient
 from app.services.price_bars_shadow import BENCHMARKS
-from app.services.security_records import CURRENT, DELISTED, Record, plan_records
+from app.services.security_records import CURRENT, Record, plan_records
+from app.services.ticker_rename import detect_rename, rename_symbol
 from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Security records (Intrinio)"
@@ -60,6 +63,7 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
             row.figi = r.figi
         if r.role == CURRENT:
             row.intrinio_ticker = seen.get("ticker")
+            row.intrinio_active = seen.get("active")
             row.figi_seen = seen.get("figi")
             lp = seen.get("last_stock_price")
             row.last_price_date = date.fromisoformat(lp) if isinstance(lp, str) else lp
@@ -67,14 +71,40 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
     return inserted, updated, changed
 
 
-async def apply_delistings(session, delisted: dict[str, dict] = DELISTED) -> list[str]:
-    """Mark each delisted ticker inactive (rows kept; lists and detail routes hide inactive tickers at read time).
-    Returns the symbols flipped by this call."""
-    rows = (await session.execute(select(Ticker).where(Ticker.symbol.in_(list(delisted)), Ticker.is_active.is_(True)))).scalars().all()
-    for t in rows:
-        t.is_active = False
-        print(f"  {t.symbol}: inactive; last session {delisted[t.symbol]['last_trade'].isoformat()}; {delisted[t.symbol]['note']}", flush=True)
-    return sorted(t.symbol for t in rows)
+STALE_SESSIONS_FOR_DELISTING = 2        # a current record missing this many completed sessions (today excluded) is stale
+
+
+def delisting_signals(last_price_date, intrinio_active, index_member, today) -> list[str]:
+    """The three signs a stock stopped trading, in words; all three together delist the ticker, two make validate ERROR."""
+    from app.services.trading_calendar import sessions_after
+    out = []
+    if last_price_date is not None and sessions_after(last_price_date, today) >= STALE_SESSIONS_FOR_DELISTING:
+        out.append(f"no Intrinio price since {last_price_date.isoformat()}")
+    if intrinio_active is False:
+        out.append("Intrinio marks the record inactive")
+    if index_member is False:
+        out.append("absent from the constituent list")
+    return out
+
+
+async def apply_delisting_rule(session, today: date) -> dict[str, dict]:
+    """Mark inactive every active ticker whose current record shows all three signals; close its record on the last
+    price date. Returns {symbol: {date, reason}} for the tickers flipped tonight."""
+    rows = (await session.execute(text("""
+        SELECT t.id, t.symbol, t.index_member, sr.last_price_date, sr.intrinio_active, sr.id AS record_id
+        FROM tickers t JOIN security_records sr ON sr.symbol = t.symbol AND sr.role = 'current'
+        WHERE t.is_active"""))).all()
+    out: dict[str, dict] = {}
+    for r in rows:
+        signals = delisting_signals(r.last_price_date, r.intrinio_active, r.index_member, today)
+        if len(signals) == 3:
+            reason = f"delisted: last session {r.last_price_date.isoformat()}; " + "; ".join(signals)
+            await session.execute(text("UPDATE tickers SET is_active = false, inactive_reason = :why, inactive_since = :d WHERE id = :id"),
+                                  {"why": reason, "d": r.last_price_date, "id": r.id})
+            await session.execute(text("UPDATE security_records SET valid_to = :d WHERE id = :rid AND valid_to IS NULL"), {"d": r.last_price_date, "rid": r.record_id})
+            out[r.symbol] = {"date": r.last_price_date.isoformat(), "reason": reason}
+            print(f"  {r.symbol}: inactive; {reason}", flush=True)
+    return out
 
 
 async def main(argv: list[str]) -> int:
@@ -82,13 +112,17 @@ async def main(argv: list[str]) -> int:
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
     async with ScriptSessionLocal() as session:
         symbols = list((await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
-    symbols = sorted(set(symbols) | set(BENCHMARKS) | set(DELISTED))   # SPY gives the seeder its session calendar; delisted rows stay resolvable
+    symbols = sorted(set(symbols) | set(BENCHMARKS))     # SPY gives the seeder its session calendar
+    async with ScriptSessionLocal() as session:
+        stored_ids = dict((await session.execute(text("SELECT symbol, intrinio_security_id FROM security_records WHERE role = 'current'"))).all())
+        all_symbols = set((await session.execute(text("SELECT symbol FROM tickers"))).scalars().all())
     if only:
         symbols = [s for s in symbols if s in {x.strip().upper() for x in only.split(",")}]
     client = IntrinioClient()
     resolved: list[str] = []
     missing: list[str] = []
     figi_changes: list[str] = []
+    renamed: dict[str, dict] = {}
     inserted = updated = 0
     try:
         for sym in symbols:
@@ -104,6 +138,19 @@ async def main(argv: list[str]) -> int:
             if not current or not current.get("id"):
                 missing.append(f"{sym}: no record")
                 continue
+            # the same record under a new ticker is a rename: the ticker row keeps its id and history, the old symbol becomes an alias
+            new_symbol = detect_rename(sym, stored_ids.get(sym), current, all_symbols - {sym}, stored_ids)
+            if new_symbol and write:
+                async with ScriptSessionLocal() as session:
+                    changed = await rename_symbol(session, sym, new_symbol, date.today(), f"Intrinio record {current['id']} now trades as {new_symbol}",
+                                                  name=current.get("name"))
+                    await session.commit()
+                renamed[sym] = {"to": new_symbol, "record": current["id"], "changed": changed}
+                all_symbols.discard(sym); all_symbols.add(new_symbol)
+                print(f"  {sym} -> {new_symbol}: renamed in place (record {current['id']}); {changed}", flush=True)
+                sym = new_symbol
+            elif new_symbol:
+                renamed[sym] = {"to": new_symbol, "record": current["id"], "dry_run": True}
             rows = plan_records(sym, current)
             resolved.append(sym)
             if write:
@@ -123,15 +170,16 @@ async def main(argv: list[str]) -> int:
           f"{inserted} inserted, {updated} updated, {len(figi_changes)} FIGI change(s); {client.request_count} request(s)\n{'─' * 60}")
     for m in missing[:20]:
         print("   missing:", m)
-    deactivated: list[str] = []
+    deactivated: dict[str, dict] = {}
     if write:
         async with ScriptSessionLocal() as session:
-            deactivated = await apply_delistings(session)
+            deactivated = await apply_delisting_rule(session, date.today())
             await session.commit()
         await record_step_fields(STEP_LABEL, {"resolved": len(resolved), "missing": missing[:50], "inserted": inserted, "updated": updated,
                                               "figi_changes": figi_changes, "requests": client.request_count,
-                                              "delisted": {sym: d["last_trade"].isoformat() for sym, d in DELISTED.items()},
-                                              "deactivated_this_run": deactivated, "error": None})
+                                              "renamed": renamed, "deactivated_this_run": deactivated, "error": None})
+    elif renamed:
+        print("  renames the write would apply:", renamed)
     return 0
 
 

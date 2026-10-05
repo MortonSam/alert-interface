@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,8 @@ class Ticker(Base):
     market_cap: Mapped[int | None] = mapped_column(BigInteger)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     index_member: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    inactive_reason: Mapped[str | None] = mapped_column(Text, nullable=True)     # why is_active is false, in words (delisted, left the index)
+    inactive_since: Mapped[date | None] = mapped_column(Date, nullable=True)     # the date the reason names
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     market_cap_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

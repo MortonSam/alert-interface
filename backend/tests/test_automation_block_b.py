@@ -16,8 +16,9 @@ from app.services.ivy_rule import ivy_rule
 
 def test_the_cadence_record_names_the_nightly_on_the_new_york_clock_and_claims_no_quote_delay():
     c = cad.cadence(datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc))
-    assert c["nightly"] == {"per_day": 1, "utc_hour": 6, "local_time": "02:00", "clock": "America/New_York"}        # EDT
-    assert cad.nightly_local_time(datetime(2026, 12, 10, 12, 0, tzinfo=timezone.utc)) == "01:00"                     # EST
+    assert c["nightly"] == {"per_day": 1, "local_time": "02:30", "clock": "America/New_York", "utc_today": "06:30Z"}   # EDT
+    assert cad.nightly_local_time(datetime(2026, 12, 10, 12, 0, tzinfo=timezone.utc)) == "02:30"                     # EST: the local time never moves
+    assert cad.cadence(datetime(2026, 12, 10, 12, 0, tzinfo=timezone.utc))["nightly"]["utc_today"] == "07:30Z"
     assert c["options"] == {"per_day": 1, "captured_local": "16:05", "clock": "America/New_York", "fresh_sessions": chain_store.CHAIN_FRESH_TRADING_DAYS}
     assert c["quotes"]["source"] == "Finnhub" and c["quotes"]["delay_statement"] is None and c["quotes"]["delay_checked"] == "2026-10-05"
     assert ivy_rule()["cadence"]["nightly"]["clock"] == "America/New_York"

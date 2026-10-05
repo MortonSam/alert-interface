@@ -6,10 +6,10 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.scripts import refresh
-from app.scripts.build_security_records import STEP_LABEL, apply_delistings, upsert
+from app.scripts.build_security_records import STEP_LABEL, upsert
 from app.scripts.validate_data import CHECKS, ERROR, PASS, check_figi_change, check_security_record_coverage, run_checks
 from app.services.security_records import (
-    CURRENT, DELISTED, PREDECESSOR, PREDECESSORS, STORED, STORED_HISTORY, STORED_HISTORY_ROWS, STORED_START,
+    CURRENT, PREDECESSOR, PREDECESSORS, STORED, STORED_HISTORY, STORED_HISTORY_ROWS, STORED_START,
     Record, coverage_problems, plan_records, resolve, rests_on_stored_history,
 )
 from app.services.trading_calendar import is_trading_day
@@ -82,10 +82,11 @@ def test_a_row_rests_on_stored_history_when_its_event_day_or_the_session_before_
     assert not rests_on_stored_history(plan_records("AAPL", body()), date(2026, 9, 30), date(2026, 9, 29))
 
 
-def test_a_delisted_ticker_s_current_record_closes_on_its_last_session():
-    assert DELISTED["AVB"]["last_trade"] == date(2026, 8, 14)
-    rows = plan_records("AVB", body(id="sec_NX6ajg", figi="BBG000BLPDS4", first="1994-03-11", last="2026-08-14"))
-    assert [(r.role, r.valid_to) for r in rows] == [(CURRENT, date(2026, 8, 14))]
+def test_no_declared_delisting_closes_a_current_record_the_rule_in_the_build_does():
+    rows = plan_records("AVB", body(id="sec_NX6ajg", figi="BBG000BLPDS4", first="1994-03-11"))
+    assert [(r.role, r.valid_to) for r in rows] == [(CURRENT, None)]
+    import app.services.security_records as sr
+    assert not hasattr(sr, "DELISTED")
 
 
 # ── resolve and coverage_problems ─────────────────────────────────────────────
@@ -168,22 +169,3 @@ async def test_figi_change_passes_when_every_current_record_still_has_its_figi()
     assert result.level == PASS, result.message
 
 
-@pytest.mark.asyncio
-async def test_a_delisted_ticker_is_marked_inactive_once_and_its_rows_stay():
-    sym = "ZZDEL"
-    try:
-        async with ScriptSessionLocal() as s:
-            await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active) VALUES (gen_random_uuid(), :s, 'Delisted test', true)"), {"s": sym})
-            await s.commit()
-        listing = {sym: {"last_trade": date(2026, 8, 14), "note": "test"}}
-        async with ScriptSessionLocal() as s:
-            assert await apply_delistings(s, listing) == [sym]
-            await s.commit()
-        async with ScriptSessionLocal() as s:
-            assert await apply_delistings(s, listing) == []          # already inactive: nothing to flip, nothing to report
-            active, = (await s.execute(text("SELECT is_active FROM tickers WHERE symbol = :s"), {"s": sym})).one()
-        assert active is False
-    finally:
-        async with ScriptSessionLocal() as s:
-            await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
-            await s.commit()

@@ -269,6 +269,7 @@ async def _process_ticker(ticker: Ticker, loop) -> tuple[bool, int]:
                 pct_change_5d=Decimal(str(pct_5d)) if pct_5d is not None else None,
                 computation_version=COMPUTATION_VERSION,
                 price_source=price_source,
+                price_computed_at=datetime.now(timezone.utc),
             ))
 
             if pct_1d is not None:

@@ -23,7 +23,7 @@ import argparse
 import asyncio
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
@@ -105,7 +105,7 @@ async def _upsert_fomc_reaction(
     data: dict,
 ) -> bool:
     """Upsert on (ticker_id, event_date, event_type=FOMC). Returns True if inserted."""
-    data = {**data, "price_source": SOURCE_INTRINIO}
+    data = {**data, "price_source": SOURCE_INTRINIO, "price_computed_at": datetime.now(timezone.utc)}
     values = dict(
         ticker_id=ticker.id,
         event_type=EventType.FOMC,

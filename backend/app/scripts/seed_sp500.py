@@ -38,7 +38,7 @@ import asyncio
 import json
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -170,6 +170,45 @@ async def build_skip_set(session) -> set[str]:
 
 # ── DB upserts ────────────────────────────────────────────────────────────────
 
+MIN_CONSTITUENTS = 480      # a scrape smaller than this is a broken page, not an index that shrank: nothing is deactivated from it
+SP500_STEP_LABEL = "Ticker data (seed_sp500)"
+
+
+async def deactivate_index_leavers(session, members: list[str], today: date) -> dict[str, str]:
+    """Active tickers absent from tonight's constituent list become inactive (rows kept, hidden at read time) with the
+    reason naming the first night they were missing. Returns {symbol: reason}. Does nothing on a short scrape."""
+    if len(members) < MIN_CONSTITUENTS:
+        return {}
+    from sqlalchemy import text as _text
+    reason = f"left the S&P 500 (first missing from the constituent list on {today.isoformat()})"
+    rows = (await session.execute(_text("""
+        UPDATE tickers SET is_active = false, index_member = false, inactive_reason = :why, inactive_since = :d
+        WHERE is_active AND NOT (symbol = ANY(:m)) RETURNING symbol"""), {"m": list(members), "why": reason, "d": today})).scalars().all()
+    return {sym: reason for sym in sorted(rows)}
+
+
+async def apply_membership(candidates: list[dict]) -> None:
+    """index_member follows tonight's constituent list, and a name absent from it becomes inactive with the date and
+    reason (rows kept, hidden at read time). Runs before the per-ticker work, so a night with every ticker recently
+    refreshed still judges membership; the outcome is recorded for /health."""
+    members = [r["symbol"] for r in candidates]
+    async with AsyncSessionLocal() as session:
+        left = await mark_index_members(session, members)
+        deactivated = await deactivate_index_leavers(session, members, date.today())
+        await session.commit()
+    if left:
+        print(f"  index_member cleared for {len(left)} active ticker(s) no longer in the list: {', '.join(left)}", flush=True)
+    for sym, why in deactivated.items():
+        print(f"  {sym}: inactive; {why}", flush=True)
+    if len(members) < MIN_CONSTITUENTS:
+        print(f"  constituent list has only {len(members)} names (floor {MIN_CONSTITUENTS}): membership left untouched", flush=True)
+    try:
+        from app.services.step_outcomes import record_step_fields
+        await record_step_fields(SP500_STEP_LABEL, {"constituents": len(members), "index_member_cleared": left, "deactivated_index_leavers": deactivated})
+    except Exception as exc:
+        print(f"  [WARN] could not record the membership outcome: {exc}")
+
+
 async def mark_index_members(session, members: list[str]) -> list[str]:
     """Set index_member = (symbol in members) for every active ticker. Returns the symbols cleared this run."""
     from sqlalchemy import text as _text
@@ -234,6 +273,8 @@ async def main(retry_only: bool, limit: int | None, force_update: bool = False) 
         print(f"Retrying {len(candidates)} previously-failed tickers.", flush=True)
     else:
         candidates = load_sp500_list()
+        if limit is None:
+            await apply_membership(candidates)
 
     if limit is not None:
         candidates = candidates[:limit]
@@ -282,14 +323,6 @@ async def main(retry_only: bool, limit: int | None, force_update: bool = False) 
         existing_failed = load_failed()
         merged_failed   = sorted(set(existing_failed) | set(failed) - set(succeeded))
         save_failed(merged_failed)
-        # index_member follows tonight's constituent list: a name that left the index keeps its rows but leaves
-        # the "S&P 500" medians (one statement, every active ticker)
-        async with AsyncSessionLocal() as session:
-            left = await mark_index_members(session, [r["symbol"] for r in candidates])
-            await session.commit()
-        if left:
-            print(f"  index_member cleared for {len(left)} active ticker(s) no longer in the list: {', '.join(left)}", flush=True)
-
     # 5. Summary
     print()
     print(f"{'─' * 50}")

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.nightly_clock import NIGHTLY_GRACE, NIGHTLY_RUN_UTC_HOUR, latest_slot  # noqa: E402  (one clock for the loop and the desk)
+from app.services.nightly_clock import NIGHTLY_GRACE, latest_slot  # noqa: E402  (one clock for the loop and the desk)
 
 AUTO_PICK_STEP = "Auto-pick"
 

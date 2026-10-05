@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Index, String, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, Date, DateTime, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,7 @@ class SecurityRecord(Base):
     symbol: Mapped[str] = mapped_column(String(10), nullable=False)
     intrinio_security_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     intrinio_ticker: Mapped[str | None] = mapped_column(Text, nullable=True)      # the ticker Intrinio files the record under (EQR's record is VMRK)
+    intrinio_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # Intrinio's active flag ("recently traded") at the last refresh
     figi: Mapped[str | None] = mapped_column(Text, nullable=True)
     composite_figi: Mapped[str | None] = mapped_column(Text, nullable=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)

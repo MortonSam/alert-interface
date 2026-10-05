@@ -68,8 +68,11 @@ STEPS: list[tuple[str, list[str]]] = [
     ("FOMC reactions",                  ["python", "-m", "app.scripts.seed_fomc_reactions"]),
     ("Dividend calendar",              ["python", "-m", "app.scripts.seed_dividends"]),
     ("Split history",                  ["python", "-m", "app.scripts.seed_splits"]),
+    ("Reclassify spin-offs",           ["python", "-m", "app.scripts.reclassify_spin_offs", "--write"]),
     ("Analyst actions",                ["python", "-m", "app.scripts.seed_analyst_actions"]),
     ("Analyst reaction stats",         ["python", "-m", "app.scripts.compute_analyst_reactions"]),
+    # rows still without a price source, and windows touching a session the calendar corrected, from the stored bars
+    ("Recompute reactions (Intrinio)", ["python", "-m", "app.scripts.recompute_reactions_intrinio", "--nightly"]),
     ("Sector peer snapshot",            ["python", "-m", "app.scripts.compute_sector_peers"]),
     ("Magnitude trend snapshot",        ["python", "-m", "app.scripts.compute_magnitude_trends"]),
     # RV ranks first: snapshot_iv reads realized vol from the rv_snapshots row written here.
@@ -104,6 +107,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Auto-pick": 600,
     "Shadow eval": 600,
     "Options chains (Intrinio)": 3 * 3600 + 1800,   # may wait up to MAX_WAIT_SECONDS for 03:05 New York, then ~2 requests per ticker
+    "Recompute reactions (Intrinio)": 900,          # the first production night recomputes every row; afterwards only new rows and corrected windows
     "ATM IV (solver)": 1200,                        # batched: ~60 round trips for 510 tickers; the backstop covers a slow database link
     "Warm options reads": 3600,
 }
@@ -232,6 +236,19 @@ def _alert_step_failure(label: str, exit_code: int, seconds: float, tail: str | 
         print(f"  [WARN] could not send the step-failure alert: {exc}")
 
 
+def _record_run(fields: dict) -> None:
+    """Merge the run's own fields into step_outcomes under RUN_LABEL."""
+    try:
+        raw = _db_get("step_outcomes")
+        outcomes = json.loads(raw) if raw else {}
+        entry = dict(outcomes.get(RUN_LABEL) or {})
+        entry.update(fields)
+        outcomes[RUN_LABEL] = entry
+        _db_upsert("step_outcomes", json.dumps(outcomes))
+    except Exception as exc:
+        print(f"  [WARN] could not record the run: {exc}")
+
+
 def _record_refresh() -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
     _db_upsert("last_refreshed_at", now_iso)
@@ -257,16 +274,59 @@ def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime
                           figures.get("chain_coverage_pct"), courier_summary(outcomes, now))
 
 
-def main() -> int:
+RUN_LABEL = "Nightly run"                  # the pseudo-step whose outcome tells the story of the run itself
+
+
+def slot_progress_key(slot: str) -> str:
+    return f"slot_progress:{slot}"
+
+
+def steps_to_run(steps: list[tuple[str, list[str]]], done: dict) -> list[tuple[str, list[str]]]:
+    """Pure: the steps a resumed run still has to do, from the first one the slot has no completion stamp for.
+    A step after an incomplete one runs even if it has a stamp, so the order of effects holds."""
+    out = []
+    pending = False
+    for label, cmd in steps:
+        if pending or label not in done:
+            pending = True
+            out.append((label, cmd))
+    return out
+
+
+def main(slot: str | None = None) -> int:
+    """Run the pipeline. With a slot (the loop's nightly), each step's completion is stamped under the slot, a run
+    that a restart interrupted resumes from the first incomplete step, and the interruption is logged in the outcome."""
     print(f"\n{'=' * 60}")
     print("  DATA REFRESH PIPELINE")
-    print(f"  Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"  Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}" + (f"  slot {slot}" if slot else "  (boot refresh, no slot)"))
     print(f"{'=' * 60}")
 
-    results: list[tuple[str, bool]] = []
-    for label, cmd in STEPS:
+    done: dict = {}
+    if slot:
+        try:
+            done = json.loads(_db_get(slot_progress_key(slot)) or "{}")
+        except (TypeError, ValueError):
+            done = {}
+    todo = steps_to_run(STEPS, done) if slot else list(STEPS)
+    todo_labels = {label for label, _ in todo}
+    results: list[tuple[str, bool]] = [(label, True) for label, _ in STEPS if label not in todo_labels]   # done before the restart
+    run_fields = {"slot": slot, "started_at": datetime.now(timezone.utc).isoformat(), "steps_total": len(STEPS), "steps_skipped_done": len(STEPS) - len(todo)}
+    if slot and done:
+        run_fields.update({"interrupted": True, "resumed_at": run_fields["started_at"], "resumed_from": todo[0][0] if todo else None,
+                           "note": "a process restart (a deploy, or a crash) cut the previous run; resumed from the first incomplete step"})
+        print(f"  Resuming slot {slot}: {len(done)} step(s) already done, resuming from {todo[0][0] if todo else 'nothing'}")
+    _record_run(run_fields)
+    for label, cmd in todo:
         ok = _run_step(label, cmd)
         results.append((label, ok))
+        if slot and ok:
+            done[label] = datetime.now(timezone.utc).isoformat()
+            try:
+                _db_upsert(slot_progress_key(slot), json.dumps(done))
+            except Exception as exc:
+                print(f"  [WARN] could not stamp {label} for slot {slot}: {exc}")
+    by_label = dict(results)
+    results = [(label, by_label.get(label, True)) for label, _ in STEPS]
 
     # ── Summary ───────────────────────────────────────────────────────────────
     print(f"\n{'=' * 60}")
@@ -300,6 +360,7 @@ def main() -> int:
     except Exception as exc:
         print(f"  [WARN] could not send the digest: {exc}")
 
+    _record_run({"finished_at": datetime.now(timezone.utc).isoformat(), "all_passed": all_passed, "interrupted": False})
     if all_passed:
         print("\n  Refresh complete.\n")
         return 0
@@ -309,4 +370,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--slot=")), None)))

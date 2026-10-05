@@ -47,6 +47,13 @@ SPECIAL_CLOSURES: dict[date, str] = {
     date(2025, 1, 9): "National Day of Mourning for President Carter",
 }
 
+# Days whose session status this calendar once got wrong, with the day the correction landed. A reaction window that
+# touches one of these is recomputed once by the nightly recompute (rows written before the correction).
+CALENDAR_CORRECTIONS: dict[date, tuple[str, date]] = {
+    date(2021, 12, 31): ("was treated as a holiday; the NYSE traded", date(2026, 10, 6)),
+    date(2025, 1, 9): ("was treated as a session; the NYSE was closed", date(2026, 10, 6)),
+}
+
 _NYSE_BDAY = CustomBusinessDay(calendar=NYSEHolidayCalendar(), holidays=[pd.Timestamp(d) for d in SPECIAL_CLOSURES])
 
 
