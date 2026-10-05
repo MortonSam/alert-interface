@@ -131,6 +131,15 @@ async def run(argv: list[str]) -> int:
         rate_fetch_error, stored = str(exc)[:160], 0
     # 2. which chain per ticker, from keys and dates only
     targets = choose_targets(await chain_index(only), on_arg)
+    skipped_stale: dict[str, str] = {}
+    if not on_arg:                                   # an explicit --on is a historic run; the nightly refuses a stale chain
+        fresh_targets = []
+        for sym, exp, d in targets:
+            if chain_store.is_fresh(d.isoformat()):
+                fresh_targets.append((sym, exp, d))
+            else:
+                skipped_stale[sym] = f"options chain is {chain_store.trading_days_since(d.isoformat())} sessions old"
+        targets = fresh_targets
     rates: dict[date, object] = {}
     written = 0
     solved_both = solved_one = 0
@@ -180,10 +189,12 @@ async def run(argv: list[str]) -> int:
     rates_used = {d.isoformat(): f"{r.rate:.4%} ({r.rate_date.isoformat()})" for d, r in rates.items() if r.rate is not None}
     fields = {"tickers": len(targets), "written": written, "solved_both_sides": solved_both, "solved_one_side": solved_one, "unsolved": len(skipped),
               "unsolved_detail": dict(list(skipped.items())[:30]), "skipped_nonstandard": skipped_nonstandard,
+              "skipped_stale": dict(list(skipped_stale.items())[:50]), "skipped_stale_count": len(skipped_stale),
               "rates_used": rates_used, "rates_stored": stored, "rate_fetch_error": rate_fetch_error, "iv_version": IV_SOLVER_VERSION,
               "progress": {"done": len(targets), "of": len(targets)}, "batch": BATCH, "error": None}
     print(f"{STEP_LABEL}: {len(targets)} ticker(s), {written} row(s) written (v{IV_SOLVER_VERSION}), both sides {solved_both}, one side {solved_one}, "
-          f"unsolved {len(skipped)}, skipped as nonstandard (an ATM mid under ${MIN_ATM_MID:.2f}) {len(skipped_nonstandard)}; rates {rates_used}; "
+          f"unsolved {len(skipped)}, skipped as nonstandard (an ATM mid under ${MIN_ATM_MID:.2f}) {len(skipped_nonstandard)}, "
+          f"refused as stale {len(skipped_stale)}; rates {rates_used}; "
           f"{stored} rate row(s) stored" + (f"; rate fetch failed: {rate_fetch_error}" if rate_fetch_error else ""))
     for k, v in skipped_nonstandard.items():
         print(f"   nonstandard {k}: spot {v['spot']} strike {v['strike']} mids {v['call_mid']}/{v['put_mid']} ({v['expiration']})")

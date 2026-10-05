@@ -973,21 +973,33 @@ export interface ThesisContextItem {
   insight: string | null;             // conditional-stats one-liner
 }
 
+/** One dataset's age from /health or /system/status: the oldest last success among the nightly steps that produce it. */
+export interface DatasetAge {
+  at: string | null;        // ISO; null when a producing step has never succeeded
+  ok: boolean;              // every producing step exited 0 on its latest run
+  failed: string[];         // producing steps whose latest run failed
+  steps: string[];
+}
+export type DatasetAges = Record<string, DatasetAge>;
+
 export interface SystemStatus {
-  last_refreshed_at: string | null;
+  last_refreshed_at: string | null;    // written only when every data step of the nightly exited 0
   total_tickers: number;
   total_reactions: number;
   most_recent_reaction_date: string | null;
+  datasets?: DatasetAges;
 }
 
 export interface HealthStatus {
-  status: string;
+  status: string;                      // "ok" | "degraded" | "error"; degraded names failed_steps
   refresh_in_progress: boolean;
   last_refreshed_at: string | null;
   rv_latest_date: string | null;
   rv_last_run: string | null;
   options_data_date?: string | null;   // chain date of the newest ingested options data
   step_health: Record<string, string | null>;
+  failed_steps?: string[];
+  datasets?: DatasetAges;
 }
 
 export interface Watchlist {

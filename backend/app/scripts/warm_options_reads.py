@@ -167,7 +167,7 @@ def main() -> int:
         print(f"ERROR: {msg}.", file=sys.stderr)
         _diagnostics.append(msg)
         _record_warm_outcome(0, 0, 0, [], 0, 0.0, reason=msg)
-        return 0  # never fail the pipeline
+        return 1  # fail closed: a missing token means no read was warmed, and the step outcome says why
 
     base = (args.base_url or os.environ.get("WARM_BASE_URL", f"http://localhost:{port}")).rstrip("/")
     client = httpx.Client()

@@ -31,19 +31,13 @@ def capture_stamp(now: datetime | None = None) -> str:
     """When this chain was captured, on the market's clock with its offset, e.g. 2026-10-05T16:06:12-04:00."""
     return (now or datetime.now(ZoneInfo(CAPTURE_CLOCK))).astimezone(ZoneInfo(CAPTURE_CLOCK)).replace(microsecond=0).isoformat()
 
-# ── Fallback tickers (used only if the API is unreachable) ────────────────────
-
-FALLBACK_TICKERS = [
-    "AAPL", "NVDA", "MSFT", "AMZN", "META", "GOOGL", "TSLA",
-    "JPM", "COST", "WMT", "NFLX", "AMD", "AVGO", "LLY",
-]
+class TickerListUnavailable(RuntimeError):
+    """The backend did not give the active ticker list: the run stops here rather than price a hand-picked few."""
 
 
 def _fetch_active_tickers(base_url: str, token: str) -> list[str]:
-    """Fetch all active ticker symbols from the backend API.
-
-    Falls back to FALLBACK_TICKERS if the request fails.
-    """
+    """Every active ticker symbol from the backend API. Raises TickerListUnavailable on any failure or an empty list:
+    there is no fallback list, so a bad night fails loudly instead of quietly covering 14 names."""
     try:
         r = httpx.get(
             f"{base_url}/api/v1/tickers",
@@ -53,11 +47,12 @@ def _fetch_active_tickers(base_url: str, token: str) -> list[str]:
         )
         r.raise_for_status()
         symbols = [t["symbol"] for t in r.json() if t.get("symbol")]
-        if symbols:
-            return sorted(symbols)
     except Exception as exc:
-        print(f"  (API ticker fetch failed: {exc} — using fallback list)")
-    return list(FALLBACK_TICKERS)
+        raise TickerListUnavailable(f"ticker list fetch failed: {exc}") from exc
+    if not symbols:
+        raise TickerListUnavailable("ticker list fetch returned no symbols")
+    return sorted(symbols)
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -362,7 +357,7 @@ def main() -> int:
     parser.add_argument("--base-url", required=True,
                         help="Hosted backend URL (e.g. https://your-app.up.railway.app)")
     parser.add_argument("--tickers", default=None,
-                        help="Comma-separated ticker list (default: marquee list)")
+                        help="Comma-separated ticker list (default: every active ticker from the API)")
     args = parser.parse_args()
 
     token = os.environ.get("ADMIN_TOKEN", "")
@@ -371,11 +366,15 @@ def main() -> int:
         return 1
 
     base = args.base_url.rstrip("/")
-    tickers = (
-        [s.strip().upper() for s in args.tickers.split(",")]
-        if args.tickers
-        else _fetch_active_tickers(base, token)
-    )
+    try:
+        tickers = (
+            [s.strip().upper() for s in args.tickers.split(",")]
+            if args.tickers
+            else _fetch_active_tickers(base, token)
+        )
+    except TickerListUnavailable as exc:
+        print(f"ERROR: {exc}. Nothing pushed.", file=sys.stderr)
+        return 1
 
     t_start = time.monotonic()
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { PRICE_FRESHNESS, freshnessLine } from "@/lib/freshness";
+import { datasetAgeLine, datasetsStale, freshnessLine } from "@/lib/freshness";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
@@ -19,9 +19,8 @@ function fmtAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function isStale(iso: string): boolean {
-  return Date.now() - new Date(iso).getTime() > 3 * 24 * 60 * 60 * 1000;
-}
+// the grid shows next earnings dates and earnings history: those datasets date its freshness line
+const GRID_DATASETS = ["earnings_calendar", "reactions"];
 
 const fmtMcap = fmtMarketCap;
 
@@ -203,12 +202,10 @@ export function TickerGrid() {
       <div className="flex justify-end items-center">
         <span
           className={`text-xs ${
-            systemStatus?.last_refreshed_at && isStale(systemStatus.last_refreshed_at)
-              ? "text-warning"
-              : "text-muted-foreground"
+            datasetsStale(systemStatus?.datasets, GRID_DATASETS) ? "text-warning" : "text-muted-foreground"
           }`}
         >
-          {systemStatus?.last_refreshed_at ? freshnessLine(fmtAgo(systemStatus.last_refreshed_at)) : PRICE_FRESHNESS}
+          {freshnessLine(datasetAgeLine(systemStatus?.datasets, GRID_DATASETS, fmtAgo))}
         </span>
       </div>
 

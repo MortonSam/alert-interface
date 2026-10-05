@@ -63,10 +63,10 @@ async def delete_expired(db: AsyncSession, source: str, before: date) -> list[st
     return sorted(expired)
 
 
-def _trading_days_since(trade_date_str: str) -> int:
+def trading_days_since(trade_date_str: str, today: date | None = None) -> int:
     """Count trading days (Mon-Fri) between trade_date and today, inclusive of today."""
-    trade_date = date.fromisoformat(trade_date_str)
-    today = date.today()
+    trade_date = date.fromisoformat(str(trade_date_str)[:10])
+    today = today or date.today()
     count = 0
     d = trade_date
     while d < today:
@@ -79,11 +79,11 @@ def _trading_days_since(trade_date_str: str) -> int:
 CHAIN_FRESH_TRADING_DAYS = 2   # a chain older than this many trading days is not used
 
 
-def is_fresh(chain_last_trade: str | None, max_trading_days: int = CHAIN_FRESH_TRADING_DAYS) -> bool:
-    """Return True if chain_last_trade is within max_trading_days of today."""
+def is_fresh(chain_last_trade: str | None, max_trading_days: int = CHAIN_FRESH_TRADING_DAYS, today: date | None = None) -> bool:
+    """Return True if chain_last_trade is within max_trading_days of today (or of `today` when given)."""
     if not chain_last_trade:
         return False
-    return _trading_days_since(chain_last_trade) <= max_trading_days
+    return trading_days_since(chain_last_trade, today) <= max_trading_days
 
 
 async def get_ingested_expirations(db: AsyncSession, sym: str, source: str = COURIER) -> list[str]:

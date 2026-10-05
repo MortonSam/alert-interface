@@ -16,10 +16,11 @@ router = APIRouter(prefix="/system", tags=["system"])
 
 
 class SystemStatus(BaseModel):
-    last_refreshed_at: datetime | None
+    last_refreshed_at: datetime | None          # written only when every data step of the nightly exited 0
     total_tickers: int
     total_reactions: int
     most_recent_reaction_date: date | None
+    datasets: dict = {}                         # per dataset: at, ok, failed, steps (services/dataset_freshness)
 
 
 @router.get("/status", response_model=SystemStatus)
@@ -44,11 +45,24 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> SystemStatus:
         select(func.max(HistoricalReaction.event_date))
     )
 
+    datasets: dict = {}
+    try:
+        import json as _json
+        from app.models.system_metadata import SystemMetadata
+        from app.services.dataset_freshness import dataset_ages
+        raw = await get_value(db, "step_outcomes")
+        rows = (await db.execute(select(SystemMetadata.key, SystemMetadata.value).where(SystemMetadata.key.like("step:%")))).all()
+        stamps = {k.replace("step:", "").replace(":last_success", ""): v for k, v in rows}
+        datasets = dataset_ages(_json.loads(raw) if raw else {}, stamps)
+    except Exception:
+        datasets = {}
+
     return SystemStatus(
         last_refreshed_at=last_refreshed_at,
         total_tickers=total_tickers,
         total_reactions=total_reactions,
         most_recent_reaction_date=most_recent_reaction_date,
+        datasets=datasets,
     )
 
 

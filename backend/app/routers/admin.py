@@ -131,10 +131,31 @@ async def ingest_options_chains(
         pc_stored += 1
 
     await db.commit()
+    await _record_courier_run(db, len(set(ingested)), len(ingested), errors,
+                              max((c.chain_captured_at for c in payload.chains if c.chain_captured_at), default=None))
     result: dict = {"ingested": len(ingested), "symbols": ingested, "put_call_stored": pc_stored}
     if errors:
         result["errors"] = errors
     return result
+
+
+async def _record_courier_run(db: AsyncSession, tickers: int, chains: int, errors: list[str], captured_at: str | None) -> None:
+    """The courier's run as a step outcome ("Courier ingest"): capture time, tickers and chains pushed, failures.
+    Calls within COURIER_RUN_GAP_HOURS accumulate into one run, so a missed day is a stored fact, not an inference."""
+    try:
+        from app.services.dataset_freshness import COURIER_STEP_LABEL, courier_run_fields
+        from app.services.step_outcomes import merged_outcomes
+        from app.services.system_metadata_service import get_value, set_value
+        raw = await get_value(db, "step_outcomes")
+        outcomes = json.loads(raw) if raw else {}
+        now = datetime.now(timezone.utc)
+        fields = courier_run_fields(outcomes.get(COURIER_STEP_LABEL), now, tickers, chains, errors, captured_at)
+        await set_value(db, "step_outcomes", json.dumps(merged_outcomes(raw, COURIER_STEP_LABEL, fields)))
+        if fields["exit"] == 0:
+            await set_value(db, f"step:{COURIER_STEP_LABEL}:last_success", now.isoformat())
+        await db.commit()
+    except Exception as exc:
+        print(f"  [WARN] could not record the courier run: {exc}", flush=True)
 
 
 @router.get("/chain-expirations", dependencies=[Depends(require_admin)])

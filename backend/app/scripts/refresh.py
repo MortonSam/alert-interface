@@ -207,6 +207,7 @@ def _run_step(label: str, cmd: list[str]) -> bool:
             stderr_head, stderr_tail = _stderr_excerpt(exc.stderr.decode(errors="replace"))
         _record_step_outcome(label, exit_code=-1, seconds=elapsed,
                              stderr_head=stderr_head, stderr_tail=stderr_tail)
+        _alert_step_failure(label, -1, elapsed, stderr_tail or stderr_head)
         return False
     elapsed = time.monotonic() - t0
     ok = result.returncode == 0
@@ -216,13 +217,44 @@ def _run_step(label: str, cmd: list[str]) -> bool:
                          stderr_head=stderr_head, stderr_tail=stderr_tail)
     if ok:
         _record_step_success(label)
+    else:
+        _alert_step_failure(label, result.returncode, elapsed, stderr_tail or stderr_head)
     return ok
+
+
+def _alert_step_failure(label: str, exit_code: int, seconds: float, tail: str | None) -> None:
+    """One ntfy message per failed or timed-out step (services/notify)."""
+    try:
+        from app.services.notify import PRIORITY_HIGH, notify_sync, step_failure_message
+        title, body = step_failure_message(label, exit_code, seconds, tail)
+        notify_sync(title, body, PRIORITY_HIGH, ("warning",))
+    except Exception as exc:
+        print(f"  [WARN] could not send the step-failure alert: {exc}")
 
 
 def _record_refresh() -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
     _db_upsert("last_refreshed_at", now_iso)
     print(f"\n  Recorded last_refreshed_at = {now_iso}")
+
+
+JUDGE_STEPS = {"Validate data"}      # validate judges the data; it is not a data step, and its errors are reported on their own
+
+
+def should_record_refresh(results: list[tuple[str, bool]]) -> bool:
+    """last_refreshed_at is written only when every data step (every step but the judges) exited 0."""
+    return all(ok for label, ok in results if label not in JUDGE_STEPS)
+
+
+def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime) -> tuple[str, str]:
+    """The morning digest's title and body from this run's results and the stored outcomes."""
+    from app.services.dataset_freshness import courier_summary
+    from app.services.notify import digest_message
+    failed = [label for label, ok in results if not ok]
+    validate = outcomes.get("Validate data") or {}
+    figures = validate.get("figures") or {}
+    return digest_message(now.strftime("%Y-%m-%d"), sum(1 for _, ok in results if ok), len(results), failed, validate,
+                          figures.get("chain_coverage_pct"), courier_summary(outcomes, now))
 
 
 def main() -> int:
@@ -249,12 +281,24 @@ def main() -> int:
 
     print(f"{'=' * 60}\n")
 
-    # Write last_refreshed_at when the pipeline runs to completion,
-    # regardless of individual step results.  step_health tracks per-step truth.
+    # last_refreshed_at means "every data step exited 0 tonight"; per-dataset ages live in /health (dataset_freshness).
     try:
-        _record_refresh()
+        if should_record_refresh(results):
+            _record_refresh()
+        else:
+            print("\n  last_refreshed_at not written: a data step failed (see /health datasets and step_outcomes)")
     except Exception:
         pass
+
+    # the morning digest
+    try:
+        from app.services.notify import notify_sync
+        raw = _db_get("step_outcomes")
+        title, body = digest_fields(results, json.loads(raw) if raw else {}, datetime.now(timezone.utc))
+        print(f"  {title}: {body}")
+        notify_sync(title, body, tags=("sunrise",))
+    except Exception as exc:
+        print(f"  [WARN] could not send the digest: {exc}")
 
     if all_passed:
         print("\n  Refresh complete.\n")

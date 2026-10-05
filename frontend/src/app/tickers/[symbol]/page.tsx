@@ -6,7 +6,10 @@ import { absentReadLine, displayedOptionFacts, ivUnavailableReason, priceDriftNo
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { impliedSpanPhrase, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, impliedSpanPhrase, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+
+// the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
+const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
 import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -1919,9 +1922,9 @@ export default function TickerPage() {
           {/* "Why now" strip */}
           <WhyNowStrip events={events} />
 
-          {health?.last_refreshed_at && (
+          {datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-2">
-              Data as of {timeAgo(health.last_refreshed_at)}
+              {datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo)}
             </p>
           )}
 

@@ -92,11 +92,10 @@ export default function Home() {
               The challenge
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              Trading apps hand you confetti. Terminals cost thirty grand a year.
+              Trading apps hand you confetti. Terminals cost more than most people will pay.
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-2xl mx-auto">
-              Thirty million people started investing since 2020. Most of them
-              research the way there&#39;s always been to research: Yahoo for the
+              Most people research the way there&#39;s always been to research: Yahoo for the
               numbers, Reddit for opinions they can&#39;t trust, YouTube to learn
               what a P/E is, their broker for options they don&#39;t understand, and
               a chatbot that makes things up because nothing checks it.

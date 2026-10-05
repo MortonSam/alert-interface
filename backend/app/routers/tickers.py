@@ -1349,8 +1349,8 @@ async def get_options_read(
             spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
         )
 
-    # ── No cache (or stale) — gate AI generation behind admin token ───────────
-    if settings.admin_token and token != settings.admin_token:
+    # ── No cache (or stale) — gate AI generation behind admin token; an unset token admits nobody ──
+    if not settings.admin_token or token != settings.admin_token:
         if stale_fact:
             return absent(stale_reason(stale_fact), f"stale cached read ({stale_fact} servable now), no admin token")
         return absent(READ_PENDING_NIGHTLY, "cache miss, no admin token")
@@ -1632,8 +1632,8 @@ async def get_explain(
         except Exception:
             pass  # corrupt cache — regenerate
 
-    # ── No cache — gate behind admin token ──────────────────────────────────
-    if settings.admin_token and token != settings.admin_token:
+    # ── No cache — gate behind admin token; an unset token admits nobody ─────
+    if not settings.admin_token or token != settings.admin_token:
         return ExplainRead(
             symbol=sym, metric=metric, content="",
             facts={}, model_used="none", generated_at=as_of,

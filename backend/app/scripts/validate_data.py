@@ -54,6 +54,7 @@ class CheckResult:
     level: str          # PASS | WARN | ERROR
     message: str
     rows: list[str] = field(default_factory=list)
+    figures: dict = field(default_factory=dict)    # numbers the step outcome and the digest carry (chain_coverage_pct)
 
 
 # ── Individual checks ─────────────────────────────────────────────────────────
@@ -1279,19 +1280,31 @@ async def check_chain_coverage(session) -> CheckResult:
 
     covered = len(active_syms) - len(stale)
     pct = covered / len(active_syms) * 100
+    figures = {"chain_coverage_pct": round(pct, 1)}
 
-    if pct >= 90:
+    if pct >= CHAIN_COVERAGE_MIN_PCT:
         return CheckResult(
             "chain_coverage", PASS,
-            f"{covered}/{len(active_syms)} active tickers ({pct:.0f}%) have a fresh chain",
+            f"{covered}/{len(active_syms)} active tickers ({pct:.0f}%) have a fresh chain", figures=figures,
         )
 
     details = [f"{sym}  no fresh chain" for sym in stale]
     return CheckResult(
-        "chain_coverage", WARN,
-        f"{covered}/{len(active_syms)} ({pct:.0f}%) active tickers have a fresh chain (below 90% threshold)",
-        details,
+        "chain_coverage", ERROR,
+        f"{covered}/{len(active_syms)} ({pct:.0f}%) active tickers have a fresh chain (below {CHAIN_COVERAGE_MIN_PCT}%): the courier did not deliver",
+        details, figures=figures,
     )
+
+
+CHAIN_COVERAGE_MIN_PCT = 90      # below this the options layer is failing for too many tickers to call it a quirk: ERROR, and an alert
+
+
+async def check_alerting_configured(session) -> CheckResult:
+    """WARN when no ntfy topic is set: failures would be silent."""
+    from app.services import notify
+    if notify.configured():
+        return CheckResult("alerting_configured", PASS, f"ntfy alerts go to {notify.settings.ntfy_server}")
+    return CheckResult("alerting_configured", WARN, "NTFY_TOPIC is not set: step failures, validate errors and the morning digest reach nobody")
 
 
 async def check_iv_history_price_drift(session) -> CheckResult:
@@ -2681,6 +2694,8 @@ CHECKS = [
     check_reaction_source_consistency,
     # Stored splits agree with the shadow bars' factors
     check_split_factor_match,
+    # Someone is told when something fails
+    check_alerting_configured,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,
@@ -2726,12 +2741,32 @@ OUTCOME_ERROR_CAP = 10
 def outcome_fields(results: list[CheckResult]) -> dict:
     """What /health carries for this run: counts, and the failing checks with their one-line messages."""
     errors = [r for r in results if r.level == ERROR]
+    figures: dict = {}
+    for r in results:
+        figures.update(r.figures or {})
     return {
         "pass_count": sum(1 for r in results if r.level == PASS),
         "warn_count": sum(1 for r in results if r.level == WARN),
         "error_count": len(errors),
         "errors": [{"check": r.name, "message": r.message} for r in errors[:OUTCOME_ERROR_CAP]],
+        "figures": figures,
     }
+
+
+VALIDATE_ALERT_CAP = 10          # one ntfy message per ERROR up to this many, then one that counts the rest
+
+
+async def alert_errors(results: list) -> int:
+    """One ntfy message per ERROR (services/notify); returns how many were sent."""
+    from app.services.notify import PRIORITY_HIGH, notify, validate_error_message
+    errors = [r for r in results if r.level == ERROR]
+    sent = 0
+    for r in errors[:VALIDATE_ALERT_CAP]:
+        title, body = validate_error_message(r.name, r.message, r.rows)
+        sent += await notify(title, body, PRIORITY_HIGH, ("rotating_light",))
+    if len(errors) > VALIDATE_ALERT_CAP:
+        sent += await notify("Validate ERROR: more", f"{len(errors) - VALIDATE_ALERT_CAP} further check(s) in error; see /health", PRIORITY_HIGH, ("rotating_light",))
+    return sent
 
 
 async def main() -> int:
@@ -2739,6 +2774,7 @@ async def main() -> int:
 
     results = await run_checks(CHECKS)
     await record_step_fields(VALIDATE_STEP_LABEL, outcome_fields(results))
+    await alert_errors(results)
 
     passed  = sum(1 for r in results if r.level == PASS)
     warned  = sum(1 for r in results if r.level == WARN)

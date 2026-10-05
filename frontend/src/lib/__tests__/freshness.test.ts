@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { PRICE_FRESHNESS, freshnessLine, optionsDataPhrase, premiumSourcePhrase, priceStateLine, priceAsOfPhrase } from "../freshness";
+import { PRICE_FRESHNESS, datasetAgeLine, datasetsStale, freshnessLine, optionsDataPhrase, premiumSourcePhrase, priceStateLine, priceAsOfPhrase } from "../freshness";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -17,8 +17,24 @@ function sourceFiles(dir: string): string[] {
 describe("freshness wording", () => {
   it("says quotes may be delayed and never calls them live", () => {
     expect(PRICE_FRESHNESS.toLowerCase()).toContain("delayed");
-    expect(freshnessLine("5h ago")).toBe(`${PRICE_FRESHNESS} · Research data refreshed nightly, last 5h ago`);
-    expect(freshnessLine(null)).not.toContain("last");
+    expect(freshnessLine("Earnings history as of 5h ago")).toBe(`${PRICE_FRESHNESS} · Earnings history as of 5h ago`);
+    expect(freshnessLine(null)).toBe(`${PRICE_FRESHNESS} · Research data refreshed nightly`);
+    // each page dates its line by the oldest dataset it shows, never by the global stamp
+    const ago = (iso: string) => (iso.startsWith("2026-10-05") ? "2h ago" : "30h ago");
+    const datasets = {
+      reactions: { at: "2026-10-05T06:30:00+00:00", ok: true, failed: [] },
+      analyst: { at: "2026-10-04T06:30:00+00:00", ok: true, failed: [] },
+      iv: { at: "2026-10-05T07:00:00+00:00", ok: false, failed: ["IV + RV snapshot (snapshot_iv)"] },
+      chains: { at: null, ok: false, failed: ["Courier ingest"] },
+    };
+    expect(datasetAgeLine(datasets, ["reactions"], ago)).toBe("Earnings history as of 2h ago");
+    expect(datasetAgeLine(datasets, ["reactions", "analyst"], ago)).toBe("Analyst data as of 30h ago");
+    expect(datasetAgeLine(datasets, ["reactions", "iv"], ago)).toBe("Earnings history as of 2h ago · last nightly step failed for Implied volatility");
+    expect(datasetAgeLine(datasets, ["chains"], ago)).toBeNull();            // never succeeded: no claim
+    expect(datasetAgeLine(null, ["reactions"], ago)).toBeNull();
+    expect(datasetsStale(datasets, ["reactions"], 3, Date.parse("2026-10-05T09:00:00Z"))).toBe(false);
+    expect(datasetsStale(datasets, ["iv"], 3, Date.parse("2026-10-05T09:00:00Z"))).toBe(true);      // a failed step is stale
+    expect(datasetsStale(datasets, ["analyst"], 3, Date.parse("2026-10-09T09:00:00Z"))).toBe(true);
   });
 
   it("names options data by its own date and never by today", () => {

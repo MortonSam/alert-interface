@@ -4,7 +4,7 @@ import SignedOutNotice from "@/components/SignedOutNotice";
 import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
 
 import { earningsProximity } from "@/lib/encodings/earningsProximity";
-import { PRICE_FRESHNESS } from "@/lib/freshness";
+import { PRICE_FRESHNESS, datasetAgeLine } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
@@ -217,6 +217,9 @@ function WatchlistRow({
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
+
+// the watchlist shows earnings history and realized volatility
+const WATCHLIST_DATASETS = ["reactions", "rv"];
 
 export default function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
@@ -454,9 +457,9 @@ export default function WatchlistPage() {
               </Link>
             </div>
             <h1 className="text-2xl font-display font-bold tracking-tight">Watchlist</h1>
-            {health?.last_refreshed_at && (
+            {datasetAgeLine(health?.datasets, WATCHLIST_DATASETS, timeAgo) && (
               <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
-                Data as of {timeAgo(health.last_refreshed_at)}
+                {datasetAgeLine(health?.datasets, WATCHLIST_DATASETS, timeAgo)}
               </p>
             )}
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
-import { freshnessLine } from "@/lib/freshness";
+import { datasetAgeLine, freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
@@ -83,6 +83,9 @@ function SectionSkeleton() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const LIMIT = 12;
+
+// Discover shows earnings history, analyst data and the volatility snapshots: those datasets date its line
+const DISCOVER_DATASETS = ["reactions", "analyst", "rv", "iv"];
 
 export default function DiscoverPage() {
   const [reportingSoon, setReportingSoon] = useState<{
@@ -180,10 +183,10 @@ export default function DiscoverPage() {
           <p className="text-sm text-muted-foreground mt-1">
             What&apos;s worth researching across the S&amp;P 500 right now.
           </p>
-          {(health?.last_refreshed_at || quotes.size > 0) && (
+          {(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) || quotes.size > 0) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">
-              {health?.last_refreshed_at && <>{freshnessLine(timeAgo(health.last_refreshed_at))}</>}
-              {health?.last_refreshed_at && quotes.size > 0 && " · "}
+              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && <>{freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo))}</>}
+              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && quotes.size > 0 && " · "}
               {quotes.size > 0 && (() => {
                 const ts = [...quotes.values()].map(q => q.timestamp).filter(Boolean);
                 const latest = ts.length > 0 ? Math.max(...(ts as number[])) : null;

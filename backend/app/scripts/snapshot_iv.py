@@ -71,6 +71,19 @@ def _get_current_price(symbol: str) -> float | None:
     return None
 
 
+def stale_chain_reason(chain_date: str | None, today: date) -> str | None:
+    """Why a chain may not feed an IV row: no date, or older than chain_store's freshness rule; names the age in sessions."""
+    from app.services import chain_store
+    if not chain_date:
+        return "options chain has no date"
+    try:
+        if chain_store.is_fresh(chain_date, today=today):
+            return None
+        return f"options chain is {chain_store.trading_days_since(chain_date, today)} sessions old"
+    except ValueError:
+        return "options chain has no valid date"
+
+
 def null_iv_reason(atm_iv: float | None, current_price: float | None, chosen_exp: str | None) -> str | None:
     """Why a snapshot row carries no ATM IV; None when it carries one. Never a bare NULL."""
     if atm_iv is not None:
@@ -183,6 +196,13 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
             "current_price": None, "atm_strike": None,
             "skipped": "no ingested chain",
         }
+    # The row is dated by the chain, never by the run: a chain the freshness rule rejects writes nothing, and the
+    # reason names its age in sessions (services/iv_store says the same downstream).
+    chain_date = str(chain.get("chain_last_trade") or "")[:10]
+    stale = stale_chain_reason(chain_date, today)
+    if stale:
+        return {"symbol": symbol, "atm_iv": None, "realized_vol_20d": None, "current_price": None, "atm_strike": None, "skipped": stale}
+    row_date = date.fromisoformat(chain_date)
 
     # ── RV from the stored snapshot (status, age and price-history freshness
     #    are enforced by rv_store); current price from yfinance ───────────────
@@ -263,7 +283,7 @@ async def _snapshot_one(symbol: str, today: date) -> dict:
 
     async with AsyncSessionLocal() as session:
         await session.execute(stmt, {
-            "symbol": symbol, "date": today,
+            "symbol": symbol, "date": row_date,
             "atm_iv": atm_iv, "atm_iv_reason": atm_iv_reason, "realized_vol_20d": realized_vol_20d,
             "atm_strike": atm_strike, "current_price": current_price,
         })

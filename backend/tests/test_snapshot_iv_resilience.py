@@ -8,7 +8,7 @@ import app.scripts.snapshot_iv as m
 
 def test_a_hung_price_fetch_is_skipped_after_the_timeout(monkeypatch):
     monkeypatch.setattr(m, "PRICE_FETCH_TIMEOUT", 0.05)
-    async def fake_chain(session, symbol, today): return ({"calls": [], "puts": []}, "2026-10-16")
+    async def fake_chain(session, symbol, today): return ({"calls": [], "puts": [], "chain_last_trade": date.today().isoformat()}, "2026-10-16")
     monkeypatch.setattr(m, "_get_ingested_chain", fake_chain)
     monkeypatch.setattr(m, "_get_current_price", lambda sym: time.sleep(5))
 

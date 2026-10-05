@@ -1,7 +1,8 @@
 """Read helper for iv_history. The only way ATM implied volatility reaches a response.
 
 Only courier rows (iv_source = 'courier') are served; the solver's rows (iv_source = 'intrinio_mid') sit beside
-them and reach no response.
+them and reach no response. Rows are dated by their chain, so an unrefreshed chain leaves the window empty and the
+reason names the chain's age in sessions.
 
 get_servable_iv(db, symbol) -> IVState(value, as_of, reason)
 
@@ -41,6 +42,18 @@ _LAST_GOOD_SQL = sa.text("""
 """)
 
 
+async def stale_chain_line(db: AsyncSession, symbol: str, today: date) -> str | None:
+    """"options chain is N sessions old" when the newest stored chain fails chain_store's freshness rule; None otherwise."""
+    from app.services import chain_store
+    chain_date = await chain_store.get_latest_chain_date(db, symbol)
+    if not chain_date or chain_store.is_fresh(chain_date, today=today):
+        return None
+    try:
+        return f"options chain is {chain_store.trading_days_since(chain_date, today)} sessions old"
+    except ValueError:
+        return None
+
+
 def pick_servable(rows: list, today: date) -> tuple[object | None, object | None]:
     """Pure: (row with the newest non-null atm_iv inside the window, newest row in the window)."""
     cutoff = today - timedelta(days=IV_WINDOW_DAYS)
@@ -57,6 +70,9 @@ async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = No
     if served is not None:
         return IVState(float(served.atm_iv), served.date.isoformat(), None)
     reason = f"No ATM implied volatility in the last {IV_WINDOW_DAYS} days"
+    chain_age = await stale_chain_line(db, symbol, today)
+    if chain_age:
+        reason += f" ({chain_age})"
     if newest is not None:
         reason += f" (the {newest.date.isoformat()} snapshot recorded none"
         reason += f": {newest.atm_iv_reason})" if newest.atm_iv_reason else ")"

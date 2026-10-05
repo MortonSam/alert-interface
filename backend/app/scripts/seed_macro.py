@@ -25,6 +25,7 @@ Usage
 from __future__ import annotations
 
 import asyncio
+import sys
 import re
 from datetime import date, timedelta
 from typing import NamedTuple
@@ -144,30 +145,6 @@ def _parse_bls_html(html: str, title: str) -> list[MacroEvent]:
     return sorted(set(events))  # dedupe same-day duplicates from nested cells
 
 
-async def fetch_bls_via_web(client: httpx.AsyncClient) -> list[MacroEvent]:
-    """Try to scrape BLS directly. Akamai may block this — set FRED_API_KEY instead."""
-    events: list[MacroEvent] = []
-    for title, _, page in BLS_RELEASES:
-        url = f"{BLS_BASE}/{page}"
-        try:
-            resp = await client.get(url, headers=_BROWSER_HEADERS, timeout=20)
-            if resp.status_code != 200 or "Access Denied" in resp.text:
-                print(
-                    f"  ⚠  BLS blocked ({resp.status_code}) for '{title}'\n"
-                    f"     Set FRED_API_KEY in .env for reliable access."
-                )
-                continue
-            batch = _parse_bls_html(resp.text, title)
-            print(f"  {title}: {len(batch)} dates  (BLS)")
-            events.extend(batch)
-        except Exception as exc:
-            print(f"  ⚠  BLS fetch error for '{title}': {exc}")
-
-    return events
-
-
-# ── DB upsert ─────────────────────────────────────────────────────────────────
-
 async def upsert_macro_event(session, ev: MacroEvent) -> bool:
     """Upsert matching on (ticker_id IS NULL, event_date, title). Returns True if inserted."""
     existing = await session.scalar(
@@ -195,22 +172,29 @@ async def upsert_macro_event(session, ev: MacroEvent) -> bool:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main() -> None:
+MACRO_STEP_LABEL = "Macro calendar (seed_macro)"    # the label in refresh.STEPS
+
+
+async def main() -> int:
     all_events: list[MacroEvent] = []
+
+    fred_key = (settings.fred_api_key or "").strip()
+    if not fred_key:
+        # fail closed: no scraping fallback; the step outcome names the missing key
+        from app.services.step_outcomes import record_step_fields
+        msg = "FRED_API_KEY is not set: the macro calendar is not refreshed"
+        print(f"ERROR: {msg}", file=sys.stderr)
+        await record_step_fields(MACRO_STEP_LABEL, {"error": msg})
+        return 1
 
     async with httpx.AsyncClient() as client:
         print("\n── BLS Economic Releases ─────────────────────────────")
-        fred_key = (settings.fred_api_key or "").strip()
-        if fred_key:
-            print(f"  Using FRED API (key configured)")
-            all_events.extend(await fetch_bls_via_fred(client, fred_key))
-        else:
-            print("  FRED_API_KEY not set — trying BLS website (may be blocked by Akamai)")
-            all_events.extend(await fetch_bls_via_web(client))
+        print("  Using FRED API (key configured)")
+        all_events.extend(await fetch_bls_via_fred(client, fred_key))
 
     if not all_events:
         print("\n⚠  No events found — nothing to upsert.")
-        return
+        return 0
 
     print(f"\n── Upserting {len(all_events)} events ────────────────────────")
     inserted = updated = 0
@@ -225,7 +209,8 @@ async def main() -> None:
 
     print(f"  ✓ {inserted} inserted, {updated} updated")
     print("\n✓ Done.\n")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

@@ -9,14 +9,43 @@
 
 export const PRICE_FRESHNESS = "Prices from Finnhub, may be delayed up to 15 minutes";
 
-export function researchFreshness(lastRefreshedAgo: string | null | undefined): string {
-  return lastRefreshedAgo
-    ? `Research data refreshed nightly, last ${lastRefreshedAgo}`
-    : "Research data refreshed nightly";
+/** The nightly datasets a page shows, by the keys /health and /system/status publish (services/dataset_freshness). */
+export const DATASET_LABELS: Record<string, string> = {
+  prices: "Prices", chains: "Options data", reactions: "Earnings history", analyst: "Analyst data",
+  iv: "Implied volatility", rv: "Realized volatility", earnings_calendar: "Earnings calendar",
+};
+
+export interface DatasetAgeLike { at: string | null; ok: boolean; failed?: string[] }
+
+/** The oldest of the named datasets, dated by its own last success: "Earnings history as of 6h ago". A dataset whose
+ * last nightly step failed says so. Null when none of the named datasets has ever succeeded. */
+export function datasetAgeLine(
+  datasets: Record<string, DatasetAgeLike> | null | undefined, keys: string[], ago: (iso: string) => string,
+): string | null {
+  if (!datasets) return null;
+  const known = keys.map((k) => [k, datasets[k]] as const).filter(([, d]) => d);
+  if (known.length === 0) return null;
+  const neverRun = known.filter(([, d]) => !d.at);
+  if (neverRun.length === known.length) return null;
+  const dated = known.filter(([, d]) => d.at) as Array<readonly [string, DatasetAgeLike]>;
+  const [key, oldest] = dated.reduce((a, b) => (new Date(b[1].at as string) < new Date(a[1].at as string) ? b : a));
+  const label = DATASET_LABELS[key] ?? key;
+  const failed = known.filter(([, d]) => !d.ok).map(([k]) => DATASET_LABELS[k] ?? k);
+  return `${label} as of ${ago(oldest.at as string)}` + (failed.length ? ` · last nightly step failed for ${failed.join(", ")}` : "");
 }
 
-export function freshnessLine(lastRefreshedAgo: string | null | undefined): string {
-  return `${PRICE_FRESHNESS} · ${researchFreshness(lastRefreshedAgo)}`;
+/** The oldest named dataset is older than `days`: the line turns amber. */
+export function datasetsStale(datasets: Record<string, DatasetAgeLike> | null | undefined, keys: string[], days = 3, now = Date.now()): boolean {
+  if (!datasets) return false;
+  return keys.some((k) => {
+    const d = datasets[k];
+    return !!d && (!d.at || now - new Date(d.at).getTime() > days * 24 * 60 * 60 * 1000 || !d.ok);
+  });
+}
+
+/** The freshness line a list page shows: the price source, then the dataset line when there is one. */
+export function freshnessLine(datasetLine: string | null | undefined): string {
+  return `${PRICE_FRESHNESS} · ${datasetLine ?? "Research data refreshed nightly"}`;
 }
 
 /** Names the options data by its own date. Never falls back to today. */

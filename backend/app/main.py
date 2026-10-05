@@ -78,6 +78,8 @@ async def health_check():
         "options_data_date": None,     # chain date of the newest ingested options data
         "step_health": {},
         "step_outcomes": {},           # per step: exit, seconds, at, stderr_head / stderr_tail (traceback's last lines)
+        "failed_steps": [],            # steps whose latest run exited non-zero or timed out; status is "degraded" while any exist
+        "datasets": {},                # per dataset: at (oldest last success of its steps), ok, failed steps (dataset_freshness)
         "research_generation": None,   # today's note generations and their estimated spend (see research_cost)
     }
 
@@ -144,6 +146,17 @@ async def health_check():
                 import json as _json
                 raw = await get_value(session, "step_outcomes")
                 result["step_outcomes"] = _json.loads(raw) if raw else {}
+            except Exception:
+                result["status"] = "degraded"
+
+            try:
+                from app.scripts.refresh import STEPS
+                from app.services.dataset_freshness import COURIER_STEP_LABEL, dataset_ages, run_status
+                status, failed = run_status(result["step_outcomes"], [label for label, _ in STEPS] + [COURIER_STEP_LABEL])
+                result["failed_steps"] = failed
+                if failed:
+                    result["status"] = "degraded"
+                result["datasets"] = dataset_ages(result["step_outcomes"], result["step_health"])
             except Exception:
                 result["status"] = "degraded"
 

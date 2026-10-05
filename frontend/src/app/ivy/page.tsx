@@ -1,6 +1,6 @@
 "use client";
 
-import { optionsDataPhrase } from "@/lib/freshness";
+import { datasetAgeLine, optionsDataPhrase } from "@/lib/freshness";
 import { ledgerHeadline, ledgerLinkLabel, ledgerRecordSentence, noForcedCallsSentence, oneRuleParagraph, whoSheIsLine } from "@/lib/ivyRule";
 import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
@@ -117,8 +117,8 @@ export default function MeetIvyPage() {
   if (!loading && !error) {
     if (health?.refresh_in_progress) {
       railRows.push({ label: "Data refreshed", value: "Now" });
-    } else if (health?.last_refreshed_at) {
-      railRows.push({ label: "Data refreshed", value: timeAgo(health.last_refreshed_at) });
+    } else if (datasetAgeLine(health?.datasets, ["chains", "reactions"], timeAgo)) {
+      railRows.push({ label: "Data refreshed", value: datasetAgeLine(health?.datasets, ["chains", "reactions"], timeAgo) as string });
     }
     if (health?.rv_latest_date) {
       railRows.push({ label: "RV snapshot", value: fmtRvDate(health.rv_latest_date) });

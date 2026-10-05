@@ -1,6 +1,9 @@
 "use client";
 
-import { freshnessLine } from "@/lib/freshness";
+import { datasetAgeLine, freshnessLine } from "@/lib/freshness";
+
+// Ivy reads the courier's options data and the earnings history
+const IVY_DATASETS = ["chains", "reactions"];
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -39,8 +42,8 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
   if (health?.refresh_in_progress) {
     stripText = "Ivy is refreshing her data…";
     pulse = true;
-  } else if (health?.last_refreshed_at) {
-    stripText = freshnessLine(timeAgo(health.last_refreshed_at));
+  } else if (datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo)) {
+    stripText = freshnessLine(datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo));
   }
 
   const isWide = pathname === "/ivy" || pathname === "/ivy/desk";
