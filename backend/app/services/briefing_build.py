@@ -41,21 +41,34 @@ async def _quote(sym: str):
 
 
 def bar_facts(df, today: date) -> dict:
-    """last close and date, 52-week high (highest close) and its date, three-month change and its start, from an adjusted frame."""
+    """last close and date, the 52-week high (highest close) and its date, and the three-month anchor close and date,
+    from an adjusted frame. The quote is compared with these in the sentence; the last close is a receipt."""
     if df is None or df.empty or "Close" not in df:
         return {}
     closes = df["Close"].dropna()
     if closes.empty:
         return {}
-    last_date = closes.index[-1].date()
-    out = {"last_close": float(closes.iloc[-1]), "last_close_date": last_date}
+    out = {"last_close": float(closes.iloc[-1]), "last_close_date": closes.index[-1].date()}
     year = closes[closes.index.date >= today - timedelta(days=B.WINDOW_52W_DAYS)]
     if not year.empty:
         out["high_52w"] = float(year.max()); out["high_52w_date"] = year.idxmax().date()
     q = closes[closes.index.date >= today - timedelta(days=B.WINDOW_3M_DAYS)]
-    if len(q) >= 2:
-        out["change_3m_pct"] = (float(q.iloc[-1]) / float(q.iloc[0]) - 1) * 100; out["change_3m_from"] = q.index[0].date()
+    if not q.empty:
+        out["anchor_close_3m"] = float(q.iloc[0]); out["anchor_date_3m"] = q.index[0].date()
     return out
+
+
+def move_from_bars(df, event_date: date, timing: str | None) -> float | None:
+    """The 1-day move from the stored bars through the seeder's own window function; None unless both bars exist."""
+    if df is None or df.empty or timing not in B.TIMING_PHRASE:
+        return None
+    from app.scripts.seed_historical_reactions import _build_date_cache, _compute_v3, load_reference_sessions   # the seeder's window, not a copy
+    try:
+        data = _compute_v3(df, _build_date_cache(df), event_date, timing, load_reference_sessions())
+    except Exception:
+        return None
+    pct = (data or {}).get("pct_change_1d")
+    return float(pct) if pct is not None else None
 
 
 async def _implied(db: AsyncSession, sym: str, spot: float | None, min_date: date, today: date) -> dict:
@@ -104,11 +117,13 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
                                .order_by(Event.event_date.desc()).limit(1))).scalar_one_or_none()
     if latest is not None and B.in_reaction_window(latest.event_date, today):
         hr = next((r for r in rows if r["event_date"] == latest.event_date), None)
+        timing = hr["report_timing"] if hr and hr["report_timing"] else latest.report_timing
+        stored = _f(hr["pct_change_1d"]) if hr else None
         sentences.append(B.reported_sentence(
-            today=today, event_date=latest.event_date, timing=(hr["report_timing"] if hr and hr["report_timing"] else latest.report_timing),
+            today=today, event_date=latest.event_date, timing=timing, bars_through=facts.get("last_close_date"),
             eps_actual=_f(hr["eps_actual"] if hr else getattr(latest, "eps_actual", None)), eps_estimate=_f(hr["eps_estimate"] if hr else getattr(latest, "eps_estimate", None)),
             outcome=(hr["outcome"] if hr else getattr(getattr(latest, "outcome", None), "value", getattr(latest, "outcome", None))),
-            pct_change_1d=_f(hr["pct_change_1d"]) if hr else None))
+            pct_change_1d=stored if stored is not None else move_from_bars(df, latest.event_date, timing)))
     else:
         ne = await next_earnings_for(db, ticker.id, today)
         timing = None
