@@ -1,8 +1,9 @@
 import uuid
+from decimal import Decimal
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, String, Text, func, text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, String, Text, func, text, Numeric
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +44,11 @@ class Event(Base):
     unresolved_since: Mapped[date | None] = mapped_column(Date, nullable=True)
     sources_checked: Mapped[dict | None] = mapped_column(JSONB, nullable=True)   # {source: what it said, checked_at}
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Reported EPS, fetched the night of the report (scripts/seed_eps_actuals): never overwritten once set
+    eps_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    eps_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    eps_source: Mapped[str | None] = mapped_column(String(20), nullable=True)          # finnhub | yfinance
+    eps_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     report_timing: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     report_timing_source: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'unknown'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

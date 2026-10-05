@@ -57,6 +57,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Security records (Intrinio)",           ["python", "-m", "app.scripts.build_security_records", "--write"]),
     ("Price bars shadow (Intrinio)",          ["python", "-m", "app.scripts.shadow_price_bars"]),
     ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
+    ("EPS actuals (Finnhub)",          ["python", "-m", "app.scripts.seed_eps_actuals"]),
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
     # RV rank runs before every reaction step: its data_error verdict is the price-history

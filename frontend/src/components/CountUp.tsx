@@ -11,11 +11,13 @@ export function CountUp({
   suffix = "",
   duration = 1000,
   className,
+  title,
 }: {
   value: number;
   suffix?: string;
   duration?: number;
   className?: string;
+  title?: string;          // shown on hover: the date the number rests on
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [display, setDisplay] = useState(value.toLocaleString("en-US"));
@@ -57,7 +59,7 @@ export function CountUp({
   }, [value, duration]);
 
   return (
-    <span ref={ref} className={className}>
+    <span ref={ref} className={className} title={title}>
       {display}
       {suffix}
     </span>

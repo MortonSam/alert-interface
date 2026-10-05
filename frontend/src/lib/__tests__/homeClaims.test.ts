@@ -62,6 +62,8 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     const block = read("components/SiteCounters.tsx");
     expect(block).toContain("api.system.stats()");
     expect(block).toContain("if (!rows.length) return null;");
+    expect(block).toContain("title={row.asOf ?? undefined}");                                 // the date lives on the number's hover title
+    expect(block).not.toMatch(/\{row\.asOf\}<\/p>/);                                         // and is not a line under it
     expect(block.replace(/className="[^"]*"/g, "")).not.toMatch(/[0-9]{2,}/);                // no typed figure or year outside class names
     expect(block).not.toMatch(/since/i);
     const { counterRows } = await import("@/lib/siteCounters");

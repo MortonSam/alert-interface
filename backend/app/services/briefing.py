@@ -233,7 +233,7 @@ def reported_sentence(*, today: date, event_date: date, timing: str | None = Non
     if eps_actual is not None and eps_estimate is not None:
         word = {"beat": "a beat", "miss": "a miss", "meet": "in line"}.get(outcome or "", None)
         eps = f"EPS {fmt_money(eps_actual)} against a {fmt_money(eps_estimate)} estimate" + (f", {word}" if word else "")
-        inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "historical_reactions"), _input("EPS estimate", fmt_money(eps_estimate), event_date, "historical_reactions"),
+        inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "events.eps_actual (Finnhub, else Yahoo Finance), the night of the report"), _input("EPS estimate", fmt_money(eps_estimate), event_date, "events.eps_estimate"),
                    _input("outcome", outcome or "unknown", event_date, "actual above estimate is a beat")]
     else:
         eps = "EPS not yet reported to us"
@@ -254,7 +254,7 @@ def reported_sentence(*, today: date, event_date: date, timing: str | None = Non
     else:
         move = f"the 1-day move ({span}) is not yet stored"
         inputs.append(_input("newest stored bar", fmt_date(bars_through) if bars_through else "none", bars_through, "price_bars_shadow"))
-    rule = (f"Shown through {REACTION_WINDOW_SESSIONS} sessions after a report. EPS and outcome from the stored reaction row. The 1-day move is the seeder's window on the "
+    rule = (f"Shown through {REACTION_WINDOW_SESSIONS} sessions after a report. EPS from the event row, fetched the night of the report; beat or miss is actual against estimate. The 1-day move is the seeder's window on the "
             "stored bars: close of the report day to the next session's close after an after-close report, the prior close to the report day's close before the open; "
             "it settles at the close that completes that window.")
     return _sentence("catalyst", f"{head}: {eps}; {move}.", rule, event_date, inputs)

@@ -18,6 +18,7 @@ from app.models.ticker import Ticker
 from app.services import briefing as B
 from app.services import chain_store, price_bars
 from app.services.basis_exclusion import basis_mismatch_dates
+from app.services.eps_actuals import eps_outcome
 from app.services.implied_move import straddle_implied_move
 from app.services.next_earnings import next_earnings_for
 from app.services.price_history_exclusion import is_excluded
@@ -121,8 +122,10 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         stored = _f(hr["pct_change_1d"]) if hr else None
         sentences.append(B.reported_sentence(
             today=today, event_date=latest.event_date, timing=timing, bars_through=facts.get("last_close_date"),
-            eps_actual=_f(hr["eps_actual"] if hr else getattr(latest, "eps_actual", None)), eps_estimate=_f(hr["eps_estimate"] if hr else getattr(latest, "eps_estimate", None)),
-            outcome=(hr["outcome"] if hr else getattr(getattr(latest, "outcome", None), "value", getattr(latest, "outcome", None))),
+            eps_actual=_f(latest.eps_actual if latest.eps_actual is not None else (hr["eps_actual"] if hr else None)),
+            eps_estimate=_f(latest.eps_estimate if latest.eps_estimate is not None else (hr["eps_estimate"] if hr else None)),
+            outcome=eps_outcome(_f(latest.eps_actual if latest.eps_actual is not None else (hr["eps_actual"] if hr else None)),
+                                _f(latest.eps_estimate if latest.eps_estimate is not None else (hr["eps_estimate"] if hr else None))),
             pct_change_1d=stored if stored is not None else move_from_bars(df, latest.event_date, timing)))
     else:
         ne = await next_earnings_for(db, ticker.id, today)

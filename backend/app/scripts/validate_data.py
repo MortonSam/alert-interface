@@ -2137,6 +2137,23 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── EPS actuals arrive the night of the report ─────────────────────────────────────────────────────────
+
+async def check_eps_actuals_fresh(session) -> CheckResult:
+    """WARN for any earnings event of an active ticker in the last 30 days that is older than two sessions and has no
+    EPS actual on the event (scripts/seed_eps_actuals)."""
+    from app.services.eps_actuals import STALE_SESSIONS, is_stale
+    today = date.today()
+    rows = (await session.execute(text("""
+        SELECT t.symbol, e.event_date, e.eps_actual FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE e.event_type = 'earnings' AND t.is_active AND e.event_date <= :today AND e.event_date >= :since ORDER BY e.event_date, t.symbol"""),
+        {"today": today, "since": today - timedelta(days=30)})).all()
+    stale = [f"{r.symbol} reported {r.event_date.isoformat()}" for r in rows if is_stale(r.event_date, today, r.eps_actual)]
+    if stale:
+        return CheckResult("eps_actuals_fresh", WARN, f"{len(stale)} reported event(s) older than {STALE_SESSIONS} sessions have no EPS actual", stale[:40])
+    return CheckResult("eps_actuals_fresh", PASS, f"Every reported event older than {STALE_SESSIONS} sessions in the last 30 days has its EPS actual ({len(rows)} checked)")
+
+
 # ── Identity: the symbol is Intrinio's, nothing half-delisted stays active, pending repairs are named ──────
 
 async def check_symbol_matches_record(session) -> CheckResult:
@@ -2775,6 +2792,8 @@ CHECKS = [
     check_symbol_matches_record,
     check_delisting_signals,
     check_pending_repairs,
+    # EPS actuals the night of the report
+    check_eps_actuals_fresh,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

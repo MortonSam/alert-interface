@@ -19,7 +19,7 @@ DATASETS: dict[str, tuple[str, ...]] = {
     "analyst":           ("Analyst actions", "Analyst reaction stats", "Analyst recommendations (Finnhub)"),
     "iv":                ("IV + RV snapshot (snapshot_iv)",),
     "rv":                ("RV rank precompute",),
-    "earnings_calendar": ("Refresh earnings calendar (Finnhub)",),
+    "earnings_calendar": ("Refresh earnings calendar (Finnhub)", "EPS actuals (Finnhub)"),
 }
 
 DATASET_LABELS = {"prices": "Prices", "chains": "Options data", "reactions": "Earnings history", "analyst": "Analyst data",
