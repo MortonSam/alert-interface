@@ -6,9 +6,9 @@ basis per_share). The nightly reads the last WINDOW_DAYS; --full reads Intrinio'
 record (current and predecessors) for all history. Rows are inserted once per (ticker, date); existing rows are
 never rewritten.
 
-Intrinio's price adjustments are past adjustments only. A declared future ex-dividend date is not in this plan's
-data (the dividends endpoint is not licensed), so the forward "Ex-Div" catalyst is not seeded here; rows that other
-sources wrote stay as they are.
+Intrinio's price adjustments are past adjustments only, and this plan has no dividends endpoint, so the declared
+next ex-dividend date (a date, not a price) keeps its yfinance source: the named exception in CLAUDE.md beside the
+earnings calendar. It is seeded after the Intrinio pass, as before, with yfinance's annual rate (basis annual_rate).
 
 CLI
 ---
@@ -34,6 +34,30 @@ from app.services.intrinio_client import IntrinioClient
 
 WINDOW_DAYS = 14          # the nightly looks this far back on the bars; the ex-date is on the bar, so a few days of slack is plenty
 DIVIDEND_BASIS = "per_share"
+FORWARD_BASIS = "annual_rate"     # yfinance's dividendRate on the forward date, as the old seeder stored it
+FORWARD_BATCH = 5
+FORWARD_BATCH_SLEEP = 2.0
+
+
+def _fetch_forward_sync(symbol: str) -> dict | None:
+    """The declared next ex-dividend date from yfinance (the named exception: a date, not a price), with the annual rate."""
+    import yfinance as yf
+    from datetime import datetime, timezone
+    try:
+        info = yf.Ticker(symbol).info
+    except Exception:
+        return None
+    ex_ts = info.get("exDividendDate")
+    if ex_ts is None:
+        return None
+    try:
+        ex_date = datetime.fromtimestamp(ex_ts, tz=timezone.utc).date()
+    except (TypeError, ValueError, OSError):
+        return None
+    if ex_date < date.today():
+        return None                     # a past date is Intrinio's to record, from the bars
+    rate = info.get("dividendRate")
+    return {"ex_date": ex_date, "dividend_rate": float(rate) if rate else None}
 
 
 async def dividends_from_bars(symbols: list[str], since: date | None) -> dict[str, list[dict]]:
@@ -59,16 +83,17 @@ async def dividends_from_api(symbol: str, client: IntrinioClient) -> list[dict]:
     return [out[d] for d in sorted(out)]
 
 
-async def _upsert_dividend_event(session, ticker: Ticker, ex_date: date, dividend_amount: float | None) -> bool:
+async def _upsert_dividend_event(session, ticker: Ticker, ex_date: date, dividend_amount: float | None,
+                                 source: DataSource = DataSource.INTRINIO, basis: str = DIVIDEND_BASIS) -> bool:
     """Insert the ex-dividend date if not already present. Returns True if inserted."""
     existing = await session.scalar(select(Event.id).where(Event.ticker_id == ticker.id, Event.event_date == ex_date, Event.event_type == EventType.EX_DIVIDEND))
     if existing is not None:
         return False
-    meta = {"basis": DIVIDEND_BASIS}
+    meta = {"basis": basis}
     if dividend_amount is not None:
         meta["dividend_amount"] = dividend_amount
     session.add(Event(ticker_id=ticker.id, event_type=EventType.EX_DIVIDEND, event_date=ex_date, title=f"{ticker.symbol} Ex-Dividend",
-                      source=DataSource.INTRINIO, is_confirmed=True, metadata_=meta))
+                      source=source, is_confirmed=True, metadata_=meta))
     return True
 
 
@@ -76,6 +101,7 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description="Seed ex-dividend dates from Intrinio's price adjustments")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--full", action="store_true", help="every stored bar, then the adjustments endpoint by security record")
+    parser.add_argument("--no-forward", action="store_true", help="skip the yfinance pass for the declared next ex-date")
     args = parser.parse_args()
 
     async with AsyncSessionLocal() as session:
@@ -111,10 +137,28 @@ async def main() -> int:
         if client is not None:
             requests = client.request_count
             await client.close()
-    print(f"  {inserted} ex-dividend date(s) inserted, {len(failed)} failed, {requests} request(s)")
+    print(f"  {inserted} ex-dividend date(s) inserted from Intrinio, {len(failed)} failed, {requests} request(s)")
     for f in failed[:10]:
         print("   ", f)
-    return 1 if len(failed) > 10 else 0
+    # the declared next ex-date: yfinance, the named exception (a date, not a price)
+    forward = 0
+    forward_failed = 0
+    if not args.no_forward:
+        loop = asyncio.get_event_loop()
+        for i in range(0, len(tickers), FORWARD_BATCH):
+            batch = tickers[i:i + FORWARD_BATCH]
+            infos = await asyncio.gather(*(loop.run_in_executor(None, _fetch_forward_sync, t.symbol) for t in batch), return_exceptions=True)
+            async with AsyncSessionLocal() as session:
+                for t, info in zip(batch, infos):
+                    if isinstance(info, Exception):
+                        forward_failed += 1
+                    elif info:
+                        forward += await _upsert_dividend_event(session, t, info["ex_date"], info["dividend_rate"], DataSource.YFINANCE, FORWARD_BASIS)
+                await session.commit()
+            if i + FORWARD_BATCH < len(tickers):
+                await asyncio.sleep(FORWARD_BATCH_SLEEP)
+        print(f"  {forward} forward ex-dividend date(s) inserted from yfinance, {forward_failed} failed")
+    return 1 if len(failed) + forward_failed > 10 else 0
 
 
 if __name__ == "__main__":

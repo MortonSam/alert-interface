@@ -11,7 +11,7 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-ACTION_EVENT_TYPES = ("split", "ex_dividend")
+ACTION_EVENT_TYPES = ("split", "ex_dividend", "spin_off")     # a spin-off day's price gap is explained too
 
 
 async def load_action_dates(session: AsyncSession, symbols: list[str]) -> dict[str, set[date]]:
@@ -153,4 +153,19 @@ def unmatched_splits(stored: list[dict], bar_splits: list[dict], sessions, max_s
             out.append(f"{s['symbol']} {s['date'].isoformat()} {s['split_ratio']}: no split factor on the shadow bars within one session")
         elif all(b["split_ratio"] != s["split_ratio"] for b in near):
             out.append(f"{s['symbol']} {s['date'].isoformat()} {s['split_ratio']}: the shadow bars say {', '.join(b['split_ratio'] for b in near)}")
+    return out
+
+
+def spin_off_reclassification(stored: list[dict], bar_splits: list[dict], sessions, max_sessions: int = 1) -> list[dict]:
+    """Stored split rows ({id, symbol, date, split_ratio}) that the shadow bars show no split factor for within max_sessions:
+    these are spin-off or separation adjustments that yfinance recorded as splits. Pure; the reclassify script applies it."""
+    by_sym: dict[str, list[dict]] = {}
+    for b in bar_splits:
+        by_sym.setdefault(b["symbol"], []).append(b)
+    out = []
+    for s in stored:
+        near = [b for b in by_sym.get(s["symbol"], []) if (session_distance(sessions, s["date"], b["date"]) or 0) <= max_sessions
+                and abs((s["date"] - b["date"]).days) <= 4]
+        if not near:
+            out.append(s)
     return out

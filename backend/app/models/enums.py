@@ -10,6 +10,7 @@ class EventType(str, enum.Enum):
     FOMC = "fomc"
     SPLIT = "split"
     ANALYST_ACTION = "analyst_action"
+    SPIN_OFF = "spin_off"            # a distribution or separation adjustment yfinance once recorded as a split; never a split
     OTHER = "other"
 
 

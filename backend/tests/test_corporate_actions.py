@@ -48,8 +48,12 @@ def test_the_seeders_read_the_store_write_intrinio_as_the_source_and_keep_the_sh
     import inspect
     for mod in (seed_splits, seed_dividends):
         src = inspect.getsource(mod)
-        assert "import yfinance" not in src and "yf.Ticker" not in src
         assert "FROM price_bars_shadow" in src and "price_adjustments(" in src and "DataSource.INTRINIO" in src
+    assert "yfinance" not in inspect.getsource(seed_splits)
+    # the one yfinance read left: the declared next ex-dividend date, a date not a price, the exception CLAUDE.md names
+    fwd = inspect.getsource(seed_dividends._fetch_forward_sync)
+    assert "exDividendDate" in fwd and "if ex_date < date.today():" in fwd
+    assert seed_dividends.FORWARD_BASIS == "annual_rate"
     assert DataSource.INTRINIO.value == "intrinio"
     assert 'title=f"{ticker.symbol} {split_ratio} Stock Split"' in inspect.getsource(seed_splits._upsert_split_event)
     assert '"split_ratio": split_ratio' in inspect.getsource(seed_splits._upsert_split_event)
@@ -110,3 +114,18 @@ async def test_the_check_errors_on_a_split_the_bars_do_not_carry_and_passes_once
             await s.execute(text("DELETE FROM events WHERE ticker_id IN (SELECT id FROM tickers WHERE symbol = :s)"), {"s": sym})
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
+
+
+def test_spin_off_rows_are_the_splits_the_bars_show_no_factor_for_and_the_guard_counts_them():
+    from app.models.enums import EventType
+    from app.services.corporate_actions import ACTION_EVENT_TYPES, spin_off_reclassification
+    stored = [{"id": 1, "symbol": "DD", "date": date(2026, 6, 24), "split_ratio": "1:3"}, {"id": 2, "symbol": "HON", "date": date(2026, 6, 29), "split_ratio": "1:1"},
+              {"id": 3, "symbol": "SPGI", "date": date(2026, 7, 1), "split_ratio": "37:35"}]
+    bars = [{"symbol": "DD", "date": date(2026, 6, 24), "split_ratio": "1:3"}]
+    assert [r["symbol"] for r in spin_off_reclassification(stored, bars, SESSIONS)] == ["HON", "SPGI"]
+    assert EventType.SPIN_OFF.value == "spin_off" and "spin_off" in ACTION_EVENT_TYPES
+    import inspect
+    from app.services import split_basis
+    assert "event_type = 'split'" in inspect.getsource(split_basis.load_splits)          # re-basing reads splits only
+    from app.scripts.validate_data import check_split_factor_match as c
+    assert "e.event_type = 'split'" in inspect.getsource(c)
