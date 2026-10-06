@@ -6,6 +6,7 @@ export interface DateRule { file: string; forbid: RegExp; because: string }
 
 export const DATE_RULES: DateRule[] = [
   { file: "components/QuestionStrip.tsx", forbid: /new Date\(|Date\.now\(|toLocaleDateString\(\)|last_refreshed_at/, because: "an answer's date comes from its data, never from the request time" },
+  { file: "components/AskIvy.tsx", forbid: /new Date\(|Date\.now\(|toLocaleDateString\(\)|last_refreshed_at|\blive\b|real-time|right now/i, because: "Ivy's answer is dated by its facts, never by the request time, and is never called live" },
   { file: "components/Briefing.tsx", forbid: /new Date\(|Date\.now\(|toLocaleDateString\(\)|last_refreshed_at/, because: "a briefing date comes from its sentence or input, never from the request time" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /today&apos;s range|today's range/, because: "the band is labelled by the chain date" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /as of \{fmtQuoteTime\(/, because: "a quote shows its date and time (fmtQuoteDateTime)" },

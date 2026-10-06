@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # no writes, no admin endpoints, and it is never attributed to admin-local (see app.auth).
     reviewer_tokens: str = ""
     refresh_enabled: bool = True  # startup + loop refresh pipeline
+    # The free-text question box under the question strip (services/ask_ivy). Off in production until launched; on locally.
+    ask_ivy_enabled: bool = False
+    ask_ivy_daily_cap_usd: float = 15.0   # site-wide estimated spend per UTC day at which the box pauses
 
     # Clerk auth (empty = disabled, admin-token-only mode)
     clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json

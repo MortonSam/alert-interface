@@ -165,8 +165,10 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
 
 # ── the question strip ───────────────────────────────────────────────────────
 
-async def build_questions(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
-    """{symbol, name, questions: [...]}: the first four catalog questions this stock's data qualifies for (services/questions)."""
+async def build_questions(db: AsyncSession, symbol: str, today: date | None = None, *, raw: dict | None = None, all_candidates: bool = False) -> dict:
+    """{symbol, name, questions: [...]}: the first four catalog questions this stock's data qualifies for (services/questions).
+    With `raw` (a dict), the numbers behind the answers are recorded into it for services/ask_ivy's word-valued facts; with
+    `all_candidates`, every qualifying question is returned, not only the first MAX_QUESTIONS."""
     from statistics import median
     from app.services import questions as Q
     today = today or date.today()
@@ -193,6 +195,8 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     typical_abs = sum(abs(m) for m in moves) / len(moves) if moves else None
     earnings_dates = (await db.execute(select(Event.event_date).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS,
                                                                        Event.event_date >= today - timedelta(days=60), Event.event_date <= today))).scalars().all()
+    if raw is not None:
+        raw.update(quote_price=quote_price, bars=facts, typical_abs=typical_abs, n_reports=len(moves), sample_as_of=sample_as_of)
 
     cands: list[dict | None] = []
     # 1. inside a report's window
@@ -204,12 +208,19 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         move = _f(hr["pct_change_1d"]) if hr and hr["pct_change_1d"] is not None else move_from_bars(df, latest, timing)
         if move is not None:
             past = [abs(m) for r, m in zip(sample, moves) if r["event_date"] != latest]
+            if raw is not None:
+                raw.update(last_report={"event_date": latest, "timing": timing, "move_pct": move, "outcome": eps_outcome(_f(ev.eps_actual) if ev else None, _f(ev.eps_estimate) if ev else None)})
             cands.append(Q.q_reaction_normal(name=name, symbol=sym, event_date=latest, timing=timing, move_pct=move, typical_abs=typical_abs,
                                              larger_count=sum(1 for m in past if m > abs(move)), n_reports=len(past), sample_as_of=sample_as_of))
     # 2. a report within 45 days with a fresh implied move
     ne = await next_earnings_for(db, ticker.id, today)
+    if raw is not None and ne.date:
+        ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
+        raw.update(next_report={"date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source, "timing": ev_t})
     if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs:
         implied = await _implied(db, sym, quote_price, ne.date, today)
+        if raw is not None:
+            raw.update(implied=implied or None)
         if implied:
             cands.append(Q.q_implied_big(name=name, symbol=sym, implied_pct=implied["implied_pct"], chain_date=implied["chain_date"], next_date=ne.date,
                                          typical_abs=typical_abs, n_reports=len(sample), sample_as_of=sample_as_of))
@@ -240,6 +251,8 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         SELECT event_date, (metadata->>'dividend_amount')::float AS amount, metadata->>'basis' AS basis, (metadata->>'declared_on')::date AS declared_on,
                metadata->>'declaration_accession' AS accession, COALESCE(updated_at, created_at)::date AS stored_on FROM events
         WHERE ticker_id = :t AND event_type = 'ex_dividend' AND event_date >= :today ORDER BY event_date LIMIT 1"""), {"t": ticker.id, "today": today})).mappings().first()
+    if exd and raw is not None:
+        raw.update(dividend={"ex_date": exd["event_date"], "declared_on": exd["declared_on"]})
     if exd:
         from app.scripts.seed_dividends import PER_PAYMENT_BASES
         amount = exd["amount"] if exd["basis"] in PER_PAYMENT_BASES else None       # an annual rate is never called a per-share dividend
@@ -256,5 +269,7 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     from app.services.rv_store import get_servable_rv
     rv_row, _ = await get_servable_rv(db, sym)
     if rv_row is not None and rv_row.rv_20d is not None and rv_row.rv_rank is not None:
+        if raw is not None:
+            raw.update(rv={"rv_20d": float(rv_row.rv_20d), "rv_rank": float(rv_row.rv_rank), "as_of": rv_row.as_of_date})
         cands.append(Q.q_volatile_now(name=name, symbol=sym, rv_20d=float(rv_row.rv_20d), rv_rank=float(rv_row.rv_rank), sample_days=int(rv_row.sample_days or 0), as_of=rv_row.as_of_date))
-    return {"symbol": sym, "name": name, "questions": Q.choose(cands)}
+    return {"symbol": sym, "name": name, "questions": [c for c in cands if c] if all_candidates else Q.choose(cands)}

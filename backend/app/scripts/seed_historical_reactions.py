@@ -1,4 +1,11 @@
-"""Seed historical earnings reactions from yfinance.
+"""Seed historical earnings reactions.
+
+One-off mode (TICKER ...) computes from the ticker's stored earnings events first: every past report in the events table
+that is confirmed or carries a reported EPS, with the timing stored on the event (EDGAR acceptance time, an announcement)
+or in earnings_report_timing. Only a ticker with no stored past report asks yfinance for dates. Prices are the stored
+Intrinio bars of the ticker's current security record (services/price_bars). One-off mode is a dry run unless --write is
+given; it prints every row it would create and the typical 1-day move they yield. Bulk mode (--all, the nightly) is
+unchanged: yfinance dates, always written.
 
 v3: Timing-aware reaction windows.
   bmo: base = close(T-1), 1d = close(T), 3d = close(T+2), 5d = close(T+4)
@@ -9,15 +16,17 @@ Upserts match on (ticker_id, event_date, event_type).
 
 CLI flags
 ---------
-  TICKER [...]   Seed specific ticker(s) — one-off mode (unchanged)
+  TICKER [...]   Seed specific ticker(s) — one-off mode: stored events first, dry run unless --write
+  --write        One-off mode: write the rows (the default only prints them)
   --all          Process every ticker in the database
   --retry-only   Only retry symbols from cache/failed_reactions.json
   --limit N      Cap the candidate list at N (for testing)
 
 Usage
 -----
-    python -m app.scripts.seed_historical_reactions AAPL
-    python -m app.scripts.seed_historical_reactions AAPL MSFT NVDA
+    python -m app.scripts.seed_historical_reactions VMRK            # dry run from stored events
+    python -m app.scripts.seed_historical_reactions VMRK --write
+    python -m app.scripts.seed_historical_reactions AAPL MSFT NVDA --write
     python -m app.scripts.seed_historical_reactions --all
     python -m app.scripts.seed_historical_reactions --all --limit 20
     python -m app.scripts.seed_historical_reactions --retry-only
@@ -177,6 +186,44 @@ def _fetch_earnings_dates(t: yf.Ticker) -> list[tuple[date, Decimal | None, Deci
         results.append((d, eps_est, eps_act))
 
     return sorted(results, key=lambda x: x[0])
+
+
+def stored_report_entries(rows: list, today: date) -> tuple[list[tuple[date, Decimal | None, Decimal | None]], dict[date, str]]:
+    """Pure: the ticker's stored past reports as seeder entries, oldest first, with the timing stored on each event.
+
+    `rows` are (event_date, eps_estimate, eps_actual, report_timing, is_confirmed, unresolved_since) from the events table.
+    A row counts as a report when it is confirmed or carries a reported EPS; an estimate that passed with no report
+    (unresolved_since set) or an unconfirmed date never does. Dates older than the lookback or younger than MIN_AGE_DAYS
+    are left out, as the yfinance path leaves them out. The timing map holds only timings the events state (not unknown)."""
+    lookback = today - timedelta(days=LOOKBACK_YEARS * 366)
+    cutoff = today - timedelta(days=MIN_AGE_DAYS)
+    entries: list[tuple[date, Decimal | None, Decimal | None]] = []
+    timing: dict[date, str] = {}
+    for event_date, eps_estimate, eps_actual, report_timing, is_confirmed, unresolved_since in rows:
+        if unresolved_since is not None or not (is_confirmed or eps_actual is not None):
+            continue
+        if not (lookback <= event_date <= cutoff):
+            continue
+        entries.append((event_date, Decimal(str(eps_estimate)) if eps_estimate is not None else None,
+                        Decimal(str(eps_actual)) if eps_actual is not None else None))
+        if report_timing and report_timing != "unknown":
+            timing[event_date] = report_timing
+    return sorted(entries, key=lambda x: x[0]), timing
+
+
+async def load_stored_report_entries(session, ticker_id, today: date) -> tuple[list, dict[date, str]]:
+    """The ticker's stored past reports (stored_report_entries over its earnings events)."""
+    rows = (await session.execute(
+        select(Event.event_date, Event.eps_estimate, Event.eps_actual, Event.report_timing, Event.is_confirmed, Event.unresolved_since)
+        .where(Event.ticker_id == ticker_id, Event.event_type == EventType.EARNINGS)
+    )).all()
+    return stored_report_entries([tuple(r) for r in rows], today)
+
+
+def typical_abs_move(moves: list) -> float | None:
+    """Pure: the mean absolute 1-day move of the rows that have one, in percent; None when none has."""
+    vals = [abs(float(m)) for m in moves if m is not None]
+    return round(sum(vals) / len(vals), 2) if vals else None
 
 
 def _fetch_price_history(t: "yf.Ticker | str", lookback: date) -> pd.DataFrame:
@@ -668,9 +715,14 @@ async def build_process_list(session) -> dict[str, str]:
 
 # ── Per-ticker seed (one-off, verbose) ────────────────────────────────────────
 
-async def seed(symbol: str) -> None:
+async def seed(symbol: str, write: bool = False) -> None:
+    """One-off mode. Stored earnings events first (with their timing), yfinance dates only when none are stored;
+    prices from the stored bars of the current record. A dry run unless `write`: it prints the rows it would create,
+    the typical 1-day move they yield and whether the ticker clears the question strip's MIN_REPORTS."""
+    from app.services.questions import MIN_REPORTS
     sym = symbol.upper()
-    print(f"\n── {sym} {'─' * (46 - len(sym))}")
+    today = date.today()
+    print(f"\n── {sym} {'─' * (46 - len(sym))}  ({'write' if write else 'dry run'})")
 
     async with AsyncSessionLocal() as session:
         ticker = await session.scalar(
@@ -682,51 +734,64 @@ async def seed(symbol: str) -> None:
         if sym in await excluded_symbols(session):
             print(f"  ⚠  {sym} is excluded: its price history failed the RV guard (data_error). Nothing seeded.")
             return
+        earnings_entries, event_timing = await load_stored_report_entries(session, ticker.id, today)
 
-    lookback = date.today() - timedelta(days=LOOKBACK_YEARS * 366)
-    yf_ticker = yf.Ticker(sym)
+    lookback = today - timedelta(days=LOOKBACK_YEARS * 366)
 
-    print("  Fetching earnings dates...")
-    earnings_entries = _fetch_earnings_dates(yf_ticker)
-    if not earnings_entries:
-        print("  ⚠  No past earnings dates found in 5-year window")
-        return
-    print(f"  Found {len(earnings_entries)} past earnings dates")
+    if earnings_entries:
+        source = "stored earnings events"
+        print(f"  {len(earnings_entries)} past report(s) stored in events ({len(event_timing)} with a stated timing)")
+    else:
+        source = "yfinance earnings dates"
+        print("  No past report stored in events; fetching earnings dates from yfinance...")
+        earnings_entries = _fetch_earnings_dates(yf.Ticker(sym))
+        if not earnings_entries:
+            print("  ⚠  No past earnings dates found in 5-year window")
+            return
+        print(f"  Found {len(earnings_entries)} past earnings dates")
 
-    print("  Fetching price history...")
+    print("  Reading stored price bars...")
     try:
-        hist = _fetch_price_history(yf_ticker, lookback)
+        hist = _fetch_price_history(sym, lookback)
     except Exception as exc:
         print(f"  ERROR: price history failed — {redact(exc)}")
         return
 
     if hist.empty:
-        print("  ⚠  No price history returned")
+        print("  ⚠  No stored price bars")
         return
 
     dates_cache = _build_date_cache(hist)
 
     inserted = updated = skipped = 0
+    moves_1d: list = []
     async with AsyncSessionLocal() as session:
-        # Look up report_timing from earnings_report_timing table
+        # Timing: the event's own first, then the earnings_report_timing table
         timing_rows = (await session.execute(
             select(EarningsReportTiming.event_date, EarningsReportTiming.timing)
             .where(EarningsReportTiming.ticker_id == ticker.id)
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
+        timing_map.update(event_timing)
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
         basis_unclear = await basis_mismatch_dates(session, ticker.id)
         kept = await price_bars.stored_history_dates(session, sym, [d for d, _, _ in earnings_entries], load_reference_sessions())
         await price_bars.mark_stored_history(session, ticker.id, EventType.EARNINGS, kept)
 
+        def fmt(v) -> str:
+            return "     --" if v is None else f"{float(v):+7.2f}"
+
+        print(f"  {'Date':<12} {'Timing':<8} {'1d':>8} {'3d':>8} {'5d':>8}  action")
         for event_date, eps_estimate, eps_actual in earnings_entries:
             if event_date in kept:
                 skipped += 1            # rests on a stored_history span: kept as stored, never recomputed
+                print(f"  {event_date.isoformat():<12} {'':<8} {'':>8} {'':>8} {'':>8}  kept (stored history span)")
                 continue
             report_timing = timing_map.get(event_date, "unknown")
             data = _compute_v3(hist, dates_cache, event_date, report_timing, load_reference_sessions())
             if data is None:
                 skipped += 1
+                print(f"  {event_date.isoformat():<12} {report_timing:<8} {'':>8} {'':>8} {'':>8}  skipped (no bars around the date)")
                 continue
             data["eps_estimate"] = eps_estimate
             data["eps_actual"]   = eps_actual
@@ -734,14 +799,29 @@ async def seed(symbol: str) -> None:
             data["report_timing"] = report_timing
             created = await upsert_reaction(session, ticker, event_date, data, anchors, basis_unclear)
             if created is None:
+                action = "refused (a row within the duplicate guard)"
                 skipped += 1
             elif created:
+                action = "insert"
                 inserted += 1
+                moves_1d.append(data.get("pct_change_1d"))
             else:
+                action = "update"
                 updated += 1
-        await session.commit()
+                moves_1d.append(data.get("pct_change_1d"))
+            print(f"  {event_date.isoformat():<12} {report_timing:<8} {fmt(data.get('pct_change_1d'))} {fmt(data.get('pct_change_3d'))} {fmt(data.get('pct_change_5d'))}  {action}")
+        if write:
+            await session.commit()
+        else:
+            await session.rollback()
 
-    print(f"  ✓ {inserted} inserted, {updated} updated, {skipped} skipped")
+    measured = sum(1 for m in moves_1d if m is not None)
+    typical = typical_abs_move(moves_1d)
+    verb = "" if write else "would be "
+    print(f"  ✓ {inserted} {verb}inserted, {updated} {verb}updated, {skipped} skipped; dates from {source}")
+    print(f"  typical 1-day move: " + (f"±{typical:.2f}% over {measured} measured report(s)" if typical is not None else "none measured"))
+    print(f"  {sym} {'clears' if measured >= MIN_REPORTS else 'does not clear'} the {MIN_REPORTS}-report minimum"
+          + ("" if write else "; dry run, nothing written (add --write)"))
 
 
 # ── Bulk infrastructure ───────────────────────────────────────────────────────
@@ -959,6 +1039,8 @@ def parse_args() -> argparse.Namespace:
                    help="Skip the freshness check and reprocess all tickers")
     p.add_argument("--shadow", action="store_true",
                    help="Write v3 results to shadow_reactions table for comparison")
+    p.add_argument("--write", action="store_true",
+                   help="One-off mode: write the rows (without it the run only prints them; bulk mode always writes)")
     return p.parse_args()
 
 
@@ -1071,7 +1153,7 @@ async def main() -> int:
         return 1
 
     for sym in symbols:
-        await seed(sym)
+        await seed(sym, write=args.write)
     print("\n✓ Done.\n")
     return 0
 

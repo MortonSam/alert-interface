@@ -130,6 +130,21 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
+    async def generate_answer(self, prompt: str, max_tokens: int = 400) -> dict:
+        """Ask Ivy (services/ask_ivy): a short answer written from a fact pack. Sonnet; the caller forbids any typed number
+        and inserts every value itself, so the output is prose with placeholders only."""
+        msg = await self._client.messages.create(
+            model=GENERATION_MODEL,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {
+            "content":       _extract_text(msg).strip(),
+            "model_used":    GENERATION_MODEL,
+            "input_tokens":  msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
+
     async def verify_research_note(self, prompt: str) -> dict:
         """Verify a research note. Uses Opus for higher accuracy.
 

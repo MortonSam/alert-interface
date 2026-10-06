@@ -1,0 +1,147 @@
+"""Ask Ivy: the no-typed-numbers rule with adversarial fixtures, the comparison check against word facts, substitution with
+receipts, the verifier's sentence verdicts, normalization and the cache key, word facts from the strip's numbers, and the
+route behind its flag."""
+import json
+from datetime import date
+
+import pytest
+
+from app.services import ask_ivy as A
+
+FACTS = [
+    {"id": "quote", "name": "quote", "value": "$1,045.56", "as_of": "Oct 6, 4:00 PM ET", "source": "quote cache", "kind": "number"},
+    {"id": "typical_move", "name": "typical move", "value": "±7.0%", "as_of": "2026-06-24", "source": "historical_reactions", "kind": "number"},
+    {"id": "report_date", "name": "report date", "value": "Sep 30, 2026", "as_of": "2026-09-30", "source": "events", "kind": "number"},
+    {"id": "implied_vs_typical", "name": "implied move against the typical move", "value": "more than usual", "as_of": "2026-10-05", "source": "x", "kind": "word"},
+    {"id": "price_vs_52w_high", "name": "price against the 52-week high", "value": "below", "as_of": "2026-06-25", "source": "x", "kind": "word"},
+    {"id": "volatility_vs_year", "name": "volatility against its year", "value": "quiet", "as_of": "2026-10-05", "source": "x", "kind": "word"},
+    {"id": "dividend_status", "name": "next dividend", "value": "estimated", "as_of": "2026-10-14", "source": "x", "kind": "word"},
+]
+IDS = {f["id"] for f in FACTS}
+
+
+@pytest.mark.parametrize("text", [
+    "The stock is at $1,045.56 right now.",                       # a typed price
+    "It moved 3% after the report.",                               # a typed percent
+    "It has beaten estimates 18 times.",                           # a digit
+    "It rose twice as much as usual.",                             # twice
+    "That is double the typical move.",                            # double
+    "Roughly half of its beats were followed by a fall.",          # half as a fraction
+    "About a quarter of the reports moved it more.",               # quarter as a fraction
+    "A dozen reports moved it more.",                              # dozen
+    "Five of the last reports moved it more.",                     # a number word
+    "Over the last twenty reports it moved {fact:typical_move}.",  # twenty
+    "It trades near {fact:quote} and {fact:not_a_fact}.",          # an unknown placeholder
+    "One sentence. Two sentences. Three sentences. Four sentences.",  # four sentences
+    "You should buy it before the dividend.",                      # a recommendation
+    "It costs {fact:quote} today.",                                # fine... but a brace below
+    "It costs {fact:quote today.",                                 # a malformed placeholder
+])
+def test_output_check_rejects_typed_numbers_number_words_unknown_ids_length_and_recommendations(text):
+    problems = A.check_output(text, IDS)
+    if text == "It costs {fact:quote} today.":
+        assert problems == []
+    else:
+        assert problems, text
+
+
+def test_output_check_passes_prose_with_placeholders_and_window_names():
+    text = ("Micron is at {fact:quote}, below its 52-week high, and its 20-day realized volatility is quiet. "
+            "On a typical report it moves {fact:typical_move}. The next session's move is the 1-day move.")
+    assert A.check_output(text, IDS) == []
+    assert A.check_output("Its results for the third quarter and the first half of the year are in the S&P 500 record.", IDS) == []   # periods, not fractions
+
+
+def test_comparisons_are_checked_against_word_facts():
+    assert A.verify_comparisons("Options price more than usual for this report.", FACTS) == []
+    assert A.verify_comparisons("It trades below its 52-week high and volatility is quiet.", FACTS) == []
+    assert "contradicts" in A.verify_comparisons("Options price less than usual.", FACTS)[0]
+    assert "contradicts" in A.verify_comparisons("Realized volatility is elevated.", FACTS)[0]
+    assert "no stored comparison" in A.verify_comparisons("The report is confirmed for after the close.", FACTS)[0]
+    assert A.verify_comparisons("The dividend is estimated, not yet declared.", FACTS) == []                        # "not yet declared" asserts estimated
+    assert "contradicts" in A.verify_comparisons("The dividend was declared.", FACTS)[0]
+
+
+def test_render_substitutes_values_and_collects_receipts_once():
+    text, inputs = A.render("At {fact:quote}, after its {fact:report_date} report; again {fact:quote}. It is {fact:price_vs_52w_high} its high.", FACTS)
+    assert text == "At $1,045.56, after its Sep 30, 2026 report; again $1,045.56. It is below its high."
+    assert [i["name"] for i in inputs] == ["quote", "report date"]                                                   # word facts carry no receipt; a value once
+    assert inputs[0]["as_of"] == "Oct 6, 4:00 PM ET" and inputs[1]["source"] == "events"
+
+
+def test_model_output_parsing_and_verdicts():
+    assert A.parse_model_output("COVERED: no\n\nThe facts do not cover that. Here is {fact:quote}.") == ("no", "The facts do not cover that. Here is {fact:quote}.")
+    assert A.parse_model_output("Just an answer.")[0] == "partly"
+    assert A.parse_model_output("COVERED: maybe\nx")[0] == "partly"
+    kept, dropped = A.apply_verdicts(["A.", "B.", "C."], [{"status": "supported"}, {"status": "unsupported"}, {"status": "supported"}])
+    assert kept == ["A.", "C."] and dropped == ["B."]
+    assert A.apply_verdicts(["A.", "B."], [{"status": "supported"}]) == ([], ["A.", "B."])                          # misaligned verdicts keep nothing
+    assert A.parse_verdicts('```json\n{"sentences": [{"text": "A.", "status": "supported", "evidence": "e"}]}\n```')[0]["status"] == "supported"
+
+
+def test_normalization_folds_ticker_name_stopwords_and_synonyms():
+    a = A.normalize_question("Why did Micron drop after earnings?", "MU", "Micron Technology")
+    b = A.normalize_question("why did MU fall after the report", "MU", "Micron Technology")
+    assert a == b == "after earnings fall"
+    assert A.normalize_question("Is Micron expensive right now?", "MU", "Micron Technology") == A.normalize_question("Is MU pricey?", "MU", "Micron Technology")
+    k1 = A.cache_key("MU", a, "fp1"); k2 = A.cache_key("MU", a, "fp2")
+    assert k1 != k2 and len(k1) == 32                                                                                 # a changed fact pack is a new key
+
+
+def test_word_facts_come_from_the_strips_numbers_with_the_shared_thresholds():
+    raw = {"implied": {"implied_pct": 0.09, "chain_date": date(2026, 10, 5)}, "typical_abs": 7.0, "quote_price": 1045.56,
+           "bars": {"high_52w": 1213.37, "high_52w_date": date(2026, 6, 25), "last_close": 1063.96}, "rv": {"rv_20d": 0.47, "rv_rank": 12.0, "as_of": date(2026, 10, 5)},
+           "last_report": {"event_date": date(2026, 9, 30), "timing": "amc", "move_pct": 3.0, "outcome": "beat"},
+           "next_report": {"date": date(2026, 12, 16), "confirmation": "estimated", "note": None, "source": "finnhub", "timing": "amc"},
+           "dividend": {"ex_date": date(2026, 10, 14), "declared_on": date(2026, 9, 30)}}
+    w = {f["id"]: f["value"] for f in A.word_facts(raw)}
+    assert w["implied_vs_typical"] == "more than usual" and w["last_move_vs_typical"] == "less than usual"           # 9 over 7 and 3 over 7, services/move_comparison
+    assert w["price_vs_52w_high"] == "below" and w["52_week_high_date"] == "Jun 25, 2026"
+    assert w["volatility_vs_year"] == "quiet" and A.volatility_word(80) == "elevated" and A.volatility_word(50) == "normal"
+    assert w["last_report_outcome"] == "beat" and w["last_report_direction"] == "rose" and w["last_report_timing"] == "after the close"
+    assert w["next_report_status"] == "estimated" and w["next_report_timing"] == "after the close" and w["dividend_status"] == "declared"
+    assert A.word_facts({}) == []
+
+
+def test_number_facts_keep_one_fact_per_name_and_value():
+    sents = [{"key": "stock", "inputs": [{"name": "quote", "value": "$1", "as_of": "d", "source": "s"}]}]
+    qs = [{"key": "reaction_normal", "inputs": [{"name": "quote", "value": "$1", "as_of": "d", "source": "s"}, {"name": "report date", "value": "Sep 30, 2026", "as_of": "2026-09-30", "source": "events"}]},
+          {"key": "implied_big", "inputs": [{"name": "report date", "value": "Dec 16, 2026", "as_of": "2026-12-16", "source": "events"}]}]
+    ids = [f["id"] for f in A.number_facts(sents, qs)]
+    assert ids == ["quote", "report_date", "report_date_implied_big"]
+    assert A.fingerprint(A.number_facts(sents, qs)) != A.fingerprint(A.number_facts(sents, qs[:1]))
+
+
+def test_prompt_shows_values_and_forbids_typing_them():
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": ["MU is at $1,045.56."], "fingerprint": "x"}
+    p = A.build_prompt(pack, "Is it expensive?")
+    assert "{fact:quote} = quote: $1,045.56" in p and "[word]" in p and "Never type a number" in p and "Never give a recommendation" in p
+
+
+@pytest.mark.asyncio
+async def test_the_route_is_absent_behind_the_flag_and_serves_a_checked_answer_when_on(monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+    from app.config import settings
+    from app.main import app
+    monkeypatch.setattr(settings, "ask_ivy_enabled", False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post("/api/v1/tickers/MU/ask", json={"question": "Is it expensive?"})).status_code == 404
+        assert (await c.get("/api/v1/tickers/MU/questions")).json()["ask_enabled"] is False
+    monkeypatch.setattr(settings, "ask_ivy_enabled", True)
+    canned = {"verdict": "verified", "covered": "yes", "model": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5, "cost": 0.001, "problems": [], "dropped": [],
+              "answer": {"key": "ask", "question": "q", "data": "MU is at $1,045.56.", "idea": "", "inputs": [FACTS[0]], "as_of": None, "as_of_kind": "observed", "rule": A.RULE}}
+    async def fake(db, pack, question, *, client=None):
+        return canned
+    monkeypatch.setattr(A, "answer_question", fake)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/tickers/MU/questions")).json()["ask_enabled"] is True
+        r = await c.post("/api/v1/tickers/MU/ask", json={"question": "Is it expensive right now, really, " + "x" * 300})
+        assert r.status_code == 422
+        import uuid
+        token = uuid.uuid4().hex                                                                   # a new question each run: the log persists between runs
+        r = await c.post("/api/v1/tickers/MU/ask", json={"question": f"Is it expensive right now {token}?"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["answer"]["data"] == "MU is at $1,045.56." and body["cached"] is False
+        r2 = await c.post("/api/v1/tickers/MU/ask", json={"question": f"is MU pricey {token}"})   # the same normalized question: served from the log
+        assert r2.status_code == 200 and r2.json()["cached"] is True

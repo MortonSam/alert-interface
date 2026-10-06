@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import posthog from "posthog-js";
+import { AskIvy } from "@/components/AskIvy";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import { api, type QuestionsResponse } from "@/lib/api";
 import { splitTerms } from "@/lib/briefing";
@@ -70,6 +71,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
           );
         })}
       </ul>
+      {data!.ask_enabled && <AskIvy symbol={symbol} name={data!.name ?? symbol} />}
     </div>
   );
 }

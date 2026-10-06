@@ -69,12 +69,22 @@ async def run(argv: list[str]) -> int:
             reports = report_dates(await edgar.get_all_8k_records(cik), date.today())
             existing = {e.event_date: e for e in (await s.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS))).scalars().all()}
             print(f"{sym} (CIK {cik}): {len(reports)} Item 2.02 report(s) in {HISTORY_YEARS} years; {len(existing)} earnings event(s) stored ({'write' if write else 'dry run'})")
-            inserted = kept = 0
+            inserted = kept = confirmed = 0
             for r in reports:
                 near = [d for d in existing if abs((d - r['date']).days) <= 3]
                 if near:
                     kept += 1
-                    print(f"  {r['date']} {r['timing']:7s} already stored as {near[0]}")
+                    ev = existing[near[0]]
+                    confirm = not ev.is_confirmed or (ev.report_timing == "unknown" and r["timing"] != "unknown")
+                    print(f"  {r['date']} {r['timing']:7s} already stored as {near[0]}" + (" (confirming it from the filing)" if confirm else ""))
+                    if confirm:
+                        confirmed += 1
+                        if write:   # the stored row becomes a confirmed report with the filing's timing; the reactions seeder counts it
+                            ev.is_confirmed = True
+                            ev.confirmation_note = f"reported on {r['date'].isoformat()} per EDGAR (8-K Item 2.02 {r['accession']})"
+                            ev.unresolved_since = None
+                            if ev.report_timing == "unknown" and r["timing"] != "unknown":
+                                ev.report_timing, ev.report_timing_source = r["timing"], "edgar"
                     continue
                 inserted += 1
                 print(f"  {r['date']} {r['timing']:7s} new (8-K {r['accession']})")
@@ -84,7 +94,7 @@ async def run(argv: list[str]) -> int:
                                 report_timing=r["timing"], report_timing_source="edgar" if r["timing"] != "unknown" else "unknown", metadata_={}))
             if write:
                 await s.commit()
-            print(f"  {inserted} to insert, {kept} already stored" + ("" if write else "; dry run, nothing written") +
+            print(f"  {inserted} to insert, {kept} already stored ({confirmed} to confirm from the filing)" + ("" if write else "; dry run, nothing written") +
                   (f"\n  next: python -m app.scripts.seed_historical_reactions {sym}" if write else ""))
     finally:
         await edgar.close()

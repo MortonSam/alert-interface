@@ -1,0 +1,439 @@
+"""Ask Ivy: the free-text question box under the question strip (flag ASK_IVY_ENABLED, off in production).
+
+Ivy answers only from this stock's stored facts and says plainly when they do not cover the question. The model (Sonnet)
+sees the fact pack, names and values, so it can reason over them, but it may not type a number: its output must refer
+to every quantity by a {fact:id} placeholder. The output check (check_output) rejects any digit, currency sign or percent
+outside a placeholder, number words (one through twenty, twice, double, triple, half, a quarter as a fraction, dozen),
+an unknown placeholder, more than three sentences, and recommendation language. Comparisons ("more than usual", "below
+its 52-week high", "elevated") arrive precomputed as word-valued facts, and verify_comparisons checks every comparison
+word the model used against them. Values are then substituted from the fact pack, each carrying its receipt, and the
+rendered answer goes to the verifier (Opus, the research-note verifier's model) with the fact pack as its only evidence:
+a sentence it marks unsupported or contradicted is dropped before display.
+
+Every question is logged (ask_log) with its normalized form, whether the facts covered it, the verdict and the cost.
+Repeated questions are served from the log while the fact pack is unchanged (the cache key holds a fingerprint of every
+fact's value and date). Visitors are limited per IP and per IP and stock (ASK_POLICY, ASK_TICKER_POLICY) and the box
+pauses for the day once the site's estimated spend reaches settings.ask_ivy_daily_cap_usd.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from datetime import date, datetime, timezone
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.services import briefing as B
+from app.services.draft_limiter import LimitPolicy
+from app.services.move_comparison import compare_moves
+from app.services.research_cost import estimate_cost_usd
+from app.services.system_metadata_service import get_value, set_value
+
+MAX_SENTENCES = 3
+MAX_QUESTION_CHARS = 300
+SPEND_KEY = "ask_ivy_spend"                 # system_metadata "{SPEND_KEY}:{YYYY-MM-DD}" holds the day's estimated spend in USD
+RV_ELEVATED_RANK = 80                       # 20-day realized volatility at or above this percentile of its own year is "elevated"
+RV_QUIET_RANK = 20                          # at or below this percentile, "quiet"
+
+ASK_POLICY = LimitPolicy(prefix="ask_ivy", per_ip_hour=10, per_ip_day=30, global_day=1500, admin_bypasses_global=False,
+                         per_ip_hour_message="Ivy answers up to {n} questions an hour per visitor; try again after {at}.",
+                         per_ip_day_message="Ivy answers up to {n} questions a day per visitor; try again after {at}.",
+                         global_message="Ivy has answered today's site-wide limit of {n} questions; try again tomorrow.", noun="Asking Ivy")
+ASK_TICKER_POLICY = LimitPolicy(prefix="ask_ivy_ticker", per_ip_day=10, global_day=10**9, admin_bypasses_global=False,
+                                per_ip_day_message="Ivy answers up to {n} questions a day per visitor about one stock; try again after {at}.", noun="Asking Ivy")
+
+PLACEHOLDER = re.compile(r"\{fact:([a-z0-9_]+)\}")
+_NUMBER_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+                 "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "twice", "double", "triple", "dozen")
+NUMBER_WORD = re.compile(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b", re.I)
+HALF = re.compile(r"(?<!first )(?<!second )\bhalf\b(?!-year)", re.I)                 # "half" as a fraction; "first half" and "half-year" are periods
+QUARTER_FRACTION = re.compile(r"\b(?:a|one|three)\s+quarters?\b|\bquarters?\s+of\b", re.I)   # "a quarter of"; "third quarter" is a period
+FORBIDDEN_CHARS = re.compile(r"[0-9$%€£]")
+WINDOW_NAMES = ("52-week", "20-day", "1-day", "3-day", "5-day", "S&P 500")        # names of windows and an index, as the strip's own copy uses them; never a quantity
+_WINDOW = re.compile("|".join(re.escape(w) for w in WINDOW_NAMES))
+RECOMMENDATION = re.compile(r"\b(you should (?:buy|sell|hold)|i(?:'d| would) (?:buy|sell)|i recommend|buy now|sell now|(?:a |is a )?(?:good|bad|great) (?:buy|time to buy|time to sell)|worth buying|worth selling)\b", re.I)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+STOPWORDS = {"the", "is", "it", "its", "a", "an", "of", "to", "in", "on", "for", "and", "or", "right", "now", "currently", "today", "does", "do", "did",
+             "has", "have", "was", "were", "be", "been", "this", "that", "at", "about", "with", "what", "how", "why", "will", "would", "should", "i", "we", "you", "my"}
+SYNONYMS = {"fall": ("drop", "dropped", "drops", "fell", "falls", "falling", "decline", "declined", "declines", "down", "lower", "plunge", "plunged", "tank", "tanked"),
+            "rise": ("rose", "rises", "rising", "jump", "jumped", "jumps", "up", "higher", "gain", "gained", "gains", "climb", "climbed", "rally", "rallied", "surge", "surged"),
+            "expensive": ("pricey", "rich", "overvalued", "overpriced", "costly", "dear"), "cheap": ("undervalued", "underpriced", "bargain", "inexpensive"),
+            "stock": ("shares", "share", "equity", "price", "stockprice"), "buy": ("purchase", "bought", "buying", "invest", "investing"),
+            "sell": ("sold", "selling", "dump", "exit"), "earnings": ("results", "report", "quarter", "eps", "profits"), "move": ("moved", "moves", "moving", "react", "reacted", "reaction"),
+            "dividend": ("payout", "distribution", "yield"), "volatile": ("volatility", "choppy", "swingy", "wild"), "usual": ("normal", "typical", "typically", "usually", "average")}
+_SYN_INDEX = {w: k for k, ws in SYNONYMS.items() for w in ws}
+
+COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
+    # (phrase the model may use, {word fact: the value that phrase asserts}); the phrase passes when any listed fact holds its value
+    (re.compile(r"\bmore than usual\b|\b(?:above|bigger than|larger than) (?:its |the )?(?:usual|typical)\b|\b(?:bigger|larger) than usual\b", re.I),
+     {"implied_vs_typical": "more than usual", "last_move_vs_typical": "more than usual"}),
+    (re.compile(r"\bless than usual\b|\b(?:below|smaller than) (?:its |the )?(?:usual|typical)\b|\bsmaller than usual\b", re.I),
+     {"implied_vs_typical": "less than usual", "last_move_vs_typical": "less than usual"}),
+    (re.compile(r"\babout (?:as |the same as )?usual\b|\bin line with (?:its |the )?(?:usual|typical)\b|\babout what it usually\b|\bclose to (?:its |the )?(?:usual|typical)\b", re.I),
+     {"implied_vs_typical": "about usual", "last_move_vs_typical": "about usual"}),
+    (re.compile(r"\bbelow (?:its|the|a) (?:52-week|year|yearly|one-year|twelve-month) high\b|\boff (?:its|the) high\b|\bunder its (?:52-week|year) high\b", re.I), {"price_vs_52w_high": "below"}),
+    (re.compile(r"\b(?:at|near) (?:its|a|the) (?:52-week|year|yearly|one-year|twelve-month|new) high\b", re.I), {"price_vs_52w_high": "near"}),
+    (re.compile(r"\belevated\b|\bmore volatile than usual\b|\bmore active than usual\b|\bunusually volatile\b", re.I), {"volatility_vs_year": "elevated"}),
+    (re.compile(r"\bquiet(?:er)?\b|\bless volatile than usual\b|\bcalmer than usual\b|\bunusually calm\b", re.I), {"volatility_vs_year": "quiet"}),
+    (re.compile(r"\bvolatility (?:is|looks|sits) (?:about )?(?:normal|typical|ordinary)\b|\bin its normal range\b|\bnot unusually volatile\b", re.I), {"volatility_vs_year": "normal"}),
+    (re.compile(r"\bbeat\b[^.]{0,40}\bestimates?\b|\bbeat the street\b|\btopped (?:the )?estimates?\b|\bexceeded (?:the )?estimates?\b|\bwas a beat\b", re.I), {"last_report_outcome": "beat"}),
+    (re.compile(r"\bmissed\b[^.]{0,40}\bestimates?\b|\bfell short of (?:the )?estimates?\b|\bwas a miss\b", re.I), {"last_report_outcome": "miss"}),
+    (re.compile(r"\bmet\b[^.]{0,40}\bestimates?\b|\bmatched (?:the )?estimates?\b|\bin line with (?:the )?estimates?\b", re.I), {"last_report_outcome": "meet"}),
+    (re.compile(r"\bafter the (?:close|bell|market closes?)\b", re.I), {"next_report_timing": "after the close", "last_report_timing": "after the close"}),
+    (re.compile(r"\bbefore the (?:open|bell|market opens?)\b", re.I), {"next_report_timing": "before the open", "last_report_timing": "before the open"}),
+    (re.compile(r"(?<!not )(?<!un)\bconfirmed\b", re.I), {"next_report_status": "confirmed", "dividend_status": "declared"}),
+    (re.compile(r"\b(?:an )?estimated(?: date| report date)?\b|\bnot (?:yet )?confirmed\b|\bunconfirmed\b|\bnot (?:yet )?declared\b", re.I), {"next_report_status": "estimated", "dividend_status": "estimated"}),
+    (re.compile(r"(?<!not )(?<!yet )\bdeclared\b", re.I), {"dividend_status": "declared"}),
+]
+
+
+# ── fact pack ────────────────────────────────────────────────────────────────
+
+def slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _fact(fid: str, name: str, value, as_of, source: str | None, kind: str = "number") -> dict:
+    iso = as_of.isoformat() if isinstance(as_of, date) else as_of
+    return {"id": fid, "name": name, "value": str(value), "as_of": iso, "source": source, "kind": kind}
+
+
+def number_facts(sentences: list[dict], questions: list[dict]) -> list[dict]:
+    """Pure: every receipt the Overview and the strip show, as facts with stable ids. The same name with a different value
+    (two questions' "report date") keeps both under ids suffixed by the question key; the same name and value appears once."""
+    facts: dict[str, dict] = {}
+    seen: dict[tuple[str, str], str] = {}
+    def add(inp: dict, suffix: str):
+        key = (inp["name"], inp["value"])
+        if key in seen:
+            return
+        fid = slug(inp["name"])
+        if fid in facts:
+            fid = f"{fid}_{slug(suffix)}"
+        if fid in facts:
+            return
+        seen[key] = fid
+        facts[fid] = _fact(fid, inp["name"], inp["value"], inp.get("as_of"), inp.get("source"))
+    for s in sentences:
+        for inp in s.get("inputs", []):
+            add(inp, s.get("key", "overview"))
+    for q in questions:
+        for inp in q.get("inputs", []):
+            add(inp, q.get("key", "question"))
+    return list(facts.values())
+
+
+def volatility_word(rv_rank: float) -> str:
+    """Pure: the stock's 20-day realized volatility against its own past year, in a word."""
+    if rv_rank >= RV_ELEVATED_RANK:
+        return "elevated"
+    if rv_rank <= RV_QUIET_RANK:
+        return "quiet"
+    return "normal"
+
+
+def word_facts(raw: dict) -> list[dict]:
+    """Pure: the comparisons Ivy may state, each computed here from the same numbers the strip uses (never by the model)."""
+    out: list[dict] = []
+    imp, typ = raw.get("implied"), raw.get("typical_abs")
+    if imp and typ:
+        out.append(_fact("implied_vs_typical", "implied move against the typical move", compare_moves(imp["implied_pct"] * 100, typ), imp["chain_date"],
+                         "services/move_comparison: over 1.2x is more than usual, under 0.8x less", "word"))
+    bars, quote = raw.get("bars") or {}, raw.get("quote_price")
+    price = quote if quote is not None else bars.get("last_close")
+    if price is not None and bars.get("high_52w"):
+        below = (bars["high_52w"] - price) / bars["high_52w"] * 100
+        out.append(_fact("price_vs_52w_high", "price against the 52-week high", "near" if below < B.NEAR_HIGH_PCT else "below", bars.get("high_52w_date"),
+                         f"within {B.NEAR_HIGH_PCT}% of the highest stored close is near", "word"))
+        if bars.get("high_52w_date"):
+            out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "price_bars_shadow, the day of the highest close"))
+    rv = raw.get("rv")
+    if rv:
+        out.append(_fact("volatility_vs_year", "20-day realized volatility against the stock's own past year", volatility_word(rv["rv_rank"]), rv["as_of"],
+                         f"rv_snapshots.rv_rank: at or above the {RV_ELEVATED_RANK}th percentile is elevated, at or below the {RV_QUIET_RANK}th quiet", "word"))
+    last = raw.get("last_report")
+    if last:
+        if last.get("timing") in B.TIMING_PHRASE:
+            out.append(_fact("last_report_timing", "last report timing", B.TIMING_PHRASE[last["timing"]], last["event_date"], "events.report_timing", "word"))
+        if last.get("move_pct") is not None and typ:
+            out.append(_fact("last_move_vs_typical", "move after the last report against the typical move", compare_moves(abs(last["move_pct"]), typ), last["event_date"],
+                             "services/move_comparison: over 1.2x the typical move is more than usual, under 0.8x less", "word"))
+        if last.get("outcome"):
+            out.append(_fact("last_report_outcome", "last report against the EPS estimate", last["outcome"], last["event_date"], "events.eps_actual against events.eps_estimate", "word"))
+        if last.get("move_pct") is not None:
+            out.append(_fact("last_report_direction", "direction of the move after the last report", "rose" if last["move_pct"] > 0 else "fell" if last["move_pct"] < 0 else "unchanged",
+                             last["event_date"], "sign of the stored 1-day move", "word"))
+    nxt = raw.get("next_report")
+    if nxt and nxt.get("date"):
+        out.append(_fact("next_report_status", "next report date", "confirmed" if nxt.get("confirmation") == "confirmed" else "estimated", nxt["date"], nxt.get("note"), "word"))
+        if nxt.get("timing") in B.TIMING_PHRASE:
+            out.append(_fact("next_report_timing", "next report timing", B.TIMING_PHRASE[nxt["timing"]], nxt["date"], "events.report_timing", "word"))
+    div = raw.get("dividend")
+    if div:
+        out.append(_fact("dividend_status", "next dividend", "declared" if div.get("declared_on") else "estimated", div.get("declared_on") or div.get("ex_date"), "events (ex_dividend)", "word"))
+    return out
+
+
+def fingerprint(facts: list[dict]) -> str:
+    """Pure: a hash of every fact's id, value and date; the cache is valid while it is unchanged."""
+    return hashlib.sha256(json.dumps(sorted((f["id"], f["value"], f["as_of"] or "") for f in facts)).encode()).hexdigest()[:16]
+
+
+async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
+    """{symbol, name, facts, context, fingerprint}: the receipts behind the Overview and every qualifying strip question,
+    plus the word-valued comparisons, and the sentences the page already shows as context."""
+    from app.services.briefing_build import build_briefing, build_questions
+    today = today or date.today()
+    raw: dict = {}
+    brief = await build_briefing(db, symbol, today)
+    qs = await build_questions(db, symbol, today, raw=raw, all_candidates=True)
+    facts = number_facts(brief["sentences"], qs["questions"]) + word_facts(raw)
+    context = [s["text"] for s in brief["sentences"]] + [f"Q: {q['question']} A: {q['data']}" for q in qs["questions"]]
+    return {"symbol": brief["symbol"], "name": qs.get("name") or brief.get("name") or brief["symbol"], "facts": facts, "context": context, "fingerprint": fingerprint(facts),
+            "active": brief.get("state") is None and bool(brief["sentences"] or qs["questions"])}
+
+
+# ── the prompt ───────────────────────────────────────────────────────────────
+
+def build_prompt(pack: dict, question: str) -> str:
+    lines = [f"{{fact:{f['id']}}} = {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "") + (f" [{f['kind']}]" if f["kind"] == "word" else "")
+             for f in pack["facts"]]
+    context = "\n".join(f"- {c}" for c in pack["context"]) or "- (nothing shown yet)"
+    return f"""You are Ivy, answering a visitor's question about {pack['name']} ({pack['symbol']}) on a stock page. You may use ONLY the stored facts below. Nothing else you know about the company, its products, its valuation or the market may enter the answer.
+
+FACTS (each has an id; a [word] fact is a precomputed comparison you may state in those words):
+{chr(10).join(lines) or '(no facts stored)'}
+
+WHAT THE PAGE ALREADY SAYS (for context; the numbers in it are the facts above):
+{context}
+
+QUESTION: {question}
+
+RULES
+1. First line: COVERED: yes, partly or no. "yes" when the facts answer the question; "partly" when they bear on it but do not answer it; "no" when nothing above bears on it.
+2. Then the answer: at most {MAX_SENTENCES} short sentences, plain words, for someone new to investing.
+3. Never type a number. No digits, no currency signs, no percent signs, no number words (one, two ... twenty, twice, double, triple, half, a quarter of, dozen). Every quantity, date, price, percentage or count is written as its placeholder, exactly {{fact:id}}, and the system will insert the value. Describe time windows in words ("the next session", "the trailing month") rather than with numbers.
+3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Read each fact's value before placing its placeholder so the sentence reads correctly with the value in place (a fact whose value is a phrase like "close <date> to close <date>" follows "from").
+4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
+5. If the facts do not cover the question, say so plainly in the first sentence, then say what the facts do hold that is closest, with placeholders.
+6. Questions about whether to buy, sell or hold: say what the data shows and the idea behind it. Never give a recommendation, a target, or an opinion about value.
+7. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
+
+Answer:"""
+
+
+# ── output check and comparison verification ─────────────────────────────────
+
+def check_output(text_: str, fact_ids: set[str]) -> list[str]:
+    """Pure: every reason the model's text cannot be shown. Empty when it passes."""
+    problems: list[str] = []
+    used = PLACEHOLDER.findall(text_)
+    unknown = sorted({u for u in used if u not in fact_ids})
+    if unknown:
+        problems.append(f"unknown fact id(s): {', '.join(unknown)}")
+    stripped = _WINDOW.sub(" ", PLACEHOLDER.sub(" ", text_))
+    if FORBIDDEN_CHARS.search(stripped):
+        problems.append("a digit, currency sign or percent sign outside a placeholder")
+    m = NUMBER_WORD.search(stripped)
+    if m:
+        problems.append(f"number word: {m.group(0)}")
+    if HALF.search(stripped):
+        problems.append("number word: half")
+    if QUARTER_FRACTION.search(stripped):
+        problems.append("number word: quarter as a fraction")
+    if RECOMMENDATION.search(stripped):
+        problems.append("recommendation language")
+    if len(sentences(text_)) > MAX_SENTENCES:
+        problems.append(f"more than {MAX_SENTENCES} sentences")
+    if "{" in PLACEHOLDER.sub("", text_) or "}" in PLACEHOLDER.sub("", text_):
+        problems.append("a malformed placeholder")
+    return problems
+
+
+def verify_comparisons(text_: str, facts: list[dict]) -> list[str]:
+    """Pure: every comparison phrase in the text that no word fact supports (missing, or stating the other value)."""
+    words = {f["id"]: f["value"] for f in facts if f["kind"] == "word"}
+    problems: list[str] = []
+    for pattern, group in COMPARISONS:
+        m = pattern.search(text_)
+        if not m:
+            continue
+        present = {fid: words[fid] for fid in group if fid in words}
+        if not present:
+            problems.append(f'"{m.group(0)}" has no stored comparison behind it')
+        elif not any(present[fid] == asserted for fid, asserted in group.items() if fid in present):
+            problems.append(f'"{m.group(0)}" contradicts the stored comparison ({", ".join(sorted(set(present.values())))})')
+    return problems
+
+
+def sentences(text_: str) -> list[str]:
+    return [s for s in SENTENCE_END.split(text_.strip()) if s]
+
+
+def parse_model_output(content: str) -> tuple[str, str]:
+    """Pure: (covered, answer) from the model's output; covered defaults to "partly" when the first line is missing."""
+    lines = content.strip().splitlines()
+    covered = "partly"
+    if lines and lines[0].strip().upper().startswith("COVERED:"):
+        covered = lines[0].split(":", 1)[1].strip().lower().rstrip(".") or "partly"
+        lines = lines[1:]
+    if covered not in ("yes", "partly", "no"):
+        covered = "partly"
+    return covered, " ".join(l.strip() for l in lines if l.strip())
+
+
+def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
+    """Pure: the text with every placeholder replaced by its fact's value, and the inputs (receipts) for the frontend's tokenizer
+    in the order used. A word fact substitutes its words and carries no receipt."""
+    by_id = {f["id"]: f for f in facts}
+    inputs: list[dict] = []
+    def sub(m: re.Match) -> str:
+        f = by_id[m.group(1)]
+        if f["kind"] == "number" and not any(i["name"] == f["name"] and i["value"] == f["value"] for i in inputs):
+            inputs.append({"name": f["name"], "value": f["value"], "as_of": f["as_of"], "source": f["source"]})
+        return f["value"]
+    return PLACEHOLDER.sub(sub, text_), inputs
+
+
+# ── the verifier ─────────────────────────────────────────────────────────────
+
+def build_verification_prompt(pack: dict, rendered: str) -> str:
+    facts = "\n".join(f"- {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "") for f in pack["facts"])
+    return f"""You are a rigorous fact-checker. Check each sentence of the answer below against the stored facts ONLY.
+
+STORED FACTS about {pack['name']} ({pack['symbol']}):
+{facts or '(none)'}
+
+ANSWER:
+{rendered}
+
+RULES
+- "supported": every factual claim in the sentence is confirmed by the facts, or the sentence states that the facts do not cover something and indeed no fact covers it, or the sentence explains an idea in general terms with no factual claim about this company.
+- "unsupported": the sentence makes a claim about this company or its stock that the facts do not confirm (outside knowledge, an inference not in the facts).
+- "contradicted": the sentence conflicts with a fact.
+- Bias toward "unsupported" when in doubt. Use no outside knowledge.
+
+Return JSON only: {{"sentences": [{{"text": "...", "status": "supported|unsupported|contradicted", "evidence": "..."}}]}} with one entry per sentence of the answer, in order."""
+
+
+def apply_verdicts(rendered_sentences: list[str], verdicts: list[dict]) -> tuple[list[str], list[str]]:
+    """Pure: (kept, dropped) sentences; a sentence is kept only when its verdict is "supported". A verdict list that does not
+    line up with the sentences keeps nothing (nothing unverified reaches the screen)."""
+    if len(verdicts) != len(rendered_sentences):
+        return [], list(rendered_sentences)
+    kept = [s for s, v in zip(rendered_sentences, verdicts) if v.get("status") == "supported"]
+    dropped = [s for s, v in zip(rendered_sentences, verdicts) if v.get("status") != "supported"]
+    return kept, dropped
+
+
+def parse_verdicts(content: str) -> list[dict]:
+    body = content.strip()
+    if body.startswith("```"):
+        body = body.split("```")[1]
+        body = body[4:] if body.startswith("json") else body
+    data = json.loads(body.strip())
+    return list(data.get("sentences", []))
+
+
+# ── normalization and cache ──────────────────────────────────────────────────
+
+def normalize_question(question: str, symbol: str, name: str | None) -> str:
+    """Pure: lowercase, no punctuation, the ticker and company name folded away, stopwords dropped, synonyms folded, words sorted."""
+    q = question.lower()
+    q = re.sub(r"[^a-z0-9\s]", " ", q)
+    drop = {symbol.lower()} | {w for w in re.sub(r"[^a-z0-9\s]", " ", (name or "").lower()).split() if len(w) > 2}
+    words = []
+    for w in q.split():
+        if w in drop or w in STOPWORDS:
+            continue
+        words.append(_SYN_INDEX.get(w, w))
+    return " ".join(sorted(set(words)))
+
+
+def cache_key(symbol: str, normalized: str, fp: str) -> str:
+    return hashlib.sha256(f"{symbol}|{normalized}|{fp}".encode()).hexdigest()[:32]
+
+
+async def cached_answer(db: AsyncSession, key: str) -> dict | None:
+    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'not_covered') "
+                                 "ORDER BY created_at DESC LIMIT 1"), {"k": key})).first()
+    return row[0] if row else None
+
+
+async def log_question(db: AsyncSession, *, symbol: str, question: str, normalized: str, key: str, covered: bool, verdict: str, answer: dict | None,
+                       model: str | None, input_tokens: int | None, output_tokens: int | None, cost: float | None, cached: bool, ip_hash: str | None) -> None:
+    await db.execute(text("""INSERT INTO ask_log (symbol, question, normalized, cache_key, covered, verdict, answer, model, input_tokens, output_tokens, cost_usd, cached, ip_hash)
+                             VALUES (:s, :q, :n, :k, :c, :v, CAST(:a AS jsonb), :m, :i, :o, :cost, :cached, :ip)"""),
+                     {"s": symbol, "q": question[:MAX_QUESTION_CHARS], "n": normalized, "k": key, "c": covered, "v": verdict, "a": json.dumps(answer) if answer is not None else None,
+                      "m": model, "i": input_tokens, "o": output_tokens, "cost": cost, "cached": cached, "ip": ip_hash})
+    await db.commit()
+
+
+async def spend_today(db: AsyncSession, now: datetime | None = None) -> float:
+    raw = await get_value(db, f"{SPEND_KEY}:{(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')}")
+    return float(raw) if raw else 0.0
+
+
+async def add_spend(db: AsyncSession, cost: float | None, now: datetime | None = None) -> None:
+    if not cost:
+        return
+    now = now or datetime.now(timezone.utc)
+    await set_value(db, f"{SPEND_KEY}:{now.strftime('%Y-%m-%d')}", f"{await spend_today(db, now) + cost:.5f}")
+    await db.commit()
+
+
+# ── the answer ───────────────────────────────────────────────────────────────
+
+RULE = ("Ivy wrote the words from this stock's stored facts and typed no number: every quantity was inserted from a stored fact with its receipt, "
+        "every comparison word was checked against a stored comparison, and each sentence was checked against those facts before display; "
+        "a sentence the check did not support was dropped.")
+
+
+def not_covered_answer(pack: dict, question: str) -> dict:
+    return {"key": "ask", "question": question, "data": f"This page's stored data for {pack['name']} doesn't cover that question.", "idea": "", "inputs": [],
+            "as_of": None, "as_of_kind": "observed", "rule": RULE}
+
+
+def answer_payload(question: str, kept: list[str], inputs: list[dict], pack: dict) -> dict:
+    as_of = max((i["as_of"] for i in inputs if i.get("as_of") and len(i["as_of"]) >= 10), default=None)
+    today = date.today().isoformat()
+    return {"key": "ask", "question": question, "data": " ".join(kept), "idea": "", "inputs": inputs,
+            "as_of": (as_of[:10] if as_of and as_of[:10] <= today else None), "as_of_kind": "observed", "rule": RULE}
+
+
+async def answer_question(db: AsyncSession, pack: dict, question: str, *, client=None) -> dict:
+    """Run the model, the output check, the comparison check, substitution and the verifier for one question against a fact pack.
+    Returns {verdict, covered, answer, model, input_tokens, output_tokens, cost, problems, dropped, raw}. Charges and logs nothing."""
+    from app.services.anthropic_client import AnthropicClient
+    client = client or AnthropicClient()
+    gen = await client.generate_answer(build_prompt(pack, question))
+    covered, body = parse_model_output(gen["content"])
+    tokens = {"input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"]}
+    cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0
+    out = {"covered": covered, "model": gen["model_used"], "raw": gen["content"], **tokens, "problems": [], "dropped": []}
+    problems = check_output(body, {f["id"] for f in pack["facts"]}) + verify_comparisons(body, pack["facts"])
+    if problems:
+        return {**out, "verdict": "rejected", "answer": not_covered_answer(pack, question), "problems": problems, "cost": cost}
+    if covered == "no" and not PLACEHOLDER.search(body):
+        return {**out, "verdict": "not_covered", "answer": not_covered_answer(pack, question), "cost": cost}
+    rendered, inputs = render(body, pack["facts"])
+    ver = await client.verify_research_note(build_verification_prompt(pack, rendered))
+    vcost = estimate_cost_usd(ver["model_used"], ver["input_tokens"], ver["output_tokens"]) or 0.0
+    out["input_tokens"] += ver["input_tokens"]; out["output_tokens"] += ver["output_tokens"]
+    try:
+        verdicts = parse_verdicts(ver["content"])
+    except (ValueError, json.JSONDecodeError):
+        verdicts = []
+    kept, dropped = apply_verdicts(sentences(rendered), verdicts)
+    if not kept:
+        return {**out, "verdict": "rejected", "answer": not_covered_answer(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
+    used_inputs = [i for i in inputs if i["value"] in " ".join(kept)]
+    return {**out, "verdict": "verified" if not dropped else "partly_dropped", "answer": answer_payload(question, kept, used_inputs, pack), "dropped": dropped, "cost": cost + vcost,
+            "verifier": verdicts}
+
+
+def ip_hash(ip: str) -> str:
+    return hashlib.sha256(ip.encode()).hexdigest()[:12]

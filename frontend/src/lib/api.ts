@@ -1048,6 +1048,14 @@ export interface QuestionsResponse {
   symbol: string;
   name: string | null;       // the short company name the header uses
   questions: QuestionAnswer[];
+  ask_enabled?: boolean;     // the ASK_IVY_ENABLED flag: the free-text box renders only when true
+}
+
+export interface AskResponse {
+  symbol: string;
+  name: string | null;
+  answer: QuestionAnswer;    // key "ask": the rendered answer, every number an input with its receipt; empty inputs when the data did not cover it
+  cached: boolean;           // served from the question log for the same normalized question against an unchanged fact pack
 }
 
 export interface SiteStats {
@@ -1090,6 +1098,8 @@ export const api = {
   tickers: {
     briefing: (symbol: string) => request<BriefingResponse>(`/tickers/${encodeURIComponent(symbol)}/briefing`),
     questions: (symbol: string) => request<QuestionsResponse>(`/tickers/${encodeURIComponent(symbol)}/questions`),
+    ask: (symbol: string, question: string) =>
+      request<AskResponse>(`/tickers/${encodeURIComponent(symbol)}/ask`, { method: "POST", body: JSON.stringify({ question }) }),
     list: (activeOnly = true) =>
       request<Ticker[]>(`/tickers?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),

@@ -5,6 +5,9 @@ of feed paths on the usual investor-relations hosts, probed concurrently; the fi
     python -m app.scripts.discover_ir_feeds                 # tickers with no row yet
     python -m app.scripts.discover_ir_feeds --all           # every active ticker again
     python -m app.scripts.discover_ir_feeds --symbols=MU,FDX
+    python -m app.scripts.discover_ir_feeds --missing       # tickers probed before that had a domain but no feed
+
+Every host's robots.txt is read first and a path it disallows (for our user agent or for everyone) is never requested.
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
+from urllib import robotparser
 from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
@@ -24,7 +28,8 @@ from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "IR feed discovery"
 HOSTS = ("investors.{d}", "investor.{d}", "ir.{d}", "{d}", "www.{d}")
-PATHS = ("/rss/news-releases.xml", "/rss/pressrelease.aspx", "/rss/news.xml", "/feed", "/news/rss", "/press-releases/rss", "/rss/events.xml", "/rss.xml")
+PATHS = ("/rss/news-releases.xml", "/rss/pressrelease.aspx", "/rss/news.xml", "/feed", "/news/rss", "/press-releases/rss", "/rss/events.xml", "/rss.xml",
+         "/news-releases/rss", "/newsroom/rss", "/news/rss.xml", "/press-releases/feed", "/news/feed", "/rss/news-releases", "/investors/rss", "/feed/press-releases")
 CONCURRENCY = 16
 TIMEOUT = 8.0
 UA = "alert-interface IR feed discovery (sammyjmorton@gmail.com)"
@@ -47,7 +52,31 @@ def feed_kind(body: str) -> str | None:
     return None
 
 
+_ROBOTS: dict[str, robotparser.RobotFileParser] = {}
+
+
+async def robots_for(client: httpx.AsyncClient, base: str) -> robotparser.RobotFileParser:
+    """The parsed robots.txt of a scheme://host, fetched once; an unreachable or missing file allows everything."""
+    if base not in _ROBOTS:
+        rp = robotparser.RobotFileParser()
+        try:
+            r = await client.get(base + "/robots.txt", timeout=TIMEOUT, follow_redirects=True)
+            rp.parse(r.text.splitlines() if r.status_code == 200 else [])
+        except Exception:
+            rp.parse([])
+        _ROBOTS[base] = rp
+    return _ROBOTS[base]
+
+
+def allowed(rp: robotparser.RobotFileParser, url: str) -> bool:
+    """Pure: a URL is requested only when robots.txt allows it both for our agent and for everyone."""
+    return rp.can_fetch(UA, url) and rp.can_fetch("*", url)
+
+
 async def probe(client: httpx.AsyncClient, url: str) -> tuple[str, int] | None:
+    u = urlparse(url)
+    if not allowed(await robots_for(client, f"{u.scheme}://{u.netloc}"), url):
+        return None
     try:
         r = await client.get(url, timeout=TIMEOUT, follow_redirects=True)
     except Exception:
@@ -75,11 +104,12 @@ async def find_feed(client: httpx.AsyncClient, domain: str) -> tuple[str | None,
 
 async def run(argv: list[str]) -> int:
     refresh_all = "--all" in argv
+    missing = "--missing" in argv
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
     only_set = {x.strip().upper() for x in only.split(",")} if only else None
     async with ScriptSessionLocal() as s:
-        rows = (await s.execute(text("SELECT t.symbol, f.symbol IS NOT NULL AS has_row FROM tickers t LEFT JOIN ir_feeds f ON f.symbol = t.symbol WHERE t.is_active ORDER BY t.symbol"))).all()
-    symbols = [r[0] for r in rows if (only_set and r[0] in only_set) or (not only_set and (refresh_all or not r[1]))]
+        rows = (await s.execute(text("SELECT t.symbol, f.symbol IS NOT NULL AS has_row, f.domain IS NOT NULL AND f.feed_url IS NULL AS feedless FROM tickers t LEFT JOIN ir_feeds f ON f.symbol = t.symbol WHERE t.is_active ORDER BY t.symbol"))).all()
+    symbols = [r[0] for r in rows if (only_set and r[0] in only_set) or (not only_set and (refresh_all or not r[1] or (missing and r[2])))]
     print(f"{STEP_LABEL}: {len(symbols)} ticker(s) to probe", flush=True)
     intrinio = IntrinioClient()
     domains: dict[str, str | None] = {}

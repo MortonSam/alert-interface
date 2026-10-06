@@ -7,11 +7,13 @@ from datetime import datetime as dt_datetime
 from statistics import mean
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_admin, _get_admin_token
+from pydantic import BaseModel
+
+from app.auth import get_draft_caller, require_admin, _get_admin_token
 from app.config import settings
 from app.database import get_db
 from app.models.event import Event
@@ -2001,9 +2003,61 @@ async def get_briefing(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
 
 @router.get("/{symbol}/questions")
 async def get_questions(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
-    """The question strip: up to four questions this stock's data raises, each answered from stored rows (services/questions)."""
+    """The question strip: up to four questions this stock's data raises, each answered from stored rows (services/questions).
+    ask_enabled follows the ASK_IVY_ENABLED flag: the free-text box renders only when it is true."""
+    from app.config import settings
     from app.services.briefing_build import build_questions
-    return await build_questions(db, symbol)
+    return {**(await build_questions(db, symbol)), "ask_enabled": bool(settings.ask_ivy_enabled)}
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+@router.post("/{symbol}/ask")
+async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSession = Depends(get_db), caller_id: str = Depends(get_draft_caller)) -> dict:
+    """Ask Ivy (services/ask_ivy): a free-text question answered only from this stock's stored facts. 404 while the flag is off.
+    Served from the question log when the same normalized question was answered against an unchanged fact pack; otherwise
+    rate-limited per IP and per IP and stock, paused for the day at the spend cap, charged before the model runs and refunded
+    when the run fails. Every question is logged."""
+    from app.config import settings
+    from app.services import ask_ivy as A
+    from app.services.draft_limiter import check_limit, get_client_ip, record_use, refund_use
+    if not settings.ask_ivy_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+    question = " ".join(body.question.split())
+    if not question or len(question) > A.MAX_QUESTION_CHARS:
+        raise HTTPException(status_code=422, detail=f"Ask a question of up to {A.MAX_QUESTION_CHARS} characters.")
+    pack = await A.fact_pack(db, symbol)
+    if not pack["active"]:
+        raise HTTPException(status_code=404, detail="No stored data for this stock")
+    ip = get_client_ip(request)
+    normalized = A.normalize_question(question, pack["symbol"], pack["name"])
+    key = A.cache_key(pack["symbol"], normalized, pack["fingerprint"])
+    hit = await A.cached_answer(db, key)
+    if hit is not None:
+        await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=bool(hit.get("inputs")), verdict="cached", answer=hit,
+                             model=None, input_tokens=None, output_tokens=None, cost=None, cached=True, ip_hash=A.ip_hash(ip))
+        return {"symbol": pack["symbol"], "name": pack["name"], "answer": {**hit, "question": question}, "cached": True}
+    if await A.spend_today(db) >= settings.ask_ivy_daily_cap_usd:
+        raise HTTPException(status_code=429, detail="Ivy has reached today's budget and is paused until tomorrow.")
+    await check_limit(db, A.ASK_POLICY, caller_id, ip)
+    await check_limit(db, A.ASK_TICKER_POLICY, caller_id, f"{ip}|{pack['symbol']}")
+    charged = await record_use(db, A.ASK_POLICY, caller_id, ip, label=pack["symbol"])
+    charged_t = await record_use(db, A.ASK_TICKER_POLICY, caller_id, f"{ip}|{pack['symbol']}", label=pack["symbol"])
+    try:
+        result = await A.answer_question(db, pack, question)
+    except Exception as exc:
+        await refund_use(db, A.ASK_POLICY, ip, charged)
+        await refund_use(db, A.ASK_TICKER_POLICY, f"{ip}|{pack['symbol']}", charged_t)
+        await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=False, verdict="failed", answer=None,
+                             model=None, input_tokens=None, output_tokens=None, cost=None, cached=False, ip_hash=A.ip_hash(ip))
+        raise HTTPException(status_code=503, detail="Ivy couldn't answer just now; nothing was charged to your limit.") from exc
+    await A.add_spend(db, result.get("cost"))
+    await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=result["covered"] != "no" and result["verdict"] in ("verified", "partly_dropped"),
+                         verdict=result["verdict"], answer=result["answer"], model=result["model"], input_tokens=result["input_tokens"], output_tokens=result["output_tokens"],
+                         cost=result.get("cost"), cached=False, ip_hash=A.ip_hash(ip))
+    return {"symbol": pack["symbol"], "name": pack["name"], "answer": result["answer"], "cached": False}
 
 
 @router.get("/by-symbol/{symbol}", response_model=TickerRead)

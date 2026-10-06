@@ -83,4 +83,17 @@ describe("the question strip renders answers from the API with a receipt on ever
     const page = read("app/tickers/[symbol]/page.tsx");
     expect(page).toContain('<div data-slot="question-strip"><QuestionStrip symbol={upperSymbol} /></div>');
   });
+
+  it("the ask box renders only behind the flag, types no number, and shows every number through the tokenizer with its receipt", () => {
+    const strip = read("components/QuestionStrip.tsx");
+    expect(strip).toContain("{data!.ask_enabled && <AskIvy symbol={symbol} name={data!.name ?? symbol} />}");   // the flag gates it
+    const src = read("components/AskIvy.tsx");
+    const copy = src.replace(/className="[^"]*"/g, "").replace(/maxLength=\{300\}/, "");
+    expect(copy).not.toMatch(/[0-9]{2,}|[0-9]%|\$[0-9]/);                                                        // no typed figure
+    expect(src).toContain("answerParts(answer.data, answer.inputs)");                                              // the strip's tokenizer
+    expect(src).toContain("title={part.receipt ?? undefined}");                                                    // the receipt on the number
+    expect(src).toContain("asOfLabel(answer.as_of, answer.as_of_kind)");                                           // dated by its facts
+    expect(src).not.toMatch(/recommend(?!ations\.)/i);                                                            // the only mention says there are none
+    expect(src).toContain('posthog.capture("question_asked"');
+  });
 });
