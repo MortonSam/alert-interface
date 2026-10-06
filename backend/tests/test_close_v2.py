@@ -126,4 +126,4 @@ class TestMissingStockClose:
         non_v2 = src[src.index("async def _close_picks"):src.index("async def _resolve_close_from_iv_history")]
         assert "if not _is_valid_price(close_price):" in non_v2 and non_v2.index("if not _is_valid_price(close_price):") < non_v2.index('pick.status = "closed"')
         assert '"--reopen-null-close" in sys.argv' in src
-        assert 'record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting})' in src
+        assert 'record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting, "auto_voided": auto_voided})' in src

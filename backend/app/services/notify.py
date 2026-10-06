@@ -72,8 +72,10 @@ def validate_error_message(check: str, message: str, rows: list[str]) -> tuple[s
 
 
 def digest_message(run_date: str, passed: int, total: int, failed: list[str], validate: dict | None, chain_coverage_pct: float | None,
-                   courier: dict | None) -> tuple[str, str]:
+                   courier: dict | None, auto_voided: list[str] | None = None) -> tuple[str, str]:
     parts = [f"failed: {', '.join(failed)}" if failed else "all steps passed"]
+    if auto_voided:
+        parts.append(f"auto-voided {len(auto_voided)} pick(s): " + "; ".join(auto_voided))
     if validate:
         parts.append(f"validate: {validate.get('error_count', 0)} errors, {validate.get('warn_count', 0)} warnings")
     parts.append(f"chain coverage {chain_coverage_pct:.0f}%" if chain_coverage_pct is not None else "chain coverage unknown")

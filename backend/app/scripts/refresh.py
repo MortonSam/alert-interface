@@ -272,8 +272,9 @@ def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime
     failed = [label for label, ok in results if not ok]
     validate = outcomes.get("Validate data") or {}
     figures = validate.get("figures") or {}
+    closer = outcomes.get("Close expired alert picks") or {}
     return digest_message(now.strftime("%Y-%m-%d"), sum(1 for _, ok in results if ok), len(results), failed, validate,
-                          figures.get("chain_coverage_pct"), courier_summary(outcomes, now))
+                          figures.get("chain_coverage_pct"), courier_summary(outcomes, now), closer.get("auto_voided") or None)
 
 
 RUN_LABEL = "Nightly run"                  # the pseudo-step whose outcome tells the story of the run itself

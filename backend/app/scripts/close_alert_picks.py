@@ -498,7 +498,14 @@ async def _main() -> int:
     await _settle_credit_shadows()
     closed, waiting = await _close_v2_picks()
     await _close_picks()
-    await record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting})
+    # the void standard: a pick whose company reported outside the 1-to-5-session entry window is voided, winner or loser
+    from app.services.pick_void import auto_void
+    async with AsyncSessionLocal() as session:
+        auto_voided = await auto_void(session)
+        await session.commit()
+    for label in auto_voided:
+        print(f"[void] {label}")
+    await record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting, "auto_voided": auto_voided})
     return 0
 
 
