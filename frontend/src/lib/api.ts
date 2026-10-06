@@ -1027,6 +1027,22 @@ export interface BriefingResponse {
 }
 
 
+export interface QuestionAnswer {
+  key: string;
+  question: string;
+  data: string;              // what this stock's rows show: one or two sentences, every number an input
+  idea: string;              // the plain-words explanation for someone new
+  inputs: BriefingInput[];
+  as_of: string | null;
+  rule: string;
+}
+
+export interface QuestionsResponse {
+  symbol: string;
+  name: string | null;       // the short company name the header uses
+  questions: QuestionAnswer[];
+}
+
 export interface SiteStats {
   option_contracts_captured: number;         // contracts across the latest night's stored courier chains
   option_contracts_as_of: string | null;     // that night's chain date (YYYY-MM-DD)
@@ -1066,6 +1082,7 @@ export interface Watchlist {
 export const api = {
   tickers: {
     briefing: (symbol: string) => request<BriefingResponse>(`/tickers/${encodeURIComponent(symbol)}/briefing`),
+    questions: (symbol: string) => request<QuestionsResponse>(`/tickers/${encodeURIComponent(symbol)}/questions`),
     list: (activeOnly = true) =>
       request<Ticker[]>(`/tickers?active_only=${activeOnly}`),
     get: (id: string) => request<Ticker>(`/tickers/${id}`),

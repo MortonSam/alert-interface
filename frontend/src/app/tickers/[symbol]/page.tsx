@@ -47,6 +47,7 @@ import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
 import { Briefing } from "@/components/Briefing";
+import { QuestionStrip } from "@/components/QuestionStrip";
 import { hasBriefing, type BriefingResponse } from "@/lib/briefing";
 import StructuredNoteView from "@/components/StructuredNoteView";
 
@@ -1994,8 +1995,8 @@ export default function TickerPage() {
         <div className="mt-10 mb-16">
           <SectionKicker index="01" label="Overview" />
           {hasBriefing(briefing) && <Briefing sentences={briefing.sentences} />}
-          {/* QUESTION STRIP SLOT: the question strip renders here in a later block; nothing is mounted yet. */}
-          <div data-slot="question-strip" aria-hidden="true" />
+          {/* The question strip: up to four questions this stock's data raises, answered from stored rows */}
+          <div data-slot="question-strip"><QuestionStrip symbol={upperSymbol} /></div>
         </div>
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}

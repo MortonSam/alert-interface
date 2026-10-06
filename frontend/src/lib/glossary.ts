@@ -15,7 +15,7 @@ const GLOSSARY: Record<string, string> = {
   "implied range":
     "The price band the market expects the stock to stay within by expiration.",
   "realized volatility":
-    "How much the stock has actually moved recently, measured from daily price changes over a set window.",
+    "How much the stock has actually moved recently, measured from daily price changes over a set window. It looks backward at what did happen, where an implied move looks forward at what the options market expects.",
   "rv rank":
     "Where today's realized volatility falls within its own range over the past year (0 = lowest, 100 = highest).",
   percentile:

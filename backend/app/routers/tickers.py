@@ -1999,6 +1999,13 @@ async def get_briefing(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
     return out
 
 
+@router.get("/{symbol}/questions")
+async def get_questions(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """The question strip: up to four questions this stock's data raises, each answered from stored rows (services/questions)."""
+    from app.services.briefing_build import build_questions
+    return await build_questions(db, symbol)
+
+
 @router.get("/by-symbol/{symbol}", response_model=TickerRead)
 async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) -> TickerRead:
     """Look up a single ticker by symbol. An old symbol resolves to the ticker's current one. Returns 404 if not found."""

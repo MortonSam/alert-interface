@@ -161,3 +161,84 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     if s2:
         sentences.append(s2)
     return {"symbol": sym, "name": ticker.name, "state": None, "sentences": sentences}
+
+
+# ── the question strip ───────────────────────────────────────────────────────
+
+async def build_questions(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
+    """{symbol, name, questions: [...]}: the first four catalog questions this stock's data qualifies for (services/questions)."""
+    from statistics import median
+    from app.services import questions as Q
+    today = today or date.today()
+    sym = await resolve_symbol(db, symbol.upper())
+    ticker = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
+    if ticker is None or not ticker.is_active:
+        return {"symbol": sym, "name": None, "questions": []}
+    name = B.short_name(ticker.name) or sym
+
+    q = await _quote(sym)
+    quote_price = q.price if q and q.state == "ok" else None
+    df = await price_bars.bars(db, sym, today - timedelta(days=B.WINDOW_52W_DAYS * Q.RANK_YEARS))
+    facts = bar_facts(df, today)
+    daily = daily_moves(df)
+
+    excluded = await is_excluded(db, sym)
+    mismatch = await basis_mismatch_dates(db, ticker.id)
+    rows = (await db.execute(text("""
+        SELECT event_date, pct_change_1d, outcome::text AS outcome, report_timing FROM historical_reactions
+        WHERE ticker_id = :t AND event_type = 'earnings' ORDER BY event_date"""), {"t": ticker.id})).mappings().all()
+    sample = [] if excluded else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
+    moves = [float(r["pct_change_1d"]) for r in sample]
+    sample_as_of = sample[-1]["event_date"] if sample else None
+    typical_abs = sum(abs(m) for m in moves) / len(moves) if moves else None
+    earnings_dates = (await db.execute(select(Event.event_date).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS,
+                                                                       Event.event_date >= today - timedelta(days=60), Event.event_date <= today))).scalars().all()
+
+    cands: list[dict | None] = []
+    # 1. inside a report's window
+    latest = max(earnings_dates, default=None)
+    if latest is not None and B.in_reaction_window(latest, today) and typical_abs:
+        hr = next((r for r in rows if r["event_date"] == latest), None)
+        ev = (await db.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == latest))).scalars().first()
+        timing = hr["report_timing"] if hr and hr["report_timing"] else (ev.report_timing if ev else None)
+        move = _f(hr["pct_change_1d"]) if hr and hr["pct_change_1d"] is not None else move_from_bars(df, latest, timing)
+        if move is not None:
+            past = [abs(m) for r, m in zip(sample, moves) if r["event_date"] != latest]
+            cands.append(Q.q_reaction_normal(name=name, symbol=sym, event_date=latest, timing=timing, move_pct=move, typical_abs=typical_abs,
+                                             larger_count=sum(1 for m in past if m > abs(move)), n_reports=len(past), sample_as_of=sample_as_of))
+    # 2. a report within 45 days with a fresh implied move
+    ne = await next_earnings_for(db, ticker.id, today)
+    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs:
+        implied = await _implied(db, sym, quote_price, ne.date, today)
+        if implied:
+            cands.append(Q.q_implied_big(name=name, symbol=sym, implied_pct=implied["implied_pct"], chain_date=implied["chain_date"], next_date=ne.date,
+                                         typical_abs=typical_abs, n_reports=len(sample), sample_as_of=sample_as_of))
+    # 3. beats followed by a fall
+    beats = [r for r in sample if r["outcome"] == "beat"]
+    cands.append(Q.q_beat_fell(name=name, symbol=sym, beats=len(beats), fell=sum(1 for r in beats if float(r["pct_change_1d"]) < 0), as_of=sample_as_of))
+    # 4. a big non-earnings move
+    exclude = set()
+    for d in earnings_dates:
+        exclude.add(d); exclude.add(nth_trading_day_after(d, 1))
+    big = B.find_big_move(daily, exclude, today)
+    if big and daily:
+        all_abs = [abs(p) for d, p in daily if d > today - timedelta(days=366 * Q.RANK_YEARS)]
+        smaller = sum(1 for a in all_abs if a < abs(big["move_pct"])) / len(all_abs) * 100
+        cands.append(Q.q_big_move(name=name, symbol=sym, move_date=big["move_date"], move_pct=big["move_pct"], typical_abs=big["typical_abs"], multiple=big["multiple"],
+                                  smaller_share=smaller, n_sessions=len(all_abs)))
+    # 5. analyst upgrades
+    ups = (await db.execute(text("""
+        SELECT event_date FROM events WHERE ticker_id = :t AND event_type = 'analyst_action' AND metadata->>'action' = 'up' AND event_date >= :since"""),
+        {"t": ticker.id, "since": today - timedelta(days=Q.UPGRADE_DAYS)})).scalars().all()
+    stats = (await db.execute(text("SELECT upgrade_sessions, median_1d_upgrade, upgrade_5d_continuation_pct, upgrade_5d_sample, computed_at FROM analyst_reaction_stats WHERE symbol = :s"), {"s": sym})).mappings().first()
+    if stats and stats["median_1d_upgrade"] is not None:
+        cands.append(Q.q_upgrades(name=name, symbol=sym, upgrades_30d=len(ups), upgrade_sessions=stats["upgrade_sessions"] or 0, median_1d=float(stats["median_1d_upgrade"]),
+                                  continuation_pct=_f(stats["upgrade_5d_continuation_pct"]), sample_5d=stats["upgrade_5d_sample"] or 0,
+                                  stats_as_of=stats["computed_at"].date() if stats["computed_at"] else None, newest_upgrade=max(ups, default=None)))
+    # 6. an ex-dividend date
+    exd = (await db.execute(text("""
+        SELECT event_date, (metadata->>'dividend_amount')::float AS amount FROM events WHERE ticker_id = :t AND event_type = 'ex_dividend'
+        AND event_date >= :today ORDER BY event_date LIMIT 1"""), {"t": ticker.id, "today": today})).mappings().first()
+    if exd:
+        cands.append(Q.q_ex_dividend(name=name, symbol=sym, ex_date=exd["event_date"], amount=exd["amount"], today=today))
+    return {"symbol": sym, "name": name, "questions": Q.choose(cands)}

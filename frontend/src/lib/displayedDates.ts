@@ -5,6 +5,7 @@
 export interface DateRule { file: string; forbid: RegExp; because: string }
 
 export const DATE_RULES: DateRule[] = [
+  { file: "components/QuestionStrip.tsx", forbid: /new Date\(|Date\.now\(|toLocaleDateString\(\)|last_refreshed_at/, because: "an answer's date comes from its data, never from the request time" },
   { file: "components/Briefing.tsx", forbid: /new Date\(|Date\.now\(|toLocaleDateString\(\)|last_refreshed_at/, because: "a briefing date comes from its sentence or input, never from the request time" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /today&apos;s range|today's range/, because: "the band is labelled by the chain date" },
   { file: "app/tickers/[symbol]/page.tsx", forbid: /as of \{fmtQuoteTime\(/, because: "a quote shows its date and time (fmtQuoteDateTime)" },
@@ -23,6 +24,8 @@ export const DATE_RULES: DateRule[] = [
 ];
 
 export const DATE_REQUIREMENTS: { file: string; require: RegExp; because: string }[] = [
+  { file: "components/QuestionStrip.tsx", require: /insightAsOfLine\(q\.as_of\)/, because: "every answer shows the date its data rests on, from the API" },
+  { file: "components/QuestionStrip.tsx", require: /answerParts\(q\.data, q\.inputs\)/, because: "every number in an answer carries its receipt from the API's inputs" },
   { file: "components/Briefing.tsx", require: /sentenceReceipt\(s\)/, because: "every briefing sentence shows how it was computed and its own as-of date, from the API" },
   { file: "components/Briefing.tsx", require: /sourceLine\(inp\)/, because: "every input is listed with its own date and source" },
   { file: "app/tickers/[symbol]/page.tsx", require: /Last bar \{chartLastBar\}/, because: "the chart names its last bar" },

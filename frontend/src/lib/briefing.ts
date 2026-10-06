@@ -19,6 +19,10 @@ export const GLOSSARY_LINKS: ReadonlyArray<readonly [string, string]> = [
   ["sector", "sector"],
   ["beat", "beat"],
   ["EPS", "eps"],
+  ["realized volatility", "realized volatility"],
+  ["ex-dividend", "ex-dividend"],
+  ["straddle", "straddle"],
+  ["upgrade", "upgrade"],
 ];
 
 export interface TextPart { text: string; term?: string }
