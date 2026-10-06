@@ -21,10 +21,21 @@ async def test_a_would_be_pick_evaluated_in_dry_run_returns_picked_with_no_struc
     `structure`, which only the write path set. Now it is None on a dry run and the call returns."""
     from app.routers import thesis
     import app.services.ivy_v2 as ivy
-    monkeypatch.setattr(ivy, "compute_live_features", _fake_features)
+    # the confirmed-date guard now runs first, so the dry-run path is reached only on a company-confirmed date: use one stored locally
+    async with ScriptSessionLocal() as s:
+        row = (await s.execute(text("""SELECT t.symbol, e.event_date FROM events e JOIN tickers t ON t.id = e.ticker_id
+                                       WHERE e.event_type = 'earnings' AND e.is_confirmed AND e.unresolved_since IS NULL AND e.event_date >= CURRENT_DATE
+                                       ORDER BY e.event_date LIMIT 1"""))).first()
+    if row is None:
+        pytest.skip("no company-confirmed future report stored locally")
+
+    async def features(sym, db):
+        return SimpleNamespace(event_date=row.event_date, symbol=sym)
+
+    monkeypatch.setattr(ivy, "compute_live_features", features)
     monkeypatch.setattr(ivy, "decide", _fake_decide_pick)
     async with ScriptSessionLocal() as s:
-        out = await thesis._compute_alert_pick_v2("FDX", s, "nightly", True, datetime.now(timezone.utc).isoformat())
+        out = await thesis._compute_alert_pick_v2(row.symbol, s, "nightly", True, datetime.now(timezone.utc).isoformat())
     assert out["outcome"] == "picked" and out["pick_id"] is None and out["structure"] is None
     src = __import__("inspect").getsource(thesis._compute_alert_pick_v2)
     assert "structure: dict | None = None" in src

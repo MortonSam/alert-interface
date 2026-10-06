@@ -330,6 +330,7 @@ export default function IvyTradesPage() {
 
   const openPicks = picks.filter((p) => p.status === "open");
   const closedPicks = picks.filter((p) => p.status === "closed");
+  const voidPicks = picks.filter((p) => p.status === "void");     // kept in the ledger with the reason; outside every count and P&L below
 
   const avgUnrealized =
     openPicks.length > 0
@@ -523,6 +524,24 @@ export default function IvyTradesPage() {
             />
           ))}
         </div>
+      )}
+      {voidPicks.length > 0 && (
+        <section className="mt-16">
+          <h2 className="font-display text-lg font-bold text-foreground">Void</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Picks made on a wrong report date. Kept here with the reason, counted in nothing above, never deleted.
+          </p>
+          <ul className="mt-4 divide-y divide-border">
+            {voidPicks.map((p) => (
+              <li key={p.id} className="py-3 text-sm">
+                <span className="font-semibold">{p.symbol}</span>
+                <span className="text-muted-foreground"> · picked {p.generated_at.slice(0, 10)}</span>
+                {p.voided_at && <span className="text-muted-foreground"> · voided {p.voided_at.slice(0, 10)}</span>}
+                {p.void_reason && <p className="text-muted-foreground mt-1">{p.void_reason}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

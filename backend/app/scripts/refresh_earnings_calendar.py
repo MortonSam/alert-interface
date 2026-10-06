@@ -424,7 +424,9 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
         past_estimates = list((await session.execute(
             select(Event).where(
                 Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(False),
-                Event.event_date < today, Event.event_date >= today - timedelta(days=PAST_LOOKBACK_DAYS))
+                Event.event_date < today, Event.unresolved_since.is_(None) | (Event.event_date >= today - timedelta(days=PAST_LOOKBACK_DAYS)))
+            # every past estimate still standing as resolved is re-judged, however old (FDX's June 2026 estimate stood for
+            # months beyond the lookback); one already marked unresolved is re-asked only inside the lookback
         )).scalars().all())
         past: list[tuple[Event, PastResolution]] = []
         for e in past_estimates:

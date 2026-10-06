@@ -117,6 +117,9 @@ def _build_verdict(result: dict, receipt: dict | None) -> str:
         return "Picked"
     if outcome == "structure_failed":
         return "Refused, structure failed"
+    if outcome == "unconfirmed_date":
+        d = receipt.get("event_date") if receipt else None
+        return f"Refused, report date {d} not confirmed by the company" if d else "Refused, report date not confirmed by the company"
     if outcome == "open_pick_exists":
         since = result.get("existing_since")
         return f"Holding, open pick since {since}" if since else "Holding, open pick"

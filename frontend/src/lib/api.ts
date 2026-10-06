@@ -879,6 +879,8 @@ export interface AlertPickLedgerItem {
   reasoning: string | null;
   generated_at: string;
   status: string;
+  void_reason?: string | null;        // set when status is "void": why the pick is outside the record
+  voided_at?: string | null;
   close_price: number | null;
   closed_at: string | null;
   direction_hit: boolean | null;

@@ -7,6 +7,7 @@ export const IVY_OUTCOME_LABELS: Record<string, string> = {
   vol_gate: "Refused: options too expensive for the edge",
   no_fresh_chain: "Refused: no current options data",
   structure_failed: "Refused: could not build the spread from the available strikes",
+  unconfirmed_date: "Refused: report date not confirmed by the company",
   momentum_gate: "Passed: no momentum setup",
   insufficient_history: "Passed: not enough earnings history",
   no_features: "Passed: no data for this name",

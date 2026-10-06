@@ -31,7 +31,9 @@ class AlertPick(Base):
     reasoning: Mapped[str | None] = mapped_column(Text)
     entry_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default="open")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default="open")   # open | closed | void
+    void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)        # why a pick was voided (a wrong report date); shown in the ledger
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     algo_version: Mapped[str] = mapped_column(String(20), nullable=False, default="v1", server_default="v1")
     model_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual", server_default="manual")

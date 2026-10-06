@@ -15,6 +15,7 @@ IVY_OUTCOMES: dict[str, dict[str, str]] = {
     "vol_gate":             {"category": REFUSED, "label": "Refused: options too expensive for the edge"},
     "no_fresh_chain":       {"category": REFUSED, "label": "Refused: no current options data"},
     "structure_failed":     {"category": REFUSED, "label": "Refused: could not build the spread from the available strikes"},
+    "unconfirmed_date":     {"category": REFUSED, "label": "Refused: report date not confirmed by the company"},
     "momentum_gate":        {"category": PASSED,  "label": "Passed: no momentum setup"},
     "insufficient_history": {"category": PASSED,  "label": "Passed: not enough earnings history"},
     "no_features":          {"category": PASSED,  "label": "Passed: no data for this name"},

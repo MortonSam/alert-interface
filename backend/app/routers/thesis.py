@@ -1181,6 +1181,15 @@ async def _compute_alert_pick_v2(
     )
     all_features = all_result.scalars().all()
 
+    # The report date behind the features, with its confirmation as every page reads it (services.earnings_calendar.level_of)
+    from app.services.earnings_calendar import level_of
+    ev = (await db.execute(
+        select(Event).join(Ticker, Ticker.id == Event.ticker_id)
+        .where(Ticker.symbol == sym, Event.event_type == EventType.EARNINGS, Event.event_date == live_features.event_date)
+    )).scalars().first()
+    event_confirmation = level_of(ev.is_confirmed, ev.unresolved_since) if ev is not None else "estimated"
+    event_source = getattr(ev.source, "value", ev.source) if ev is not None and ev.source is not None else None
+
     # AI client for narration (template fallback on failure)
     ai_client = AnthropicClient()
     result = await v2_decide(
@@ -1191,6 +1200,24 @@ async def _compute_alert_pick_v2(
         all_features=all_features,
         ai_client=ai_client,
     )
+    if isinstance(result.receipt, dict):
+        result.receipt["event_date"] = live_features.event_date.isoformat()
+        result.receipt["event_confirmation"] = event_confirmation
+        result.receipt["event_source"] = event_source
+
+    # Ivy picks only a report date the company has confirmed: an aggregator estimate can be weeks wrong (FDX, Oct 2026)
+    if result.pick and event_confirmation != "confirmed":
+        how = "expected, not confirmed" if event_confirmation == "expected_unconfirmed" else f"an estimate" + (f" from {event_source}" if event_source else "")
+        return {
+            "outcome": "unconfirmed_date",
+            "leans": None,
+            "pick_id": None,
+            "note": f"report date {live_features.event_date.isoformat()} is {how}; Ivy picks only a company-confirmed date",
+            "generated_at": generated_at,
+            "existing_pick": False,
+            "draft": None,
+            "receipt": result.receipt,
+        }
 
     print(
         f"[alert-pick-v2] {sym} | pick={result.pick} direction={result.direction} "
@@ -2006,10 +2033,11 @@ async def list_alert_picks(
     for r in rows:
         entry = float(r.entry_price)
         is_closed = r.status == "closed"
+        is_void = r.status == "void"             # kept in the ledger with its reason; no mark, no P&L, outside the record
         close_price = float(r.close_price) if r.close_price is not None else None
 
-        # For closed picks use close_price; for open use live mark
-        current = close_price if is_closed else price_map.get(r.symbol)
+        # For closed picks use close_price; for open use live mark; a void pick is priced by nothing
+        current = None if is_void else (close_price if is_closed else price_map.get(r.symbol))
         unrealized = round(((current - entry) / entry) * 100, 2) if current and entry else None
 
         # Scoring
@@ -2057,7 +2085,7 @@ async def list_alert_picks(
             expiration=r.expiration,
             entry_price=entry,
             current_price=current,
-            quote_ts=ts_map.get(r.symbol) if not is_closed else None,
+            quote_ts=ts_map.get(r.symbol) if not (is_closed or is_void) else None,
             unrealized_move_pct=unrealized,
             cost_to_enter=float(r.cost_to_enter) if r.cost_to_enter else None,
             max_loss=float(r.max_loss) if r.max_loss else None,
@@ -2070,6 +2098,8 @@ async def list_alert_picks(
             reasoning=r.reasoning,
             generated_at=r.generated_at.isoformat(),
             status=r.status,
+            void_reason=r.void_reason,
+            voided_at=r.voided_at.isoformat() if r.voided_at else None,
             close_price=close_price,
             closed_at=r.closed_at.isoformat() if r.closed_at else None,
             direction_hit=direction_hit,

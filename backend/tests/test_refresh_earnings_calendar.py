@@ -71,7 +71,8 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
             plan = await reconcile(s, tickers, sources, NOW, edgar=None)
         assert plan.checked == 3
         assert plan.inserted == [f"{NKE}: 2026-10-01 estimated (Yahoo Finance)"]
-        assert plan.superseded == [f"{NKE}: 2026-09-28 replaced by the 2026-10-01 estimate"]
+        assert plan.superseded == [f"{NKE}: 2026-06-25 the quarter was reported on 2026-06-30; the 2026-06-25 estimate is removed",      # an old estimate never stands beside a reported quarter
+                                   f"{NKE}: 2026-09-28 replaced by the 2026-10-01 estimate"]
         assert plan.unresolved == [f"{LONE}: 2026-09-28 expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
         assert plan.no_date == [LONE, NONE]
         assert plan.replaced == [f"{NKE}: 2026-12-16 -> 2026-10-01"]
@@ -86,7 +87,6 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
         got = [tuple(r) for r in rows]
         assert got == [
             (LONE, date(2026, 9, 28), "finnhub", False, TODAY, "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR", "unknown"),
-            (NKE, date(2026, 6, 25), "yfinance", False, None, None, "unknown"),
             (NKE, date(2026, 6, 30), "yfinance", False, None, None, "unknown"),
             (NKE, date(2026, 10, 1), "yfinance", False, None, "estimated (Yahoo Finance)", "amc"),
             (NKE, date(2026, 12, 16), "finnhub", False, None, "estimated (Finnhub)", "unknown"),
@@ -224,7 +224,8 @@ async def test_production_2026_09_29_a_silent_yahoo_drops_nothing_unh_uber_and_n
         async with ScriptSessionLocal() as s:
             tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_(syms)).order_by(Ticker.symbol))).scalars().all())
             plan = await reconcile(s, tickers, silent, NOW, edgar=None)
-        assert plan.dropped == [] and plan.replaced == [] and plan.superseded == [] and plan.no_date == []
+        assert plan.dropped == [] and plan.replaced == [] and plan.no_date == []
+        assert plan.superseded == [f"{UNH}: 2026-07-28 the quarter was reported on 2026-07-16; the 2026-07-28 estimate is removed"]   # the stale July estimate goes
         assert plan.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub)"]
         assert plan.standing == [
             f"{UBER}: 2026-11-03 (yfinance) stands; Yahoo Finance returned no future date this run",

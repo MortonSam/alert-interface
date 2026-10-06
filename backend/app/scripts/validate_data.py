@@ -2138,6 +2138,43 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── The calendar: a company-confirmed date stands alone; a past estimate never stands as resolved ───────
+
+ESTIMATE_BESIDE_CONFIRMED_DAYS = 45
+
+async def check_estimate_beside_confirmed(session) -> CheckResult:
+    """ERROR when a ticker holds an unconfirmed future estimate within ESTIMATE_BESIDE_CONFIRMED_DAYS of a company-confirmed
+    future date: the confirmed date replaces the estimate (refresh_earnings_calendar), it never sits beside it."""
+    rows = (await session.execute(text("""
+        SELECT t.symbol, est.event_date, con.event_date FROM events est
+        JOIN events con ON con.ticker_id = est.ticker_id AND con.event_type = 'earnings' AND con.is_confirmed AND con.event_date >= CURRENT_DATE
+        JOIN tickers t ON t.id = est.ticker_id
+        WHERE est.event_type = 'earnings' AND NOT est.is_confirmed AND est.event_date >= CURRENT_DATE
+          AND abs(est.event_date - con.event_date) <= :d AND t.is_active ORDER BY t.symbol"""), {"d": ESTIMATE_BESIDE_CONFIRMED_DAYS})).all()
+    if rows:
+        return CheckResult("estimate_beside_confirmed", ERROR, f"{len(rows)} estimate(s) stand beside a company-confirmed date",
+                           [f"{r[0]}: estimate {r[1].isoformat()} beside confirmed {r[2].isoformat()}" for r in rows[:40]])
+    return CheckResult("estimate_beside_confirmed", PASS, f"No estimate within {ESTIMATE_BESIDE_CONFIRMED_DAYS} days of a company-confirmed date")
+
+
+async def check_past_estimate_standing(session) -> CheckResult:
+    """ERROR when an unconfirmed estimate two or more sessions in the past still stands as a resolved date: no reported
+    EPS, no reaction row, and not marked unresolved. The calendar step marks every such row the night it ages past."""
+    from app.services.trading_calendar import sessions_after
+    today = date.today()
+    rows = (await session.execute(text("""
+        SELECT t.symbol, e.event_date, e.source::text FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE e.event_type = 'earnings' AND NOT e.is_confirmed AND e.unresolved_since IS NULL AND e.eps_actual IS NULL
+          AND e.event_date < CURRENT_DATE AND t.is_active
+          AND NOT EXISTS (SELECT 1 FROM historical_reactions hr WHERE hr.ticker_id = e.ticker_id AND hr.event_type = 'earnings'
+                          AND hr.event_date BETWEEN e.event_date - 3 AND e.event_date + 3)
+        ORDER BY e.event_date DESC, t.symbol"""))).all()
+    stale = [f"{r[0]} {r[1].isoformat()} ({r[2]})" for r in rows if sessions_after(r[1], today) >= 2]
+    if stale:
+        return CheckResult("past_estimate_standing", ERROR, f"{len(stale)} past estimate(s) still stand as resolved dates", stale[:40])
+    return CheckResult("past_estimate_standing", PASS, "No past estimate stands as a resolved date")
+
+
 # ── Prices behind every reaction; a realized-volatility snapshot that was really computed ─────────────
 
 async def check_reactions_after_first_bar(session) -> CheckResult:
@@ -2849,6 +2886,9 @@ CHECKS = [
     check_eps_actuals_fresh,
     # one earnings event per ticker and date
     check_earnings_events_unique,
+    # the calendar: confirmed dates stand alone, past estimates never stand as resolved
+    check_estimate_beside_confirmed,
+    check_past_estimate_standing,
     # prices behind every reaction; RV really recomputed
     check_reactions_after_first_bar,
     check_rv_snapshot_unchanged,

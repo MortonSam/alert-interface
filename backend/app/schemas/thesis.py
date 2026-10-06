@@ -205,6 +205,8 @@ class AlertPickLedgerItem(BaseModel):
     reasoning: str | None
     generated_at: str
     status: str
+    void_reason: str | None = None       # set when status is void: why the pick does not count
+    voided_at: str | None = None
     source: str = "manual"
     close_price: float | None = None
     closed_at: str | None = None
