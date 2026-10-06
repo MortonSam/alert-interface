@@ -81,8 +81,10 @@ export default function Home() {
           </p>
         </section>
 
-        {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero ── */}
-        <section className="px-4 sm:px-6 py-20 sm:py-24">
+        {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero. From 640px up the section is
+               one screen (the viewport minus the sticky header, in svh) with the row centered and nothing else on it; below
+               that it is a normal section. ── */}
+        <section className="px-4 sm:px-6 py-20 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)] sm:flex sm:items-center sm:justify-center">
           <SiteCounters />
         </section>
 
