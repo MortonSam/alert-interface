@@ -16,11 +16,11 @@ export function SiteCounters() {
   const rows = counterRows(stats);
   if (!rows.length) return null;
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-12 max-w-6xl w-full mx-auto text-center">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-12 max-w-6xl w-full mx-auto text-center">
       {rows.map((row) => (
-        <div key={row.key}>
+        <div key={row.key} className="min-w-0">
           <CountUp value={row.value} title={row.title ?? undefined} className="stat-number font-display font-bold text-primary tabular-nums block whitespace-nowrap" />
-          <p className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground mt-3">{row.label}</p>
+          <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-3 ${row.key === "contracts" ? "lg:whitespace-nowrap" : "whitespace-nowrap"}`}>{row.label}</p>
         </div>
       ))}
     </div>

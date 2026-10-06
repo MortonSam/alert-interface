@@ -70,7 +70,7 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(block).toContain("title={row.title ?? undefined}");                                       // the date lives on the number's hover title
     expect(block).toMatch(/stat-number[^"]*text-primary[^"]*tabular-nums/);                           // the accent, the largest numeric size, tabular figures
     expect(block).not.toMatch(/border|rounded|shadow/);                                               // no card
-    expect(block.replace(/className="[^"]*"/g, "")).not.toMatch(/[0-9]{2,}/);                        // no typed figure or year
+    expect(block.replace(/className="[^"]*"|className=\{`[^`]*`\}/g, "")).not.toMatch(/[0-9]{2,}/);    // no typed figure or year outside class names
     const { counterRows } = await import("@/lib/siteCounters");
     const rows = counterRows({ option_contracts_captured: 2787, option_contracts_as_of: "2026-10-01", option_contracts_source: "courier chains", licensed_daily_prices: 663960,
       licensed_daily_prices_as_of: "2026-10-02", earnings_reports_measured: 9894, earnings_reports_as_of: "2026-09-11", analyst_reactions_measured: 9781, analyst_reactions_as_of: "2026-09-22" });

@@ -28,7 +28,7 @@ export default function Home() {
           letter-spacing: -.03em;
         }
         .stat-number {
-          font-size: clamp(40px, 5.5vw, 84px);
+          font-size: clamp(36px, 4.2vw, 60px);   /* lib/siteCounters.ts COUNTER_LAYOUT.font: seven characters fit a quarter column from 1024px up */
           line-height: 1;
           letter-spacing: -.02em;
           font-variant-numeric: tabular-nums;
@@ -82,12 +82,12 @@ export default function Home() {
         </section>
 
         {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero ── */}
-        <section className="px-4 sm:px-8 py-28 sm:py-36">
+        <section className="px-4 sm:px-6 py-20 sm:py-24">
           <SiteCounters />
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
+        <section className="flex items-center justify-center px-4 sm:px-8 py-24">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
