@@ -1224,6 +1224,7 @@ async def _compute_alert_pick_v2(
 
     # ── Persist v2 pick (deterministic strikes from chain) ──────────────
     pick_id = None
+    structure: dict | None = None      # stays None on a dry run (an open pick already held, the cap, or --dry-run)
     if not dry_run:
         try:
             structure = await _build_deterministic_structure(

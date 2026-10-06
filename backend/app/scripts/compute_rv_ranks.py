@@ -28,6 +28,8 @@ from app.services.rv_math import compute_rv_metrics
 from app.services.system_metadata_service import set_value
 
 RV_HISTORY_DAYS = 731        # two years of bars for the trailing-year rank
+RECOMPUTE_SESSIONS = 5       # each run rewrites the snapshots of the last few bar dates from the current frame, so a late
+                             # adjustment factor (CTVA's 2026-10-01 distribution arrived after the bar) heals the days it touched
 BATCH_SIZE = 100
 STRAGGLER_BACKOFF = (2, 5, 12)
 
@@ -81,6 +83,14 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
         await session.commit()
 
 
+async def _drop_snapshots_after(symbol: str, last_bar: date) -> int:
+    """Delete this symbol's snapshots dated after its newest bar (rows an earlier run labelled with a day that had no bar)."""
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(sa.text("DELETE FROM rv_snapshots WHERE symbol = :s AND as_of_date > :d"), {"s": symbol, "d": last_bar})
+        await session.commit()
+        return res.rowcount or 0
+
+
 async def _has_recent_row(symbol: str, as_of: date) -> bool:
     """Check if a row exists within last 5 trading days."""
     cutoff = as_of - timedelta(days=7)  # ~5 trading days
@@ -92,6 +102,12 @@ async def _has_recent_row(symbol: str, as_of: date) -> bool:
     async with AsyncSessionLocal() as session:
         result = await session.execute(stmt, {"symbol": symbol, "cutoff": cutoff})
         return result.scalar() is not None
+
+
+def snapshot_dates(index, n: int) -> list[date]:
+    """Pure: the last `n` bar dates of a frame, ascending; the snapshots a run writes."""
+    dates = sorted({(d.date() if hasattr(d, "date") else d) for d in index})
+    return dates[-n:]
 
 
 def _bars(frame) -> "pd.DataFrame | None":
@@ -164,12 +180,30 @@ async def main(only_symbol: str | None = None) -> int:
         try:
             bars = all_bars.get(sym)
             if bars is not None:
-                closes = bars["Close"]
-                metrics = compute_rv_metrics(
-                    closes, volumes=bars["Volume"], action_dates=action_dates.get(sym, set()),
-                )
-                metrics["last_bar_date"] = closes.index[-1].date()
-                metrics["last_bar_close"] = round(float(closes.iloc[-1]), 4)
+                # one snapshot per bar date, dated by that bar (never by the calendar day the run happens on), for the
+                # last RECOMPUTE_SESSIONS bar dates: the newest is tonight's; the earlier ones are rewritten from the frame
+                written = 0
+                for as_of in snapshot_dates(bars.index, RECOMPUTE_SESSIONS):
+                    sub = bars[bars.index.date <= as_of]
+                    closes = sub["Close"]
+                    metrics = compute_rv_metrics(
+                        closes, volumes=sub["Volume"], action_dates=action_dates.get(sym, set()),
+                    )
+                    metrics["last_bar_date"] = closes.index[-1].date()
+                    metrics["last_bar_close"] = round(float(closes.iloc[-1]), 4)
+                    await _upsert_snapshot(sym, as_of, metrics)
+                    written += 1
+                # a snapshot dated after the newest bar was labelled by the calendar, not by data: it goes
+                removed = await _drop_snapshots_after(sym, metrics["last_bar_date"])
+                status = metrics["status"]
+                counts[status] = counts.get(status, 0) + 1
+                if removed:
+                    print(f"  {sym:8s}  removed {removed} snapshot(s) dated after the newest bar {metrics['last_bar_date']}")
+                rv_str = f"{metrics['rv_20d'] * 100:.2f}%" if metrics["rv_20d"] is not None else "—"
+                rank_str = f"{metrics['rv_rank']:.1f}" if metrics["rv_rank"] is not None else "—"
+                print(f"  {sym:8s}  RV={rv_str:8s}  rank={rank_str:5s}  [{status}]  as of {metrics['last_bar_date']} ({written} dates)")
+                ok += 1
+                continue
             else:
                 # Only write fetch_failed if no recent row exists
                 if await _has_recent_row(sym, today):

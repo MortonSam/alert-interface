@@ -163,6 +163,7 @@ async def test_a_rename_onto_a_duplicate_row_of_the_same_security_absorbs_it_and
                 await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at) VALUES (gen_random_uuid(), :s, 'Dup test', true, :c)"), {"s": sym, "c": created})
                 await s.execute(text("INSERT INTO security_records (symbol, intrinio_security_id, valid_from, role, source, intrinio_ticker, name) VALUES (:s, 'sec_dup', '2020-01-02', 'current', 'intrinio', :t, 'Dup Test Renamed')"), {"s": sym, "t": dup})
                 await s.execute(text("INSERT INTO price_bars_shadow (symbol, date, intrinio_security_id, close, factor, split_ratio, dividend, fetched_at) VALUES (:s, '2026-10-01', 'sec_dup', 10, 1, 1, 0, now())"), {"s": sym})
+            await s.execute(text("INSERT INTO price_bars_shadow (symbol, date, intrinio_security_id, close, factor, split_ratio, dividend, fetched_at) VALUES (:s, '2026-01-02', 'sec_dup', 9, 1, 1, 0, now())"), {"s": old})   # the kept history begins before its events
             await s.execute(text("INSERT INTO iv_history (id, symbol, date, iv_source, atm_iv) VALUES (gen_random_uuid(), :s, '2026-09-30', 'courier', 0.3)"), {"s": old})
             await s.execute(text("INSERT INTO iv_history (id, symbol, date, iv_source, atm_iv) VALUES (gen_random_uuid(), :s, '2026-10-02', 'courier', 0.4)"), {"s": dup})     # only the duplicate has this one
             ids = dict((await s.execute(text("SELECT symbol, id FROM tickers WHERE symbol IN (:a, :b)"), {"a": old, "b": dup})).all())
@@ -176,7 +177,7 @@ async def test_a_rename_onto_a_duplicate_row_of_the_same_security_absorbs_it_and
         async with ScriptSessionLocal() as s:
             changed = await rename_symbol(s, old, dup, date(2026, 10, 6), "test")
             await s.commit()
-        assert changed["tickers dropped"] == 1 and changed["price_bars_shadow dropped"] == 1 and changed["iv_history moved"] == 1
+        assert changed["tickers dropped"] == 1 and changed["price_bars_shadow dropped"] == 1 and changed["iv_history moved"] == 1 and "historical_reactions refused (before first bar)" not in changed
         assert changed["events dropped"] == 1 and changed["events moved"] == 1 and changed["historical_reactions dropped"] == 1 and changed["historical_reactions moved"] == 1
         assert changed["system_metadata keys dropped (target exists)"] == 1 and changed["tickers"] == 1 and changed["tickers name"] == 1
 
@@ -185,7 +186,7 @@ async def test_a_rename_onto_a_duplicate_row_of_the_same_security_absorbs_it_and
             assert (await s.execute(text("SELECT name FROM tickers WHERE symbol = :s"), {"s": dup})).scalar() == "Dup Test Renamed"
             assert (await s.execute(text("SELECT count(*) FROM tickers WHERE symbol = :s"), {"s": old})).scalar() == 0
             assert (await s.execute(text("SELECT count(*) FROM iv_history WHERE symbol = :s"), {"s": dup})).scalar() == 2
-            assert (await s.execute(text("SELECT count(*) FROM price_bars_shadow WHERE symbol = :s"), {"s": dup})).scalar() == 1
+            assert (await s.execute(text("SELECT count(*) FROM price_bars_shadow WHERE symbol = :s"), {"s": dup})).scalar() == 2
             ev = (await s.execute(text("SELECT event_date FROM events WHERE ticker_id = :t ORDER BY 1"), {"t": ids[old]})).scalars().all()
             assert [d.isoformat() for d in ev] == ["2026-07-30", "2026-10-01"]
             dangling = (await s.execute(text("SELECT count(*) FROM historical_reactions hr LEFT JOIN events e ON e.id = hr.event_id WHERE hr.ticker_id = :t AND e.id IS NULL"), {"t": ids[old]})).scalar()

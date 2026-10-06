@@ -2138,6 +2138,39 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── Prices behind every reaction; a realized-volatility snapshot that was really computed ─────────────
+
+async def check_reactions_after_first_bar(session) -> CheckResult:
+    """ERROR when a ticker carries a reaction dated before its record's first stored bar (nothing priced it); rows on a
+    declared stored-history span are exempt. A renamed ticker is where this bites: the merge now refuses such rows."""
+    rows = (await session.execute(text("""
+        SELECT t.symbol, hr.event_type::text, hr.event_date, fb.first_bar FROM historical_reactions hr
+        JOIN tickers t ON t.id = hr.ticker_id
+        JOIN (SELECT symbol, min(date) AS first_bar FROM price_bars_shadow GROUP BY symbol) fb ON fb.symbol = t.symbol
+        WHERE hr.event_date < fb.first_bar AND COALESCE(hr.price_source, '') <> 'stored_history' ORDER BY t.symbol, hr.event_date"""))).all()
+    if rows:
+        return CheckResult("reactions_after_first_bar", ERROR, f"{len(rows)} reaction(s) dated before the ticker's first stored bar",
+                           [f"{r[0]} {r[1]} {r[2].isoformat()} (first bar {r[3].isoformat()})" for r in rows[:40]])
+    return CheckResult("reactions_after_first_bar", PASS, "Every reaction is dated on or after its ticker's first stored bar (stored-history spans exempt)")
+
+
+async def check_rv_snapshot_unchanged(session) -> CheckResult:
+    """WARN when a ticker's rv_20d is identical to the previous snapshot's to six decimals (last 10 days, status ok):
+    a value carried forward or computed from the same bars twice, not a fresh measurement."""
+    rows = (await session.execute(text("""
+        WITH r AS (SELECT symbol, as_of_date, rv_20d, status,
+                          lag(rv_20d) OVER (PARTITION BY symbol ORDER BY as_of_date) AS prev_rv,
+                          lag(as_of_date) OVER (PARTITION BY symbol ORDER BY as_of_date) AS prev_date
+                   FROM rv_snapshots WHERE as_of_date >= CURRENT_DATE - 14)
+        SELECT symbol, as_of_date, prev_date, rv_20d FROM r
+        WHERE as_of_date >= CURRENT_DATE - 10 AND status = 'ok' AND rv_20d IS NOT NULL AND round(rv_20d, 6) = round(prev_rv, 6)
+        ORDER BY as_of_date DESC, symbol"""))).all()
+    if rows:
+        return CheckResult("rv_snapshot_unchanged", WARN, f"{len(rows)} realized-volatility snapshot(s) identical to the previous day's",
+                           [f"{r[0]} {r[1].isoformat()} = {r[2].isoformat()}: rv_20d {r[3]}" for r in rows[:40]])
+    return CheckResult("rv_snapshot_unchanged", PASS, "No realized-volatility snapshot in the last 10 days repeats the previous day's value")
+
+
 # ── One earnings event per ticker and date ────────────────────────────────────────────────────────────
 
 async def check_earnings_events_unique(session) -> CheckResult:
@@ -2816,6 +2849,9 @@ CHECKS = [
     check_eps_actuals_fresh,
     # one earnings event per ticker and date
     check_earnings_events_unique,
+    # prices behind every reaction; RV really recomputed
+    check_reactions_after_first_bar,
+    check_rv_snapshot_unchanged,
     # FOMC decision days: official set, one event per meeting, the Fed page agrees
     check_fomc_dates_official,
     check_fomc_events_unique,

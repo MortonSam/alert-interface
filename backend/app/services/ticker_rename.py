@@ -58,7 +58,7 @@ async def _merge_rows(session, table: str, column: str, keep, drop) -> dict[str,
                 continue                                  # the duplicate ticker row goes last, after its children moved
             res = await session.execute(text(f'DELETE FROM "{table}" WHERE "{column}" = :d'), {"d": drop})
         else:
-            same = " AND ".join(f'k."{c}" IS NOT DISTINCT FROM d."{c}"' for c in others)
+            same = " AND ".join(f'k."{c}" = d."{c}"' for c in others)     # NULLs never collide, as in the unique index itself
             if table == "events":                         # reactions that point at a duplicate event follow it to the kept one
                 await session.execute(text(f"""
                     UPDATE historical_reactions hr SET event_id = k.id FROM events d JOIN events k ON k."{column}" = :k AND {same}
@@ -85,6 +85,14 @@ async def absorb_duplicate(session, keep: str, drop: str) -> dict[str, int]:
     changed: dict[str, int] = {}
     ticker_id_tables = (await session.execute(text("""
         SELECT table_name FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'ticker_id' ORDER BY table_name"""))).scalars().all()
+    # a reaction dated before the kept symbol's first stored bar has no price behind it: refused, never moved
+    first_bar = (await session.execute(text("SELECT min(date) FROM price_bars_shadow WHERE symbol = :s"), {"s": keep})).scalar()
+    if first_bar is not None:
+        res = await session.execute(text("""
+            DELETE FROM historical_reactions WHERE ticker_id = :d AND event_date < :fb AND COALESCE(price_source, '') <> 'stored_history'"""),
+            {"d": ids[drop], "fb": first_bar})
+        if res.rowcount:
+            changed["historical_reactions refused (before first bar)"] = res.rowcount
     # reactions before events: a duplicate event's reactions are judged on their own key first, then repointed
     ordered = sorted(ticker_id_tables, key=lambda t: (t != "historical_reactions", t))
     for table in ordered:

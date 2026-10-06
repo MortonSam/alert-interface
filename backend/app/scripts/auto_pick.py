@@ -311,7 +311,7 @@ async def _load_candidates(session, today: date, horizon: date) -> list:
     )).all()
 
 
-async def _run(dry_run: bool = False) -> int:
+async def _run(dry_run: bool = False, only: set[str] | None = None) -> int:
     today = date.today()
     # 1-5 trading days ~ next 7 calendar days; exclude today (event day
     # itself is too late for momentum to be measured into the report).
@@ -323,6 +323,8 @@ async def _run(dry_run: bool = False) -> int:
 
         # ── Find candidates: active tickers with earnings in 1-5 trading days
         candidates = await _load_candidates(session, today, horizon)
+        if only:
+            candidates = [c for c in candidates if c.symbol in only]       # a targeted rerun (--symbols=FDX) after a fix; the rest keep tonight's rows
 
         if not candidates:
             print("[auto-pick] No candidates with earnings in next 1-5 trading days.")
@@ -495,7 +497,9 @@ def _log_evaluation(
 
 def main() -> int:
     dry_run = "--dry-run" in sys.argv
-    return asyncio.run(_run(dry_run=dry_run))
+    only = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--symbols=")), None)
+    only_set = {x.strip().upper() for x in only.split(",") if x.strip()} if only else None
+    return asyncio.run(_run(dry_run=dry_run, only=only_set))
 
 
 if __name__ == "__main__":
