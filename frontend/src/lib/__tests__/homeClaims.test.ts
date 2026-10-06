@@ -76,7 +76,7 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
       licensed_daily_prices_as_of: "2026-10-02", earnings_reports_measured: 9894, earnings_reports_as_of: "2026-09-11", analyst_reactions_measured: 9781, analyst_reactions_as_of: "2026-09-22" });
     expect(rows.map((r) => [r.label, r.value, r.title])).toEqual([
       ["option contracts captured nightly", 2787, "As of Oct 1, 2026 (courier chains)"],
-      ["licensed daily prices", 663960, "As of Oct 2, 2026"],
+      ["daily stock prices on record", 663960, "Five years of daily prices for every S&P 500 stock, licensed from Intrinio · As of Oct 2, 2026"],
       ["earnings reactions measured", 9894, "As of Sep 11, 2026"],
       ["analyst actions measured", 9781, "As of Sep 22, 2026"],
     ]);

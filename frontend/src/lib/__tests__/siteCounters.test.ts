@@ -6,7 +6,7 @@ import { COUNTER_LAYOUT, STAT_NUMBER_CLAMP, boxesOverlap, counterGeometry, label
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 const NUMBERS = ["117,310", "665,331", "9,903", "9,813"];           // production's counts: the longest is seven characters
-const LABELS = ["option contracts captured nightly", "licensed daily prices", "earnings reactions measured", "analyst actions measured"];
+const LABELS = ["option contracts captured nightly", "daily stock prices on record", "earnings reactions measured", "analyst actions measured"];
 
 describe("the counters row never overlaps", () => {
   it.each([1024, 1280, 1440])("at %ipx the four seven-character numbers sit in four columns and no two boxes overlap", (viewport) => {
