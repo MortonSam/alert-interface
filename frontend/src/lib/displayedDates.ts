@@ -24,7 +24,7 @@ export const DATE_RULES: DateRule[] = [
 ];
 
 export const DATE_REQUIREMENTS: { file: string; require: RegExp; because: string }[] = [
-  { file: "components/QuestionStrip.tsx", require: /insightAsOfLine\(q\.as_of\)/, because: "every answer shows the date its data rests on, from the API" },
+  { file: "components/QuestionStrip.tsx", require: /asOfLabel\(q\.as_of, q\.as_of_kind\)/, because: "every answer shows when its fact was known, worded by kind, never a date ahead" },
   { file: "components/QuestionStrip.tsx", require: /answerParts\(q\.data, q\.inputs\)/, because: "every number in an answer carries its receipt from the API's inputs" },
   { file: "components/Briefing.tsx", require: /sentenceReceipt\(s\)/, because: "every briefing sentence shows how it was computed and its own as-of date, from the API" },
   { file: "components/Briefing.tsx", require: /sourceLine\(inp\)/, because: "every input is listed with its own date and source" },

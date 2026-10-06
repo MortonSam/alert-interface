@@ -25,8 +25,11 @@ EX_DIV_DAYS = 14              # an ex-dividend date this close raises the divide
 NEXT_WITHIN_DAYS = 45         # a report this close, with a fresh implied move, raises the expected-move question
 
 
-def _q(key: str, question: str, data: str, idea: str, inputs: list[dict], as_of: date | None, rule: str) -> dict:
-    return {"key": key, "question": question, "data": data, "idea": idea, "inputs": inputs, "as_of": as_of.isoformat() if as_of else None, "rule": rule}
+def _q(key: str, question: str, data: str, idea: str, inputs: list[dict], as_of: date | None, rule: str, as_of_kind: str = "observed") -> dict:
+    """as_of is the day we knew the fact (a bar, a chain, a stored report, a refresh), never a day still ahead; as_of_kind is
+    observed (a measurement), estimated (a projection, dated by the refresh that stored it) or declared (dated by the declaration)."""
+    return {"key": key, "question": question, "data": data, "idea": idea, "inputs": inputs, "as_of": as_of.isoformat() if as_of else None,
+            "as_of_kind": as_of_kind, "rule": rule}
 
 
 # 1 ─────────────────────────────────────────────────────────────────────────────
@@ -131,19 +134,23 @@ def q_upgrades(*, name: str, symbol: str, upgrades_30d: int, upgrade_sessions: i
 
 
 # 6 ─────────────────────────────────────────────────────────────────────────────
-def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None, today: date) -> dict | None:
-    """An ex-dividend date within EX_DIV_DAYS."""
+def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None, today: date, stored_on: date | None = None,
+                  declared_on: date | None = None) -> dict | None:
+    """An ex-dividend date within EX_DIV_DAYS. Dated by the declaration when one is held, else as an estimate dated by the refresh
+    that stored the amount; the ex-date itself is the event, never the as-of."""
     days = (ex_date - today).days
     if days < 0 or days > EX_DIV_DAYS:
         return None
     amt = f" with a {fmt_money(amount)} per-share dividend" if amount else ""
     data = f"{symbol} goes ex-dividend on {fmt_date(ex_date)}{amt}."
     idea = "On the ex-dividend date the price typically opens lower by about the dividend, because buyers from that day on no longer receive that payment."
-    inputs = [_input("ex-dividend date", fmt_date(ex_date), ex_date, "events, ex_dividend")]
+    knew = declared_on or stored_on or today
+    inputs = [_input("ex-dividend date", fmt_date(ex_date), knew, "events, ex_dividend")]
     if amount:
-        inputs.append(_input("dividend per share", fmt_money(amount), ex_date, "the declared per-payment amount (Intrinio's last payment on the bars, else yfinance's last declared payment)"))
-    return _q("ex_dividend", f"What happens to {name}'s price on the ex-dividend date?", data, idea, inputs, ex_date,
-              f"Asked when a stored ex-dividend date is within {EX_DIV_DAYS} days.")
+        inputs.append(_input("dividend per share", fmt_money(amount), knew, "declared" if declared_on else "the last per-payment amount (Intrinio's bars, else yfinance's last declared payment)"))
+    return _q("ex_dividend", f"What happens to {name}'s price on the ex-dividend date?", data, idea, inputs, knew,
+              f"Asked when a stored ex-dividend date is within {EX_DIV_DAYS} days; dated by the declaration when held, else by the refresh that stored the amount.",
+              as_of_kind="declared" if declared_on else "estimated")
 
 
 # 7 ─────────────────────────────────────────────────────────────────────────────

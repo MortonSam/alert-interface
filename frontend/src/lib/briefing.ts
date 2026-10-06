@@ -50,8 +50,9 @@ export function splitTerms(text: string): TextPart[] {
 }
 
 /** The receipt: `what` and `asOf` are the two short hover lines; `how` (the full rule) is for the Sources expander only. */
-export function sentenceReceipt(s: BriefingSentence): { what: string; asOf: string | null; how: string | null } {
-  return { what: BLOCK_LABELS[s.key] ?? s.key, asOf: insightAsOfLine(s.as_of), how: computedHowLine(s.rule) };
+export function sentenceReceipt(s: BriefingSentence, today: Date = new Date()): { what: string; asOf: string | null; how: string | null } {
+  const future = !!s.as_of && s.as_of > today.toISOString().slice(0, 10);          // an as-of is when we knew; a day ahead is never shown
+  return { what: BLOCK_LABELS[s.key] ?? s.key, asOf: future ? null : insightAsOfLine(s.as_of), how: computedHowLine(s.rule) };
 }
 
 /** One line per input for the Sources list: "name: value (as of …; source)". Dates come from the input itself. */

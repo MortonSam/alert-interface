@@ -2,7 +2,8 @@
 
 import type { BriefingSentence } from "@/lib/api";
 import ExplainTip from "@/components/ticker/ExplainTip";
-import { BLOCK_LABELS, sentenceReceipt, sourceLine, splitTerms } from "@/lib/briefing";
+import { BLOCK_LABELS, sentenceReceipt, sourceLine } from "@/lib/briefing";
+import { answerParts } from "@/lib/questions";
 
 /**
  * The Overview: the API's blocks ("What it is", "What's been happening") in the overview's display type. Glossary
@@ -21,8 +22,10 @@ export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
           <div key={s.key + i} className="group relative" tabIndex={0}>
             <p className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground mb-2">{BLOCK_LABELS[s.key] ?? s.key}</p>
             <p className="text-lg text-foreground/90 leading-relaxed">
-              {splitTerms(s.text).map((part, j) =>
-                part.term ? (
+              {answerParts(s.text, s.inputs).map((part, j) =>
+                part.receipt !== undefined ? (
+                  <span key={j} title={part.receipt ?? undefined} className="tabular-nums underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                ) : part.term ? (
                   <ExplainTip key={j} term={part.term}>
                     <span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
                   </ExplainTip>

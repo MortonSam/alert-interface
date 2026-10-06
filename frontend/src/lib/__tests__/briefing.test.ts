@@ -10,7 +10,7 @@ const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 
 const S: BriefingSentence[] = [
   { key: "happening", text: "Next earnings Oct 14, 2026, after the close, 9 days away, confirmed by the company (press release).", rule: "Next report from the stored earnings calendar.",
-    as_of: "2026-10-14", inputs: [{ name: "next earnings date", value: "Oct 14, 2026", as_of: "2026-10-14", source: "finnhub" }, { name: "days away", value: "9", as_of: "2026-10-05", source: null }] },
+    as_of: "2026-10-05", inputs: [{ name: "next earnings date", value: "Oct 14, 2026", as_of: "2026-10-14", source: "finnhub" }, { name: "days away", value: "9", as_of: "2026-10-05", source: null }] },
   { key: "profile", text: "Beat estimates in 15 of 20 stored quarters and fell the next session after 8 of those 15 beats (53%), so a beat alone has not been a buy signal.",
     rule: "Earnings quarters with a stored 1-day move; a share of 50% or more reads as no buy signal.", as_of: "2026-06-25",
     inputs: [{ name: "stored quarters", value: "20", as_of: "2026-06-25", source: "historical_reactions" }] },
@@ -19,7 +19,7 @@ const S: BriefingSentence[] = [
 describe("the briefing renders the API's sentences and receipts, nothing typed", () => {
   it("joins the sentences in API order and reads each receipt from the sentence", () => {
     expect(briefingParagraph(S)).toBe(S[0].text + " " + S[1].text);
-    expect(sentenceReceipt(S[0])).toEqual({ what: "What's been happening", asOf: "As of Oct 14, 2026", how: "How this was computed: Next report from the stored earnings calendar." });
+    expect(sentenceReceipt(S[0])).toEqual({ what: "What's been happening", asOf: "As of Oct 5, 2026", how: "How this was computed: Next report from the stored earnings calendar." });
     expect(sentenceReceipt({ ...S[1], rule: "", as_of: null })).toEqual({ what: "What it is", asOf: null, how: null });
     expect(sourceLine(S[0].inputs[0])).toBe("next earnings date: Oct 14, 2026 (As of Oct 14, 2026; finnhub)");
     expect(sourceLine({ name: "quote time", value: "Oct 5, 4:00 PM ET", as_of: "Oct 5, 4:00 PM ET", source: "last trade" })).toBe("quote time: Oct 5, 4:00 PM ET (Oct 5, 4:00 PM ET; last trade)");
@@ -67,5 +67,6 @@ describe("the briefing renders the API's sentences and receipts, nothing typed",
     expect(src).toContain("sourceLine(inp)");
     expect(src).toContain("BLOCK_LABELS[s.key]");
     expect(src).toContain("<ExplainTip key={j} term={part.term}>");                              // glossary entries open in place
+    expect(src).toContain("answerParts(s.text, s.inputs)");                                      // the same whole-quantity receipts as the strip
   });
 });

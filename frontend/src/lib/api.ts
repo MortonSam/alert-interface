@@ -1033,7 +1033,8 @@ export interface QuestionAnswer {
   data: string;              // what this stock's rows show: one or two sentences, every number an input
   idea: string;              // the plain-words explanation for someone new
   inputs: BriefingInput[];
-  as_of: string | null;
+  as_of: string | null;      // when we knew the fact: a bar, a chain, a stored report, a refresh; never a day ahead
+  as_of_kind?: "observed" | "estimated" | "declared" | string;
   rule: string;
 }
 

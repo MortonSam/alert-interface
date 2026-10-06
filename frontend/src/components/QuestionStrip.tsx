@@ -5,8 +5,7 @@ import posthog from "posthog-js";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import { api, type QuestionsResponse } from "@/lib/api";
 import { splitTerms } from "@/lib/briefing";
-import { answerParts, hasQuestions, questionsHeader } from "@/lib/questions";
-import { insightAsOfLine } from "@/lib/insightHeadline";
+import { answerParts, asOfLabel, hasQuestions, questionsHeader } from "@/lib/questions";
 
 /**
  * The question strip under "What's been happening": up to four questions this stock's own data raises, each expanding
@@ -35,7 +34,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
       <ul className="divide-y divide-border border-y border-border">
         {data!.questions.map((q) => {
           const isOpen = open === q.key;
-          const asOf = insightAsOfLine(q.as_of);
+          const asOf = asOfLabel(q.as_of, q.as_of_kind);
           return (
             <li key={q.key}>
               <button type="button" onClick={() => toggle(q.key)} aria-expanded={isOpen} className="w-full text-left py-3 flex items-baseline justify-between gap-4 hover:text-primary transition-colors">

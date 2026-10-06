@@ -24,6 +24,7 @@ def receipts(q):
 
 def assert_clean(q):
     assert q["inputs"] and q["as_of"] and q["rule"]
+    assert date.fromisoformat(q["as_of"]) <= date.today() and q.get("as_of_kind") in ("observed", "estimated", "declared")   # an as-of is never ahead
     missing = [n for n in numbers(q["data"]) if n not in receipts(q)]
     assert not missing, (missing, q["data"])
     for t in (q["question"], q["data"], q["idea"]):
@@ -80,10 +81,13 @@ def test_5_upgrades_needs_a_recent_upgrade_and_eight_sessions_and_words_follow_t
     assert thin["data"].endswith("median move was +1.0%.")                                    # too few five-session moves: the clause is left out
 
 
-def test_6_ex_dividend_within_fourteen_days():
-    q = Q.q_ex_dividend(name="Micron Technology", symbol="MU", ex_date=date(2026, 10, 14), amount=0.6, today=T)
+def test_6_ex_dividend_within_fourteen_days_is_dated_by_when_we_knew_not_by_the_ex_date():
+    q = Q.q_ex_dividend(name="Micron Technology", symbol="MU", ex_date=date(2026, 10, 14), amount=0.6, today=T, stored_on=date(2026, 10, 6))
     assert q["data"] == "MU goes ex-dividend on Oct 14, 2026 with a $0.60 per-share dividend."
+    assert q["as_of"] == "2026-10-06" and q["as_of_kind"] == "estimated"                       # the refresh that stored it, not the event
     assert_clean(q)
+    declared = Q.q_ex_dividend(name="Micron Technology", symbol="MU", ex_date=date(2026, 10, 14), amount=0.15, today=T, stored_on=date(2026, 10, 6), declared_on=date(2026, 9, 30))
+    assert declared["as_of"] == "2026-09-30" and declared["as_of_kind"] == "declared"
     assert Q.q_ex_dividend(name="X", symbol="X", ex_date=T + __import__("datetime").timedelta(days=15), amount=1.0, today=T) is None
     assert Q.q_ex_dividend(name="X", symbol="X", ex_date=T - __import__("datetime").timedelta(days=1), amount=1.0, today=T) is None
     assert Q.q_ex_dividend(name="X", symbol="X", ex_date=T, amount=None, today=T)["data"] == "X goes ex-dividend on Oct 6, 2026."

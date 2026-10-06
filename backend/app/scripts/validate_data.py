@@ -2138,6 +2138,33 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── As-of dates: every source a page dates itself by is on or before today ──────────────────────────────
+
+async def check_as_of_not_future(session) -> CheckResult:
+    """ERROR when any stored row a page may show as an as-of date is dated after today: bars, RV snapshots, chains,
+    profiles, share counts, reactions, the calendar's checked_at and dividend amounts' stored_on. An as-of is when we knew."""
+    probes = {
+        "price_bars_shadow.date": "SELECT count(*) FROM price_bars_shadow WHERE date > CURRENT_DATE",
+        "rv_snapshots.as_of_date": "SELECT count(*) FROM rv_snapshots WHERE as_of_date > CURRENT_DATE",
+        "historical_reactions.event_date": "SELECT count(*) FROM historical_reactions WHERE event_date > CURRENT_DATE",
+        "company_profiles.fetched_at": "SELECT count(*) FROM company_profiles WHERE fetched_at > now()",
+        "tickers.shares_as_of": "SELECT count(*) FROM tickers WHERE shares_as_of > now()",
+        "events.checked_at": "SELECT count(*) FROM events WHERE checked_at > now()",
+        "events.updated_at": "SELECT count(*) FROM events WHERE updated_at > now() + interval '1 minute'",
+        "events.declared_on": "SELECT count(*) FROM events WHERE (metadata->>'declared_on')::date > CURRENT_DATE",
+        "chain_last_trade": """SELECT count(*) FROM system_metadata WHERE key LIKE 'chain:%' AND key NOT LIKE 'chain:%:%:%'
+                               AND substring(value from '"chain_last_trade": ?"([0-9]{4}-[0-9]{2}-[0-9]{2})')::date > CURRENT_DATE""",
+    }
+    bad = []
+    for name, sql in probes.items():
+        n = (await session.execute(text(sql))).scalar() or 0
+        if n:
+            bad.append(f"{name}: {n} row(s) dated after today")
+    if bad:
+        return CheckResult("as_of_not_future", ERROR, f"{len(bad)} as-of source(s) carry a future date", bad)
+    return CheckResult("as_of_not_future", PASS, f"No as-of source is dated after today ({len(probes)} sources checked)")
+
+
 # ── Dividends: the next amount is a per-payment figure in line with the last one paid ─────────────────
 
 NEXT_DIVIDEND_TOLERANCE_PCT = 10
@@ -2910,6 +2937,8 @@ CHECKS = [
     check_eps_actuals_fresh,
     # one earnings event per ticker and date
     check_earnings_events_unique,
+    # an as-of is when we knew: no source dated after today
+    check_as_of_not_future,
     # dividends: the next amount is a payment, in line with the last
     check_next_dividend_amount,
     # the calendar: confirmed dates stand alone, past estimates never stand as resolved

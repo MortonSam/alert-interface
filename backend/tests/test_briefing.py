@@ -25,7 +25,8 @@ def receipts(s: dict) -> str:
 
 
 def assert_clean(s: dict):
-    """Every number in the text is an input or a constant the rule names; no plumbing word is visible."""
+    """Every number in the text is an input or a constant the rule names; no plumbing word is visible; the as-of is never ahead."""
+    assert s["as_of"] is None or date.fromisoformat(s["as_of"]) <= date.today()
     missing = [n for n in numbers(s["text"]) if n not in receipts(s)]
     assert not missing, (missing, s["text"])
     assert not PLUMBING.search(s["text"]), s["text"]
@@ -143,6 +144,7 @@ def test_sentence_b_priority_window_then_report_within_7_days_then_big_move_then
     assert "biggest move" in s["text"] and "Reports" not in s["text"]                                                   # 3: the big move beats a report 23 days out
     s = B.happening_sentence("MSFT", stock=STOCK, upcoming=later)
     assert s["text"].endswith("Reports Oct 28, 2026 after the close, 23 days away (estimated).")                        # 4: the report within 45 days
+    assert s["as_of"] == "2026-10-05"                                                                                   # dated by the quote, not by the report ahead
     s = B.happening_sentence("MU", stock=STOCK, upcoming=dict(today=T, next_date=T + timedelta(days=B.NEXT_WITHIN_DAYS + 1)))
     assert s["text"] == B.stock_sentence("MU", **STOCK)[0]                                                              # beyond 45 days: sentence B omitted
     for x in (B.happening_sentence("MU", stock=STOCK, reported=rep), B.happening_sentence("STZ", stock=STOCK, big_move=big, upcoming=soon)):

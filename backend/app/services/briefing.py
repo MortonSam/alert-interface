@@ -359,7 +359,8 @@ def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict
         return None
     text = " ".join(p[0] for p in parts)
     inputs = [i for p in parts for i in p[1]]
-    dates = [d for p in parts for d in p[2]]
+    today = (reported or upcoming or {}).get("today") or date.today()
+    dates = [d for p in parts for d in p[2] if d <= today]          # an as-of is when we knew, never a report day still ahead
     rule = (f"The stock: the latest quote dated by its last trade, against its 52-week high (the highest stored close over {WINDOW_52W_DAYS} days; within {NEAR_HIGH_PCT}% reads near) and the "
             f"first stored close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, the EPS on the event row against "
             f"the estimate (actual above estimate is a beat) and the 1-day move from the stored bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "

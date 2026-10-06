@@ -237,14 +237,16 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
                                   stats_as_of=stats["computed_at"].date() if stats["computed_at"] else None, newest_upgrade=max(ups, default=None)))
     # 6. an ex-dividend date
     exd = (await db.execute(text("""
-        SELECT event_date, (metadata->>'dividend_amount')::float AS amount, metadata->>'basis' AS basis FROM events
+        SELECT event_date, (metadata->>'dividend_amount')::float AS amount, metadata->>'basis' AS basis, (metadata->>'declared_on')::date AS declared_on,
+               COALESCE(updated_at, created_at)::date AS stored_on FROM events
         WHERE ticker_id = :t AND event_type = 'ex_dividend' AND event_date >= :today ORDER BY event_date LIMIT 1"""), {"t": ticker.id, "today": today})).mappings().first()
     if exd:
         from app.scripts.seed_dividends import PER_PAYMENT_BASES
         amount = exd["amount"] if exd["basis"] in PER_PAYMENT_BASES else None       # an annual rate is never called a per-share dividend
         if amount is None:
             amount = _f(await db.scalar(text("SELECT dividend FROM price_bars_shadow WHERE symbol = :s AND dividend > 0 ORDER BY date DESC LIMIT 1"), {"s": sym}))
-        cands.append(Q.q_ex_dividend(name=name, symbol=sym, ex_date=exd["event_date"], amount=amount, today=today))
+        cands.append(Q.q_ex_dividend(name=name, symbol=sym, ex_date=exd["event_date"], amount=amount, today=today,
+                                     stored_on=min(exd["stored_on"], today) if exd["stored_on"] else None, declared_on=exd["declared_on"]))
     # 7. the usual move on earnings (evergreen)
     if moves and typical_abs:
         dated = [(r["event_date"], m) for r, m in zip(sample, moves)]
