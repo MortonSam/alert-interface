@@ -50,13 +50,14 @@ def standard_reason(company: str, sessions: int, actual: date, target: date | No
 
 
 async def auto_void(session, today: date | None = None) -> list[str]:
-    """Void every v2 pick (open or closed, not yet void) whose company has reported outside the entry window. Returns labels
-    "SYM picked YYYY-MM-DD: <reason>" for the step outcome and the digest. Writes status, reason and time; deletes nothing."""
+    """Void every v2 pick (open or closed) whose company has reported outside the entry window. A pick already void is
+    skipped and reported as "already void"; its reason and time are never rewritten. Returns labels for the step outcome
+    and the digest. Deletes nothing."""
     today = today or date.today()
     picks = (await session.execute(text("""
         SELECT p.id, p.symbol, p.generated_at, p.exit_date, p.status, t.id AS tid, t.name
         FROM alert_picks p JOIN tickers t ON t.symbol = p.symbol
-        WHERE p.status IN ('open', 'closed') AND p.exit_date IS NOT NULL ORDER BY p.generated_at"""))).all()
+        WHERE p.status IN ('open', 'closed', 'void') AND p.exit_date IS NOT NULL ORDER BY p.generated_at"""))).all()
     out: list[str] = []
     for p in picks:
         pick_day = p.generated_at.date()
@@ -71,6 +72,9 @@ async def auto_void(session, today: date | None = None) -> list[str]:
             continue
         n, inside, target = void_verdict(pick_day, p.exit_date, actual)
         if inside:
+            continue
+        if p.status == "void":                       # already void, by hand or by an earlier run: its reason and time are never rewritten
+            out.append(f"{p.symbol} picked {pick_day.isoformat()}: already void")
             continue
         from app.services.briefing import short_name
         reason = standard_reason(short_name(p.name) or p.symbol, n, actual, target)

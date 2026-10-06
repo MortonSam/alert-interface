@@ -82,11 +82,37 @@ def test_5_upgrades_needs_a_recent_upgrade_and_eight_sessions_and_words_follow_t
 
 def test_6_ex_dividend_within_fourteen_days():
     q = Q.q_ex_dividend(name="Micron Technology", symbol="MU", ex_date=date(2026, 10, 14), amount=0.6, today=T)
-    assert q["data"] == "MU goes ex-dividend on Oct 14, 2026 with a $0.60 dividend per share."
+    assert q["data"] == "MU goes ex-dividend on Oct 14, 2026 with a $0.60 per-share dividend."
     assert_clean(q)
     assert Q.q_ex_dividend(name="X", symbol="X", ex_date=T + __import__("datetime").timedelta(days=15), amount=1.0, today=T) is None
     assert Q.q_ex_dividend(name="X", symbol="X", ex_date=T - __import__("datetime").timedelta(days=1), amount=1.0, today=T) is None
     assert Q.q_ex_dividend(name="X", symbol="X", ex_date=T, amount=None, today=T)["data"] == "X goes ex-dividend on Oct 6, 2026."
+
+
+def test_6_ex_dividend_says_per_share_and_the_amount_is_a_payment():
+    q = Q.q_ex_dividend(name="Micron Technology", symbol="MU", ex_date=date(2026, 10, 14), amount=0.15, today=T)
+    assert q["data"] == "MU goes ex-dividend on Oct 14, 2026 with a $0.15 per-share dividend."
+    assert "per-payment" in next(i["source"] for i in q["inputs"] if i["name"] == "dividend per share")
+
+
+def test_7_usual_move_is_evergreen_past_eight_reports():
+    q = Q.q_usual_move(name="Micron Technology", symbol="MU", typical_abs=7.0, n_reports=20, best=(date(2026, 6, 24), 15.7), worst=(date(2024, 12, 18), -16.2), sample_as_of=date(2026, 6, 25))
+    assert q["question"] == "How much does Micron Technology usually move on earnings?"
+    assert q["data"] == "Over the last 20 reports MU has moved ±7.0% on average the session after reporting; its largest were +15.7% (Jun 24, 2026) and -16.2% (Dec 18, 2024)."
+    assert "yardstick" in q["idea"]
+    assert_clean(q)
+    assert Q.q_usual_move(name="X", symbol="X", typical_abs=3.0, n_reports=7, best=(T, 1.0), worst=(T, -1.0), sample_as_of=T) is None
+
+
+def test_8_volatile_now_ranks_against_the_stocks_own_year_and_needs_eight_sessions():
+    q = Q.q_volatile_now(name="Micron Technology", symbol="MU", rv_20d=0.4153, rv_rank=70.5, sample_days=252, as_of=date(2026, 10, 5))
+    assert q["question"] == "Is Micron Technology more volatile than usual right now?"
+    assert q["data"] == "MU's realized volatility over the last 20 sessions is 41.5% annualized, more active than 70% of its own 20-day windows over the past year."
+    assert_clean(q)
+    quiet = Q.q_volatile_now(name="X", symbol="X", rv_20d=0.20, rv_rank=20.0, sample_days=252, as_of=T)
+    assert "quieter than 80%" in quiet["data"]
+    assert "cause" not in quiet["idea"] and "because" not in quiet["idea"].split("so")[0]
+    assert Q.q_volatile_now(name="X", symbol="X", rv_20d=0.2, rv_rank=50.0, sample_days=Q.MIN_SESSIONS - 1, as_of=T) is None
 
 
 def test_choose_keeps_catalog_order_and_four_at_most():
@@ -120,12 +146,14 @@ def test_no_number_in_an_answer_is_a_literal_of_its_template():
 async def test_the_route_serves_at_most_four_in_catalog_order_with_receipts():
     from httpx import ASGITransport, AsyncClient
     from app.main import app
-    order = ["reaction_normal", "implied_big", "beat_fell", "big_move", "upgrades", "ex_dividend"]
+    order = ["reaction_normal", "implied_big", "beat_fell", "big_move", "upgrades", "ex_dividend", "usual_move", "volatile_now"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        for sym in ("MU", "MSFT", "FICO", "STZ"):
+        for sym in ("MU", "MSFT", "FICO", "STZ", "VMRK"):
             body = (await c.get(f"/api/v1/tickers/{sym}/questions")).json()
             keys = [q["key"] for q in body["questions"]]
             assert len(keys) <= 4 and keys == sorted(keys, key=order.index)
             for q in body["questions"]:
                 assert_clean(q)
+            if sym != "VMRK":
+                assert len(keys) >= 3, (sym, keys)                                             # eight reports or more: three questions at least
         assert (await c.get("/api/v1/tickers/CAG/questions")).json()["questions"] == []       # inactive: nothing

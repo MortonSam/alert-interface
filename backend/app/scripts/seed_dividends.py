@@ -8,7 +8,8 @@ never rewritten.
 
 Intrinio's price adjustments are past adjustments only, and this plan has no dividends endpoint, so the declared
 next ex-dividend date (a date, not a price) keeps its yfinance source: the named exception in CLAUDE.md beside the
-earnings calendar. It is seeded after the Intrinio pass, as before, with yfinance's annual rate (basis annual_rate).
+earnings calendar. Its amount is the declared per-payment dividend: the last payment on the stored Intrinio bars first, yfinance's
+lastDividendValue when the bars hold none; never the annualized dividendRate.
 
 CLI
 ---
@@ -35,7 +36,10 @@ from app.services.intrinio_client import IntrinioClient
 
 WINDOW_DAYS = 14          # the nightly looks this far back on the bars; the ex-date is on the bar, so a few days of slack is plenty
 DIVIDEND_BASIS = "per_share"
-FORWARD_BASIS = "annual_rate"     # yfinance's dividendRate on the forward date, as the old seeder stored it
+FORWARD_BASIS_INTRINIO = "last_payment_intrinio"   # the last per-payment dividend on the stored Intrinio bars
+FORWARD_BASIS_YFINANCE = "last_payment_yfinance"   # yfinance's lastDividendValue (the last declared payment) when the bars hold none
+PER_PAYMENT_BASES = ("per_share", FORWARD_BASIS_INTRINIO, FORWARD_BASIS_YFINANCE)   # amounts a page may call a per-share dividend
+FORWARD_BASIS = FORWARD_BASIS_YFINANCE
 FORWARD_BATCH = 5
 FORWARD_BATCH_SLEEP = 2.0
 
@@ -57,8 +61,14 @@ def _fetch_forward_sync(symbol: str) -> dict | None:
         return None
     if ex_date < date.today():
         return None                     # a past date is Intrinio's to record, from the bars
-    rate = info.get("dividendRate")
-    return {"ex_date": ex_date, "dividend_rate": float(rate) if rate else None}
+    last = info.get("lastDividendValue")          # the last declared payment per share, never dividendRate (the annualized figure)
+    return {"ex_date": ex_date, "last_payment": float(last) if last else None}
+
+
+async def last_paid_from_bars(session, symbol: str) -> float | None:
+    """The most recent per-payment dividend Intrinio recorded on the stored bars; None when the bars hold none."""
+    return await session.scalar(select(text("dividend")).select_from(text("price_bars_shadow"))
+                                .where(text("symbol = :s AND dividend > 0")).order_by(text("date DESC")).limit(1).params(s=symbol))
 
 
 async def dividends_from_bars(symbols: list[str], since: date | None) -> dict[str, list[dict]]:
@@ -87,8 +97,11 @@ async def dividends_from_api(symbol: str, client: IntrinioClient) -> list[dict]:
 async def _upsert_dividend_event(session, ticker: Ticker, ex_date: date, dividend_amount: float | None,
                                  source: DataSource = DataSource.INTRINIO, basis: str = DIVIDEND_BASIS) -> bool:
     """Insert the ex-dividend date if not already present. Returns True if inserted."""
-    existing = await session.scalar(select(Event.id).where(Event.ticker_id == ticker.id, Event.event_date == ex_date, Event.event_type == EventType.EX_DIVIDEND))
+    existing = (await session.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_date == ex_date, Event.event_type == EventType.EX_DIVIDEND))).scalars().first()
     if existing is not None:
+        # a stored forward amount that is not a per-payment figure (the old annual rate, or no basis) is corrected in place
+        if basis in PER_PAYMENT_BASES and dividend_amount is not None and (existing.metadata_ or {}).get("basis") not in PER_PAYMENT_BASES:
+            existing.metadata_ = {**(existing.metadata_ or {}), "dividend_amount": dividend_amount, "basis": basis}
         return False
     meta = {"basis": basis}
     if dividend_amount is not None:
@@ -154,7 +167,9 @@ async def main() -> int:
                     if isinstance(info, Exception):
                         forward_failed += 1
                     elif info:
-                        forward += await _upsert_dividend_event(session, t, info["ex_date"], info["dividend_rate"], DataSource.YFINANCE, FORWARD_BASIS)
+                        paid = await last_paid_from_bars(session, t.symbol)
+                        amount, basis = (float(paid), FORWARD_BASIS_INTRINIO) if paid else (info["last_payment"], FORWARD_BASIS_YFINANCE)
+                        forward += await _upsert_dividend_event(session, t, info["ex_date"], amount, DataSource.YFINANCE, basis)
                 await session.commit()
             if i + FORWARD_BATCH < len(tickers):
                 await asyncio.sleep(FORWARD_BATCH_SLEEP)

@@ -53,7 +53,7 @@ def test_the_seeders_read_the_store_write_intrinio_as_the_source_and_keep_the_sh
     # the one yfinance read left: the declared next ex-dividend date, a date not a price, the exception CLAUDE.md names
     fwd = inspect.getsource(seed_dividends._fetch_forward_sync)
     assert "exDividendDate" in fwd and "if ex_date < date.today():" in fwd
-    assert seed_dividends.FORWARD_BASIS == "annual_rate"
+    assert seed_dividends.FORWARD_BASIS in seed_dividends.PER_PAYMENT_BASES and "annual_rate" not in seed_dividends.PER_PAYMENT_BASES   # the forward amount is a declared payment, never the annualized rate
     assert DataSource.INTRINIO.value == "intrinio"
     assert 'title=f"{ticker.symbol} {split_ratio} Stock Split"' in inspect.getsource(seed_splits._upsert_split_event)
     assert '"split_ratio": split_ratio' in inspect.getsource(seed_splits._upsert_split_event)

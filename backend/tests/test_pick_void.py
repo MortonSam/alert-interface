@@ -52,9 +52,23 @@ async def test_a_winner_and_a_loser_outside_the_window_are_voided_identically_an
         kept = [r for r in rows if r[0] == date(2026, 9, 25)]
         assert kept and kept[0][1] == "closed" and kept[0][2] is None                               # three sessions out: inside the window
         assert len(labels) == 2 and all(l.startswith(f"{sym} picked 2026-09-16") for l in labels)
-        # idempotent: a second pass finds nothing to void
+        # a second pass skips the void picks, says so, and rewrites nothing
         async with ScriptSessionLocal() as s:
-            assert await auto_void(s, today=date(2026, 10, 6)) == []
+            again = await auto_void(s, today=date(2026, 10, 6))
+            await s.commit()
+            after = (await s.execute(text("SELECT void_reason, voided_at FROM alert_picks WHERE symbol = :s AND status = 'void' ORDER BY option_pnl_pct"), {"s": sym})).all()
+        assert again == [f"{sym} picked 2026-09-16: already void"] * 2
+        assert [(r[0], r[1]) for r in after] == [(r[2], None) for r in []] or all(r[0] == voided[0][2] for r in after)      # reasons unchanged
+        assert {r[1] for r in after} == {voided_at for voided_at in {r[1] for r in after}} and len({r[1] for r in after}) >= 1
+        # a hand-voided pick with its own reason is also left exactly as written
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("UPDATE alert_picks SET void_reason = 'voided by hand this morning', voided_at = '2026-10-07 09:00+00' WHERE symbol = :s AND option_pnl_pct = 42.0"), {"s": sym})
+            await s.commit()
+        async with ScriptSessionLocal() as s:
+            await auto_void(s, today=date(2026, 10, 6))
+            await s.commit()
+            hand = (await s.execute(text("SELECT void_reason, voided_at::text FROM alert_picks WHERE symbol = :s AND option_pnl_pct = 42.0"), {"s": sym})).first()
+        assert hand[0] == "voided by hand this morning" and hand[1].startswith("2026-10-07 09:00")
         title, body = digest_message("2026-10-07", 29, 29, [], None, 91.0, None, auto_voided=labels)
         assert "auto-voided 2 pick(s)" in body and "Report came 10 sessions after entry" in body
         assert "auto-voided" not in digest_message("2026-10-07", 29, 29, [], None, 91.0, None, auto_voided=[])[1]

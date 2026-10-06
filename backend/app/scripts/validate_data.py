@@ -2138,6 +2138,30 @@ async def check_iv_solver_band(session) -> CheckResult:
     return CheckResult("iv_solver_band", PASS, f"Every solved IV within [{IV_SANITY_MIN}, {IV_SANITY_MAX}] ({n} solver rows)")
 
 
+# ── Dividends: the next amount is a per-payment figure in line with the last one paid ─────────────────
+
+NEXT_DIVIDEND_TOLERANCE_PCT = 10
+
+async def check_next_dividend_amount(session) -> CheckResult:
+    """ERROR when a stored upcoming ex-dividend amount is more than NEXT_DIVIDEND_TOLERANCE_PCT off the last dividend Intrinio
+    recorded on the bars, unless the event's metadata carries a declaration (declared: true). Catches an annual rate stored as a payment."""
+    rows = (await session.execute(text("""
+        SELECT t.symbol, e.event_date, (e.metadata->>'dividend_amount')::float AS amount, e.metadata->>'basis' AS basis,
+               (SELECT dividend FROM price_bars_shadow b WHERE b.symbol = t.symbol AND b.dividend > 0 ORDER BY b.date DESC LIMIT 1) AS last_paid
+        FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE e.event_type = 'ex_dividend' AND e.event_date >= CURRENT_DATE AND t.is_active AND COALESCE(e.metadata->>'declared', 'false') <> 'true'
+        ORDER BY e.event_date, t.symbol"""))).all()
+    bad = []
+    for r in rows:
+        if r.amount is None or r.last_paid is None:
+            continue
+        if abs(r.amount - float(r.last_paid)) > float(r.last_paid) * NEXT_DIVIDEND_TOLERANCE_PCT / 100:
+            bad.append(f"{r.symbol} {r.event_date.isoformat()}: stored {r.amount} ({r.basis or 'no basis'}) vs last paid {float(r.last_paid)}")
+    if bad:
+        return CheckResult("next_dividend_amount", ERROR, f"{len(bad)} upcoming dividend amount(s) more than {NEXT_DIVIDEND_TOLERANCE_PCT}% off the last paid", bad[:40])
+    return CheckResult("next_dividend_amount", PASS, f"Every stored upcoming dividend is within {NEXT_DIVIDEND_TOLERANCE_PCT}% of the last paid ({len(rows)} checked)")
+
+
 # ── The calendar: a company-confirmed date stands alone; a past estimate never stands as resolved ───────
 
 ESTIMATE_BESIDE_CONFIRMED_DAYS = 45
@@ -2886,6 +2910,8 @@ CHECKS = [
     check_eps_actuals_fresh,
     # one earnings event per ticker and date
     check_earnings_events_unique,
+    # dividends: the next amount is a payment, in line with the last
+    check_next_dividend_amount,
     # the calendar: confirmed dates stand alone, past estimates never stand as resolved
     check_estimate_beside_confirmed,
     check_past_estimate_standing,

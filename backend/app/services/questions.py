@@ -4,7 +4,9 @@ stock's own data, each answered in at most three short sentences from stored row
 Each answer is {key, question, data, idea, inputs, as_of, rule}: `data` is what this stock's rows show (one or two
 sentences, every number an input with its receipt), `idea` is the plain-words explanation for someone new. A question
 whose data is missing, stale, or rests on fewer than MIN_REPORTS reports or MIN_SESSIONS sessions never appears. The
-catalog order is the priority order; the builder shows the first MAX_QUESTIONS that qualify.
+catalog order is the priority order; the builder shows the first MAX_QUESTIONS that qualify. Two evergreen questions (the
+usual move on earnings, volatility against the stock's own year) follow the six event questions, so every stock with at
+least MIN_REPORTS reports shows at least three.
 """
 from __future__ import annotations
 
@@ -134,14 +136,48 @@ def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None
     days = (ex_date - today).days
     if days < 0 or days > EX_DIV_DAYS:
         return None
-    amt = f" with a {fmt_money(amount)} dividend per share" if amount else ""
+    amt = f" with a {fmt_money(amount)} per-share dividend" if amount else ""
     data = f"{symbol} goes ex-dividend on {fmt_date(ex_date)}{amt}."
     idea = "On the ex-dividend date the price typically opens lower by about the dividend, because buyers from that day on no longer receive that payment."
     inputs = [_input("ex-dividend date", fmt_date(ex_date), ex_date, "events, ex_dividend")]
     if amount:
-        inputs.append(_input("dividend per share", fmt_money(amount), ex_date, "events metadata, dividend_amount"))
+        inputs.append(_input("dividend per share", fmt_money(amount), ex_date, "the declared per-payment amount (Intrinio's last payment on the bars, else yfinance's last declared payment)"))
     return _q("ex_dividend", f"What happens to {name}'s price on the ex-dividend date?", data, idea, inputs, ex_date,
               f"Asked when a stored ex-dividend date is within {EX_DIV_DAYS} days.")
+
+
+# 7 ─────────────────────────────────────────────────────────────────────────────
+def q_usual_move(*, name: str, symbol: str, typical_abs: float, n_reports: int, best: tuple[date, float], worst: tuple[date, float],
+                 sample_as_of: date | None) -> dict | None:
+    """Evergreen: the typical 1-day move over past reports with the largest up and down moves."""
+    if n_reports < MIN_REPORTS:
+        return None
+    typ = fmt_pct(typical_abs, signed=False)
+    data = (f"Over {last_reports(n_reports)} {symbol} has moved ±{typ} on average the session after reporting; its largest were {fmt_pct(best[1])} "
+            f"({fmt_date(best[0])}) and {fmt_pct(worst[1])} ({fmt_date(worst[0])}).")
+    idea = ("The typical move is the average size of the stock's past reactions, up or down; it is the yardstick an expected move is measured "
+            "against, because the options market is pricing a move of some size, not a direction.")
+    inputs = [_input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, historical_reactions"), _input("reports in the sample", n_reports, sample_as_of),
+              _input("largest up move", fmt_pct(best[1]), best[0], "historical_reactions"), _input("largest down move", fmt_pct(worst[1]), worst[0], "historical_reactions")]
+    return _q("usual_move", f"How much does {name} usually move on earnings?", data, idea, inputs, sample_as_of,
+              f"At least {MIN_REPORTS} past reports with a 1-day move; typical is the mean absolute move; the largest are the extremes of the same sample.")
+
+
+# 8 ─────────────────────────────────────────────────────────────────────────────
+def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_rank: float, sample_days: int, as_of: date) -> dict | None:
+    """Evergreen: the current 20-day realized volatility against the stock's own past year."""
+    if sample_days < MIN_SESSIONS:
+        return None
+    rv = fmt_pct(rv_20d * 100, signed=False)
+    share = f"{rv_rank:.0f}%" if rv_rank >= 50 else f"{100 - rv_rank:.0f}%"
+    phrase = f"more active than {share}" if rv_rank >= 50 else f"quieter than {share}"
+    data = f"{symbol}'s realized volatility over the last 20 sessions is {rv} annualized, {phrase} of its own 20-day windows over the past year."
+    idea = ("Realized volatility measures how much a stock actually moved from one close to the next; a stock is only \"volatile\" relative to its own "
+            "normal, so the comparison that matters is with its own past year.")
+    inputs = [_input("20-day realized volatility", rv, as_of, "rv_snapshots.rv_20d, annualized"), _input("share of past-year windows", share, as_of, f"rv_snapshots.rv_rank {rv_rank:.0f}"),
+              _input("sessions in the past year", sample_days, as_of, "rv_snapshots.sample_days")]
+    return _q("volatile_now", f"Is {name} more volatile than usual right now?", data, idea, inputs, as_of,
+              f"The latest servable realized-volatility snapshot with at least {MIN_SESSIONS} sessions; the rank is the percentile of the current 20-day value among the past year's windows.")
 
 
 def choose(candidates: list[dict | None]) -> list[dict]:
@@ -149,4 +185,4 @@ def choose(candidates: list[dict | None]) -> list[dict]:
     return [c for c in candidates if c][:MAX_QUESTIONS]
 
 
-__all__ = ["choose", "q_reaction_normal", "q_implied_big", "q_beat_fell", "q_big_move", "q_upgrades", "q_ex_dividend", "short_name"]
+__all__ = ["choose", "q_reaction_normal", "q_implied_big", "q_beat_fell", "q_big_move", "q_upgrades", "q_ex_dividend", "q_usual_move", "q_volatile_now", "short_name"]
