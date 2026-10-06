@@ -95,7 +95,7 @@ export default function Home() {
               The challenge
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              Trading apps hand you confetti. Terminals cost more than most people will pay.
+              Trading apps hand you confetti. Terminals cost thirty grand a year.
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-2xl mx-auto">
               Most people research the way there&#39;s always been to research: Yahoo for the

@@ -17,7 +17,9 @@ export const DATE_RULES: DateRule[] = [
   { file: "components/DiscoverRow.tsx", forbid: /\{price && <span/, because: "a price renders only with its as-of" },
   { file: "app/build/page.tsx", forbid: /"n\/a"/, because: "an absent fact says why: absent: <reason>" },
   { file: "app/build/page.tsx", forbid: /updated once a day/, because: "the options cadence comes from the cadence record" },
-  { file: "app/page.tsx", forbid: /thirty grand|Thirty million/, because: "no unsourced figure" },
+  // "Terminals cost thirty grand a year" is the challenge headline, kept verbatim at Sam's instruction (2026-10-05): a line about
+  // the market, not a figure from this system's data. Every other typed figure on the page stays forbidden.
+  { file: "app/page.tsx", forbid: /Thirty million/, because: "no unsourced figure" },
 ];
 
 export const DATE_REQUIREMENTS: { file: string; require: RegExp; because: string }[] = [
