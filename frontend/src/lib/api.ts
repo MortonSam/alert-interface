@@ -555,6 +555,12 @@ export interface ReportingSoonItem {
   confirmation_note?: string | null;
   insight: string | null;
   vol_regime: string | null;
+  implied_move_pct?: number | null;    // the freshest chain's ATM straddle over spot, percent
+  chain_date?: string | null;          // that chain's date: the implied move's receipt
+  typical_move_pct?: number | null;    // mean absolute 1-day move over at least 8 stored reports
+  typical_n?: number | null;
+  move_comparison?: string | null;     // "more than usual" | "less than usual" | "about its usual"
+  comparison?: string | null;          // the one sentence the API built (services/move_comparison)
 }
 
 export interface ReportingSoonResponse {

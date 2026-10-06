@@ -52,6 +52,12 @@ class ReportingSoonItem(BaseModel):
     confirmation_note: str | None = None
     insight: str | None = None  # e.g. "Beat 18 of 20 — beats largely priced in"
     vol_regime: str | None = None  # "iv_rich" | "iv_cheap" | None
+    implied_move_pct: float | None = None   # the freshest chain's ATM straddle over spot, percent
+    chain_date: str | None = None           # that chain's date: the implied move's receipt
+    typical_move_pct: float | None = None   # mean absolute 1-day move over at least 8 stored reports
+    typical_n: int | None = None
+    move_comparison: str | None = None      # "more than usual" | "less than usual" | "about its usual"
+    comparison: str | None = None           # the one sentence, services/move_comparison
 
 
 class ReportingSoonResponse(BaseModel):
@@ -726,6 +732,7 @@ async def reporting_soon(
     # Batch intelligence
     cond_stats = await _batch_conditional_stats(db, symbols)
     vol_data = await _batch_vol_regime(db, symbols)
+    comparisons = await _batch_move_comparison(db, deduped, cond_stats, today)
 
     # Build items with insights
     raw_items = []
@@ -753,6 +760,7 @@ async def reporting_soon(
             is_confirmed=r.is_confirmed,
             insight=_reporting_soon_insight(cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,
+            **comparisons.get(r.symbol, {}),
         )
         for r, cond, vol, _ in raw_items[:limit]
     ]
@@ -1145,6 +1153,31 @@ async def latest_pick(
             option_pnl_pct=option_pnl_pct,
         ),
     )
+
+
+async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today: date) -> dict[str, dict]:
+    """Per symbol: the implied move from the freshest chain (its date the receipt) against the typical 1-day move over at least
+    MIN_REPORTS stored reports, and the one-sentence comparison. A symbol missing either side gets no comparison."""
+    from app.services import price_bars, quote_cache
+    from app.services.briefing_build import _implied
+    from app.services.move_comparison import MIN_REPORTS, compare_moves, comparison_sentence
+    out: dict[str, dict] = {}
+    for r in rows:
+        cond = cond_stats.get(r.symbol)
+        if not cond or (cond.get("total") or 0) < MIN_REPORTS or not cond.get("avg_abs_1d"):
+            continue
+        cached = quote_cache.get(r.symbol)
+        spot = cached.get("price") if cached else None
+        if spot is None:
+            closes = await price_bars.bars(db, r.symbol, today - timedelta(days=14))
+            spot = float(closes["Close"].iloc[-1]) if closes is not None and not closes.empty else None
+        implied = await _implied(db, r.symbol, spot, r.event_date, today)
+        if not implied:
+            continue
+        imp, typ = round(implied["implied_pct"] * 100, 1), round(float(cond["avg_abs_1d"]), 1)
+        out[r.symbol] = {"implied_move_pct": imp, "chain_date": implied["chain_date"].isoformat(), "typical_move_pct": typ, "typical_n": int(cond["total"]),
+                         "move_comparison": compare_moves(imp, typ), "comparison": comparison_sentence(imp, typ, implied["chain_date"])}
+    return out
 
 
 @router.get("/insight/{symbol}", response_model=InsightResponse)

@@ -59,8 +59,8 @@ def q_implied_big(*, name: str, symbol: str, implied_pct: float, chain_date: dat
         return None
     imp = fmt_pct(implied_pct * 100, signed=False)
     typ = fmt_pct(typical_abs, signed=False)
-    ratio = (implied_pct * 100) / typical_abs if typical_abs else None
-    verdict = "more than usual" if ratio and ratio > 1.15 else "less than usual" if ratio and ratio < 0.85 else "about its usual"
+    from app.services.move_comparison import compare_moves
+    verdict = compare_moves(implied_pct * 100, typical_abs)
     data = (f"Options price a move of about ±{imp} for the {fmt_date(next_date)} report; over {last_reports(n_reports)} {symbol} has moved ±{typ} on average, "
             f"so the market is pricing {verdict}.")
     idea = ("The implied move is what a straddle costs: the price the options market puts on uncertainty. It tends to run above the move that "
@@ -69,8 +69,8 @@ def q_implied_big(*, name: str, symbol: str, implied_pct: float, chain_date: dat
               _input("report date", fmt_date(next_date), next_date, "events"), _input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, historical_reactions"),
               _input("reports in the sample", n_reports, sample_as_of)]
     return _q("implied_big", f"Is a ±{imp} expected move big for {name}?", data, idea, inputs, chain_date,
-              f"A report within {NEXT_WITHIN_DAYS} days and a fresh chain; at least {MIN_REPORTS} past reports; more or less than usual means the implied move is "
-              "over 15% above or below the mean absolute 1-day move.")
+              f"A report within {NEXT_WITHIN_DAYS} days and a fresh chain; at least {MIN_REPORTS} past reports; more than usual means the implied move is over "
+              "1.2 times the mean absolute 1-day move, less than usual under 0.8 times (services/move_comparison).")
 
 
 # 3 ─────────────────────────────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ def q_upgrades(*, name: str, symbol: str, upgrades_30d: int, upgrade_sessions: i
 
 # 6 ─────────────────────────────────────────────────────────────────────────────
 def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None, today: date, stored_on: date | None = None,
-                  declared_on: date | None = None) -> dict | None:
+                  declared_on: date | None = None, accession: str | None = None) -> dict | None:
     """An ex-dividend date within EX_DIV_DAYS. Dated by the declaration when one is held, else as an estimate dated by the refresh
     that stored the amount; the ex-date itself is the event, never the as-of."""
     days = (ex_date - today).days
@@ -147,7 +147,8 @@ def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None
     knew = declared_on or stored_on or today
     inputs = [_input("ex-dividend date", fmt_date(ex_date), knew, "events, ex_dividend")]
     if amount:
-        inputs.append(_input("dividend per share", fmt_money(amount), knew, "declared" if declared_on else "the last per-payment amount (Intrinio's bars, else yfinance's last declared payment)"))
+        inputs.append(_input("dividend per share", fmt_money(amount), knew, (f"declared in the 8-K filed {fmt_date(declared_on)}" + (f" ({accession})" if accession else "")) if declared_on
+                             else "the last per-payment amount (Intrinio's bars, else yfinance's last declared payment)"))
     return _q("ex_dividend", f"What happens to {name}'s price on the ex-dividend date?", data, idea, inputs, knew,
               f"Asked when a stored ex-dividend date is within {EX_DIV_DAYS} days; dated by the declaration when held, else by the refresh that stored the amount.",
               as_of_kind="declared" if declared_on else "estimated")

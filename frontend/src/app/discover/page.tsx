@@ -1,6 +1,7 @@
 "use client";
 
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
+import { MoveComparisonLine } from "@/components/MoveComparisonLine";
 import { datasetAgeLine, fmtQuoteDateTime, freshnessLine } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -244,6 +245,7 @@ export default function DiscoverPage() {
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                     priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
                     sentence={reportingSoonSentence(item)}
+                    detail={<MoveComparisonLine item={item} />}
                   />
                 ))}
               </DiscoverRows>

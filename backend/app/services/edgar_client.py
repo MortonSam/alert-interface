@@ -201,6 +201,57 @@ class EdgarClient:
             print(f"Warning: could not cache filing {accession_number}: {redact(exc)}", flush=True)
         return html
 
+    async def list_filing_documents(self, cik: str, accession_number: str) -> list[str]:
+        """The .htm documents in a filing (the cover and its exhibits), from the filing's index. Cached 24h."""
+        import json as _json
+        safe_acc = accession_number.replace("-", "")
+        cache_file = _cache_path(f"edgar_{accession_number}_index.json")
+        if _cache_fresh(cache_file):
+            data = _json.loads(cache_file.read_text(encoding="utf-8"))
+        else:
+            resp = await self._sec_client.get(f"/Archives/edgar/data/{int(cik)}/{safe_acc}/index.json")
+            resp.raise_for_status()
+            data = resp.json()
+            try:
+                cache_file.write_text(_json.dumps(data), encoding="utf-8")
+            except OSError:
+                pass
+        names = [it.get("name", "") for it in data.get("directory", {}).get("item", [])]
+        return [n for n in names if n.lower().endswith((".htm", ".html")) and not n.lower().startswith("r") or n.lower().startswith("ex")]
+
+    async def fetch_filing_document(self, cik: str, accession_number: str, name: str) -> str:
+        """One document of a filing (an exhibit, say), cached 24h by accession and name."""
+        safe_acc = accession_number.replace("-", "")
+        cache_file = _cache_path(f"edgar_{accession_number}_{name}")
+        if _cache_fresh(cache_file):
+            return cache_file.read_text(encoding="utf-8", errors="replace")
+        resp = await self._sec_client.get(f"/Archives/edgar/data/{int(cik)}/{safe_acc}/{name}")
+        resp.raise_for_status()
+        try:
+            cache_file.write_text(resp.text, encoding="utf-8")
+        except OSError:
+            pass
+        return resp.text
+
+    async def filing_texts(self, cik: str, accession_number: str, primary_document: str) -> list[tuple[str, str]]:
+        """(document name, plain text) for the cover and every exhibit of a filing; the cover first."""
+        from bs4 import BeautifulSoup
+        out = []
+        try:
+            html = await self.fetch_filing_html(cik, accession_number, primary_document)
+            out.append((primary_document, BeautifulSoup(html, "html.parser").get_text(" ")))
+        except Exception:
+            pass
+        try:
+            for name in await self.list_filing_documents(cik, accession_number):
+                if name == primary_document:
+                    continue
+                html = await self.fetch_filing_document(cik, accession_number, name)
+                out.append((name, BeautifulSoup(html, "html.parser").get_text(" ")))
+        except Exception:
+            pass
+        return out
+
     # ── Section extraction ───────────────────────────────────────────────────
 
     def extract_filing_sections(self, html: str) -> dict[str, str]:

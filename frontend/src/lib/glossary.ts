@@ -94,6 +94,8 @@ const GLOSSARY: Record<string, string> = {
     "The stock market's price for the whole company: share price times shares outstanding. It says how big the company is, not whether it is cheap.",
   sector:
     "The broad industry group a company belongs to, such as Manufacturing or Finance. Stocks in a sector often move together when news hits the group.",
+  "typical move":
+    "The average size of a stock's past reactions to its reports, up or down, over at least eight of them. It is the yardstick an expected move is measured against.",
   "1-day move":
     "The stock's percentage change over the one session that first trades on the report, close to close. For an after-close report that is the next session; for a before-open report it is the report day itself.",
 };

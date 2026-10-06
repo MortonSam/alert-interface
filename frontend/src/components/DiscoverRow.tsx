@@ -7,10 +7,12 @@ interface DiscoverRowProps {
   priceAsOf?: string | null; // the quote's own date and time, shown under the price; a price never appears without it
   /** Why this stock is in this section, one sentence (lib/discoverSentences). Wraps; never cut short. */
   sentence: string;
+  /** An optional second line under the sentence (the calendar's options-against-typical comparison), already linked. */
+  detail?: React.ReactNode;
 }
 
 /** One stock on /discover: ticker, company, last price, then the reason. The whole row opens the ticker page. */
-export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence }: DiscoverRowProps) {
+export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence, detail }: DiscoverRowProps) {
   return (
     <li>
       <Link
@@ -28,7 +30,10 @@ export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence }
             </span>
           )}
         </div>
-        <p className="mt-0.5 sm:mt-0 text-sm text-foreground/80 leading-snug break-words">{sentence}</p>
+        <div className="mt-0.5 sm:mt-0 min-w-0">
+          <p className="text-sm text-foreground/80 leading-snug break-words">{sentence}</p>
+          {detail && <p className="mt-1 text-xs text-muted-foreground leading-snug break-words">{detail}</p>}
+        </div>
       </Link>
     </li>
   );
