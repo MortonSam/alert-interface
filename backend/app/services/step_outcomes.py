@@ -6,6 +6,7 @@ the fields that explain a failure (validate: which checks; FOMC: which tickers
 stalled) and they survive.
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import json
 
@@ -30,7 +31,8 @@ async def record_step_fields(label: str, fields: dict) -> None:
     try:
         async with ScriptSessionLocal() as session:
             raw = await get_value(session, "step_outcomes")
-            await set_value(session, "step_outcomes", json.dumps(merged_outcomes(raw, label, fields)))
+            from app.services.redact import redact_deep
+            await set_value(session, "step_outcomes", json.dumps(merged_outcomes(raw, label, redact_deep(fields))))
             await session.commit()
     except Exception as exc:
-        print(f"  [WARN] could not record step outcome for {label}: {exc}", flush=True)
+        print(f"  [WARN] could not record step outcome for {label}: {redact(exc)}", flush=True)

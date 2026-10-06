@@ -20,6 +20,7 @@ CLI
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import json
@@ -80,7 +81,7 @@ def _warm_one(
             "action": "failed",
             "model": None,
             "elapsed": time.monotonic() - t0,
-            "error": str(exc)[:80],
+            "error": redact(exc)[:80],
         }
 
 
@@ -145,7 +146,7 @@ def _record_warm_outcome(generated: int, cached: int, failed: int,
             conn.commit()
         engine.dispose()
     except Exception as exc:
-        print(f"  [WARN] Failed to write warm outcome: {exc}")
+        print(f"  [WARN] Failed to write warm outcome: {redact(exc)}")
 
 
 def main() -> int:
@@ -180,7 +181,7 @@ def main() -> int:
         try:
             symbols = _get_active_symbols(client, base)
         except Exception as exc:
-            msg = f"Could not fetch tickers from {base}: {exc}"
+            msg = f"Could not fetch tickers from {base}: {redact(exc)}"
             print(f"  [WARN] {msg}")
             _diagnostics.append(msg)
             _record_warm_outcome(0, 0, 0, [], 0, 0.0, reason=msg)

@@ -1,3 +1,4 @@
+from app.services.redact import redact
 import asyncio
 import json
 import re
@@ -84,7 +85,7 @@ def _extract_json(text: str) -> dict:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"JSON parse failed after sanitization: {exc}\nText: {raw[:300]}")
+        raise ValueError(f"JSON parse failed after sanitization: {redact(exc)}\nText: {raw[:300]}")
 
 
 def _build_strike_lines(
@@ -341,7 +342,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
             ),
         )
     except Exception as exc:
-        print(f"[draft] {sym}: market data fetch failed: {exc}", flush=True)
+        print(f"[draft] {sym}: market data fetch failed: {redact(exc)}", flush=True)
         raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
     finally:
         await finnhub.close()
@@ -932,7 +933,7 @@ Return ONLY this JSON object (no other text):
         try:
             gen = await client.generate_thesis_draft(current_prompt)
         except Exception as exc:
-            print(f"[thesis-draft] {sym}: AI generation failed: {exc}", flush=True)
+            print(f"[thesis-draft] {sym}: AI generation failed: {redact(exc)}", flush=True)
             raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
         print(f"[thesis-draft] {sym} attempt={attempt}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
@@ -941,7 +942,7 @@ Return ONLY this JSON object (no other text):
         try:
             parsed = _extract_json(gen["content"])
         except Exception as exc:
-            print(f"[thesis-draft] {sym}: AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}", flush=True)
+            print(f"[thesis-draft] {sym}: AI returned non-JSON output: {redact(exc)}\nRaw: {gen['content'][:300]}", flush=True)
             raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
         suggested_target = parsed.get("suggested_target")
@@ -1285,7 +1286,7 @@ async def _compute_alert_pick_v2(
         except Exception as exc:
             import traceback
             traceback.print_exc()
-            print(f"[alert-pick-v2] {sym}: structure failed: {exc}", flush=True)
+            print(f"[alert-pick-v2] {sym}: structure failed: {redact(exc)}", flush=True)
             await db.rollback()   # a failed flush leaves the session unusable until rolled back
             # Do NOT persist a broken pick — return structure_failed
             return {
@@ -1293,7 +1294,7 @@ async def _compute_alert_pick_v2(
                 "leans": [],
                 "pick_id": None,
                 "picked_direction": "bullish",
-                "note": str(exc),
+                "note": redact(exc),
                 "generated_at": generated_at,
                 "existing_pick": False,
                 "draft": None,
@@ -2117,7 +2118,7 @@ async def draft_alternative(
     try:
         quote = await finnhub.get_quote(sym)
     except Exception as exc:
-        print(f"[draft] {sym}: market data fetch failed: {exc}", flush=True)
+        print(f"[draft] {sym}: market data fetch failed: {redact(exc)}", flush=True)
         raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
     finally:
         await finnhub.close()
@@ -2274,7 +2275,7 @@ Return ONLY this JSON object (no other text):
     try:
         gen = await client.generate_thesis_draft_alternative(prompt)
     except Exception as exc:
-        print(f"[draft-alternative] {sym}: AI generation failed: {exc}", flush=True)
+        print(f"[draft-alternative] {sym}: AI generation failed: {redact(exc)}", flush=True)
         raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
     print(
@@ -2286,7 +2287,7 @@ Return ONLY this JSON object (no other text):
     try:
         parsed = _extract_json(gen["content"])
     except Exception as exc:
-        print(f"[draft-alternative] {sym}: AI returned non-JSON output: {exc}\nRaw: {gen['content'][:300]}", flush=True)
+        print(f"[draft-alternative] {sym}: AI returned non-JSON output: {redact(exc)}\nRaw: {gen['content'][:300]}", flush=True)
         raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
     fits              = bool(parsed.get("fits", False))

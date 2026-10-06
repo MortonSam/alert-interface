@@ -12,6 +12,7 @@ full 512-ticker price pass (one request per ticker, page_size 10000 covers five 
 minute-level cap. Nothing imports this module yet.
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import os
@@ -26,6 +27,10 @@ BASE_URL = "https://api-v2.intrinio.com"
 MIN_INTERVAL_SECONDS = 0.25
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)       # after a 429 or a 5xx; Retry-After wins when present
 PAGE_SIZE = 10000                         # the spec's maximum for price pages
+
+
+class IntrinioError(RuntimeError):
+    """An Intrinio response that is not usable; its message never carries the key."""
 
 
 class IntrinioAuthError(RuntimeError):
@@ -67,7 +72,10 @@ class IntrinioClient:
                 await asyncio.sleep(wait)
             self._last_at = time.monotonic()
             self.log.count += 1
-            resp = await self._client.get(path, params=params)
+            try:
+                resp = await self._client.get(path, params=params)
+            except httpx.HTTPError as exc:
+                raise httpx.HTTPError(redact(exc)) from None
             self.log.last_status = resp.status_code
             self.log.rate_limit_headers = {k: v for k, v in resp.headers.items() if "limit" in k.lower() or "retry" in k.lower()}
             if resp.status_code == 200:
@@ -78,7 +86,7 @@ class IntrinioClient:
                 return {}
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt == len(RETRY_DELAYS):
-                    resp.raise_for_status()
+                    raise IntrinioError(f"Intrinio {resp.status_code} on {redact(str(resp.url))} after {attempt} retries")
                 delay = RETRY_DELAYS[attempt]
                 retry_after = resp.headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
@@ -86,7 +94,7 @@ class IntrinioClient:
                 self.log.retries += 1
                 await asyncio.sleep(delay)
                 continue
-            resp.raise_for_status()
+            raise IntrinioError(f"Intrinio {resp.status_code} on {redact(str(resp.url))}: {resp.text[:120]}")
         raise RuntimeError("unreachable")
 
     async def _paged(self, path: str, params: dict[str, Any], key: str) -> list[dict]:
@@ -133,7 +141,7 @@ async def self_test() -> str:
         rows = await c.daily_prices("AAPL", date(2026, 9, 20), date(2026, 9, 30))
         return f"ok: {len(rows)} AAPL bars, {c.request_count} request(s), headers {c.log.rate_limit_headers}"
     except IntrinioAuthError as exc:
-        return f"auth failed: {exc}"
+        return f"auth failed: {redact(exc)}"
     finally:
         await c.close()
 

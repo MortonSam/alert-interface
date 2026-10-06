@@ -9,6 +9,7 @@ Usage
     make refresh
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import json
 import os
@@ -120,7 +121,7 @@ def _record_step_success(label: str) -> None:
         now_iso = datetime.now(timezone.utc).isoformat()
         _db_upsert(f"step:{label}:last_success", now_iso)
     except Exception as exc:
-        print(f"  [WARN] Failed to write step stamp for {label}: {exc}")
+        print(f"  [WARN] Failed to write step stamp for {label}: {redact(exc)}")
 
 
 STDERR_EXCERPT_LINES = 3
@@ -135,7 +136,7 @@ def _stderr_excerpt(stderr_text: str | None) -> tuple[str | None, str | None]:
     """
     if not stderr_text:
         return None, None
-    lines = [l for l in stderr_text.strip().splitlines() if l.strip()]
+    lines = [redact(l) for l in stderr_text.strip().splitlines() if l.strip()]
     if not lines:
         return None, None
     head = "\n".join(lines[:STDERR_EXCERPT_LINES])
@@ -171,7 +172,7 @@ def _record_step_outcome(label: str, exit_code: int, seconds: float,
         outcomes[label] = existing
         _db_upsert("step_outcomes", json.dumps(outcomes))
     except Exception as exc:
-        print(f"  [WARN] Failed to write step outcome for {label}: {exc}")
+        print(f"  [WARN] Failed to write step outcome for {label}: {redact(exc)}")
 
 
 def _step_env() -> dict[str, str]:
@@ -234,7 +235,7 @@ def _alert_step_failure(label: str, exit_code: int, seconds: float, tail: str | 
         title, body = step_failure_message(label, exit_code, seconds, tail)
         notify_sync(title, body, PRIORITY_HIGH, ("warning",))
     except Exception as exc:
-        print(f"  [WARN] could not send the step-failure alert: {exc}")
+        print(f"  [WARN] could not send the step-failure alert: {redact(exc)}")
 
 
 def _record_run(fields: dict) -> None:
@@ -247,7 +248,7 @@ def _record_run(fields: dict) -> None:
         outcomes[RUN_LABEL] = entry
         _db_upsert("step_outcomes", json.dumps(outcomes))
     except Exception as exc:
-        print(f"  [WARN] could not record the run: {exc}")
+        print(f"  [WARN] could not record the run: {redact(exc)}")
 
 
 def _record_refresh() -> None:
@@ -325,7 +326,7 @@ def main(slot: str | None = None) -> int:
             try:
                 _db_upsert(slot_progress_key(slot), json.dumps(done))
             except Exception as exc:
-                print(f"  [WARN] could not stamp {label} for slot {slot}: {exc}")
+                print(f"  [WARN] could not stamp {label} for slot {slot}: {redact(exc)}")
     by_label = dict(results)
     results = [(label, by_label.get(label, True)) for label, _ in STEPS]
 
@@ -359,7 +360,7 @@ def main(slot: str | None = None) -> int:
         print(f"  {title}: {body}")
         notify_sync(title, body, tags=("sunrise",))
     except Exception as exc:
-        print(f"  [WARN] could not send the digest: {exc}")
+        print(f"  [WARN] could not send the digest: {redact(exc)}")
 
     _record_run({"finished_at": datetime.now(timezone.utc).isoformat(), "all_passed": all_passed, "interrupted": False})
     if all_passed:

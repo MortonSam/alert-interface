@@ -1,3 +1,4 @@
+from app.services.redact import redact
 import asyncio
 import json
 import uuid
@@ -269,7 +270,7 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
                 loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo"),
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Quote fetch failed: {exc}")
+            raise HTTPException(status_code=502, detail=f"Quote fetch failed: {redact(exc)}")
         finally:
             await finnhub.close()
 
@@ -687,7 +688,7 @@ async def _guarded_price(sym: str) -> QuoteState:
     try:
         raw = await finnhub.get_quote(sym)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {redact(exc)}")
     finally:
         await finnhub.close()
     price = float(raw.get("c") or 0) or None
@@ -1360,7 +1361,7 @@ async def get_options_read(
     try:
         quote = await finnhub.get_quote(sym)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Data fetch failed: {redact(exc)}")
     finally:
         await finnhub.close()
 
@@ -1569,7 +1570,7 @@ STRICT RULES:
     try:
         gen = await client.generate_options_read(prompt)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Options read generation failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Options read generation failed: {redact(exc)}")
 
     generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
     print(
@@ -1586,7 +1587,7 @@ STRICT RULES:
         }))
         await db.commit()
     except Exception as exc:
-        print(f"[options-read] Cache write failed for {sym}: {exc}", flush=True)
+        print(f"[options-read] Cache write failed for {sym}: {redact(exc)}", flush=True)
 
     return OptionsReadRead(
         symbol=sym, content=gen["content"], facts=facts, fact_values=fact_values,
@@ -1842,7 +1843,7 @@ Keep it grounded in the numbers. 40-70 words.\
     try:
         gen = await client.generate_explain(prompt)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Explain generation failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Explain generation failed: {redact(exc)}")
 
     generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
     print(f"[explain] {sym}/{metric}: {gen['input_tokens']} in / {gen['output_tokens']} out tokens", flush=True)
@@ -1855,7 +1856,7 @@ Keep it grounded in the numbers. 40-70 words.\
         }))
         await db.commit()
     except Exception as exc:
-        print(f"[explain] Cache write failed for {sym}/{metric}: {exc}", flush=True)
+        print(f"[explain] Cache write failed for {sym}/{metric}: {redact(exc)}", flush=True)
 
     return ExplainRead(
         symbol=sym, metric=metric, content=gen["content"], facts=facts,

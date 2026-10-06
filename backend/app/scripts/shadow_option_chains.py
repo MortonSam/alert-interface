@@ -17,6 +17,7 @@ Usage
     python -m app.scripts.shadow_option_chains --now --on=2026-10-01   # that session's EOD chains
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import json
@@ -163,11 +164,11 @@ async def run(argv: list[str]) -> int:
                     if got:
                         per_ticker[sym] = compare_front(got[0], stored_chains[cfront])
             except IntrinioAuthError as exc:
-                await record_step_fields(STEP_LABEL, {"error": str(exc)[:200], **clock_fields(now_utc, waited, early_reason)})
-                print(f"Intrinio refused the key: {exc}")
+                await record_step_fields(STEP_LABEL, {"error": redact(exc)[:200], **clock_fields(now_utc, waited, early_reason)})
+                print(f"Intrinio refused the key: {redact(exc)}")
                 return 1
             except Exception as exc:
-                errors.append(f"{sym}: {str(exc)[:120]}")
+                errors.append(f"{sym}: {redact(exc)[:120]}")
         async with ScriptSessionLocal() as s:
             removed = await chain_store.delete_expired(s, chain_store.INTRINIO, expected)
             await s.commit()

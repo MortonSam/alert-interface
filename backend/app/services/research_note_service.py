@@ -1,6 +1,7 @@
 """Service layer for generating and verifying AI research notes."""
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import json
 import uuid
@@ -206,7 +207,7 @@ async def _fetch_financials(symbol: str) -> dict | None:
     try:
         raw = await client.get_basic_financials(symbol)
     except Exception as exc:
-        print(f"Finnhub financials fetch failed for {symbol}: {exc}", flush=True)
+        print(f"Finnhub financials fetch failed for {symbol}: {redact(exc)}", flush=True)
         return None
     finally:
         await client.close()
@@ -348,7 +349,7 @@ def _parse_generation_response(raw_text: str) -> dict:
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Model returned invalid JSON: {exc}") from exc
+        raise ValueError(f"Model returned invalid JSON: {redact(exc)}") from exc
 
     # Validate required keys
     required = {"rating", "bottom_line", "what_they_do", "highlights", "watch", "risks"}
@@ -487,7 +488,7 @@ async def _fetch_context(
         if result:
             filing, sections = result
     except Exception as exc:
-        print(f"EDGAR fetch failed for {ticker.symbol}: {exc}", flush=True)
+        print(f"EDGAR fetch failed for {ticker.symbol}: {redact(exc)}", flush=True)
     finally:
         await edgar.close()
 
@@ -706,7 +707,7 @@ async def run_research_note_background(
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker_id)
-                .values(status="failed", error=str(exc), updated_at=now)
+                .values(status="failed", error=redact(exc), updated_at=now)
             )
             await db.commit()
             await _refund(db)
@@ -742,7 +743,7 @@ async def run_research_note_background(
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
-                .values(status=STATUS_VERIFICATION_FAILED, error=f"verification failed: {exc}", updated_at=now)
+                .values(status=STATUS_VERIFICATION_FAILED, error=f"verification failed: {redact(exc)}", updated_at=now)
             )
             await db.commit()
             await _refund(db)   # the visitor gets no note, so the use is not theirs to pay
@@ -787,7 +788,7 @@ async def verify_existing_note(
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Verification failed: {exc}. Please try again.",
+            detail=f"Verification failed: {redact(exc)}. Please try again.",
         )
 
     now = datetime.now(timezone.utc)

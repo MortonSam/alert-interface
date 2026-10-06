@@ -10,6 +10,7 @@ Usage:
     python -m app.scripts.audit_reaction_windows [TICKER ...]
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -41,7 +42,7 @@ def _fetch(symbol: str):
     try:
         return symbol, _fetch_price_history(yf.Ticker(symbol), lookback), None
     except Exception as exc:  # report and move on; this is an audit
-        return symbol, None, str(exc)
+        return symbol, None, redact(exc)
 
 
 def window_sessions(sessions: np.ndarray, event_type: str, timing: str, event_date: date) -> list[date]:

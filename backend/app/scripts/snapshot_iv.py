@@ -21,6 +21,7 @@ both side-by-side on the ticker page.  The spread between IV Rank and RV Rank
   - Low IV Rank,  High RV Rank -> options cheap vs realised movement (buy vol)
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -361,7 +362,7 @@ async def main(only_symbol: str | None = None, backfill: bool = False) -> int:
             )
             ok += 1
         except Exception as exc:
-            print(f"  {symbol:8s}  ERROR: {exc}")
+            print(f"  {symbol:8s}  ERROR: {redact(exc)}")
             err += 1
         if i % PROGRESS_EVERY == 0:
             print(f"  … {i}/{len(symbols)}  ok={ok} skipped={skipped} timed_out={timed_out} err={err}  {time.monotonic() - started:.0f}s", flush=True)

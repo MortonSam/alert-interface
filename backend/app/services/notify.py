@@ -9,6 +9,7 @@ Message formats (title / body), all plain text:
                  "failed: a, b | validate: E errors, W warnings | chain coverage P% | courier ran 16:07 ET, 421 tickers (91 failed)"
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import httpx
 
@@ -42,7 +43,7 @@ def notify_sync(title: str, message: str, priority: str = PRIORITY_DEFAULT, tags
         httpx.post(_url(), content=message.encode("utf-8"), headers=_headers(title, priority, tags), timeout=TIMEOUT_SECONDS).raise_for_status()
         return True
     except Exception as exc:
-        print(f"  [WARN] ntfy send failed: {exc}", flush=True)
+        print(f"  [WARN] ntfy send failed: {redact(exc)}", flush=True)
         return False
 
 
@@ -54,7 +55,7 @@ async def notify(title: str, message: str, priority: str = PRIORITY_DEFAULT, tag
             (await client.post(_url(), content=message.encode("utf-8"), headers=_headers(title, priority, tags))).raise_for_status()
         return True
     except Exception as exc:
-        print(f"  [WARN] ntfy send failed: {exc}", flush=True)
+        print(f"  [WARN] ntfy send failed: {redact(exc)}", flush=True)
         return False
 
 

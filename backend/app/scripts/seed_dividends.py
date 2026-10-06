@@ -17,6 +17,7 @@ CLI
     python -m app.scripts.seed_dividends --limit 5
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -132,7 +133,7 @@ async def main() -> int:
                     await session.commit()
                 inserted += n
             except Exception as exc:
-                failed.append(f"{t.symbol}: {str(exc)[:80]}")
+                failed.append(f"{t.symbol}: {redact(exc)[:80]}")
     finally:
         if client is not None:
             requests = client.request_count

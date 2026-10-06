@@ -16,6 +16,7 @@ Usage:
     python -m app.scripts.reclassify_report_timing [--cache FILE] [--symbols A,B] [--write]
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -81,7 +82,7 @@ async def collect_evidence(by_sym: dict[str, list[date]]) -> dict[str, dict]:
                     filings.extend(await edgar.get_all_8k_filings(cik))
                     await asyncio.sleep(0.12)
             except Exception as exc:
-                print(f"  {sym}: EDGAR error, rows keep no filing: {exc}", flush=True)
+                print(f"  {sym}: EDGAR error, rows keep no filing: {redact(exc)}", flush=True)
             hist = prices.get(sym)
             dates = _build_date_cache(hist) if hist is not None and not hist.empty else None
             rows: dict[str, dict] = {}

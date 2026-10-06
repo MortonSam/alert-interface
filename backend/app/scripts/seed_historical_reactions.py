@@ -27,6 +27,7 @@ Usage
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -148,7 +149,7 @@ def _fetch_earnings_dates(t: yf.Ticker) -> list[tuple[date, Decimal | None, Deci
     try:
         df = t.earnings_dates
     except Exception as exc:
-        print(f"    ⚠  earnings_dates error: {exc}")
+        print(f"    ⚠  earnings_dates error: {redact(exc)}")
         return []
 
     if df is None or df.empty:
@@ -696,7 +697,7 @@ async def seed(symbol: str) -> None:
     try:
         hist = _fetch_price_history(yf_ticker, lookback)
     except Exception as exc:
-        print(f"  ERROR: price history failed — {exc}")
+        print(f"  ERROR: price history failed — {redact(exc)}")
         return
 
     if hist.empty:
@@ -997,7 +998,7 @@ async def shadow_seed(symbols: list[str]) -> int:
         try:
             hist = _fetch_price_history(yf_ticker, lookback)
         except Exception as exc:
-            print(f"  {sym}: price history failed -- {exc}")
+            print(f"  {sym}: price history failed -- {redact(exc)}")
             continue
         if hist.empty:
             continue

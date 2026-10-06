@@ -27,6 +27,7 @@ CLI
     python -m app.scripts.check_eps_basis --limit 20
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -173,7 +174,7 @@ async def main(only_symbol: str | None, limit: int | None, incremental: bool = F
                     counts = await check_ticker(session, edgar, ticker_id, symbol, trs)
                 except Exception as exc:
                     await session.rollback()
-                    print(f"  {symbol:6s} ERROR {exc}", flush=True)
+                    print(f"  {symbol:6s} ERROR {redact(exc)}", flush=True)
                     continue
                 total.update(counts)
                 if i % 25 == 0 or only_symbol:

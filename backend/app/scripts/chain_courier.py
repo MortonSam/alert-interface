@@ -12,6 +12,15 @@ CLI
 """
 
 from __future__ import annotations
+try:                                        # the courier runs standalone on Sam's Mac: the app package may not be on its path
+    from app.services.redact import redact
+except ImportError:                         # the same rule inline, so a logged URL never carries a key here either
+    import re as _re
+
+    def redact(value) -> str:
+        text = str(value) if value is not None else ""
+        text = _re.sub(r"((?:^|[?&\s'\"])(?:token|api_key|apikey|key)=)[^&\s\"'<>)\]]*", r"\1***", text, flags=_re.I)
+        return _re.sub(r"(authorization['\"]?\s*[:=]\s*['\"]?)(?:bearer\s+|basic\s+|token\s+)?[^\s,'\"}]+", r"\1***", text, flags=_re.I)
 
 import argparse
 import os
@@ -48,7 +57,7 @@ def _fetch_active_tickers(base_url: str, token: str) -> list[str]:
         r.raise_for_status()
         symbols = [t["symbol"] for t in r.json() if t.get("symbol")]
     except Exception as exc:
-        raise TickerListUnavailable(f"ticker list fetch failed: {exc}") from exc
+        raise TickerListUnavailable(f"ticker list fetch failed: {redact(exc)}") from exc
     if not symbols:
         raise TickerListUnavailable("ticker list fetch returned no symbols")
     return sorted(symbols)
@@ -184,7 +193,7 @@ def _fetch_stored_expirations(base_url: str, token: str) -> dict[str, list[str]]
         r.raise_for_status()
         return r.json()
     except Exception as exc:
-        print(f"  (stored expirations fetch failed: {exc} — using rule-based only)")
+        print(f"  (stored expirations fetch failed: {redact(exc)} — using rule-based only)")
         return {}
 
 
@@ -342,7 +351,7 @@ def process_ticker(
         body = exc.response.text[:120] if exc.response else ""
         result["action"] = f"HTTP {exc.response.status_code}: {body}"[:60]
     except Exception as exc:
-        result["action"] = str(exc)[:60]
+        result["action"] = redact(exc)[:60]
 
     result["elapsed"] = time.monotonic() - t0
     return result
@@ -373,7 +382,7 @@ def main() -> int:
             else _fetch_active_tickers(base, token)
         )
     except TickerListUnavailable as exc:
-        print(f"ERROR: {exc}. Nothing pushed.", file=sys.stderr)
+        print(f"ERROR: {redact(exc)}. Nothing pushed.", file=sys.stderr)
         return 1
 
     t_start = time.monotonic()
@@ -423,7 +432,7 @@ def main() -> int:
         r.raise_for_status()
         expired_deleted = r.json().get("deleted", 0)
     except Exception as exc:
-        print(f"  (expired chain cleanup failed: {exc})")
+        print(f"  (expired chain cleanup failed: {redact(exc)})")
     if expired_deleted:
         print(f"Expired chains deleted: {expired_deleted}")
 

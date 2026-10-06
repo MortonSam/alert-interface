@@ -13,6 +13,7 @@ Usage (inside the backend container or via railway run):
     python -m app.scripts.repair_refused_dates --write    # apply
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -98,7 +99,7 @@ async def repair(write: bool) -> int:
                 await session.commit()
             except Exception as exc:
                 await session.rollback()
-                result = f"failed: {exc}"
+                result = f"failed: {redact(exc)}"
             print(line + f" -> {result}")
     print(f"{swappable} swappable with SEC evidence" + ("" if write else "; pass --write to apply"))
     return 0

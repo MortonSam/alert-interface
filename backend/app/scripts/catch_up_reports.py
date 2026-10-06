@@ -22,6 +22,7 @@ Usage
     python -m app.scripts.catch_up_reports --report   # read only: list what is missing
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -233,7 +234,7 @@ async def find_missing(session, tickers: list, entries: list[dict], edgar: Edgar
                     continue
                 dates = edgar_release_dates(await edgar.get_all_8k_records(cik), today)
             except Exception as exc:   # one filer must not stop the check
-                print(f"  EDGAR check skipped for {sym}: {exc}", flush=True)
+                print(f"  EDGAR check skipped for {sym}: {redact(exc)}", flush=True)
                 continue
             if dates:
                 reported[sym] = [(d, "edgar") for d in dates]
@@ -282,6 +283,7 @@ async def main(argv: list[str]) -> int:
             "checked": len(tickers), "missing": len(missing),
             "caught_up": by["caught_up"], "pending": by["pending"], "unseedable": by["unseedable"],
             "details": {m.label(): m.detail for m in missing},
+            "finnhub": __import__("app.services.finnhub_client", fromlist=["finnhub_stats"]).finnhub_stats(),
         })
     return 0
 

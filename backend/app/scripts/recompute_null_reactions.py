@@ -16,6 +16,7 @@ Usage:
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -124,7 +125,7 @@ async def _run(write: bool = False) -> int:
                     timeout=FETCH_TIMEOUT,
                 )
             except Exception as exc:
-                print(f"  {sym}: price fetch failed — {exc}")
+                print(f"  {sym}: price fetch failed — {redact(exc)}")
                 skipped_no_data += len(ticker_rows)
                 continue
 

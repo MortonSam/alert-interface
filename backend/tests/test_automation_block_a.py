@@ -168,7 +168,7 @@ def test_chain_coverage_below_the_floor_is_an_error_and_carries_its_figure():
 def test_the_courier_has_no_fallback_list_and_stops_without_the_ticker_list():
     src = inspect.getsource(chain_courier)
     assert "FALLBACK_TICKERS" not in src and "class TickerListUnavailable" in src
-    assert 'print(f"ERROR: {exc}. Nothing pushed.", file=sys.stderr)' in src and "return 1" in inspect.getsource(chain_courier.main)
+    assert 'print(f"ERROR: {redact(exc)}. Nothing pushed.", file=sys.stderr)' in src and "return 1" in inspect.getsource(chain_courier.main)
 
 
 # ── 5. fail-closed gates ──────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ Usage:
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -179,7 +180,7 @@ async def seed(symbol: str) -> None:
     try:
         data = fetch_ticker_data(symbol)
     except Exception as exc:
-        print(f"  ERROR: yfinance fetch failed — {exc}")
+        print(f"  ERROR: yfinance fetch failed — {redact(exc)}")
         return
 
     print(f"  name       : {data.name}")

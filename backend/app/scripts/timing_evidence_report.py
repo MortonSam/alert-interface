@@ -15,6 +15,7 @@ Usage:
     python -m app.scripts.timing_evidence_report --out /tmp/timing_evidence.json [--symbols A,B]
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -163,7 +164,7 @@ async def _run(out_path: str, only: list[str] | None) -> int:
                     records.extend(await edgar.get_all_8k_records(cik))
                     await asyncio.sleep(0.12)
             except Exception as exc:
-                tickers_out[sym] = {"error": str(exc)}
+                tickers_out[sym] = {"error": redact(exc)}
                 continue
             stats = ticker_clock_stats(records, since)
             stats["ciks"] = ciks

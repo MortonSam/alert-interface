@@ -164,8 +164,9 @@ async def health_check():
 
             try:
                 import json as _json
+                from app.services.redact import redact_deep
                 raw = await get_value(session, "step_outcomes")
-                result["step_outcomes"] = _json.loads(raw) if raw else {}
+                result["step_outcomes"] = redact_deep(_json.loads(raw) if raw else {})   # public: nothing stored before the redaction leaks either
             except Exception:
                 result["status"] = "degraded"
 

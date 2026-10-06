@@ -9,6 +9,7 @@ Usage
     python -m app.scripts.compute_rv_ranks --symbol AAPL
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -189,7 +190,7 @@ async def main(only_symbol: str | None = None) -> int:
             print(f"  {sym:8s}  RV={rv_str:8s}  rank={rank_str:5s}  [{status}]")
             ok += 1
         except Exception as exc:
-            print(f"  {sym:8s}  ERROR: {exc}")
+            print(f"  {sym:8s}  ERROR: {redact(exc)}")
             err += 1
 
     duration = round(time.time() - t0, 1)
@@ -209,7 +210,7 @@ async def main(only_symbol: str | None = None) -> int:
             await set_value(session, "rv_last_run", json.dumps(summary))
             await session.commit()
     except Exception as exc:
-        print(f"  WARNING: Could not write rv_last_run metadata: {exc}")
+        print(f"  WARNING: Could not write rv_last_run metadata: {redact(exc)}")
 
     return 0 if err == 0 else 1
 

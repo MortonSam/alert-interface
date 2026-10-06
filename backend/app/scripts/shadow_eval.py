@@ -12,6 +12,7 @@ Usage:
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import json
@@ -79,7 +80,7 @@ async def _run(dry_run: bool = False) -> int:
         try:
             tr = train(all_features, cutoff_date=today)
         except ValueError as e:
-            print(f"[shadow] Training failed: {e}")
+            print(f"[shadow] Training failed: {redact(e)}")
             return 1
 
         model = tr.model

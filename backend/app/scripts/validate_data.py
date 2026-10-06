@@ -14,6 +14,7 @@ Usage
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -2297,7 +2298,7 @@ async def check_fomc_calendar_matches_fed(session) -> CheckResult:
             resp.raise_for_status()
         page = parse_fed_calendar(resp.text)
     except Exception as exc:
-        return CheckResult("fomc_calendar_matches_fed", WARN, f"Fed calendar page could not be fetched or read: {exc}")
+        return CheckResult("fomc_calendar_matches_fed", WARN, f"Fed calendar page could not be fetched or read: {redact(exc)}")
     if not page:
         return CheckResult("fomc_calendar_matches_fed", WARN, "Fed calendar page fetched but no meetings were parsed")
     diffs = disagreements(page, today)
@@ -2850,7 +2851,7 @@ async def run_checks(checks, session_factory=None) -> list[CheckResult]:
             async with session_factory() as session:
                 result = await check_fn(session)
         except Exception as exc:
-            result = CheckResult(check_fn.__name__, ERROR, f"Check raised an exception: {exc}")
+            result = CheckResult(check_fn.__name__, ERROR, f"Check raised an exception: {redact(exc)}")
         results.append(result)
     return results
 

@@ -6,6 +6,7 @@ as the second source where Finnhub has nothing. A value already stored is never 
     python -m app.scripts.seed_eps_actuals --since 2026-09-01     # a one-time backfill of older events validate warns about
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import math
@@ -103,7 +104,7 @@ async def run(today: date | None = None, since: date | None = None) -> int:
                     cursor = stop + timedelta(days=1)
                 by_symbol = finnhub_rows(entries)
             except Exception as exc:
-                error = f"finnhub calendar: {exc}"
+                error = f"finnhub calendar: {redact(exc)}"
                 print(f"  [WARN] {error}", flush=True)
             finally:
                 await client.close()
@@ -129,8 +130,9 @@ async def run(today: date | None = None, since: date | None = None) -> int:
             filled[source].append(f"{sym} {e.event_date.isoformat()}")
             print(f"  {sym} {e.event_date}: {plan.get('eps_actual', 'kept')} vs {plan.get('eps_estimate', 'kept')} ({source})", flush=True)
         await s.commit()
+    from app.services.finnhub_client import finnhub_stats
     await record_step_fields(STEP_LABEL, {"since": start.isoformat(), "events": len(events), "due": len(due), "filled_finnhub": filled["finnhub"],
-                                          "filled_yfinance": filled["yfinance"], "still_missing": missing[:60], "error": error})
+                                          "filled_yfinance": filled["yfinance"], "still_missing": missing[:60], "finnhub": finnhub_stats(), "error": error})
     return 1 if error and not (filled["finnhub"] or filled["yfinance"]) else 0
 
 

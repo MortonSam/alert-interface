@@ -19,6 +19,7 @@ Usage
     python -m app.scripts.shadow_intrinio chains MU=1078.04,CAT=827.02       # SYMBOL=page quote for the second ATM pick
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import json
@@ -112,7 +113,7 @@ async def prices(symbols: list[str], client: IntrinioClient | None, today: date)
         try:
             hist = await bars(sym)
         except Exception as exc:
-            out["tickers"][sym] = {"error": str(exc)[:120]}
+            out["tickers"][sym] = {"error": redact(exc)[:120]}
             continue
         if hist.empty:
             out["tickers"][sym] = {"error": "no bars"}

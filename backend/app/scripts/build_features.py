@@ -12,6 +12,7 @@ CLI
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -142,7 +143,7 @@ def _fetch_prices(symbol: str, start: date, end: date) -> pd.DataFrame | None:
         if df is not None and not df.empty:
             return df
     except Exception as e:
-        print(f"  stored bars error for {symbol}: {e}")
+        print(f"  stored bars error for {symbol}: {redact(e)}")
     return None
 
 

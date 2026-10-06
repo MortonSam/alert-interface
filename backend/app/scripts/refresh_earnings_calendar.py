@@ -25,6 +25,7 @@ Usage
     python -m app.scripts.refresh_earnings_calendar
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -190,7 +191,7 @@ async def _last_outcome(label: str) -> dict:
             raw = await get_value(session, "step_outcomes")
         return (json.loads(raw) if raw else {}).get(label) or {}
     except Exception as exc:
-        print(f"  [WARN] could not read the last outcome for {label}: {exc}", flush=True)
+        print(f"  [WARN] could not read the last outcome for {label}: {redact(exc)}", flush=True)
         return {}
 
 
@@ -463,7 +464,7 @@ async def _edgar_202_dates(edgar: EdgarClient, sym: str, today: date) -> list[da
                     out.append(d)
         return out
     except Exception as exc:
-        print(f"  EDGAR 2.02 check skipped for {sym}: {exc}", flush=True)
+        print(f"  EDGAR 2.02 check skipped for {sym}: {redact(exc)}", flush=True)
         return []
 
 
@@ -518,7 +519,7 @@ async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbol
                     said.append("EDGAR: no CIK")
             print(f"  {sym}: " + "; ".join(said) + (f"; hit {hit.day.isoformat()} ({hit.evidence})" if hit else ""), flush=True)
         except Exception as exc:
-            print(f"  announcement check skipped for {sym}: {exc}", flush=True)
+            print(f"  announcement check skipped for {sym}: {redact(exc)}", flush=True)
             continue
         if hit is not None:
             out[sym] = hit
@@ -627,6 +628,8 @@ def outcome_fields(fields: dict, exit_code: int, started: datetime) -> dict:
     """The step's fields with exit, at and seconds: /health reads a missing exit as a failure, and a manual run
     (restore_yfinance_estimates) has no refresh.py wrapper to write them."""
     now = datetime.now(timezone.utc)
+    from app.services.finnhub_client import finnhub_stats
+    fields = {**fields, "finnhub": finnhub_stats()}
     return {**fields, "exit": exit_code, "at": now.isoformat(), "seconds": round((now - started).total_seconds(), 1)}
 
 

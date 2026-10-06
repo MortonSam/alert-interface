@@ -6,8 +6,10 @@ this is the one-off to fill them now.
     python -m app.scripts.seed_company_profiles
     python -m app.scripts.seed_company_profiles --all                 # refresh every active ticker regardless of age
     python -m app.scripts.seed_company_profiles --symbols=MU,MSFT     # just these
+    python -m app.scripts.seed_company_profiles --all --shares-only   # share counts and market caps from Finnhub only
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -41,6 +43,7 @@ async def store_shares(symbol: str, profile: dict) -> bool:
 
 async def run(argv: list[str]) -> int:
     refresh_all = "--all" in argv
+    shares_only = "--shares-only" in argv
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
     only_set = {x.strip().upper() for x in only.split(",")} if only else None
     now = datetime.now(timezone.utc)
@@ -50,7 +53,7 @@ async def run(argv: list[str]) -> int:
             WHERE t.is_active ORDER BY t.symbol"""))).all()
     if only_set:
         rows = [r for r in rows if r[0] in only_set]
-    due_profile = [sym for sym, at, _ in rows if refresh_all or at is None or (now - at).days >= PROFILE_MAX_AGE_DAYS]
+    due_profile = [] if shares_only else [sym for sym, at, _ in rows if refresh_all or at is None or (now - at).days >= PROFILE_MAX_AGE_DAYS]
     due_shares = [sym for sym, _, at in rows if refresh_all or at is None or (now - at).days >= PROFILE_MAX_AGE_DAYS]
     print(f"{STEP_LABEL}: {len(rows)} ticker(s), {len(due_profile)} profiles and {len(due_shares)} share counts to fetch", flush=True)
     client = IntrinioClient()
@@ -66,20 +69,21 @@ async def run(argv: list[str]) -> int:
                     await s.commit()
                 done.append(sym)
             except Exception as exc:
-                failed.append(f"{sym} (Intrinio): {str(exc)[:80]}")
-                print(f"  [WARN] {sym}: {exc}", flush=True)
+                failed.append(f"{sym} (Intrinio): {redact(exc)[:80]}")
+                print(f"  [WARN] {sym}: {redact(exc)}", flush=True)
         for sym in due_shares:
             try:
                 if await store_shares(sym, await finnhub.get_profile2(sym)):
                     shares_done.append(sym)
             except Exception as exc:
-                failed.append(f"{sym} (Finnhub): {str(exc)[:80]}")
-                print(f"  [WARN] {sym}: {exc}", flush=True)
+                failed.append(f"{sym} (Finnhub): {redact(exc)[:80]}")
+                print(f"  [WARN] {sym}: {redact(exc)}", flush=True)
     finally:
         await client.close()
         await finnhub.close()
     print(f"  stored {len(done)} profile(s) and {len(shares_done)} share count(s), {len(failed)} failed; {client.request_count} Intrinio request(s)")
-    await record_step_fields(STEP_LABEL, {"tickers": len(rows), "profiles": len(done), "shares": len(shares_done), "failed": failed[:40], "error": None})
+    from app.services.finnhub_client import finnhub_stats
+    await record_step_fields(STEP_LABEL, {"tickers": len(rows), "profiles": len(done), "shares": len(shares_done), "failed": failed[:40], "finnhub": finnhub_stats(), "error": None})
     return 0 if (done or shares_done) or not (due_profile or due_shares) else 1
 
 

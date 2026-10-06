@@ -32,6 +32,7 @@ Usage
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -206,7 +207,7 @@ async def apply_membership(candidates: list[dict]) -> None:
         from app.services.step_outcomes import record_step_fields
         await record_step_fields(SP500_STEP_LABEL, {"constituents": len(members), "index_member_cleared": left, "deactivated_index_leavers": deactivated})
     except Exception as exc:
-        print(f"  [WARN] could not record the membership outcome: {exc}")
+        print(f"  [WARN] could not record the membership outcome: {redact(exc)}")
 
 
 async def mark_index_members(session, members: list[str]) -> list[str]:
@@ -253,7 +254,7 @@ async def process_ticker(wiki_row: dict) -> bool:
             await session.commit()
         return True
     except Exception as exc:
-        tqdm.write(f"  ✗ {symbol}: {exc}")
+        tqdm.write(f"  ✗ {symbol}: {redact(exc)}")
         return False
 
 

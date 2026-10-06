@@ -14,6 +14,7 @@ Usage
     python -m app.scripts.backfill_report_timing --symbol CAT
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -170,7 +171,7 @@ async def _phase_edgar(
                     all_8ks.extend(await edgar.get_all_8k_filings(cik))
             except Exception as exc:
                 if i < 3:
-                    print(f"    {sym}: EDGAR error: {exc}")
+                    print(f"    {sym}: EDGAR error: {redact(exc)}")
                 errors += len(rows)
                 continue
 

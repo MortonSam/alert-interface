@@ -1,6 +1,7 @@
 """SEC EDGAR client — filing search and company facts via public EDGAR API."""
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import json
@@ -73,7 +74,7 @@ class EdgarClient:
             try:
                 cache_file.write_text(json.dumps(data))
             except OSError as exc:
-                print(f"Warning: could not write CIK cache: {exc}", flush=True)
+                print(f"Warning: could not write CIK cache: {redact(exc)}", flush=True)
 
         upper = symbol.upper()
         for entry in data.values():
@@ -197,7 +198,7 @@ class EdgarClient:
         try:
             cache_file.write_text(html, encoding="utf-8")
         except OSError as exc:
-            print(f"Warning: could not cache filing {accession_number}: {exc}", flush=True)
+            print(f"Warning: could not cache filing {accession_number}: {redact(exc)}", flush=True)
         return html
 
     # ── Section extraction ───────────────────────────────────────────────────

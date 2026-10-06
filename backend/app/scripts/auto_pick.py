@@ -8,6 +8,7 @@ Usage:
     python -m app.scripts.auto_pick --dry-run  # skip LLM + persist, print what would happen
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -425,9 +426,9 @@ async def _run(dry_run: bool = False) -> int:
                 tb = traceback.format_exc()
                 draft_attempts += 1
                 if not dry_run:
-                    _log_evaluation(session, sym, "error", note=f"{type(exc).__name__}: {exc}")
-                print(f"  {sym} (earnings {next_earnings}): error -- {exc}")
-                failures.append({"symbol": sym, "error": f"{type(exc).__name__}: {exc}", "traceback": tb})
+                    _log_evaluation(session, sym, "error", note=f"{type(exc).__name__}: {redact(exc)}")
+                print(f"  {sym} (earnings {next_earnings}): error -- {redact(exc)}")
+                failures.append({"symbol": sym, "error": f"{type(exc).__name__}: {redact(exc)}", "traceback": tb})
 
         if not dry_run:
             await session.commit()

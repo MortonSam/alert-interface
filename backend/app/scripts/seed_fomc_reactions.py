@@ -18,6 +18,7 @@ CLI
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import asyncio
@@ -192,7 +193,7 @@ async def seed(symbol: str) -> None:
     try:
         hist = _fetch_price_history(sym, lookback)
     except Exception as exc:
-        print(f"  ERROR: price history failed — {exc}")
+        print(f"  ERROR: price history failed — {redact(exc)}")
         return
 
     if hist.empty:
@@ -308,8 +309,8 @@ async def _process_ticker_bulk(
             ins, upd, nop = await _seed_ticker_bulk(ticker, fomc_dates, loop, floor_date)
             return True, ins, upd, nop, None
         except PriceFetchStalled as exc:
-            tqdm.write(f"  ⏱ {ticker.symbol}: skipped, {exc}")
-            return False, 0, 0, 0, str(exc)
+            tqdm.write(f"  ⏱ {ticker.symbol}: skipped, {redact(exc)}")
+            return False, 0, 0, 0, redact(exc)
         except Exception as exc:
             last_exc = exc
             if attempt < len(BULK_RETRY_DELAYS):

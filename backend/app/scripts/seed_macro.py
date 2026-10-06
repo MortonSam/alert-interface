@@ -23,6 +23,7 @@ Usage
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -113,7 +114,7 @@ async def fetch_bls_via_fred(
             print(f"  {title}: {len(batch)} dates  (FRED release {release_id})")
             events.extend(batch)
         except Exception as exc:
-            print(f"  ERROR FRED release {release_id} ({title}): {exc}")
+            print(f"  ERROR FRED release {release_id} ({title}): {redact(exc)}")
 
     return events
 

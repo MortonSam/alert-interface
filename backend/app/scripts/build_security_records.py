@@ -17,6 +17,7 @@ Usage
     python -m app.scripts.build_security_records --write --symbols=MU,CAT
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -151,11 +152,11 @@ async def main(argv: list[str]) -> int:
             try:
                 current = await client._get(f"/securities/{sym}", {})
             except IntrinioAuthError as exc:
-                print(f"  Intrinio refused the key: {exc}", flush=True)
-                await record_step_fields(STEP_LABEL, {"error": str(exc)[:200], "resolved": 0})
+                print(f"  Intrinio refused the key: {redact(exc)}", flush=True)
+                await record_step_fields(STEP_LABEL, {"error": redact(exc)[:200], "resolved": 0})
                 return 1
             except Exception as exc:
-                missing.append(f"{sym}: {exc}")
+                missing.append(f"{sym}: {redact(exc)}")
                 continue
             if not current or not current.get("id"):
                 missing.append(f"{sym}: no record")
@@ -185,7 +186,7 @@ async def main(argv: list[str]) -> int:
                         await session.commit()
                     profiles_refreshed.append(sym)
                 except Exception as exc:
-                    profile_failures.append(f"{sym}: {str(exc)[:80]}")
+                    profile_failures.append(f"{sym}: {redact(exc)[:80]}")
             if write:
                 async with ScriptSessionLocal() as session:
                     ins, upd, changed = await upsert(session, rows, current)

@@ -11,6 +11,7 @@ CLI
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import argparse
 import os
@@ -165,7 +166,7 @@ def process_ticker(
         result["status"] = f"HTTP {exc.response.status_code}"
     except Exception as exc:
         result["action"] = "failed"
-        result["status"] = str(exc)[:40]
+        result["status"] = redact(exc)[:40]
 
     result["elapsed"] = time.monotonic() - t0
     return result

@@ -16,6 +16,7 @@ Usage
     python -m app.scripts.solve_atm_iv --symbols=MU,CAT --on=2026-10-01
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import json
@@ -128,7 +129,7 @@ async def run(argv: list[str]) -> int:
             stored = await store_rates(s, rows)
             await s.commit()
     except Exception as exc:
-        rate_fetch_error, stored = str(exc)[:160], 0
+        rate_fetch_error, stored = redact(exc)[:160], 0
     # 2. which chain per ticker, from keys and dates only
     targets = choose_targets(await chain_index(only), on_arg)
     skipped_stale: dict[str, str] = {}

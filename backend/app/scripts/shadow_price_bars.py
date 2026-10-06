@@ -11,6 +11,7 @@ Usage
     python -m app.scripts.shadow_price_bars --plan     # print the fetch plan, no requests, no writes
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import sys
@@ -90,11 +91,11 @@ async def main(argv: list[str]) -> int:
             try:
                 bars = await client.daily_prices(f.record.intrinio_security_id, f.start, f.end)
             except IntrinioAuthError as exc:
-                await record_step_fields(STEP_LABEL, {"error": str(exc)[:200], "requests": client.request_count, "bars": written})
-                print(f"Intrinio refused the key: {exc}")
+                await record_step_fields(STEP_LABEL, {"error": redact(exc)[:200], "requests": client.request_count, "bars": written})
+                print(f"Intrinio refused the key: {redact(exc)}")
                 return 1
             except Exception as exc:
-                errors.append(f"{f.symbol} {f.record.intrinio_security_id}: {str(exc)[:120]}")
+                errors.append(f"{f.symbol} {f.record.intrinio_security_id}: {redact(exc)[:120]}")
                 continue
             n = await _upsert(_rows(f, bars, ids[(f.symbol, f.record.valid_from)], now))
             written += n

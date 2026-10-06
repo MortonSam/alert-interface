@@ -15,9 +15,9 @@ Implemented
 
 Rate limiting
 -------------
-  Module-level async limiter enforces 1.05s minimum spacing between calls
-  (fits comfortably under Finnhub free tier's 60/min).  On 429 the request
-  is retried once after a 5s pause.
+  One module-level pace for every client in the process: at most REQUESTS_PER_MINUTE (55) requests in any rolling
+  minute. A 429 is retried with backoff that honours Retry-After (RETRY_DELAYS), counted in STATS for step outcomes,
+  and raised as FinnhubRateLimited only after the retries. Every error message passes through services.redact.
 
 Finnhub field key reference
 ---------------------------
@@ -25,6 +25,7 @@ Finnhub field key reference
   Candles : c=closes, h=highs, l=lows, o=opens, v=volumes, t=timestamps, s=status
 """
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -36,24 +37,48 @@ from app.config import settings
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 
-# ── Module-level rate limiter ─────────────────────────────────────────────────
-# Shared across all FinnhubClient instances within a process.
+# ── Module-level pacing ───────────────────────────────────────────────────────
+# One pace for every FinnhubClient in the process (profiles, share counts, EPS actuals, recommendations, calendar, quotes):
+# at most REQUESTS_PER_MINUTE requests in any rolling minute, a 429 retried with backoff that honours Retry-After, and the
+# counts kept for step outcomes.
 
+REQUESTS_PER_MINUTE = 55
+RETRY_DELAYS = (2.0, 5.0, 15.0, 30.0)        # after a 429 without a usable Retry-After; a Retry-After larger than these wins
 _rate_lock = asyncio.Lock()
-_last_call_at: float = 0.0
-MIN_SPACING = 1.05  # seconds between Finnhub API calls
+_recent_calls: list[float] = []              # monotonic times of the calls in the last minute
+STATS = {"requests": 0, "rate_limited": 0, "retries_exhausted": 0}
 
 
-async def _throttle() -> None:
-    """Enforce minimum spacing between Finnhub calls."""
-    global _last_call_at
+def finnhub_stats() -> dict:
+    """Counts since the process started, for step outcomes: requests, 429s met, requests given up after the retries."""
+    return dict(STATS)
+
+
+class FinnhubRateLimited(RuntimeError):
+    """A request still 429 after every retry."""
+
+
+async def _pace() -> None:
+    """Block until a request can be made without exceeding REQUESTS_PER_MINUTE in the trailing minute."""
     async with _rate_lock:
         loop = asyncio.get_event_loop()
-        now = loop.time()
-        wait = MIN_SPACING - (now - _last_call_at)
-        if wait > 0:
-            await asyncio.sleep(wait)
-        _last_call_at = asyncio.get_event_loop().time()
+        while True:
+            now = loop.time()
+            while _recent_calls and now - _recent_calls[0] >= 60.0:
+                _recent_calls.pop(0)
+            if len(_recent_calls) < REQUESTS_PER_MINUTE:
+                _recent_calls.append(now)
+                STATS["requests"] += 1
+                return
+            await asyncio.sleep(max(0.05, 60.0 - (now - _recent_calls[0])))
+
+
+def retry_delay(retry_after: str | None, attempt: int) -> float:
+    """Seconds to wait after a 429: Retry-After when the server sends one, never less than the backoff schedule."""
+    base = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+    if retry_after and retry_after.strip().isdigit():
+        return max(base, float(retry_after.strip()))
+    return base
 
 
 class FinnhubClient:
@@ -71,15 +96,27 @@ class FinnhubClient:
         path: str,
         params: dict[str, Any] | None = None,
     ) -> Any:
-        """Rate-limited HTTP request with one retry on 429."""
-        await _throttle()
-        resp = await self._client.request(method, path, params=params)
-        if resp.status_code == 429:
-            await asyncio.sleep(5.0)
-            await _throttle()
-            resp = await self._client.request(method, path, params=params)
-        resp.raise_for_status()
-        return resp.json()
+        """A paced request; a 429 is retried with backoff honouring Retry-After; every error message is redacted."""
+        attempt = 0
+        while True:
+            await _pace()
+            try:
+                resp = await self._client.request(method, path, params=params)
+            except httpx.HTTPError as exc:
+                raise httpx.HTTPError(redact(exc)) from None
+            if resp.status_code == 429:
+                STATS["rate_limited"] += 1
+                if attempt >= len(RETRY_DELAYS):
+                    STATS["retries_exhausted"] += 1
+                    raise FinnhubRateLimited(f"Finnhub 429 on {path} after {attempt} retries")
+                await asyncio.sleep(retry_delay(resp.headers.get("Retry-After"), attempt))
+                attempt += 1
+                continue
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise httpx.HTTPStatusError(redact(exc), request=exc.request, response=exc.response) from None
+            return resp.json()
 
     # ── Quote ──────────────────────────────────────────────────────────────────
 

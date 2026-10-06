@@ -11,6 +11,7 @@ Usage
 """
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import asyncio
 import random
@@ -322,7 +323,7 @@ async def audit_spot_check(session) -> None:
         try:
             info = yf.Ticker(sym).info or {}
         except Exception as exc:
-            print(f"    ✗ yfinance fetch failed: {exc}")
+            print(f"    ✗ yfinance fetch failed: {redact(exc)}")
             continue
 
         yf_data = {

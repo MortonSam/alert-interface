@@ -1,6 +1,7 @@
 """Admin-only endpoints — chain ingestion, diagnostics."""
 
 from __future__ import annotations
+from app.services.redact import redact
 
 import json
 import math
@@ -89,7 +90,7 @@ async def ingest_options_chains(
                 if prev is None or item.expiration < prev.expiration:
                     nearest_chain[sym] = item
         except Exception as exc:
-            errors.append(f"{sym}: {exc}")
+            errors.append(f"{sym}: {redact(exc)}")
 
     # Compute and store put/call ratio from the nearest expiration per symbol
     from app.constants import MIN_SIDE_CONTRACTS
@@ -155,7 +156,7 @@ async def _record_courier_run(db: AsyncSession, tickers: int, chains: int, error
             await set_value(db, f"step:{COURIER_STEP_LABEL}:last_success", now.isoformat())
         await db.commit()
     except Exception as exc:
-        print(f"  [WARN] could not record the courier run: {exc}", flush=True)
+        print(f"  [WARN] could not record the courier run: {redact(exc)}", flush=True)
 
 
 @router.get("/chain-expirations", dependencies=[Depends(require_admin)])
