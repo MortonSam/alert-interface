@@ -463,14 +463,26 @@ def pe_history_clean(bars: list[tuple[date, float]], quarters: list[dict], curre
 
 
 EPS_MAX_SHARE_OF_PRICE = 0.25       # a quarter's EPS above this share of the stock's close on the report date is not a per-share figure
-EPS_MAX_YEAR_RATIO = 10.0           # a quarter's EPS more than this many times (or under a tenth of) the same quarter a year earlier, both positive, is suspect
+EPS_MAX_ADJUSTED_RATIO = 5.0        # a GAAP figure more than this many times (or under a fifth of) the stored adjusted EPS for the same report, both positive, is refused
+EPS_MAX_YEAR_RATIO = 10.0           # a quarter's EPS more than this many times (or under a tenth of) the same quarter a year earlier, both positive, is noted for the digest
 
 
-def implausible(eps: float, close: float | None, prior_year_eps: float | None) -> str | None:
-    """Pure: why a parsed quarterly EPS cannot be right, or None. Against the close on the report date (a per-share figure is a
-    fraction of the price) and against the same quarter a year earlier when both are positive."""
+def implausible(eps: float, close: float | None, adjusted_eps: float | None) -> str | None:
+    """Pure: why a parsed quarterly GAAP EPS cannot be right, or None; a refusal (the figure is recorded as unread). Against the
+    close on the report date (a per-share figure is a fraction of the price) and against the stored adjusted EPS for the same
+    report (events.eps_actual) when both are positive: GAAP and adjusted differ by charges, never by a factor of five."""
     if close is not None and close > 0 and abs(eps) > EPS_MAX_SHARE_OF_PRICE * close:
         return f"{eps:+.2f} is more than {EPS_MAX_SHARE_OF_PRICE:.0%} of the {close:.2f} close on the report date"
+    if adjusted_eps is not None and eps > 0 and adjusted_eps > 0:
+        ratio = eps / adjusted_eps
+        if ratio > EPS_MAX_ADJUSTED_RATIO or ratio < 1 / EPS_MAX_ADJUSTED_RATIO:
+            return f"{eps:+.2f} is {ratio:.1f}x the stored adjusted EPS for the report ({adjusted_eps:+.2f})"
+    return None
+
+
+def year_over_year_note(eps: float, prior_year_eps: float | None) -> str | None:
+    """Pure: a note when the figure is more than EPS_MAX_YEAR_RATIO times (or under a tenth of) the same quarter a year earlier,
+    both positive. A warning for the digest only: the figure is stored (Micron's 32.87 against 2.83 was real)."""
     if prior_year_eps is not None and eps > 0 and prior_year_eps > 0:
         ratio = eps / prior_year_eps
         if ratio > EPS_MAX_YEAR_RATIO or ratio < 1 / EPS_MAX_YEAR_RATIO:

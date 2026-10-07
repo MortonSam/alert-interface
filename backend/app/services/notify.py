@@ -93,8 +93,11 @@ def feed_confirmation_lines(confirmations: list[dict]) -> str:
 
 
 def digest_message(run_date: str, passed: int, total: int, failed: list[str], validate: dict | None, chain_coverage_pct: float | None,
-                   courier: dict | None, auto_voided: list[str] | None = None, feed_confirmations: list[dict] | None = None) -> tuple[str, str]:
+                   courier: dict | None, auto_voided: list[str] | None = None, feed_confirmations: list[dict] | None = None,
+                   release_warnings: list[str] | None = None) -> tuple[str, str]:
     parts = [f"failed: {', '.join(failed)}" if failed else "all steps passed"]
+    if release_warnings:
+        parts.append(f"release EPS year-over-year warning(s) ({len(release_warnings)}), stored, check by hand: " + "; ".join(release_warnings))
     if auto_voided:
         already = sum(1 for label in auto_voided if label.endswith(": already void"))
         parts.append(f"auto-void: {len(auto_voided) - already} voided, {already} already void: " + "; ".join(auto_voided))

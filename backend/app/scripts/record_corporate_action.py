@@ -5,6 +5,10 @@ P/E marks any window holding it "not meaningful yet" until four clean quarters e
     python -m app.scripts.record_corporate_action FDX spin_off 2026-06-01 "FedEx Freight"
     python -m app.scripts.record_corporate_action FDX spin_off 2026-06-01 "FedEx Freight" --write
     python -m app.scripts.record_corporate_action FDX spin_off 2026-06-01 "FedEx Freight" --accession=0000... --write   # the filing as the receipt
+
+The accession is the completion 8-K whatever item it was reported under: Chevron (Hess) and Palo Alto (CyberArk) filed theirs
+under Item 8.01, Paramount's sits under its pre-merger CIK and Bunge's predates the scanner's window, so scan_corporate_actions
+(Item 2.01, current CIK, 15 months) never records them and they are recorded here by hand.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ async def run(argv: list[str]) -> int:
         print(f"{sym}: {kind} on {day} with {name}" + (" (already recorded)" if dup else "") + ("" if write else "; dry run, nothing written"))
         if write and not dup:
             s.add(Event(ticker_id=ticker.id, event_type=EventType.OTHER, event_date=day, title=f"{sym} {kind.replace('_', ' ')}: {name}", source=DataSource.MANUAL,
-                        is_confirmed=True, confirmation_note=(f"8-K Item 2.01 {accession}" if accession else "recorded by record_corporate_action"),
+                        is_confirmed=True, confirmation_note=(f"8-K {accession}" if accession else "recorded by record_corporate_action"),
                         metadata_={"corporate_action": kind, "counterparty": name, **({"accession": accession} if accession else {})}))
             await s.commit()
             print("  recorded; the next nightly P/E run applies it")

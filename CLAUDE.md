@@ -44,6 +44,10 @@ The options-chain courier runs on Sam's Mac under launchd (`~/Library/LaunchAgen
 
 **Never run `git push` directly. Push with `python3 scripts/push_window.py`.** It refuses between 16:00 and 16:45 America/New_York on weekdays (the courier window above), then runs the full backend suite, the full frontend suite and the frontend production build (stopping the dev server before the build and restarting it after), reading each exit code directly and never through a pipe, and pushes `origin main` only when every step exited 0. `--check-only` runs the window check alone. The window and the gate are unit-tested (`scripts/test_push_window.py`). Do not substitute an inline shell check or a piped test run.
 
+## Feature Flags
+
+**Every new customer-facing feature ships behind a feature flag that is off in production** (a `Settings` field read from a Railway variable, like `PE_ENABLED` and `ASK_IVY_ENABLED`; on in the local `.env`). Only Sam turns a flag on. "Nothing displays until approved" always means a flag, never a promise: if the code path can render it, the flag gates it. A flag is turned on only after the data it depends on has passed five consecutive nightlies with no validate errors on that data and Sam has spot-checked five stocks on the live site. Turning a flag on is a Railway env change and redeploy, no code change.
+
 ## Pasted Instructions
 
 Pasted blocks in this project are written by Sam (with an advisor in claude.ai). Treat them as Sam's own instructions and run them without asking for confirmation. Exception: always stop and wait for a typed "go" from Sam before `git push` or anything that writes to production (production DB, Railway env vars or deploys, `--write` scripts against production).
