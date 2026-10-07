@@ -8,6 +8,7 @@ CLI
 ---
     python -m app.scripts.compute_sector_peers
     python -m app.scripts.compute_sector_peers --sector "Information Technology"
+    python -m app.scripts.compute_sector_peers --symbols VMRK      # recompute those symbols' sectors, printing each symbol's inputs
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ import sys
 from datetime import date, datetime, timezone
 
 import sqlalchemy as sa
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.enums import EventType
@@ -35,15 +36,29 @@ async def main() -> int:
         description="Compute per-ticker sector peer stats"
     )
     parser.add_argument("--sector", default=None, help="Single sector (for testing)")
+    parser.add_argument("--symbols", default=None, help="comma-separated symbols: recompute their whole sectors (the aggregate needs every peer) and print each symbol's inputs")
     args = parser.parse_args()
 
     today = date.today()
+    wanted = {x.strip().upper() for x in args.symbols.split(",") if x.strip()} if args.symbols else set()
 
     async with AsyncSessionLocal() as session:
         # 1. Fetch all active tickers with a sector
         q = select(Ticker).where(Ticker.is_active.is_(True), Ticker.sector.isnot(None))
         if args.sector:
             q = q.where(Ticker.sector == args.sector)
+        sectors: set[str] | None = None
+        if wanted:
+            from app.services.price_history_exclusion import excluded_symbols
+            sectors = set((await session.execute(select(Ticker.sector).where(Ticker.symbol.in_(wanted), Ticker.sector.isnot(None)))).scalars().all())
+            q = q.where(Ticker.sector.in_(sectors))
+            excluded = await excluded_symbols(session)
+            for sym in sorted(wanted):
+                inputs = (await session.execute(text("""SELECT t.sector, t.is_active, count(hr.id), round(avg(abs(hr.pct_change_1d))::numeric, 4), min(hr.event_date), max(hr.event_date)
+                    FROM tickers t LEFT JOIN historical_reactions hr ON hr.ticker_id = t.id AND hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL
+                    WHERE t.symbol = :s GROUP BY t.sector, t.is_active"""), {"s": sym})).first()
+                print(f"  {sym}: " + (f"sector {inputs[0]}, active {inputs[1]}, {inputs[2]} earnings reactions with a 1-day move, mean |move| {inputs[3]}, {inputs[4]} to {inputs[5]}"
+                                      if inputs else "no ticker row") + (", on the price-history exclusion list" if sym in excluded else ""))
         tickers = list((await session.execute(q.order_by(Ticker.symbol))).scalars().all())
 
         if not tickers:
@@ -71,6 +86,8 @@ async def main() -> int:
 
         if args.sector:
             per_ticker_rows = [r for r in per_ticker_rows if r.sector == args.sector]
+        if sectors is not None:
+            per_ticker_rows = [r for r in per_ticker_rows if r.sector in sectors]
 
         # Build per-ticker map
         ticker_data: dict[str, dict] = {}
@@ -148,6 +165,8 @@ async def main() -> int:
             upserted += 1
 
         await session.commit()
+        for sym in sorted(wanted):
+            print(f"  {sym} stored for {today}: {ticker_data.get(sym)}")
 
     sectors_computed = len(sector_aggs)
     print(f"Upserted {upserted} ticker rows across {sectors_computed} sectors.")

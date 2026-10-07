@@ -1103,7 +1103,8 @@ async def check_recommendations_bounds(session) -> CheckResult:
 
 
 async def check_pick_lifecycle(session) -> CheckResult:
-    """ERROR listing open picks with past expiration or closed picks with null close data."""
+    """ERROR listing open picks with past expiration or closed picks with null close data. A void pick is neither open nor
+    closed (check_pick_void judges it): it is never expected to carry a close."""
     today_str = date.today().isoformat()
 
     open_expired = (await session.execute(
@@ -1119,7 +1120,7 @@ async def check_pick_lifecycle(session) -> CheckResult:
     closed_null = (await session.execute(
         select(AlertPick.symbol, AlertPick.status, AlertPick.closed_at, AlertPick.close_price)
         .where(
-            AlertPick.status != "open",
+            AlertPick.status == "closed",
             (AlertPick.closed_at.is_(None)) | (AlertPick.close_price.is_(None)),
         )
         .order_by(AlertPick.symbol)
@@ -1141,6 +1142,28 @@ async def check_pick_lifecycle(session) -> CheckResult:
         f"{len(details)} pick(s): {len(open_expired)} open with past expiration, {len(closed_null)} closed with null close data",
         details,
     )
+
+
+VOID_PRICE_FIELDS = ("closed_at", "close_price", "option_pnl_dollars", "option_pnl_pct")     # a void pick is priced by nothing
+
+
+async def check_pick_void(session) -> CheckResult:
+    """ERROR listing void picks missing their reason or time, or carrying a price: a void pick keeps its void_reason and
+    voided_at and is never priced (no close, no option P&L); the ledger shows it with the reason, outside every count."""
+    rows = (await session.execute(text(f"""
+        SELECT symbol, generated_at::date AS picked, void_reason IS NULL AS no_reason, voided_at IS NULL AS no_time,
+               {", ".join(f"{c} IS NOT NULL AS has_{c}" for c in VOID_PRICE_FIELDS)}
+        FROM alert_picks WHERE status = 'void'
+          AND (void_reason IS NULL OR voided_at IS NULL OR {" OR ".join(f"{c} IS NOT NULL" for c in VOID_PRICE_FIELDS)})
+        ORDER BY symbol, generated_at"""))).mappings().all()
+    if not rows:
+        n = await session.scalar(text("SELECT count(*) FROM alert_picks WHERE status = 'void'"))
+        return CheckResult("pick_void", PASS, f"Every void pick ({n}) carries its reason and time and is priced by nothing")
+    details = []
+    for r in rows:
+        problems = (["no void_reason"] if r["no_reason"] else []) + (["no voided_at"] if r["no_time"] else []) + [f"{c} set" for c in VOID_PRICE_FIELDS if r[f"has_{c}"]]
+        details.append(f"{r['symbol']} picked {r['picked']}: " + ", ".join(problems))
+    return CheckResult("pick_void", ERROR, f"{len(rows)} void pick(s) without a reason or time, or carrying a price", details[:40])
 
 
 async def check_inactive_leakage(session) -> CheckResult:
@@ -1703,48 +1726,35 @@ async def check_analyst_stats_continuation_range(session) -> CheckResult:
 
 
 async def check_sector_peer_avg_range(session) -> CheckResult:
-    """ERROR if any stored per-ticker avg abs 1d is outside [0.5, 40.0]."""
-    rows = (await session.execute(
-        select(SectorPeerSnapshot.symbol, SectorPeerSnapshot.avg_abs_1d)
-        .where(
-            SectorPeerSnapshot.avg_abs_1d.isnot(None),
-            (SectorPeerSnapshot.avg_abs_1d < Decimal("0.5")) |
-            (SectorPeerSnapshot.avg_abs_1d > Decimal("40.0")),
-        )
-        .order_by(SectorPeerSnapshot.symbol)
-    )).all()
+    """ERROR if any ticker's latest stored avg abs 1d (the row the sector-peers endpoint serves) is outside [0.5, 40.0].
+    Earlier rows are history: a value a later nightly replaced is not an error on the page."""
+    rows = (await session.execute(text("""
+        SELECT symbol, avg_abs_1d, as_of_date, quarter_count FROM (
+            SELECT DISTINCT ON (symbol) symbol, avg_abs_1d, as_of_date, quarter_count FROM sector_peer_snapshots ORDER BY symbol, as_of_date DESC) latest
+        WHERE avg_abs_1d IS NOT NULL AND (avg_abs_1d < 0.5 OR avg_abs_1d > 40.0) ORDER BY symbol"""))).all()
 
     if not rows:
         return CheckResult("sector_peer_avg_range", PASS,
-                           "All stored per-ticker avg abs 1d in [0.5, 40.0]")
+                           "Every ticker's latest stored avg abs 1d is in [0.5, 40.0]")
 
-    details = [f"{r.symbol}  avg_abs_1d={float(r.avg_abs_1d):.2f}" for r in rows]
+    details = [f"{r.symbol}  avg_abs_1d={float(r.avg_abs_1d):.2f} (as of {r.as_of_date}, {r.quarter_count} reports)" for r in rows]
     return CheckResult(
         "sector_peer_avg_range", ERROR,
-        f"{len(rows)} ticker(s) with stored avg abs 1d outside [0.5, 40.0]",
+        f"{len(rows)} ticker(s) whose latest stored avg abs 1d is outside [0.5, 40.0]",
         details,
     )
 
 
 async def check_sector_peer_sector_avg_range(session) -> CheckResult:
-    """ERROR if any stored sector aggregate avg abs 1d is outside [1.0, 25.0]."""
-    rows = (await session.execute(
-        select(
-            SectorPeerSnapshot.sector,
-            SectorPeerSnapshot.sector_avg_abs_1d,
-        )
-        .where(
-            SectorPeerSnapshot.sector_avg_abs_1d.isnot(None),
-            (SectorPeerSnapshot.sector_avg_abs_1d < Decimal("1.0")) |
-            (SectorPeerSnapshot.sector_avg_abs_1d > Decimal("25.0")),
-        )
-        .distinct(SectorPeerSnapshot.sector)
-        .order_by(SectorPeerSnapshot.sector)
-    )).all()
+    """ERROR if any sector's latest stored aggregate avg abs 1d is outside [1.0, 25.0] (the latest row per sector, as served)."""
+    rows = (await session.execute(text("""
+        SELECT sector, sector_avg_abs_1d FROM (
+            SELECT DISTINCT ON (sector) sector, sector_avg_abs_1d FROM sector_peer_snapshots ORDER BY sector, as_of_date DESC) latest
+        WHERE sector_avg_abs_1d IS NOT NULL AND (sector_avg_abs_1d < 1.0 OR sector_avg_abs_1d > 25.0) ORDER BY sector"""))).all()
 
     if not rows:
         return CheckResult("sector_peer_sector_avg_range", PASS,
-                           "All stored sector aggregate avg abs 1d in [1.0, 25.0]")
+                           "Every sector's latest stored aggregate avg abs 1d is in [1.0, 25.0]")
 
     details = [f"{r.sector}  sector_avg={float(r.sector_avg_abs_1d):.2f}" for r in rows]
     return CheckResult(
@@ -2197,13 +2207,14 @@ async def check_release_eps_checked(session) -> CheckResult:
     if flagged:
         return CheckResult("release_eps_checked", ERROR, f"{len(flagged)} release EPS figure(s) differ from XBRL",
                            [f"{s}: {d} release {float(r):+.2f} vs XBRL {float(x):+.2f}" for s, d, r, x in flagged[:10]])
-    late = (await session.execute(text("SELECT symbol, report_date FROM release_eps WHERE xbrl_eps IS NULL AND report_date < CURRENT_DATE - :n * interval '1 day' ORDER BY report_date"),
+    late = (await session.execute(text("SELECT symbol, report_date FROM release_eps WHERE xbrl_checked_at IS NULL AND report_date < CURRENT_DATE - :n * interval '1 day' ORDER BY report_date"),
                                   {"n": RELEASE_CHECK_DUE_DAYS})).all()
-    total = (await session.execute(text("SELECT count(*), count(xbrl_eps) FROM release_eps"))).one()
+    total = (await session.execute(text("SELECT count(*), count(xbrl_eps), count(*) FILTER (WHERE xbrl_note IS NOT NULL) FROM release_eps"))).one()
     if late:
         return CheckResult("release_eps_checked", WARN, f"{len(late)} release EPS figure(s) older than {RELEASE_CHECK_DUE_DAYS} days await their XBRL check",
                            [f"{s}: report of {d}" for s, d in late[:10]])
-    return CheckResult("release_eps_checked", PASS, f"Release EPS figures: {total[0]} stored, {total[1]} checked against XBRL, none flagged, none overdue")
+    return CheckResult("release_eps_checked", PASS, f"Release EPS figures: {total[0]} stored, {total[1]} checked against a directly reported XBRL quarter, "
+                       f"{total[2]} not comparable (XBRL holds the quarter only as a derived figure), none flagged, none overdue")
 
 
 async def check_share_count_jumps(session) -> CheckResult:
@@ -2237,8 +2248,11 @@ async def check_share_count_jumps(session) -> CheckResult:
 NEXT_DIVIDEND_TOLERANCE_PCT = 10
 
 async def check_next_dividend_amount(session) -> CheckResult:
-    """ERROR when a stored upcoming ex-dividend amount is more than NEXT_DIVIDEND_TOLERANCE_PCT off the last dividend Intrinio
-    recorded on the bars, unless the event's metadata carries a declaration (declared: true). Catches an annual rate stored as a payment."""
+    """ERROR when a stored upcoming ex-dividend amount carries no per-payment basis (seed_dividends.PER_PAYMENT_BASES: the bars'
+    cash per share, the last payment on the bars, or yfinance's last declared payment), or is more than NEXT_DIVIDEND_TOLERANCE_PCT
+    off the last dividend Intrinio recorded on the bars, unless the event's metadata carries a declaration (declared: true).
+    Catches an annual rate stored as a payment by any writer, whether or not the bars hold a payment to compare it with."""
+    from app.scripts.seed_dividends import PER_PAYMENT_BASES
     rows = (await session.execute(text("""
         SELECT t.symbol, e.event_date, (e.metadata->>'dividend_amount')::float AS amount, e.metadata->>'basis' AS basis,
                (SELECT dividend FROM price_bars_shadow b WHERE b.symbol = t.symbol AND b.dividend > 0 ORDER BY b.date DESC LIMIT 1) AS last_paid
@@ -2247,13 +2261,19 @@ async def check_next_dividend_amount(session) -> CheckResult:
         ORDER BY e.event_date, t.symbol"""))).all()
     bad = []
     for r in rows:
-        if r.amount is None or r.last_paid is None:
+        if r.amount is None:
+            continue
+        if r.basis not in PER_PAYMENT_BASES:
+            bad.append(f"{r.symbol} {r.event_date.isoformat()}: stored {r.amount} with no per-payment basis ({r.basis or 'no basis'})"
+                       + (f" vs last paid {float(r.last_paid)}" if r.last_paid is not None else ""))
+            continue
+        if r.last_paid is None:
             continue
         if abs(r.amount - float(r.last_paid)) > float(r.last_paid) * NEXT_DIVIDEND_TOLERANCE_PCT / 100:
-            bad.append(f"{r.symbol} {r.event_date.isoformat()}: stored {r.amount} ({r.basis or 'no basis'}) vs last paid {float(r.last_paid)}")
+            bad.append(f"{r.symbol} {r.event_date.isoformat()}: stored {r.amount} ({r.basis}) vs last paid {float(r.last_paid)}")
     if bad:
-        return CheckResult("next_dividend_amount", ERROR, f"{len(bad)} upcoming dividend amount(s) more than {NEXT_DIVIDEND_TOLERANCE_PCT}% off the last paid", bad[:40])
-    return CheckResult("next_dividend_amount", PASS, f"Every stored upcoming dividend is within {NEXT_DIVIDEND_TOLERANCE_PCT}% of the last paid ({len(rows)} checked)")
+        return CheckResult("next_dividend_amount", ERROR, f"{len(bad)} upcoming dividend amount(s) without a per-payment basis or more than {NEXT_DIVIDEND_TOLERANCE_PCT}% off the last paid", bad[:40])
+    return CheckResult("next_dividend_amount", PASS, f"Every stored upcoming dividend carries a per-payment basis and is within {NEXT_DIVIDEND_TOLERANCE_PCT}% of the last paid ({len(rows)} checked)")
 
 
 # ── The calendar: a company-confirmed date stands alone; a past estimate never stands as resolved ───────
@@ -2944,6 +2964,7 @@ CHECKS = [
     check_recommendations_bounds,
     # Alert picks
     check_pick_lifecycle,
+    check_pick_void,
     # IV history
     check_iv_history_out_of_band,
     # Options chains

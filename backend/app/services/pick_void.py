@@ -49,11 +49,18 @@ def standard_reason(company: str, sessions: int, actual: date, target: date | No
             f"{company} reported {actual.strftime('%b %-d, %Y')}, not the targeted {tgt}")
 
 
+PRICE_FIELDS = ("closed_at", "close_price", "option_pnl_dollars", "option_pnl_pct")     # cleared on void: a void pick is priced by nothing
+
+
 async def auto_void(session, today: date | None = None) -> list[str]:
     """Void every v2 pick (open or closed) whose company has reported outside the entry window. A pick already void is
-    skipped and reported as "already void"; its reason and time are never rewritten. Returns labels for the step outcome
-    and the digest. Deletes nothing."""
+    skipped and reported as "already void"; its reason and time are never rewritten. A void pick is priced by nothing: voiding
+    clears its close and option P&L fields, and any void pick still carrying one has it cleared here (validate's pick_void
+    check holds the invariant). Returns labels for the step outcome and the digest. Deletes nothing."""
     today = today or date.today()
+    cleared = (await session.execute(text(f"UPDATE alert_picks SET {', '.join(f'{c} = NULL' for c in PRICE_FIELDS)} WHERE status = 'void' AND ({' OR '.join(f'{c} IS NOT NULL' for c in PRICE_FIELDS)})"))).rowcount
+    if cleared:
+        print(f"[void] cleared the price fields of {cleared} already-void pick(s)")
     picks = (await session.execute(text("""
         SELECT p.id, p.symbol, p.generated_at, p.exit_date, p.status, t.id AS tid, t.name
         FROM alert_picks p JOIN tickers t ON t.symbol = p.symbol
@@ -78,7 +85,7 @@ async def auto_void(session, today: date | None = None) -> list[str]:
             continue
         from app.services.briefing import short_name
         reason = standard_reason(short_name(p.name) or p.symbol, n, actual, target)
-        await session.execute(text("UPDATE alert_picks SET status = 'void', void_reason = :r, voided_at = :at WHERE id = :i"),
+        await session.execute(text(f"UPDATE alert_picks SET status = 'void', void_reason = :r, voided_at = :at, {', '.join(f'{c} = NULL' for c in PRICE_FIELDS)} WHERE id = :i"),
                               {"r": reason, "at": datetime.now(timezone.utc), "i": p.id})
         out.append(f"{p.symbol} picked {pick_day.isoformat()} ({p.status}): {reason}")
     return out

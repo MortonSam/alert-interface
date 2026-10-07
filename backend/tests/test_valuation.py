@@ -3,7 +3,7 @@ fourth quarter, the freshness rule (the window must hold the latest reported qua
 exclusions, the release-against-XBRL flag, and the checker's quarter match."""
 from datetime import date
 
-from app.scripts.check_release_eps import matching_quarter
+from app.scripts.check_release_eps import derived_only_match, matching_quarter
 from app.scripts.seed_release_eps import exhibit_text
 from app.services import valuation as V
 
@@ -80,6 +80,13 @@ def test_release_against_xbrl_and_the_checkers_match():
     assert matching_quarter(later, date(2026, 9, 3), date(2026, 9, 30))["eps"] == 32.87
     assert matching_quarter(later, None, date(2026, 9, 30))["eps"] == 32.87                          # newest quarter before the report, filed after it
     assert matching_quarter(MU_Q, date(2026, 9, 3), date(2026, 9, 30)) is None                        # not filed yet
+    # PANW: the fourth quarter exists in XBRL only as the 10-K's annual figure less three 10-Qs; it is never the match, and the row reads not comparable
+    derived = {**q(date(2026, 7, 31), -0.46, date(2026, 9, 10), form="10-K"), "derived": True}
+    panw = MU_Q + [derived]
+    assert matching_quarter(panw, date(2026, 7, 31), date(2026, 8, 18)) is None
+    assert derived_only_match(panw, date(2026, 7, 31), date(2026, 8, 18)) is derived
+    assert derived_only_match(MU_Q, date(2026, 7, 31), date(2026, 8, 18)) is None
+    assert matching_quarter(MU_Q + [{**q(date(2026, 7, 31), -0.35, date(2026, 9, 10), form="10-K")}, derived], date(2026, 7, 31), date(2026, 8, 18))["eps"] == -0.35   # a direct figure wins
     assert exhibit_text([("form8k.htm", "x" * 600), ("a2026q4ex991-pressrelease.htm", "y" * 600)])[0] == "a2026q4ex991-pressrelease.htm"
 
 

@@ -1,5 +1,5 @@
 """The next dividend is the declared per-payment amount, never the annual rate, and validate catches one that is."""
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -31,7 +31,19 @@ async def test_validate_flags_an_annual_rate_stored_as_the_next_payment_and_acce
                                     SELECT gen_random_uuid(), id, 'ex_dividend', CURRENT_DATE + 8, 'x', 'yfinance', true, '{"dividend_amount": 0.6, "basis": "annual_rate"}', now(), now() FROM tickers WHERE symbol = :s"""), {"s": sym})
             await s.commit()
         r = (await run_checks([check_next_dividend_amount]))[0]
-        assert r.level == ERROR and any(row.startswith(f"{sym} ") and "stored 0.6 (annual_rate) vs last paid 0.15" in row for row in r.rows)
+        assert r.level == ERROR and any(row.startswith(f"{sym} ") and "stored 0.6 with no per-payment basis (annual_rate) vs last paid 0.15" in row for row in r.rows)
+        async with ScriptSessionLocal() as s:                                             # the old writer's shape: an amount and no basis at all, and no bar to compare with
+            await s.execute(text("""UPDATE events SET metadata = '{"dividend_amount": 0.6}' WHERE ticker_id = (SELECT id FROM tickers WHERE symbol = :s)"""), {"s": sym})
+            await s.execute(text("DELETE FROM price_bars_shadow WHERE symbol = :s"), {"s": sym})
+            await s.commit()
+        r = (await run_checks([check_next_dividend_amount]))[0]
+        assert r.level == ERROR and any(row == f"{sym} {(date.today() + timedelta(days=8)).isoformat()}: stored 0.6 with no per-payment basis (no basis)" for row in r.rows)
+        async with ScriptSessionLocal() as s:                                             # a per-payment basis still has to agree with the bars
+            await s.execute(text("INSERT INTO price_bars_shadow (symbol, date, intrinio_security_id, close, factor, split_ratio, dividend, fetched_at) VALUES (:s, '2026-07-06', 'sec_dv', 100, 1, 1, 0.15, now())"), {"s": sym})
+            await s.execute(text("""UPDATE events SET metadata = '{"dividend_amount": 0.6, "basis": "last_payment_yfinance"}' WHERE ticker_id = (SELECT id FROM tickers WHERE symbol = :s)"""), {"s": sym})
+            await s.commit()
+        r = (await run_checks([check_next_dividend_amount]))[0]
+        assert any(row.startswith(f"{sym} ") and "stored 0.6 (last_payment_yfinance) vs last paid 0.15" in row for row in r.rows)
         async with ScriptSessionLocal() as s:
             await s.execute(text("""UPDATE events SET metadata = '{"dividend_amount": 0.2, "basis": "per_share", "declared": true}' WHERE ticker_id = (SELECT id FROM tickers WHERE symbol = :s)"""), {"s": sym})
             await s.commit()

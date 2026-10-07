@@ -36,16 +36,20 @@ async def test_a_winner_and_a_loser_outside_the_window_are_voided_identically_an
                                     VALUES (gen_random_uuid(), :t, 'earnings', '2026-09-30', 'x', 'finnhub', true, 1.5, 1.4, '{}', now(), now())"""), {"t": tid})
             for day, status, pnl in (("2026-09-16", "closed", 42.0), ("2026-09-16", "open", -30.0), ("2026-09-25", "closed", 10.0)):
                 await s.execute(text("""INSERT INTO alert_picks (id, symbol, picked_direction, leans, strategy, entry_price, generated_at, status, algo_version, source,
-                                                                 exit_date, expiration, option_pnl_pct, cost_to_enter)
-                                        VALUES (gen_random_uuid(), :s, 'bullish', '[]', 'Bull call spread', 100, :g, :st, 'v2.0', 'nightly', :x, '2026-10-30', :p, 5.0)"""),
-                                {"s": sym, "g": datetime.fromisoformat(day + "T07:00:00+00:00"), "st": status, "x": date.fromisoformat(day) + timedelta(days=14), "p": pnl})
+                                                                 exit_date, expiration, option_pnl_pct, cost_to_enter, closed_at, close_price)
+                                        VALUES (gen_random_uuid(), :s, 'bullish', '[]', 'Bull call spread', 100, :g, :st, 'v2.0', 'nightly', :x, '2026-10-30', :p, :c, :ca, :cp)"""),
+                                {"s": sym, "g": datetime.fromisoformat(day + "T07:00:00+00:00"), "st": status, "x": date.fromisoformat(day) + timedelta(days=14), "p": pnl,
+                                 "c": abs(pnl), "ca": datetime.fromisoformat("2026-10-01T20:00:00+00:00") if status == "closed" else None, "cp": 110.0 if status == "closed" else None})
             await s.commit()
         async with ScriptSessionLocal() as s:
             labels = await auto_void(s, today=date(2026, 10, 6))
             await s.commit()
-            rows = (await s.execute(text("SELECT generated_at::date, status, void_reason, voided_at IS NOT NULL, option_pnl_pct FROM alert_picks WHERE symbol = :s ORDER BY generated_at, option_pnl_pct"), {"s": sym})).all()
+            rows = (await s.execute(text("SELECT generated_at::date, status, void_reason, voided_at IS NOT NULL, cost_to_enter FROM alert_picks WHERE symbol = :s ORDER BY generated_at, cost_to_enter"), {"s": sym})).all()
+            priced = await s.scalar(text("SELECT count(*) FROM alert_picks WHERE symbol = :s AND status = 'void' AND (closed_at IS NOT NULL OR close_price IS NOT NULL OR option_pnl_dollars IS NOT NULL OR option_pnl_pct IS NOT NULL)"), {"s": sym})
+            kept_price = (await s.execute(text("SELECT close_price, option_pnl_pct FROM alert_picks WHERE symbol = :s AND cost_to_enter = 10.0"), {"s": sym})).first()
         voided = [r for r in rows if r[1] == "void"]
-        assert len(voided) == 2 and {float(r[4]) for r in voided} == {42.0, -30.0}                 # the winner and the loser, same treatment
+        assert len(voided) == 2 and {float(r[4]) for r in voided} == {42.0, 30.0}                  # the winner and the loser, same treatment
+        assert priced == 0 and (float(kept_price[0]), float(kept_price[1])) == (110.0, 10.0)        # a void pick is priced by nothing; the kept closed pick keeps its close
         assert len({r[2] for r in voided}) == 1                                                     # identical standard reason
         assert voided[0][2].startswith("Report came 10 sessions after entry, the rule allows 1 to 5; Void Test reported Sep 30, 2026, not the targeted Sep 23, 2026")
         assert all(r[3] for r in voided)
@@ -56,22 +60,23 @@ async def test_a_winner_and_a_loser_outside_the_window_are_voided_identically_an
         async with ScriptSessionLocal() as s:
             again = await auto_void(s, today=date(2026, 10, 6))
             await s.commit()
-            after = (await s.execute(text("SELECT void_reason, voided_at FROM alert_picks WHERE symbol = :s AND status = 'void' ORDER BY option_pnl_pct"), {"s": sym})).all()
+            after = (await s.execute(text("SELECT void_reason, voided_at FROM alert_picks WHERE symbol = :s AND status = 'void' ORDER BY cost_to_enter"), {"s": sym})).all()
         assert again == [f"{sym} picked 2026-09-16: already void"] * 2
         assert [(r[0], r[1]) for r in after] == [(r[2], None) for r in []] or all(r[0] == voided[0][2] for r in after)      # reasons unchanged
         assert {r[1] for r in after} == {voided_at for voided_at in {r[1] for r in after}} and len({r[1] for r in after}) >= 1
         # a hand-voided pick with its own reason is also left exactly as written
         async with ScriptSessionLocal() as s:
-            await s.execute(text("UPDATE alert_picks SET void_reason = 'voided by hand this morning', voided_at = '2026-10-07 09:00+00' WHERE symbol = :s AND option_pnl_pct = 42.0"), {"s": sym})
+            await s.execute(text("UPDATE alert_picks SET void_reason = 'voided by hand this morning', voided_at = '2026-10-07 09:00+00', close_price = 123 WHERE symbol = :s AND cost_to_enter = 42.0"), {"s": sym})
             await s.commit()
         async with ScriptSessionLocal() as s:
             await auto_void(s, today=date(2026, 10, 6))
             await s.commit()
-            hand = (await s.execute(text("SELECT void_reason, voided_at::text FROM alert_picks WHERE symbol = :s AND option_pnl_pct = 42.0"), {"s": sym})).first()
-        assert hand[0] == "voided by hand this morning" and hand[1].startswith("2026-10-07 09:00")
+            hand = (await s.execute(text("SELECT void_reason, voided_at::text, close_price FROM alert_picks WHERE symbol = :s AND cost_to_enter = 42.0"), {"s": sym})).first()
+        assert hand[0] == "voided by hand this morning" and hand[1].startswith("2026-10-07 09:00") and hand[2] is None   # reason and time kept; a price set by hand on a void pick is cleared
         title, body = digest_message("2026-10-07", 29, 29, [], None, 91.0, None, auto_voided=labels)
-        assert "auto-voided 2 pick(s)" in body and "Report came 10 sessions after entry" in body
-        assert "auto-voided" not in digest_message("2026-10-07", 29, 29, [], None, 91.0, None, auto_voided=[])[1]
+        assert "auto-void: 2 voided, 0 already void: " in body and "Report came 10 sessions after entry" in body
+        assert "auto-void: 0 voided, 2 already void: " in digest_message("2026-10-07", 29, 29, [], None, 91.0, None, auto_voided=again)[1]
+        assert "auto-void" not in digest_message("2026-10-07", 29, 29, [], None, 91.0, None, auto_voided=[])[1]
     finally:
         async with ScriptSessionLocal() as s:
             await s.execute(text("DELETE FROM alert_picks WHERE symbol = :s"), {"s": sym})

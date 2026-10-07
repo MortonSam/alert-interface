@@ -96,7 +96,8 @@ def digest_message(run_date: str, passed: int, total: int, failed: list[str], va
                    courier: dict | None, auto_voided: list[str] | None = None, feed_confirmations: list[dict] | None = None) -> tuple[str, str]:
     parts = [f"failed: {', '.join(failed)}" if failed else "all steps passed"]
     if auto_voided:
-        parts.append(f"auto-voided {len(auto_voided)} pick(s): " + "; ".join(auto_voided))
+        already = sum(1 for label in auto_voided if label.endswith(": already void"))
+        parts.append(f"auto-void: {len(auto_voided) - already} voided, {already} already void: " + "; ".join(auto_voided))
     if feed_confirmations:
         parts.append(f"IR-feed confirmations to spot-check ({len(feed_confirmations)}): " + feed_confirmation_lines(feed_confirmations))
     if validate:

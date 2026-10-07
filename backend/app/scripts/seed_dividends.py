@@ -39,6 +39,7 @@ DIVIDEND_BASIS = "per_share"
 FORWARD_BASIS_INTRINIO = "last_payment_intrinio"   # the last per-payment dividend on the stored Intrinio bars
 FORWARD_BASIS_YFINANCE = "last_payment_yfinance"   # yfinance's lastDividendValue (the last declared payment) when the bars hold none
 PER_PAYMENT_BASES = ("per_share", FORWARD_BASIS_INTRINIO, FORWARD_BASIS_YFINANCE)   # amounts a page may call a per-share dividend
+FORWARD_BASIS_UNKNOWN = "unknown"                 # a stored forward date whose amount no source confirms: the date stays, the amount is shown from nothing
 FORWARD_BASIS = FORWARD_BASIS_YFINANCE
 FORWARD_BATCH = 5
 FORWARD_BATCH_SLEEP = 2.0
@@ -69,6 +70,32 @@ async def last_paid_from_bars(session, symbol: str) -> float | None:
     """The most recent per-payment dividend Intrinio recorded on the stored bars; None when the bars hold none."""
     return await session.scalar(select(text("dividend")).select_from(text("price_bars_shadow"))
                                 .where(text("symbol = :s AND dividend > 0")).order_by(text("date DESC")).limit(1).params(s=symbol))
+
+
+async def retire_stale_forward_rows(session, ticker: Ticker, declared_date: date | None, paid: float | None, today: date | None = None) -> dict[str, int]:
+    """Future ex-dividend rows of this ticker that carry an amount with no per-payment basis and no declaration: the writer before
+    2026-10-05 stored yfinance's annualized dividendRate with no basis, and the nightly only corrected a row on the date yfinance
+    still reports, so a row on a date it no longer reports kept the annual rate (PCAR 2026-11-11 1.40 beside the declared 11-10
+    0.35). One on another date than the declared one is dropped (the declared date supersedes it); one on the declared date, or
+    any when no date is declared, is re-based to the last payment on the stored bars, or loses its amount and reads basis unknown.
+    Returns {dropped, rebased, unpriced}."""
+    today = today or date.today()
+    out = {"dropped": 0, "rebased": 0, "unpriced": 0}
+    rows = (await session.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EX_DIVIDEND, Event.event_date >= today))).scalars().all()
+    for e in rows:
+        meta = e.metadata_ or {}
+        if meta.get("basis") in PER_PAYMENT_BASES or meta.get("declared") or meta.get("dividend_amount") is None:
+            continue
+        if declared_date is not None and e.event_date != declared_date:
+            await session.delete(e)
+            out["dropped"] += 1
+        elif paid:
+            e.metadata_ = {**meta, "dividend_amount": float(paid), "basis": FORWARD_BASIS_INTRINIO}
+            out["rebased"] += 1
+        else:
+            e.metadata_ = {**{k: v for k, v in meta.items() if k != "dividend_amount"}, "basis": FORWARD_BASIS_UNKNOWN}
+            out["unpriced"] += 1
+    return out
 
 
 async def dividends_from_bars(symbols: list[str], since: date | None) -> dict[str, list[dict]]:
@@ -116,10 +143,14 @@ async def main() -> int:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--full", action="store_true", help="every stored bar, then the adjustments endpoint by security record")
     parser.add_argument("--no-forward", action="store_true", help="skip the yfinance pass for the declared next ex-date")
+    parser.add_argument("--symbols", default=None, help="comma-separated symbols to run alone (a targeted repair of their forward rows)")
     args = parser.parse_args()
 
     async with AsyncSessionLocal() as session:
         tickers = list((await session.execute(select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
+    if args.symbols:
+        wanted = {x.strip().upper() for x in args.symbols.split(",") if x.strip()}
+        tickers = [t for t in tickers if t.symbol in wanted]
     if args.limit:
         tickers = tickers[:args.limit]
     since = None if args.full else date.today() - timedelta(days=WINDOW_DAYS)
@@ -157,6 +188,7 @@ async def main() -> int:
     # the declared next ex-date: yfinance, the named exception (a date, not a price)
     forward = 0
     forward_failed = 0
+    stale = {"dropped": 0, "rebased": 0, "unpriced": 0}
     if not args.no_forward:
         loop = asyncio.get_event_loop()
         for i in range(0, len(tickers), FORWARD_BATCH):
@@ -166,14 +198,19 @@ async def main() -> int:
                 for t, info in zip(batch, infos):
                     if isinstance(info, Exception):
                         forward_failed += 1
-                    elif info:
-                        paid = await last_paid_from_bars(session, t.symbol)
+                        continue
+                    paid = await last_paid_from_bars(session, t.symbol)
+                    if info:
                         amount, basis = (float(paid), FORWARD_BASIS_INTRINIO) if paid else (info["last_payment"], FORWARD_BASIS_YFINANCE)
                         forward += await _upsert_dividend_event(session, t, info["ex_date"], amount, DataSource.YFINANCE, basis)
+                    # rows the pre-2026-10-05 writer left with the annual rate and no basis are retired every night, declared date or not
+                    for k, v in (await retire_stale_forward_rows(session, t, info["ex_date"] if info else None, float(paid) if paid else None)).items():
+                        stale[k] += v
                 await session.commit()
             if i + FORWARD_BATCH < len(tickers):
                 await asyncio.sleep(FORWARD_BATCH_SLEEP)
-        print(f"  {forward} forward ex-dividend date(s) inserted from yfinance, {forward_failed} failed")
+        print(f"  {forward} forward ex-dividend date(s) inserted from yfinance, {forward_failed} failed; stale forward rows: {stale['dropped']} dropped "
+              f"(superseded by the declared date), {stale['rebased']} re-based to the last payment on the bars, {stale['unpriced']} left without an amount")
     return 1 if len(failed) + forward_failed > 10 else 0
 
 
