@@ -46,6 +46,9 @@ def test_the_four_misreads_and_the_rules_behind_them():
     # a quarter sentence that also names the year is not refused as annual; the first GAAP figure is the quarter's
     assert V.parse_release_eps("For the fourth quarter and fiscal year ended June 30, 2026, GAAP net income was $500 million, or $1.25 per diluted share.")["eps"] == 1.25
     assert V.is_annual_figure("Fiscal year 2026 revenues were $254.2 billion. GAAP diluted EPS was $7.23.", 65, 90) is True
+    acn = "Effective tax rate 27.3 % 30.1 % Diluted earnings per share (2) $ 3.29 $ 2.25 $ 0.78 $ 3.03 Year Ended August 31, 2026 As Reported (GAAP)"
+    assert V.parse_release_eps(acn)["eps"] == 3.29                                                                                     # the next table's header follows the row
+    assert V.parse_release_eps("HIGHLIGHTS • Generates reported EPS of $3.32 and comparable EPS of $3.74 • Beer Business")["eps"] == 3.32   # STZ: the comparable figure is named on purpose
 
 
 def test_plausibility_guard_refuses_on_price_and_adjusted_eps_and_notes_year_over_year():

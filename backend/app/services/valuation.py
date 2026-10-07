@@ -171,13 +171,14 @@ def _previous_sentence(flat: str, sentence_start: int) -> str:
 
 
 def is_annual_figure(flat: str, start: int, end: int) -> bool:
-    """Pure: the figure is labelled as the year's, never the quarter's: its own sentence or bullet carries a fiscal-year, full-year,
-    year-ended, twelve-months or year-to-date label and no quarter word; or its sentence carries neither and the sentence before it
-    (the paragraph's subject: "Fiscal year 2026 revenues were $254.2 billion...") carries the label with no quarter word."""
-    before, sentence = _sentence_around(flat, start, end)
-    if _QUARTER_WORD.search(sentence):
+    """Pure: the figure is labelled as the year's, never the quarter's: the text before it in its own sentence or bullet carries a
+    fiscal-year, full-year, year-ended, twelve-months or year-to-date label and no quarter word; or it carries neither and the sentence
+    before it (the paragraph's subject: "Fiscal year 2026 revenues were $254.2 billion...") carries the label with no quarter word."""
+    # only the text before the figure labels it: in a flattened table the next table's "Year Ended" header follows the row (ACN)
+    before, _ = _sentence_around(flat, start, end)
+    if _QUARTER_WORD.search(before):
         return False
-    if _ANNUAL_LABEL.search(sentence):
+    if _ANNUAL_LABEL.search(before):
         return True
     prev = _previous_sentence(flat, start - len(before))
     return bool(_ANNUAL_LABEL.search(prev)) and not _QUARTER_WORD.search(prev)
@@ -222,7 +223,8 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
             before = _same_clause(flat, hit.start(), max(back, 12))
-            if _NON_GAAP_NEAR.search(before + hit.group(0)):            # joined, so "non-" + "GAAP earnings per share of $3.02" reads as non-GAAP (CRL)
+            own = "" if how == "reported EPS against a non-GAAP measure" else hit.group(0)      # that pattern names the comparable figure on purpose (STZ)
+            if _NON_GAAP_NEAR.search(before + own):                      # joined, so "non-" + "GAAP earnings per share of $3.02" reads as non-GAAP (CRL)
                 continue
             if _guidance_near(flat, hit.start(), hit.end()) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]) or is_annual_figure(flat, hit.start(), hit.end()):
                 continue
