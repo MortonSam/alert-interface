@@ -150,18 +150,20 @@ def repeated_phrase(sentence: str, words: int = 4) -> str | None:
 # double it); a name absent here reads as its bare value. test_ask_ivy checks the no-verb rule over this table.
 PHRASES: dict[str, str] = {
     "distance below 52-week high": "{value} below its 52-week high",
-    "three-month change": "{value} over the past three months",
+    "three-month change": "a {value} change over the past three months",
+    "1-day move": "a {value} move",
+    "median 1-day move after an upgrade": "a {value} median move",
     "three-month anchor close": "{value} three months ago",
     "quote time": "as of {value}",
     "last close": "a last close of {value}",
     "typical move": "{value} on a typical report",
     "typical move after a report": "{value} on a typical report",
     "typical daily move": "{value} on a typical day",
-    "reports moving more": "{value} of those reports",
+    "reports moving more": "{value} of its reports",             # with its denominator when the sample size is a fact: "15 of its last 20 reports"
     "reports in the sample": "its last {value} reports",
     "beats": "its last {value} beats",
-    "beats followed by a fall": "{value} of its beats",
-    "share": "{value} of the time",
+    "beats followed by a fall": "{value} of its beats",           # "11 of its last 18 beats" when the beat count is a fact
+    "share": "{value}",
     "20-day realized volatility": "{value} annualized",
     "sessions in the past year": "{value} trading sessions in the past year",
     "dividend per share": "{value} per share",
@@ -181,6 +183,29 @@ _WINDOW_VALUE = re.compile(r"close (?P<base>[A-Z][a-z]{2} \d{1,2}, \d{4}) to clo
 
 def phrase_for(name: str, value: str) -> str:
     return PHRASES.get(name, "{value}").format(value=value)
+
+
+# a count fact whose phrase carries another fact's value as its denominator: (numerator name, denominator name, phrase)
+DENOMINATORS: list[tuple[str, str, str]] = [
+    ("beats followed by a fall", "beats", "{value} of its last {denominator} beats"),
+    ("reports moving more", "reports in the sample", "{value} of its last {denominator} reports"),
+    ("beats followed by a fall", "reports in the sample", "{value} of its beats in its last {denominator} reports"),
+]
+
+
+def with_denominators(facts: list[dict]) -> list[dict]:
+    """Pure: count facts read with their denominator when that fact is in the pack; the denominator fact's id is kept as a
+    companion so its receipt renders too. The first matching pair per numerator wins."""
+    by_name = {f["name"]: f for f in facts}
+    done: set[str] = set()
+    for num, den, template in DENOMINATORS:
+        n, d = by_name.get(num), by_name.get(den)
+        if n is None or d is None or num in done:
+            continue
+        n["phrase"] = template.format(value=n["value"], denominator=d["value"])
+        n["companions"] = [d["id"]]
+        done.add(num)
+    return facts
 
 def slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
@@ -291,7 +316,7 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
     raw: dict = {}
     brief = await build_briefing(db, symbol, today)
     qs = await build_questions(db, symbol, today, raw=raw, all_candidates=True)
-    facts = number_facts(brief["sentences"], qs["questions"]) + word_facts(raw)
+    facts = with_denominators(number_facts(brief["sentences"], qs["questions"])) + word_facts(raw)
     last = raw.get("last_report") or {}
     for f in facts:
         if f["id"] == "move_session" and last.get("timing") == "bmo":
@@ -326,7 +351,7 @@ RULES
 4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
 5. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: say plainly in the first sentence that this page's data does not cover it, then what the facts do hold that is closest, with placeholders. Partly: say what they show and what they do not.
 6. Never give a recommendation, a target, or an opinion about value; describe what the data shows and the idea behind it.
-6a. Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its beats", so write "fell after {{fact:beats_followed_by_a_fall}}", never "<count> of its beats were followed by a fall were followed by a fall".
+6a. Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its last <count> beats", so write "fell after {{fact:beats_followed_by_a_fall}}". A move placeholder reads "a <signed percentage> move", so write "the stock had {{fact:1_day_move}} the next session", never "rose {{fact:1_day_move}}".
 7. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
 
 Answer:"""
@@ -419,18 +444,32 @@ def absorb_literals(text_: str, facts: list[dict]) -> str:
     return text_
 
 
+_DOUBLED = re.compile(r"\b([A-Za-z]+) \1\b", re.I)
+
+
+def collapse_doubled_words(text_: str) -> str:
+    """Pure: one identical word written twice in a row ("after after the close", when the model's word meets the fact's) appears
+    once. Only a single doubled word; a repeated phrase of four or more words is rejected, never patched (repeated_phrase)."""
+    return _DOUBLED.sub(r"\1", text_)
+
+
 def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
     """Pure: the text with every placeholder replaced by its fact's value, and the inputs (receipts) for the frontend's tokenizer
     in the order used. A word fact substitutes its words and carries no receipt."""
     by_id = {f["id"]: f for f in facts}
     inputs: list[dict] = []
-    def sub(m: re.Match) -> str:
-        f = by_id[m.group(1)]
+    def add_input(f: dict) -> None:
         if f["kind"] == "number" and not any(i["name"] == f["name"] and i["value"] == f["value"] for i in inputs):
             inputs.append({"name": f["name"], "value": f["value"], "as_of": f["as_of"], "source": f["source"]})
+    def sub(m: re.Match) -> str:
+        f = by_id[m.group(1)]
+        add_input(f)
+        for cid in f.get("companions", []):          # a denominator carried in the phrase gets its receipt too
+            if cid in by_id:
+                add_input(by_id[cid])
         return f.get("phrase") or f["value"]
     from app.services.anthropic_client import _scrub_dashes
-    return _scrub_dashes(PLACEHOLDER.sub(sub, text_)), inputs
+    return collapse_doubled_words(_scrub_dashes(PLACEHOLDER.sub(sub, text_))), inputs
 
 
 # ── the verifier ─────────────────────────────────────────────────────────────

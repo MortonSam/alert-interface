@@ -1,9 +1,10 @@
-"""The no-push window across its boundaries, a weekend, a DST date and a UTC clock. Run: python3 -m unittest scripts/test_push_window.py"""
+"""The no-push window across its boundaries, a weekend, a DST date and a UTC clock, and the gate that refuses to push on any failed
+step. Run: python3 -m unittest scripts/test_push_window.py"""
 import unittest
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from push_window import in_window
+from push_window import STEPS, gate, in_window
 
 NY = ZoneInfo("America/New_York")
 
@@ -36,3 +37,16 @@ class PushWindow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Gate(unittest.TestCase):
+    def test_every_step_must_exit_zero(self):
+        self.assertEqual(gate([("backend tests", 0), ("frontend tests", 0), ("frontend build", 0)])[0], True)
+        ok, why = gate([("backend tests", 0), ("frontend tests", 1)])
+        self.assertFalse(ok); self.assertIn("frontend tests (exit 1)", why)
+        self.assertFalse(gate([("backend tests", 2)])[0])
+
+    def test_the_steps_are_the_two_suites_and_the_build(self):
+        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "frontend tests", "frontend build"])
+        for _, cmd, _ in STEPS:
+            self.assertNotIn("|", " ".join(cmd))                  # exit codes are read directly, never through a pipe

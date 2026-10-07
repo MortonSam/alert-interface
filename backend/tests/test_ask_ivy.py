@@ -236,3 +236,19 @@ async def test_a_covered_no_draft_shows_only_the_fixed_sentence_and_a_repeat_is_
     r = await A.answer_question(None, pack, "q", client=Client(["COVERED: yes\nIt moved on a typical report on a typical report day to {fact:quote}.",
                                                                 "COVERED: yes\nIt moved on a typical report day to {fact:quote} again on a typical report day."]))
     assert r["verdict"] == "rejected" and any("repeats the phrase" in p for p in r["problems"])
+
+
+def test_counts_carry_their_denominator_and_signed_moves_read_as_a_move():
+    facts = A.with_denominators(A.number_facts([], [
+        {"key": "beat_fell", "inputs": [{"name": "beats", "value": "18", "as_of": "2026-06-24", "source": "s"}, {"name": "beats followed by a fall", "value": "11", "as_of": "2026-06-24", "source": "s"}]},
+        {"key": "reaction_normal", "inputs": [{"name": "reports moving more", "value": "15", "as_of": "2026-06-24", "source": "s"}, {"name": "reports in the sample", "value": "20", "as_of": "2026-06-24", "source": "s"},
+                                               {"name": "1-day move", "value": "+3.0%", "as_of": "2026-10-01", "source": "s"}]}]))
+    by = {f["id"]: f for f in facts}
+    assert by["beats_followed_by_a_fall"]["phrase"] == "11 of its last 18 beats" and by["beats_followed_by_a_fall"]["companions"] == ["beats"]
+    assert by["reports_moving_more"]["phrase"] == "15 of its last 20 reports"
+    assert by["1_day_move"]["phrase"] == "a +3.0% move"
+    text, inputs = A.render("It fell after {fact:beats_followed_by_a_fall}; the stock had {fact:1_day_move}.", facts)
+    assert text == "It fell after 11 of its last 18 beats; the stock had a +3.0% move."
+    assert A.collapse_doubled_words("reported after after the close; the the stock") == "reported after the close; the stock"
+    assert A.collapse_doubled_words("it had had enough") == "it had enough" and A.collapse_doubled_words("on a typical report on a typical report") == "on a typical report on a typical report"
+    assert [(i["name"], i["value"]) for i in inputs] == [("beats followed by a fall", "11"), ("beats", "18"), ("1-day move", "+3.0%")]   # the denominator's receipt too
