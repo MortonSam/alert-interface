@@ -170,17 +170,18 @@ def _previous_sentence(flat: str, sentence_start: int) -> str:
     return head[left + 1:] if left >= 0 else head[-300:]
 
 
-def is_annual_figure(flat: str, start: int, end: int) -> bool:
+def is_annual_figure(flat: str, start: int, end: int, figure_at: int | None = None) -> bool:
     """Pure: the figure is labelled as the year's, never the quarter's: the text before it in its own sentence or bullet carries a
     fiscal-year, full-year, year-ended, twelve-months or year-to-date label and no quarter word; or it carries neither and the sentence
     before it (the paragraph's subject: "Fiscal year 2026 revenues were $254.2 billion...") carries the label with no quarter word."""
-    # only the text before the figure labels it: in a flattened table the next table's "Year Ended" header follows the row (ACN)
-    before, _ = _sentence_around(flat, start, end)
+    # only the text before the figure labels it: in a flattened table the next table's "Year Ended" header follows the row (ACN);
+    # `figure_at` is the number's position, since a match may start at its subject ("Net income for fiscal year 2026 was ..., or $3.26")
+    before, _ = _sentence_around(flat, figure_at if figure_at is not None else start, end)
     if _QUARTER_WORD.search(before):
         return False
     if _ANNUAL_LABEL.search(before):
         return True
-    prev = _previous_sentence(flat, start - len(before))
+    prev = _previous_sentence(flat, (figure_at if figure_at is not None else start) - len(before))
     return bool(_ANNUAL_LABEL.search(prev)) and not _QUARTER_WORD.search(prev)
 
 
@@ -209,7 +210,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
     for hit in _PROSE.finditer(flat):
         if _NON_GAAP_NEAR.search(_same_clause(flat, hit.start(), 12) + hit.group(0)):      # "Non-GAAP net income ... , or $3.63 per diluted share" (SMCI)
             continue
-        if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end()):
+        if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end(), hit.start(1)):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
     attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
@@ -226,7 +227,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
             own = "" if how == "reported EPS against a non-GAAP measure" else hit.group(0)      # that pattern names the comparable figure on purpose (STZ)
             if _NON_GAAP_NEAR.search(before + own):                      # joined, so "non-" + "GAAP earnings per share of $3.02" reads as non-GAAP (CRL)
                 continue
-            if _guidance_near(flat, hit.start(), hit.end()) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]) or is_annual_figure(flat, hit.start(), hit.end()):
+            if _guidance_near(flat, hit.start(), hit.end()) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]) or is_annual_figure(flat, hit.start(), hit.end(), hit.start(1)):
                 continue
             if how in ("net income sentence", "per diluted share", "per share net income sentence", "labelled GAAP EPS", "GAAP EPS sentence", "EPS on a GAAP basis", "reported EPS, GAAP named",
                        "as-reported EPS", "diluted EPS were sentence", "GAAP net income per share") and _disqualified(flat, hit.start(), hit.end()):
