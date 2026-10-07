@@ -20,24 +20,31 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.services import valuation as V
-from app.services.edgar_client import EdgarClient
+from app.services.edgar_client import PREDECESSOR_CIKS, EdgarClient
 from app.services.redact import redact
 from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Trailing P/E"
 
 
-async def company_facts_merged(edgar: EdgarClient, cik: str) -> dict:
-    """Company facts for a CIK plus those of any earlier CIK its filings were made under (the accession prefix names the filer)."""
+def _eps_series(facts: dict) -> list[dict]:
+    return facts.get("facts", {}).get("us-gaap", {}).get("EarningsPerShareDiluted", {}).get("units", {}).get("USD/shares", [])
+
+
+async def company_facts_merged(edgar: EdgarClient, cik: str, symbol: str) -> dict:
+    """Company facts for a CIK plus those of the ticker's predecessor CIKs named in edgar_client.PREDECESSOR_CIKS (PSKY's filings
+    under Paramount Global's CIK). Never the CIK in an accession prefix: that is the submitter, often a filing agent, and Workiva
+    Inc. files for its clients under its own CIK, so its calendar-quarter EPS (0.33 for 2026-03-31, 0.24 for 2026-06-30) once
+    merged into COST, AMZN, AON and some fifty others, replacing Amazon's own quarter where the period ends matched."""
     facts = await edgar.get_company_facts(cik)
-    series = facts.get("facts", {}).get("us-gaap", {}).get("EarningsPerShareDiluted", {}).get("units", {}).get("USD/shares", [])
-    others = {e.get("accn", "")[:10] for e in series if e.get("accn") and e["accn"][:10] != cik.zfill(10) and e["accn"][:10].isdigit()}
-    for other in others:
+    series = list(_eps_series(facts))
+    for other in PREDECESSOR_CIKS.get(symbol.upper(), []):
+        if other.zfill(10) == cik.zfill(10):
+            continue
         try:
-            more = (await edgar.get_company_facts(other)).get("facts", {}).get("us-gaap", {}).get("EarningsPerShareDiluted", {}).get("units", {}).get("USD/shares", [])
+            series.extend(_eps_series(await edgar.get_company_facts(other)))
         except Exception:
             continue
-        series.extend(more)
     if series:
         facts.setdefault("facts", {}).setdefault("us-gaap", {}).setdefault("EarningsPerShareDiluted", {}).setdefault("units", {})["USD/shares"] = series
     return facts
@@ -89,10 +96,14 @@ async def run(argv: list[str]) -> int:
             if reread or V.needs_refresh(quarters, lr, today):
                 try:
                     cik = await edgar.get_cik(sym)
-                    quarters = V.eps_quarters(await company_facts_merged(edgar, cik)) if cik else []
+                    quarters = V.eps_quarters(await company_facts_merged(edgar, cik, sym)) if cik else []
                     refreshed += 1
                     if write:
                         async with ScriptSessionLocal() as s:
+                            # a stored quarter the facts no longer yield (a merged filer's quarter, a restated period end) is removed, so the table is the facts
+                            gone = (await s.execute(text("DELETE FROM eps_quarters WHERE symbol = :s AND NOT (period_end = ANY(:ends))"), {"s": sym, "ends": [q["end"] for q in quarters]})).rowcount
+                            if gone:
+                                print(f"  {sym}: removed {gone} stored quarter(s) the company facts do not yield", flush=True)
                             for q in quarters:
                                 await s.execute(text("""INSERT INTO eps_quarters (symbol, period_end, period_start, eps, filed_on, form, derived, diluted_shares, fetched_at)
                                     VALUES (:s, :e, :st, :eps, :f, :form, :d, :sh, now()) ON CONFLICT (symbol, period_end) DO UPDATE SET period_start = EXCLUDED.period_start,

@@ -163,9 +163,11 @@ async def test_a_moved_ticker_keeps_its_stored_figi_records_the_new_one_and_fail
 
 
 @pytest.mark.asyncio
-async def test_figi_change_passes_when_every_current_record_still_has_its_figi():
-    """The local build wrote every current record with figi == figi_seen; nothing synthetic is left behind."""
+async def test_figi_change_passes_or_names_only_real_tickers_whose_figi_moved():
+    """Nothing synthetic is left behind by the local build: the check passes, or every row it lists is a real active ticker whose
+    current record Intrinio now reports under a new FIGI (PSKY on 2026-10-07), which is data for the record map, not a test failure."""
     result = (await run_checks([check_figi_change]))[0]
-    assert result.level == PASS, result.message
+    if result.level != PASS:
+        assert all(not row.startswith("ZZ") and "Intrinio now BBG" in row for row in result.rows), result.rows
 
 

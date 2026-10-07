@@ -21,8 +21,31 @@ def test_full_exhibit_reads_its_gaap_diluted_eps(sym, report_date, accession, na
         assert hit is not None and hit["eps"] == float(want), (sym, hit and (hit["eps"], hit["how"], hit["evidence"][:120]))
 
 
-def test_the_fixture_set_is_the_production_run():
-    assert len(ROWS) == 26 and sum(1 for r in ROWS if r[4] == "") == 1
+def test_the_fixture_set_is_the_production_runs():
+    """The 2026-10-07 dry run's 25 reads and HPE unread, plus the four misreads of the second dry run (CRL, SMCI, CAH, FRT) and
+    Dominion, whose release states a continuing-operations row beside the total row."""
+    assert len(ROWS) == 31 and sum(1 for r in ROWS if r[4] == "") == 1
+
+
+def test_the_four_misreads_and_the_rules_behind_them():
+    assert V.parse_release_eps("Reports second-quarter revenue of $1.00 billion, GAAP loss per share of $(0.03), and non-GAAP earnings per share of $3.02.")["eps"] == -0.03
+    smci = "• Diluted net income per common share of $1.62 versus $0.72 in Q3'26. Non-GAAP net income attributable to common stockholders for fiscal year 2026 was $2.5 billion, or $3.63 per diluted share."
+    assert V.parse_release_eps(smci)["eps"] == 1.62
+    assert V.parse_release_eps("Non-GAAP net income for fiscal year 2026 was $2.5 billion, or $3.63 per diluted share, versus $1.3 billion.") is None   # non-GAAP and annual
+    assert V.parse_release_eps("Net income for fiscal year 2026 was $2.2 billion, or $3.26 per diluted share, versus $1.0 billion.") is None            # annual
+    cah = "Fiscal year 2026 revenues were $254.2 billion, a 14% increase. GAAP operating earnings were $2.6 billion and GAAP diluted EPS was $7.23."
+    assert V.parse_release_eps(cah) is None                                                                                                  # the paragraph is the year's
+    assert V.parse_release_eps("Fourth quarter revenue increased 6% to $63.7 billion and GAAP diluted earnings per share (EPS) increased 70% to $1.70. " + cah)["eps"] == 1.70
+    frt = "Nareit FFO was $162.8 million, or $1.88 per diluted share, for the second quarter of 2026. Net income available for common shareholders was $83.7 million and earnings per diluted share was $0.97 versus $153.9 million."
+    assert V.parse_release_eps(frt)["eps"] == 0.97
+    assert V.parse_release_eps("Core FFO per diluted share of $1.88 for the quarter.") is None
+    d = "Reported Income (loss) per common share from continuing operations - diluted $ 0.37 $ 0.88 Reported Income (loss) per common share - diluted $ 0.37 $ 0.88 Average shares"
+    hit = V.parse_release_eps(d)
+    assert hit["eps"] == 0.37 and "from continuing" not in hit["evidence"]
+    assert V.parse_release_eps("Reported Income (loss) per common share from continuing operations - diluted $ 0.37 $ 0.88 Average shares") is None   # continuing only: unread
+    # a quarter sentence that also names the year is not refused as annual; the first GAAP figure is the quarter's
+    assert V.parse_release_eps("For the fourth quarter and fiscal year ended June 30, 2026, GAAP net income was $500 million, or $1.25 per diluted share.")["eps"] == 1.25
+    assert V.is_annual_figure("Fiscal year 2026 revenues were $254.2 billion. GAAP diluted EPS was $7.23.", 65, 90) is True
 
 
 def test_plausibility_guard_refuses_on_price_and_adjusted_eps_and_notes_year_over_year():

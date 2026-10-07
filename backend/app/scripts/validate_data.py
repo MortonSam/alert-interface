@@ -2217,6 +2217,26 @@ async def check_release_eps_checked(session) -> CheckResult:
                        f"{total[2]} not comparable (XBRL holds the quarter only as a derived figure), none flagged, none overdue")
 
 
+EPS_OUTLIER_SHARE = 0.10          # a quarter under this share of its neighbours' average, all positive, is listed for a look
+EPS_OUTLIER_YEARS = 6             # the P/E history reads five years of quarters; one more for the year-ago comparisons
+
+
+async def check_eps_quarter_outliers(session) -> CheckResult:
+    """WARN listing stored quarters under EPS_OUTLIER_SHARE of the average of their two neighbours when all three are positive, in the
+    last EPS_OUTLIER_YEARS years. Some are real (ABBV's 0.03 for Q4 2017, a tax charge); a run of identical values across tickers
+    (0.05 for 2025-09-30, 0.33 for 2026-03-31) is another filer's quarter merged in, which compute_pe --reread --write removes."""
+    rows = (await session.execute(text("""
+        WITH q AS (SELECT symbol, period_end, eps, lag(eps) OVER (PARTITION BY symbol ORDER BY period_end) AS prev,
+                          lead(eps) OVER (PARTITION BY symbol ORDER BY period_end) AS nxt FROM eps_quarters)
+        SELECT symbol, period_end, eps, prev, nxt FROM q
+        WHERE eps >= 0 AND prev > 0 AND nxt > 0 AND eps < :share * (prev + nxt) / 2 AND period_end >= CURRENT_DATE - :years * interval '1 year'
+        ORDER BY period_end DESC, symbol"""), {"share": EPS_OUTLIER_SHARE, "years": EPS_OUTLIER_YEARS})).all()
+    if rows:
+        return CheckResult("eps_quarter_outliers", WARN, f"{len(rows)} stored quarter(s) under {EPS_OUTLIER_SHARE:.0%} of their neighbours' average with no loss",
+                           [f"{r.symbol} {r.period_end}: {float(r.eps):+.2f} between {float(r.prev):+.2f} and {float(r.nxt):+.2f}" for r in rows[:60]])
+    return CheckResult("eps_quarter_outliers", PASS, f"No stored quarter in the last {EPS_OUTLIER_YEARS} years sits under {EPS_OUTLIER_SHARE:.0%} of its neighbours' average without a loss")
+
+
 async def check_share_count_jumps(session) -> CheckResult:
     """WARN when a ticker's weighted-average diluted share count moves more than SHARE_JUMP_PCT between consecutive stored quarters with no
     corporate action or split recorded between them (a spin-off, merger, share-exchange acquisition or rename-merge the P/E rule should know about)."""
@@ -3032,6 +3052,7 @@ CHECKS = [
     check_pe_window_fresh,
     check_release_eps_checked,
     check_share_count_jumps,
+    check_eps_quarter_outliers,
     # the calendar: confirmed dates stand alone, past estimates never stand as resolved
     check_estimate_beside_confirmed,
     check_past_estimate_standing,

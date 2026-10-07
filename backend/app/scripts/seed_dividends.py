@@ -17,12 +17,15 @@ CLI
     python -m app.scripts.seed_dividends --full         # every stored bar, then the adjustments endpoint for every record
     python -m app.scripts.seed_dividends --limit 5
     python -m app.scripts.seed_dividends --full --dry-run   # every change --full would make (inserts, re-based amounts, retired forward rows), nothing written
+    python -m app.scripts.seed_dividends --rebase           # dry run: every stored amount with no per-payment basis that a stored bar's cash per share would replace
+    python -m app.scripts.seed_dividends --rebase --write   # apply those re-basings; inserts no dates, reads no API, runs no forward pass
 """
 from __future__ import annotations
 from app.services.redact import redact
 
 import argparse
 import asyncio
+import json
 import sys
 from datetime import date, timedelta
 
@@ -152,6 +155,39 @@ async def _upsert_dividend_event(session, ticker: Ticker, ex_date: date, dividen
     return True
 
 
+async def rebase_from_bars(write: bool) -> int:
+    """Every stored ex-dividend row (any ticker, any date) whose amount carries no per-payment basis and no declaration is re-based to
+    the cash per share Intrinio recorded on the bar of that date (basis per_share); a row with no such bar is listed and left. Nothing
+    is inserted; no request is made. Dry run unless `write`."""
+    CORRECTIONS.clear()
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(text("""
+            SELECT e.id, t.symbol, e.event_date, e.metadata, b.dividend
+            FROM events e JOIN tickers t ON t.id = e.ticker_id
+            LEFT JOIN price_bars_shadow b ON b.symbol = t.symbol AND b.date = e.event_date AND b.dividend > 0
+            WHERE e.event_type = 'ex_dividend' AND e.metadata ? 'dividend_amount'
+              AND COALESCE(e.metadata->>'basis', '') <> ALL(:bases) AND COALESCE(e.metadata->>'declared', 'false') <> 'true'
+            ORDER BY t.symbol, e.event_date"""), {"bases": list(PER_PAYMENT_BASES)})).all()
+        without = []
+        for rid, sym, d, meta, bar in rows:
+            if bar is None:
+                without.append(f"{sym} {d.isoformat()}: {meta.get('dividend_amount')} ({meta.get('basis') or 'no basis'}); no Intrinio dividend on that bar, left as is")
+                continue
+            CORRECTIONS.append(f"{sym} {d.isoformat()}: {meta.get('dividend_amount')} ({meta.get('basis') or 'no basis'}) -> {float(bar)} ({DIVIDEND_BASIS})")
+            if write:
+                await s.execute(text("UPDATE events SET metadata = metadata || :m, updated_at = now() WHERE id = :i"),
+                                {"m": json.dumps({"dividend_amount": float(bar), "basis": DIVIDEND_BASIS}), "i": rid})
+        if write:
+            await s.commit()
+    print(f"Re-base from the stored bars: {len(rows)} stored amount(s) without a per-payment basis; {len(CORRECTIONS)} {'re-based' if write else 'to re-base'}, "
+          f"{len(without)} with no bar dividend to re-base from" + ("" if write else "; DRY RUN, nothing written"))
+    for line in CORRECTIONS[:600]:
+        print("   ", line)
+    for line in without[:60]:
+        print("   ", line)
+    return 0
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Seed ex-dividend dates from Intrinio's price adjustments")
     parser.add_argument("--limit", type=int, default=None)
@@ -159,7 +195,11 @@ async def main() -> int:
     parser.add_argument("--no-forward", action="store_true", help="skip the yfinance pass for the declared next ex-date")
     parser.add_argument("--symbols", default=None, help="comma-separated symbols to run alone (a targeted repair of their forward rows)")
     parser.add_argument("--dry-run", action="store_true", help="list every insert, re-based amount and retired forward row; write nothing")
+    parser.add_argument("--rebase", action="store_true", help="only re-base stored amounts without a per-payment basis from the bars' cash per share; dry run unless --write")
+    parser.add_argument("--write", action="store_true", help="with --rebase: apply the re-basings")
     args = parser.parse_args()
+    if args.rebase:
+        return await rebase_from_bars(args.write)
     write = not args.dry_run
     CORRECTIONS.clear()
 

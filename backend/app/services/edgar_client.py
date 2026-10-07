@@ -51,6 +51,22 @@ def _cache_fresh(path: Path, max_age_h: float = CACHE_MAX_AGE_H) -> bool:
     return (time.time() - path.stat().st_mtime) / 3600 < max_age_h
 
 
+# Tickers whose filings sit under more than one CIK (predecessor first, current filer last): a reorganization moves the ticker to
+# a new CIK and the earlier filings stay under the old one. Used by compute_pe (company facts) and backfill_report_timing (8-Ks).
+# Never derive a predecessor from an accession prefix: that prefix names the submitter, often a filing agent, and Workiva Inc.
+# (CIK 0001445305) files for its clients under its own CIK, so its calendar-quarter EPS once leaked into fifty tickers' quarters.
+PREDECESSOR_CIKS: dict[str, list[str]] = {
+    "XOM":  ["0000034088", "0002115436"],   # Exxon Mobil Corp -> ExxonMobil Holdings (files from 2026)
+    "AVB":  ["0000915912"],   # AVALONBAY COMMUNITIES INC
+    "EA":   ["0000712515"],   # ELECTRONIC ARTS INC
+    "EQR":  ["0000906107"],   # EQUITY RESIDENTIAL
+    "PSKY": ["0000813828", "0002041610"],   # Paramount Global -> Paramount Skydance Corp
+    "BLK":  ["0001364742", "0002012383"],   # BlackRock Finance (old BlackRock) -> BlackRock, Inc.
+    "BG":   ["0001144519", "0001996862"],   # Bunge Ltd -> Bunge Global SA
+    "FERG": ["0001832433", "0002011641"],   # Ferguson plc -> Ferguson Enterprises Inc.
+}
+
+
 class EdgarClient:
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(

@@ -40,16 +40,7 @@ from app.services.report_timing import TIMING_RULE_VERSION, classify, select_fil
 # vs operating entity) or drops them entirely. After a reorganization the
 # ticker moves to a new CIK and the earlier 8-Ks stay under the predecessor,
 # so each ticker takes a list: predecessor first, current filer last.
-CIK_OVERRIDES: dict[str, list[str]] = {
-    "XOM":  ["0000034088", "0002115436"],   # Exxon Mobil Corp -> ExxonMobil Holdings (files from 2026)
-    "AVB":  ["0000915912"],   # AVALONBAY COMMUNITIES INC
-    "EA":   ["0000712515"],   # ELECTRONIC ARTS INC
-    "EQR":  ["0000906107"],   # EQUITY RESIDENTIAL
-    "PSKY": ["0000813828", "0002041610"],   # Paramount Global -> Paramount Skydance Corp
-    "BLK":  ["0001364742", "0002012383"],   # BlackRock Finance (old BlackRock) -> BlackRock, Inc.
-    "BG":   ["0001144519", "0001996862"],   # Bunge Ltd -> Bunge Global SA
-    "FERG": ["0001832433", "0002011641"],   # Ferguson plc -> Ferguson Enterprises Inc.
-}
+from app.services.edgar_client import PREDECESSOR_CIKS as CIK_OVERRIDES     # one map, shared with compute_pe
 
 
 async def _ciks_for(sym: str, edgar: EdgarClient) -> list[str]:

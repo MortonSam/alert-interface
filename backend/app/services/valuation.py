@@ -38,9 +38,15 @@ _MONEY = r"\$?\s?\(?-?\d{1,4}(?:,\d{3})*(?:\.\d{1,2})?\)?"
 # "GAAP net income of $37.70 billion, or $32.87 per diluted share" (the quarter's highlight comes before the year's)
 _PROSE = re.compile(rf"GAAP\s+(?:net\s+)?(?:income|earnings|loss)\b.{{0,80}}?,\s*or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?(\(?\$\s?\(?-?\d{{1,4}}(?:,\d{{3}})*(?:\.\d{{1,2}})?\)?)\s+per\s+(?:basic\s+and\s+)?diluted\s+share", re.I)
 # "GAAP diluted earnings per share $ 32.87 $ 24.67 ..." / "Diluted earnings per share 32.87 24.67 ..." (first column is the current quarter)
-_ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:potential\s+)?(?:common\s+)?share(?:\s*\(\d\)|\s+\d)?\s*(?:attributable[^$\d]{{0,80}})?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
+_ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:potential\s+)?(?:common\s+)?share(?:\s*\(\d\)|\s+\d)?\s*(?:attributable[^$\d]{{0,80}})?(?:\s+(?:of|was|were))?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 _ROW2 = re.compile(rf"earnings\s+per\s+share[^A-Za-z]{{0,20}}basic[^A-Za-z]{{0,40}}diluted\s*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
-_NON_GAAP_NEAR = re.compile(r"non-?\s?gaap|adjusted|pro\s?forma|excluding|\bcore\b|operating (?:income|earnings)|underlying|normali[sz]ed", re.I)
+# a figure whose own clause carries one of these is never GAAP EPS (CRL's "non-GAAP earnings per share of $3.02", FRT's "Nareit FFO ... $1.88 per diluted share")
+_NON_GAAP_NEAR = re.compile(r"non-?\s?gaap|adjusted|pro\s?forma|excluding|\bcore\b|operating (?:income|earnings|eps)|underlying|normali[sz]ed|\bffo\b|funds from operations"
+                            r"|comparable (?:eps|earnings|net income|diluted|income)", re.I)
+# a figure labelled as the year's is never the quarter's (SMCI's "for fiscal year 2026 was $2.5 billion, or $3.63 per diluted share", CAH's "GAAP diluted EPS was $7.23"
+# in the fiscal-year paragraph); a clause that also names a quarter is left to the other rules
+_ANNUAL_LABEL = re.compile(r"fiscal[- ]year|full[- ]year|year[- ]ended|twelve[- ]months|12[- ]months|year[- ]to[- ]date|\bannual\b", re.I)
+_QUARTER_WORD = re.compile(r"quarter|\bQ[1-4]\b|three months|\d{1,2} weeks", re.I)
 _NUM = r"(\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"
 _DNUM = r"(\(?\$\s?\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"      # with the dollar sign, a loss written "($0.35)" or "$(0.35)"
 # other phrasings, tried after _PROSE and _ROW, in this order
@@ -51,12 +57,13 @@ _GAAP_PER_SHARE = re.compile(rf"GAAP\s+net\s+(?:income|earnings)\s+of\s+{_DNUM}\
 _EPS_GAAP_BASIS = re.compile(rf"(?:earnings\s+per\s+share|EPS)(?:\s+\(EPS\))?\s+of\s+{_DNUM}\s+on\s+a\s+GAAP\s+basis", re.I)
 _REPORTED_EPS_GAAP = re.compile(rf"reported\s+(?:diluted\s+)?EPS\s+of\s+{_DNUM}[^.]{{0,160}}?\bGAAP\b", re.I)
 _AS_REPORTED = re.compile(rf"earnings\s+per\s+share\s+of\s+{_DNUM}\s+on\s+an\s+as-reported", re.I)
-_GAAP_EPS_WAS = re.compile(rf"GAAP\s+(?:diluted\s+)?earnings\s+per\s+share(?:\s+\(EPS\))?\s+(?:was|were|of)\s+{_DNUM}", re.I)
+_GAAP_EPS_WAS = re.compile(rf"GAAP\s+(?:diluted\s+)?(?:earnings|loss|income)\s+per\s+(?:diluted\s+)?share(?:\s+\(EPS\))?\s+(?:was|were|of)\s+{_DNUM}", re.I)   # "GAAP loss per share of $(0.03)" (CRL)
 _DILUTED_WERE = re.compile(rf"\bdiluted\s+(?:net\s+)?earnings\s+per\s+share\s+(?:were|was)\s+{_DNUM}", re.I)
 # rows: "Net income per share: Basic $ 57.17 $ 50.02 Diluted $ 56.05", "Earnings (loss) per common share - diluted $ 0.99", "EPS (Diluted) $ (0.01)",
 # "Diluted earnings per share (EPS) ... GAAP $5.73", "Diluted net earnings per share: ... Net earnings $ 2.04" (the total, after continuing operations)
 _ROW_NET_BASIC_DILUTED = re.compile(rf"net\s+(?:income|earnings)\s+per\s+(?:common\s+)?share:?\s*basic\s*\$?\s?\(?-?[\d,]+\.\d{{1,2}}\)?(?:\s*\$?\s?\(?-?[\d,]+\.\d{{1,2}}\)?){{0,3}}\s*diluted\s*\$?\s?{_NUM}", re.I)
-_ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?(?:\s+from\s+continuing\s+operations)?\s*[—–-]+\s*diluted(?:\s*\((?:GAAP|[a-z]|\d)\))*\s*\$?\s?{_NUM}", re.I)
+# the total row only: a "from continuing operations - diluted" row is not the whole EPS (Dominion states both; the total is read)
+_ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?\s*[—–-]+\s*diluted(?:\s*\((?:GAAP|[a-z]|\d)\))*\s*\$?\s?{_NUM}", re.I)
 _EPS_DILUTED_PAREN = re.compile(rf"\bEPS\s+\(diluted\)\s*\$?\s?{_NUM}", re.I)
 _DILUTED_EPS_GAAP_COL = re.compile(rf"diluted\s+earnings\s+per\s+share(?:\s+\(EPS\))?[^$]{{0,120}}?\bGAAP\s+\$?\s?{_NUM}", re.I)
 _PER_SHARE_NUM = r"(\(?-?\d{1,3}\.\d{2}\)?)"      # a per-share amount: two decimals, under 1,000; never "397.0" (millions) or "429.7"
@@ -73,8 +80,8 @@ _DILUTED_HEADER_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)\s+p
 # "reported EPS of $3.32 and comparable EPS of $3.74" (reported against a non-GAAP measure), "On a basic and diluted basis, net income attributable to X per share ... was $Y"
 _GAAP_MILLION_PER_SHARE = re.compile(rf"(?:GAAP\s+(?:net\s+)?(?:income|earnings)|(?:reported\s+)?earnings\s+\(GAAP\))\s+of\s+\$\s?[\d.,]+\s+(?:million|billion),?\s+or\s+{_DNUM}\s+per\s+(?:diluted\s+)?share", re.I)
 _GAAP_PAREN_PER_SHARE = re.compile(rf"(?:reported\s+)?earnings\s+\(GAAP\)\s+of\s+{_DNUM}\s+per\s+share", re.I)
-_GAAP_EPS_CHANGE = re.compile(rf"GAAP\s+(?:diluted\s+)?EPS\s+(?:increased|decreased|grew|fell|rose|declined|was\s+(?:up|down))\s+[\d.]+%?\s+to\s+{_DNUM}", re.I)
-_EPS_WERE = re.compile(rf"(?<![A-Za-z-])earnings\s+per\s+share\s+(?:were|was)\s+{_DNUM}", re.I)
+_GAAP_EPS_CHANGE = re.compile(rf"GAAP(?:\s+\d)?\s+(?:diluted\s+)?(?:EPS|earnings\s+per\s+share(?:\s+\(EPS\))?)\s+(?:increased|decreased|grew|fell|rose|declined|was\s+(?:up|down))\s+[\d.]+%?\s+to\s+{_DNUM}", re.I)   # a footnote mark after GAAP (CAH)
+_EPS_WERE = re.compile(rf"(?<![A-Za-z-])earnings\s+per\s+(?:diluted\s+)?share\s+(?:were|was)\s+{_DNUM}", re.I)   # "earnings per diluted share was $0.97" (FRT)
 _ROW_FOOTNOTE = re.compile(rf"(?<![A-Za-z-])diluted\s+net\s+income\s+per\s+share\s+\d\s+\$\s?{_NUM}", re.I)
 _ROW_PER_DILUTED = re.compile(rf"(?<![A-Za-z-])(?:net\s+income|earnings)\s+per\s+diluted\s+share:?\s*(?:•\s*)?\$?\s?{_NUM}(?:\s+GAAP)?", re.I)
 _ROW_POTENTIAL = re.compile(rf"GAAP\s+diluted\s+net\s+income\s+per\s+potential\s+common\s+share\s*\$?\s?{_NUM}", re.I)
@@ -156,6 +163,26 @@ def _disqualified(flat: str, start: int, end: int) -> bool:
     return bool(_ITEM_NEAR.search(sentence)) or introduced_by_comparison(before)
 
 
+def _previous_sentence(flat: str, sentence_start: int) -> str:
+    """Pure: the sentence or bullet just before the one starting at `sentence_start`."""
+    head = flat[:max(0, sentence_start - 1)]
+    left = max(head.rfind(". "), head.rfind("•"), head.rfind("; "), head.rfind("▪"), head.rfind("◦"))
+    return head[left + 1:] if left >= 0 else head[-300:]
+
+
+def is_annual_figure(flat: str, start: int, end: int) -> bool:
+    """Pure: the figure is labelled as the year's, never the quarter's: its own sentence or bullet carries a fiscal-year, full-year,
+    year-ended, twelve-months or year-to-date label and no quarter word; or its sentence carries neither and the sentence before it
+    (the paragraph's subject: "Fiscal year 2026 revenues were $254.2 billion...") carries the label with no quarter word."""
+    before, sentence = _sentence_around(flat, start, end)
+    if _QUARTER_WORD.search(sentence):
+        return False
+    if _ANNUAL_LABEL.search(sentence):
+        return True
+    prev = _previous_sentence(flat, start - len(before))
+    return bool(_ANNUAL_LABEL.search(prev)) and not _QUARTER_WORD.search(prev)
+
+
 def parse_release_eps(text: str, report_date: date | None = None) -> dict | None:
     """Pure: the quarter's GAAP diluted EPS stated in an earnings release, with how it was read.
 
@@ -164,8 +191,10 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
     the income statement's "Earnings per share: Basic … Diluted …" row; a labelled figure ("Earnings per Share: GAAP: $Y",
     "Diluted EPS $Y"); a dash or net-income row ("Earnings per share—diluted $Y"); a net-income sentence without the word
     GAAP ("net income of $X, or $Y per diluted share"); the first "$Y per diluted share"; and, last, an insurer's "net income
-    of $X, or $Y per share". Anything preceded by non-GAAP, adjusted, core, pro forma or operating is skipped. Returns
-    {eps, how, evidence, period_end} or None when no GAAP diluted figure can be read."""
+    of $X, or $Y per share". A figure whose own clause carries non-GAAP, adjusted, core, operating, FFO, funds from operations,
+    normalized or comparable is never GAAP EPS; one labelled fiscal year, full year, year ended, twelve months or year to date is
+    never the quarter (is_annual_figure); a continuing-operations-only figure stays unread. Returns {eps, how, evidence, period_end}
+    or None when no GAAP diluted figure can be read."""
     if not text:
         return None
     flat = re.sub(r"\s+", " ", text)
@@ -177,7 +206,9 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
             period_end = d
             break
     for hit in _PROSE.finditer(flat):
-        if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()):
+        if _NON_GAAP_NEAR.search(_same_clause(flat, hit.start(), 12) + hit.group(0)):      # "Non-GAAP net income ... , or $3.63 per diluted share" (SMCI)
+            continue
+        if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end()):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
     attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
@@ -190,10 +221,10 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 (_PER_DILUTED, "per diluted share", 80), (_PER_SHARE, "per share net income sentence", 12))
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
-            before = _same_clause(flat, hit.start(), back) if back else ""
-            if _NON_GAAP_NEAR.search(before) or _NON_GAAP_NEAR.search(hit.group(0)):
+            before = _same_clause(flat, hit.start(), max(back, 12))
+            if _NON_GAAP_NEAR.search(before + hit.group(0)):            # joined, so "non-" + "GAAP earnings per share of $3.02" reads as non-GAAP (CRL)
                 continue
-            if _guidance_near(flat, hit.start(), hit.end()) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]):
+            if _guidance_near(flat, hit.start(), hit.end()) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]) or is_annual_figure(flat, hit.start(), hit.end()):
                 continue
             if how in ("net income sentence", "per diluted share", "per share net income sentence", "labelled GAAP EPS", "GAAP EPS sentence", "EPS on a GAAP basis", "reported EPS, GAAP named",
                        "as-reported EPS", "diluted EPS were sentence", "GAAP net income per share") and _disqualified(flat, hit.start(), hit.end()):
