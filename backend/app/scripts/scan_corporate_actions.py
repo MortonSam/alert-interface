@@ -32,6 +32,24 @@ RECORDED_KINDS = ("spin_off", "merger", "acquisition")
 MATCH_SPIN_DAYS = 7
 
 
+def issuer_short(name: str) -> str:
+    """Pure: a company's short form for a counterparty label ("Waters Corporation" -> "Waters")."""
+    from app.services.report_announcements import issuer_forms
+    forms = issuer_forms(name)
+    return (forms[1] if len(forms) > 1 else forms[0]).title() if forms else name
+
+
+def spinner_symbol(spinner: str, by_name: dict[str, str]) -> str | None:
+    """Pure: the active ticker whose stored name the filing's spinner name matches ("Becton, Dickinson and Company" for "Becton Dickinson")."""
+    from app.services.report_announcements import issuer_forms
+    want = {f for f in issuer_forms(spinner)}
+    for sym, name in by_name.items():
+        forms = set(issuer_forms(name))
+        if want & forms:
+            return sym
+    return None
+
+
 async def record(session, ticker: Ticker, kind: str, day: date, name: str | None, accession: str) -> str:
     """Record an action as record_corporate_action does, with the filing as its receipt; returns what happened."""
     existing = (await session.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.OTHER, Event.event_date == day))).scalars().all()
@@ -62,6 +80,7 @@ async def run(argv: list[str]) -> int:
     since = today - timedelta(days=recent) if recent else today - timedelta(days=30 * MONTHS)
     async with ScriptSessionLocal() as s:
         tickers = list((await s.execute(select(Ticker).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())
+    by_name = {t.symbol: t.name for t in tickers if t.name}
     if only:
         tickers = [t for t in tickers if t.symbol in only]
     print(f"{STEP_LABEL}: {len(tickers)} ticker(s), filings since {since} ({'write' if write else 'dry run'})", flush=True)
@@ -94,6 +113,17 @@ async def run(argv: list[str]) -> int:
                     row = {"symbol": t.symbol, "kind": c["kind"], "date": c["date"], "name": c["name"], "accession": r["accession"], "filed": r["filing_date"]}
                     found.append(row)
                     print(f"  {t.symbol:6s} {c['kind']:12s} {c['date']}  {c['name'] or '(no name read)':40s}  8-K {r['accession']} filed {r['filing_date']}", flush=True)
+                    spinner_sym = spinner_symbol(c.get("spinner"), by_name) if c.get("spinner") else None
+                    if spinner_sym:          # the other side of a Reverse Morris Trust: the spinner's spin-off, with the same filing as its receipt
+                        srow = {"symbol": spinner_sym, "kind": "spin_off", "date": c["date"], "name": t.name and issuer_short(t.name), "accession": r["accession"], "filed": r["filing_date"]}
+                        found.append(srow)
+                        print(f"  {spinner_sym:6s} {'spin_off':12s} {c['date']}  {srow['name'] or '(no name read)':40s}  8-K {r['accession']} filed {r['filing_date']} (the spinner's side)", flush=True)
+                        if write and c["date"]:
+                            async with ScriptSessionLocal() as s:
+                                tk2 = (await s.execute(select(Ticker).where(Ticker.symbol == spinner_sym))).scalar_one()
+                                what = await record(s, tk2, "spin_off", c["date"], srow["name"], r["accession"])
+                                await s.commit()
+                                print(f"         {what}", flush=True)
                     if write and c["kind"] in RECORDED_KINDS and c["date"]:
                         async with ScriptSessionLocal() as s:
                             tk = (await s.execute(select(Ticker).where(Ticker.symbol == t.symbol))).scalar_one()

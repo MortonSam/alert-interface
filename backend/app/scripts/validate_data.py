@@ -2208,24 +2208,28 @@ async def check_release_eps_checked(session) -> CheckResult:
 
 async def check_share_count_jumps(session) -> CheckResult:
     """WARN when a ticker's weighted-average diluted share count moves more than SHARE_JUMP_PCT between consecutive stored quarters with no
-    corporate action recorded between them (a spin-off, merger, share-exchange acquisition or rename-merge the P/E rule should know about)."""
-    from app.services.valuation import SHARE_JUMP_PCT, share_jumps
+    corporate action or split recorded between them (a spin-off, merger, share-exchange acquisition or rename-merge the P/E rule should know about)."""
+    from app.services.valuation import SHARE_JUMP_PCT, share_jumps, split_ratio
     rows = (await session.execute(text("SELECT symbol, period_end, period_start, diluted_shares FROM eps_quarters WHERE diluted_shares IS NOT NULL AND period_end >= CURRENT_DATE - interval '2 years' ORDER BY symbol, period_end"))).all()
     actions: dict[str, list] = {}
+    # a recorded action between the quarters explains the change; so does a recorded split whose ratio matches it (a split restates earlier quarters in later filings)
     for sym, d in (await session.execute(text("""SELECT t.symbol, e.event_date FROM events e JOIN tickers t ON t.id = e.ticker_id
             WHERE e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action')
             UNION ALL SELECT symbol, renamed_on FROM ticker_aliases"""))).all():
         actions.setdefault(sym, []).append(d)
+    splits: dict[str, list] = {}
+    for sym, d, ratio in (await session.execute(text("""SELECT t.symbol, e.event_date, e.metadata->>'split_ratio' FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE e.event_type = 'split'"""))).all():
+        splits.setdefault(sym, []).append((d, split_ratio(ratio)))
     by_symbol: dict[str, list[dict]] = {}
     for sym, end, start, shares in rows:
         by_symbol.setdefault(sym, []).append({"end": end, "start": start, "diluted_shares": float(shares)})
     flagged = []
     for sym, qs in by_symbol.items():
-        for j in share_jumps(qs, actions.get(sym, [])):
+        for j in share_jumps(qs, actions.get(sym, []), splits.get(sym, [])):
             flagged.append(f"{sym}: diluted shares {j['from_shares']:,.0f} ({j['from_end']}) to {j['to_shares']:,.0f} ({j['to_end']}), {j['change_pct']:+.1f}%, no recorded action")
     if flagged:
         return CheckResult("share_count_jumps", WARN, f"{len(flagged)} quarter-to-quarter share count change(s) over {SHARE_JUMP_PCT}% with no recorded corporate action", flagged[:12])
-    return CheckResult("share_count_jumps", PASS, f"No diluted share count moved more than {SHARE_JUMP_PCT}% between quarters without a recorded action ({len(by_symbol)} tickers, two years)")
+    return CheckResult("share_count_jumps", PASS, f"No diluted share count moved more than {SHARE_JUMP_PCT}% between quarters without a recorded action or matching split ({len(by_symbol)} tickers, two years)")
 
 
 # ── Dividends: the next amount is a per-payment figure in line with the last one paid ─────────────────

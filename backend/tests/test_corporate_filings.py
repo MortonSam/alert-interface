@@ -47,3 +47,24 @@ def test_a_defined_term_is_not_a_counterparty_name():
             "a pro rata distribution of all of the outstanding shares of SpinCo common stock. Item 9.01.")
     c = classify_item_201(text, date(2026, 2, 9), "Waters Corporation")
     assert c["kind"] == "spin_off" and c["name"] is None
+
+
+WAT = ("Introductory Note. On February 9, 2026 (the Closing Date), Waters Corporation, a Delaware corporation (Waters), and Becton, Dickinson and Company, a New Jersey corporation (BD), "
+       "announced that they consummated the previously announced spin-off of BD's Biosciences and Diagnostic Solutions business (the SpinCo Business) and combination of the SpinCo "
+       "Business with Waters. BD distributed, on a pro rata basis (the Distribution), one share of SpinCo common stock to each holder of BD common stock as of the Record Date, and following the "
+       "Distribution, Merger Sub merged with and into SpinCo, and each share of SpinCo Common Stock was converted into the right to receive 0.135343148384084 shares of common stock of Waters. "
+       "Item 2.01 Completion of Acquisition or Disposition of Assets. The information set forth in the Introductory Note is incorporated herein by reference. Item 9.01.")
+WBD = ("Item 2.01 Completion of Acquisition or Disposition of Assets. The information set forth in the Introductory Note is incorporated by reference into this Item 2.01. Pursuant to the "
+       "Merger Agreement, each share of WBD's Series A common stock, par value $0.01 per share (WBD Common Stock), issued and outstanding immediately prior to the effective time of the Merger "
+       "was automatically canceled and converted into the right to receive an amount in cash equal to $31.01666668, without interest. Item 3.01 Notice of Delisting.")
+
+
+def test_a_reverse_morris_trust_makes_the_filer_the_acquirer_and_names_the_spinner():
+    c = classify_item_201(WAT, date(2026, 2, 9), "Waters Corporation")
+    assert c["kind"] == "acquisition" and c["date"] == date(2026, 2, 9)
+    assert c["name"] == "Becton, Dickinson and Company (Biosciences and Diagnostic Solutions)" and c["spinner"] == "Becton, Dickinson and Company" and c["spinner_kind"] == "spin_off"
+
+
+def test_a_filer_bought_for_cash_is_other_not_a_merger():
+    c = classify_item_201(WBD, date(2026, 10, 6), "Warner Bros. Discovery, Inc.")
+    assert c["kind"] == "other"

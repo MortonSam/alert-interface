@@ -59,7 +59,14 @@ _ROW_NET_BASIC_DILUTED = re.compile(rf"net\s+(?:income|earnings)\s+per\s+(?:comm
 _ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?(?:\s+from\s+continuing\s+operations)?\s*[—–-]+\s*diluted(?:\s*\((?:GAAP|[a-z]|\d)\))*\s*\$?\s?{_NUM}", re.I)
 _EPS_DILUTED_PAREN = re.compile(rf"\bEPS\s+\(diluted\)\s*\$?\s?{_NUM}", re.I)
 _DILUTED_EPS_GAAP_COL = re.compile(rf"diluted\s+earnings\s+per\s+share(?:\s+\(EPS\))?[^$]{{0,120}}?\bGAAP\s+\$?\s?{_NUM}", re.I)
-_DILUTED_BLOCK_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)(?:\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?:?.{{0,260}}?\bnet\s+(?:earnings|income)(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?\s+\$?\s?{_NUM}", re.I)
+_PER_SHARE_NUM = r"(\(?-?\d{1,3}\.\d{2}\)?)"      # a per-share amount: two decimals, under 1,000; never "397.0" (millions) or "429.7"
+_DILUTED_BLOCK_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)(?:\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?:?\s*"
+                                rf"(?:(?:earnings|income|loss|net earnings|net income)?\s*(?:\(loss\)\s+)?(?:from\s+)?)?continuing\s+operations\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?(?:\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?)*"
+                                rf"(?:\s+(?:losses?|earnings|income)?\s*(?:\(loss\)\s+)?(?:from\s+)?discontinued\s+operations\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?(?:\s+[—-]|\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?)*)?"
+                                rf"\s+(?:discontinued\s+operations\s+[^$]{{0,40}})?net\s+(?:earnings|income)(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?\s+\$?\s?{_PER_SHARE_NUM}", re.I)
+# a per-share block whose header is followed straight by the attributable line ("Diluted earnings per common share … Net income attributable to PFG $1.84"):
+# the amount must look like a per-share figure (two decimals, under 1,000), which a net income in millions ("$ 397.0", "$ 1,204.2") never does
+_DILUTED_HEADER_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share(?![^$]{{0,120}}continuing)[^$]{{0,120}}?\bnet\s+(?:income|earnings)(?:\s*\(loss\))?\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?\s+\$?\s?{_PER_SHARE_NUM}(?![\d,])", re.I)
 # third pass (utilities and others): "GAAP earnings of $713 million or $1.31 per share", "reported earnings (GAAP) of $230 million, or $0.30 per share",
 # "GAAP EPS decreased 3% to $1.25", "earnings per share were $1.60", "Diluted Net Income Per Share 1 $ 1.03" (a footnote mark), "Earnings per diluted share $1.25",
 # "Net Income per diluted share $0.21", "Net Income per diluted share: • $1.83 GAAP", "GAAP diluted net income per potential common share $ 1.83",
@@ -173,7 +180,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
         if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
-    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
+    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
                 (_LABELLED, "labelled GAAP EPS", 40), (_GAAP_EPS_WAS, "GAAP EPS sentence", 12), (_EPS_GAAP_BASIS, "EPS on a GAAP basis", 12), (_REPORTED_EPS_GAAP, "reported EPS, GAAP named", 12),
                 (_AS_REPORTED, "as-reported EPS", 12), (_DILUTED_EPS_GAAP_COL, "diluted EPS, GAAP column", 12), (_ROW_DASH, "EPS row, dash diluted", 12), (_EPS_DILUTED_PAREN, "EPS (Diluted) row", 12),
                 (_ROW_NET, "net income per share row", 12), (_DILUTED_WERE, "diluted EPS were sentence", 12), (_PROSE_ANY, "net income sentence", 12), (_GAAP_PER_SHARE, "GAAP net income per share", 12),
@@ -193,7 +200,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 continue
             if "continuing operations" in _sentence_around(flat, hit.start(), hit.end())[1].lower() and how not in ("diluted EPS block, net earnings line",) and "dash" not in how:
                 continue        # a continuing-operations figure is not the whole GAAP diluted EPS; the net-earnings line of a diluted block is
-            if how != "diluted EPS block, net earnings line" and _CONTINUING_TABLE.search(flat):
+            if how not in ("diluted EPS block, net earnings line", "diluted EPS block, attributable line") and _CONTINUING_TABLE.search(flat):
                 continue        # the release splits EPS into continuing and discontinued operations: only a stated total counts
             return {"eps": _num(hit.group(1)), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}
     return None
@@ -250,17 +257,43 @@ def share_quarters(facts: dict) -> dict[date, float]:
     return {k: v[1] for k, v in out.items()}
 
 
-def share_jumps(quarters: list[dict], action_dates: list[date]) -> list[dict]:
+SPLIT_MATCH_TOLERANCE = 0.15     # a jump within this share of a recorded split's ratio (or its inverse) is that split, restated in a later filing
+SPLIT_LOOKAHEAD_DAYS = 400       # a split this long after the later quarter can still restate it in the facts filed afterwards
+
+
+def split_ratio(text_: str | None) -> float | None:
+    """Pure: "10:1" -> 10.0 (ten new for one old), "1:5" -> 0.2 (a reverse split), None when unreadable."""
+    if not text_ or ":" not in text_:
+        return None
+    try:
+        new, old = (float(x) for x in text_.split(":", 1))
+        return new / old if old else None
+    except ValueError:
+        return None
+
+
+def share_jumps(quarters: list[dict], action_dates: list[date], splits: list[tuple[date, float | None]] | None = None) -> list[dict]:
     """Pure: consecutive quarters whose diluted share count moved more than SHARE_JUMP_PCT with no recorded action between the
-    earlier quarter's start and the later quarter's end. Each: {from_end, to_end, from_shares, to_shares, change_pct}."""
+    earlier quarter's start and the later quarter's end, and no recorded split (between them or within SPLIT_LOOKAHEAD_DAYS after,
+    since facts filed after a split restate earlier quarters) whose ratio or inverse matches the change. Each: {from_end, to_end,
+    from_shares, to_shares, change_pct}."""
     rows = [q for q in quarters if q.get("diluted_shares")]
+    splits = splits or []
     out = []
     for a, b in zip(rows, rows[1:]):
         ratio = b["diluted_shares"] / a["diluted_shares"]
         if ratio >= SCALE_FLIP_RATIO or ratio <= 1 / SCALE_FLIP_RATIO:
             continue                 # a reporting-scale change (thousands against units), not a corporate action: left to the facts, not flagged here
         change = (ratio - 1) * 100
-        if abs(change) > SHARE_JUMP_PCT and not any(a["start"] <= d <= b["end"] for d in action_dates):
+        if abs(change) <= SHARE_JUMP_PCT or any(a["start"] <= d <= b["end"] for d in action_dates):
+            continue
+        explained = False
+        for d, r in splits:
+            if r and a["start"] <= d <= b["end"] + timedelta(days=SPLIT_LOOKAHEAD_DAYS):
+                if abs(ratio / r - 1) <= SPLIT_MATCH_TOLERANCE or abs(ratio * r - 1) <= SPLIT_MATCH_TOLERANCE:
+                    explained = True
+                    break
+        if not explained:
             out.append({"from_end": a["end"], "to_end": b["end"], "from_shares": a["diluted_shares"], "to_shares": b["diluted_shares"], "change_pct": round(change, 1)})
     return out
 
@@ -427,3 +460,19 @@ def pe_history_clean(bars: list[tuple[date, float]], quarters: list[dict], curre
     if kept and current is not None:
         out["share_above"] = round(sum(1 for v in kept if v < current) / len(kept) * 100)
     return out
+
+
+EPS_MAX_SHARE_OF_PRICE = 0.25       # a quarter's EPS above this share of the stock's close on the report date is not a per-share figure
+EPS_MAX_YEAR_RATIO = 10.0           # a quarter's EPS more than this many times (or under a tenth of) the same quarter a year earlier, both positive, is suspect
+
+
+def implausible(eps: float, close: float | None, prior_year_eps: float | None) -> str | None:
+    """Pure: why a parsed quarterly EPS cannot be right, or None. Against the close on the report date (a per-share figure is a
+    fraction of the price) and against the same quarter a year earlier when both are positive."""
+    if close is not None and close > 0 and abs(eps) > EPS_MAX_SHARE_OF_PRICE * close:
+        return f"{eps:+.2f} is more than {EPS_MAX_SHARE_OF_PRICE:.0%} of the {close:.2f} close on the report date"
+    if prior_year_eps is not None and eps > 0 and prior_year_eps > 0:
+        ratio = eps / prior_year_eps
+        if ratio > EPS_MAX_YEAR_RATIO or ratio < 1 / EPS_MAX_YEAR_RATIO:
+            return f"{eps:+.2f} is {ratio:.1f}x the same quarter a year earlier ({prior_year_eps:+.2f})"
+    return None

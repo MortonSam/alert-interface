@@ -18,7 +18,23 @@ SPIN = re.compile(r"spin-?off|separation of|separated|spun off|pro rata distribu
 _COMMON_STOCK_NAME = re.compile(r"((?:[A-Z][A-Za-z0-9&.'’-]*\s){1,4}?)(?:Common Stock|common stock)\b")
 _REFERENCE_ONLY = re.compile(r"incorporated (?:herein )?by reference", re.I)
 MERGER = re.compile(r"merger of equals|merged with and into|merger agreement|combination with|business combination|merged with", re.I)
-SHARE_EXCHANGE = re.compile(r"exchange ratio|stock-for-stock|in exchange for shares|shares of (?:the )?(?:company'?s? )?common stock(?: of the company)? (?:were|was) issued|each share of .{0,80}? (?:was|were) converted into (?:the right to receive )?\d|all-stock", re.I)
+SHARE_EXCHANGE = re.compile(r"exchange ratio|stock-for-stock|in exchange for shares|shares of (?:the )?(?:company'?s? )?common stock(?: of the company)? (?:were|was) issued|"
+                            r"converted into the right to receive (?:[\d.]+ )?(?:shares? of|of a share)|all-stock", re.I)
+# the filer's own shares converted into cash: the filer was bought for cash and will stop trading (never a share exchange)
+CASH_TARGET = re.compile(r"each share of (?:(?:the )?(?:company'?s?|registrant'?s?|[A-Z][\w&.'’]*'?s?) )?(?:series [a-z] )?common stock.{0,900}?converted into the right to receive (?:an amount in )?cash", re.I | re.S)
+# a defined term for a company: 'Becton, Dickinson and Company, a New Jersey corporation ("BD")'
+_DEFINITION = re.compile(r"([A-Z][\w&.,'’ ]{2,80}?),? an? [A-Z][a-z]+(?: [A-Z][a-z]+)? (?:corporation|company|limited liability company|limited partnership)[^(]{0,40}\(\W{0,3}([A-Z][\w&.]{1,30})\W{0,3}\)")
+
+
+def resolve_defined(term: str, text: str) -> str:
+    """Pure: the full name a filing gave a defined term ("BD" -> "Becton, Dickinson and Company"), else the term itself."""
+    for m in _DEFINITION.finditer(text):
+        if m.group(2).strip().lower() == term.strip().lower():
+            return m.group(1).strip(" ,")
+    return term
+# a Reverse Morris Trust: another company spun a business to its own holders, which then merged into the filer for the filer's shares: the filer acquired
+RMT = re.compile(r"spin-?off of (?P<spinner>[A-Z][\w&.,'’ ]{1,60}?)(?:'s|’s) (?P<business>[A-Z][\w&.,'’ ]{2,80}? business)[^.]{0,120}?(?:combination|merger) of (?:the )?[^.]{0,80}? with (?P<filer>[A-Z][\w&.,'’ ]{1,50}?)\b", re.I)
+RMT_DISTRIBUTION = re.compile(r"distributed,? on a pro rata basis[^.]{0,200}? to (?:each )?holders? of (?P<spinner>[A-Z][\w&.'’]+(?: [A-Z][\w&.'’]+){0,3}) common stock", re.I)
 ACQUIRE = re.compile(r"completed (?:its |the )?(?:previously announced )?acquisition of|acquired (?:all of )?(?:the )?(?:issued and )?outstanding|acquisition of all", re.I)
 # the counterparty: the capitalised name after the verb
 _NAME_AFTER = re.compile(r"(?:spin-?off of|separation of|distribution of|acquisition of|acquired|merger (?:with|of)|merged with(?: and into)?|combination with|business combination with)\s+"
@@ -94,7 +110,18 @@ def classify_item_201(text: str, filed: date | None = None, issuer: str | None =
     head = passage[:1500]
     if len(passage.strip()) < 120 or _REFERENCE_ONLY.search(passage[:300]):
         head = flat[:6000]
-    if SPIN.search(head):
+    rmt = RMT.search(head) or RMT.search(flat[:8000])
+    own_forms = {f.lower() for f in (issuer_forms(issuer) if issuer else [])}
+    spinner_is_other = bool(rmt) and rmt.group("spinner").strip().lower() not in own_forms and not any(rmt.group("spinner").strip().lower().startswith(f) for f in own_forms)
+    if rmt and spinner_is_other and SHARE_EXCHANGE.search(flat):
+        # another company's holders received the business and then the filer's shares: the filer is the acquirer, by share exchange
+        spinner = resolve_defined(rmt.group("spinner").strip(), flat[:8000])
+        name = f"{spinner} ({rmt.group('business').strip().removesuffix(' business').removesuffix(' Business')})"
+        dm = _DATE.search(head)
+        return {"kind": "acquisition", "date": _to_date(dm) if dm else filed, "name": name, "evidence": head[:300], "spinner": spinner, "spinner_kind": "spin_off"}
+    if CASH_TARGET.search(passage) or CASH_TARGET.search(flat[:20000]):
+        kind = "other"          # the target's shares became cash: a cash deal on either side; the delisting rule, not the P/E rule, handles a filer that stops trading
+    elif SPIN.search(head):
         kind = "spin_off"
     elif MERGER.search(head) and (SHARE_EXCHANGE.search(flat) or re.search(r"merger of equals|merged with and into", head, re.I)):
         kind = "merger"

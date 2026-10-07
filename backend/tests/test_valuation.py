@@ -165,6 +165,10 @@ def test_share_counts_and_jumps_without_a_recorded_action():
     assert V.share_jumps(qs, [date(2026, 5, 15)]) == []                                          # a recorded action between them explains it
     flip = [{"end": date(2026, 3, 31), "start": date(2026, 1, 1), "diluted_shares": 815_000_000.0}, {"end": date(2026, 6, 30), "start": date(2026, 4, 1), "diluted_shares": 32_558_000.0}]
     assert V.share_jumps(flip, []) == []                                                          # a units flip in the facts, not an action
+    nflx = [{"end": date(2025, 6, 30), "start": date(2025, 4, 1), "diluted_shares": 4_348_825_000.0}, {"end": date(2025, 9, 30), "start": date(2025, 7, 1), "diluted_shares": 434_039_000.0}]
+    assert V.share_jumps(nflx, [], [(date(2025, 11, 17), 10.0)]) == []                              # a 10:1 split two months later restated the September quarter
+    assert len(V.share_jumps(nflx, [], [(date(2025, 11, 17), 5.0)])) == 1                           # a split of another ratio explains nothing
+    assert V.split_ratio("10:1") == 10.0 and V.split_ratio("1:5") == 0.2 and V.split_ratio("x") is None
 
 
 def test_edgar_backoff_ladder_and_retry_after():

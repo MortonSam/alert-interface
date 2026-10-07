@@ -21,7 +21,7 @@ from app.database import ScriptSessionLocal
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
 from app.services.step_outcomes import record_step_fields
-from app.services.valuation import parse_release_eps
+from app.services.valuation import implausible, parse_release_eps
 
 STEP_LABEL = "Release EPS (8-K exhibits)"
 LOOKBACK_DAYS = 45
@@ -73,6 +73,16 @@ async def run(argv: list[str]) -> int:
                     UNION ALL
                     SELECT t.symbol, hr.event_date FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
                     WHERE t.symbol = ANY(:syms) AND hr.event_type = 'earnings' AND hr.event_date <= :t) x GROUP BY symbol ORDER BY symbol"""), {"syms": symbols, "t": today})).all()
+    async with ScriptSessionLocal() as s:
+        # for the plausibility guard: the close on (or just before) each report date, and the same quarter a year earlier from XBRL
+        closes = {}
+        priors = {}
+        for sym, report_date in rows:
+            c = (await s.execute(text("SELECT close FROM price_bars_shadow WHERE symbol = :s AND date <= :d ORDER BY date DESC LIMIT 1"), {"s": sym, "d": report_date})).scalar()
+            closes[(sym, report_date)] = float(c) if c is not None else None
+            pr = (await s.execute(text("""SELECT eps FROM eps_quarters WHERE symbol = :s AND period_end BETWEEN :a AND :b ORDER BY period_end DESC LIMIT 1"""),
+                                  {"s": sym, "a": report_date - timedelta(days=365 + 60), "b": report_date - timedelta(days=365 - 30)})).scalar()
+            priors[(sym, report_date)] = float(pr) if pr is not None else None
     print(f"{STEP_LABEL}: {len(rows)} report(s) to read ({'write' if write else 'dry run'})", flush=True)
     edgar = EdgarClient()
     stored = parsed = unread = 0
@@ -99,6 +109,9 @@ async def run(argv: list[str]) -> int:
                         break
                 if not hit:
                     print(f"  {sym} {report_date}: 8-K {', '.join(r['accession'] for r in recs)}: no GAAP diluted EPS read"); unread += 1; continue
+                why = implausible(hit["eps"], closes.get((sym, report_date)), priors.get((sym, report_date)))
+                if why:
+                    print(f"  {sym} {report_date}: read {hit['eps']:+.2f} ({hit['how']}) but unread: {why}"); unread += 1; continue
                 parsed += 1
                 print(f"  {sym} {report_date}: GAAP diluted EPS {hit['eps']:+.2f} ({hit['how']}; quarter ended {hit['period_end']}) from {rec['accession']} {ex[0]}")
                 print(f"      evidence: {hit['evidence'][:200]}")
