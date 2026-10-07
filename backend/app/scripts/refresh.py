@@ -63,6 +63,8 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Release EPS (8-K exhibits)",     ["python", "-m", "app.scripts.seed_release_eps", "--due", "--write"]),
     ("Release EPS vs XBRL",            ["python", "-m", "app.scripts.check_release_eps"]),
     # after the price bars and the release figures: price over the four latest reported quarters, per ticker and per sector
+    # completed spin-offs, mergers and share-exchange acquisitions from new 8-K Item 2.01 filings, before the P/E judges its windows
+    ("Corporate actions (8-K Item 2.01)", ["python", "-m", "app.scripts.scan_corporate_actions", "--recent=45", "--write"]),
     ("Trailing P/E",                   ["python", "-m", "app.scripts.compute_pe", "--write"]),
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),

@@ -36,21 +36,39 @@ _MONTHS = "January|February|March|April|May|June|July|August|September|October|N
 _DATE = re.compile(rf"({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})")
 _MONEY = r"\$?\s?\(?-?\d{1,4}(?:,\d{3})*(?:\.\d{1,2})?\)?"
 # "GAAP net income of $37.70 billion, or $32.87 per diluted share" (the quarter's highlight comes before the year's)
-_PROSE = re.compile(rf"GAAP\s+net\s+(?:income|earnings|loss)\b.{{0,80}}?,\s*or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?\$\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*(?:\.\d{{1,2}})?\)?)\s+per\s+diluted\s+share", re.I)
+_PROSE = re.compile(rf"GAAP\s+(?:net\s+)?(?:income|earnings|loss)\b.{{0,80}}?,\s*or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?(\(?\$\s?\(?-?\d{{1,4}}(?:,\d{{3}})*(?:\.\d{{1,2}})?\)?)\s+per\s+(?:basic\s+and\s+)?diluted\s+share", re.I)
 # "GAAP diluted earnings per share $ 32.87 $ 24.67 ..." / "Diluted earnings per share 32.87 24.67 ..." (first column is the current quarter)
 _ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:common\s+)?share(?:\s*\(\d\))?\s*(?:attributable[^$\d]{{0,80}})?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 _ROW2 = re.compile(rf"earnings\s+per\s+share[^A-Za-z]{{0,20}}basic[^A-Za-z]{{0,40}}diluted\s*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 _NON_GAAP_NEAR = re.compile(r"non-?\s?gaap|adjusted|pro\s?forma|excluding|\bcore\b|operating (?:income|earnings)|underlying|normali[sz]ed", re.I)
 _NUM = r"(\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"
+_DNUM = r"(\(?\$\s?\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"      # with the dollar sign, a loss written "($0.35)" or "$(0.35)"
 # other phrasings, tried after _PROSE and _ROW, in this order
-_PROSE_ANY = re.compile(rf"\b(?:net\s+(?:income|earnings|loss)|earnings|income)\b[^;]{{0,120}}?,?\s+or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?\$\s?{_NUM}\s+per\s+diluted\s+(?:common\s+)?share", re.I)
+_PROSE_ANY = re.compile(rf"\b(?:net\s+(?:income|earnings|loss)|earnings|income)\b[^;]{{0,120}}?,?\s+or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?{_DNUM}\s+per\s+(?:basic\s+and\s+)?diluted\s+(?:common\s+)?share", re.I)
+# utilities and others: "GAAP net income of $0.37 per share", "earnings per share (EPS) of $5.73 on a GAAP basis", "reported EPS of $1.38 ... (GAAP)",
+# "earnings per share of $1.03 on an as-reported ... basis", "GAAP earnings per share (EPS) was $0.99", "diluted earnings per share were $56.05"
+_GAAP_PER_SHARE = re.compile(rf"GAAP\s+net\s+(?:income|earnings)\s+of\s+{_DNUM}\s+per\s+(?:diluted\s+)?share", re.I)
+_EPS_GAAP_BASIS = re.compile(rf"(?:earnings\s+per\s+share|EPS)(?:\s+\(EPS\))?\s+of\s+{_DNUM}\s+on\s+a\s+GAAP\s+basis", re.I)
+_REPORTED_EPS_GAAP = re.compile(rf"reported\s+(?:diluted\s+)?EPS\s+of\s+{_DNUM}[^.]{{0,160}}?\bGAAP\b", re.I)
+_AS_REPORTED = re.compile(rf"earnings\s+per\s+share\s+of\s+{_DNUM}\s+on\s+an\s+as-reported", re.I)
+_GAAP_EPS_WAS = re.compile(rf"GAAP\s+(?:diluted\s+)?earnings\s+per\s+share(?:\s+\(EPS\))?\s+(?:was|were|of)\s+{_DNUM}", re.I)
+_DILUTED_WERE = re.compile(rf"\bdiluted\s+(?:net\s+)?earnings\s+per\s+share\s+(?:were|was)\s+{_DNUM}", re.I)
+# rows: "Net income per share: Basic $ 57.17 $ 50.02 Diluted $ 56.05", "Earnings (loss) per common share - diluted $ 0.99", "EPS (Diluted) $ (0.01)",
+# "Diluted earnings per share (EPS) ... GAAP $5.73", "Diluted net earnings per share: ... Net earnings $ 2.04" (the total, after continuing operations)
+_ROW_NET_BASIC_DILUTED = re.compile(rf"net\s+(?:income|earnings)\s+per\s+(?:common\s+)?share:?\s*basic\s*\$?\s?\(?-?[\d,]+\.\d{{1,2}}\)?(?:\s*\$?\s?\(?-?[\d,]+\.\d{{1,2}}\)?){{0,3}}\s*diluted\s*\$?\s?{_NUM}", re.I)
+_ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+from\s+continuing\s+operations)?\s*[—–-]+\s*diluted(?:\s+\(GAAP\))?(?:\s+\([a-z]\))?\s*\$?\s?{_NUM}", re.I)
+_EPS_DILUTED_PAREN = re.compile(rf"\bEPS\s+\(diluted\)\s*\$?\s?{_NUM}", re.I)
+_DILUTED_EPS_GAAP_COL = re.compile(rf"diluted\s+earnings\s+per\s+share(?:\s+\(EPS\))?[^$]{{0,120}}?\bGAAP\s+\$?\s?{_NUM}", re.I)
+_DILUTED_BLOCK_NET = re.compile(rf"diluted\s+net\s+earnings\s+per\s+share:.{{0,220}}?\bnet\s+earnings\s+\$?\s?{_NUM}", re.I)
 _LABELLED = re.compile(rf"(?<![A-Za-z-])(?:earnings\s+per\s+share:?\s*GAAP:?|GAAP\s+(?:diluted\s+)?EPS(?:\s+of|\s+was|:)?|diluted\s+EPS(?:\s+of|\s+was|:)?|GAAP\s+earnings\s+per\s+(?:diluted\s+)?share(?:\s+of|\s+was|:)?)\s*\$\s?{_NUM}", re.I)
-_ROW_DASH = re.compile(rf"(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share\s*[—–-]+\s*diluted\s*\$?\s?{_NUM}", re.I)
 _ROW_NET = re.compile(rf"net\s+(?:income|earnings)\s+per\s+(?:common\s+)?(?:diluted\s+)?share[^$\d]{{0,30}}diluted\s*\$?\s?{_NUM}", re.I)
-_PER_DILUTED = re.compile(rf"\$\s?{_NUM}\s+per\s+diluted\s+(?:common\s+)?share", re.I)
+_PER_DILUTED = re.compile(rf"{_DNUM}\s+per\s+diluted\s+(?:common\s+)?share", re.I)
 _PER_SHARE = re.compile(rf"\bnet\s+income\b[^;]{{0,120}}?,?\s+or\s+\$\s?{_NUM}\s+per\s+share", re.I)       # insurers' "per share net income": diluted by their statements
 # a figure inside an outlook is never the quarter's result: a guidance word nearby, or a range to a second amount right after it
-_GUIDANCE_NEAR = re.compile(r"outlook|guidance|expect|forecast|anticipat|projected|target|(?:fiscal|fy)\s*'?\d{2,4}\s+(?:guidance|outlook)|next\s+(?:quarter|year)|first\s+quarter\s+of\s+fiscal", re.I)
+_GUIDANCE_NEAR = re.compile(r"outlook|guidance|expect|forecast|anticipat|projected|target|estimates?\b|(?:fiscal|fy)\s*'?\d{2,4}\s+(?:guidance|outlook)|next\s+(?:quarter|year)|first\s+quarter\s+of\s+fiscal", re.I)
+# a per-share figure in a sentence about an item, charge, impact or adjustment is never the quarter's EPS
+_ITEM_NEAR = re.compile(r"related to|impact of|impacts? from|charges?\s+of|approximately|amortization|adjustments?|impairment|benefit of|expense of|effect of|headwind|tailwind|one-time|non-?recurring", re.I)
+# a figure introduced by a comparison is the prior period's (introduced_by_comparison)
 _RANGE_AFTER = re.compile(r"^\s*(?:to|[–—-]|±)\s*\$?\s?\d", re.I)
 _PERIOD_END = re.compile(rf"(?:(?:three|3)\s+months|\d{{1,2}}\s+weeks|quarter|qtr\.?|fiscal\s+quarter|quarterly\s+period)\s+ended\s+({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
 _QTR_HEADER = re.compile(rf"(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4])[^A-Za-z]{{0,40}}(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4]|Year\s+Ended|Twelve\s+Months)?[^A-Za-z]{{0,40}}(?:Year\s+Ended\s+)?({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
@@ -64,10 +82,41 @@ def _to_date(m: re.Match, g: int = 1) -> date | None:
 
 
 def _num(s: str) -> float:
-    s = s.replace("$", "").replace(",", "").strip()
-    neg = s.startswith("(") and s.endswith(")")
-    v = float(s.strip("()"))
+    s = s.replace("$", "").replace(",", "").replace(" ", "").strip()
+    neg = "(" in s or s.startswith("-")
+    v = float(s.strip("()-"))
     return -v if neg else v
+
+
+def _sentence_around(flat: str, start: int, end: int) -> tuple[str, str]:
+    """Pure: (the sentence text before the match, the whole sentence), bounded by the nearest sentence ends or bullets."""
+    left = max(flat.rfind(". ", 0, start), flat.rfind("•", 0, start), flat.rfind("; ", 0, start), flat.rfind(" ▪ ", 0, start))
+    left = left + 1 if left >= 0 else 0
+    right_candidates = [i for i in (flat.find(". ", end), flat.find("•", end), flat.find("; ", end)) if i >= 0]
+    right = min(right_candidates) if right_candidates else len(flat)
+    return flat[left:start], flat[left:right]
+
+
+_COMPARISON_CUE = re.compile(r"compared\s+(?:with|to)|versus|vs\.?|in\s+the\s+(?:prior|year-ago|same)\s+(?:year|quarter|period)|a\s+year\s+(?:ago|earlier)|last\s+year|prior-year|year-ago", re.I)
+
+
+def introduced_by_comparison(before: str) -> bool:
+    """Pure: the figure is the prior period's: a comparison cue precedes it in the clause, with nothing but the compared amount
+    (and an ", or" join) between them. A cue earlier in the sentence, before a clause break (", while", "; ", " and "), compares
+    something else: "net income was $931.6 million compared to $837.0 million last year, while diluted EPS were $56.05"."""
+    m = None
+    for m in _COMPARISON_CUE.finditer(before):
+        pass
+    if m is None:
+        return False
+    tail = re.sub(r",\s+or\s+", " or ", before[m.end():])
+    return not re.search(r",|;|\bwhile\b|\band\b", tail)
+
+
+def _disqualified(flat: str, start: int, end: int) -> bool:
+    """Pure: the sentence describes an item, charge, impact or adjustment, or the figure is introduced by a comparison."""
+    before, sentence = _sentence_around(flat, start, end)
+    return bool(_ITEM_NEAR.search(sentence)) or introduced_by_comparison(before)
 
 
 def parse_release_eps(text: str, report_date: date | None = None) -> dict | None:
@@ -90,11 +139,15 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
         if d and (report_date is None or 0 <= (report_date - d).days <= PERIOD_END_MAX_DAYS):
             period_end = d
             break
-    hit = _PROSE.search(flat)
-    if hit and not _GUIDANCE_NEAR.search(flat[max(0, hit.start() - 200):hit.start()]):
+    for hit in _PROSE.finditer(flat):
+        if _GUIDANCE_NEAR.search(flat[max(0, hit.start() - 200):hit.start()]) or _disqualified(flat, hit.start(), hit.end()):
+            continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
-    attempts = ((_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_LABELLED, "labelled GAAP EPS", 40), (_ROW_DASH, "EPS row, dash diluted", 12),
-                (_ROW_NET, "net income per share row", 12), (_PROSE_ANY, "net income sentence", 12), (_PER_DILUTED, "per diluted share", 80), (_PER_SHARE, "per share net income sentence", 12))
+    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
+                (_LABELLED, "labelled GAAP EPS", 40), (_GAAP_EPS_WAS, "GAAP EPS sentence", 12), (_EPS_GAAP_BASIS, "EPS on a GAAP basis", 12), (_REPORTED_EPS_GAAP, "reported EPS, GAAP named", 12),
+                (_AS_REPORTED, "as-reported EPS", 12), (_DILUTED_EPS_GAAP_COL, "diluted EPS, GAAP column", 12), (_ROW_DASH, "EPS row, dash diluted", 12), (_EPS_DILUTED_PAREN, "EPS (Diluted) row", 12),
+                (_ROW_NET, "net income per share row", 12), (_DILUTED_WERE, "diluted EPS were sentence", 12), (_PROSE_ANY, "net income sentence", 12), (_GAAP_PER_SHARE, "GAAP net income per share", 12),
+                (_PER_DILUTED, "per diluted share", 80), (_PER_SHARE, "per share net income sentence", 12))
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
             before = flat[max(0, hit.start() - back):hit.start()] if back else ""
@@ -102,6 +155,11 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 continue
             if _GUIDANCE_NEAR.search(flat[max(0, hit.start() - 200):hit.start()]) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]):
                 continue
+            if how in ("net income sentence", "per diluted share", "per share net income sentence", "labelled GAAP EPS", "GAAP EPS sentence", "EPS on a GAAP basis", "reported EPS, GAAP named",
+                       "as-reported EPS", "diluted EPS were sentence", "GAAP net income per share") and _disqualified(flat, hit.start(), hit.end()):
+                continue
+            if "continuing operations" in _sentence_around(flat, hit.start(), hit.end())[1].lower() and how not in ("diluted EPS block, net earnings line",) and "dash" not in how:
+                continue        # a continuing-operations figure is not the whole GAAP diluted EPS; the net-earnings line of a diluted block is
             return {"eps": _num(hit.group(1)), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}
     return None
 
@@ -132,7 +190,44 @@ def eps_quarters(facts: dict) -> list[dict]:
         if len(inside) == 3:
             quarters[a["end"]] = {"end": a["end"], "start": max(q["end"] for q in inside) + timedelta(days=1), "eps": round(a["eps"] - sum(q["eps"] for q in inside), 4),
                                   "filed": a["filed"], "form": a["form"], "derived": True, "source": "xbrl"}
+    shares = share_quarters(facts)
+    for q in quarters.values():
+        q["diluted_shares"] = shares.get(q["end"])
     return sorted(quarters.values(), key=lambda q: q["end"])
+
+
+SHARES_TAG = "WeightedAverageNumberOfDilutedSharesOutstanding"
+SHARE_JUMP_PCT = 10               # a quarter-to-quarter change in diluted shares above this, with no recorded action, is worth a look
+SCALE_FLIP_RATIO = 20             # a swing this large between quarters is a units change in the facts (thousands vs units), never a real count
+
+
+def share_quarters(facts: dict) -> dict[date, float]:
+    """Pure: {quarter end: weighted-average diluted shares} from a companyfacts document (quarterly facts only, latest filed wins)."""
+    series = facts.get("facts", {}).get("us-gaap", {}).get(SHARES_TAG, {}).get("units", {}).get("shares", [])
+    out: dict[date, tuple[date, float]] = {}
+    for e in series:
+        try:
+            start, end, filed = date.fromisoformat(e["start"]), date.fromisoformat(e["end"]), date.fromisoformat(e["filed"])
+        except (KeyError, ValueError):
+            continue
+        if QUARTER_DAYS[0] <= (end - start).days <= QUARTER_DAYS[1] and (end not in out or filed >= out[end][0]):
+            out[end] = (filed, float(e["val"]))
+    return {k: v[1] for k, v in out.items()}
+
+
+def share_jumps(quarters: list[dict], action_dates: list[date]) -> list[dict]:
+    """Pure: consecutive quarters whose diluted share count moved more than SHARE_JUMP_PCT with no recorded action between the
+    earlier quarter's start and the later quarter's end. Each: {from_end, to_end, from_shares, to_shares, change_pct}."""
+    rows = [q for q in quarters if q.get("diluted_shares")]
+    out = []
+    for a, b in zip(rows, rows[1:]):
+        ratio = b["diluted_shares"] / a["diluted_shares"]
+        if ratio >= SCALE_FLIP_RATIO or ratio <= 1 / SCALE_FLIP_RATIO:
+            continue                 # a reporting-scale change (thousands against units), not a corporate action: left to the facts, not flagged here
+        change = (ratio - 1) * 100
+        if abs(change) > SHARE_JUMP_PCT and not any(a["start"] <= d <= b["end"] for d in action_dates):
+            out.append({"from_end": a["end"], "to_end": b["end"], "from_shares": a["diluted_shares"], "to_shares": b["diluted_shares"], "change_pct": round(change, 1)})
+    return out
 
 
 def trailing_four(quarters: list[dict], as_of: date, known_by: date | None = None) -> list[dict] | None:

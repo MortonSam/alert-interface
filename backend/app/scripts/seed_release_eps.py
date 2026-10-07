@@ -5,6 +5,7 @@ for the latest report of any ticker whose P/E is missing because XBRL lags it.
 
     python -m app.scripts.seed_release_eps MU                 # dry run for one ticker
     python -m app.scripts.seed_release_eps MU --write
+    python -m app.scripts.seed_release_eps --symbols=HPE,PANW         # the same, as a flag
     python -m app.scripts.seed_release_eps --due --write      # every recent report without a row (the nightly step)
 """
 from __future__ import annotations
@@ -27,19 +28,27 @@ LOOKBACK_DAYS = 45
 MATCH_DAYS = 5          # the 8-K is filed within this many days of the report
 
 
+def exhibit_candidates(texts: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Pure: the documents worth parsing, press-release exhibits first (EX-99.x by name), then the rest by length; index files,
+    bylaws and the cover 8-K last or never."""
+    docs = [(n, t) for n, t in texts if t and len(t) > 500 and "index" not in n.lower() and not re.search(r"by-?laws|bylaws", n.lower())]
+    press = [d for d in docs if re.search(r"ex(?:hibit)?[-_.]?99|99[-_.]?[1-9]|ex99", d[0].lower())]
+    rest = sorted((d for d in docs if d not in press), key=lambda x: -len(x[1]))
+    return press + rest
+
+
 def exhibit_text(texts: list[tuple[str, str]]) -> tuple[str, str] | None:
-    """Pure: (name, text) of the EX-99.1 press release among a filing's documents, else the longest exhibit."""
-    docs = [(n, t) for n, t in texts if t and len(t) > 500 and "index" not in n.lower()]
-    for name, t in docs:
-        if re.search(r"ex(?:hibit)?[-_.]?99|99[-_.]?1|ex99", name.lower()):
-            return name, t
-    cands = docs
-    return max(cands, key=lambda x: len(x[1])) if cands else None
+    """Pure: the first press-release exhibit (compatibility: callers that want one document)."""
+    cands = exhibit_candidates(texts)
+    return cands[0] if cands else None
 
 
 async def run(argv: list[str]) -> int:
     write, due = "--write" in argv, "--due" in argv
     symbols = [a.upper() for a in argv if not a.startswith("--")]
+    flagged = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)     # --symbols=MU,HPE
+    if flagged:
+        symbols += [x.strip().upper() for x in flagged.split(",") if x.strip()]
     today = date.today()
     async with ScriptSessionLocal() as s:
         if due:
@@ -80,8 +89,12 @@ async def run(argv: list[str]) -> int:
                     print(f"  {sym} {report_date}: no Item 2.02 8-K within {MATCH_DAYS} days"); unread += 1; continue
                 rec = recs[0]
                 texts = await edgar.filing_texts(cik, rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""))
-                ex = exhibit_text(texts)
-                hit = parse_release_eps(ex[1], report_date) if ex else None
+                ex, hit = None, None
+                for cand in exhibit_candidates(texts):       # a subsidiary's release (DTE Gas) may sit beside the issuer's; the first that reads wins
+                    hit = parse_release_eps(cand[1], report_date)
+                    if hit:
+                        ex = cand
+                        break
                 if not hit:
                     print(f"  {sym} {report_date}: 8-K {rec['accession']}: no GAAP diluted EPS read"); unread += 1; continue
                 parsed += 1

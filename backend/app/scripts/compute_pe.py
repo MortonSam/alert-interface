@@ -7,6 +7,7 @@ or "missing" with the reason; and a pe_sector_snapshots row per sector, shown on
     python -m app.scripts.compute_pe                 # dry run: computes everything, prints coverage by sector, stores nothing
     python -m app.scripts.compute_pe --write         # the nightly step
     python -m app.scripts.compute_pe MU NVDA --write
+    python -m app.scripts.compute_pe --reread --write   # re-parse every ticker's quarters from the cached company facts
 """
 from __future__ import annotations
 
@@ -48,6 +49,7 @@ def _rows_to_quarters(rows) -> list[dict]:
 
 async def run(argv: list[str]) -> int:
     write = "--write" in argv
+    reread = "--reread" in argv            # re-parse every ticker's quarters from the (cached) company facts, e.g. after a parser change
     only = [a.upper() for a in argv if not a.startswith("--")]
     today = date.today()
     async with ScriptSessionLocal() as s:
@@ -73,8 +75,9 @@ async def run(argv: list[str]) -> int:
         for r in (await s.execute(text("SELECT symbol, old_symbol, renamed_on FROM ticker_aliases WHERE symbol = ANY(:s)"), {"s": symbols})).all():
             actions.setdefault(r[0], []).append({"kind": "rename_merge", "date": r[2], "name": r[1]})
         stored: dict[str, list[dict]] = {}
-        for r in (await s.execute(text("SELECT symbol, period_end, period_start, eps, filed_on, form, derived FROM eps_quarters WHERE symbol = ANY(:s) ORDER BY symbol, period_end"), {"s": symbols})).all():
-            stored.setdefault(r[0], []).append({"end": r[1], "start": r[2], "eps": float(r[3]), "filed": r[4], "form": r[5], "derived": bool(r[6]), "source": "xbrl"})
+        for r in (await s.execute(text("SELECT symbol, period_end, period_start, eps, filed_on, form, derived, diluted_shares FROM eps_quarters WHERE symbol = ANY(:s) ORDER BY symbol, period_end"), {"s": symbols})).all():
+            stored.setdefault(r[0], []).append({"end": r[1], "start": r[2], "eps": float(r[3]), "filed": r[4], "form": r[5], "derived": bool(r[6]), "source": "xbrl",
+                                                "diluted_shares": float(r[7]) if r[7] is not None else None})
     print(f"{STEP_LABEL}: {len(symbols)} active ticker(s) ({'write' if write else 'dry run'}); closes through {max((c[0] for c in closes.values()), default=None)}", flush=True)
     edgar = EdgarClient()
     refreshed = failed = 0
@@ -83,7 +86,7 @@ async def run(argv: list[str]) -> int:
         for sym in symbols:
             quarters = stored.get(sym, [])
             lr = latest_report.get(sym)
-            if V.needs_refresh(quarters, lr, today):
+            if reread or V.needs_refresh(quarters, lr, today):
                 try:
                     cik = await edgar.get_cik(sym)
                     quarters = V.eps_quarters(await company_facts_merged(edgar, cik)) if cik else []
@@ -91,10 +94,10 @@ async def run(argv: list[str]) -> int:
                     if write:
                         async with ScriptSessionLocal() as s:
                             for q in quarters:
-                                await s.execute(text("""INSERT INTO eps_quarters (symbol, period_end, period_start, eps, filed_on, form, derived, fetched_at)
-                                    VALUES (:s, :e, :st, :eps, :f, :form, :d, now()) ON CONFLICT (symbol, period_end) DO UPDATE SET period_start = EXCLUDED.period_start,
-                                    eps = EXCLUDED.eps, filed_on = EXCLUDED.filed_on, form = EXCLUDED.form, derived = EXCLUDED.derived, fetched_at = now()"""),
-                                    {"s": sym, "e": q["end"], "st": q["start"], "eps": q["eps"], "f": q["filed"], "form": q["form"][:12], "d": q["derived"]})
+                                await s.execute(text("""INSERT INTO eps_quarters (symbol, period_end, period_start, eps, filed_on, form, derived, diluted_shares, fetched_at)
+                                    VALUES (:s, :e, :st, :eps, :f, :form, :d, :sh, now()) ON CONFLICT (symbol, period_end) DO UPDATE SET period_start = EXCLUDED.period_start,
+                                    eps = EXCLUDED.eps, filed_on = EXCLUDED.filed_on, form = EXCLUDED.form, derived = EXCLUDED.derived, diluted_shares = EXCLUDED.diluted_shares, fetched_at = now()"""),
+                                    {"s": sym, "e": q["end"], "st": q["start"], "eps": q["eps"], "f": q["filed"], "form": q["form"][:12], "d": q["derived"], "sh": q.get("diluted_shares")})
                             await s.commit()
                 except Exception as exc:
                     print(f"  {sym}: XBRL failed: {redact(exc)[:100]}", flush=True); failed += 1

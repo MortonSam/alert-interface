@@ -151,3 +151,24 @@ def test_a_corporate_action_inside_the_window_means_not_meaningful_yet_and_leave
     h = V.pe_history_clean(bars, qs, 13.0, [date(2026, 1, 15)])
     assert h["sessions"] == 0 and h["excluded"] == 3                                           # every window holds the action
     assert V.pe_history_clean(bars, qs, 13.0, [date(2024, 1, 1)])["sessions"] == 3
+
+
+def test_share_counts_and_jumps_without_a_recorded_action():
+    facts = {"facts": {"us-gaap": {"WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": [
+        {"start": "2026-01-01", "end": "2026-03-31", "val": 1000.0, "filed": "2026-05-01"}, {"start": "2026-04-01", "end": "2026-06-30", "val": 850.0, "filed": "2026-08-01"},
+        {"start": "2026-01-01", "end": "2026-06-30", "val": 925.0, "filed": "2026-08-01"}]}}}}}
+    assert V.share_quarters(facts) == {date(2026, 3, 31): 1000.0, date(2026, 6, 30): 850.0}
+    qs = [{"end": date(2026, 3, 31), "start": date(2026, 1, 1), "diluted_shares": 1000.0}, {"end": date(2026, 6, 30), "start": date(2026, 4, 1), "diluted_shares": 850.0},
+          {"end": date(2026, 9, 30), "start": date(2026, 7, 1), "diluted_shares": 845.0}]
+    jumps = V.share_jumps(qs, [])
+    assert len(jumps) == 1 and jumps[0]["change_pct"] == -15.0 and jumps[0]["to_end"] == date(2026, 6, 30)
+    assert V.share_jumps(qs, [date(2026, 5, 15)]) == []                                          # a recorded action between them explains it
+    flip = [{"end": date(2026, 3, 31), "start": date(2026, 1, 1), "diluted_shares": 815_000_000.0}, {"end": date(2026, 6, 30), "start": date(2026, 4, 1), "diluted_shares": 32_558_000.0}]
+    assert V.share_jumps(flip, []) == []                                                          # a units flip in the facts, not an action
+
+
+def test_edgar_backoff_ladder_and_retry_after():
+    from app.services.edgar_client import RETRY_DELAYS_S, backoff_delay
+    assert backoff_delay(0, None) == RETRY_DELAYS_S[0] and backoff_delay(2, None) == RETRY_DELAYS_S[2]
+    assert backoff_delay(3, None) is None                                                         # no retry left
+    assert backoff_delay(0, "7") == 7.0 and backoff_delay(0, "0") == 1.0 and backoff_delay(1, "soon") == RETRY_DELAYS_S[1]

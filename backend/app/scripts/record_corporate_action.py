@@ -4,6 +4,7 @@ P/E marks any window holding it "not meaningful yet" until four clean quarters e
 
     python -m app.scripts.record_corporate_action FDX spin_off 2026-06-01 "FedEx Freight"
     python -m app.scripts.record_corporate_action FDX spin_off 2026-06-01 "FedEx Freight" --write
+    python -m app.scripts.record_corporate_action FDX spin_off 2026-06-01 "FedEx Freight" --accession=0000... --write   # the filing as the receipt
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from app.services.valuation import ACTION_VERBS
 
 async def run(argv: list[str]) -> int:
     write = "--write" in argv
+    accession = next((a.split("=", 1)[1] for a in argv if a.startswith("--accession=")), None)
     args = [a for a in argv if not a.startswith("--")]
     if len(args) != 4 or args[1] not in ACTION_VERBS:
         print(__doc__); print(f"kinds: {', '.join(ACTION_VERBS)}"); return 2
@@ -35,7 +37,8 @@ async def run(argv: list[str]) -> int:
         print(f"{sym}: {kind} on {day} with {name}" + (" (already recorded)" if dup else "") + ("" if write else "; dry run, nothing written"))
         if write and not dup:
             s.add(Event(ticker_id=ticker.id, event_type=EventType.OTHER, event_date=day, title=f"{sym} {kind.replace('_', ' ')}: {name}", source=DataSource.MANUAL,
-                        is_confirmed=True, confirmation_note=f"recorded by record_corporate_action", metadata_={"corporate_action": kind, "counterparty": name}))
+                        is_confirmed=True, confirmation_note=(f"8-K Item 2.01 {accession}" if accession else "recorded by record_corporate_action"),
+                        metadata_={"corporate_action": kind, "counterparty": name, **({"accession": accession} if accession else {})}))
             await s.commit()
             print("  recorded; the next nightly P/E run applies it")
     return 0

@@ -312,7 +312,8 @@ def word_facts(raw: dict) -> list[dict]:
     if pe:
         if pe.get("sector") == "Real Estate":
             from app.services.questions import REIT_NOTE
-            out.append(_fact("earnings_measure_note", "how real estate companies are judged", REIT_NOTE, pe["as_of"], "services/questions REIT_NOTE", "word"))
+            out.append({**_fact("earnings_measure_note", "how real estate companies are judged", REIT_NOTE, pe["as_of"], "services/questions REIT_NOTE", "note"),
+                        "hidden": True, "applies_to": ("p_e", "five_year_median_p_e", "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_sector")})
         if pe.get("hist_median") is not None:
             out.append(_fact("pe_vs_history", "P/E against its five-year median", "above" if pe["pe"] > pe["hist_median"] else "below" if pe["pe"] < pe["hist_median"] else "at",
                              pe["as_of"], "pe_snapshots.pe against pe_snapshots.hist_median", "word"))
@@ -381,13 +382,17 @@ Answer:"""
 
 # ── output check and comparison verification ─────────────────────────────────
 
-def check_output(text_: str, fact_ids: set[str]) -> list[str]:
-    """Pure: every reason the model's text cannot be shown. Empty when it passes."""
+def check_output(text_: str, fact_ids: set[str], note_ids: set[str] | None = None) -> list[str]:
+    """Pure: every reason the model's text cannot be shown. Empty when it passes. A note fact placed by the model is a problem:
+    the system appends notes itself."""
     problems: list[str] = []
     used = PLACEHOLDER.findall(text_)
     unknown = sorted({u for u in used if u not in fact_ids})
     if unknown:
         problems.append(f"unknown fact id(s): {', '.join(unknown)}")
+    placed_notes = sorted({u for u in used if u in (note_ids or set())})
+    if placed_notes:
+        problems.append(f"a note fact placed by the model: {', '.join(placed_notes)}")
     stripped = _WINDOW.sub(" ", PLACEHOLDER.sub(" ", text_))
     typed = re.findall(r"\S*[0-9$%€£]\S*", stripped)
     if typed:
@@ -486,15 +491,25 @@ def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
     def add_input(f: dict) -> None:
         if f["kind"] == "number" and not any(i["name"] == f["name"] and i["value"] == f["value"] for i in inputs):
             inputs.append({"name": f["name"], "value": f["value"], "as_of": f["as_of"], "source": f["source"]})
+    used: set[str] = set()
     def sub(m: re.Match) -> str:
         f = by_id[m.group(1)]
+        used.add(f["id"])
         add_input(f)
         for cid in f.get("companions", []):          # a denominator carried in the phrase gets its receipt too
             if cid in by_id:
                 add_input(by_id[cid])
         return f.get("phrase") or f["value"]
     from app.services.anthropic_client import _scrub_dashes
-    return collapse_doubled_words(_scrub_dashes(PLACEHOLDER.sub(sub, text_))), inputs
+    rendered = collapse_doubled_words(_scrub_dashes(PLACEHOLDER.sub(sub, text_)))
+    return rendered, inputs
+
+
+def notes_for(text_: str, facts: list[dict]) -> list[str]:
+    """Pure: the sentence-valued facts (kind note) whose subject the text placed: appended by the system as their own final
+    sentences, never written by the model (a note never appears as a placeholder in the prompt)."""
+    used = set(PLACEHOLDER.findall(text_))
+    return [f["value"] for f in facts if f["kind"] == "note" and used & set(f.get("applies_to", ()))]
 
 
 # ── the verifier ─────────────────────────────────────────────────────────────
@@ -624,7 +639,7 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     def all_problems(text_: str) -> list[str]:
         rendered_, _ = render(text_, pack["facts"])
         reps = [r for r in (repeated_phrase(sn) for sn in sentences(rendered_)) if r]
-        return (check_output(text_, {f["id"] for f in pack["facts"]}) + verify_comparisons(text_, pack["facts"])
+        return (check_output(text_, {f["id"] for f in pack["facts"]}, {f["id"] for f in pack["facts"] if f["kind"] == "note"}) + verify_comparisons(text_, pack["facts"])
                 + [f'a sentence repeats the phrase "{r}"' for r in reps])
     problems = all_problems(body)
     if problems:
@@ -645,6 +660,10 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     if covered == "no" and not PLACEHOLDER.search(body):
         return {**out, "verdict": "not_covered", "answer": not_covered_answer(pack, question), "cost": cost}
     rendered, inputs = render(body, pack["facts"])
+    notes = notes_for(body, pack["facts"])
+    if notes:
+        rendered = sentences(rendered)
+        rendered = " ".join(rendered + notes)        # a sentence-valued fact closes the answer as its own sentence
     ver = await client.verify_research_note(build_verification_prompt(pack, rendered))
     vcost = estimate_cost_usd(ver["model_used"], ver["input_tokens"], ver["output_tokens"]) or 0.0
     out["input_tokens"] += ver["input_tokens"]; out["output_tokens"] += ver["output_tokens"]

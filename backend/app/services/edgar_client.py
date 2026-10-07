@@ -21,6 +21,23 @@ USER_AGENT = "AlertInterface research@example.com"
 
 CACHE_DIR  = Path(__file__).parent / "cache"
 CACHE_MAX_AGE_H = 24  # hours
+SUBMISSIONS_CACHE_H = 6           # a filing index is reread after this long: fresh for each nightly, shared within a run
+MIN_INTERVAL_S = 0.125            # at most 8 requests a second to the SEC (its limit is 10)
+RETRY_DELAYS_S = (2.0, 5.0, 15.0) # after a 429 without a Retry-After header
+_last_request_at = 0.0
+
+
+def backoff_delay(attempt: int, retry_after: str | None) -> float | None:
+    """Pure: how long to wait before retry `attempt` (0-based) after a 429: the Retry-After header's seconds when given, else
+    the fixed ladder; None when no retry is left."""
+    if attempt >= len(RETRY_DELAYS_S):
+        return None
+    if retry_after:
+        try:
+            return max(1.0, float(retry_after))
+        except ValueError:
+            pass
+    return RETRY_DELAYS_S[attempt]
 
 
 def _cache_path(name: str) -> Path:
@@ -48,6 +65,25 @@ class EdgarClient:
             follow_redirects=True,
         )
 
+    async def _paced_get(self, client: httpx.AsyncClient, url: str, **kw) -> httpx.Response:
+        """One SEC request at the paced rate; a 429 waits and retries up to len(RETRY_DELAYS_S) times, then raises."""
+        import asyncio as _asyncio
+        global _last_request_at
+        attempt = 0
+        while True:
+            wait = MIN_INTERVAL_S - (time.time() - _last_request_at)
+            if wait > 0:
+                await _asyncio.sleep(wait)
+            _last_request_at = time.time()
+            resp = await client.get(url, **kw)
+            if resp.status_code != 429:
+                return resp
+            delay = backoff_delay(attempt, resp.headers.get("Retry-After"))
+            if delay is None:
+                resp.raise_for_status()
+            await _asyncio.sleep(delay)
+            attempt += 1
+
     async def get_company_facts(self, cik: str) -> dict[str, Any]:
         """XBRL company facts — revenue, EPS, etc. CIK must be zero-padded to 10 digits. Cached on disk for CACHE_MAX_AGE_H:
         a document runs to several megabytes and the nightly reads hundreds."""
@@ -58,15 +94,23 @@ class EdgarClient:
                 return _json.loads(cache_file.read_text())
             except ValueError:
                 pass
-        resp = await self._client.get(f"/api/xbrl/companyfacts/CIK{cik.zfill(10)}.json")
+        resp = await self._paced_get(self._client, f"/api/xbrl/companyfacts/CIK{cik.zfill(10)}.json")
         resp.raise_for_status()
         cache_file.write_text(resp.text)
         return resp.json()
 
     async def get_submissions(self, cik: str) -> dict[str, Any]:
-        """Recent filing history for a CIK."""
-        resp = await self._client.get(f"/submissions/CIK{cik.zfill(10)}.json")
+        """Recent filing history for a CIK, cached SUBMISSIONS_CACHE_H hours."""
+        import json as _json
+        cache_file = _cache_path(f"submissions_{cik.zfill(10)}.json")
+        if _cache_fresh(cache_file, SUBMISSIONS_CACHE_H):
+            try:
+                return _json.loads(cache_file.read_text())
+            except ValueError:
+                pass
+        resp = await self._paced_get(self._client, f"/submissions/CIK{cik.zfill(10)}.json")
         resp.raise_for_status()
+        cache_file.write_text(resp.text)
         return resp.json()
 
     # ── CIK lookup ────────────────────────────────────────────────────────────
@@ -77,7 +121,7 @@ class EdgarClient:
         if _cache_fresh(cache_file):
             data = json.loads(cache_file.read_text())
         else:
-            resp = await self._sec_client.get("/files/company_tickers.json")
+            resp = await self._paced_get(self._sec_client, "/files/company_tickers.json")
             resp.raise_for_status()
             data = resp.json()
             try:
@@ -124,7 +168,7 @@ class EdgarClient:
             if not name:
                 continue
             try:
-                resp = await self._client.get(f"/submissions/{name}")
+                resp = await self._paced_get(self._client, f"/submissions/{name}")
                 resp.raise_for_status()
                 records.extend(_extract(resp.json()))
             except Exception:
@@ -201,7 +245,7 @@ class EdgarClient:
 
         cik_int = str(int(cik))  # strip leading zeros: 0000320193 → 320193
         url = f"/Archives/edgar/data/{cik_int}/{safe_acc}/{primary_document}"
-        resp = await self._sec_client.get(url)
+        resp = await self._paced_get(self._sec_client, url)
         resp.raise_for_status()
         html = resp.text
         try:
@@ -218,7 +262,7 @@ class EdgarClient:
         if _cache_fresh(cache_file):
             data = _json.loads(cache_file.read_text(encoding="utf-8"))
         else:
-            resp = await self._sec_client.get(f"/Archives/edgar/data/{int(cik)}/{safe_acc}/index.json")
+            resp = await self._paced_get(self._sec_client, f"/Archives/edgar/data/{int(cik)}/{safe_acc}/index.json")
             resp.raise_for_status()
             data = resp.json()
             try:
@@ -234,7 +278,7 @@ class EdgarClient:
         cache_file = _cache_path(f"edgar_{accession_number}_{name}")
         if _cache_fresh(cache_file):
             return cache_file.read_text(encoding="utf-8", errors="replace")
-        resp = await self._sec_client.get(f"/Archives/edgar/data/{int(cik)}/{safe_acc}/{name}")
+        resp = await self._paced_get(self._sec_client, f"/Archives/edgar/data/{int(cik)}/{safe_acc}/{name}")
         resp.raise_for_status()
         try:
             cache_file.write_text(resp.text, encoding="utf-8")

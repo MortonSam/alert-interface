@@ -274,3 +274,16 @@ def test_real_estate_note_fact_and_the_session_share_reads_as_one_clause():
     assert [i["value"] for i in inputs] == ["38%", "871"]
     pack = {"symbol": "MU", "name": "Micron Technology", "facts": facts, "context": [], "fingerprint": "x"}
     assert "{fact:sessions_compared}" not in A.build_prompt(pack, "q") and "{fact:sessions_below_today_s_p_e}" in A.build_prompt(pack, "q")   # the denominator is not offered on its own
+
+
+def test_a_sentence_fact_is_never_placed_by_the_model_and_is_appended_by_the_system():
+    from app.services.questions import REIT_NOTE
+    facts = A.word_facts({"pe": {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8}})
+    note = next(f for f in facts if f["kind"] == "note")
+    assert note["hidden"] and note["value"] == REIT_NOTE
+    pack = {"symbol": "PLD", "name": "Prologis", "facts": facts + [{"id": "p_e", "name": "P/E", "value": "26.0", "as_of": "2026-10-05", "source": "s", "kind": "number", "phrase": "26.0 times"}],
+            "context": [], "fingerprint": "x"}
+    assert "earnings_measure_note" not in A.build_prompt(pack, "q")                                 # never offered as a placeholder
+    assert A.check_output("It is {fact:earnings_measure_note}.", {"earnings_measure_note", "p_e"}, {"earnings_measure_note"}) == ["a note fact placed by the model: earnings_measure_note"]
+    assert A.notes_for("Its P/E is {fact:p_e}.", pack["facts"]) == [REIT_NOTE]                        # the subject was placed: the note follows
+    assert A.notes_for("It moved {fact:quote}.", pack["facts"]) == []

@@ -2206,6 +2206,28 @@ async def check_release_eps_checked(session) -> CheckResult:
     return CheckResult("release_eps_checked", PASS, f"Release EPS figures: {total[0]} stored, {total[1]} checked against XBRL, none flagged, none overdue")
 
 
+async def check_share_count_jumps(session) -> CheckResult:
+    """WARN when a ticker's weighted-average diluted share count moves more than SHARE_JUMP_PCT between consecutive stored quarters with no
+    corporate action recorded between them (a spin-off, merger, share-exchange acquisition or rename-merge the P/E rule should know about)."""
+    from app.services.valuation import SHARE_JUMP_PCT, share_jumps
+    rows = (await session.execute(text("SELECT symbol, period_end, period_start, diluted_shares FROM eps_quarters WHERE diluted_shares IS NOT NULL AND period_end >= CURRENT_DATE - interval '2 years' ORDER BY symbol, period_end"))).all()
+    actions: dict[str, list] = {}
+    for sym, d in (await session.execute(text("""SELECT t.symbol, e.event_date FROM events e JOIN tickers t ON t.id = e.ticker_id
+            WHERE e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action')
+            UNION ALL SELECT symbol, renamed_on FROM ticker_aliases"""))).all():
+        actions.setdefault(sym, []).append(d)
+    by_symbol: dict[str, list[dict]] = {}
+    for sym, end, start, shares in rows:
+        by_symbol.setdefault(sym, []).append({"end": end, "start": start, "diluted_shares": float(shares)})
+    flagged = []
+    for sym, qs in by_symbol.items():
+        for j in share_jumps(qs, actions.get(sym, [])):
+            flagged.append(f"{sym}: diluted shares {j['from_shares']:,.0f} ({j['from_end']}) to {j['to_shares']:,.0f} ({j['to_end']}), {j['change_pct']:+.1f}%, no recorded action")
+    if flagged:
+        return CheckResult("share_count_jumps", WARN, f"{len(flagged)} quarter-to-quarter share count change(s) over {SHARE_JUMP_PCT}% with no recorded corporate action", flagged[:12])
+    return CheckResult("share_count_jumps", PASS, f"No diluted share count moved more than {SHARE_JUMP_PCT}% between quarters without a recorded action ({len(by_symbol)} tickers, two years)")
+
+
 # ── Dividends: the next amount is a per-payment figure in line with the last one paid ─────────────────
 
 NEXT_DIVIDEND_TOLERANCE_PCT = 10
@@ -2984,6 +3006,7 @@ CHECKS = [
     check_next_dividend_amount,
     check_pe_window_fresh,
     check_release_eps_checked,
+    check_share_count_jumps,
     # the calendar: confirmed dates stand alone, past estimates never stand as resolved
     check_estimate_beside_confirmed,
     check_past_estimate_standing,
