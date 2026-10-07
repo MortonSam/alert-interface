@@ -90,13 +90,66 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
 ]
 
 
+# ── deterministic classifiers: advice and off-topic questions never reach the model ──────────────────────────────
+
+ADVICE_ANSWER = "Ivy cannot give investment advice."
+OFF_TOPIC_ANSWER = "Ivy only answers questions about {name}'s stock."
+# whether to buy, sell or hold; whether it is a good time; whether it is worth it (any phrasing of the person's own decision)
+ADVICE = re.compile(
+    r"\b(?:should|shall|do|could|would|can|ought)\s+(?:i|we|you|one|someone|a person|an investor)\b[^?.]{0,40}\b(?:buy|sell|hold|short|invest|get in|get out|add|trim|dump|load up|take profits?|cash out|keep holding|stay in|enter|exit)\b"
+    r"|\b(?:is|was|would|will|does) (?:it|this|that|now|today|[A-Za-z.&' ]{1,40}) (?:a )?(?:good|bad|smart|wise|right|great|terrible|poor|best|worst|ok|okay|safe) (?:time|moment|idea|bet|buy|sell|investment|stock to buy|stock to own|entry|exit|point)\b"
+    r"|\b(?:good|bad|smart|wise|right|great|best|worst|safe) (?:time|moment|idea|entry|exit) to (?:buy|sell|hold|invest|short|enter|exit|add|trim)\b"
+    r"|\bworth (?:it|buying|selling|holding|owning|investing|a buy|the risk|getting into|picking up|adding)\b"
+    r"|\b(?:is|was) (?:it|this|[A-Za-z.&' ]{1,40}) (?:a |an )?(?:buy|sell|hold|strong buy|strong sell|screaming buy|good buy|good investment|bad investment|safe investment|good stock to buy)\b"
+    r"|\bbuy or sell\b|\bbuy,? sell,? or hold\b|\bbuy now\b|\bsell now\b|\btime to (?:buy|sell)\b|\bwhat should i do\b|\bwhat would you do\b|\brecommend(?:ation)?\b|\badvice\b"
+    r"|\bshould i (?:be )?(?:buying|selling|holding|worried|concerned)\b|\bget in now\b|\bget out now\b|\bjump in\b|\bbail\b",
+    re.I)
+# clearly off this stock: chit-chat, other subjects, questions about Ivy herself; everything else is judged by the fact pack
+OFF_TOPIC = re.compile(
+    r"^\s*(?:hi|hello|hey|yo|thanks?|thank you|ok|okay|test|testing)\b[\s!.?]*$"
+    r"|\b(?:weather|recipe|joke|poem|song|lyrics|movie|football|soccer|basketball|baseball|election|president|bitcoin|ethereum|crypto|gold price|oil price|mortgage rate|homework|translate|capital of|who are you|what are you|are you (?:an ai|a bot|human|chatgpt|claude)|what model|how do you work|who made you|meaning of life)\b",
+    re.I)
+STOCK_WORDS = re.compile(r"\b(?:stock|share|shares|price|earnings|report|dividend|move|moved|volatil|eps|estimate|high|low|quarter|results|sector|market|value|cap|trade|trading|options?|implied|beat|miss|upgrade|downgrade|analyst|ex-dividend|rally|drop|fall|rise|gain|loss|return|chart|history|typical|usual|react|outlook|forecast|predict|expect|guidance|revenue|growth|profit|valuation|cheap|expensive|rich|p/e|pe ratio|multiple)\b", re.I)
+
+
+def classify_question(question: str, symbol: str, name: str | None) -> str:
+    """Pure: "advice" (buy, sell, hold, good time, worth it), "off_topic" (chit-chat, another subject, nothing about a stock),
+    else "normal" (predictions and everything else go to the model, which may still find the facts do not cover it)."""
+    q = " ".join(question.split())
+    if ADVICE.search(q):
+        return "advice"
+    if OFF_TOPIC.search(q):
+        return "off_topic"
+    mentions = symbol.lower() in q.lower() or bool(name and any(w.lower() in q.lower() for w in re.findall(r"[A-Za-z]{4,}", name)))
+    if not STOCK_WORDS.search(q) and not mentions and not re.search(r"\b(?:it|its|it's|they|their|the company|this|that)\b", q, re.I):
+        return "off_topic"
+    return "normal"
+
+
+def fixed_answer(kind: str, pack: dict, question: str) -> dict:
+    text_ = ADVICE_ANSWER if kind == "advice" else OFF_TOPIC_ANSWER.format(name=pack["name"])
+    return {"key": "ask", "question": question, "data": text_, "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
+
+
+def repeated_phrase(sentence: str, words: int = 4) -> str | None:
+    """Pure: a run of `words` words that appears twice in one sentence ("were followed by a fall … were followed by a fall"), else None."""
+    toks = re.findall(r"[a-z0-9]+", sentence.lower())       # words only: punctuation never makes "report." differ from "report"
+    seen: dict[tuple, int] = {}
+    for i in range(len(toks) - words + 1):
+        gram = tuple(toks[i:i + words])
+        if gram in seen and i >= seen[gram] + words - 1:
+            return " ".join(gram)
+        seen.setdefault(gram, i)
+    return None
+
+
 # ── fact pack ────────────────────────────────────────────────────────────────
 
 # Sentence-ready phrasing per fact name: how the value reads inside a sentence. {value} is the quantity as the receipt shows it,
-# so the frontend's tokenizer still finds it. A name absent here reads as its bare value.
+# so the frontend's tokenizer still finds it. Every phrase is a noun phrase (never a verb phrase, so the model's own verb cannot
+# double it); a name absent here reads as its bare value. test_ask_ivy checks the no-verb rule over this table.
 PHRASES: dict[str, str] = {
     "distance below 52-week high": "{value} below its 52-week high",
-    "52-week high": "its 52-week high of {value}",
     "three-month change": "{value} over the past three months",
     "three-month anchor close": "{value} three months ago",
     "quote time": "as of {value}",
@@ -105,10 +158,10 @@ PHRASES: dict[str, str] = {
     "typical move after a report": "{value} on a typical report",
     "typical daily move": "{value} on a typical day",
     "reports moving more": "{value} of those reports",
-    "reports in the sample": "{value} reports",
-    "beats": "{value} beats",
-    "beats followed by a fall": "{value} of those beats were followed by a fall",
-    "share": "{value}",
+    "reports in the sample": "its last {value} reports",
+    "beats": "its last {value} beats",
+    "beats followed by a fall": "{value} of its beats",
+    "share": "{value} of the time",
     "20-day realized volatility": "{value} annualized",
     "sessions in the past year": "{value} trading sessions in the past year",
     "dividend per share": "{value} per share",
@@ -266,13 +319,14 @@ WHAT THE PAGE ALREADY SAYS (for context; the numbers in it are the facts above):
 QUESTION: {question}
 
 RULES
-1. First line: COVERED: yes, partly or no. "yes" when the facts answer the question; "partly" when they bear on it but do not answer it; "no" when nothing above bears on it.
+1. First line: COVERED: yes, partly, no or off. "yes" when the facts answer the question; "partly" when they bear on it but do not answer it; "no" when the question is about this company or its stock but nothing above bears on it; "off" when the question is not about this company's stock at all.
 2. Then the answer: at most {MAX_SENTENCES} short sentences, plain words, for someone new to investing.
 3. Never type a number. No digits, no currency signs, no percent signs, no number words (one, two ... twenty, twice, double, triple, half, a quarter of, dozen). Every quantity, date, price, percentage or count is written as its placeholder, exactly {{fact:id}}, and the system will insert the value. Describe time windows in words ("the next session", "the trailing month") rather than with numbers.
 3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase: "{{fact:quote}}, {{fact:distance_below_52_week_high}}" becomes "<price>, <share> below its 52-week high". Do not repeat words the phrase already carries.
 4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
-5. If the facts do not cover the question, say so plainly in the first sentence, then say what the facts do hold that is closest, with placeholders.
-6. Questions about whether to buy, sell or hold: say what the data shows and the idea behind it. Never give a recommendation, a target, or an opinion about value.
+5. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: say plainly in the first sentence that this page's data does not cover it, then what the facts do hold that is closest, with placeholders. Partly: say what they show and what they do not.
+6. Never give a recommendation, a target, or an opinion about value; describe what the data shows and the idea behind it.
+6a. Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its beats", so write "fell after {{fact:beats_followed_by_a_fall}}", never "<count> of its beats were followed by a fall were followed by a fall".
 7. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
 
 Answer:"""
@@ -288,8 +342,9 @@ def check_output(text_: str, fact_ids: set[str]) -> list[str]:
     if unknown:
         problems.append(f"unknown fact id(s): {', '.join(unknown)}")
     stripped = _WINDOW.sub(" ", PLACEHOLDER.sub(" ", text_))
-    if FORBIDDEN_CHARS.search(stripped):
-        problems.append("a digit, currency sign or percent sign outside a placeholder")
+    typed = re.findall(r"\S*[0-9$%€£]\S*", stripped)
+    if typed:
+        problems.append("a digit, currency sign or percent sign outside a placeholder: " + ", ".join(sorted(set(typed))[:5]))
     m = NUMBER_WORD.search(stripped)
     if m:
         problems.append(f"number word: {m.group(0)}")
@@ -333,20 +388,34 @@ def parse_model_output(content: str) -> tuple[str, str]:
     if lines and lines[0].strip().upper().startswith("COVERED:"):
         covered = lines[0].split(":", 1)[1].strip().lower().rstrip(".") or "partly"
         lines = lines[1:]
-    if covered not in ("yes", "partly", "no"):
+    if covered not in ("yes", "partly", "no", "off"):
         covered = "partly"
     return covered, " ".join(l.strip() for l in lines if l.strip())
 
 
-_STUTTER = re.compile(r"\b((?:[\w$%±+.,-]+\s+){0,5}[\w$%±+.,-]+)\s+\1\b", re.I)
-
-
-def unstutter(text_: str) -> str:
-    """Pure: an exact phrase repeated back to back ("on a typical report on a typical report", "the last the last") appears once;
-    the model's words around a substituted phrase sometimes duplicate the phrase's own."""
-    prev = None
-    while prev != text_:
-        prev, text_ = text_, _STUTTER.sub(r"\1", text_)
+def absorb_literals(text_: str, facts: list[dict]) -> str:
+    """Pure: a fact's phrase or value the model typed verbatim becomes its placeholder (longest first, never inside one already),
+    so a copied "Oct 1, 2026" still renders from the fact with its receipt and the no-typed-numbers check judges only what is
+    not a stored value. A word fact's words are left alone (they are prose)."""
+    spans = [(m.start(), m.end()) for m in PLACEHOLDER.finditer(text_)]
+    def inside(i: int) -> bool:
+        return any(a <= i < b for a, b in spans)
+    for f in sorted((f for f in facts if f["kind"] == "number"), key=lambda f: -len(f.get("phrase") or f["value"])):
+        for literal in sorted({f.get("phrase") or f["value"], f["value"]}, key=len, reverse=True):
+            if not literal or not re.search(r"\d", literal):
+                continue
+            pos = 0
+            while True:
+                i = text_.find(literal, pos)
+                if i < 0:
+                    break
+                if inside(i):
+                    pos = i + 1
+                    continue
+                ph = f"{{fact:{f['id']}}}"
+                text_ = text_[:i] + ph + text_[i + len(literal):]
+                spans = [(m.start(), m.end()) for m in PLACEHOLDER.finditer(text_)]
+                pos = i + len(ph)
     return text_
 
 
@@ -361,7 +430,7 @@ def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
             inputs.append({"name": f["name"], "value": f["value"], "as_of": f["as_of"], "source": f["source"]})
         return f.get("phrase") or f["value"]
     from app.services.anthropic_client import _scrub_dashes
-    return unstutter(_scrub_dashes(PLACEHOLDER.sub(sub, text_))), inputs
+    return _scrub_dashes(PLACEHOLDER.sub(sub, text_)), inputs
 
 
 # ── the verifier ─────────────────────────────────────────────────────────────
@@ -424,7 +493,7 @@ def cache_key(symbol: str, normalized: str, fp: str) -> str:
 
 
 async def cached_answer(db: AsyncSession, key: str) -> dict | None:
-    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'not_covered') "
+    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'not_covered', 'off_topic') "
                                  "ORDER BY created_at DESC LIMIT 1"), {"k": key})).first()
     return row[0] if row else None
 
@@ -484,21 +553,31 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     prompt = build_prompt(pack, question)
     gen = await client.generate_answer(prompt)
     covered, body = parse_model_output(gen["content"])
+    body = absorb_literals(body, pack["facts"])
     tokens = {"input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"]}
     cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0
     out = {"covered": covered, "model": gen["model_used"], "raw": gen["content"], **tokens, "problems": [], "dropped": [], "retried": False}
-    problems = check_output(body, {f["id"] for f in pack["facts"]}) + verify_comparisons(body, pack["facts"])
+    def all_problems(text_: str) -> list[str]:
+        rendered_, _ = render(text_, pack["facts"])
+        reps = [r for r in (repeated_phrase(sn) for sn in sentences(rendered_)) if r]
+        return (check_output(text_, {f["id"] for f in pack["facts"]}) + verify_comparisons(text_, pack["facts"])
+                + [f'a sentence repeats the phrase "{r}"' for r in reps])
+    problems = all_problems(body)
     if problems:
         # one rewrite with the check's reasons; a draft that fails twice is never shown
         gen2 = await client.generate_answer(prompt + "\n\nYour previous draft was rejected for these reasons: " + "; ".join(problems)
-                                            + ". Rewrite it so none applies (spell no number word; use placeholders; state only comparisons a [word] fact gives).\n\nAnswer:")
+                                            + ". Rewrite it so none applies (spell no number word; use placeholders; state only comparisons a [word] fact gives; "
+                                            "do not repeat words a placeholder's phrase already carries).\n\nAnswer:")
         covered, body = parse_model_output(gen2["content"])
+        body = absorb_literals(body, pack["facts"])
         out.update(covered=covered, raw=gen2["content"], retried=True, first_problems=problems)
         out["input_tokens"] += gen2["input_tokens"]; out["output_tokens"] += gen2["output_tokens"]
         cost += estimate_cost_usd(gen2["model_used"], gen2["input_tokens"], gen2["output_tokens"]) or 0.0
-        problems = check_output(body, {f["id"] for f in pack["facts"]}) + verify_comparisons(body, pack["facts"])
+        problems = all_problems(body)
     if problems:
         return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "problems": problems, "cost": cost}
+    if covered == "off":
+        return {**out, "verdict": "off_topic", "answer": fixed_answer("off_topic", pack, question), "cost": cost}
     if covered == "no" and not PLACEHOLDER.search(body):
         return {**out, "verdict": "not_covered", "answer": not_covered_answer(pack, question), "cost": cost}
     rendered, inputs = render(body, pack["facts"])

@@ -2032,6 +2032,12 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     if not pack["active"]:
         raise HTTPException(status_code=404, detail="No stored data for this stock")
     ip = get_client_ip(request)
+    kind = A.classify_question(question, pack["symbol"], pack["name"])
+    if kind != "normal":       # advice and off-topic questions get a fixed sentence: no model call, no limit charged, still logged
+        fixed = A.fixed_answer(kind, pack, question)
+        await A.log_question(db, symbol=pack["symbol"], question=question, normalized=A.normalize_question(question, pack["symbol"], pack["name"]), key="", covered=False,
+                             verdict=kind, answer=fixed, model=None, input_tokens=None, output_tokens=None, cost=None, cached=False, ip_hash=A.ip_hash(ip))
+        return {"symbol": pack["symbol"], "name": pack["name"], "answer": fixed, "cached": False}
     normalized = A.normalize_question(question, pack["symbol"], pack["name"])
     key = A.cache_key(pack["symbol"], normalized, pack["fingerprint"])
     hit = await A.cached_answer(db, key)

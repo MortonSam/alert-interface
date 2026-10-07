@@ -44,17 +44,15 @@ describe("the briefing renders the API's sentences and receipts, nothing typed",
     expect(BLOCK_LABELS).toEqual({ profile: "What it is", happening: "What's been happening" });
   });
 
-  it("the hover receipt is two short lines above the text and the rule lives in Sources only", () => {
+  it("the paragraphs carry no label or hover box; the rule lives in Sources only", () => {
     const src = read("components/Briefing.tsx");
-    const start = src.indexOf('role="tooltip"');
-    const tooltip = src.slice(start, src.indexOf("\n            )}", start));            // the whole tooltip element
-    expect(tooltip).toContain("bottom-full");                                   // above the trigger, never over the text it explains
-    expect(tooltip).not.toContain("top-full");
-    expect(tooltip).toContain("{r.what}");
-    expect(tooltip).toContain("{r.asOf}");
-    expect(tooltip).not.toContain("r.how");                                     // the rule is not in the hover
+    const paragraphs = src.slice(src.indexOf("return ("), src.indexOf("<details"));   // the paragraphs' markup
+    expect(paragraphs).not.toContain('role="tooltip"');                          // no hover box over or above the text
+    expect(paragraphs).not.toContain("BLOCK_LABELS");                           // no "What it is" / "What's been happening" label
+    expect(paragraphs).not.toContain("r.how");
+    expect(paragraphs).toContain('className="space-y-8 max-w-[65ch]"');         // two paragraphs with space between them
     const sources = src.slice(src.indexOf("<details"));
-    expect(sources).toContain("{r.how}");                                       // it is in Sources
+    expect(sources).toContain("{r.how}");                                       // the rule is in Sources
   });
 
   it("the component carries no number, date or threshold of its own and renders nothing without sentences", () => {

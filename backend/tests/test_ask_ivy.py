@@ -2,6 +2,7 @@
 receipts, the verifier's sentence verdicts, normalization and the cache key, word facts from the strip's numbers, and the
 route behind its flag."""
 import json
+import re
 from datetime import date
 
 import pytest
@@ -133,6 +134,11 @@ async def test_the_route_is_absent_behind_the_flag_and_serves_a_checked_answer_w
     async def fake(db, pack, question, *, client=None):
         return canned
     monkeypatch.setattr(A, "answer_question", fake)
+    from app.services import draft_limiter
+    async def no_limit(*a, **k):
+        return None
+    monkeypatch.setattr(draft_limiter, "check_limit", no_limit)        # the limiter has its own tests; this one runs many times a day locally
+    monkeypatch.setattr(draft_limiter, "record_use", no_limit)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.get("/api/v1/tickers/MU/questions")).json()["ask_enabled"] is True
         r = await c.post("/api/v1/tickers/MU/ask", json={"question": "Is it expensive right now, really, " + "x" * 300})
@@ -156,7 +162,6 @@ def test_phrases_read_in_a_sentence_and_receipts_keep_the_quantity():
     text, inputs = A.render("It sits {fact:distance_below_52_week_high} and rose {fact:move_session}.", facts)
     assert text == "It sits 13.8% below its 52-week high and rose over the next session, Oct 1, 2026."
     assert [(i["name"], i["value"]) for i in inputs] == [("distance below 52-week high", "13.8%"), ("session the move was measured over", "Oct 1, 2026")]
-    assert A.unstutter("moves ±7.0% on a typical report on a typical report, the last the last reports") == "moves ±7.0% on a typical report, the last reports"
     text, _ = A.render("A rise — then a fall.", facts)
     assert "—" not in text
 
@@ -178,3 +183,56 @@ async def test_a_rejected_draft_is_rewritten_once_and_a_second_failure_is_never_
     c = Client(["COVERED: yes\nIt moved twice.", "COVERED: yes\nIt moved 3% again."])
     r = await A.answer_question(None, pack, "q", client=c)
     assert r["verdict"] == "rejected" and r["answer"]["inputs"] == [] and "passed the checks" in r["answer"]["data"]
+
+
+@pytest.mark.parametrize("q", [
+    "Should I buy Micron before the dividend?", "should i sell MU now", "Is it a good time to buy?", "Is now a good time to get in?",
+    "Is Micron worth buying?", "Is it worth it?", "Would you buy this stock?", "Is MU a buy?", "Buy or sell?", "Is this a good investment?",
+    "What should I do with my shares?", "Do you recommend Micron?", "Should I hold or take profits?", "Is it the right time to sell?",
+])
+def test_advice_questions_are_classified_without_a_model(q):
+    assert A.classify_question(q, "MU", "Micron Technology") == "advice"
+
+
+@pytest.mark.parametrize("q", ["Will Micron go up after earnings?", "Where will the stock be next year?", "Is it more volatile than usual?",
+                               "How did it react to the last report?", "What happens on the ex-dividend date?", "Is Micron expensive right now?", "Why did it fall?"])
+def test_predictions_and_data_questions_go_to_the_model(q):
+    assert A.classify_question(q, "MU", "Micron Technology") == "normal"
+
+
+@pytest.mark.parametrize("q", ["hello", "What's the weather in Boise?", "Tell me a joke", "Who are you?", "What is the capital of France?", "best pizza recipe"])
+def test_off_topic_questions_get_the_fixed_sentence(q):
+    assert A.classify_question(q, "MU", "Micron Technology") == "off_topic"
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": [], "context": [], "fingerprint": "x"}
+    assert A.fixed_answer("off_topic", pack, q)["data"] == "Ivy only answers questions about Micron Technology's stock."
+    assert A.fixed_answer("advice", pack, q)["data"] == "Ivy cannot give investment advice."
+
+
+def test_fact_phrases_are_noun_phrases_and_repeated_phrases_are_rejected():
+    verbs = re.compile(r"\b(?:was|were|is|are|has|have|had|moved|followed|rose|fell|gained|lost|beat|missed)\b")
+    for name, phrase in A.PHRASES.items():
+        assert not verbs.search(phrase), (name, phrase)
+    assert A.phrase_for("beats followed by a fall", "11") == "11 of its beats"
+    assert "followed by" in (A.repeated_phrase("MU fell after 11 of its beats were followed by a fall out of 18 beats were followed by a fall.") or "")
+    assert A.repeated_phrase("It moves ±7.0% on a report; on a report it moves less.") is None                   # three words repeat, not four
+    assert A.absorb_literals("Reported Sep 30, 2026 at $1,045.56, a beat.", FACTS) == "Reported {fact:report_date} at {fact:quote}, a beat."
+    assert A.absorb_literals("At {fact:quote} already.", FACTS) == "At {fact:quote} already."
+    assert A.repeated_phrase("The stock rose +3.0% over the next session, Oct 1, 2026.") is None
+
+
+@pytest.mark.asyncio
+async def test_a_covered_no_draft_shows_only_the_fixed_sentence_and_a_repeat_is_rejected():
+    class Client:
+        def __init__(self, drafts): self.drafts = list(drafts)
+        async def generate_answer(self, prompt, max_tokens=400):
+            return {"content": self.drafts.pop(0), "model_used": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5}
+        async def verify_research_note(self, prompt):
+            return {"content": json.dumps({"sentences": [{"text": "x", "status": "supported", "evidence": "e"}]}), "model_used": "claude-opus-4-6", "input_tokens": 5, "output_tokens": 5}
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": [], "fingerprint": "x"}
+    r = await A.answer_question(None, pack, "q", client=Client(["COVERED: off\n\nI can tell you about the weather instead: {fact:quote}."]))
+    assert r["verdict"] == "off_topic" and r["answer"]["data"] == "Ivy only answers questions about Micron Technology's stock." and r["answer"]["inputs"] == []
+    r = await A.answer_question(None, pack, "q", client=Client(["COVERED: no\n\nThis page's data does not cover valuation."]))
+    assert r["verdict"] == "not_covered" and "doesn't cover" in r["answer"]["data"] and r["answer"]["inputs"] == []
+    r = await A.answer_question(None, pack, "q", client=Client(["COVERED: yes\nIt moved on a typical report on a typical report day to {fact:quote}.",
+                                                                "COVERED: yes\nIt moved on a typical report day to {fact:quote} again on a typical report day."]))
+    assert r["verdict"] == "rejected" and any("repeats the phrase" in p for p in r["problems"])

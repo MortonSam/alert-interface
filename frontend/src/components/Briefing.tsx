@@ -6,21 +6,19 @@ import { BLOCK_LABELS, sentenceReceipt, sourceLine } from "@/lib/briefing";
 import { answerParts } from "@/lib/questions";
 
 /**
- * The Overview: the API's blocks ("What it is", "What's been happening") in the overview's display type. Glossary
- * terms in the text are underlined links that open the existing glossary entry in place. Hovering or focusing a block
- * shows a two-line receipt above it (what the block is, and its as-of date), never covering the text; how it was
- * computed and every input with its own date sit in the Sources expander. Nothing here is typed: the text, rules, dates and inputs all come from the API; only the block labels and
- * the glossary are the page's own. The same component serves the ticker page and the home page's featured example.
+ * The Overview: the API's two blocks as two paragraphs with space between them and no labels or hover boxes. Glossary
+ * terms in the text are underlined links that open the existing glossary entry in place; each quantity carries its
+ * receipt on hover; how each block was computed and every input with its own date sit in the Sources expander. Nothing
+ * here is typed: the text, rules, dates and inputs all come from the API; only the glossary is the page's own. The same
+ * component serves the ticker page and the home page's featured example.
  */
 export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
   if (!sentences.length) return null;
   return (
     <div className="space-y-8 max-w-[65ch]">
       {sentences.map((s, i) => {
-        const r = sentenceReceipt(s);
         return (
-          <div key={s.key + i} className="group relative" tabIndex={0}>
-            <p className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground mb-2">{BLOCK_LABELS[s.key] ?? s.key}</p>
+          <div key={s.key + i}>
             <p className="text-lg text-foreground/90 leading-relaxed">
               {answerParts(s.text, s.inputs).map((part, j) =>
                 part.receipt !== undefined ? (
@@ -34,12 +32,6 @@ export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
                 ),
               )}
             </p>
-            {r.asOf && (
-              <span role="tooltip" className="pointer-events-none absolute left-0 bottom-full z-20 mb-2 hidden rounded-lg border border-border bg-background px-3 py-2 font-sans text-xs leading-relaxed text-muted-foreground shadow-lg group-hover:block group-focus-within:block">
-                <span className="block">{r.what}</span>
-                <span className="block">{r.asOf}</span>
-              </span>
-            )}
           </div>
         );
       })}
