@@ -38,7 +38,7 @@ _MONEY = r"\$?\s?\(?-?\d{1,4}(?:,\d{3})*(?:\.\d{1,2})?\)?"
 # "GAAP net income of $37.70 billion, or $32.87 per diluted share" (the quarter's highlight comes before the year's)
 _PROSE = re.compile(rf"GAAP\s+(?:net\s+)?(?:income|earnings|loss)\b.{{0,80}}?,\s*or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?(\(?\$\s?\(?-?\d{{1,4}}(?:,\d{{3}})*(?:\.\d{{1,2}})?\)?)\s+per\s+(?:basic\s+and\s+)?diluted\s+share", re.I)
 # "GAAP diluted earnings per share $ 32.87 $ 24.67 ..." / "Diluted earnings per share 32.87 24.67 ..." (first column is the current quarter)
-_ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:common\s+)?share(?:\s*\(\d\))?\s*(?:attributable[^$\d]{{0,80}})?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
+_ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:potential\s+)?(?:common\s+)?share(?:\s*\(\d\)|\s+\d)?\s*(?:attributable[^$\d]{{0,80}})?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 _ROW2 = re.compile(rf"earnings\s+per\s+share[^A-Za-z]{{0,20}}basic[^A-Za-z]{{0,40}}diluted\s*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 _NON_GAAP_NEAR = re.compile(r"non-?\s?gaap|adjusted|pro\s?forma|excluding|\bcore\b|operating (?:income|earnings)|underlying|normali[sz]ed", re.I)
 _NUM = r"(\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"
@@ -56,10 +56,23 @@ _DILUTED_WERE = re.compile(rf"\bdiluted\s+(?:net\s+)?earnings\s+per\s+share\s+(?
 # rows: "Net income per share: Basic $ 57.17 $ 50.02 Diluted $ 56.05", "Earnings (loss) per common share - diluted $ 0.99", "EPS (Diluted) $ (0.01)",
 # "Diluted earnings per share (EPS) ... GAAP $5.73", "Diluted net earnings per share: ... Net earnings $ 2.04" (the total, after continuing operations)
 _ROW_NET_BASIC_DILUTED = re.compile(rf"net\s+(?:income|earnings)\s+per\s+(?:common\s+)?share:?\s*basic\s*\$?\s?\(?-?[\d,]+\.\d{{1,2}}\)?(?:\s*\$?\s?\(?-?[\d,]+\.\d{{1,2}}\)?){{0,3}}\s*diluted\s*\$?\s?{_NUM}", re.I)
-_ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+from\s+continuing\s+operations)?\s*[—–-]+\s*diluted(?:\s+\(GAAP\))?(?:\s+\([a-z]\))?\s*\$?\s?{_NUM}", re.I)
+_ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?(?:\s+from\s+continuing\s+operations)?\s*[—–-]+\s*diluted(?:\s*\((?:GAAP|[a-z]|\d)\))*\s*\$?\s?{_NUM}", re.I)
 _EPS_DILUTED_PAREN = re.compile(rf"\bEPS\s+\(diluted\)\s*\$?\s?{_NUM}", re.I)
 _DILUTED_EPS_GAAP_COL = re.compile(rf"diluted\s+earnings\s+per\s+share(?:\s+\(EPS\))?[^$]{{0,120}}?\bGAAP\s+\$?\s?{_NUM}", re.I)
-_DILUTED_BLOCK_NET = re.compile(rf"diluted\s+net\s+earnings\s+per\s+share:.{{0,220}}?\bnet\s+earnings\s+\$?\s?{_NUM}", re.I)
+_DILUTED_BLOCK_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)(?:\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?:?.{{0,260}}?\bnet\s+(?:earnings|income)(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?\s+\$?\s?{_NUM}", re.I)
+# third pass (utilities and others): "GAAP earnings of $713 million or $1.31 per share", "reported earnings (GAAP) of $230 million, or $0.30 per share",
+# "GAAP EPS decreased 3% to $1.25", "earnings per share were $1.60", "Diluted Net Income Per Share 1 $ 1.03" (a footnote mark), "Earnings per diluted share $1.25",
+# "Net Income per diluted share $0.21", "Net Income per diluted share: • $1.83 GAAP", "GAAP diluted net income per potential common share $ 1.83",
+# "reported EPS of $3.32 and comparable EPS of $3.74" (reported against a non-GAAP measure), "On a basic and diluted basis, net income attributable to X per share ... was $Y"
+_GAAP_MILLION_PER_SHARE = re.compile(rf"(?:GAAP\s+(?:net\s+)?(?:income|earnings)|(?:reported\s+)?earnings\s+\(GAAP\))\s+of\s+\$\s?[\d.,]+\s+(?:million|billion),?\s+or\s+{_DNUM}\s+per\s+(?:diluted\s+)?share", re.I)
+_GAAP_PAREN_PER_SHARE = re.compile(rf"(?:reported\s+)?earnings\s+\(GAAP\)\s+of\s+{_DNUM}\s+per\s+share", re.I)
+_GAAP_EPS_CHANGE = re.compile(rf"GAAP\s+(?:diluted\s+)?EPS\s+(?:increased|decreased|grew|fell|rose|declined|was\s+(?:up|down))\s+[\d.]+%?\s+to\s+{_DNUM}", re.I)
+_EPS_WERE = re.compile(rf"(?<![A-Za-z-])earnings\s+per\s+share\s+(?:were|was)\s+{_DNUM}", re.I)
+_ROW_FOOTNOTE = re.compile(rf"(?<![A-Za-z-])diluted\s+net\s+income\s+per\s+share\s+\d\s+\$\s?{_NUM}", re.I)
+_ROW_PER_DILUTED = re.compile(rf"(?<![A-Za-z-])(?:net\s+income|earnings)\s+per\s+diluted\s+share:?\s*(?:•\s*)?\$?\s?{_NUM}(?:\s+GAAP)?", re.I)
+_ROW_POTENTIAL = re.compile(rf"GAAP\s+diluted\s+net\s+income\s+per\s+potential\s+common\s+share\s*\$?\s?{_NUM}", re.I)
+_REPORTED_VS_NONGAAP = re.compile(rf"reported\s+EPS\s+of\s+{_DNUM}\s+and\s+(?:comparable|adjusted|non-GAAP)\s+EPS", re.I)
+_BASIC_AND_DILUTED_BASIS = re.compile(rf"on\s+a\s+basic\s+and\s+diluted\s+basis,\s+net\s+income[^$]{{0,160}}?\bwas\s+{_DNUM}", re.I)
 _LABELLED = re.compile(rf"(?<![A-Za-z-])(?:earnings\s+per\s+share:?\s*GAAP:?|GAAP\s+(?:diluted\s+)?EPS(?:\s+of|\s+was|:)?|diluted\s+EPS(?:\s+of|\s+was|:)?|GAAP\s+earnings\s+per\s+(?:diluted\s+)?share(?:\s+of|\s+was|:)?)\s*\$\s?{_NUM}", re.I)
 _ROW_NET = re.compile(rf"net\s+(?:income|earnings)\s+per\s+(?:common\s+)?(?:diluted\s+)?share[^$\d]{{0,30}}diluted\s*\$?\s?{_NUM}", re.I)
 _PER_DILUTED = re.compile(rf"{_DNUM}\s+per\s+diluted\s+(?:common\s+)?share", re.I)
@@ -70,6 +83,7 @@ _GUIDANCE_NEAR = re.compile(r"outlook|guidance|expect|forecast|anticipat|project
 _ITEM_NEAR = re.compile(r"related to|impact of|impacts? from|charges?\s+of|approximately|amortization|adjustments?|impairment|benefit of|expense of|effect of|headwind|tailwind|one-time|non-?recurring", re.I)
 # a figure introduced by a comparison is the prior period's (introduced_by_comparison)
 _RANGE_AFTER = re.compile(r"^\s*(?:to|[–—-]|±)\s*\$?\s?\d", re.I)
+_CONTINUING_TABLE = re.compile(r"(?:diluted\s+)?(?:earnings|income|EPS)[^.]{0,60}?\(a\)\s+from\s+continuing\s+operations|per\s+share:?\s+continuing\s+operations\s+\$|\(a\)\s+from\s+continuing\s+operations", re.I)
 _PERIOD_END = re.compile(rf"(?:(?:three|3)\s+months|\d{{1,2}}\s+weeks|quarter|qtr\.?|fiscal\s+quarter|quarterly\s+period)\s+ended\s+({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
 _QTR_HEADER = re.compile(rf"(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4])[^A-Za-z]{{0,40}}(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4]|Year\s+Ended|Twelve\s+Months)?[^A-Za-z]{{0,40}}(?:Year\s+Ended\s+)?({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
 
@@ -90,9 +104,10 @@ def _num(s: str) -> float:
 
 def _sentence_around(flat: str, start: int, end: int) -> tuple[str, str]:
     """Pure: (the sentence text before the match, the whole sentence), bounded by the nearest sentence ends or bullets."""
-    left = max(flat.rfind(". ", 0, start), flat.rfind("•", 0, start), flat.rfind("; ", 0, start), flat.rfind(" ▪ ", 0, start))
+    # a headline runs straight into the dateline in flattened text ("affirms guidance and outlooks NEW ORLEANS – Entergy reported"): the dash ends it
+    left = max(flat.rfind(". ", 0, start), flat.rfind("•", 0, start), flat.rfind("; ", 0, start), flat.rfind("▪", 0, start), flat.rfind("◦", 0, start), flat.rfind(" – ", 0, start), flat.rfind(" — ", 0, start))
     left = left + 1 if left >= 0 else 0
-    right_candidates = [i for i in (flat.find(". ", end), flat.find("•", end), flat.find("; ", end)) if i >= 0]
+    right_candidates = [i for i in (flat.find(". ", end), flat.find("•", end), flat.find("; ", end), flat.find("▪", end), flat.find("◦", end)) if i >= 0]
     right = min(right_candidates) if right_candidates else len(flat)
     return flat[left:start], flat[left:right]
 
@@ -111,6 +126,21 @@ def introduced_by_comparison(before: str) -> bool:
         return False
     tail = re.sub(r",\s+or\s+", " or ", before[m.end():])
     return not re.search(r",|;|\bwhile\b|\band\b", tail)
+
+
+def _same_clause(flat: str, start: int, back: int) -> str:
+    """Pure: up to `back` characters before the match, cut at the start of its bullet or sentence, so a neighbouring bullet's
+    "adjusted" never disqualifies this one."""
+    before = flat[max(0, start - back):start]
+    cut = max(before.rfind("•"), before.rfind("▪"), before.rfind("◦"), before.rfind(". "), before.rfind("; "))
+    return before[cut + 1:] if cut >= 0 else before
+
+
+def _guidance_near(flat: str, start: int, end: int) -> bool:
+    """Pure: a guidance word in the figure's own bullet or sentence (the text before it in that clause, and the clause itself up to
+    80 characters after the figure), never in a headline several bullets earlier."""
+    before, sentence = _sentence_around(flat, start, end)
+    return bool(_GUIDANCE_NEAR.search(before)) or bool(_GUIDANCE_NEAR.search(flat[end:min(len(flat), end + 80)].split("•")[0].split(". ")[0]))
 
 
 def _disqualified(flat: str, start: int, end: int) -> bool:
@@ -140,26 +170,31 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
             period_end = d
             break
     for hit in _PROSE.finditer(flat):
-        if _GUIDANCE_NEAR.search(flat[max(0, hit.start() - 200):hit.start()]) or _disqualified(flat, hit.start(), hit.end()):
+        if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
     attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
                 (_LABELLED, "labelled GAAP EPS", 40), (_GAAP_EPS_WAS, "GAAP EPS sentence", 12), (_EPS_GAAP_BASIS, "EPS on a GAAP basis", 12), (_REPORTED_EPS_GAAP, "reported EPS, GAAP named", 12),
                 (_AS_REPORTED, "as-reported EPS", 12), (_DILUTED_EPS_GAAP_COL, "diluted EPS, GAAP column", 12), (_ROW_DASH, "EPS row, dash diluted", 12), (_EPS_DILUTED_PAREN, "EPS (Diluted) row", 12),
                 (_ROW_NET, "net income per share row", 12), (_DILUTED_WERE, "diluted EPS were sentence", 12), (_PROSE_ANY, "net income sentence", 12), (_GAAP_PER_SHARE, "GAAP net income per share", 12),
+                (_GAAP_MILLION_PER_SHARE, "GAAP earnings, or per share", 12), (_GAAP_PAREN_PER_SHARE, "reported earnings (GAAP) per share", 12), (_GAAP_EPS_CHANGE, "GAAP EPS change sentence", 12),
+                (_ROW_FOOTNOTE, "diluted net income per share row (footnote)", 12), (_ROW_POTENTIAL, "GAAP diluted per potential common share", 12), (_ROW_PER_DILUTED, "per diluted share row", 12),
+                (_REPORTED_VS_NONGAAP, "reported EPS against a non-GAAP measure", 12), (_BASIC_AND_DILUTED_BASIS, "basic and diluted basis sentence", 12), (_EPS_WERE, "EPS were sentence", 12),
                 (_PER_DILUTED, "per diluted share", 80), (_PER_SHARE, "per share net income sentence", 12))
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
-            before = flat[max(0, hit.start() - back):hit.start()] if back else ""
+            before = _same_clause(flat, hit.start(), back) if back else ""
             if _NON_GAAP_NEAR.search(before) or _NON_GAAP_NEAR.search(hit.group(0)):
                 continue
-            if _GUIDANCE_NEAR.search(flat[max(0, hit.start() - 200):hit.start()]) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]):
+            if _guidance_near(flat, hit.start(), hit.end()) or _RANGE_AFTER.search(flat[hit.end():hit.end() + 12]):
                 continue
             if how in ("net income sentence", "per diluted share", "per share net income sentence", "labelled GAAP EPS", "GAAP EPS sentence", "EPS on a GAAP basis", "reported EPS, GAAP named",
                        "as-reported EPS", "diluted EPS were sentence", "GAAP net income per share") and _disqualified(flat, hit.start(), hit.end()):
                 continue
             if "continuing operations" in _sentence_around(flat, hit.start(), hit.end())[1].lower() and how not in ("diluted EPS block, net earnings line",) and "dash" not in how:
                 continue        # a continuing-operations figure is not the whole GAAP diluted EPS; the net-earnings line of a diluted block is
+            if how != "diluted EPS block, net earnings line" and _CONTINUING_TABLE.search(flat):
+                continue        # the release splits EPS into continuing and discontinued operations: only a stated total counts
             return {"eps": _num(hit.group(1)), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}
     return None
 

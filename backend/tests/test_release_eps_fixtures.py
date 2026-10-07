@@ -87,3 +87,43 @@ def test_second_pass_reads(sym):
 @pytest.mark.parametrize("sym", sorted(AMBIGUOUS))
 def test_second_pass_ambiguous_are_not_read(sym):
     assert V.parse_release_eps(AMBIGUOUS[sym], date(2026, 8, 15)) is None, sym
+
+
+PASSING_3 = {
+    "AEP": (1.31, "American Electric Power (Nasdaq: AEP) today reported second-quarter 2026 GAAP earnings of $713 million or $1.31 per share, compared with GAAP earnings of $1,226 million or $2.29 per share in second-quarter 2025. Operating earnings for second-quarter"),
+    "EVRG": (0.91, "Declares Quarterly Dividend and Reaffirms 2026 Guidance • Second Quarter 2026 GAAP EPS of $0.91, compared to $0.74 in 2025 • Second Quarter 2026 Adjusted EPS (non-GAAP) of $0.88, compared to $0.82 in 2025"),
+    "JCI": (1.23, "▪ Q3 sales increased 9% and organic sales increased 10% * ▪ Q3 GAAP EPS of $1.23; Q3 Adjusted EPS * of $1.42 ▪ Q3 orders +27% organically year-over-year"),
+    "KO": (1.03, "Net Income Attributable to Shareowners of The Coca-Cola Company $ 4,425 $ 3,810 16 Basic Net Income Per Share 1 $ 1.03 $ 0.89 16 Diluted Net Income Per Share 1 $ 1.03 $ 0.88 16 Average Shares Outstanding 4,303 4,304"),
+    "MAS": (1.60, "• Operating profit margin was 23.6 percent; adjusted operating profit margin was 24.2 percent • Earnings per share were $1.60; adjusted earnings per share grew 26 percent to $1.64 per share • Returned $454 million to shareholders"),
+    "PFG": (1.84, "Principal Financial Group (Nasdaq: PFG) announced results for second quarter 2026. Diluted earnings per common share 2Q26 Earnings (in millions) 2Q26 Net income attributable to PFG $1.84 Net income $531 Non-GAAP operating earnings"),
+    "PNR": (0.80, "• Operating income was $167 million with ROS of 17.9 percent; 25.4 percent on an adjusted basis • GAAP EPS was $0.80, the same as communicated on July 14, and adjusted EPS was $1.14, slightly higher than communicated"),
+    "PPL": (0.30, "PPL Corporation (NYSE: PPL) today announced second-quarter 2026 reported earnings (GAAP) of $230 million, or $0.30 per share, compared with second-quarter 2025 reported earnings of $183 million, or $0.25 per share."),
+    "PPL_bullet": (0.30, "• Announces 2026 second-quarter reported earnings (GAAP) of $0.30 per share. • Achieves 2026 second-quarter ongoing earnings per share of $0.33 versus $0.32 in 2025."),
+    "PYPL": (1.25, "• GAAP EPS decreased 3% to $1.25 3 ; non-GAAP EPS decreased 1% to $1.38. 2Q'26 Operating Results"),
+    "PYPL_row": (1.25, "Effective tax rate 15.7% 17.5% (1.8pts) Net income (loss) $1,104 $1,261 (12%) Earnings per diluted share $1.25 $1.29 (3%) Net cash provided by operating activities $1,983 $898 121% Non-GAAP Net revenues"),
+    "STZ": (3.32, "HIGHLIGHTS • Generates reported EPS of $3.32 and comparable EPS of $3.74 • Beer Business delivers both net sales and operating income growth of 5%"),
+    "UDR": (0.21, "Three Months Ended June 30 2026 2025 2026 2025 Net Income per diluted share $0.21 $0.11 $0.79 $0.34 FFO per diluted share $0.60 $0.61 $1.23 $1.19 FFOA per diluted share $0.64"),
+    "VMC": (2.48, "Net earnings $ 2.49 $ 2.43 $ 3.75 $ 3.40 Diluted earnings (loss) per share attributable to Vulcan Continuing operations $ 2.47 $ 2.43 $ 3.74 $ 3.41 Discontinued operations $ 0.01 $ (0.01) $ 0.00 $ (0.03) Net earnings $ 2.48 $ 2.42 $ 3.74 $ 3.38"),
+    "CIEN": (1.83, "Net Income per diluted share: • $1.83 GAAP and $2.11 adjusted (non-GAAP) for the fiscal third quarter 2026, compared to $0.35 and $0.69 for the fiscal third quarter 2025"),
+    "CIEN_row": (1.83, "Net Income per Common Share GAAP diluted net income per potential common share $ 1.83 $ 0.35 Adjusted (non-GAAP) diluted net income per potential common share $ 2.11 $ 0.69"),
+    "ARES": (0.99, "On a basic and diluted basis, net income attributable to Ares Management Corporation per share of Class A and non-voting common stock was $0.99 for the quarter ended June 30, 2026."),
+}
+AMBIGUOUS_3 = {
+    # EPS split into continuing and discontinued operations with no stated total: not read
+    "CARR": "Adjusted operating margin 17.2 % 19.1 % (190) bps Diluted earnings per share: Continuing operations $ 0.60 $ 0.70 (14) % Continuing operations - Adjusted $ 0.86 $ 0.93. GAAP EPS from continuing operations was $0.60 and adjusted EPS was $0.86.",
+    "PPG": "• Reported earnings per diluted share (EPS) of $1.96 and adjusted EPS of $2.23 • Cash from operating activities was approximately $600 million. Reported EPS (a) $1.96 $1.98 (1)% Adjusted EPS (a)(b) $2.23 $2.22 (a) From continuing operations",
+    # a prior-year-first table
+    "AEP_table": "EPS ($): (a) GAAP 2.29 1.31 (0.98) 3.80 2.92 (0.88) Operating (non-GAAP) 1.43 1.36 (0.07)",
+}
+
+
+@pytest.mark.parametrize("sym", sorted(PASSING_3))
+def test_third_pass_reads(sym):
+    eps, text = PASSING_3[sym]
+    hit = V.parse_release_eps(text, date(2026, 8, 15))
+    assert hit is not None and hit["eps"] == eps, (sym, hit)
+
+
+@pytest.mark.parametrize("sym", sorted(AMBIGUOUS_3))
+def test_third_pass_ambiguous_are_not_read(sym):
+    assert V.parse_release_eps(AMBIGUOUS_3[sym], date(2026, 8, 15)) is None, sym

@@ -87,16 +87,18 @@ async def run(argv: list[str]) -> int:
                         and abs((date.fromisoformat(r["filing_date"]) - report_date).days) <= MATCH_DAYS]
                 if not recs:
                     print(f"  {sym} {report_date}: no Item 2.02 8-K within {MATCH_DAYS} days"); unread += 1; continue
-                rec = recs[0]
-                texts = await edgar.filing_texts(cik, rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""))
-                ex, hit = None, None
-                for cand in exhibit_candidates(texts):       # a subsidiary's release (DTE Gas) may sit beside the issuer's; the first that reads wins
-                    hit = parse_release_eps(cand[1], report_date)
+                ex, hit, rec = None, None, recs[0]
+                for rec in recs:                              # a company may file more than one Item 2.02 8-K that week (DTE Gas beside DTE Energy)
+                    texts = await edgar.filing_texts(cik, rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""))
+                    for cand in exhibit_candidates(texts):   # a subsidiary's release may sit beside the issuer's; the first that reads wins
+                        hit = parse_release_eps(cand[1], report_date)
+                        if hit:
+                            ex = cand
+                            break
                     if hit:
-                        ex = cand
                         break
                 if not hit:
-                    print(f"  {sym} {report_date}: 8-K {rec['accession']}: no GAAP diluted EPS read"); unread += 1; continue
+                    print(f"  {sym} {report_date}: 8-K {', '.join(r['accession'] for r in recs)}: no GAAP diluted EPS read"); unread += 1; continue
                 parsed += 1
                 print(f"  {sym} {report_date}: GAAP diluted EPS {hit['eps']:+.2f} ({hit['how']}; quarter ended {hit['period_end']}) from {rec['accession']} {ex[0]}")
                 print(f"      evidence: {hit['evidence'][:200]}")
