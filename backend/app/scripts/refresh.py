@@ -273,8 +273,11 @@ def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime
     validate = outcomes.get("Validate data") or {}
     figures = validate.get("figures") or {}
     closer = outcomes.get("Close expired alert picks") or {}
+    calendar = outcomes.get("Refresh earnings calendar (Finnhub)") or {}
+    from app.services.notify import feed_spotcheck_active
+    feed_confs = calendar.get("feed_confirmations") if feed_spotcheck_active(calendar.get("feed_spotcheck_started"), now.date()) else None
     return digest_message(now.strftime("%Y-%m-%d"), sum(1 for _, ok in results if ok), len(results), failed, validate,
-                          figures.get("chain_coverage_pct"), courier_summary(outcomes, now), closer.get("auto_voided") or None)
+                          figures.get("chain_coverage_pct"), courier_summary(outcomes, now), closer.get("auto_voided") or None, feed_confs or None)
 
 
 RUN_LABEL = "Nightly run"                  # the pseudo-step whose outcome tells the story of the run itself

@@ -18,11 +18,11 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
-from urllib import robotparser
 from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.services.intrinio_client import IntrinioClient
+from app.services.ir_feeds import PRESS_RELEASES, allowed, robots_for
 from app.services.redact import redact
 from app.services.step_outcomes import record_step_fields
 
@@ -34,6 +34,14 @@ CONCURRENCY = 16
 TIMEOUT = 8.0
 UA = "alert-interface IR feed discovery (sammyjmorton@gmail.com)"
 _ITEM = re.compile(r"<(item|entry)\b", re.I)
+UNREVIEWED = "unreviewed"   # a site-wide /feed path is often a blog: stored unreviewed until classified; phase 2 reads press_releases only
+
+
+def classification_for(feed_url: str | None) -> str | None:
+    """Pure: a feed found under an investor-relations path is press_releases; a bare site /feed is unreviewed."""
+    if not feed_url:
+        return None
+    return UNREVIEWED if feed_url.rstrip("/").endswith("/feed") else PRESS_RELEASES
 
 
 def domain_of(url: str | None) -> str | None:
@@ -52,30 +60,9 @@ def feed_kind(body: str) -> str | None:
     return None
 
 
-_ROBOTS: dict[str, robotparser.RobotFileParser] = {}
-
-
-async def robots_for(client: httpx.AsyncClient, base: str) -> robotparser.RobotFileParser:
-    """The parsed robots.txt of a scheme://host, fetched once; an unreachable or missing file allows everything."""
-    if base not in _ROBOTS:
-        rp = robotparser.RobotFileParser()
-        try:
-            r = await client.get(base + "/robots.txt", timeout=TIMEOUT, follow_redirects=True)
-            rp.parse(r.text.splitlines() if r.status_code == 200 else [])
-        except Exception:
-            rp.parse([])
-        _ROBOTS[base] = rp
-    return _ROBOTS[base]
-
-
-def allowed(rp: robotparser.RobotFileParser, url: str) -> bool:
-    """Pure: a URL is requested only when robots.txt allows it both for our agent and for everyone."""
-    return rp.can_fetch(UA, url) and rp.can_fetch("*", url)
-
-
 async def probe(client: httpx.AsyncClient, url: str) -> tuple[str, int] | None:
     u = urlparse(url)
-    if not allowed(await robots_for(client, f"{u.scheme}://{u.netloc}"), url):
+    if not allowed(await robots_for(client, f"{u.scheme}://{u.netloc}"), url, UA):
         return None
     try:
         r = await client.get(url, timeout=TIMEOUT, follow_redirects=True)
@@ -140,11 +127,12 @@ async def run(argv: list[str]) -> int:
     async with ScriptSessionLocal() as s:
         for sym, (d, url, kind, items, probes) in results.items():
             await s.execute(text("""
-                INSERT INTO ir_feeds (symbol, domain, feed_url, kind, items, probed, discovered_at, last_ok_at)
-                VALUES (:s, CAST(:d AS text), CAST(:u AS text), CAST(:k AS varchar), CAST(:i AS integer), :p, :now, CAST(:ok AS timestamptz))
+                INSERT INTO ir_feeds (symbol, domain, feed_url, kind, items, probed, discovered_at, last_ok_at, classification)
+                VALUES (:s, CAST(:d AS text), CAST(:u AS text), CAST(:k AS varchar), CAST(:i AS integer), :p, :now, CAST(:ok AS timestamptz), CAST(:c AS varchar))
                 ON CONFLICT (symbol) DO UPDATE SET domain = EXCLUDED.domain, feed_url = EXCLUDED.feed_url, kind = EXCLUDED.kind, items = EXCLUDED.items,
-                    probed = EXCLUDED.probed, discovered_at = EXCLUDED.discovered_at, last_ok_at = COALESCE(EXCLUDED.last_ok_at, ir_feeds.last_ok_at)"""),
-                {"s": sym, "d": d, "u": url, "k": kind, "i": items, "p": probes, "now": now, "ok": now if url else None})
+                    probed = EXCLUDED.probed, discovered_at = EXCLUDED.discovered_at, last_ok_at = COALESCE(EXCLUDED.last_ok_at, ir_feeds.last_ok_at),
+                    classification = CASE WHEN EXCLUDED.feed_url IS DISTINCT FROM ir_feeds.feed_url THEN EXCLUDED.classification ELSE ir_feeds.classification END"""),
+                {"s": sym, "d": d, "u": url, "k": kind, "i": items, "p": probes, "now": now, "ok": now if url else None, "c": classification_for(url)})
         await s.commit()
     with_domain = sum(1 for v in results.values() if v[0])
     with_feed = sum(1 for v in results.values() if v[1])

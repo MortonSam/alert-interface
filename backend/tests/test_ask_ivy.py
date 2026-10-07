@@ -145,3 +145,36 @@ async def test_the_route_is_absent_behind_the_flag_and_serves_a_checked_answer_w
         assert body["answer"]["data"] == "MU is at $1,045.56." and body["cached"] is False
         r2 = await c.post("/api/v1/tickers/MU/ask", json={"question": f"is MU pricey {token}"})   # the same normalized question: served from the log
         assert r2.status_code == 200 and r2.json()["cached"] is True
+
+
+def test_phrases_read_in_a_sentence_and_receipts_keep_the_quantity():
+    facts = A.number_facts([{"key": "stock", "inputs": [{"name": "distance below 52-week high", "value": "13.8%", "as_of": "2026-06-25", "source": "s"},
+                                                           {"name": "1-day move window", "value": "close Sep 30, 2026 to close Oct 1, 2026", "as_of": "2026-10-01", "source": "trading calendar"}]}], [])
+    by = {f["id"]: f for f in facts}
+    assert by["distance_below_52_week_high"]["phrase"] == "13.8% below its 52-week high"
+    assert by["move_session"]["value"] == "Oct 1, 2026" and by["move_session"]["phrase"] == "over the next session, Oct 1, 2026"
+    text, inputs = A.render("It sits {fact:distance_below_52_week_high} and rose {fact:move_session}.", facts)
+    assert text == "It sits 13.8% below its 52-week high and rose over the next session, Oct 1, 2026."
+    assert [(i["name"], i["value"]) for i in inputs] == [("distance below 52-week high", "13.8%"), ("session the move was measured over", "Oct 1, 2026")]
+    assert A.unstutter("moves ±7.0% on a typical report on a typical report, the last the last reports") == "moves ±7.0% on a typical report, the last reports"
+    text, _ = A.render("A rise — then a fall.", facts)
+    assert "—" not in text
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_draft_is_rewritten_once_and_a_second_failure_is_never_shown():
+    class Client:
+        def __init__(self, drafts):
+            self.drafts = list(drafts); self.calls = 0
+        async def generate_answer(self, prompt, max_tokens=400):
+            self.calls += 1
+            return {"content": self.drafts.pop(0), "model_used": "claude-sonnet-4-6", "input_tokens": 100, "output_tokens": 20}
+        async def verify_research_note(self, prompt):
+            return {"content": json.dumps({"sentences": [{"text": "x", "status": "supported", "evidence": "e"}]}), "model_used": "claude-opus-4-6", "input_tokens": 50, "output_tokens": 10}
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": [], "fingerprint": "x"}
+    c = Client(["COVERED: yes\nIt moved one time to {fact:quote}.", "COVERED: yes\nIt moved to {fact:quote}."])
+    r = await A.answer_question(None, pack, "q", client=c)
+    assert c.calls == 2 and r["retried"] and r["verdict"] == "verified" and r["answer"]["data"] == "It moved to $1,045.56."
+    c = Client(["COVERED: yes\nIt moved twice.", "COVERED: yes\nIt moved 3% again."])
+    r = await A.answer_question(None, pack, "q", client=c)
+    assert r["verdict"] == "rejected" and r["answer"]["inputs"] == [] and "passed the checks" in r["answer"]["data"]

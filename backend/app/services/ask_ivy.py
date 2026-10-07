@@ -92,13 +92,54 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
 
 # ── fact pack ────────────────────────────────────────────────────────────────
 
+# Sentence-ready phrasing per fact name: how the value reads inside a sentence. {value} is the quantity as the receipt shows it,
+# so the frontend's tokenizer still finds it. A name absent here reads as its bare value.
+PHRASES: dict[str, str] = {
+    "distance below 52-week high": "{value} below its 52-week high",
+    "52-week high": "its 52-week high of {value}",
+    "three-month change": "{value} over the past three months",
+    "three-month anchor close": "{value} three months ago",
+    "quote time": "as of {value}",
+    "last close": "a last close of {value}",
+    "typical move": "{value} on a typical report",
+    "typical move after a report": "{value} on a typical report",
+    "typical daily move": "{value} on a typical day",
+    "reports moving more": "{value} of those reports",
+    "reports in the sample": "{value} reports",
+    "beats": "{value} beats",
+    "beats followed by a fall": "{value} of those beats were followed by a fall",
+    "share": "{value}",
+    "20-day realized volatility": "{value} annualized",
+    "sessions in the past year": "{value} trading sessions in the past year",
+    "dividend per share": "{value} per share",
+    "days away": "{value} days away",
+    "implied move": "about {value} either way",
+    "largest up move": "its largest gain, {value}",
+    "largest down move": "its largest fall, {value}",
+    "market cap": "a market value of about {value}",
+    "shares outstanding": "{value} shares outstanding",
+    "EPS actual": "{value} a share",
+    "EPS estimate": "an estimate of {value} a share",
+    "daily move": "a daily move of {value}",
+    "upgrades in the last month": "{value} upgrades in the past month",
+}
+_WINDOW_VALUE = re.compile(r"close (?P<base>[A-Z][a-z]{2} \d{1,2}, \d{4}) to close (?P<after>[A-Z][a-z]{2} \d{1,2}, \d{4})")
+
+
+def phrase_for(name: str, value: str) -> str:
+    return PHRASES.get(name, "{value}").format(value=value)
+
 def slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
-def _fact(fid: str, name: str, value, as_of, source: str | None, kind: str = "number") -> dict:
+def _fact(fid: str, name: str, value, as_of, source: str | None, kind: str = "number", phrase: str | None = None) -> dict:
+    """A fact: `value` is the quantity as the receipt shows it; `phrase` is how it reads inside a sentence (the value verbatim
+    within it); a word fact's phrase is its words."""
     iso = as_of.isoformat() if isinstance(as_of, date) else as_of
-    return {"id": fid, "name": name, "value": str(value), "as_of": iso, "source": source, "kind": kind}
+    value = str(value)
+    return {"id": fid, "name": name, "value": value, "as_of": iso, "source": source, "kind": kind,
+            "phrase": phrase if phrase is not None else (value if kind == "word" else phrase_for(name, value))}
 
 
 def number_facts(sentences: list[dict], questions: list[dict]) -> list[dict]:
@@ -116,6 +157,13 @@ def number_facts(sentences: list[dict], questions: list[dict]) -> list[dict]:
         if fid in facts:
             return
         seen[key] = fid
+        if inp["name"] == "1-day move window":
+            m = _WINDOW_VALUE.search(inp["value"])
+            if not m:
+                return
+            facts["move_session"] = _fact("move_session", "session the move was measured over", m.group("after"), inp.get("as_of"),
+                                          f"{inp.get('source')}; {inp['value']}", phrase=f"over the next session, {m.group('after')}")
+            return
         facts[fid] = _fact(fid, inp["name"], inp["value"], inp.get("as_of"), inp.get("source"))
     for s in sentences:
         for inp in s.get("inputs", []):
@@ -191,6 +239,10 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
     brief = await build_briefing(db, symbol, today)
     qs = await build_questions(db, symbol, today, raw=raw, all_candidates=True)
     facts = number_facts(brief["sentences"], qs["questions"]) + word_facts(raw)
+    last = raw.get("last_report") or {}
+    for f in facts:
+        if f["id"] == "move_session" and last.get("timing") == "bmo":
+            f["phrase"] = f"over that session, {f['value']}"
     context = [s["text"] for s in brief["sentences"]] + [f"Q: {q['question']} A: {q['data']}" for q in qs["questions"]]
     return {"symbol": brief["symbol"], "name": qs.get("name") or brief.get("name") or brief["symbol"], "facts": facts, "context": context, "fingerprint": fingerprint(facts),
             "active": brief.get("state") is None and bool(brief["sentences"] or qs["questions"])}
@@ -199,7 +251,8 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
 # ── the prompt ───────────────────────────────────────────────────────────────
 
 def build_prompt(pack: dict, question: str) -> str:
-    lines = [f"{{fact:{f['id']}}} = {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "") + (f" [{f['kind']}]" if f["kind"] == "word" else "")
+    lines = [f"{{fact:{f['id']}}} = {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "")
+             + (" [word]" if f["kind"] == "word" else "") + (f' → reads "{f["phrase"]}"' if f.get("phrase") and f["phrase"] != f["value"] else "")
              for f in pack["facts"]]
     context = "\n".join(f"- {c}" for c in pack["context"]) or "- (nothing shown yet)"
     return f"""You are Ivy, answering a visitor's question about {pack['name']} ({pack['symbol']}) on a stock page. You may use ONLY the stored facts below. Nothing else you know about the company, its products, its valuation or the market may enter the answer.
@@ -216,7 +269,7 @@ RULES
 1. First line: COVERED: yes, partly or no. "yes" when the facts answer the question; "partly" when they bear on it but do not answer it; "no" when nothing above bears on it.
 2. Then the answer: at most {MAX_SENTENCES} short sentences, plain words, for someone new to investing.
 3. Never type a number. No digits, no currency signs, no percent signs, no number words (one, two ... twenty, twice, double, triple, half, a quarter of, dozen). Every quantity, date, price, percentage or count is written as its placeholder, exactly {{fact:id}}, and the system will insert the value. Describe time windows in words ("the next session", "the trailing month") rather than with numbers.
-3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Read each fact's value before placing its placeholder so the sentence reads correctly with the value in place (a fact whose value is a phrase like "close <date> to close <date>" follows "from").
+3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase: "{{fact:quote}}, {{fact:distance_below_52_week_high}}" becomes "<price>, <share> below its 52-week high". Do not repeat words the phrase already carries.
 4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
 5. If the facts do not cover the question, say so plainly in the first sentence, then say what the facts do hold that is closest, with placeholders.
 6. Questions about whether to buy, sell or hold: say what the data shows and the idea behind it. Never give a recommendation, a target, or an opinion about value.
@@ -285,6 +338,18 @@ def parse_model_output(content: str) -> tuple[str, str]:
     return covered, " ".join(l.strip() for l in lines if l.strip())
 
 
+_STUTTER = re.compile(r"\b((?:[\w$%±+.,-]+\s+){0,5}[\w$%±+.,-]+)\s+\1\b", re.I)
+
+
+def unstutter(text_: str) -> str:
+    """Pure: an exact phrase repeated back to back ("on a typical report on a typical report", "the last the last") appears once;
+    the model's words around a substituted phrase sometimes duplicate the phrase's own."""
+    prev = None
+    while prev != text_:
+        prev, text_ = text_, _STUTTER.sub(r"\1", text_)
+    return text_
+
+
 def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
     """Pure: the text with every placeholder replaced by its fact's value, and the inputs (receipts) for the frontend's tokenizer
     in the order used. A word fact substitutes its words and carries no receipt."""
@@ -294,8 +359,9 @@ def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
         f = by_id[m.group(1)]
         if f["kind"] == "number" and not any(i["name"] == f["name"] and i["value"] == f["value"] for i in inputs):
             inputs.append({"name": f["name"], "value": f["value"], "as_of": f["as_of"], "source": f["source"]})
-        return f["value"]
-    return PLACEHOLDER.sub(sub, text_), inputs
+        return f.get("phrase") or f["value"]
+    from app.services.anthropic_client import _scrub_dashes
+    return unstutter(_scrub_dashes(PLACEHOLDER.sub(sub, text_))), inputs
 
 
 # ── the verifier ─────────────────────────────────────────────────────────────
@@ -397,6 +463,12 @@ def not_covered_answer(pack: dict, question: str) -> dict:
             "as_of": None, "as_of_kind": "observed", "rule": RULE}
 
 
+def unchecked_answer(pack: dict, question: str) -> dict:
+    """What a visitor sees when no draft passed the checks: a plain sentence, no guess."""
+    return {"key": "ask", "question": question, "data": f"Ivy couldn't produce an answer about {pack['name']} that passed the checks for that question.", "idea": "",
+            "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
+
+
 def answer_payload(question: str, kept: list[str], inputs: list[dict], pack: dict) -> dict:
     as_of = max((i["as_of"] for i in inputs if i.get("as_of") and len(i["as_of"]) >= 10), default=None)
     today = date.today().isoformat()
@@ -409,14 +481,24 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     Returns {verdict, covered, answer, model, input_tokens, output_tokens, cost, problems, dropped, raw}. Charges and logs nothing."""
     from app.services.anthropic_client import AnthropicClient
     client = client or AnthropicClient()
-    gen = await client.generate_answer(build_prompt(pack, question))
+    prompt = build_prompt(pack, question)
+    gen = await client.generate_answer(prompt)
     covered, body = parse_model_output(gen["content"])
     tokens = {"input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"]}
     cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0
-    out = {"covered": covered, "model": gen["model_used"], "raw": gen["content"], **tokens, "problems": [], "dropped": []}
+    out = {"covered": covered, "model": gen["model_used"], "raw": gen["content"], **tokens, "problems": [], "dropped": [], "retried": False}
     problems = check_output(body, {f["id"] for f in pack["facts"]}) + verify_comparisons(body, pack["facts"])
     if problems:
-        return {**out, "verdict": "rejected", "answer": not_covered_answer(pack, question), "problems": problems, "cost": cost}
+        # one rewrite with the check's reasons; a draft that fails twice is never shown
+        gen2 = await client.generate_answer(prompt + "\n\nYour previous draft was rejected for these reasons: " + "; ".join(problems)
+                                            + ". Rewrite it so none applies (spell no number word; use placeholders; state only comparisons a [word] fact gives).\n\nAnswer:")
+        covered, body = parse_model_output(gen2["content"])
+        out.update(covered=covered, raw=gen2["content"], retried=True, first_problems=problems)
+        out["input_tokens"] += gen2["input_tokens"]; out["output_tokens"] += gen2["output_tokens"]
+        cost += estimate_cost_usd(gen2["model_used"], gen2["input_tokens"], gen2["output_tokens"]) or 0.0
+        problems = check_output(body, {f["id"] for f in pack["facts"]}) + verify_comparisons(body, pack["facts"])
+    if problems:
+        return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "problems": problems, "cost": cost}
     if covered == "no" and not PLACEHOLDER.search(body):
         return {**out, "verdict": "not_covered", "answer": not_covered_answer(pack, question), "cost": cost}
     rendered, inputs = render(body, pack["facts"])
@@ -429,7 +511,7 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
         verdicts = []
     kept, dropped = apply_verdicts(sentences(rendered), verdicts)
     if not kept:
-        return {**out, "verdict": "rejected", "answer": not_covered_answer(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
+        return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
     used_inputs = [i for i in inputs if i["value"] in " ".join(kept)]
     return {**out, "verdict": "verified" if not dropped else "partly_dropped", "answer": answer_payload(question, kept, used_inputs, pack), "dropped": dropped, "cost": cost + vcost,
             "verifier": verdicts}

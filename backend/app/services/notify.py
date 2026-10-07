@@ -9,6 +9,8 @@ Message formats (title / body), all plain text:
                  "failed: a, b | validate: E errors, W warnings | chain coverage P% | courier ran 16:07 ET, 421 tickers (91 failed)"
 """
 from __future__ import annotations
+
+from datetime import date
 from app.services.redact import redact
 
 import httpx
@@ -71,11 +73,32 @@ def validate_error_message(check: str, message: str, rows: list[str]) -> tuple[s
     return f"Validate ERROR: {check}", body
 
 
+FEED_SPOTCHECK_NIGHTS = 7   # the digest lists every confirmation taken from a company's press-release feed for this many nights after the first
+
+
+def feed_spotcheck_active(started_iso: str | None, today: date) -> bool:
+    """Pure: the digest lists feed confirmations while fewer than FEED_SPOTCHECK_NIGHTS nights have passed since the first run."""
+    if not started_iso:
+        return False
+    try:
+        started = date.fromisoformat(started_iso[:10])
+    except ValueError:
+        return False
+    return 0 <= (today - started).days < FEED_SPOTCHECK_NIGHTS
+
+
+def feed_confirmation_lines(confirmations: list[dict]) -> str:
+    """Pure: "SYM 2026-10-21 https://..." per confirmation, for the digest's spot-check list."""
+    return "; ".join(f"{c.get('symbol')} {c.get('date')}" + (f" {c['link']}" if c.get("link") else "") for c in confirmations)
+
+
 def digest_message(run_date: str, passed: int, total: int, failed: list[str], validate: dict | None, chain_coverage_pct: float | None,
-                   courier: dict | None, auto_voided: list[str] | None = None) -> tuple[str, str]:
+                   courier: dict | None, auto_voided: list[str] | None = None, feed_confirmations: list[dict] | None = None) -> tuple[str, str]:
     parts = [f"failed: {', '.join(failed)}" if failed else "all steps passed"]
     if auto_voided:
         parts.append(f"auto-voided {len(auto_voided)} pick(s): " + "; ".join(auto_voided))
+    if feed_confirmations:
+        parts.append(f"IR-feed confirmations to spot-check ({len(feed_confirmations)}): " + feed_confirmation_lines(feed_confirmations))
     if validate:
         parts.append(f"validate: {validate.get('error_count', 0)} errors, {validate.get('warn_count', 0)} warnings")
     parts.append(f"chain coverage {chain_coverage_pct:.0f}%" if chain_coverage_pct is not None else "chain coverage unknown")

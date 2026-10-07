@@ -30,12 +30,16 @@ from app.services.redact import redact
 import asyncio
 import sys
 import time
+
+import httpx
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func as sa_func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from sqlalchemy import text as sa_text
 
 from app.database import ScriptSessionLocal
 from app.models.earnings_report_timing import EarningsReportTiming
@@ -50,6 +54,7 @@ from app.services.earnings_calendar import (
 from app.services.edgar_client import EdgarClient
 from app.services.finnhub_client import FinnhubClient
 from app.services.report_announcements import edgar_ir_8ks, from_8k_text, from_news
+from app.services.system_metadata_service import get_value, set_value
 from app.services.step_outcomes import record_step_fields
 
 LOOKAHEAD_DAYS = 120
@@ -64,6 +69,8 @@ YFINANCE_PAUSE_SECONDS = 0.3
 YFINANCE_RETRY_PAUSE_SECONDS = 30
 UNREACHED_RUNS_WARN = 3          # a ticker Yahoo has not answered for this many runs in a row is named in the outcome
 ANNOUNCE_WINDOW_DAYS = 60        # look for a company announcement when the nearest candidate or stored date is this close
+IR_FEED_WINDOW_DAYS = 60         # read the company's press-release feed when a candidate or stored date is this close
+FEED_SPOTCHECK_KEY = "ir_feed_confirmations_started"   # system_metadata: the first night feed confirmations ran (the digest lists them for 7 nights)
 ANNOUNCE_BUDGET_SECONDS = 240
 REPORT_DUE_DAYS = 75             # no reaction row this recent: a report is due, ask for an announcement whatever the calendar says
 STEP_LABEL = "Refresh earnings calendar (Finnhub)"
@@ -82,6 +89,10 @@ class Plan:
     unresolved: list[str] = field(default_factory=list)
     reported: list[str] = field(default_factory=list)
     superseded: list[str] = field(default_factory=list)
+    feeds_read: int = 0                                           # press-release feeds read this run (services/ir_feeds)
+    feed_hits: int = 0                                            # announcements found in them
+    feed_confirmations: list[dict] = field(default_factory=list)  # {symbol, date, link, title} confirmed from a feed this run
+    feed_spotcheck_started: str | None = None                     # the first night feed confirmations ran (digest lists them for 7 nights)
     unchanged: int = 0
     no_date: list[str] = field(default_factory=list)
     yfinance_reached: int = 0
@@ -99,6 +110,8 @@ class Plan:
             "dropped": len(self.dropped), "kept": len(self.kept), "standing": len(self.standing),
             "confirmed": len(self.confirmed), "unresolved": len(self.unresolved),
             "reported": len(self.reported), "superseded": len(self.superseded), "unchanged": self.unchanged,
+            "feeds_read": self.feeds_read, "feed_hits": self.feed_hits, "feed_confirmations": self.feed_confirmations,
+            "feed_spotcheck_started": self.feed_spotcheck_started,
             "no_date": len(self.no_date), "yfinance_reached": self.yfinance_reached, "yfinance_silent": self.yfinance_silent,
             "yfinance_started_at": self.yfinance_started_at, "yfinance_seconds": round(self.yfinance_seconds, 1),
             "yfinance_unreached": self.yfinance_unreached, "yfinance_unreached_streak": self.yfinance_unreached_streak,
@@ -487,44 +500,87 @@ def announcement_targets(symbols: list[str], fin_future: dict, yf_future: dict, 
 
 
 async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbols: list[str], today: date, budget_s: float | None,
-                              names: dict[str, str] | None = None) -> dict:
-    """{symbol: Announcement} from Finnhub news and EDGAR 8-K 7.01/8.01, inside a budget.
+                              names: dict[str, str] | None = None, feeds: dict[str, str] | None = None) -> dict:
+    """{symbol: Announcement} from Finnhub news, the company's press-release feed (services/ir_feeds) and EDGAR 8-K 7.01/8.01,
+    in that order, inside a budget.
 
-    `names` maps symbol to the tickers table's company name: a news item confirms only when its headline names the
-    issuer (report_announcements.names_issuer). One log line per ticker says what each source returned."""
+    `names` maps symbol to the tickers table's company name: a news or feed item confirms only when its headline names the
+    issuer (report_announcements.names_issuer). `feeds` maps symbol to the press-release feed to read (ir_feeds rows
+    classified press_releases, for tickers with a candidate date within IR_FEED_WINDOW_DAYS). One log line per ticker says
+    what each source returned."""
+    from app.services import ir_feeds as F
     names = names or {}
+    feeds = feeds or {}
     out: dict = {}
     started = time.monotonic()
     since = (today - timedelta(days=45)).isoformat()
-    for sym in symbols:
-        if budget_s is not None and time.monotonic() - started > budget_s:
-            print(f"  announcements: budget of {budget_s:.0f}s reached after {len(out)} found in {symbols.index(sym)} tickers", flush=True)
-            break
-        try:
-            news = await finnhub.get_company_news(sym, since, today.isoformat())
-            hit = from_news(news, today, names.get(sym))
-            said = [f"Finnhub news {len(news)} items" + ("" if hit else ", none from the issuer names a results date")]
-            if hit is None:
-                cik = await edgar.get_cik(sym)
-                if cik:
-                    ir = edgar_ir_8ks(await edgar.get_all_8k_records(cik), today)[:3]
-                    for r in ir:
-                        html = await edgar.fetch_filing_html(cik, r["accession"], r.get("primary_document") or r.get("primaryDocument", ""))
-                        from bs4 import BeautifulSoup
-                        text = BeautifulSoup(html, "html.parser").get_text(" ")
-                        hit = from_8k_text(text, r["filing_date"], r.get("items", ""), today)
-                        if hit:
-                            break
-                    filings = ", ".join(f"{r['filing_date']} ({r.get('items', '')})" for r in ir) or "none"
-                    said.append(f"EDGAR 8-K 7.01/8.01 since {since}: {filings}" + ("" if hit else "; none names a results date" if ir else ""))
-                else:
-                    said.append("EDGAR: no CIK")
-            print(f"  {sym}: " + "; ".join(said) + (f"; hit {hit.day.isoformat()} ({hit.evidence})" if hit else ""), flush=True)
-        except Exception as exc:
-            print(f"  announcement check skipped for {sym}: {redact(exc)}", flush=True)
+    http = httpx.AsyncClient(headers={"User-Agent": F.UA})
+    try:
+        for sym in symbols:
+            if budget_s is not None and time.monotonic() - started > budget_s:
+                print(f"  announcements: budget of {budget_s:.0f}s reached after {len(out)} found in {symbols.index(sym)} tickers", flush=True)
+                break
+            try:
+                news = await finnhub.get_company_news(sym, since, today.isoformat())
+                hit = from_news(news, today, names.get(sym))
+                said = [f"Finnhub news {len(news)} items" + ("" if hit else ", none from the issuer names a results date")]
+                if hit is None and feeds.get(sym):
+                    hit, read = await F.from_feed(http, feeds[sym], names.get(sym), today, sym)
+                    said.append(read + ("" if hit else ", none names a results date"))
+                if hit is None:
+                    cik = await edgar.get_cik(sym)
+                    if cik:
+                        ir = edgar_ir_8ks(await edgar.get_all_8k_records(cik), today)[:3]
+                        for r in ir:
+                            html = await edgar.fetch_filing_html(cik, r["accession"], r.get("primary_document") or r.get("primaryDocument", ""))
+                            from bs4 import BeautifulSoup
+                            text = BeautifulSoup(html, "html.parser").get_text(" ")
+                            hit = from_8k_text(text, r["filing_date"], r.get("items", ""), today)
+                            if hit:
+                                break
+                        filings = ", ".join(f"{r['filing_date']} ({r.get('items', '')})" for r in ir) or "none"
+                        said.append(f"EDGAR 8-K 7.01/8.01 since {since}: {filings}" + ("" if hit else "; none names a results date" if ir else ""))
+                    else:
+                        said.append("EDGAR: no CIK")
+                print(f"  {sym}: " + "; ".join(said) + (f"; hit {hit.day.isoformat()} ({hit.evidence})" if hit else ""), flush=True)
+            except Exception as exc:
+                print(f"  announcement check skipped for {sym}: {redact(exc)}", flush=True)
+                continue
+            if hit is not None:
+                out[sym] = hit
+    finally:
+        await http.aclose()
+    return out
+
+
+def feed_targets(symbols: list[str], fin_future: dict, yf_future: dict, stored_future: dict[str, list[date]], today: date,
+                 feeds: dict[str, str]) -> dict[str, str]:
+    """Pure: the press-release feeds to read tonight: tickers with a readable feed and a candidate or stored date within
+    IR_FEED_WINDOW_DAYS."""
+    out = {}
+    for s in symbols:
+        if s not in feeds:
             continue
-        if hit is not None:
-            out[sym] = hit
+        days = list(fin_future.get(s, {})) + list(yf_future.get(s, {})) + list(stored_future.get(s, []))
+        if any(0 <= (d - today).days <= IR_FEED_WINDOW_DAYS for d in days):
+            out[s] = feeds[s]
+    return out
+
+
+async def feed_confirmations_since(session, since: datetime) -> list[dict]:
+    """Confirmations written this run whose evidence is the company's press-release feed: {symbol, date, link, title} for the digest."""
+    rows = (await session.execute(
+        select(Ticker.symbol, Event.event_date, Event.confirmation_note)
+        .join(Ticker, Ticker.id == Event.ticker_id)
+        .where(Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True), Event.updated_at >= since,
+               Event.confirmation_note.like("confirmed: press release via IR feed%"))
+        .order_by(Event.event_date)
+    )).all()
+    from app.services.ir_feeds import release_link
+    out = []
+    for sym, d, note in rows:
+        body = note.split(":", 2)[2].strip() if note.count(":") >= 2 else note
+        out.append({"symbol": sym, "date": d.isoformat(), "link": release_link(note), "title": (body.rsplit(" http", 1)[0] if " http" in body else body)[:80]})
     return out
 
 
@@ -586,8 +642,14 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
             print(f"  [WARN] not reached by Yahoo {UNREACHED_RUNS_WARN} runs in a row: {', '.join(stuck)}", flush=True)
 
         near = announcement_targets(symbols, fin_future, yf_future, stored_future, last_report, today)
-        company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names)
-        print(f"Company announcements: {len(company)} found among {len(near)} tickers asked.")
+        async with ScriptSessionLocal() as session:
+            from app.services.ir_feeds import PRESS_RELEASES
+            feed_rows = (await session.execute(sa_text("SELECT symbol, feed_url FROM ir_feeds WHERE feed_url IS NOT NULL AND classification = :c"),
+                                               {"c": PRESS_RELEASES})).all()
+        feeds = feed_targets(near, fin_future, yf_future, stored_future, today, {r[0]: r[1] for r in feed_rows})
+        company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names, feeds)
+        from_feeds = sum(1 for a in company.values() if "press release via IR feed" in a.evidence)
+        print(f"Company announcements: {len(company)} found among {len(near)} tickers asked ({len(feeds)} press-release feeds read, {from_feeds} hits from them).")
 
         sources = {"finnhub_future": fin_future, "finnhub_actual": fin_actual,
                    "yfinance_future": yf_future, "yfinance_reported": yf_reported, "company": company}
@@ -604,6 +666,17 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
         plan.yfinance_unreached_streak = streak
         plan.announcements_checked = len(near)
         plan.announcements_found = len(company)
+        plan.feeds_read = len(feeds)
+        plan.feed_hits = from_feeds
+        if write:
+            async with ScriptSessionLocal() as session:
+                plan.feed_confirmations = await feed_confirmations_since(session, now)
+                started = await get_value(session, FEED_SPOTCHECK_KEY)
+                if started is None:
+                    started = today.isoformat()
+                    await set_value(session, FEED_SPOTCHECK_KEY, started)
+                    await session.commit()
+                plan.feed_spotcheck_started = started
     finally:
         await finnhub.close()
         await edgar.close()
