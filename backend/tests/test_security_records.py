@@ -171,3 +171,12 @@ async def test_figi_change_passes_or_names_only_real_tickers_whose_figi_moved():
         assert all(not row.startswith("ZZ") and "Intrinio now BBG" in row for row in result.rows), result.rows
 
 
+
+
+def test_figi_acceptance_takes_a_new_figi_on_the_same_record_only():
+    from app.scripts.build_security_records import figi_acceptance
+    cur = {"id": "sec_Xa0q0v", "figi": "BBG01WF62461", "name": "Skydance Corp."}
+    assert figi_acceptance("sec_Xa0q0v", "BBG01WF624M3", cur) == ("accept", "FIGI BBG01WF624M3 -> BBG01WF62461 on record sec_Xa0q0v (Skydance Corp.)")
+    assert figi_acceptance("sec_Xa0q0v", "BBG01WF62461", cur)[0] == "unchanged"
+    assert figi_acceptance("sec_other", "BBG01WF624M3", cur)[0] == "different security"
+    assert figi_acceptance("sec_Xa0q0v", "BBG01WF624M3", {})[0] == "no record"

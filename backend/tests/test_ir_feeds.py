@@ -81,3 +81,41 @@ def test_digest_lists_feed_confirmations_for_seven_nights_with_links():
     assert "IR-feed confirmations to spot-check (1): CDNS 2026-10-26 https://investor.cadence.com/news/q3-webcast" in body
     _, body = digest_message("2026-10-07", 30, 30, [], None, 90.0, None, None, None)
     assert "spot-check" not in body
+
+
+EVENTS_FEED = """<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel><title>FedEx Events </title><lastBuildDate>Wed, 28 Oct 2026 16:30:00 -0400</lastBuildDate>
+<item><title>10/28/2026 : FedEx Q3 2026 Earnings Call</title><link>https://investors.fedex.com/news-and-events/upcoming-events/upcoming-events-details/2026/FedEx-Earnings-Call/default.aspx</link><pubDate>Mon, 21 Sep 2026 08:00:39 -0400</pubDate></item>
+<item><title>2/2/2027 : FedEx Q4 2026 Earnings Call</title><link>https://investors.fedex.com/x/q4</link><pubDate>Tue, 23 Jun 2026 22:20:34 -0400</pubDate></item>
+<item><title>11/5/2026 : FedEx Annual Meeting of Shareholders</title><link>https://investors.fedex.com/x/agm</link></item>
+</channel></rss>"""
+ARCH_EVENTS = """<rss><channel><lastBuildDate>Tue, 27 Oct 2026 16:00:00 -0400</lastBuildDate>
+<item><title>10/27/2026 : Q3 2026 Earnings Release</title><link>https://ir.archgroup.com/x/release</link></item>
+<item><title>10/28/2026 : Q3 2026 Earnings Conference Call</title><link>https://ir.archgroup.com/x/call</link></item></channel></rss>"""
+
+
+def test_the_q4_events_feed_confirms_a_scheduled_earnings_call_or_release():
+    assert F.events_feed_url("https://investors.fedex.com/rss/pressrelease.aspx") == "https://investors.fedex.com/rss/event.aspx"
+    assert F.events_feed_url("https://ir.acme.com/feed.atom") is None and F.events_feed_url(None) is None
+    ev = F.earnings_events(F.parse_items(EVENTS_FEED, ""), T)
+    assert [(e["day"].isoformat(), e["title"]) for e in ev] == [("2026-10-28", "FedEx Q3 2026 Earnings Call"), ("2027-02-02", "FedEx Q4 2026 Earnings Call")]   # the annual meeting is not one
+    a = F.announcement_from_events(EVENTS_FEED, T)
+    assert a.day == date(2026, 10, 28) and a.timing == "amc" and a.evidence.startswith("events feed via IR 2026-10-28: FedEx Q3 2026 Earnings Call https://investors.fedex.com/news-and-events/upcoming-events")
+    assert F.release_link(a.evidence).endswith("/FedEx-Earnings-Call/default.aspx") and F.is_feed_evidence("confirmed: " + a.evidence)
+    b = F.announcement_from_events(ARCH_EVENTS, T)
+    assert b.day == date(2026, 10, 27) and b.timing == "amc" and "Earnings Release" in b.evidence       # the release, not the next morning's call
+    assert F.announcement_from_events(EVENTS_FEED, date(2027, 3, 1)) is None                             # nothing upcoming
+    assert F.event_timing("<lastBuildDate>Tue, 03 Nov 2026 07:30:00 -0500</lastBuildDate>", date(2026, 11, 3)) == "bmo"
+    assert F.event_timing("<lastBuildDate>Tue, 03 Nov 2026 07:30:00 -0500</lastBuildDate>", date(2026, 11, 4)) == "unknown"
+
+
+def test_a_morning_call_the_day_after_a_candidate_confirms_the_release_day_and_sales_events_are_not_earnings():
+    fe = """<rss><channel><lastBuildDate>Wed, 28 Oct 2026 09:00:00 -0400</lastBuildDate><item><title>10/28/2026 : FirstEnergy Corp. - 3Q26 Earnings Call</title><link>https://investors.firstenergycorp.com/x</link></item></channel></rss>"""
+    a = F.announcement_from_events(fe, T, [date(2026, 10, 27)])
+    assert a.day == date(2026, 10, 27) and a.timing == "amc" and "(the morning call follows the 2026-10-27 release)" in a.evidence
+    b = F.announcement_from_events(fe, T, [date(2026, 10, 28)])
+    assert b.day == date(2026, 10, 28) and b.timing == "bmo"                                           # the candidate agrees: the call's own morning
+    assert F.announcement_from_events(fe, T).day == date(2026, 10, 28)                                 # no candidates known: the call's day stands
+    cost = """<rss><channel><lastBuildDate>Wed, 07 Oct 2026 13:15:00 -0400</lastBuildDate><item><title>10/7/2026 : September Sales Results</title></item>
+    <item><title>12/10/2026 : Q1 2027 Earnings Results</title><link>https://investor.costco.com/x</link></item><item><title>12/10/2026 : Q1 2027 Earnings Call</title></item></channel></rss>"""
+    c = F.announcement_from_events(cost, T, [date(2026, 12, 10)])
+    assert c.day == date(2026, 12, 10) and "Q1 2027 Earnings Results" in c.evidence                   # monthly sales are not a report; the results event wins the day

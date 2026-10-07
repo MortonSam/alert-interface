@@ -38,6 +38,85 @@ NOT_ANNOUNCEMENT = re.compile(r"(?<!to )\breports\b|\bdividend\b|\bdeclares?\b|\
 
 _ROBOTS: dict[str, robotparser.RobotFileParser] = {}
 
+# Q4-platform events feed: /rss/event.aspx (every Q4 host probed returns 404 for /rss/events.xml). Items read "M/D/YYYY : <title>" and the
+# channel's lastBuildDate is the first event's start time; the page link is the receipt. A scheduled earnings call, results release or
+# results webcast on the company's own events feed is the company's confirmation of its report date.
+EVENTS_FEED_PATH = "/rss/event.aspx"
+PRESS_FEED_PATH = "/rss/pressrelease.aspx"
+_EVENT_TITLE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*:\s*(.+?)\s*$")
+EARNINGS_EVENT = re.compile(r"\b(?:earnings|financial results|results)\b", re.I)
+NOT_EARNINGS_EVENT = re.compile(r"annual meeting|investor day|analyst day|shareholder|conference(?!\s+call)|presentation|dividend|roadshow|summit|sales results|monthly|same.store", re.I)
+_CALL_ONLY = re.compile(r"\b(?:call|webcast)\b", re.I)
+_RELEASE_WORD = re.compile(r"\b(?:release|announce|announces|report|reports|results)\b", re.I)
+_BUILD_DATE = re.compile(r"<lastBuildDate>([^<]+)</lastBuildDate>", re.I)
+_TIME = re.compile(r"\b(\d{1,2}):(\d{2}):\d{2}\s*([+-]\d{4})?")
+
+
+def events_feed_url(press_feed_url: str | None) -> str | None:
+    """Pure: the events feed beside a Q4 press-release feed; None for any other platform."""
+    if not press_feed_url or PRESS_FEED_PATH not in press_feed_url:
+        return None
+    return press_feed_url.split("/rss/", 1)[0] + EVENTS_FEED_PATH
+
+
+def earnings_events(items: list[dict], today: date) -> list[dict]:
+    """Pure: [{day, title, link}] for the feed's upcoming earnings events (a call, release or results webcast), feed order."""
+    out = []
+    for it in items:
+        m = _EVENT_TITLE.match(it.get("title") or "")
+        if not m:
+            continue
+        try:
+            day = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            continue
+        title = m.group(4)
+        if day >= today and EARNINGS_EVENT.search(title) and not NOT_EARNINGS_EVENT.search(title):
+            out.append({"day": day, "title": title, "link": it.get("link") or ""})
+    return out
+
+
+def event_timing(body: str, day: date) -> str:
+    """Pure: amc, bmo or unknown from the channel's lastBuildDate when it falls on `day` (Q4 sets it to the first event's start time)."""
+    m = _BUILD_DATE.search(body or "")
+    if not m or f"{day.day:02d} " not in m.group(1) and f" {day.day} " not in m.group(1):
+        return "unknown"
+    t = _TIME.search(m.group(1))
+    if not t:
+        return "unknown"
+    hour = int(t.group(1))
+    return "amc" if hour >= 16 else "bmo" if hour < 12 else "unknown"
+
+
+def announcement_from_events(body: str, today: date, candidates: list[date] | None = None) -> Announcement | None:
+    """Pure: the earliest upcoming earnings event as the company's confirmation. When a results release and its call fall on different
+    days, the earlier (the release) is the report date. A call alone in the morning is the standard follow-up to a release the evening
+    before: when a calendar candidate sits on the previous day, the report is that day, after the close (FirstEnergy's 3Q26 call at
+    09:00 on Oct 28 follows its Oct 27 release; Assurant's Nov 4 08:00 call follows Nov 3); otherwise the call's own day stands."""
+    events = earnings_events(parse_items(body or "", ""), today)
+    if not events:
+        return None
+    first = min(events, key=lambda e: e["day"])
+    day, timing = first["day"], event_timing(body, first["day"])
+    link = f" {first['link']}" if first["link"] else ""
+    call_only = bool(_CALL_ONLY.search(first["title"])) and not _RELEASE_WORD.search(_CALL_ONLY.sub("", first["title"]).replace("Earnings", ""))
+    if call_only and timing == "bmo" and any((day - c).days in (1, 2, 3) and c.weekday() < 5 for c in candidates or []):
+        prev = max(c for c in candidates if (day - c).days in (1, 2, 3))
+        return Announcement(prev, "amc", f"events feed via IR {day.isoformat()}: {first['title'][:80]} (the morning call follows the {prev.isoformat()} release){link}")
+    return Announcement(day, timing, f"events feed via IR {day.isoformat()}: {first['title'][:80]}{link}")
+
+
+async def from_events_feed(client: httpx.AsyncClient, press_feed_url: str, today: date, candidates: list[date] | None = None) -> tuple[Announcement | None, str]:
+    """(announcement, what was read) from the Q4 events feed beside a press-release feed; (None, why) for other platforms."""
+    url = events_feed_url(press_feed_url)
+    if url is None:
+        return None, "no events feed (not a Q4 host)"
+    body = await fetch_allowed(client, url)
+    if body is None:
+        return None, "events feed not readable (robots, error or non-200)"
+    hit = announcement_from_events(body, today, candidates)
+    return hit, f"events feed {len(parse_items(body, url))} items, {len(earnings_events(parse_items(body, url), today))} upcoming earnings event(s)"
+
 
 def clean(fragment: str) -> str:
     """Pure: text of an XML/HTML fragment, CDATA unwrapped, tags and scripts removed, entities decoded, whitespace folded."""
@@ -105,7 +184,7 @@ def release_link(evidence: str) -> str | None:
 
 
 def is_feed_evidence(note: str | None) -> bool:
-    return bool(note) and "press release via IR feed" in note
+    return bool(note) and ("press release via IR feed" in note or "events feed via IR" in note)
 
 
 # ── fetching, robots first ───────────────────────────────────────────────────

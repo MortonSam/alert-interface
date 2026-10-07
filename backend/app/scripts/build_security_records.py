@@ -15,6 +15,8 @@ Usage
     python -m app.scripts.build_security_records
     python -m app.scripts.build_security_records --write
     python -m app.scripts.build_security_records --write --symbols=MU,CAT
+    python -m app.scripts.build_security_records --accept-figi=PSKY           # dry run: Intrinio's new FIGI for the same security record
+    python -m app.scripts.build_security_records --accept-figi=PSKY --write   # store it on the current row (figi_change clears)
 """
 from __future__ import annotations
 from app.services.redact import redact
@@ -127,8 +129,47 @@ async def apply_delisting_rule(session, today: date) -> dict[str, dict]:
     return out
 
 
+def figi_acceptance(stored_id: str | None, stored_figi: str | None, current: dict) -> tuple[str, str]:
+    """Pure: (verdict, detail) for accepting Intrinio's FIGI on a current row: "accept" when the same Intrinio security record now
+    carries a different FIGI (Bloomberg reassigned it, as for PSKY after the Skydance merger), "unchanged" when they agree, and
+    "different security" when the record id itself moved (that is a new row for the map, never an accepted FIGI)."""
+    cur_id, cur_figi = current.get("id"), current.get("figi")
+    if not cur_id or not cur_figi:
+        return "no record", "Intrinio returned no record or no FIGI"
+    if stored_id and cur_id != stored_id:
+        return "different security", f"stored record {stored_id}, Intrinio now {cur_id}: a new row, not a FIGI change"
+    if stored_figi == cur_figi:
+        return "unchanged", f"FIGI {cur_figi} already stored"
+    return "accept", f"FIGI {stored_figi} -> {cur_figi} on record {cur_id} ({current.get('name')})"
+
+
+async def accept_figi(symbols: list[str], write: bool) -> int:
+    """Store Intrinio's current FIGI on each symbol's current row when the security record is the same one. Dry run unless `write`."""
+    client = IntrinioClient()
+    try:
+        for sym in symbols:
+            async with ScriptSessionLocal() as session:
+                row = (await session.execute(select(SecurityRecord).where(SecurityRecord.symbol == sym, SecurityRecord.role == CURRENT))).scalar_one_or_none()
+                if row is None:
+                    print(f"  {sym}: no current security record"); continue
+                current = await client._get(f"/securities/{sym}", {})
+                verdict, detail = figi_acceptance(row.intrinio_security_id, row.figi, current or {})
+                print(f"  {sym}: {verdict}; {detail}" + ("" if write or verdict != "accept" else "; dry run, nothing written"))
+                if verdict == "accept" and write:
+                    row.figi, row.composite_figi, row.figi_seen = current["figi"], current.get("composite_figi"), current["figi"]
+                    row.checked_at = datetime.now(timezone.utc)
+                    await session.commit()
+                    print("  stored; validate's figi_change clears for this ticker")
+    finally:
+        await client.close()
+    return 0
+
+
 async def main(argv: list[str]) -> int:
     write = "--write" in argv
+    accept = next((a.split("=", 1)[1] for a in argv if a.startswith("--accept-figi=")), None)
+    if accept:
+        return await accept_figi([x.strip().upper() for x in accept.split(",") if x.strip()], write)
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
     async with ScriptSessionLocal() as session:
         symbols = list((await session.execute(select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol))).scalars().all())

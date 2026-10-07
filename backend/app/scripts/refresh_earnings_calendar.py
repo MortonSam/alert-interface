@@ -500,7 +500,7 @@ def announcement_targets(symbols: list[str], fin_future: dict, yf_future: dict, 
 
 
 async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbols: list[str], today: date, budget_s: float | None,
-                              names: dict[str, str] | None = None, feeds: dict[str, str] | None = None) -> dict:
+                              names: dict[str, str] | None = None, feeds: dict[str, str] | None = None, candidate_days: dict[str, list[date]] | None = None) -> dict:
     """{symbol: Announcement} from Finnhub news, the company's press-release feed (services/ir_feeds) and EDGAR 8-K 7.01/8.01,
     in that order, inside a budget.
 
@@ -524,6 +524,9 @@ async def fetch_announcements(finnhub: FinnhubClient, edgar: EdgarClient, symbol
                 news = await finnhub.get_company_news(sym, since, today.isoformat())
                 hit = from_news(news, today, names.get(sym))
                 said = [f"Finnhub news {len(news)} items" + ("" if hit else ", none from the issuer names a results date")]
+                if hit is None and feeds.get(sym):
+                    hit, read = await F.from_events_feed(http, feeds[sym], today, (candidate_days or {}).get(sym))   # the Q4 events feed: a scheduled call or release is the date
+                    said.append(read + ("" if hit else ", none upcoming"))
                 if hit is None and feeds.get(sym):
                     hit, read = await F.from_feed(http, feeds[sym], names.get(sym), today, sym)
                     said.append(read + ("" if hit else ", none names a results date"))
@@ -573,7 +576,7 @@ async def feed_confirmations_since(session, since: datetime) -> list[dict]:
         select(Ticker.symbol, Event.event_date, Event.confirmation_note)
         .join(Ticker, Ticker.id == Event.ticker_id)
         .where(Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True), Event.updated_at >= since,
-               Event.confirmation_note.like("confirmed: press release via IR feed%"))
+               Event.confirmation_note.like("confirmed: press release via IR feed%") | Event.confirmation_note.like("confirmed: events feed via IR%"))
         .order_by(Event.event_date)
     )).all()
     from app.services.ir_feeds import release_link
@@ -647,9 +650,11 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
             feed_rows = (await session.execute(sa_text("SELECT symbol, feed_url FROM ir_feeds WHERE feed_url IS NOT NULL AND classification = :c"),
                                                {"c": PRESS_RELEASES})).all()
         feeds = feed_targets(near, fin_future, yf_future, stored_future, today, {r[0]: r[1] for r in feed_rows})
-        company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names, feeds)
+        candidate_days = {s: sorted(set(list(fin_future.get(s, {})) + list(yf_future.get(s, {})) + list(stored_future.get(s, [])))) for s in near}
+        company = await fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names, feeds, candidate_days)
         from_feeds = sum(1 for a in company.values() if "press release via IR feed" in a.evidence)
-        print(f"Company announcements: {len(company)} found among {len(near)} tickers asked ({len(feeds)} press-release feeds read, {from_feeds} hits from them).")
+        from_events = sum(1 for a in company.values() if "events feed via IR" in a.evidence)
+        print(f"Company announcements: {len(company)} found among {len(near)} tickers asked ({len(feeds)} press-release feeds read, {from_feeds} hits from them, {from_events} from events feeds).")
 
         sources = {"finnhub_future": fin_future, "finnhub_actual": fin_actual,
                    "yfinance_future": yf_future, "yfinance_reported": yf_reported, "company": company}

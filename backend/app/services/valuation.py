@@ -25,6 +25,8 @@ RANGE_YEARS = 5
 RELEASE_TOLERANCE = 0.01          # a release figure this far from the XBRL figure for the same quarter is flagged
 SECTOR_COVERAGE_MIN = 0.90        # a sector median shows only when this share of the sector's active tickers has a fresh window
 NOT_MEANINGFUL_REASON = "lost money over the last four quarters"
+PE_MAX_MEANINGFUL = round(1 / MIN_EARNINGS_YIELD)      # 100: above it the P/E is stored but not meaningful, as the five-year history already excludes such sessions
+NEAR_ZERO_REASON = f"earnings near zero: P/E above {PE_MAX_MEANINGFUL}"
 CLEAN_QUARTERS_NEEDED = 4         # after a spin-off, merger, share-exchange acquisition or rename-merge, this many full quarters must pass before a P/E
 ACTION_VERBS = {"spin_off": "Spun off {name} on {date}", "merger": "Merged with {name} on {date}", "acquisition": "Acquired {name} by share exchange on {date}",
                 "rename_merge": "Renamed from {name} on {date} after a merger"}
@@ -457,7 +459,10 @@ def snapshot(price: float | None, quarters: list[dict], latest_report: date | No
         return {**base, "reason": "no stored close"}
     if total <= 0:
         return {**base, "status": "not_meaningful", "reason": NOT_MEANINGFUL_REASON}
-    return {**base, "status": "ok", "pe": round(price / total, 2)}
+    value = round(price / total, 2)
+    if value > PE_MAX_MEANINGFUL:
+        return {**base, "status": "not_meaningful", "pe": value, "reason": NEAR_ZERO_REASON}      # stored, never shown as a comparison
+    return {**base, "status": "ok", "pe": value}
 
 
 def sector_summary(statuses: list[tuple[str, float | None]], active: int) -> dict:

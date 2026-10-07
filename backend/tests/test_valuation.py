@@ -102,6 +102,9 @@ def test_snapshot_states_ok_not_meaningful_or_missing_with_reasons():
     s = V.snapshot(50.0, loss, date(2026, 6, 25), None, today)
     assert s["status"] == "not_meaningful" and s["reason"] == "lost money over the last four quarters" and s["trailing_eps"] == -4.0 and s["window_end"] == date(2026, 5, 28)
     assert V.snapshot(None, MU_Q, date(2026, 6, 25), None, today)["reason"] == "no stored close"
+    tiny = [{**q, "eps": 0.05} for q in MU_Q]                                                    # trailing 0.20 under a 50 close: P/E 250
+    s = V.snapshot(50.0, tiny, date(2026, 6, 25), None, today)
+    assert s["status"] == "not_meaningful" and s["pe"] == 250.0 and s["reason"] == "earnings near zero: P/E above 100" and V.PE_MAX_MEANINGFUL == 100
 
 
 def test_sector_median_shows_only_at_ninety_percent_coverage():
