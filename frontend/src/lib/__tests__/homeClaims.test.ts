@@ -68,7 +68,7 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     const block = read("components/SiteCounters.tsx");
     expect(block).toContain("api.system.stats()");
     expect(block).toContain("if (!rows.length) return <CountersUnavailable />;");                        // never an empty section
-    expect(block).toContain("title={row.title ?? undefined}");                                       // the date lives on the number's hover title
+    expect(block).toContain("title={row.title ? row.title + stale : undefined}");                     // the date lives on the number's hover title
     expect(block).toMatch(/stat-number[^"]*text-primary[^"]*tabular-nums/);                           // the accent, the largest numeric size, tabular figures
     expect(block).not.toMatch(/border|rounded|shadow/);                                               // no card
     expect(block.replace(/className="[^"]*"|className=\{`[^`]*`\}/g, "")).not.toMatch(/[0-9]{2,}/);    // no typed figure or year outside class names
