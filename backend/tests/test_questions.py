@@ -163,6 +163,28 @@ async def test_the_route_serves_at_most_four_in_catalog_order_with_receipts():
         assert (await c.get("/api/v1/tickers/CAG/questions")).json()["questions"] == []       # inactive: nothing
 
 
+@pytest.mark.asyncio
+async def test_question_9_is_served_only_behind_the_pe_enabled_flag(monkeypatch):
+    """PE_ENABLED (off in production) gates the strip's P/E question and, through the same candidate list, every P/E fact Ask Ivy may cite."""
+    from httpx import ASGITransport, AsyncClient
+    from app.config import settings
+    from app.main import app
+    from app.services import ask_ivy as A
+    from app.database import AsyncSessionLocal
+    pe_ids = {"p_e", "five_year_median_p_e", "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_sector", "earnings_measure_note", "window_start", "window_end"}
+    for enabled in (False, True):
+        monkeypatch.setattr(settings, "pe_enabled", enabled)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            served = {sym: [q["key"] for q in (await c.get(f"/api/v1/tickers/{sym}/questions")).json()["questions"]] for sym in ("MU", "MSFT", "FICO", "VMRK")}
+        async with AsyncSessionLocal() as db:
+            packs = {sym: await A.fact_pack(db, sym) for sym in served}
+        cited = {sym: {f["id"] for f in p["facts"]} & pe_ids for sym, p in packs.items()}
+        if not enabled:
+            assert not any("pe_compare" in keys for keys in served.values()), served
+            assert not any(cited.values()), cited
+            assert not any("P/E" in line for p in packs.values() for line in p["context"]), "a P/E sentence reached the Ask Ivy context with the flag off"
+
+
 def test_9_pe_compares_with_history_and_sector_and_never_passes_a_verdict():
     kw = dict(name="Micron Technology", symbol="MU", pe=14.34, window_start=date(2025, 8, 29), window_end=date(2026, 9, 3), as_of=date(2026, 10, 5), hist_median=16.8,
               hist_share_above=38, hist_sessions=871, hist_excluded=385, hist_first=date(2021, 10, 4), hist_last=date(2026, 10, 5), sector="Information Technology")
@@ -179,6 +201,11 @@ def test_9_pe_compares_with_history_and_sector_and_never_passes_a_verdict():
     assert_clean(q)
     q = Q.q_pe(**{**kw, "hist_median": None, "hist_share_above": None, "hist_sessions": None, "hist_excluded": None}, sector_median=None)
     assert q["data"] == "MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026."
+    # equal at the one decimal shown reads "in line with": FDX at 15.6 against a median of 15.6 was rendered "below" on an invisible difference
+    assert Q.pe_history_words(15.6, 15.6) == "in line with" and Q.pe_history_words(15.64, 15.58) == "in line with"
+    assert Q.pe_history_words(15.54, 15.64) == "below" and Q.pe_history_words(15.7, 15.6) == "above"
+    q = Q.q_pe(**{**kw, "pe": 15.61, "hist_median": 15.58}, sector_median=15.6)
+    assert "in line with its five-year median of 15.6" in q["data"] and q["data"].endswith("so it sits in line with its peers.")
 
 
 def test_9_real_estate_adds_the_funds_from_operations_note_and_the_pe_question_always_takes_a_slot():

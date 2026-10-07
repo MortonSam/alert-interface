@@ -91,6 +91,8 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
     (re.compile(r"\bbelow its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\blower than its (?:own )?(?:five-year )?median\b", re.I), {"pe_vs_history": "below"}),
     (re.compile(r"\babove (?:its |the )?(?:sector|peer|peers'|industry) median\b|\babove its peers\b|\bhigher than its (?:sector|peers)\b", re.I), {"pe_vs_sector": "above"}),
     (re.compile(r"\bbelow (?:its |the )?(?:sector|peer|peers'|industry) median\b|\bbelow its peers\b|\blower than its (?:sector|peers)\b", re.I), {"pe_vs_sector": "below"}),
+    (re.compile(r"\bin line with its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\b(?:at|matches|equal to) its (?:own )?(?:five-year|5-year) median\b", re.I), {"pe_vs_history": "in line with"}),
+    (re.compile(r"\bin line with (?:its |the )?(?:sector|peer|peers'|industry) median\b|\bin line with its peers\b|\b(?:at|matches|equal to) (?:its |the )?(?:sector|peer) median\b", re.I), {"pe_vs_sector": "in line with"}),
 ]
 VALUATION_VERDICTS = re.compile(r"\b(?:cheap|expensive|undervalued|overvalued|pricey|a bargain|overpriced|underpriced)\b", re.I)   # a ratio is never a verdict
 
@@ -314,12 +316,13 @@ def word_facts(raw: dict) -> list[dict]:
             from app.services.questions import REIT_NOTE
             out.append({**_fact("earnings_measure_note", "how real estate companies are judged", REIT_NOTE, pe["as_of"], "services/questions REIT_NOTE", "note"),
                         "hidden": True, "applies_to": ("p_e", "five_year_median_p_e", "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_sector")})
+        from app.services.questions import pe_history_words
         if pe.get("hist_median") is not None:
-            out.append(_fact("pe_vs_history", "P/E against its five-year median", "above" if pe["pe"] > pe["hist_median"] else "below" if pe["pe"] < pe["hist_median"] else "at",
-                             pe["as_of"], "pe_snapshots.pe against pe_snapshots.hist_median", "word"))
+            out.append(_fact("pe_vs_history", "P/E against its five-year median", pe_history_words(pe["pe"], pe["hist_median"]),
+                             pe["as_of"], "pe_snapshots.pe against pe_snapshots.hist_median; judged at one decimal (services/questions pe_history_words)", "word"))
         if pe.get("sector_median") is not None:
-            out.append(_fact("pe_vs_sector", "P/E against its sector median", "above" if pe["pe"] > pe["sector_median"] else "below" if pe["pe"] < pe["sector_median"] else "at",
-                             pe["as_of"], "pe_snapshots.pe against pe_sector_snapshots.median_pe", "word"))
+            out.append(_fact("pe_vs_sector", "P/E against its sector median", pe_history_words(pe["pe"], pe["sector_median"]),
+                             pe["as_of"], "pe_snapshots.pe against pe_sector_snapshots.median_pe; judged at one decimal (services/questions pe_history_words)", "word"))
     div = raw.get("dividend")
     if div:
         out.append(_fact("dividend_status", "next dividend", "declared" if div.get("declared_on") else "estimated", div.get("declared_on") or div.get("ex_date"), "events (ex_dividend)", "word"))

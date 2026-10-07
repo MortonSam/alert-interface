@@ -272,9 +272,13 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         if raw is not None:
             raw.update(rv={"rv_20d": float(rv_row.rv_20d), "rv_rank": float(rv_row.rv_rank), "as_of": rv_row.as_of_date})
         cands.append(Q.q_volatile_now(name=name, symbol=sym, rv_20d=float(rv_row.rv_20d), rv_rank=float(rv_row.rv_rank), sample_days=int(rv_row.sample_days or 0), as_of=rv_row.as_of_date))
-    # 9. trailing P/E against its history and its sector (evergreen; only a stored, fresh snapshot)
-    pe_row = (await db.execute(text("""SELECT as_of_date, status, pe, window_start, window_end, hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last
-        FROM pe_snapshots WHERE symbol = :s ORDER BY as_of_date DESC LIMIT 1"""), {"s": sym})).mappings().first()
+    # 9. trailing P/E against its history and its sector (evergreen; only a stored, fresh snapshot). Behind the PE_ENABLED flag: while it is
+    #    off the snapshot is never read here, so neither the strip nor Ask Ivy (whose facts come from this function's candidates and `raw`) sees a P/E.
+    from app.config import settings
+    pe_row = None
+    if settings.pe_enabled:
+        pe_row = (await db.execute(text("""SELECT as_of_date, status, pe, window_start, window_end, hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last
+            FROM pe_snapshots WHERE symbol = :s ORDER BY as_of_date DESC LIMIT 1"""), {"s": sym})).mappings().first()
     if pe_row and pe_row["status"] == "ok" and pe_row["pe"] is not None:
         sec_row = (await db.execute(text("SELECT median_pe, shown, reason, fresh, active FROM pe_sector_snapshots WHERE sector = :sec ORDER BY as_of_date DESC LIMIT 1"),
                                     {"sec": ticker.sector or ""})).mappings().first()

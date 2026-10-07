@@ -257,6 +257,11 @@ def test_counts_carry_their_denominator_and_signed_moves_read_as_a_move():
 def test_pe_word_facts_and_the_valuation_verdict_check():
     w = {f["id"]: f["value"] for f in A.word_facts({"pe": {"pe": 14.34, "as_of": date(2026, 10, 5), "hist_median": 16.8, "sector": "Information Technology", "sector_median": 43.4}})}
     assert w["pe_vs_history"] == "below" and w["pe_vs_sector"] == "below"
+    w = {f["id"]: f["value"] for f in A.word_facts({"pe": {"pe": 15.61, "as_of": date(2026, 10, 5), "hist_median": 15.58, "sector": "Industrials", "sector_median": 22.0}})}
+    assert w["pe_vs_history"] == "in line with" and w["pe_vs_sector"] == "below"                  # judged at the one decimal shown
+    level = [{"id": "pe_vs_history", "name": "x", "value": "in line with", "as_of": None, "source": None, "kind": "word", "phrase": "in line with"}]
+    assert A.verify_comparisons("It is in line with its five-year median.", level) == []
+    assert "contradicts" in A.verify_comparisons("It is below its five-year median.", level)[0]
     assert A.check_output("Its P/E is {fact:p_e}, which looks cheap.", {"p_e"}) == ["valuation verdict: cheap"]
     assert A.check_output("Its P/E is {fact:p_e}, below its five-year median.", {"p_e"}) == []
     facts = [{"id": "pe_vs_sector", "name": "x", "value": "below", "as_of": None, "source": None, "kind": "word", "phrase": "below"}]

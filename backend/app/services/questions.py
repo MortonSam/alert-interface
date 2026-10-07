@@ -196,7 +196,10 @@ REIT_NOTE = ("Real estate companies are usually judged against funds from operat
 
 
 def pe_history_words(pe: float, median: float) -> str:
-    return "above" if pe > median else "below" if pe < median else "at"
+    """The comparison word for a P/E against a median, judged at the one decimal both are shown with: two values that read the
+    same ("15.6" and "15.6") are "in line with", never "above" or "below" on a difference the reader cannot see."""
+    a, b = round(pe, 1), round(median, 1)
+    return "above" if a > b else "below" if a < b else "in line with"
 
 
 def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: date, as_of: date, hist_median: float | None, hist_share_above: int | None,

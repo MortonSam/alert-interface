@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # The free-text question box under the question strip (services/ask_ivy). Off in production until launched; on locally.
     ask_ivy_enabled: bool = False
     ask_ivy_daily_cap_usd: float = 15.0   # site-wide estimated spend per UTC day at which the box pauses
+    # Trailing P/E (pe_snapshots): strip question 9 and the P/E facts Ask Ivy may cite. Off in production until Sam approves the
+    # figures; on locally. The nightly still computes the snapshots either way; the flag only gates what the pages serve.
+    pe_enabled: bool = False
 
     # Clerk auth (empty = disabled, admin-token-only mode)
     clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json
