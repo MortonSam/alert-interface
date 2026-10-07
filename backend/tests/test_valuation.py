@@ -150,8 +150,10 @@ def test_a_corporate_action_inside_the_window_means_not_meaningful_yet_and_leave
     s = V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, spin)
     assert s["status"] == "not_meaningful_yet" and s["pe"] is None and s["reason"] == "Spun off Solstice on Jun 29, 2026; 4 full quarters after it are needed"
     assert V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, [{"kind": "spin_off", "date": date(2025, 6, 1), "name": None}])["status"] == "ok"   # before the window
-    after = [{"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}]                                                             # after the window, before the price
+    after = [{"kind": "merger", "date": date(2026, 10, 5), "name": "AvalonBay"}]                                                              # after the window, before the price
     assert V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, after)["status"] == "not_meaningful_yet"
+    alias = [{"kind": "rename_merge", "date": date(2026, 10, 7), "name": "PSKY"}]                                                             # a symbol change with no deal behind it holds nothing
+    assert V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, alias)["status"] == "ok"
     assert V.action_reason({"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}) == "Renamed from EQR on Oct 5, 2026 after a merger; 4 full quarters after it are needed"
     assert V.action_reason({"kind": "spin_off", "date": date(2026, 1, 5), "name": None}).startswith("Spun off a business on Jan 5, 2026")
     s = V.sector_summary([("ok", 10.0)] * 8 + [("not_meaningful_yet", None)] * 2, active=10)

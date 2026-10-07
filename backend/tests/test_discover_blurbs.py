@@ -39,7 +39,7 @@ def test_reaction_card_has_one_template():
 
 def test_every_card_renders_through_the_blurb_module():
     assert "earnings_blurb(cond)" in DISCOVER
-    assert 'volatility_blurb(vol.get("iv_rv_spread_pp"), vol.get("vol_regime"), vol.get("rv_rank"))' in DISCOVER
+    assert 'volatility_blurb(vol.get("iv_rv_spread_pp"), vol.get("vol_regime"), vol.get("rv_rank"), vol.get("iv_rv_note"))' in DISCOVER
     assert "_sym_variant" not in DISCOVER
     for old in ("of beats dropped", "but stock fell", "pp spread", "Options {label", "Implied-realized gap", "templates = ["):
         assert old not in DISCOVER, old
