@@ -15,7 +15,10 @@ const MU: BriefingSentence[] = [
   { key: "profile", rule: "r", as_of: "2026-10-05", inputs: [{ name: "market cap", value: "$1.2 trillion", as_of: "Oct 6, 4:00 PM ET", source: "s" }],
     text: "Micron Technology, Inc. designs, manufactures, and sells memory and storage products. It's part of the S&P 500's Information Technology sector (Semiconductors), worth about $1.2 trillion." },
   { key: "happening", rule: "r", as_of: "2026-10-06", inputs: [{ name: "quote", value: "$1,045.56", as_of: "Oct 6, 4:00 PM ET", source: "s" }, { name: "quote time", value: "Oct 6, 4:00 PM ET", as_of: "Oct 6, 4:00 PM ET", source: "s" },
-    { name: "52-week high", value: "$1,213.37", as_of: "2026-06-25", source: "s" }],
+    { name: "52-week high", value: "$1,213.37", as_of: "2026-06-25", source: "s" }, { name: "distance below 52-week high", value: "13.8%", as_of: "2026-06-25", source: "s" },
+    { name: "three-month change", value: "11.4%", as_of: "2026-07-06", source: "s" }, { name: "report date", value: "Sep 30, 2026", as_of: "2026-09-30", source: "s" },
+    { name: "EPS actual", value: "$33.42", as_of: "2026-09-30", source: "s" }, { name: "EPS estimate", value: "$32.56", as_of: "2026-09-30", source: "s" },
+    { name: "1-day move", value: "+3.0%", as_of: "2026-10-01", source: "s" }],
     text: "MU is at $1,045.56 (Oct 6, 4:00 PM ET), 13.8% below its 52-week high of $1,213.37 (Jun 25, 2026), up 11.4% over three months. Reported Sep 30, 2026 after the close: EPS $33.42 against a $32.56 estimate, a beat; the stock moved +3.0% the next session." },
 ];
 const ASK: QuestionAnswer = { key: "ask", question: "How did it react?", idea: "", rule: "r", as_of: "2026-10-01", as_of_kind: "observed",
@@ -38,9 +41,9 @@ describe("rendered quantities", () => {
       expect(p.textContent).toBe(MU[i].text);
       p.querySelectorAll("span").forEach((span) => expect(span.className).not.toMatch(SPACING));
     });
-    const receipts = paras[1].querySelectorAll("span[title]");
+    const receipts = paras[1].querySelectorAll("span[data-quantity]");
     expect(Array.from(receipts).map((s) => s.textContent)).toEqual(["$1,045.56", "Oct 6, 4:00 PM ET", "13.8%", "$1,213.37", "Jun 25, 2026", "11.4%", "Sep 30, 2026", "$33.42", "$32.56", "+3.0%"]);
-    expect(Array.from(paras[0].querySelectorAll("span[title]")).map((s) => s.textContent)).toEqual(["$1.2 trillion"]);   // "S&P 500" is a name
+    expect(Array.from(paras[0].querySelectorAll("span[data-quantity]")).map((s) => s.textContent)).toEqual(["$1.2 trillion"]);   // "S&P 500" is a name
   });
   it("an Ask Ivy answer reads back exactly, and window names are never receipts", () => {
     const html = renderToStaticMarkup(createElement(AskIvy, { symbol: "MU", name: "Micron Technology", initialAnswer: ASK }));
@@ -48,7 +51,7 @@ describe("rendered quantities", () => {
     expect(paras.length).toBe(1);
     expect(paras[0].textContent).toBe(ASK.data);
     paras[0].querySelectorAll("span").forEach((span) => expect(span.className).not.toMatch(SPACING));
-    expect(Array.from(paras[0].querySelectorAll("span[title]")).map((s) => s.textContent)).toEqual(["+3.0%", "Oct 1, 2026", "±7.0%"]);
+    expect(Array.from(paras[0].querySelectorAll("span[data-quantity]")).map((s) => s.textContent)).toEqual(["+3.0%", "Oct 1, 2026", "±7.0%"]);
     const parts = answerParts("It's part of the S&P 500, 13.8% below its 52-week high over 20-day and 1-day windows, 1,254 sessions.", []);
     expect(parts.map((p) => p.text).join("")).toContain("S&P 500");
     expect(parts.filter((p) => p.receipt !== undefined).map((p) => p.text)).toEqual(["13.8%", "1,254"]);

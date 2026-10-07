@@ -16,7 +16,7 @@ export function questionsHeader(shortName: string): string {
 const MONTH = String.raw`(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`;
 const DATETIME = String.raw`${MONTH} \d{1,2}, \d{1,2}:\d{2} (?:AM|PM) ET`;      // a quote time, one token: "Oct 6, 4:00 PM ET"
 const DATE = String.raw`${MONTH} \d{1,2}, \d{4}`;
-const AMOUNT = String.raw`[+\-±]?\$\d+(?:,\d{3})*(?:\.\d+)?`;
+const AMOUNT = String.raw`[+\-±]?\$\d+(?:,\d{3})*(?:\.\d+)?(?: (?:thousand|million|billion|trillion))?`;   // "$1.2 trillion" is one quantity
 const PERCENT = String.raw`[+\-±]?\d+(?:,\d{3})*(?:\.\d+)?%`;
 // a bare count; never the number inside a window or index name ("1-day", "20-day", "52-week", "S&P 500")
 const COUNT = String.raw`(?<!S&P )\d+(?:,\d{3})*(?:\.\d+)?(?!-(?:day|week|month|year|session)|\d|[.,]\d|%)`;

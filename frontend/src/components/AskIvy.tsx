@@ -56,7 +56,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
           <p className="text-foreground/90">
             {answerParts(answer.data, answer.inputs).map((part, j) =>
               part.receipt !== undefined ? (
-                <span key={j} title={part.receipt ?? undefined} className="font-semibold underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                <span key={j} data-quantity title={part.receipt ?? undefined} className="font-semibold underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
               ) : part.term ? (
                 <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
               ) : (

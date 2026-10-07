@@ -54,7 +54,7 @@ describe("the question strip renders answers from the API with a receipt on ever
         expect(span, `${span} split`).not.toMatch(/^\d+$/.test(span) && text.includes(span + ".") && /\d/.test(text[text.indexOf(span + ".") + span.length + 1] ?? "") ? /./ : /$^/);
       }
       // the whole quantities survive as single spans
-      for (const whole of text.match(/\$[\d,]+\.\d+|[+\-±]?\d+(?:\.\d+)?%|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4}/g) ?? []) {
+      for (const whole of text.match(/\$[\d,]+\.\d+(?: (?:million|billion|trillion))?|[+\-±]?\d+(?:\.\d+)?%|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4}/g) ?? []) {
         expect(spans, `${whole} should be one span in: ${text}`).toContain(whole);
       }
     }
