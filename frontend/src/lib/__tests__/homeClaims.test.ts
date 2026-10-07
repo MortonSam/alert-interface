@@ -60,13 +60,14 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
 
   it("the four counters are live counts from /system/stats, first under the hero, with only the as-of date on hover", async () => {
     const home = read("app/page.tsx");
-    expect(home).toContain("<SiteCounters />");
-    expect(home.indexOf("<SiteCounters />")).toBeLessThan(home.indexOf("The challenge"));             // the first thing under the hero
+    expect(home).toContain("<SiteCounters initial={initial} />");
+    expect(home.indexOf("<SiteCounters initial={initial} />")).toBeLessThan(home.indexOf("The challenge"));   // the first thing under the hero
+    expect(home).toContain("export const revalidate = STATS_REVALIDATE_SECONDS;");                   // server-rendered and revalidated
     expect(home).toContain("font-variant-numeric: tabular-nums");
     expect(home).not.toMatch(/stat-number[^}]*border|since 2011|Analyst actions since/);
     const block = read("components/SiteCounters.tsx");
     expect(block).toContain("api.system.stats()");
-    expect(block).toContain("if (!rows.length) return null;");
+    expect(block).toContain("if (!rows.length) return <CountersUnavailable />;");                        // never an empty section
     expect(block).toContain("title={row.title ?? undefined}");                                       // the date lives on the number's hover title
     expect(block).toMatch(/stat-number[^"]*text-primary[^"]*tabular-nums/);                           // the accent, the largest numeric size, tabular figures
     expect(block).not.toMatch(/border|rounded|shadow/);                                               // no card

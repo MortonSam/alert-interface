@@ -10,17 +10,26 @@ export interface CounterRow {
 
 export const PRICES_HOVER = "Five years of daily prices for every S&P 500 stock, licensed from Intrinio";
 
+/** The four counters' keys and labels, as written, for the row that has no counts to show yet. */
+export const COUNTER_LABELS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "contracts", label: "option contracts captured nightly" },
+  { key: "prices", label: "daily stock prices on record" },
+  { key: "earnings", label: "earnings reactions measured" },
+  { key: "analyst", label: "analyst actions measured" },
+];
+
 /** The four homepage counters, each a live count from a stored table, dated by its own newest row. Labels as written. */
 export function counterRows(stats: SiteStats | null): CounterRow[] {
   if (!stats) return [];
   const contractsAsOf = insightAsOfLine(stats.option_contracts_as_of);
+  const label = (key: string) => COUNTER_LABELS.find((l) => l.key === key)!.label;
   return [
-    { key: "contracts", value: stats.option_contracts_captured, label: "option contracts captured nightly",
+    { key: "contracts", value: stats.option_contracts_captured, label: label("contracts"),
       title: contractsAsOf ? `${contractsAsOf} (${stats.option_contracts_source})` : null },
-    { key: "prices", value: stats.licensed_daily_prices, label: "daily stock prices on record",
+    { key: "prices", value: stats.licensed_daily_prices, label: label("prices"),
       title: [PRICES_HOVER, insightAsOfLine(stats.licensed_daily_prices_as_of)].filter(Boolean).join(" · ") },
-    { key: "earnings", value: stats.earnings_reports_measured, label: "earnings reactions measured", title: insightAsOfLine(stats.earnings_reports_as_of) },
-    { key: "analyst", value: stats.analyst_reactions_measured, label: "analyst actions measured", title: insightAsOfLine(stats.analyst_reactions_as_of) },
+    { key: "earnings", value: stats.earnings_reports_measured, label: label("earnings"), title: insightAsOfLine(stats.earnings_reports_as_of) },
+    { key: "analyst", value: stats.analyst_reactions_measured, label: label("analyst"), title: insightAsOfLine(stats.analyst_reactions_as_of) },
   ];
 }
 

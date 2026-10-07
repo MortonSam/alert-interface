@@ -5,11 +5,17 @@ import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
 import { SiteCounters } from "@/components/SiteCounters";
+import { fetchSiteStatsServer, STATS_REVALIDATE_SECONDS } from "@/lib/siteStats";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
 
-export default function Home() {
+// The counters are rendered on the server and revalidated: a backend that is slow, restarting or erroring never costs the
+// page its first screen, because a failed revalidation keeps the last good render (lib/siteStats).
+export const revalidate = STATS_REVALIDATE_SECONDS;
+
+export default async function Home() {
+  const initial = await fetchSiteStatsServer();
   return (
     <main>
       <style>{`
@@ -85,7 +91,7 @@ export default function Home() {
                one screen (the viewport minus the sticky header, in svh) with the row centered and nothing else on it; below
                that it is a normal section. ── */}
         <section className="px-4 sm:px-6 py-20 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)] sm:flex sm:items-center sm:justify-center">
-          <SiteCounters />
+          <SiteCounters initial={initial} />
         </section>
 
         {/* ── 3. The Challenge ──────────────────────────────────── */}
