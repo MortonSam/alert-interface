@@ -56,7 +56,7 @@ PREDECESSORS: dict[str, dict] = {
 
 # symbol -> the span the stored rows keep their yfinance history for, and the day the current record takes over
 STORED_HISTORY_ROWS: dict[str, dict] = {
-    "PSKY": {"valid_from": STORED_START, "valid_to": date(2025, 8, 6), "current_from": date(2025, 8, 7),
+    "SKYD": {"valid_from": STORED_START, "valid_to": date(2025, 8, 6), "current_from": date(2025, 8, 7),
              "name": "Paramount Global class B (Intrinio sec_gVN622, a different security): stored yfinance history"},
     "CEG":  {"valid_from": date(2022, 1, 26), "valid_to": date(2022, 2, 1), "current_from": date(2022, 2, 2),
              "name": "Constellation Energy when-issued trading before Intrinio's first bar: stored yfinance history"},

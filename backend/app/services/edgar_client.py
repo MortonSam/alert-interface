@@ -60,7 +60,7 @@ PREDECESSOR_CIKS: dict[str, list[str]] = {
     "AVB":  ["0000915912"],   # AVALONBAY COMMUNITIES INC
     "EA":   ["0000712515"],   # ELECTRONIC ARTS INC
     "EQR":  ["0000906107"],   # EQUITY RESIDENTIAL
-    "PSKY": ["0000813828", "0002041610"],   # Paramount Global -> Paramount Skydance Corp
+    "SKYD": ["0000813828", "0002041610"],   # Paramount Global -> Paramount Skydance Corp; the ticker became SKYD on 2026-10-06 (the rows moved with it)
     "BLK":  ["0001364742", "0002012383"],   # BlackRock Finance (old BlackRock) -> BlackRock, Inc.
     "BG":   ["0001144519", "0001996862"],   # Bunge Ltd -> Bunge Global SA
     "FERG": ["0001832433", "0002011641"],   # Ferguson plc -> Ferguson Enterprises Inc.

@@ -38,7 +38,7 @@ def test_a_redomiciled_ticker_gets_its_predecessor_then_its_current_record_from_
 
 
 def test_psky_keeps_its_stored_history_before_the_current_record():
-    rows = plan_records("PSKY", body(id="sec_z9qYDq", figi="BBG01WF624M3", first="2025-08-07"))
+    rows = plan_records("SKYD", body(id="sec_z9qYDq", figi="BBG01WF624M3", first="2025-08-07"))
     hist, cur = rows
     assert hist.role == STORED_HISTORY and hist.source == STORED and hist.intrinio_security_id is None
     assert (hist.valid_from, hist.valid_to) == (STORED_START, date(2025, 8, 6))
@@ -56,7 +56,7 @@ def test_every_declared_symbol_tiles_the_stored_window_with_exactly_one_record_p
 
 def test_the_stored_history_list_is_exactly_the_five_declared_spans():
     assert {sym: (r["valid_from"], r["valid_to"]) for sym, r in STORED_HISTORY_ROWS.items()} == {
-        "PSKY": (STORED_START, date(2025, 8, 6)),
+        "SKYD": (STORED_START, date(2025, 8, 6)),
         "CEG": (date(2022, 1, 26), date(2022, 2, 1)),
         "HONA": (date(2026, 6, 17), date(2026, 6, 28)),
         "Q": (date(2025, 10, 29), date(2025, 11, 3)),

@@ -31,9 +31,9 @@ async def test_the_filing_agents_cik_is_never_merged_and_a_predecessors_is():
     vals = [x["val"] for x in f["facts"]["us-gaap"]["EarningsPerShareDiluted"]["units"]["USD/shares"]]
     assert vals == [6.75, 4.93] and e.calls == ["0000909832"]                          # Workiva's accession prefix fetches nothing
     e = FakeEdgar()
-    f = await company_facts_merged(e, "0002041610", "PSKY")
+    f = await company_facts_merged(e, "0002041610", "SKYD")
     vals = [x["val"] for x in f["facts"]["us-gaap"]["EarningsPerShareDiluted"]["units"]["USD/shares"]]
     assert vals == [0.10, 0.22] and e.calls == ["0002041610", "0000813828"]              # the named predecessor is merged
-    assert PREDECESSOR_CIKS["PSKY"] == ["0000813828", "0002041610"]
+    assert PREDECESSOR_CIKS["SKYD"] == ["0000813828", "0002041610"] and "PSKY" not in PREDECESSOR_CIKS
     from app.scripts.backfill_report_timing import CIK_OVERRIDES
     assert CIK_OVERRIDES is PREDECESSOR_CIKS
