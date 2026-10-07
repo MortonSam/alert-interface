@@ -131,3 +131,23 @@ def test_release_parser_reads_the_other_common_phrasings():
     assert V.parse_release_eps("16 Weeks Ended August 30, 2026. Net income was $2.998 billion, $6.75 per diluted share, compared to $5.87 last year.")["period_end"] == date(2026, 8, 30)
     assert V.parse_release_eps("Core operating income of $2.26 per diluted share.") is None
     assert exhibit_text([("0000037996-26-000155-index-headers.html", "x" * 7000), ("exhibit99tojuly282026for.htm", "y" * 600)])[0] == "exhibit99tojuly282026for.htm"
+
+
+def test_a_corporate_action_inside_the_window_means_not_meaningful_yet_and_leaves_history():
+    today = date(2026, 10, 7)
+    rel = {"eps": 32.87, "period_end": date(2026, 9, 3), "accession": "x"}
+    spin = [{"kind": "spin_off", "date": date(2026, 6, 29), "name": "Solstice"}]
+    s = V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, spin)
+    assert s["status"] == "not_meaningful_yet" and s["pe"] is None and s["reason"] == "Spun off Solstice on Jun 29, 2026; 4 full quarters after it are needed"
+    assert V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, [{"kind": "spin_off", "date": date(2025, 6, 1), "name": None}])["status"] == "ok"   # before the window
+    after = [{"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}]                                                             # after the window, before the price
+    assert V.snapshot_with_actions(1063.96, MU_Q, date(2026, 9, 30), rel, today, after)["status"] == "not_meaningful_yet"
+    assert V.action_reason({"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}) == "Renamed from EQR on Oct 5, 2026 after a merger; 4 full quarters after it are needed"
+    assert V.action_reason({"kind": "spin_off", "date": date(2026, 1, 5), "name": None}).startswith("Spun off a business on Jan 5, 2026")
+    s = V.sector_summary([("ok", 10.0)] * 8 + [("not_meaningful_yet", None)] * 2, active=10)
+    assert s["shown"] and s["with_pe"] == 8 and s["fresh"] == 10                              # covered, but out of the median
+    bars = [(date(2026, 7, 1), 100.0), (date(2026, 7, 2), 110.0), (date(2026, 7, 3), 120.0)]
+    qs = [q(date(2025, 9, 30), 2.0, date(2025, 11, 1)), q(date(2025, 12, 31), 2.0, date(2026, 2, 1)), q(date(2026, 3, 31), 2.0, date(2026, 5, 1)), q(date(2026, 6, 30), 2.0, date(2026, 6, 30))]
+    h = V.pe_history_clean(bars, qs, 13.0, [date(2026, 1, 15)])
+    assert h["sessions"] == 0 and h["excluded"] == 3                                           # every window holds the action
+    assert V.pe_history_clean(bars, qs, 13.0, [date(2024, 1, 1)])["sessions"] == 3

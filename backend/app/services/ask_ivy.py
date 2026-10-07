@@ -184,7 +184,7 @@ PHRASES: dict[str, str] = {
     "upgrades in the last month": "{value} upgrades in the past month",
     "P/E": "{value} times its earnings of the last four reported quarters",
     "five-year median P/E": "{value}",
-    "sessions below today's P/E": "{value} of its sessions over the past five years",
+    "sessions below today's P/E": "{value} of its sessions over the past five years",   # with the session count when stored (DENOMINATORS)
     "sector median P/E": "{value}",
 }
 _WINDOW_VALUE = re.compile(r"close (?P<base>[A-Z][a-z]{2} \d{1,2}, \d{4}) to close (?P<after>[A-Z][a-z]{2} \d{1,2}, \d{4})")
@@ -199,6 +199,7 @@ DENOMINATORS: list[tuple[str, str, str]] = [
     ("beats followed by a fall", "beats", "{value} of its last {denominator} beats"),
     ("reports moving more", "reports in the sample", "{value} of its last {denominator} reports"),
     ("beats followed by a fall", "reports in the sample", "{value} of its beats in its last {denominator} reports"),
+    ("sessions below today's P/E", "sessions compared", "{value} of its {denominator} sessions over the past five years"),
 ]
 
 
@@ -213,6 +214,7 @@ def with_denominators(facts: list[dict]) -> list[dict]:
             continue
         n["phrase"] = template.format(value=n["value"], denominator=d["value"])
         n["companions"] = [d["id"]]
+        d["hidden"] = True          # offered to the model only inside the numerator's phrase, so it cannot be placed twice; still rendered and receipted
         done.add(num)
     return facts
 
@@ -308,6 +310,9 @@ def word_facts(raw: dict) -> list[dict]:
             out.append(_fact("next_report_timing", "next report timing", B.TIMING_PHRASE[nxt["timing"]], nxt["date"], "events.report_timing", "word"))
     pe = raw.get("pe")
     if pe:
+        if pe.get("sector") == "Real Estate":
+            from app.services.questions import REIT_NOTE
+            out.append(_fact("earnings_measure_note", "how real estate companies are judged", REIT_NOTE, pe["as_of"], "services/questions REIT_NOTE", "word"))
         if pe.get("hist_median") is not None:
             out.append(_fact("pe_vs_history", "P/E against its five-year median", "above" if pe["pe"] > pe["hist_median"] else "below" if pe["pe"] < pe["hist_median"] else "at",
                              pe["as_of"], "pe_snapshots.pe against pe_snapshots.hist_median", "word"))
@@ -348,7 +353,7 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
 def build_prompt(pack: dict, question: str) -> str:
     lines = [f"{{fact:{f['id']}}} = {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "")
              + (" [word]" if f["kind"] == "word" else "") + (f' → reads "{f["phrase"]}"' if f.get("phrase") and f["phrase"] != f["value"] else "")
-             for f in pack["facts"]]
+             for f in pack["facts"] if not f.get("hidden")]
     context = "\n".join(f"- {c}" for c in pack["context"]) or "- (nothing shown yet)"
     return f"""You are Ivy, answering a visitor's question about {pack['name']} ({pack['symbol']}) on a stock page. You may use ONLY the stored facts below. Nothing else you know about the company, its products, its valuation or the market may enter the answer.
 
@@ -368,7 +373,7 @@ RULES
 4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
 5. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: say plainly in the first sentence that this page's data does not cover it, then what the facts do hold that is closest, with placeholders. Partly: say what they show and what they do not.
 6. Never give a recommendation, a target, or an opinion about value; describe what the data shows and the idea behind it. Never call the stock cheap, expensive, undervalued or overvalued; a P/E is compared with the company's own history and its sector, nothing more.
-6a. Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its last <count> beats", so write "fell after {{fact:beats_followed_by_a_fall}}". A move placeholder reads "a <signed percentage> move", so write "the stock had {{fact:1_day_move}} the next session", never "rose {{fact:1_day_move}}".
+6a. A placeholder's phrase is a complete clause ending: follow it with punctuation or a conjunction, never with more words about the same quantity ("{{fact:sessions_below_today_s_p_e}}." not "{{fact:sessions_below_today_s_p_e}} of the sessions tracked"). Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its last <count> beats", so write "fell after {{fact:beats_followed_by_a_fall}}". A move placeholder reads "a <signed percentage> move", so write "the stock had {{fact:1_day_move}} the next session", never "rose {{fact:1_day_move}}".
 7. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
 
 Answer:"""

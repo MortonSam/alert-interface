@@ -64,6 +64,14 @@ async def run(argv: list[str]) -> int:
                 WHERE t.symbol = ANY(:s) AND hr.event_type = 'earnings' AND hr.event_date <= :t) x GROUP BY symbol"""), {"s": symbols, "t": today})).all())
         releases = {r[0]: {"report_date": r[1], "period_end": r[2], "eps": float(r[3]), "accession": r[4]} for r in
                     (await s.execute(text("SELECT DISTINCT ON (symbol) symbol, report_date, period_end, diluted_eps_gaap, accession FROM release_eps WHERE symbol = ANY(:s) ORDER BY symbol, report_date DESC"), {"s": symbols})).all()}
+        # recorded corporate actions: spin-offs (events.spin_off), actions recorded by record_corporate_action (events.other with
+        # metadata.corporate_action) and rename-merges (ticker_aliases)
+        actions: dict[str, list[dict]] = {}
+        for r in (await s.execute(text("""SELECT t.symbol, e.event_date, COALESCE(e.metadata->>'corporate_action', 'spin_off'), e.metadata->>'counterparty' FROM events e
+            JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action'))"""), {"s": symbols})).all():
+            actions.setdefault(r[0], []).append({"kind": r[2], "date": r[1], "name": r[3]})
+        for r in (await s.execute(text("SELECT symbol, old_symbol, renamed_on FROM ticker_aliases WHERE symbol = ANY(:s)"), {"s": symbols})).all():
+            actions.setdefault(r[0], []).append({"kind": "rename_merge", "date": r[2], "name": r[1]})
         stored: dict[str, list[dict]] = {}
         for r in (await s.execute(text("SELECT symbol, period_end, period_start, eps, filed_on, form, derived FROM eps_quarters WHERE symbol = ANY(:s) ORDER BY symbol, period_end"), {"s": symbols})).all():
             stored.setdefault(r[0], []).append({"end": r[1], "start": r[2], "eps": float(r[3]), "filed": r[4], "form": r[5], "derived": bool(r[6]), "source": "xbrl"})
@@ -94,14 +102,14 @@ async def run(argv: list[str]) -> int:
             rel = releases.get(sym)
             rel = rel if rel and lr and rel["report_date"] == lr else None
             close = closes.get(sym)
-            snap = V.snapshot(close[1] if close else None, quarters, lr, rel, today)
+            snap = V.snapshot_with_actions(close[1] if close else None, quarters, lr, rel, today, actions.get(sym, []))
             snap["as_of_date"] = close[0] if close else today
             snap["price"] = close[1] if close else None
             if snap["status"] == "ok":
                 async with ScriptSessionLocal() as s:
                     bars = [(d, float(c)) for d, c in (await s.execute(text("SELECT date, close FROM price_bars_shadow WHERE symbol = :s AND date >= :d ORDER BY date"),
                                                                         {"s": sym, "d": today - timedelta(days=366 * V.RANGE_YEARS)})).all()]
-                snap["history"] = V.pe_history(bars, quarters, snap["pe"])
+                snap["history"] = V.pe_history_clean(bars, quarters, snap["pe"], [a["date"] for a in actions.get(sym, [])])
             snapshots[sym] = snap
     finally:
         await edgar.close()
@@ -141,13 +149,17 @@ async def run(argv: list[str]) -> int:
                     fresh = EXCLUDED.fresh, active = EXCLUDED.active, shown = EXCLUDED.shown, reason = EXCLUDED.reason, computed_at = now()"""),
                     {"sec": sec, "d": as_of, "m": summ["median_pe"], "w": summ["with_pe"], "f": summ["fresh"], "a": summ["active"], "sh": summ["shown"], "r": summ["reason"]})
             await s.commit()
-    counts = {k: sum(1 for sn in snapshots.values() if sn["status"] == k) for k in ("ok", "not_meaningful", "missing")}
-    print(f"\n  coverage: {counts['ok']} with a P/E, {counts['not_meaningful']} not meaningful, {counts['missing']} missing; {refreshed} XBRL read(s), {failed} failed")
+    counts = {k: sum(1 for sn in snapshots.values() if sn["status"] == k) for k in ("ok", "not_meaningful", "not_meaningful_yet", "missing")}
+    print(f"\n  coverage: {counts['ok']} with a P/E, {counts['not_meaningful']} not meaningful, {counts['not_meaningful_yet']} not meaningful yet (corporate action in the window), "
+          f"{counts['missing']} missing; {refreshed} XBRL read(s), {failed} failed")
+    for sym, sn in sorted(snapshots.items()):
+        if sn["status"] == "not_meaningful_yet":
+            print(f"    {sym}: {sn['reason']}")
     print(f"  {'sector':<28} {'P/E':>5} {'n/m':>5} {'miss':>5} {'active':>7}  median  shown")
     missing_reasons: dict[str, int] = {}
     for sec in sorted(sectors):
         rows = [snapshots[sym] for sym, s2 in tickers if (s2 or "unclassified") == sec and sym in snapshots]
-        ok = sum(1 for r in rows if r["status"] == "ok"); nm = sum(1 for r in rows if r["status"] == "not_meaningful"); miss = active[sec] - ok - nm
+        ok = sum(1 for r in rows if r["status"] == "ok"); nm = sum(1 for r in rows if r["status"] in ("not_meaningful", "not_meaningful_yet")); miss = active[sec] - ok - nm
         summ = sectors[sec]
         print(f"  {sec:<28} {ok:>5} {nm:>5} {miss:>5} {active[sec]:>7}  {summ['median_pe'] if summ['median_pe'] is not None else '—':>6}  {'yes' if summ['shown'] else 'no: ' + (summ['reason'] or '')}")
     for sn in snapshots.values():

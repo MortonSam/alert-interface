@@ -261,3 +261,16 @@ def test_pe_word_facts_and_the_valuation_verdict_check():
     assert A.check_output("Its P/E is {fact:p_e}, below its five-year median.", {"p_e"}) == []
     facts = [{"id": "pe_vs_sector", "name": "x", "value": "below", "as_of": None, "source": None, "kind": "word", "phrase": "below"}]
     assert "contradicts" in A.verify_comparisons("It sits above its sector median.", facts)[0]
+
+
+def test_real_estate_note_fact_and_the_session_share_reads_as_one_clause():
+    w = {f["id"]: f["value"] for f in A.word_facts({"pe": {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8}})}
+    assert w["earnings_measure_note"].startswith("Real estate companies are usually judged against funds from operations")
+    assert "earnings_measure_note" not in {f["id"] for f in A.word_facts({"pe": {"pe": 14.3, "as_of": date(2026, 10, 5), "hist_median": 16.8, "sector": "Information Technology", "sector_median": None}})}
+    facts = A.with_denominators(A.number_facts([], [{"key": "pe_compare", "inputs": [{"name": "sessions below today's P/E", "value": "38%", "as_of": "2026-10-05", "source": "s"},
+                                                                                     {"name": "sessions compared", "value": "871", "as_of": "2026-10-05", "source": "s"}]}]))
+    text, inputs = A.render("It has been lower in {fact:sessions_below_today_s_p_e}.", facts)
+    assert text == "It has been lower in 38% of its 871 sessions over the past five years."
+    assert [i["value"] for i in inputs] == ["38%", "871"]
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": facts, "context": [], "fingerprint": "x"}
+    assert "{fact:sessions_compared}" not in A.build_prompt(pack, "q") and "{fact:sessions_below_today_s_p_e}" in A.build_prompt(pack, "q")   # the denominator is not offered on its own

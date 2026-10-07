@@ -179,3 +179,16 @@ def test_9_pe_compares_with_history_and_sector_and_never_passes_a_verdict():
     assert_clean(q)
     q = Q.q_pe(**{**kw, "hist_median": None, "hist_share_above": None, "hist_sessions": None, "hist_excluded": None}, sector_median=None)
     assert q["data"] == "MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026."
+
+
+def test_9_real_estate_adds_the_funds_from_operations_note_and_the_pe_question_always_takes_a_slot():
+    kw = dict(name="Vornado", symbol="VMRK", pe=26.0, window_start=date(2025, 7, 1), window_end=date(2026, 6, 30), as_of=date(2026, 10, 5), hist_median=24.7, hist_share_above=60,
+              hist_sessions=1256, hist_excluded=0, hist_first=date(2021, 10, 4), hist_last=date(2026, 10, 5), sector="Real Estate", sector_median=30.8)
+    q = Q.q_pe(**kw)
+    assert q["idea"].endswith(Q.REIT_NOTE) and q["idea"].count(". ") <= 1
+    assert_clean(q)
+    assert Q.REIT_NOTE not in Q.q_pe(**{**kw, "sector": "Financials"})["idea"]
+    cands = [{"key": k} for k in ("reaction_normal", "beat_fell", "ex_dividend", "usual_move", "volatile_now", "pe_compare")]
+    assert [c["key"] for c in Q.choose(cands)] == ["reaction_normal", "beat_fell", "ex_dividend", "pe_compare"]        # the lowest-priority others give way
+    assert [c["key"] for c in Q.choose(cands[:5])] == ["reaction_normal", "beat_fell", "ex_dividend", "usual_move"]   # no P/E: unchanged
+    assert [c["key"] for c in Q.choose([{"key": "usual_move"}, {"key": "pe_compare"}])] == ["usual_move", "pe_compare"]

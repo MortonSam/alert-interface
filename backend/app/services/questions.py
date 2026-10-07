@@ -190,6 +190,9 @@ def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_rank: float, sam
 
 # 9 ─────────────────────────────────────────────────────────────────────────────
 PE_FORBIDDEN_WORDS = ("cheap", "expensive", "undervalued", "overvalued")     # never in a P/E answer: a ratio is not a verdict
+REIT_SECTOR = "Real Estate"
+REIT_NOTE = ("Real estate companies are usually judged against funds from operations rather than earnings, because depreciation makes their reported "
+             "earnings look small, so a REIT's P/E says less than other companies'.")
 
 
 def pe_history_words(pe: float, median: float) -> str:
@@ -224,15 +227,26 @@ def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: d
                    _input("coverage needed", needed, as_of, "services/valuation SECTOR_COVERAGE_MIN")]
     idea = ("P/E is the price paid for each dollar of the last year's earnings, and it means most when compared with the same company's history and its peers; "
             "for companies whose earnings swing with the cycle, a low P/E near a peak in earnings can mislead.")
+    if sector == REIT_SECTOR:
+        idea += " " + REIT_NOTE
     return _q("pe_compare", f"How does {name}'s P/E compare with its own history and its sector?", data, idea, inputs, as_of,
               "The latest stored P/E: the stored close over the four latest reported quarters' GAAP diluted EPS (XBRL, with the earnings release for a quarter XBRL does not "
               "hold yet); the five-year summary is the median and the share of sessions below today's value, after leaving out sessions with negative trailing EPS or a P/E "
               "above 100; the sector median shows only when at least 90% of the sector's active tickers have a fresh window.")
 
 
+PINNED = "pe_compare"     # question 9 always takes a slot when it qualifies, displacing the lowest-priority other question
+
+
 def choose(candidates: list[dict | None]) -> list[dict]:
-    """The first MAX_QUESTIONS answers that qualify, in catalog order."""
-    return [c for c in candidates if c][:MAX_QUESTIONS]
+    """The first MAX_QUESTIONS answers that qualify, in catalog order, except that the pinned question (the P/E comparison)
+    always takes a slot when it qualifies: the others fill the remaining slots in catalog order."""
+    qualified = [c for c in candidates if c]
+    pinned = [c for c in qualified if c["key"] == PINNED]
+    if not pinned:
+        return qualified[:MAX_QUESTIONS]
+    others = [c for c in qualified if c["key"] != PINNED][:MAX_QUESTIONS - 1]
+    return others + pinned[:1]
 
 
 __all__ = ["choose", "q_reaction_normal", "q_implied_big", "q_beat_fell", "q_big_move", "q_upgrades", "q_ex_dividend", "q_usual_move", "q_volatile_now", "q_pe", "short_name"]

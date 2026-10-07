@@ -24,6 +24,9 @@ RANGE_YEARS = 5
 RELEASE_TOLERANCE = 0.01          # a release figure this far from the XBRL figure for the same quarter is flagged
 SECTOR_COVERAGE_MIN = 0.90        # a sector median shows only when this share of the sector's active tickers has a fresh window
 NOT_MEANINGFUL_REASON = "lost money over the last four quarters"
+CLEAN_QUARTERS_NEEDED = 4         # after a spin-off, merger, share-exchange acquisition or rename-merge, this many full quarters must pass before a P/E
+ACTION_VERBS = {"spin_off": "Spun off {name} on {date}", "merger": "Merged with {name} on {date}", "acquisition": "Acquired {name} by share exchange on {date}",
+                "rename_merge": "Renamed from {name} on {date} after a merger"}
 REFRESH_AFTER_REPORT_DAYS = 100   # quarters are re-read from XBRL while a report this recent may not have landed in XBRL yet
 NEWER_REPORT_GRACE_DAYS = 20      # a report dated more than this many days after the latest XBRL quarter end is a newer quarter
 MAX_QUARTER_GAP_DAYS = 125        # the release quarter must directly follow the newest XBRL quarter; a longer gap means a quarter is missing
@@ -231,7 +234,7 @@ def snapshot(price: float | None, quarters: list[dict], latest_report: date | No
 def sector_summary(statuses: list[tuple[str, float | None]], active: int) -> dict:
     """Pure: the sector median over tickers with a P/E, shown only when fresh windows (ok or not meaningful) cover at least
     SECTOR_COVERAGE_MIN of the sector's active tickers. `statuses` are (status, pe) per ticker with a snapshot."""
-    fresh = sum(1 for s, _ in statuses if s in ("ok", "not_meaningful"))
+    fresh = sum(1 for s, _ in statuses if s in ("ok", "not_meaningful", "not_meaningful_yet"))   # a fresh window, with or without a usable P/E
     values = sorted(p for s, p in statuses if s == "ok" and p is not None)
     coverage = fresh / active if active else 0.0
     shown = active > 0 and coverage >= SECTOR_COVERAGE_MIN and bool(values)
@@ -247,3 +250,50 @@ def needs_refresh(stored_quarters: list[dict], latest_report: date | None, today
     if latest_report is None or (today - latest_report).days > REFRESH_AFTER_REPORT_DAYS:
         return False
     return newer_quarter_reported(stored_quarters, latest_report)
+
+
+def action_reason(action: dict) -> str:
+    """Pure: "Spun off <name> on <date>; four full quarters after it are needed". `action` is {kind, date, name}; a missing
+    name reads "a business"."""
+    from app.services.briefing import fmt_date
+    verb = ACTION_VERBS.get(action["kind"], "Had a corporate action ({kind}) on {date}").format(name=action.get("name") or "a business", date=fmt_date(action["date"]), kind=action["kind"])
+    return f"{verb}; {CLEAN_QUARTERS_NEEDED} full quarters after it are needed"
+
+
+def actions_in_window(actions: list[dict], start: date, as_of: date) -> list[dict]:
+    """Pure: the recorded corporate actions dated from the window's first day through the price date. An action after the
+    window's last quarter but before the price still breaks the comparison: today's post-action price over pre-action earnings."""
+    return [a for a in actions if start <= a["date"] <= as_of]
+
+
+def snapshot_with_actions(price: float | None, quarters: list[dict], latest_report: date | None, release: dict | None, as_of: date, actions: list[dict]) -> dict:
+    """Pure: snapshot(), then a window holding a spin-off, merger, share-exchange acquisition or rename-merge becomes
+    not_meaningful_yet with the action's reason: four clean quarters must exist before a P/E."""
+    snap = snapshot(price, quarters, latest_report, release, as_of)
+    if snap["window_start"] and snap["window_end"]:
+        inside = actions_in_window(actions, snap["window_start"], as_of)
+        if inside:
+            return {**snap, "status": "not_meaningful_yet", "pe": None, "reason": action_reason(max(inside, key=lambda a: a["date"]))}
+    return snap
+
+
+def pe_history_clean(bars: list[tuple[date, float]], quarters: list[dict], current: float | None, action_dates: list[date]) -> dict:
+    """Pure: pe_history, with sessions whose four-quarter window holds a corporate action excluded as well (and counted)."""
+    kept: list[float] = []
+    excluded = 0
+    first = last = None
+    for d, close in bars:
+        four = trailing_four(quarters, d, d)
+        if four is None:
+            continue
+        total = sum(q["eps"] for q in four)
+        if total <= 0 or total < MIN_EARNINGS_YIELD * close or any(four[0]["start"] <= a <= d for a in action_dates):
+            excluded += 1
+            continue
+        kept.append(round(close / total, 2))
+        first = first or d
+        last = d
+    out = {"sessions": len(kept), "excluded": excluded, "median": round(statistics.median(kept), 1) if kept else None, "first": first, "last": last, "share_above": None}
+    if kept and current is not None:
+        out["share_above"] = round(sum(1 for v in kept if v < current) / len(kept) * 100)
+    return out

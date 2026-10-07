@@ -2182,11 +2182,11 @@ async def check_pe_window_fresh(session) -> CheckResult:
                 UNION ALL
                 SELECT t.symbol, hr.event_date FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id WHERE hr.event_type = 'earnings' AND hr.event_date <= CURRENT_DATE) x GROUP BY symbol)
         SELECT l.symbol, l.as_of_date, l.latest_report, r.d FROM latest l JOIN reports r ON r.symbol = l.symbol
-        WHERE l.status IN ('ok', 'not_meaningful') AND (l.latest_report IS NULL OR r.d > l.latest_report) ORDER BY l.symbol"""))).all()
+        WHERE l.status IN ('ok', 'not_meaningful', 'not_meaningful_yet') AND (l.latest_report IS NULL OR r.d > l.latest_report) ORDER BY l.symbol"""))).all()
     if rows:
         return CheckResult("pe_window_fresh", ERROR, f"{len(rows)} stored P/E(s) rest on a window computed before the latest reported quarter",
                            [f"{sym}: P/E of {d} computed for the report of {lr}; latest report {rep}" for sym, d, lr, rep in rows[:10]])
-    n = (await session.execute(text("SELECT count(DISTINCT symbol) FROM pe_snapshots WHERE status IN ('ok', 'not_meaningful')"))).scalar() or 0
+    n = (await session.execute(text("SELECT count(DISTINCT symbol) FROM pe_snapshots WHERE status IN ('ok', 'not_meaningful', 'not_meaningful_yet')"))).scalar() or 0
     return CheckResult("pe_window_fresh", PASS, f"Every stored P/E ({n} tickers) rests on a window that holds the latest reported quarter")
 
 
