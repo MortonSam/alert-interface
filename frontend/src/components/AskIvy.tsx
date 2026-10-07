@@ -13,9 +13,9 @@ import { answerParts, asOfLabel } from "@/lib/questions";
  * the answer was checked against those facts before it is shown. Nothing here is typed by the page: the answer, its
  * receipts and its as-of come from the API; only the prompt copy and the error line are the page's own.
  */
-export function AskIvy({ symbol, name }: { symbol: string; name: string }) {
+export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string; name: string; initialAnswer?: QuestionAnswer | null }) {
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<QuestionAnswer | null>(null);
+  const [answer, setAnswer] = useState<QuestionAnswer | null>(initialAnswer);   // initialAnswer: a rendered answer for tests and previews
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -56,7 +56,7 @@ export function AskIvy({ symbol, name }: { symbol: string; name: string }) {
           <p className="text-foreground/90">
             {answerParts(answer.data, answer.inputs).map((part, j) =>
               part.receipt !== undefined ? (
-                <span key={j} title={part.receipt ?? undefined} className="font-semibold tabular-nums underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                <span key={j} title={part.receipt ?? undefined} className="font-semibold underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
               ) : part.term ? (
                 <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
               ) : (

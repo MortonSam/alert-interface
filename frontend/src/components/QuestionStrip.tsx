@@ -47,7 +47,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
                   <p className="text-foreground/90">
                     {answerParts(q.data, q.inputs).map((part, j) =>
                       part.receipt !== undefined ? (
-                        <span key={j} title={part.receipt ?? undefined} className="font-semibold tabular-nums underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                        <span key={j} title={part.receipt ?? undefined} className="font-semibold underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
                       ) : part.term ? (
                         <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
                       ) : (

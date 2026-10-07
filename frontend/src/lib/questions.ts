@@ -9,14 +9,18 @@ export function questionsHeader(shortName: string): string {
   return `Questions about ${shortName}, answered by Ivy from this page's data`;
 }
 
-/** One token per quantity: a date ("Oct 14, 2026"), an amount ("$1,213.37", "-$0.46"), a percentage ("+3.0%", "±7.0%"), a count
- * ("1,254"). Alternation order matters: dates first, then amounts, then percentages, then bare numbers. "1-day" and "20-day" name
- * windows and are left as words. */
-const DATE = String.raw`(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4}`;
+/** One token per quantity: a quote time ("Oct 6, 4:00 PM ET"), a date ("Oct 14, 2026"), an amount ("$1,213.37", "-$0.46"), a
+ * percentage ("+3.0%", "±7.0%"), a count ("1,254"). Alternation order matters: times, then dates, amounts, percentages, bare numbers.
+ * "1-day", "20-day", "52-week" and "S&P 500" are names and stay words. A quantity renders exactly as its text: the spans that carry
+ * receipts add no spacing of their own (no letter-spacing, word-spacing, gap or tabular figures; see renderedText.test). */
+const MONTH = String.raw`(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`;
+const DATETIME = String.raw`${MONTH} \d{1,2}, \d{1,2}:\d{2} (?:AM|PM) ET`;      // a quote time, one token: "Oct 6, 4:00 PM ET"
+const DATE = String.raw`${MONTH} \d{1,2}, \d{4}`;
 const AMOUNT = String.raw`[+\-±]?\$\d+(?:,\d{3})*(?:\.\d+)?`;
 const PERCENT = String.raw`[+\-±]?\d+(?:,\d{3})*(?:\.\d+)?%`;
-const COUNT = String.raw`\d+(?:,\d{3})*(?:\.\d+)?(?!-day|\d|[.,]\d|%)`;
-export const QUANTITY = new RegExp(String.raw`(?<![\w$.])(?:${DATE}|${AMOUNT}|${PERCENT}|${COUNT})`, "g");
+// a bare count; never the number inside a window or index name ("1-day", "20-day", "52-week", "S&P 500")
+const COUNT = String.raw`(?<!S&P )\d+(?:,\d{3})*(?:\.\d+)?(?!-(?:day|week|month|year|session)|\d|[.,]\d|%)`;
+export const QUANTITY = new RegExp(String.raw`(?<![\w$.])(?:${DATETIME}|${DATE}|${AMOUNT}|${PERCENT}|${COUNT})`, "g");
 
 /** The receipt behind a quantity in an answer: the input whose value contains it, as "name: value (as of …; source)". */
 export function receiptFor(token: string, inputs: BriefingInput[]): string | null {

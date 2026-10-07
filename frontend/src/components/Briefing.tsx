@@ -24,7 +24,7 @@ export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
             <p className="text-lg text-foreground/90 leading-relaxed">
               {answerParts(s.text, s.inputs).map((part, j) =>
                 part.receipt !== undefined ? (
-                  <span key={j} title={part.receipt ?? undefined} className="tabular-nums underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                  <span key={j} title={part.receipt ?? undefined} className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
                 ) : part.term ? (
                   <ExplainTip key={j} term={part.term}>
                     <span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
