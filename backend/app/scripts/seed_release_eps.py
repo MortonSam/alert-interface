@@ -7,6 +7,11 @@ for the latest report of any ticker whose P/E is missing because XBRL lags it.
     python -m app.scripts.seed_release_eps MU --write
     python -m app.scripts.seed_release_eps --symbols=HPE,PANW         # the same, as a flag
     python -m app.scripts.seed_release_eps --due --write      # every recent report without a row (the nightly step)
+    python -m app.scripts.seed_release_eps --due --no-model   # the pattern parser alone (nothing stores: both readers must agree)
+
+Two readers. The pattern parser (valuation.parse_release_eps) and the model (services/release_reader, Sonnet, with its verbatim quote
+verified by code) read every exhibit; a figure is stored only when both agree to the cent. A disagreement, a rejected quote or a
+reader that read nothing records the report as unread with both readings, and the morning digest lists it.
 """
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
 from app.services.step_outcomes import record_step_fields
 from app.services.valuation import implausible, parse_release_eps, year_over_year_note
+from app.services import release_reader as R
 
 STEP_LABEL = "Release EPS (8-K exhibits)"
 LOOKBACK_DAYS = 45
@@ -94,6 +100,17 @@ async def run(argv: list[str]) -> int:
     stored = parsed = unread = 0
     results = []
     yoy_warnings = []
+    disagreements = []
+    model_costs: list[float] = []
+    use_model = "--no-model" not in argv
+    model_client = None
+    if use_model:
+        from app.config import settings
+        if settings.anthropic_api_key:
+            from app.services.anthropic_client import AnthropicClient
+            model_client = AnthropicClient()
+        else:
+            print("  no Anthropic key: the model reader is off, so nothing can store (both readers must agree)", flush=True)
     try:
         for sym, report_date in rows:
             try:
@@ -114,20 +131,44 @@ async def run(argv: list[str]) -> int:
                             break
                     if hit:
                         break
-                if not hit:
-                    print(f"  {sym} {report_date}: 8-K {', '.join(r['accession'] for r in recs)}: no GAAP diluted EPS read"); unread += 1; continue
+                # the second reader: the model reads the same exhibit the pattern parser read (or the first press exhibit when it read none)
+                model = None
+                exhibit_for_model = ex[1] if ex else ""
+                if model_client is not None:
+                    try:
+                        cands = exhibit_candidates(texts)
+                        exhibit_for_model = ex[1] if ex else (cands[0][1] if cands else "")
+                        model = await R.model_read(model_client, exhibit_for_model, report_date)
+                        if model.get("cost_usd") is not None:
+                            model_costs.append(model["cost_usd"])
+                    except Exception as exc:
+                        print(f"  {sym} {report_date}: model reader failed: {redact(exc)[:100]}")
+                        model = None
+                if not hit and not (model and model.get("eps") is not None):
+                    print(f"  {sym} {report_date}: 8-K {', '.join(r['accession'] for r in recs)}: no GAAP diluted EPS read" + ("" if model else "; model read nothing")); unread += 1; continue
+                figure, note = R.decide(hit, model, (ex[1] if ex else exhibit_for_model) if model_client is not None else "")
+                if model_client is not None and figure is None:
+                    cost = f" (model ${model['cost_usd']:.4f})" if model and model.get("cost_usd") is not None else ""
+                    print(f"  {sym} {report_date}: UNREAD, {note}{cost}")
+                    disagreements.append(f"{sym} {report_date}: {note}")
+                    unread += 1; continue
+                if model_client is None and not hit:
+                    unread += 1; continue
                 why = implausible(hit["eps"], closes.get((sym, report_date)), adjusted.get((sym, report_date)))
                 if why:
                     print(f"  {sym} {report_date}: read {hit['eps']:+.2f} ({hit['how']}) but unread: {why}"); unread += 1; continue
+                if model_client is None:
+                    print(f"  {sym} {report_date}: pattern {hit['eps']:+.2f} ({hit['how']}); model reader off: not stored")
                 yoy = year_over_year_note(hit["eps"], priors.get((sym, report_date)))
                 if yoy:
                     yoy_warnings.append(f"{sym} {report_date}: {yoy}")
                     print(f"  {sym} {report_date}: year-over-year warning: {yoy}")
                 parsed += 1
-                print(f"  {sym} {report_date}: GAAP diluted EPS {hit['eps']:+.2f} ({hit['how']}; quarter ended {hit['period_end']}) from {rec['accession']} {ex[0]}")
+                cost = f"; model ${model['cost_usd']:.4f}, {model['input_tokens']} in / {model['output_tokens']} out" if model and model.get("cost_usd") is not None else ""
+                print(f"  {sym} {report_date}: GAAP diluted EPS {hit['eps']:+.2f} ({hit['how']}; quarter ended {hit['period_end']}) from {rec['accession']} {ex[0]}; {note}{cost}")
                 print(f"      evidence: {hit['evidence'][:200]}")
                 results.append({"symbol": sym, "report_date": report_date.isoformat(), "eps": hit["eps"], "period_end": hit["period_end"].isoformat() if hit["period_end"] else None, "accession": rec["accession"]})
-                if write:
+                if write and model_client is not None:
                     async with ScriptSessionLocal() as s:
                         await s.execute(text("""
                             INSERT INTO release_eps (symbol, report_date, period_end, diluted_eps_gaap, how, evidence, accession, exhibit, filed_on)
@@ -142,9 +183,14 @@ async def run(argv: list[str]) -> int:
                 print(f"  {sym} {report_date}: failed: {redact(exc)[:120]}"); unread += 1
     finally:
         await edgar.close()
-    print(f"  read {parsed}, stored {stored}, unread {unread}" + ("" if write else "; dry run, nothing written"))
+    total_cost = round(sum(model_costs), 4)
+    print(f"  read {parsed} (both readers agree), stored {stored}, unread {unread}, reader disagreements {len(disagreements)}; model reads {len(model_costs)}, "
+          f"cost ${total_cost:.4f} total, ${(total_cost / len(model_costs)) if model_costs else 0:.4f} per release" + ("" if write else "; dry run, nothing written"))
+    for d in disagreements:
+        print(f"    disagreement: {d[:300]}")
     if write and due:
-        await record_step_fields(STEP_LABEL, {"reports": len(rows), "read": parsed, "stored": stored, "unread": unread, "rows": results[:50], "yoy_warnings": yoy_warnings[:20], "error": None})
+        await record_step_fields(STEP_LABEL, {"reports": len(rows), "read": parsed, "stored": stored, "unread": unread, "rows": results[:50], "yoy_warnings": yoy_warnings[:20],
+                                              "disagreements": disagreements[:30], "model_reads": len(model_costs), "model_cost_usd": total_cost, "error": None})
     return 0
 
 

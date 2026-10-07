@@ -286,7 +286,7 @@ def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime
     release = outcomes.get("Release EPS (8-K exhibits)") or {}
     return digest_message(now.strftime("%Y-%m-%d"), sum(1 for _, ok in results if ok), len(results), failed, validate,
                           figures.get("chain_coverage_pct"), courier_summary(outcomes, now), closer.get("auto_voided") or None, feed_confs or None,
-                          release.get("yoy_warnings") or None, validate.get("hidden") or None)
+                          release.get("yoy_warnings") or None, validate.get("hidden") or None, release.get("disagreements") or None)
 
 
 RUN_LABEL = "Nightly run"                  # the pseudo-step whose outcome tells the story of the run itself
