@@ -18,6 +18,7 @@ import statistics
 from datetime import date, timedelta
 
 QUARTER_DAYS = (80, 100)          # a quarterly EPS fact covers a period this long
+EPS_FACT_MAX = 1_000_000          # an EPS fact beyond this is a tagging error (ICE's 2015 10-Qs carry $112,000,000 as EPS); Berkshire's class A EPS is ~30,000
 YEAR_DAYS = (350, 380)            # an annual one
 MIN_EARNINGS_YIELD = 0.01         # trailing EPS below 1% of price (P/E above 100) is excluded from history
 RANGE_YEARS = 5
@@ -253,6 +254,8 @@ def eps_quarters(facts: dict) -> list[dict]:
         except (KeyError, ValueError):
             continue
         days = (end - start).days
+        if abs(float(e["val"])) > EPS_FACT_MAX:
+            continue                                            # a dollar amount tagged as a per-share figure; never a quarter, never in a derivation
         row = {"end": end, "start": start, "eps": float(e["val"]), "filed": filed, "form": e.get("form", ""), "derived": False, "source": "xbrl"}
         if QUARTER_DAYS[0] <= days <= QUARTER_DAYS[1]:
             if end not in quarters or filed >= quarters[end]["filed"]:

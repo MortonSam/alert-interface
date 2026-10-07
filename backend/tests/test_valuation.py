@@ -183,3 +183,14 @@ def test_edgar_backoff_ladder_and_retry_after():
     assert backoff_delay(0, None) == RETRY_DELAYS_S[0] and backoff_delay(2, None) == RETRY_DELAYS_S[2]
     assert backoff_delay(3, None) is None                                                         # no retry left
     assert backoff_delay(0, "7") == 7.0 and backoff_delay(0, "0") == 1.0 and backoff_delay(1, "soon") == RETRY_DELAYS_S[1]
+
+
+def test_an_eps_fact_that_is_a_dollar_amount_is_dropped():
+    """ICE's 2015 10-Qs tag $112,000,000 as EarningsPerShareDiluted; the value overflowed eps_quarters and blocked the ticker's reread."""
+    facts = {"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": [
+        {"start": "2015-01-01", "end": "2015-03-31", "filed": "2016-05-04", "val": 112000000.0, "form": "10-Q"},
+        {"start": "2015-04-01", "end": "2015-06-30", "filed": "2015-08-05", "val": 0.81, "form": "10-Q"},
+        {"start": "2015-01-01", "end": "2015-12-31", "filed": "2016-02-04", "val": 112000000.0, "form": "10-K"}]}}}}}
+    qs = V.eps_quarters(facts)
+    assert [(q["end"].isoformat(), q["eps"]) for q in qs] == [("2015-06-30", 0.81)]
+    assert V.EPS_FACT_MAX >= 50_000                                                     # Berkshire's class A figure stays
