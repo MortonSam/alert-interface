@@ -209,7 +209,7 @@ def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: d
     """The stock's trailing P/E against its own five-year history and its sector. Shown with any stored P/E; the history and the
     sector clauses appear only when stored (a sector median is absent below 90% coverage, and the answer says so)."""
     data = f"{symbol} trades at {pe:.1f} times its earnings over {fmt_date(window_start)} to {fmt_date(window_end)}"
-    inputs = [_input("P/E", f"{pe:.1f}", as_of, "pe_snapshots: stored close over four reported quarters of GAAP diluted EPS (XBRL, else the earnings release)"),
+    inputs = [_input("P/E", f"{pe:.1f}", as_of, "pe_snapshots: stored close over four reported quarters of GAAP diluted EPS (XBRL, else the earnings release), restated across recorded splits"),
               _input("window start", fmt_date(window_start), window_start, "the first of the four quarters"), _input("window end", fmt_date(window_end), window_end, "the latest reported quarter")]
     if hist_median is not None and hist_share_above is not None and hist_sessions:
         data += (f", {pe_history_words(pe, hist_median)} its five-year median of {hist_median:.1f} and higher than in {hist_share_above}% of {hist_sessions:,} sessions"
@@ -235,7 +235,7 @@ def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: d
         idea += " " + REIT_NOTE
     return _q("pe_compare", f"How does {name}'s P/E compare with its own history and its sector?", data, idea, inputs, as_of,
               "The latest stored P/E: the stored close over the four latest reported quarters' GAAP diluted EPS (XBRL, with the earnings release for a quarter XBRL does not "
-              "hold yet); the five-year summary is the median and the share of sessions below today's value, after leaving out sessions with negative trailing EPS or a P/E "
+              "hold yet), every quarter and close restated to today's share count across recorded splits; the five-year summary is the median and the share of sessions below today's value, after leaving out sessions with negative trailing EPS or a P/E "
               "above 100; the sector median shows only when at least 90% of the sector's active tickers have a fresh window.")
 
 

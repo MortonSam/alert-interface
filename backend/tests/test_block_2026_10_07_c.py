@@ -8,7 +8,7 @@ from sqlalchemy import text
 from app.database import ScriptSessionLocal
 from app.scripts.list_release_eps import format_rows, xbrl_status
 from app.scripts.seed_dividends import CORRECTIONS, rebase_from_bars
-from app.scripts.validate_data import WARN, check_eps_quarter_outliers, run_checks
+from app.scripts.validate_data import ERROR, WARN, check_eps_quarter_outliers, check_pe_sanity, run_checks
 
 
 @pytest.mark.asyncio
@@ -67,3 +67,24 @@ def test_the_listing_names_each_rows_xbrl_status():
     lines = format_rows([base])
     assert lines[0].startswith("PANW   2026-09-01  quarter ended 2026-07-31  GAAP diluted EPS -0.35  (highlights sentence; 8-K 0001327567-26-000019)  awaiting XBRL")
     assert lines[1] == "       evidence: GAAP net loss of $(0.35) per diluted share more"
+
+
+@pytest.mark.asyncio
+async def test_pe_sanity_flags_a_sub_two_pe_and_an_old_version():
+    sym = "ZZPE"
+    try:
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("""INSERT INTO pe_snapshots (symbol, as_of_date, price, status, trailing_eps, pe, computation_version, computed_at)
+                                    VALUES (:s, '2026-10-06', 157.63, 'ok', 167.96, 0.94, 2, now())"""), {"s": sym})
+            await s.commit()
+        r = (await run_checks([check_pe_sanity]))[0]
+        assert r.level == ERROR and any(row == f"{sym}: P/E 0.94 (price 157.63 over trailing EPS 167.96)" for row in r.rows)
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("UPDATE pe_snapshots SET pe = 15.6, trailing_eps = 10.1, computation_version = 1 WHERE symbol = :s"), {"s": sym})
+            await s.commit()
+        r = (await run_checks([check_pe_sanity]))[0]
+        n = int(r.message.split(" and ")[1].split()[0])
+        assert r.level == ERROR and n >= 1 and "computed by an older version" in r.message          # the listing is capped; the count carries the row
+    finally:
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("DELETE FROM pe_snapshots WHERE symbol = :s"), {"s": sym}); await s.commit()

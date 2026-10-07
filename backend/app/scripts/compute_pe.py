@@ -75,6 +75,11 @@ async def run(argv: list[str]) -> int:
                     (await s.execute(text("SELECT DISTINCT ON (symbol) symbol, report_date, period_end, diluted_eps_gaap, accession FROM release_eps WHERE symbol = ANY(:s) ORDER BY symbol, report_date DESC"), {"s": symbols})).all()}
         # recorded corporate actions: spin-offs (events.spin_off), actions recorded by record_corporate_action (events.other with
         # metadata.corporate_action) and rename-merges (ticker_aliases)
+        # recorded splits, [(effective date, new-for-old ratio, recorded at)]: quarters and closes are restated across them (valuation.split_factor)
+        splits: dict[str, list[tuple]] = {}
+        for r in (await s.execute(text("""SELECT t.symbol, e.event_date, e.metadata->>'split_ratio', e.created_at FROM events e JOIN tickers t ON t.id = e.ticker_id
+            WHERE t.symbol = ANY(:s) AND e.event_type = 'split' ORDER BY e.event_date"""), {"s": symbols})).all():
+            splits.setdefault(r[0], []).append((r[1], V.split_ratio(r[2]), r[3]))
         actions: dict[str, list[dict]] = {}
         for r in (await s.execute(text("""SELECT t.symbol, e.event_date, COALESCE(e.metadata->>'corporate_action', 'spin_off'), e.metadata->>'counterparty' FROM events e
             JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action'))"""), {"s": symbols})).all():
@@ -82,9 +87,11 @@ async def run(argv: list[str]) -> int:
         for r in (await s.execute(text("SELECT symbol, old_symbol, renamed_on FROM ticker_aliases WHERE symbol = ANY(:s)"), {"s": symbols})).all():
             actions.setdefault(r[0], []).append({"kind": "rename_merge", "date": r[2], "name": r[1]})
         stored: dict[str, list[dict]] = {}
-        for r in (await s.execute(text("SELECT symbol, period_end, period_start, eps, filed_on, form, derived, diluted_shares FROM eps_quarters WHERE symbol = ANY(:s) ORDER BY symbol, period_end"), {"s": symbols})).all():
+        fetched: dict[str, datetime] = {}
+        for r in (await s.execute(text("SELECT symbol, period_end, period_start, eps, filed_on, form, derived, diluted_shares, fetched_at FROM eps_quarters WHERE symbol = ANY(:s) ORDER BY symbol, period_end"), {"s": symbols})).all():
             stored.setdefault(r[0], []).append({"end": r[1], "start": r[2], "eps": float(r[3]), "filed": r[4], "form": r[5], "derived": bool(r[6]), "source": "xbrl",
                                                 "diluted_shares": float(r[7]) if r[7] is not None else None})
+            fetched[r[0]] = max(fetched.get(r[0], r[8]), r[8])
     print(f"{STEP_LABEL}: {len(symbols)} active ticker(s) ({'write' if write else 'dry run'}); closes through {max((c[0] for c in closes.values()), default=None)}", flush=True)
     edgar = EdgarClient()
     refreshed = failed = 0
@@ -93,10 +100,12 @@ async def run(argv: list[str]) -> int:
         for sym in symbols:
             quarters = stored.get(sym, [])
             lr = latest_report.get(sym)
-            if reread or V.needs_refresh(quarters, lr, today):
+            # a split recorded since the quarters were last read restates them: read again (stored rows carry the basis of their read)
+            split_since = any(created and sym in fetched and created > fetched[sym] for _, _, created in splits.get(sym, []))
+            if reread or split_since or V.needs_refresh(quarters, lr, today):
                 try:
                     cik = await edgar.get_cik(sym)
-                    quarters = V.eps_quarters(await company_facts_merged(edgar, cik, sym)) if cik else []
+                    quarters = V.eps_quarters(await company_facts_merged(edgar, cik, sym), [(d, ratio) for d, ratio, _ in splits.get(sym, [])]) if cik else []
                     refreshed += 1
                     if write:
                         async with ScriptSessionLocal() as s:
@@ -123,6 +132,7 @@ async def run(argv: list[str]) -> int:
                 async with ScriptSessionLocal() as s:
                     bars = [(d, float(c)) for d, c in (await s.execute(text("SELECT date, close FROM price_bars_shadow WHERE symbol = :s AND date >= :d ORDER BY date"),
                                                                         {"s": sym, "d": today - timedelta(days=366 * V.RANGE_YEARS)})).all()]
+                bars = V.rebase_closes(bars, [(d, ratio) for d, ratio, _ in splits.get(sym, [])])
                 snap["history"] = V.pe_history_clean(bars, quarters, snap["pe"], [a["date"] for a in actions.get(sym, [])])
             snapshots[sym] = snap
     finally:
@@ -148,13 +158,14 @@ async def run(argv: list[str]) -> int:
                 h = sn.get("history") or {}
                 await s.execute(text("""
                     INSERT INTO pe_snapshots (symbol, as_of_date, price, status, reason, trailing_eps, pe, window_start, window_end, window_source, latest_report, quarters,
-                                              hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last, computed_at)
-                    VALUES (:s, :d, :p, :st, :r, :te, :pe, :ws, :we, :src, :lr, CAST(:q AS jsonb), :hm, :hs, :hn, :hx, :hf, :hl, now())
+                                              hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last, computed_at, computation_version)
+                    VALUES (:s, :d, :p, :st, :r, :te, :pe, :ws, :we, :src, :lr, CAST(:q AS jsonb), :hm, :hs, :hn, :hx, :hf, :hl, now(), :v)
                     ON CONFLICT (symbol, as_of_date) DO UPDATE SET price = EXCLUDED.price, status = EXCLUDED.status, reason = EXCLUDED.reason, trailing_eps = EXCLUDED.trailing_eps,
                         pe = EXCLUDED.pe, window_start = EXCLUDED.window_start, window_end = EXCLUDED.window_end, window_source = EXCLUDED.window_source, latest_report = EXCLUDED.latest_report,
                         quarters = EXCLUDED.quarters, hist_median = EXCLUDED.hist_median, hist_share_above = EXCLUDED.hist_share_above, hist_sessions = EXCLUDED.hist_sessions,
-                        hist_excluded = EXCLUDED.hist_excluded, hist_first = EXCLUDED.hist_first, hist_last = EXCLUDED.hist_last, computed_at = now()"""),
-                    {"s": sym, "d": sn["as_of_date"], "p": sn["price"], "st": sn["status"], "r": sn["reason"], "te": sn["trailing_eps"], "pe": sn["pe"], "ws": sn["window_start"], "we": sn["window_end"],
+                        hist_excluded = EXCLUDED.hist_excluded, hist_first = EXCLUDED.hist_first, hist_last = EXCLUDED.hist_last, computed_at = now(),
+                        computation_version = EXCLUDED.computation_version"""),
+                    {"v": V.PE_COMPUTATION_VERSION, "s": sym, "d": sn["as_of_date"], "p": sn["price"], "st": sn["status"], "r": sn["reason"], "te": sn["trailing_eps"], "pe": sn["pe"], "ws": sn["window_start"], "we": sn["window_end"],
                      "src": sn["window_source"], "lr": sn["latest_report"], "q": json.dumps(sn["quarters"]) if sn["quarters"] else None, "hm": h.get("median"), "hs": h.get("share_above"),
                      "hn": h.get("sessions"), "hx": h.get("excluded"), "hf": h.get("first"), "hl": h.get("last")})
             for sec, summ in sectors.items():

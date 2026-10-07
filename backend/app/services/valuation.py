@@ -241,10 +241,27 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
     return None
 
 
-def eps_quarters(facts: dict) -> list[dict]:
+PE_COMPUTATION_VERSION = 2       # 2 (2026-10-07): quarters and closes restated to the current share basis across recorded splits before any window or history
+
+
+def split_factor(filed: date, splits: list[tuple[date, float | None]] | None) -> tuple[float, list[str]]:
+    """Pure: (the product of the ratios of every recorded split effective after `filed`, the splits' labels). A fact filed before
+    a split is on the old share basis; one filed after it is restated by the company. A split with no readable ratio is ignored."""
+    factor, notes = 1.0, []
+    for day, ratio in splits or []:
+        if ratio and filed < day:
+            factor *= ratio
+            notes.append(f"{ratio:g}:1 split of {day.isoformat()}" if ratio >= 1 else f"1:{1 / ratio:g} reverse split of {day.isoformat()}")
+    return factor, notes
+
+
+def eps_quarters(facts: dict, splits: list[tuple[date, float | None]] | None = None) -> list[dict]:
     """Pure: quarterly GAAP diluted EPS from a companyfacts document, oldest first: the quarterly facts, plus the fourth
     quarter derived as the fiscal year's annual figure less the three quarters inside it. One value per period end, the
-    latest filed wins. Each: {end, start, eps, filed, form, derived, source}."""
+    latest filed wins. Every fact is first restated to the current share basis across `splits` [(effective date, new-for-old
+    ratio)]: a fact filed before a split is divided by its ratio (BKNG's 10-K of Feb 2026, before the 25:1 split of Apr 6, 2026,
+    carries $79.66 that is $3.19 today), so a derived quarter never subtracts restated quarters from an unrestated year.
+    Each: {end, start, eps, filed, form, derived, source, diluted_shares, rebased?}."""
     series = (facts.get("facts", {}).get("us-gaap", {}).get("EarningsPerShareDiluted", {}).get("units", {}).get("USD/shares", []))
     quarters: dict[date, dict] = {}
     annual: list[dict] = []
@@ -256,7 +273,10 @@ def eps_quarters(facts: dict) -> list[dict]:
         days = (end - start).days
         if abs(float(e["val"])) > EPS_FACT_MAX:
             continue                                            # a dollar amount tagged as a per-share figure; never a quarter, never in a derivation
-        row = {"end": end, "start": start, "eps": float(e["val"]), "filed": filed, "form": e.get("form", ""), "derived": False, "source": "xbrl"}
+        factor, notes = split_factor(filed, splits)
+        row = {"end": end, "start": start, "eps": round(float(e["val"]) / factor, 4), "filed": filed, "form": e.get("form", ""), "derived": False, "source": "xbrl"}
+        if notes:
+            row["rebased"] = "; ".join(notes)
         if QUARTER_DAYS[0] <= days <= QUARTER_DAYS[1]:
             if end not in quarters or filed >= quarters[end]["filed"]:
                 quarters[end] = row
@@ -268,11 +288,19 @@ def eps_quarters(facts: dict) -> list[dict]:
         inside = [q for q in quarters.values() if a["start"] <= q["start"] and q["end"] < a["end"]]
         if len(inside) == 3:
             quarters[a["end"]] = {"end": a["end"], "start": max(q["end"] for q in inside) + timedelta(days=1), "eps": round(a["eps"] - sum(q["eps"] for q in inside), 4),
-                                  "filed": a["filed"], "form": a["form"], "derived": True, "source": "xbrl"}
-    shares = share_quarters(facts)
+                                  "filed": a["filed"], "form": a["form"], "derived": True, "source": "xbrl", **({"rebased": a["rebased"]} if a.get("rebased") else {})}
+    shares = share_quarters(facts, splits)
     for q in quarters.values():
         q["diluted_shares"] = shares.get(q["end"])
     return sorted(quarters.values(), key=lambda q: q["end"])
+
+
+def rebase_closes(bars: list[tuple[date, float]], splits: list[tuple[date, float | None]] | None) -> list[tuple[date, float]]:
+    """Pure: raw closes restated to the current share basis: a close before a split is divided by its ratio, as the quarters are,
+    so a session's P/E is one basis over the same basis."""
+    if not splits:
+        return bars
+    return [(d, c / split_factor(d, splits)[0]) for d, c in bars]
 
 
 SHARES_TAG = "WeightedAverageNumberOfDilutedSharesOutstanding"
@@ -280,8 +308,9 @@ SHARE_JUMP_PCT = 10               # a quarter-to-quarter change in diluted share
 SCALE_FLIP_RATIO = 20             # a swing this large between quarters is a units change in the facts (thousands vs units), never a real count
 
 
-def share_quarters(facts: dict) -> dict[date, float]:
-    """Pure: {quarter end: weighted-average diluted shares} from a companyfacts document (quarterly facts only, latest filed wins)."""
+def share_quarters(facts: dict, splits: list[tuple[date, float | None]] | None = None) -> dict[date, float]:
+    """Pure: {quarter end: weighted-average diluted shares} from a companyfacts document (quarterly facts only, latest filed wins),
+    restated to the current share basis across `splits` (a count filed before a split is multiplied by its ratio)."""
     series = facts.get("facts", {}).get("us-gaap", {}).get(SHARES_TAG, {}).get("units", {}).get("shares", [])
     out: dict[date, tuple[date, float]] = {}
     for e in series:
@@ -290,7 +319,7 @@ def share_quarters(facts: dict) -> dict[date, float]:
         except (KeyError, ValueError):
             continue
         if QUARTER_DAYS[0] <= (end - start).days <= QUARTER_DAYS[1] and (end not in out or filed >= out[end][0]):
-            out[end] = (filed, float(e["val"]))
+            out[end] = (filed, float(e["val"]) * split_factor(filed, splits)[0])
     return {k: v[1] for k, v in out.items()}
 
 

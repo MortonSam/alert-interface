@@ -194,3 +194,29 @@ def test_an_eps_fact_that_is_a_dollar_amount_is_dropped():
     qs = V.eps_quarters(facts)
     assert [(q["end"].isoformat(), q["eps"]) for q in qs] == [("2015-06-30", 0.81)]
     assert V.EPS_FACT_MAX >= 50_000                                                     # Berkshire's class A figure stays
+
+
+def test_quarters_and_closes_are_restated_across_recorded_splits():
+    """BKNG's 25:1 split of 2026-04-06: the 10-K filed in February carries the old basis, the 10-Qs filed after it the new one; a derived
+    quarter is computed after the restatement, and a close before the split is divided like the quarters."""
+    splits = [(date(2026, 4, 6), 25.0)]
+    facts = {"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": [
+        {"start": "2025-01-01", "end": "2025-03-31", "filed": "2026-04-28", "val": 0.40, "form": "10-Q"},      # restated after the split
+        {"start": "2025-04-01", "end": "2025-06-30", "filed": "2026-08-04", "val": 1.10, "form": "10-Q"},      # restated after the split
+        {"start": "2025-07-01", "end": "2025-09-30", "filed": "2025-10-28", "val": 84.41, "form": "10-Q"},     # old basis
+        {"start": "2025-01-01", "end": "2025-12-31", "filed": "2026-02-18", "val": 165.00, "form": "10-K"},    # old basis: the year
+        {"start": "2026-01-01", "end": "2026-03-31", "filed": "2026-04-28", "val": 1.36, "form": "10-Q"},
+        {"start": "2026-04-01", "end": "2026-06-30", "filed": "2026-08-04", "val": 2.53, "form": "10-Q"}]}},
+        "WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": [{"start": "2025-07-01", "end": "2025-09-30", "filed": "2025-10-28", "val": 32558000}]}}}}}
+    qs = V.eps_quarters(facts, splits)
+    by = {q["end"].isoformat(): q for q in qs}
+    assert by["2025-09-30"]["eps"] == 3.3764 and by["2025-09-30"]["rebased"] == "25:1 split of 2026-04-06" and by["2025-09-30"]["diluted_shares"] == 32558000 * 25
+    assert by["2025-12-31"]["derived"] and by["2025-12-31"]["eps"] == round(165.0 / 25 - (0.40 + 1.10 + 3.3764), 4) and by["2025-12-31"]["rebased"]
+    assert "rebased" not in by["2026-03-31"] and by["2026-03-31"]["eps"] == 1.36
+    four = [by[k] for k in ("2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30")]
+    assert 15 < V.pe(157.63, four) < 20                                                     # a sane P/E, not 0.94
+    assert V.eps_quarters(facts)[2]["eps"] == 84.41                                          # no splits known: as filed
+    assert V.rebase_closes([(date(2026, 4, 1), 5000.0), (date(2026, 4, 7), 200.0)], splits) == [(date(2026, 4, 1), 200.0), (date(2026, 4, 7), 200.0)]
+    assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), 0.2)]) == (0.2, ["1:5 reverse split of 2026-02-01"])     # a reverse split multiplies
+    assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), None)]) == (1.0, [])                                      # unreadable ratio: left alone
+    assert V.PE_COMPUTATION_VERSION == 2

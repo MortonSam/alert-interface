@@ -2217,6 +2217,28 @@ async def check_release_eps_checked(session) -> CheckResult:
                        f"{total[2]} not comparable (XBRL holds the quarter only as a derived figure), none flagged, none overdue")
 
 
+PE_MIN_SANE = 2.0                 # no S&P 500 company trades under twice its trailing earnings: a lower P/E is a basis error (BKNG's 0.94 was post-split price over pre-split earnings)
+PE_HIGH_NOTE = 300.0              # a P/E above this is real but rests on tiny earnings; listed for a look
+
+
+async def check_pe_sanity(session) -> CheckResult:
+    """ERROR when a latest ok P/E snapshot is under PE_MIN_SANE or was computed by an older version than valuation.PE_COMPUTATION_VERSION;
+    WARN listing those above PE_HIGH_NOTE."""
+    from app.services.valuation import PE_COMPUTATION_VERSION
+    rows = (await session.execute(text("""
+        SELECT symbol, pe, price, trailing_eps, computation_version FROM (
+            SELECT DISTINCT ON (symbol) symbol, status, pe, price, trailing_eps, computation_version FROM pe_snapshots ORDER BY symbol, as_of_date DESC) latest
+        WHERE status = 'ok' AND pe IS NOT NULL ORDER BY pe"""))).all()
+    low = [f"{r.symbol}: P/E {float(r.pe):.2f} (price {float(r.price):.2f} over trailing EPS {float(r.trailing_eps):.2f})" for r in rows if float(r.pe) < PE_MIN_SANE]
+    stale = [f"{r.symbol}: computed by version {r.computation_version}, current is {PE_COMPUTATION_VERSION}" for r in rows if (r.computation_version or 1) < PE_COMPUTATION_VERSION]
+    if low or stale:
+        return CheckResult("pe_sanity", ERROR, f"{len(low)} P/E value(s) under {PE_MIN_SANE:g} and {len(stale)} computed by an older version", low[:20] + stale[:20])
+    high = [f"{r.symbol}: P/E {float(r.pe):.0f} on trailing EPS {float(r.trailing_eps):.2f}" for r in rows if float(r.pe) > PE_HIGH_NOTE]
+    if high:
+        return CheckResult("pe_sanity", WARN, f"{len(high)} P/E value(s) above {PE_HIGH_NOTE:g}, resting on tiny earnings", high[:40])
+    return CheckResult("pe_sanity", PASS, f"Every shown P/E ({len(rows)}) is at least {PE_MIN_SANE:g}, at most {PE_HIGH_NOTE:g}, and computed by version {PE_COMPUTATION_VERSION}")
+
+
 EPS_OUTLIER_SHARE = 0.10          # a quarter under this share of its neighbours' average, all positive, is listed for a look
 EPS_OUTLIER_YEARS = 6             # the P/E history reads five years of quarters; one more for the year-ago comparisons
 
@@ -3053,6 +3075,7 @@ CHECKS = [
     check_release_eps_checked,
     check_share_count_jumps,
     check_eps_quarter_outliers,
+    check_pe_sanity,
     # the calendar: confirmed dates stand alone, past estimates never stand as resolved
     check_estimate_beside_confirmed,
     check_past_estimate_standing,
