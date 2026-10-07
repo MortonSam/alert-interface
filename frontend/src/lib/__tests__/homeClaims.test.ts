@@ -62,7 +62,9 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     const home = read("app/page.tsx");
     expect(home).toContain("<SiteCounters initial={initial} />");
     expect(home.indexOf("<SiteCounters initial={initial} />")).toBeLessThan(home.indexOf("The challenge"));   // the first thing under the hero
-    expect(home).toContain("export const revalidate = STATS_REVALIDATE_SECONDS;");                   // server-rendered and revalidated
+    expect(home).toContain("export const revalidate = 300;");                                      // server-rendered and revalidated
+    const { STATS_REVALIDATE_SECONDS } = await import("@/lib/siteStats");
+    expect(STATS_REVALIDATE_SECONDS).toBe(300);                                                      // the literal Next needs and the constant the fetch uses agree
     expect(home).toContain("font-variant-numeric: tabular-nums");
     expect(home).not.toMatch(/stat-number[^}]*border|since 2011|Analyst actions since/);
     const block = read("components/SiteCounters.tsx");

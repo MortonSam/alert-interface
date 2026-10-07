@@ -5,14 +5,15 @@ import { TickerGrid } from "./ticker-grid";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
 import { SiteCounters } from "@/components/SiteCounters";
-import { fetchSiteStatsServer, STATS_REVALIDATE_SECONDS } from "@/lib/siteStats";
+import { fetchSiteStatsServer } from "@/lib/siteStats";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
 
 // The counters are rendered on the server and revalidated: a backend that is slow, restarting or erroring never costs the
-// page its first screen, because a failed revalidation keeps the last good render (lib/siteStats).
-export const revalidate = STATS_REVALIDATE_SECONDS;
+// page its first screen, because a failed revalidation keeps the last good render (lib/siteStats). Next needs this export as a
+// literal; lib/siteStats.STATS_REVALIDATE_SECONDS carries the same number and a test holds them equal.
+export const revalidate = 300;
 
 export default async function Home() {
   const initial = await fetchSiteStatsServer();
