@@ -150,7 +150,7 @@ def test_no_number_in_an_answer_is_a_literal_of_its_template():
 async def test_the_route_serves_at_most_four_in_catalog_order_with_receipts():
     from httpx import ASGITransport, AsyncClient
     from app.main import app
-    order = ["reaction_normal", "implied_big", "beat_fell", "big_move", "upgrades", "ex_dividend", "usual_move", "volatile_now"]
+    order = ["reaction_normal", "implied_big", "beat_fell", "big_move", "upgrades", "ex_dividend", "usual_move", "volatile_now", "pe_compare"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         for sym in ("MU", "MSFT", "FICO", "STZ", "VMRK"):
             body = (await c.get(f"/api/v1/tickers/{sym}/questions")).json()
