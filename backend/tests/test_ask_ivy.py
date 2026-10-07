@@ -252,3 +252,12 @@ def test_counts_carry_their_denominator_and_signed_moves_read_as_a_move():
     assert A.collapse_doubled_words("reported after after the close; the the stock") == "reported after the close; the stock"
     assert A.collapse_doubled_words("it had had enough") == "it had enough" and A.collapse_doubled_words("on a typical report on a typical report") == "on a typical report on a typical report"
     assert [(i["name"], i["value"]) for i in inputs] == [("beats followed by a fall", "11"), ("beats", "18"), ("1-day move", "+3.0%")]   # the denominator's receipt too
+
+
+def test_pe_word_facts_and_the_valuation_verdict_check():
+    w = {f["id"]: f["value"] for f in A.word_facts({"pe": {"pe": 14.34, "as_of": date(2026, 10, 5), "hist_median": 16.8, "sector": "Information Technology", "sector_median": 43.4}})}
+    assert w["pe_vs_history"] == "below" and w["pe_vs_sector"] == "below"
+    assert A.check_output("Its P/E is {fact:p_e}, which looks cheap.", {"p_e"}) == ["valuation verdict: cheap"]
+    assert A.check_output("Its P/E is {fact:p_e}, below its five-year median.", {"p_e"}) == []
+    facts = [{"id": "pe_vs_sector", "name": "x", "value": "below", "as_of": None, "source": None, "kind": "word", "phrase": "below"}]
+    assert "contradicts" in A.verify_comparisons("It sits above its sector median.", facts)[0]

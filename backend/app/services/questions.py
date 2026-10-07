@@ -4,9 +4,9 @@ stock's own data, each answered in at most three short sentences from stored row
 Each answer is {key, question, data, idea, inputs, as_of, rule}: `data` is what this stock's rows show (one or two
 sentences, every number an input with its receipt), `idea` is the plain-words explanation for someone new. A question
 whose data is missing, stale, or rests on fewer than MIN_REPORTS reports or MIN_SESSIONS sessions never appears. The
-catalog order is the priority order; the builder shows the first MAX_QUESTIONS that qualify. Two evergreen questions (the
-usual move on earnings, volatility against the stock's own year) follow the six event questions, so every stock with at
-least MIN_REPORTS reports shows at least three.
+catalog order is the priority order; the builder shows the first MAX_QUESTIONS that qualify. Three evergreen questions (the
+usual move on earnings, volatility against the stock's own year, the trailing P/E against its history and sector) follow the
+six event questions, so every stock with at least MIN_REPORTS reports shows at least three.
 """
 from __future__ import annotations
 
@@ -188,9 +188,51 @@ def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_rank: float, sam
               f"The latest servable realized-volatility snapshot with at least {MIN_SESSIONS} sessions; the rank is the percentile of the current 20-day value among the past year's windows.")
 
 
+# 9 ─────────────────────────────────────────────────────────────────────────────
+PE_FORBIDDEN_WORDS = ("cheap", "expensive", "undervalued", "overvalued")     # never in a P/E answer: a ratio is not a verdict
+
+
+def pe_history_words(pe: float, median: float) -> str:
+    return "above" if pe > median else "below" if pe < median else "at"
+
+
+def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: date, as_of: date, hist_median: float | None, hist_share_above: int | None,
+         hist_sessions: int | None, hist_excluded: int | None, hist_first: date | None, hist_last: date | None, sector: str | None, sector_median: float | None,
+         sector_fresh: int | None = None, sector_active: int | None = None) -> dict | None:
+    """The stock's trailing P/E against its own five-year history and its sector. Shown with any stored P/E; the history and the
+    sector clauses appear only when stored (a sector median is absent below 90% coverage, and the answer says so)."""
+    data = f"{symbol} trades at {pe:.1f} times its earnings over {fmt_date(window_start)} to {fmt_date(window_end)}"
+    inputs = [_input("P/E", f"{pe:.1f}", as_of, "pe_snapshots: stored close over four reported quarters of GAAP diluted EPS (XBRL, else the earnings release)"),
+              _input("window start", fmt_date(window_start), window_start, "the first of the four quarters"), _input("window end", fmt_date(window_end), window_end, "the latest reported quarter")]
+    if hist_median is not None and hist_share_above is not None and hist_sessions:
+        data += (f", {pe_history_words(pe, hist_median)} its five-year median of {hist_median:.1f} and higher than in {hist_share_above}% of {hist_sessions:,} sessions"
+                 + (f" ({hist_excluded:,} left out for negative or tiny earnings)" if hist_excluded else ""))
+        inputs += [_input("five-year median P/E", f"{hist_median:.1f}", hist_last, f"pe_snapshots.hist_median, sessions {fmt_date(hist_first)} to {fmt_date(hist_last)}"),
+                   _input("sessions below today's P/E", f"{hist_share_above}%", hist_last, "pe_snapshots.hist_share_above, share of the five-year sessions"),
+                   _input("sessions compared", f"{hist_sessions:,}", hist_last, "pe_snapshots.hist_sessions")]
+        if hist_excluded:
+            inputs.append(_input("sessions left out", f"{hist_excluded:,}", hist_last, "trailing EPS negative or under 1% of price (P/E above 100)"))
+    data += "."
+    if sector and sector_median is not None:
+        data += f" Its {sector} sector's median is {sector_median:.1f}, so it sits {pe_history_words(pe, sector_median)} its peers."
+        inputs.append(_input("sector median P/E", f"{sector_median:.1f}", as_of, f"pe_sector_snapshots, {sector}, over the sector's active tickers with a fresh window"))
+    elif sector and sector_fresh is not None and sector_active:
+        from app.services.valuation import SECTOR_COVERAGE_MIN
+        needed = f"{SECTOR_COVERAGE_MIN:.0%}"
+        data += f" No sector median is shown: only {sector_fresh} of the {sector_active} active stocks in its sector have a fresh P/E window, and {needed} are needed."
+        inputs += [_input("sector stocks with a fresh window", sector_fresh, as_of, "pe_sector_snapshots.fresh"), _input("active stocks in the sector", sector_active, as_of, "pe_sector_snapshots.active"),
+                   _input("coverage needed", needed, as_of, "services/valuation SECTOR_COVERAGE_MIN")]
+    idea = ("P/E is the price paid for each dollar of the last year's earnings, and it means most when compared with the same company's history and its peers; "
+            "for companies whose earnings swing with the cycle, a low P/E near a peak in earnings can mislead.")
+    return _q("pe_compare", f"How does {name}'s P/E compare with its own history and its sector?", data, idea, inputs, as_of,
+              "The latest stored P/E: the stored close over the four latest reported quarters' GAAP diluted EPS (XBRL, with the earnings release for a quarter XBRL does not "
+              "hold yet); the five-year summary is the median and the share of sessions below today's value, after leaving out sessions with negative trailing EPS or a P/E "
+              "above 100; the sector median shows only when at least 90% of the sector's active tickers have a fresh window.")
+
+
 def choose(candidates: list[dict | None]) -> list[dict]:
     """The first MAX_QUESTIONS answers that qualify, in catalog order."""
     return [c for c in candidates if c][:MAX_QUESTIONS]
 
 
-__all__ = ["choose", "q_reaction_normal", "q_implied_big", "q_beat_fell", "q_big_move", "q_upgrades", "q_ex_dividend", "q_usual_move", "q_volatile_now", "short_name"]
+__all__ = ["choose", "q_reaction_normal", "q_implied_big", "q_beat_fell", "q_big_move", "q_upgrades", "q_ex_dividend", "q_usual_move", "q_volatile_now", "q_pe", "short_name"]

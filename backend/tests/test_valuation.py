@@ -54,6 +54,9 @@ def test_the_window_must_hold_the_latest_reported_quarter():
     four, why = V.fresh_window(MU_Q, date(2026, 9, 30), {"eps": 32.87, "period_end": date(2026, 9, 3), "accession": "0000723125-26-000018"}, today)
     assert [x["eps"] for x in four] == [4.60, 12.07, 24.67, 32.87] and four[-1]["source"] == "release" and why.startswith("three XBRL")
     assert V.pe(1063.96, four) == 14.34 and V.period_label(four) == "2025-08-29 to 2026-09-03"
+    stale = MU_Q[:2]  + [q(date(2025, 12, 31), 1.0, date(2026, 2, 20))]                               # XBRL two quarters behind: no window
+    four, why = V.fresh_window(stale, date(2026, 7, 14), {"eps": 2.0, "period_end": date(2026, 6, 30), "accession": "x"}, today)
+    assert four is None and "more than one quarter behind" in why
     four, why = V.fresh_window(MU_Q, date(2026, 6, 25), None, today)                                   # the latest report is in XBRL already
     assert [x["eps"] for x in four] == [2.83, 4.60, 12.07, 24.67] and why.startswith("XBRL holds")
     assert V.fresh_window(MU_Q[:3], None, None, today) == (None, "fewer than four reported quarters in XBRL")
@@ -78,3 +81,53 @@ def test_release_against_xbrl_and_the_checkers_match():
     assert matching_quarter(later, None, date(2026, 9, 30))["eps"] == 32.87                          # newest quarter before the report, filed after it
     assert matching_quarter(MU_Q, date(2026, 9, 3), date(2026, 9, 30)) is None                        # not filed yet
     assert exhibit_text([("form8k.htm", "x" * 600), ("a2026q4ex991-pressrelease.htm", "y" * 600)])[0] == "a2026q4ex991-pressrelease.htm"
+
+
+def test_snapshot_states_ok_not_meaningful_or_missing_with_reasons():
+    today = date(2026, 10, 7)
+    rel = {"eps": 32.87, "period_end": date(2026, 9, 3), "accession": "0000723125-26-000018"}
+    s = V.snapshot(1063.96, MU_Q, date(2026, 9, 30), rel, today)
+    assert s["status"] == "ok" and s["pe"] == 14.34 and s["window_start"] == date(2025, 8, 29) and s["window_end"] == date(2026, 9, 3)
+    assert s["quarters"][-1]["source"] == "release" and s["quarters"][-1]["form"].startswith("earnings release 8-K 0000723125")
+    s = V.snapshot(1063.96, MU_Q, date(2026, 9, 30), None, today)
+    assert s["status"] == "missing" and "release EPS is not stored" in s["reason"] and s["pe"] is None
+    loss = [{**q, "eps": -1.0} for q in MU_Q]
+    s = V.snapshot(50.0, loss, date(2026, 6, 25), None, today)
+    assert s["status"] == "not_meaningful" and s["reason"] == "lost money over the last four quarters" and s["trailing_eps"] == -4.0 and s["window_end"] == date(2026, 5, 28)
+    assert V.snapshot(None, MU_Q, date(2026, 6, 25), None, today)["reason"] == "no stored close"
+
+
+def test_sector_median_shows_only_at_ninety_percent_coverage():
+    statuses = [("ok", 10.0)] * 8 + [("not_meaningful", None)] * 1
+    s = V.sector_summary(statuses, active=10)
+    assert s["shown"] and s["median_pe"] == 10.0 and s["fresh"] == 9 and s["with_pe"] == 8          # 9 of 10 fresh windows
+    s = V.sector_summary(statuses[:8], active=10)
+    assert not s["shown"] and "8 of 10" in s["reason"] and "90%" in s["reason"]                      # 80% is not enough; the median is still computed
+    assert V.sector_summary([], active=0)["reason"] == "no active tickers"
+
+
+def test_quarters_are_reread_only_while_a_recent_report_may_not_have_landed():
+    today = date(2026, 10, 7)
+    assert V.needs_refresh([], None, today)                                                           # nothing stored
+    assert V.needs_refresh(MU_Q, date(2026, 9, 30), today)                                            # Sep 30 reported, XBRL through May
+    assert not V.needs_refresh(MU_Q, date(2026, 6, 25), today)                                       # the latest report is in XBRL
+    later = MU_Q + [q(date(2026, 9, 3), 32.87, date(2026, 10, 20), form="10-K")]
+    assert not V.needs_refresh(later, date(2026, 9, 30), today)
+    assert not V.needs_refresh(MU_Q, date(2026, 5, 1), date(2026, 12, 1))                            # an old report never triggers a reread
+
+
+def test_release_parser_reads_the_other_common_phrasings():
+    assert V.parse_release_eps("Net income of $1.84 billion, or $2.75 per diluted share, compared to $2.87 per diluted share last year.")["eps"] == 2.75
+    assert V.parse_release_eps("Earnings per Share: GAAP: $0.99; Non-GAAP: $1.02. GAAP EPS increased 52%.")["eps"] == 0.99
+    assert V.parse_release_eps("Diluted EPS $4.22, up 13% versus prior year.")["eps"] == 4.22
+    assert V.parse_release_eps("Earnings per share—basic $ 4.31 Earnings per share—diluted $ 4.22")["eps"] == 4.22
+    assert V.parse_release_eps("Chubb Reports Second Quarter Per Share Net Income of $7.30. Net income was $2.9 billion, or $7.30 per share, and core operating income of $2.26 per share.")["eps"] == 7.30
+    assert V.parse_release_eps("Adjusted net income of $2.0 billion, or $3.10 per diluted share.") is None        # adjusted is never GAAP
+    assert V.parse_release_eps("GAAP net loss of $(0.18). Non-GAAP EPS of $0.78 increased.") is None                # "Non-GAAP EPS" is not a GAAP label
+    old_first = "Results for the quarter ended March 31, 2025 were restated. For the quarter ended June 30, 2026, diluted earnings per share $ 1.36 $ 1.31."
+    assert V.parse_release_eps(old_first, date(2026, 7, 29))["period_end"] == date(2026, 6, 30)                   # a comparison period is skipped
+    assert V.parse_release_eps("Business Outlook for fiscal 2027: Diluted Earnings Per Share $14.39 – $14.81, a 6% to 9% increase.") is None   # guidance, a range
+    assert V.parse_release_eps("Q1 FY 2027 Guidance: Earnings per Share: GAAP: $1.02 to $1.07.") is None
+    assert V.parse_release_eps("16 Weeks Ended August 30, 2026. Net income was $2.998 billion, $6.75 per diluted share, compared to $5.87 last year.")["period_end"] == date(2026, 8, 30)
+    assert V.parse_release_eps("Core operating income of $2.26 per diluted share.") is None
+    assert exhibit_text([("0000037996-26-000155-index-headers.html", "x" * 7000), ("exhibit99tojuly282026for.htm", "y" * 600)])[0] == "exhibit99tojuly282026for.htm"

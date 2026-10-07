@@ -10,6 +10,7 @@ export const BLOCK_LABELS: Record<string, string> = { profile: "What it is", hap
  * any shorter overlap. Only whole words match ("estimated" is not "estimate"), and each term links once per block. */
 export const GLOSSARY_LINKS: ReadonlyArray<readonly [string, string]> = [
   ["52-week high", "52-week high"],
+  ["P/E", "P/E"],
   ["after the close", "after the close"],
   ["before the open", "before the open"],
   ["implied move", "implied move"],

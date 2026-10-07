@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xbrl
+  xml:lang="en-US"
+  xmlns="http://www.xbrl.org/2003/instance"
+  xmlns:dei="http://xbrl.sec.gov/dei/2026"
+  xmlns:exc="http://www.exeloncorp.com/20260730"
+  xmlns:link="http://www.xbrl.org/2003/linkbase"
+  xmlns:srt="http://fasb.org/srt/2026"
+  xmlns:stpr="http://xbrl.sec.gov/stpr/2026"
+  xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+  xmlns:xlink="http://www.w3.org/1999/xlink">
+    <link:schemaRef xlink:href="exc-20260730.xsd" xlink:type="simple"/>
+    <context id="c-1">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:BaltimoreGasAndElectricCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-2">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:AtlanticCityElectricCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-3">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:PecoEnergyCoMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-4">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:PotomacElectricPowerCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-5">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:PepcoHoldingsLLCMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-6">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:CommonwealthEdisonCoMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-7">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:DelmarvaPowerandLightCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-8">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-9">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="srt:StatementGeographicalAxis">stpr:DC</xbrldi:explicitMember>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:PotomacElectricPowerCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-10">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="srt:StatementGeographicalAxis">stpr:VA</xbrldi:explicitMember>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:PotomacElectricPowerCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-11">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="srt:StatementGeographicalAxis">stpr:DE</xbrldi:explicitMember>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:DelmarvaPowerandLightCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <context id="c-12">
+        <entity>
+            <identifier scheme="http://www.sec.gov/CIK">0001109357</identifier>
+            <segment>
+                <xbrldi:explicitMember dimension="srt:StatementGeographicalAxis">stpr:VA</xbrldi:explicitMember>
+                <xbrldi:explicitMember dimension="dei:LegalEntityAxis">exc:DelmarvaPowerandLightCompanyMember</xbrldi:explicitMember>
+            </segment>
+        </entity>
+        <period>
+            <startDate>2026-07-30</startDate>
+            <endDate>2026-07-30</endDate>
+        </period>
+    </context>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-8" id="f-138">PA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-8" id="f-139">10 South Dearborn Street</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressAddressLine2 contextRef="c-8" id="f-140">P.O. Box&#160;805379</dei:EntityAddressAddressLine2>
+    <dei:EntityAddressCityOrTown contextRef="c-8" id="f-141">Chicago</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-8" id="f-142">IL</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-8" id="f-143">60680-5379</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-8" id="f-144">(800)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-8" id="f-145">483-3220</dei:LocalPhoneNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-6" id="f-146">IL</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-6" id="f-147">10 South Dearborn Street</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-6" id="f-148">Chicago</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-6" id="f-149">IL</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-6" id="f-150">60603-2300</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-6" id="f-151">(312)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-6" id="f-152">394-4321</dei:LocalPhoneNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-3" id="f-153">PA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-3" id="f-154">P.O. Box&#160;8699</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressAddressLine2 contextRef="c-3" id="f-155">2301 Market Street</dei:EntityAddressAddressLine2>
+    <dei:EntityAddressCityOrTown contextRef="c-3" id="f-156">Philadelphia</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-3" id="f-157">PA</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-3" id="f-158">19101-8699</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-3" id="f-159">(215)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-3" id="f-160">841-4000</dei:LocalPhoneNumber>
+    <dei:Security12bTitle contextRef="c-3" id="f-161">Cumulative Preferred Security, Series D</dei:Security12bTitle>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-1" id="f-162">MD</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-1" id="f-163">2 Center Plaza</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressAddressLine2 contextRef="c-1" id="f-164">110 West Fayette Street</dei:EntityAddressAddressLine2>
+    <dei:EntityAddressCityOrTown contextRef="c-1" id="f-165">Baltimore</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-1" id="f-166">MD</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-1" id="f-167">21201-3708</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-1" id="f-168">(410)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-1" id="f-169">234-5000</dei:LocalPhoneNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-5" id="f-170">DE</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-5" id="f-171">701 Ninth Street, N.W.</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-5" id="f-172">Washington</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-5" id="f-173">DC</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-5" id="f-174">20068-0001</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-5" id="f-175">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-5" id="f-176">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-9" id="f-177">DC</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-10" id="f-178">VA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-4" id="f-179">701 Ninth Street, N.W.</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-4" id="f-180">Washington</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-4" id="f-181">DC</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-4" id="f-182">20068-0001</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-4" id="f-183">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-4" id="f-184">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-11" id="f-185">DE</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-12" id="f-186">VA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-7" id="f-187">500 North Wakefield Drive</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-7" id="f-188">Newark</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-7" id="f-189">DE</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-7" id="f-190">19702-5440</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-7" id="f-191">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-7" id="f-192">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-2" id="f-193">NJ</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-2" id="f-194">500 North Wakefield Drive</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-2" id="f-195">Newark</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-2" id="f-196">DE</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-2" id="f-197">19702-5440</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-2" id="f-198">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-2" id="f-199">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityEmergingGrowthCompany contextRef="c-2" id="f-200">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-3" id="f-201">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-7" id="f-202">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-8" id="f-203">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-5" id="f-204">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-1" id="f-205">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-6" id="f-206">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-4" id="f-207">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityCentralIndexKey contextRef="c-8" id="f-208">0001109357</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-6" id="f-209">0000022606</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-3" id="f-210">0000078100</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-1" id="f-211">0000009466</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-5" id="f-212">0001135971</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-4" id="f-213">0000079732</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-7" id="f-214">0000027879</dei:EntityCentralIndexKey>
+    <dei:EntityCentralIndexKey contextRef="c-2" id="f-215">0000008192</dei:EntityCentralIndexKey>
+    <dei:AmendmentFlag contextRef="c-1" id="f-216">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-4" id="f-217">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-8" id="f-218">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-5" id="f-219">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-7" id="f-220">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-6" id="f-221">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-3" id="f-222">false</dei:AmendmentFlag>
+    <dei:AmendmentFlag contextRef="c-2" id="f-223">false</dei:AmendmentFlag>
+    <dei:DocumentType contextRef="c-1" id="f-1">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-2" id="f-2">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-3" id="f-3">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-4" id="f-4">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-5" id="f-5">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-6" id="f-6">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-7" id="f-7">8-K</dei:DocumentType>
+    <dei:DocumentType contextRef="c-8" id="f-8">8-K</dei:DocumentType>
+    <dei:DocumentPeriodEndDate contextRef="c-8" id="f-9">2026-07-30</dei:DocumentPeriodEndDate>
+    <dei:EntityFileNumber contextRef="c-8" id="f-10">001-16169</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-8" id="f-11">EXELON CORPORATION</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-8" id="f-12">23-2990190</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-8" id="f-13">PA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-8" id="f-14">10 South Dearborn Street</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressAddressLine2 contextRef="c-8" id="f-15">P.O. Box&#160;805379</dei:EntityAddressAddressLine2>
+    <dei:EntityAddressCityOrTown contextRef="c-8" id="f-16">Chicago</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-8" id="f-17">IL</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-8" id="f-18">60680-5379</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-8" id="f-19">(800)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-8" id="f-20">483-3220</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-6" id="f-21">001-01839</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-6" id="f-22">COMMONWEALTH EDISON COMPANY</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-6" id="f-23">36-0938600</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-6" id="f-24">IL</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-6" id="f-25">10 South Dearborn Street</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-6" id="f-26">Chicago</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-6" id="f-27">IL</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-6" id="f-28">60603-2300</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-6" id="f-29">(312)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-6" id="f-30">394-4321</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-3" id="f-31">000-16844</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-3" id="f-32">PECO ENERGY COMPANY</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-3" id="f-33">23-0970240</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-3" id="f-34">PA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine2 contextRef="c-3" id="f-35">2301 Market Street</dei:EntityAddressAddressLine2>
+    <dei:EntityAddressAddressLine1 contextRef="c-3" id="f-36">P.O. Box&#160;8699</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-3" id="f-37">Philadelphia</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-3" id="f-38">PA</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-3" id="f-39">19101-8699</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-3" id="f-40">(215)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-3" id="f-41">841-4000</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-1" id="f-42">001-01910</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-1" id="f-43">BALTIMORE GAS AND ELECTRIC COMPANY</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-1" id="f-44">52-0280210</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-1" id="f-45">MD</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-1" id="f-46">2 Center Plaza</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressAddressLine2 contextRef="c-1" id="f-47">110 West Fayette Street</dei:EntityAddressAddressLine2>
+    <dei:EntityAddressCityOrTown contextRef="c-1" id="f-48">Baltimore</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-1" id="f-49">MD</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-1" id="f-50">21201-3708</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-1" id="f-51">(410)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-1" id="f-52">234-5000</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-5" id="f-53">001-31403</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-5" id="f-54">PEPCO HOLDINGS LLC</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-5" id="f-55">52-2297449</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-5" id="f-56">DE</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-5" id="f-57">701 Ninth Street, N.W.</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-5" id="f-58">Washington</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-5" id="f-59">DC</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-5" id="f-60">20068-0001</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-5" id="f-61">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-5" id="f-62">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-4" id="f-63">001-01072</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-4" id="f-64">POTOMAC ELECTRIC POWER COMPANY</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-4" id="f-65">53-0127880</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-9" id="f-66">DC</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-10" id="f-67">VA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-4" id="f-68">701 Ninth Street, N.W.</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-4" id="f-69">Washington</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-4" id="f-70">DC</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-4" id="f-71">20068-0001</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-4" id="f-72">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-4" id="f-73">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-7" id="f-74">001-01405</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-7" id="f-75">DELMARVA POWER &amp; LIGHT COMPANY</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-7" id="f-76">51-0084283</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-11" id="f-77">DE</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-12" id="f-78">VA</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-7" id="f-79">500 North Wakefield Drive</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-7" id="f-80">Newark</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-7" id="f-81">DE</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-7" id="f-82">19702-5440</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-7" id="f-83">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-7" id="f-84">872-2000</dei:LocalPhoneNumber>
+    <dei:EntityFileNumber contextRef="c-2" id="f-85">001-03559</dei:EntityFileNumber>
+    <dei:EntityRegistrantName contextRef="c-2" id="f-86">ATLANTIC CITY ELECTRIC COMPANY</dei:EntityRegistrantName>
+    <dei:EntityTaxIdentificationNumber contextRef="c-2" id="f-87">21-0398280</dei:EntityTaxIdentificationNumber>
+    <dei:EntityIncorporationStateCountryCode contextRef="c-2" id="f-88">NJ</dei:EntityIncorporationStateCountryCode>
+    <dei:EntityAddressAddressLine1 contextRef="c-2" id="f-89">500 North Wakefield Drive</dei:EntityAddressAddressLine1>
+    <dei:EntityAddressCityOrTown contextRef="c-2" id="f-90">Newark</dei:EntityAddressCityOrTown>
+    <dei:EntityAddressStateOrProvince contextRef="c-2" id="f-91">DE</dei:EntityAddressStateOrProvince>
+    <dei:EntityAddressPostalZipCode contextRef="c-2" id="f-92">19702-5440</dei:EntityAddressPostalZipCode>
+    <dei:CityAreaCode contextRef="c-2" id="f-93">(202)</dei:CityAreaCode>
+    <dei:LocalPhoneNumber contextRef="c-2" id="f-94">872-2000</dei:LocalPhoneNumber>
+    <dei:WrittenCommunications contextRef="c-1" id="f-95">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-8" id="f-96">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-5" id="f-97">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-2" id="f-98">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-6" id="f-99">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-4" id="f-100">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-7" id="f-101">false</dei:WrittenCommunications>
+    <dei:WrittenCommunications contextRef="c-3" id="f-102">false</dei:WrittenCommunications>
+    <dei:SolicitingMaterial contextRef="c-4" id="f-103">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-2" id="f-104">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-3" id="f-105">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-8" id="f-106">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-6" id="f-107">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-7" id="f-108">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-5" id="f-109">false</dei:SolicitingMaterial>
+    <dei:SolicitingMaterial contextRef="c-1" id="f-110">false</dei:SolicitingMaterial>
+    <dei:PreCommencementTenderOffer contextRef="c-7" id="f-111">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-8" id="f-112">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-6" id="f-113">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-1" id="f-114">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-5" id="f-115">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-4" id="f-116">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-3" id="f-117">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementTenderOffer contextRef="c-2" id="f-118">false</dei:PreCommencementTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-7" id="f-119">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-2" id="f-120">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-5" id="f-121">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-6" id="f-122">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-1" id="f-123">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-4" id="f-124">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-3" id="f-125">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:PreCommencementIssuerTenderOffer contextRef="c-8" id="f-126">false</dei:PreCommencementIssuerTenderOffer>
+    <dei:Security12bTitle contextRef="c-8" id="f-127">Common Stock, without par value</dei:Security12bTitle>
+    <dei:TradingSymbol contextRef="c-8" id="f-128">EXC</dei:TradingSymbol>
+    <dei:SecurityExchangeName contextRef="c-8" id="f-129">NASDAQ</dei:SecurityExchangeName>
+    <dei:EntityEmergingGrowthCompany contextRef="c-2" id="f-130">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-3" id="f-131">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-7" id="f-132">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-8" id="f-133">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-5" id="f-134">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-1" id="f-135">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-6" id="f-136">false</dei:EntityEmergingGrowthCompany>
+    <dei:EntityEmergingGrowthCompany contextRef="c-4" id="f-137">false</dei:EntityEmergingGrowthCompany>
+</xbrl>

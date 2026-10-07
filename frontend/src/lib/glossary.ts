@@ -96,6 +96,8 @@ const GLOSSARY: Record<string, string> = {
     "The broad industry group a company belongs to, such as Manufacturing or Finance. Stocks in a sector often move together when news hits the group.",
   "typical move":
     "The average size of a stock's past reactions to its reports, up or down, over at least eight of them. It is the yardstick an expected move is measured against.",
+  "P/E":
+    "The price paid for each dollar of the company's earnings over its last four reported quarters, taken from its filings. It means most beside the same company's own history and its sector, and a low figure near a peak in earnings can mislead.",
   "1-day move":
     "The stock's percentage change over the one session that first trades on the report, close to close. For an after-close report that is the next session; for a before-open report it is the report day itself.",
 };

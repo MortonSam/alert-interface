@@ -49,9 +49,18 @@ class EdgarClient:
         )
 
     async def get_company_facts(self, cik: str) -> dict[str, Any]:
-        """XBRL company facts — revenue, EPS, etc. CIK must be zero-padded to 10 digits."""
+        """XBRL company facts — revenue, EPS, etc. CIK must be zero-padded to 10 digits. Cached on disk for CACHE_MAX_AGE_H:
+        a document runs to several megabytes and the nightly reads hundreds."""
+        import json as _json
+        cache_file = _cache_path(f"companyfacts_{cik.zfill(10)}.json")
+        if _cache_fresh(cache_file):
+            try:
+                return _json.loads(cache_file.read_text())
+            except ValueError:
+                pass
         resp = await self._client.get(f"/api/xbrl/companyfacts/CIK{cik.zfill(10)}.json")
         resp.raise_for_status()
+        cache_file.write_text(resp.text)
         return resp.json()
 
     async def get_submissions(self, cik: str) -> dict[str, Any]:

@@ -2165,6 +2165,47 @@ async def check_as_of_not_future(session) -> CheckResult:
     return CheckResult("as_of_not_future", PASS, f"No as-of source is dated after today ({len(probes)} sources checked)")
 
 
+# ── Trailing P/E: a stored P/E rests on a window that holds the latest reported quarter; release figures are checked ──
+
+RELEASE_CHECK_DUE_DAYS = 75     # a 10-Q is due within 40 days of the quarter, a 10-K within 60 to 90: after this many days an unchecked release figure is late
+
+
+async def check_pe_window_fresh(session) -> CheckResult:
+    """ERROR when a ticker's latest stored P/E (status ok or not meaningful) rests on a window computed for an older report than
+    the ticker's latest reported quarter (a confirmed or EPS-bearing earnings event, or a reaction row, dated on or before today)."""
+    rows = (await session.execute(text("""
+        WITH latest AS (SELECT DISTINCT ON (symbol) symbol, as_of_date, status, latest_report, window_end FROM pe_snapshots ORDER BY symbol, as_of_date DESC),
+        reports AS (
+            SELECT symbol, max(d) AS d FROM (
+                SELECT t.symbol, e.event_date AS d FROM events e JOIN tickers t ON t.id = e.ticker_id
+                WHERE e.event_type = 'earnings' AND e.event_date <= CURRENT_DATE AND (e.is_confirmed OR e.eps_actual IS NOT NULL)
+                UNION ALL
+                SELECT t.symbol, hr.event_date FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id WHERE hr.event_type = 'earnings' AND hr.event_date <= CURRENT_DATE) x GROUP BY symbol)
+        SELECT l.symbol, l.as_of_date, l.latest_report, r.d FROM latest l JOIN reports r ON r.symbol = l.symbol
+        WHERE l.status IN ('ok', 'not_meaningful') AND (l.latest_report IS NULL OR r.d > l.latest_report) ORDER BY l.symbol"""))).all()
+    if rows:
+        return CheckResult("pe_window_fresh", ERROR, f"{len(rows)} stored P/E(s) rest on a window computed before the latest reported quarter",
+                           [f"{sym}: P/E of {d} computed for the report of {lr}; latest report {rep}" for sym, d, lr, rep in rows[:10]])
+    n = (await session.execute(text("SELECT count(DISTINCT symbol) FROM pe_snapshots WHERE status IN ('ok', 'not_meaningful')"))).scalar() or 0
+    return CheckResult("pe_window_fresh", PASS, f"Every stored P/E ({n} tickers) rests on a window that holds the latest reported quarter")
+
+
+async def check_release_eps_checked(session) -> CheckResult:
+    """ERROR when a release figure differs from the XBRL figure for the same quarter by more than the tolerance (release_eps.flagged);
+    WARN when a release figure older than RELEASE_CHECK_DUE_DAYS has still not been checked against XBRL."""
+    flagged = (await session.execute(text("SELECT symbol, report_date, diluted_eps_gaap, xbrl_eps FROM release_eps WHERE flagged ORDER BY report_date DESC"))).all()
+    if flagged:
+        return CheckResult("release_eps_checked", ERROR, f"{len(flagged)} release EPS figure(s) differ from XBRL",
+                           [f"{s}: {d} release {float(r):+.2f} vs XBRL {float(x):+.2f}" for s, d, r, x in flagged[:10]])
+    late = (await session.execute(text("SELECT symbol, report_date FROM release_eps WHERE xbrl_eps IS NULL AND report_date < CURRENT_DATE - :n * interval '1 day' ORDER BY report_date"),
+                                  {"n": RELEASE_CHECK_DUE_DAYS})).all()
+    total = (await session.execute(text("SELECT count(*), count(xbrl_eps) FROM release_eps"))).one()
+    if late:
+        return CheckResult("release_eps_checked", WARN, f"{len(late)} release EPS figure(s) older than {RELEASE_CHECK_DUE_DAYS} days await their XBRL check",
+                           [f"{s}: report of {d}" for s, d in late[:10]])
+    return CheckResult("release_eps_checked", PASS, f"Release EPS figures: {total[0]} stored, {total[1]} checked against XBRL, none flagged, none overdue")
+
+
 # ── Dividends: the next amount is a per-payment figure in line with the last one paid ─────────────────
 
 NEXT_DIVIDEND_TOLERANCE_PCT = 10
@@ -2941,6 +2982,8 @@ CHECKS = [
     check_as_of_not_future,
     # dividends: the next amount is a payment, in line with the last
     check_next_dividend_amount,
+    check_pe_window_fresh,
+    check_release_eps_checked,
     # the calendar: confirmed dates stand alone, past estimates never stand as resolved
     check_estimate_beside_confirmed,
     check_past_estimate_standing,

@@ -62,6 +62,8 @@ STEPS: list[tuple[str, list[str]]] = [
     # GAAP diluted EPS from the earnings release for quarters XBRL does not hold yet, then checked against XBRL once filed
     ("Release EPS (8-K exhibits)",     ["python", "-m", "app.scripts.seed_release_eps", "--due", "--write"]),
     ("Release EPS vs XBRL",            ["python", "-m", "app.scripts.check_release_eps"]),
+    # after the price bars and the release figures: price over the four latest reported quarters, per ticker and per sector
+    ("Trailing P/E",                   ["python", "-m", "app.scripts.compute_pe", "--write"]),
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
     # RV rank runs before every reaction step: its data_error verdict is the price-history

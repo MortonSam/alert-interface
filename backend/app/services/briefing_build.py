@@ -272,4 +272,17 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         if raw is not None:
             raw.update(rv={"rv_20d": float(rv_row.rv_20d), "rv_rank": float(rv_row.rv_rank), "as_of": rv_row.as_of_date})
         cands.append(Q.q_volatile_now(name=name, symbol=sym, rv_20d=float(rv_row.rv_20d), rv_rank=float(rv_row.rv_rank), sample_days=int(rv_row.sample_days or 0), as_of=rv_row.as_of_date))
+    # 9. trailing P/E against its history and its sector (evergreen; only a stored, fresh snapshot)
+    pe_row = (await db.execute(text("""SELECT as_of_date, status, pe, window_start, window_end, hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last
+        FROM pe_snapshots WHERE symbol = :s ORDER BY as_of_date DESC LIMIT 1"""), {"s": sym})).mappings().first()
+    if pe_row and pe_row["status"] == "ok" and pe_row["pe"] is not None:
+        sec_row = (await db.execute(text("SELECT median_pe, shown, reason, fresh, active FROM pe_sector_snapshots WHERE sector = :sec ORDER BY as_of_date DESC LIMIT 1"),
+                                    {"sec": ticker.sector or ""})).mappings().first()
+        sector_median = float(sec_row["median_pe"]) if sec_row and sec_row["shown"] and sec_row["median_pe"] is not None else None
+        if raw is not None:
+            raw.update(pe={"pe": float(pe_row["pe"]), "as_of": pe_row["as_of_date"], "hist_median": _f(pe_row["hist_median"]), "sector": ticker.sector, "sector_median": sector_median})
+        cands.append(Q.q_pe(name=name, symbol=sym, pe=float(pe_row["pe"]), window_start=pe_row["window_start"], window_end=pe_row["window_end"], as_of=pe_row["as_of_date"],
+                            hist_median=_f(pe_row["hist_median"]), hist_share_above=pe_row["hist_share_above"], hist_sessions=pe_row["hist_sessions"], hist_excluded=pe_row["hist_excluded"],
+                            hist_first=pe_row["hist_first"], hist_last=pe_row["hist_last"], sector=ticker.sector, sector_median=sector_median,
+                            sector_fresh=(sec_row["fresh"] if sec_row and not sec_row["shown"] else None), sector_active=(sec_row["active"] if sec_row and not sec_row["shown"] else None)))
     return {"symbol": sym, "name": name, "questions": [c for c in cands if c] if all_candidates else Q.choose(cands)}

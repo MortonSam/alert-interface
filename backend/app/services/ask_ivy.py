@@ -52,7 +52,7 @@ NUMBER_WORD = re.compile(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b", re.I)
 HALF = re.compile(r"(?<!first )(?<!second )\bhalf\b(?!-year)", re.I)                 # "half" as a fraction; "first half" and "half-year" are periods
 QUARTER_FRACTION = re.compile(r"\b(?:a|one|three)\s+quarters?\b|\bquarters?\s+of\b", re.I)   # "a quarter of"; "third quarter" is a period
 FORBIDDEN_CHARS = re.compile(r"[0-9$%€£]")
-WINDOW_NAMES = ("52-week", "20-day", "1-day", "3-day", "5-day", "S&P 500")        # names of windows and an index, as the strip's own copy uses them; never a quantity
+WINDOW_NAMES = ("52-week", "20-day", "1-day", "3-day", "5-day", "five-year", "S&P 500")        # names of windows and an index, as the strip's own copy uses them; never a quantity
 _WINDOW = re.compile("|".join(re.escape(w) for w in WINDOW_NAMES))
 RECOMMENDATION = re.compile(r"\b(you should (?:buy|sell|hold)|i(?:'d| would) (?:buy|sell)|i recommend|buy now|sell now|(?:a |is a )?(?:good|bad|great) (?:buy|time to buy|time to sell)|worth buying|worth selling)\b", re.I)
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -87,7 +87,12 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
     (re.compile(r"(?<!not )(?<!un)\bconfirmed\b", re.I), {"next_report_status": "confirmed", "dividend_status": "declared"}),
     (re.compile(r"\b(?:an )?estimated(?: date| report date)?\b|\bnot (?:yet )?confirmed\b|\bunconfirmed\b|\bnot (?:yet )?declared\b", re.I), {"next_report_status": "estimated", "dividend_status": "estimated"}),
     (re.compile(r"(?<!not )(?<!yet )\bdeclared\b", re.I), {"dividend_status": "declared"}),
+    (re.compile(r"\babove its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\bricher than its (?:own )?history\b|\bhigher than its (?:own )?(?:five-year )?median\b", re.I), {"pe_vs_history": "above"}),
+    (re.compile(r"\bbelow its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\blower than its (?:own )?(?:five-year )?median\b", re.I), {"pe_vs_history": "below"}),
+    (re.compile(r"\babove (?:its |the )?(?:sector|peer|peers'|industry) median\b|\babove its peers\b|\bhigher than its (?:sector|peers)\b", re.I), {"pe_vs_sector": "above"}),
+    (re.compile(r"\bbelow (?:its |the )?(?:sector|peer|peers'|industry) median\b|\bbelow its peers\b|\blower than its (?:sector|peers)\b", re.I), {"pe_vs_sector": "below"}),
 ]
+VALUATION_VERDICTS = re.compile(r"\b(?:cheap|expensive|undervalued|overvalued|pricey|a bargain|overpriced|underpriced)\b", re.I)   # a ratio is never a verdict
 
 
 # ── deterministic classifiers: advice and off-topic questions never reach the model ──────────────────────────────
@@ -177,6 +182,10 @@ PHRASES: dict[str, str] = {
     "EPS estimate": "an estimate of {value} a share",
     "daily move": "a daily move of {value}",
     "upgrades in the last month": "{value} upgrades in the past month",
+    "P/E": "{value} times its earnings of the last four reported quarters",
+    "five-year median P/E": "{value}",
+    "sessions below today's P/E": "{value} of its sessions over the past five years",
+    "sector median P/E": "{value}",
 }
 _WINDOW_VALUE = re.compile(r"close (?P<base>[A-Z][a-z]{2} \d{1,2}, \d{4}) to close (?P<after>[A-Z][a-z]{2} \d{1,2}, \d{4})")
 
@@ -297,6 +306,14 @@ def word_facts(raw: dict) -> list[dict]:
         out.append(_fact("next_report_status", "next report date", "confirmed" if nxt.get("confirmation") == "confirmed" else "estimated", nxt["date"], nxt.get("note"), "word"))
         if nxt.get("timing") in B.TIMING_PHRASE:
             out.append(_fact("next_report_timing", "next report timing", B.TIMING_PHRASE[nxt["timing"]], nxt["date"], "events.report_timing", "word"))
+    pe = raw.get("pe")
+    if pe:
+        if pe.get("hist_median") is not None:
+            out.append(_fact("pe_vs_history", "P/E against its five-year median", "above" if pe["pe"] > pe["hist_median"] else "below" if pe["pe"] < pe["hist_median"] else "at",
+                             pe["as_of"], "pe_snapshots.pe against pe_snapshots.hist_median", "word"))
+        if pe.get("sector_median") is not None:
+            out.append(_fact("pe_vs_sector", "P/E against its sector median", "above" if pe["pe"] > pe["sector_median"] else "below" if pe["pe"] < pe["sector_median"] else "at",
+                             pe["as_of"], "pe_snapshots.pe against pe_sector_snapshots.median_pe", "word"))
     div = raw.get("dividend")
     if div:
         out.append(_fact("dividend_status", "next dividend", "declared" if div.get("declared_on") else "estimated", div.get("declared_on") or div.get("ex_date"), "events (ex_dividend)", "word"))
@@ -350,7 +367,7 @@ RULES
 3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase: "{{fact:quote}}, {{fact:distance_below_52_week_high}}" becomes "<price>, <share> below its 52-week high". Do not repeat words the phrase already carries.
 4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
 5. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: say plainly in the first sentence that this page's data does not cover it, then what the facts do hold that is closest, with placeholders. Partly: say what they show and what they do not.
-6. Never give a recommendation, a target, or an opinion about value; describe what the data shows and the idea behind it.
+6. Never give a recommendation, a target, or an opinion about value; describe what the data shows and the idea behind it. Never call the stock cheap, expensive, undervalued or overvalued; a P/E is compared with the company's own history and its sector, nothing more.
 6a. Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its last <count> beats", so write "fell after {{fact:beats_followed_by_a_fall}}". A move placeholder reads "a <signed percentage> move", so write "the stock had {{fact:1_day_move}} the next session", never "rose {{fact:1_day_move}}".
 7. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
 
@@ -379,6 +396,9 @@ def check_output(text_: str, fact_ids: set[str]) -> list[str]:
         problems.append("number word: quarter as a fraction")
     if RECOMMENDATION.search(stripped):
         problems.append("recommendation language")
+    m = VALUATION_VERDICTS.search(stripped)
+    if m:
+        problems.append(f"valuation verdict: {m.group(0)}")
     if len(sentences(text_)) > MAX_SENTENCES:
         problems.append(f"more than {MAX_SENTENCES} sentences")
     if "{" in PLACEHOLDER.sub("", text_) or "}" in PLACEHOLDER.sub("", text_):

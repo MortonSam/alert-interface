@@ -161,3 +161,21 @@ async def test_the_route_serves_at_most_four_in_catalog_order_with_receipts():
             if sym != "VMRK":
                 assert len(keys) >= 3, (sym, keys)                                             # eight reports or more: three questions at least
         assert (await c.get("/api/v1/tickers/CAG/questions")).json()["questions"] == []       # inactive: nothing
+
+
+def test_9_pe_compares_with_history_and_sector_and_never_passes_a_verdict():
+    kw = dict(name="Micron Technology", symbol="MU", pe=14.34, window_start=date(2025, 8, 29), window_end=date(2026, 9, 3), as_of=date(2026, 10, 5), hist_median=16.8,
+              hist_share_above=38, hist_sessions=871, hist_excluded=385, hist_first=date(2021, 10, 4), hist_last=date(2026, 10, 5), sector="Information Technology")
+    q = Q.q_pe(**kw, sector_median=43.4)
+    assert q["question"] == "How does Micron Technology's P/E compare with its own history and its sector?"
+    assert q["data"] == ("MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026, below its five-year median of 16.8 and higher than in 38% of 871 sessions "
+                         "(385 left out for negative or tiny earnings). Its Information Technology sector's median is 43.4, so it sits below its peers.")
+    assert_clean(q)
+    for w in Q.PE_FORBIDDEN_WORDS:
+        assert w not in (q["data"] + q["idea"]).lower()
+    assert "price paid for each dollar" in q["idea"] and "can mislead" in q["idea"]
+    q = Q.q_pe(**kw, sector_median=None, sector_fresh=62, sector_active=74)
+    assert q["data"].endswith("No sector median is shown: only 62 of the 74 active stocks in its sector have a fresh P/E window, and 90% are needed.")
+    assert_clean(q)
+    q = Q.q_pe(**{**kw, "hist_median": None, "hist_share_above": None, "hist_sessions": None, "hist_excluded": None}, sector_median=None)
+    assert q["data"] == "MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026."
