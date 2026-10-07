@@ -35,12 +35,15 @@ def earnings_blurb(cond: dict | None) -> str | None:
     return None
 
 
-def volatility_blurb(spread_pp: float | None, vol_regime: str | None, rv_rank: float | None) -> str | None:
-    """Unusually-active card. The regime word is the chip's; the tier word is rv_rank_label's."""
+def volatility_blurb(spread_pp: float | None, vol_regime: str | None, rv_rank: float | None, note: str | None = None) -> str | None:
+    """Unusually-active card. The regime word is the chip's; the tier word is rv_rank_label's. `note` replaces the comparison when
+    one session dominates the window (rv_store.dominant_note)."""
     if rv_rank is None:
         return None
     tier = rv_rank_label(rv_rank)
     rank_part = f"RV rank {rv_rank:.0f}, {tier.label}" if tier else f"RV rank {rv_rank:.0f}"
+    if note:
+        return f"{note} · {rank_part}"
     if spread_pp is None:
         return rank_part
     return f"{VOL_REGIME_WORDS.get(vol_regime, VOL_REGIME_WORDS[None])} at {spread_pp:+.0f}pp vs realized · {rank_part}"

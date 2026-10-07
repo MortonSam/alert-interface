@@ -619,6 +619,7 @@ export interface UnusuallyActiveItem {
   tier: "extreme" | "elevated";
   insight: string | null;
   vol_regime: string | null;
+  iv_rv_note?: string | null;      // "one session dominates the 20-day window: Oct 5, 2026 (+33.5%)" in place of the IV comparison
   earnings_date?: string | null;
   earnings_source?: string | null;
   earnings_checked_at?: string | null;

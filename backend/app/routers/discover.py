@@ -52,6 +52,7 @@ class ReportingSoonItem(BaseModel):
     confirmation_note: str | None = None
     insight: str | None = None  # e.g. "Beat 18 of 20 — beats largely priced in"
     vol_regime: str | None = None  # "iv_rich" | "iv_cheap" | None
+    iv_rv_note: str | None = None  # "one session dominates the 20-day window: Oct 5, 2026 (+33.5%)" in place of the comparison
     implied_move_pct: float | None = None   # the freshest chain's ATM straddle over spot, percent
     chain_date: str | None = None           # that chain's date: the implied move's receipt
     typical_move_pct: float | None = None   # mean absolute 1-day move over at least 8 stored reports
@@ -78,6 +79,7 @@ class SuggestionItem(BaseModel):
     event_date: str | None  # ISO date of the reaction's report
     insight: str | None = None
     vol_regime: str | None = None
+    iv_rv_note: str | None = None
     earnings_date: str | None = None        # next stored earnings date, None when the calendar has none
     earnings_source: str | None = None      # events.source of that date
     earnings_checked_at: str | None = None  # when Finnhub was last asked (tickers.earnings_checked_at)
@@ -122,6 +124,7 @@ class JustReportedItem(BaseModel):
     outcome: str  # beat / miss / meet / unknown
     insight: str | None = None  # e.g. "Moved -6.3% vs +2.7% typical beat"
     vol_regime: str | None = None
+    iv_rv_note: str | None = None
 
 
 class JustReportedResponse(BaseModel):
@@ -139,6 +142,7 @@ class UnusuallyActiveItem(BaseModel):
     tier: str  # "extreme" or "elevated"
     insight: str | None = None  # e.g. "IV rich +12pp — options expensive vs realized"
     vol_regime: str | None = None
+    iv_rv_note: str | None = None
     earnings_date: str | None = None
     earnings_source: str | None = None
     earnings_checked_at: str | None = None
@@ -292,23 +296,29 @@ async def _batch_vol_regime(
             iv_dates[r.symbol] = r.date
 
     # Latest RV per symbol
-    from app.services.rv_store import get_latest_rv_bulk
+    from app.services.rv_hold import rank_holds
+    from app.services.rv_store import dominant_note, get_latest_rv_bulk
     rv_rows = await get_latest_rv_bulk(db, symbols)
 
     today = date.today()
+    holds = await rank_holds(db, symbols, today)         # the rank is held after a corporate action inside the last 252 sessions
     out: dict[str, dict] = {}
     for sym in symbols:
         atm_iv = iv_map.get(sym)
         rv_row = rv_rows.get(sym)
         rv_20d = float(rv_row.rv_20d) if rv_row and rv_row.rv_20d else None
-        rv_rank = float(rv_row.rv_rank) if rv_row and rv_row.rv_rank else None
+        rv_rank = float(rv_row.rv_rank) if rv_row and rv_row.rv_rank and sym not in holds else None
+        note = dominant_note(rv_row) if rv_row else None
 
         # Only compute spread if IV data is fresh (<= 5 calendar days)
         iv_date = iv_dates.get(sym)
         if atm_iv is not None and iv_date and (today - iv_date).days > 5:
             atm_iv = None  # stale IV, skip
 
-        if atm_iv is not None and rv_20d is not None and rv_20d > 0:
+        if note is not None:
+            spread_pp = None             # one session dominates the window: the comparison and its rich/cheap label are not shown
+            regime = None
+        elif atm_iv is not None and rv_20d is not None and rv_20d > 0:
             spread_pp = round((atm_iv - rv_20d) * 100, 1)
             if spread_pp > DISCOVER_IV_RICH_PP:
                 regime = "iv_rich"
@@ -326,6 +336,8 @@ async def _batch_vol_regime(
             "atm_iv": atm_iv,
             "rv_20d": rv_20d,
             "rv_rank": rv_rank,
+            "iv_rv_note": note,
+            "rv_rank_hold": holds.get(sym),
         }
     return out
 
@@ -687,7 +699,7 @@ def _suggestion_insight(
 def _unusually_active_insight(vol: dict | None, symbol: str = "") -> str | None:
     if not vol:
         return None
-    return volatility_blurb(vol.get("iv_rv_spread_pp"), vol.get("vol_regime"), vol.get("rv_rank"))
+    return volatility_blurb(vol.get("iv_rv_spread_pp"), vol.get("vol_regime"), vol.get("rv_rank"), vol.get("iv_rv_note"))
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -770,6 +782,7 @@ async def reporting_soon(
             is_confirmed=r.is_confirmed,
             insight=_reporting_soon_insight(cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,
+            iv_rv_note=vol.get("iv_rv_note") if vol else None,
             **comparisons.get(r.symbol, {}),
         )
         for r, cond, vol, _ in raw_items[:limit]
@@ -847,6 +860,7 @@ async def just_reported(
             outcome=outcome,
             insight=_just_reported_insight(pct, outcome, cond, r.symbol),
             vol_regime=vol["vol_regime"] if vol else None,
+            iv_rv_note=vol.get("iv_rv_note") if vol else None,
         )
         for r, cond, vol, pct, outcome in raw_items[:limit]
     ]
@@ -1000,6 +1014,7 @@ async def suggestions(
                 buy_share_stats.get(sym), base, sym,
             )[0]),
             vol_regime=vol_data.get(sym, {}).get("vol_regime"),
+            iv_rv_note=vol_data.get(sym, {}).get("iv_rv_note"),
             **next_earnings.get(sym, {}),
         )
         for sym, t, total in top
@@ -1037,6 +1052,7 @@ async def unusually_active(
     symbols = [row.symbol for row in rows]
     vol_data = await _batch_vol_regime(db, symbols)
     next_earnings = await _batch_next_earnings(db, symbols)
+    rows = [row for row in rows if not vol_data.get(row.symbol, {}).get("rv_rank_hold")]     # a held rank is not on the tape
 
     items = [
         UnusuallyActiveItem(
@@ -1049,6 +1065,7 @@ async def unusually_active(
             tier=discover_rv_tier(float(row.rv_rank)).label,
             insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol),
             vol_regime=vol_data.get(row.symbol, {}).get("vol_regime"),
+            iv_rv_note=vol_data.get(row.symbol, {}).get("iv_rv_note"),
             **next_earnings.get(row.symbol, {}),
         )
         for row in rows
@@ -1072,6 +1089,7 @@ async def latest_pick(
         .where(
             AlertPick.source != "visitor",
             AlertPick.season == 2,
+            AlertPick.status != "void",                  # a void pick is outside the record: never on Discover, never priced
             func.cast(AlertPick.generated_at, SADate) >= LEDGER_START,
         )
         .order_by(AlertPick.generated_at.desc())

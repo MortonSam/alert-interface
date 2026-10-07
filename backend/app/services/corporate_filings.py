@@ -43,6 +43,52 @@ _NAME_AFTER = re.compile(r"(?:spin-?off of|separation of|distribution of|acquisi
 _NAME_LOOSE = re.compile(r"(?:spin-?off of|separation of|acquisition of|acquired|merger with|merged with|combination with)\s+(?:its |the )?((?:[A-Z][A-Za-z0-9&'’-]+\s?){1,5})")
 
 
+# the completion date the filing itself names: "Effective August 19, 2026 (the “Closing Date”)", "closing on August 17, 2026 (the “Closing Date”)",
+# "on June 29, 2026, the Company completed the Spin-Off"; an agreement date or the cover's event date is never taken over these
+_CLOSING_DATE = re.compile(rf"(?:on|effective(?: as of)?)\s+({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})\s*\((?:the\s*)?[“\"]?\s*(?:Closing Date|Distribution Date|Effective Date)", re.I)
+_COMPLETED_ON = re.compile(rf"(?:on|as of)\s+({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}}),?\s+(?:the Company|[A-Z][\w.&'’]*(?: [A-Z][\w.&'’]*){{0,4}})\s+completed the (?:previously announced )?(?:Spin-Off|Distribution|Separation|Merger|Combination|Transactions?)", re.I)
+# the counterparties a combination names: "transaction with Liberty Broadband Corporation, a Delaware corporation", "transaction with Cox Enterprises, Inc."
+_WITH = re.compile(r"(?:transactions?|combination|merger|business combination)\s+with\s+((?:[A-Z][\w&.'’-]*)(?:[ ,]+(?:[A-Z][\w&.'’-]*|and))*?(?:,? (?:Inc\.?|Corp\.?|Corporation|Company|LLC|L\.P\.|plc|Ltd\.?))?)(?=,? an? [A-Z][a-z]+(?: [A-Z][a-z]+)* (?:corporation|company|limited|real estate)|\s*\(|,|\.| pursuant)")
+# the company spun off, from the distribution sentence: "shares of common stock of Honeywell Aerospace, par value $0.01"
+_SPUN_COMPANY = re.compile(r"shares of (?:common stock|capital stock|common shares) of ([A-Z][\w&.'’-]*(?: [A-Z][\w&.'’-]*){0,5}?)(?:,? par value|\s*\(|,|\s+(?:to|on|was|were)\b)")
+_SHARE_CLASS = re.compile(r"\b(?:Class|Series)\s+[A-Z]\b|\b(?:Common|Preferred)(?:\s+Stock)?$|^(?:Company|Registrant|Charter|Parent)$", re.I)
+_STRUCTURAL_TERM = re.compile(r"Merger Sub|Merger LLC|Parent|NewCo|SpinCo|Holdings|Operating Partnership|^Sub$|^Company$|^Registrant$", re.I)
+_CORP_SUFFIX = re.compile(r",?\s+(?:Inc\.?|Incorporated|Corp\.?|Corporation|Company|Co\.|LLC|L\.P\.|LP|Ltd\.?|Limited|plc|PLC|N\.V\.|S\.A\.)$")
+
+
+def completion_date(flat: str) -> date | None:
+    """Pure: the date the filing names as the completion, when it names one (the first 15,000 characters: the cover, the
+    introductory note and the items)."""
+    m = _COMPLETED_ON.search(flat[:15000]) or _CLOSING_DATE.search(flat[:15000])
+    return _to_date(m) if m else None
+
+
+def counterparties(flat: str, issuer: str | None) -> list[str]:
+    """Pure: the companies a combination names as its other parties ("transaction with X"), in filing order, without the
+    issuer, its subsidiaries or structural defined terms; a parent whose operating company the filing also defines by the
+    same first word carries it in parentheses ("Cox Enterprises, Inc. (Cox Communications, LLC)")."""
+    own = {f.lower() for f in (issuer_forms(issuer) if issuer else [])}
+    out: list[str] = []
+    for m in _WITH.finditer(flat[:8000]):
+        name = _clean_name(m.group(1))
+        low = name.lower()
+        if not name or _SHARE_CLASS.search(name) or _STRUCTURAL_TERM.search(name) or low in own or any(low.startswith(f + " ") or f.startswith(low + " ") for f in own):
+            continue
+        tail = flat[m.end():m.end() + 140]
+        if re.search(r"subsidiary of", tail.split("(")[0], re.I):      # "X, a Delaware corporation and wholly owned subsidiary of Y (“Term”)": a party's subsidiary, not a party
+            continue
+        if name not in out:
+            out.append(name)
+    for i, name in enumerate(out):
+        first = name.split()[0]
+        for d in re.finditer(rf"({re.escape(first)} [A-Z][\w&.'’-]*(?:, (?:LLC|Inc\.?))?)(?: \(f/k/a [^)]*\))?\s*\(\W{{0,3}}{re.escape(first)}\W{{0,3}}\)", flat[:12000]):
+            other = _clean_name(d.group(1))
+            if other != name and not _STRUCTURAL_TERM.search(other):
+                out[i] = f"{name} ({other})"
+                break
+    return out
+
+
 def _to_date(m: re.Match) -> date | None:
     try:
         return date(int(m.group(3)), [x.lower() for x in _MONTHS.split("|")].index(m.group(1).lower()) + 1, int(m.group(2)))
@@ -68,8 +114,9 @@ _DEFINED_TERM = re.compile(r"^(?:SpinCo|RemainCo|New Company|NewCo|Merger Sub(?:
 
 
 def _usable_name(name: str | None) -> str | None:
-    """Pure: None for a defined term or a bare suffix; otherwise the name."""
-    if not name or _SUFFIX_ONLY.match(name) or _DEFINED_TERM.match(name):
+    """Pure: None for a defined term, a bare suffix or a share-class label ("Company Class B", "Series A", "Charter Class A Common");
+    otherwise the name."""
+    if not name or _SUFFIX_ONLY.match(name) or _DEFINED_TERM.match(name) or _SHARE_CLASS.search(name):
         return None
     return name
 
@@ -118,7 +165,7 @@ def classify_item_201(text: str, filed: date | None = None, issuer: str | None =
         spinner = resolve_defined(rmt.group("spinner").strip(), flat[:8000])
         name = f"{spinner} ({rmt.group('business').strip().removesuffix(' business').removesuffix(' Business')})"
         dm = _DATE.search(head)
-        return {"kind": "acquisition", "date": _to_date(dm) if dm else filed, "name": name, "evidence": head[:300], "spinner": spinner, "spinner_kind": "spin_off"}
+        return {"kind": "acquisition", "date": completion_date(flat) or (_to_date(dm) if dm else filed), "name": name, "evidence": head[:300], "spinner": spinner, "spinner_kind": "spin_off"}
     if CASH_TARGET.search(passage) or CASH_TARGET.search(flat[:20000]):
         kind = "other"          # the target's shares became cash: a cash deal on either side; the delisting rule, not the P/E rule, handles a filer that stops trading
     elif SPIN.search(head):
@@ -130,11 +177,21 @@ def classify_item_201(text: str, filed: date | None = None, issuer: str | None =
     else:
         kind = "other"          # a cash acquisition, an asset sale, or an unread form of consideration
     dm = _DATE.search(head)
-    day = _to_date(dm) if dm else filed
+    day = completion_date(flat) or (_to_date(dm) if dm else filed)
     nm = _NAME_AFTER.search(head)
     name = _clean_name(nm.group(1)) if nm else None
-    if name and (re.match(r"^(?:The |Its |All |Each )", name) or _SUFFIX_ONLY.match(name) or (issuer and name.lower() in {f.lower() for f in issuer_forms(issuer)})):
+    if name and (re.match(r"^(?:The |Its |All |Each )", name) or _SUFFIX_ONLY.match(name) or _SHARE_CLASS.search(name) or (issuer and name.lower() in {f.lower() for f in issuer_forms(issuer)})):
         name = None
+    name = _usable_name(name)                             # a defined term ("Merger LLC") or a share-class label is no name, so the rules below may fill it
+    if kind == "spin_off":
+        sc = _SPUN_COMPANY.search(flat[:15000])
+        spun = _clean_name(sc.group(1)) if sc else None
+        if spun and _usable_name(spun) and not (issuer and spun.lower() in {f.lower() for f in issuer_forms(issuer)}):
+            name = spun                                   # the company distributed, named in the distribution sentence (Honeywell Aerospace)
+    if kind in ("merger", "acquisition"):
+        parties = counterparties(flat, issuer)
+        if len(parties) > 1 or (parties and not name):
+            name = " and ".join(parties)                  # every party the combination names (Liberty Broadband and Cox)
     if not name:
         name = _name_from_common_stock(head, issuer) or _name_from_common_stock(flat, issuer)
     if not name:
@@ -142,4 +199,7 @@ def classify_item_201(text: str, filed: date | None = None, issuer: str | None =
         cand = _clean_name(lm.group(1)) if lm else None
         if cand and cand.lower() not in {"its", "the", "all", "each"} and not _SUFFIX_ONLY.match(cand) and not (issuer and cand.lower() in {f.lower() for f in issuer_forms(issuer)}):
             name = cand
+    name = _usable_name(name)
+    if name and " " not in name and " and " not in name:
+        name = resolve_defined(name, flat[:12000])       # a defined term stands for its company ("AvalonBay" -> "AvalonBay Communities, Inc.")
     return {"kind": kind, "date": day, "name": _usable_name(name), "evidence": head[:300]}

@@ -25,11 +25,15 @@ from sqlalchemy import text
 from app.database import ScriptSessionLocal
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+from app.services.write_failures import WriteFailures
 from app.services.step_outcomes import record_step_fields
 from app.services.valuation import implausible, parse_release_eps, year_over_year_note
 from app.services import release_reader as R
 
 STEP_LABEL = "Release EPS (8-K exhibits)"
+WRITES = WriteFailures(STEP_LABEL)
+WRITES = WriteFailures(STEP_LABEL)
 LOOKBACK_DAYS = 45
 MATCH_DAYS = 5          # the 8-K is filed within this many days of the report
 
@@ -169,17 +173,22 @@ async def run(argv: list[str]) -> int:
                 print(f"      evidence: {hit['evidence'][:200]}")
                 results.append({"symbol": sym, "report_date": report_date.isoformat(), "eps": hit["eps"], "period_end": hit["period_end"].isoformat() if hit["period_end"] else None, "accession": rec["accession"]})
                 if write and model_client is not None:
-                    async with ScriptSessionLocal() as s:
-                        await s.execute(text("""
-                            INSERT INTO release_eps (symbol, report_date, period_end, diluted_eps_gaap, how, evidence, accession, exhibit, filed_on)
-                            VALUES (:s, :d, :pe, :eps, :how, :ev, :acc, :ex, :filed)
-                            ON CONFLICT (symbol, report_date) DO UPDATE SET period_end = EXCLUDED.period_end, diluted_eps_gaap = EXCLUDED.diluted_eps_gaap,
-                                how = EXCLUDED.how, evidence = EXCLUDED.evidence, accession = EXCLUDED.accession, exhibit = EXCLUDED.exhibit, filed_on = EXCLUDED.filed_on, parsed_at = now()"""),
-                            {"s": sym, "d": report_date, "pe": hit["period_end"], "eps": hit["eps"], "how": hit["how"], "ev": hit["evidence"][:2000], "acc": rec["accession"], "ex": ex[0][:120],
-                             "filed": date.fromisoformat(rec["filing_date"])})
-                        await s.commit()
-                    stored += 1
+                    try:
+                        async with ScriptSessionLocal() as s:
+                            await s.execute(text("""
+                                INSERT INTO release_eps (symbol, report_date, period_end, diluted_eps_gaap, how, evidence, accession, exhibit, filed_on)
+                                VALUES (:s, :d, :pe, :eps, :how, :ev, :acc, :ex, :filed)
+                                ON CONFLICT (symbol, report_date) DO UPDATE SET period_end = EXCLUDED.period_end, diluted_eps_gaap = EXCLUDED.diluted_eps_gaap,
+                                    how = EXCLUDED.how, evidence = EXCLUDED.evidence, accession = EXCLUDED.accession, exhibit = EXCLUDED.exhibit, filed_on = EXCLUDED.filed_on, parsed_at = now()"""),
+                                {"s": sym, "d": report_date, "pe": hit["period_end"], "eps": hit["eps"], "how": hit["how"][:64], "ev": hit["evidence"][:2000], "acc": rec["accession"], "ex": ex[0][:120],
+                                 "filed": date.fromisoformat(rec["filing_date"])})
+                            await s.commit()
+                        stored += 1
+                    except Exception as exc:                    # a failed write is a failed step, named row by row (write_failures)
+                        WRITES.add(f"{sym} {report_date}", exc)
+                        print(f"  {sym} {report_date}: WRITE FAILED: {redact(exc)[:160]}", flush=True)
             except Exception as exc:
+                WRITES.note(f"{sym} {report_date}", exc)
                 print(f"  {sym} {report_date}: failed: {redact(exc)[:120]}"); unread += 1
     finally:
         await edgar.close()
@@ -191,7 +200,7 @@ async def run(argv: list[str]) -> int:
     if write and due:
         await record_step_fields(STEP_LABEL, {"reports": len(rows), "read": parsed, "stored": stored, "unread": unread, "rows": results[:50], "yoy_warnings": yoy_warnings[:20],
                                               "disagreements": disagreements[:30], "model_reads": len(model_costs), "model_cost_usd": total_cost, "error": None})
-    return 0
+    return await WRITES.finish(0)
 
 
 if __name__ == "__main__":

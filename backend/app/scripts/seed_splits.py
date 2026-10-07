@@ -16,6 +16,9 @@ CLI
 """
 from __future__ import annotations
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+
+WRITES = WriteFailures("Split history")
 
 import argparse
 import asyncio
@@ -101,6 +104,7 @@ async def main() -> int:
                     await session.commit()
                 inserted += n
             except Exception as exc:
+                WRITES.note(t.symbol, exc)
                 failed.append(f"{t.symbol}: {redact(exc)[:80]}")
     finally:
         if client is not None:
@@ -109,7 +113,7 @@ async def main() -> int:
     print(f"  {inserted} split(s) inserted, {len(failed)} failed, {requests} request(s)")
     for f in failed[:10]:
         print("   ", f)
-    return 1 if len(failed) > 10 else 0
+    return await WRITES.finish(1 if len(failed) > 10 else 0)
 
 
 if __name__ == "__main__":

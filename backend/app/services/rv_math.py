@@ -64,6 +64,44 @@ def extreme_return_is_real(
     return bool(pd.notna(vol) and vol >= VOLUME_SPIKE_MULTIPLE * float(trailing.median()))
 
 
+DOMINANT_SHARE = 0.5     # when one session holds more than this share of the 20-day realized variance, the IV-versus-realized comparison is not shown
+
+
+def dominant_session(log_returns: "pd.Series", rv_window: int = 20) -> dict | None:
+    """Pure: the session carrying the largest share of the trailing window's realized variance: {date, move_pct, share}, or None
+    without a full window. PTC's +33.5% on Oct 5, 2026 (an acquisition) is almost all of a 107% annualized "realized vol";
+    comparing an option's implied move with that number says nothing about the options."""
+    window = log_returns.iloc[-rv_window:]
+    if len(window) < rv_window:
+        return None
+    sq = window ** 2
+    total = float(sq.sum())
+    if total <= 0:
+        return None
+    idx = sq.idxmax()
+    move = float(np.exp(window.loc[idx]) - 1) * 100
+    return {"date": idx.date() if hasattr(idx, "date") else idx, "move_pct": round(move, 2), "share": round(float(sq.loc[idx]) / total, 4)}
+
+
+DOMINANT_SHARE = 0.5     # when one session holds more than this share of the 20-day realized variance, the IV-versus-realized comparison is not shown
+
+
+def dominant_session(log_returns: "pd.Series", rv_window: int = 20) -> dict | None:
+    """Pure: the session carrying the largest share of the trailing window's realized variance: {date, move_pct, share}, or None
+    without a full window. PTC's +33.5% on Oct 5, 2026 (an acquisition) is almost all of a 107% annualized "realized vol";
+    comparing an option's implied move with that number says nothing about the options."""
+    window = log_returns.iloc[-rv_window:]
+    if len(window) < rv_window:
+        return None
+    sq = window ** 2
+    total = float(sq.sum())
+    if total <= 0:
+        return None
+    idx = sq.idxmax()
+    move = float(np.exp(window.loc[idx]) - 1) * 100
+    return {"date": idx.date() if hasattr(idx, "date") else idx, "move_pct": round(move, 2), "share": round(float(sq.loc[idx]) / total, 4)}
+
+
 def compute_rv_metrics(
     closes: pd.Series,
     rv_window: int = 20,
@@ -161,6 +199,7 @@ def compute_rv_metrics(
     rv_rank = (current_rv - rv_min) / (rv_max - rv_min) * 100
     rv_rank = max(0.0, min(100.0, rv_rank))
     rv_percentile = sum(1 for v in trailing if v < current_rv) / sample_days * 100
+    dom = dominant_session(log_returns, rv_window)
 
     return {
         "rv_20d": current_rv,
@@ -170,4 +209,7 @@ def compute_rv_metrics(
         "rv_max": rv_max,
         "sample_days": sample_days,
         "status": "ok",
+        "dominant_date": dom["date"] if dom else None,
+        "dominant_move_pct": dom["move_pct"] if dom else None,
+        "dominant_share": dom["share"] if dom else None,
     }

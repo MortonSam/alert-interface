@@ -22,6 +22,7 @@ CLI
 """
 from __future__ import annotations
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
 
 import argparse
 import asyncio
@@ -39,6 +40,7 @@ from app.services.corporate_actions import dividends_from_adjustments
 from app.services.intrinio_client import IntrinioClient
 
 WINDOW_DAYS = 14          # the nightly looks this far back on the bars; the ex-date is on the bar, so a few days of slack is plenty
+WRITES = WriteFailures("Dividend calendar")
 DIVIDEND_BASIS = "per_share"
 FORWARD_BASIS_INTRINIO = "last_payment_intrinio"   # the last per-payment dividend on the stored Intrinio bars
 FORWARD_BASIS_YFINANCE = "last_payment_yfinance"   # yfinance's lastDividendValue (the last declared payment) when the bars hold none
@@ -236,6 +238,7 @@ async def main() -> int:
                         await session.commit()
                 inserted += n
             except Exception as exc:
+                WRITES.note(t.symbol, exc)
                 failed.append(f"{t.symbol}: {redact(exc)[:80]}")
     finally:
         if client is not None:
@@ -278,7 +281,7 @@ async def main() -> int:
             print("   ", line)
     if not write:
         print("  dry run, nothing written")
-    return 1 if len(failed) + forward_failed > 10 else 0
+    return await WRITES.finish(1 if len(failed) + forward_failed > 10 else 0)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,9 @@ Usage
 """
 from __future__ import annotations
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+
+WRITES = WriteFailures("Refresh profiles (Finnhub)")
 
 import asyncio
 import sys
@@ -68,6 +71,7 @@ async def main() -> int:
                     updated += 1
 
                 except Exception as exc:
+                    WRITES.note(ticker.symbol, exc)
                     failed += 1
                     print(f"  ✗ {ticker.symbol}: {redact(exc)}")
                     continue
@@ -86,7 +90,7 @@ async def main() -> int:
     from app.services.finnhub_client import finnhub_stats
     from app.services.step_outcomes import record_step_fields
     await record_step_fields("Refresh profiles (Finnhub)", {"updated": updated, "skipped": skipped, "failed": failed, "finnhub": finnhub_stats(), "error": None})
-    return 1 if failed > 10 else 0
+    return await WRITES.finish(1 if failed > 10 else 0)
 
 
 if __name__ == "__main__":

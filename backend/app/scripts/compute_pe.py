@@ -22,9 +22,13 @@ from app.database import ScriptSessionLocal
 from app.services import valuation as V
 from app.services.edgar_client import PREDECESSOR_CIKS, EdgarClient
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+from app.services.write_failures import WriteFailures
 from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Trailing P/E"
+WRITES = WriteFailures(STEP_LABEL)
+WRITES = WriteFailures(STEP_LABEL)
 
 
 def _eps_series(facts: dict) -> list[dict]:
@@ -120,6 +124,7 @@ async def run(argv: list[str]) -> int:
                                     {"s": sym, "e": q["end"], "st": q["start"], "eps": q["eps"], "f": q["filed"], "form": q["form"][:12], "d": q["derived"], "sh": q.get("diluted_shares")})
                             await s.commit()
                 except Exception as exc:
+                    WRITES.note(sym, exc)                  # a database error while storing the quarters fails the step; an EDGAR failure does not
                     print(f"  {sym}: XBRL failed: {redact(exc)[:100]}", flush=True); failed += 1
                     quarters = stored.get(sym, [])
             rel = releases.get(sym)
@@ -195,7 +200,7 @@ async def run(argv: list[str]) -> int:
         print("  missing, by reason: " + "; ".join(f"{k}: {n}" for k, n in sorted(missing_reasons.items(), key=lambda x: -x[1])[:6]))
     if write:
         await record_step_fields(STEP_LABEL, {**counts, "refreshed": refreshed, "failed": failed, "sectors_shown": sum(1 for s2 in sectors.values() if s2["shown"]), "error": None})
-    return 0
+    return await WRITES.finish(0)
 
 
 if __name__ == "__main__":

@@ -268,9 +268,13 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         dated = [(r["event_date"], m) for r, m in zip(sample, moves)]
         cands.append(Q.q_usual_move(name=name, symbol=sym, typical_abs=typical_abs, n_reports=len(moves), best=max(dated, key=lambda x: x[1]),
                                     worst=min(dated, key=lambda x: x[1]), sample_as_of=sample_as_of))
-    # 8. volatility against the stock's own year (evergreen)
+    # 8. volatility against the stock's own year (evergreen); held after a corporate action inside the last 252 sessions (services/rv_hold)
+    from app.services.rv_hold import rank_holds
     from app.services.rv_store import get_servable_rv
-    rv_row, _ = await get_servable_rv(db, sym)
+    rv_hold = (await rank_holds(db, [sym], today)).get(sym)
+    rv_row, _ = (None, None) if rv_hold else await get_servable_rv(db, sym)
+    if rv_hold and raw is not None:
+        raw.update(rv_hold=rv_hold)
     if rv_row is not None and rv_row.rv_20d is not None and rv_row.rv_rank is not None:
         if raw is not None:
             raw.update(rv={"rv_20d": float(rv_row.rv_20d), "rv_rank": float(rv_row.rv_rank), "as_of": rv_row.as_of_date})

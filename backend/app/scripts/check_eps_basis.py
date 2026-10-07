@@ -28,6 +28,9 @@ CLI
 """
 from __future__ import annotations
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+
+WRITES = WriteFailures("EPS basis check (check_eps_basis)")
 
 import argparse
 import asyncio
@@ -174,6 +177,7 @@ async def main(only_symbol: str | None, limit: int | None, incremental: bool = F
                     counts = await check_ticker(session, edgar, ticker_id, symbol, trs)
                 except Exception as exc:
                     await session.rollback()
+                    WRITES.note(symbol, exc)
                     print(f"  {symbol:6s} ERROR {redact(exc)}", flush=True)
                     continue
                 total.update(counts)
@@ -186,7 +190,7 @@ async def main(only_symbol: str | None, limit: int | None, incremental: bool = F
     finally:
         await edgar.close()
     print(f"Done: {dict(total)}" + (" (stopped at the time budget)" if stopped_early else ""))
-    return 0
+    return await WRITES.finish(0)
 
 
 if __name__ == "__main__":

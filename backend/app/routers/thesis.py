@@ -11,7 +11,7 @@ from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import check_ownership, get_current_user, get_draft_caller, may_read_ledger
+from app.auth import check_ownership, get_current_user, get_draft_caller, may_read_ledger, viewer_role
 from app.thresholds import MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
@@ -1905,10 +1905,12 @@ async def list_alert_picks(
     season: int = Query(default=2, ge=1),
     db: AsyncSession = Depends(get_db),
     ledger_reader: bool = Depends(may_read_ledger),
+    role: str = Depends(viewer_role),
 ) -> list[AlertPickLedgerItem]:
     """List Ivy's alert picks newest-first, with live price marks and scoring.
 
-    Visitor picks (source='visitor') are excluded -- they never appear in Ivy's ledger.
+    Visitor picks (source='visitor') are excluded -- they never appear in Ivy's ledger. Void picks are outside the record and
+    appear on no public surface: only the admin token (Sam's own review) sees them, with their reason and no price.
     """
     if not LEDGER_PUBLIC and not ledger_reader:
         return []
@@ -1921,6 +1923,8 @@ async def list_alert_picks(
         )
         .order_by(AlertPick.generated_at.desc())
     )).scalars().all()
+    if role != "admin":
+        rows = [r for r in rows if r.status != "void"]
 
     if not rows:
         return []

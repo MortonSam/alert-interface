@@ -21,10 +21,14 @@ from sqlalchemy import text
 from app.database import ScriptSessionLocal
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+from app.services.write_failures import WriteFailures
 from app.services.step_outcomes import record_step_fields
 from app.services.valuation import eps_quarters, release_difference
 
 STEP_LABEL = "Release EPS vs XBRL"
+WRITES = WriteFailures(STEP_LABEL)
+WRITES = WriteFailures(STEP_LABEL)
 END_TOLERANCE_DAYS = 7
 NOT_COMPARABLE = ("XBRL holds this quarter only as a derived figure ({form} annual less three quarters, filed {filed}); "
                   "a release figure is compared only with a quarter XBRL reports directly")
@@ -87,12 +91,13 @@ async def run(recheck_flagged: bool = False) -> int:
                                     {"x": q["eps"], "f": q["form"][:10], "d": diff, "fl": flag, "id": rid})
                     await s.commit()
             except Exception as exc:
+                WRITES.note(f"{sym} {report_date}", exc)
                 print(f"  {sym} {report_date}: failed: {redact(exc)[:120]}")
     finally:
         await edgar.close()
     print(f"  checked {checked}, flagged {flagged}, not comparable {not_comparable}, still pending {pending}")
     await record_step_fields(STEP_LABEL, {"awaiting": len(rows), "checked": checked, "flagged": flagged, "not_comparable": not_comparable, "pending": pending, "flags": flags, "error": None})
-    return 0
+    return await WRITES.finish(0)
 
 
 if __name__ == "__main__":

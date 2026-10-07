@@ -27,7 +27,8 @@ _FRESHNESS_DAYS = 7
 _LATEST_SQL = sa.text("""
     SELECT DISTINCT ON (symbol)
            symbol, as_of_date, rv_20d, rv_rank, rv_percentile,
-           rv_min_1y, rv_max_1y, sample_days, status, last_bar_date
+           rv_min_1y, rv_max_1y, sample_days, status, last_bar_date,
+           dominant_date, dominant_move_pct, dominant_share
     FROM rv_snapshots
     WHERE symbol = ANY(:symbols)
     ORDER BY symbol, as_of_date DESC
@@ -59,6 +60,36 @@ def _why_not(row: sa.Row, cutoff: date) -> tuple[str, str] | None:
         if not state.ok:
             return (state.reason, state.detail or state.state)
     return None
+
+
+def single_session_dominates(row) -> bool:
+    """One session holds more than rv_math.DOMINANT_SHARE of the window's realized variance: the IV-versus-realized comparison is not shown."""
+    from app.services.rv_math import DOMINANT_SHARE
+    share = getattr(row, "dominant_share", None)
+    return share is not None and float(share) > DOMINANT_SHARE
+
+
+def dominant_note(row) -> str | None:
+    """"one session dominates the 20-day window: Oct 5, 2026 (+33.5%)", for the surfaces that would have compared IV with realized."""
+    if not single_session_dominates(row):
+        return None
+    from app.services.briefing import fmt_date
+    return f"one session dominates the 20-day window: {fmt_date(row.dominant_date)} ({float(row.dominant_move_pct):+.1f}%)"
+
+
+def single_session_dominates(row) -> bool:
+    """One session holds more than rv_math.DOMINANT_SHARE of the window's realized variance: the IV-versus-realized comparison is not shown."""
+    from app.services.rv_math import DOMINANT_SHARE
+    share = getattr(row, "dominant_share", None)
+    return share is not None and float(share) > DOMINANT_SHARE
+
+
+def dominant_note(row) -> str | None:
+    """"one session dominates the 20-day window: Oct 5, 2026 (+33.5%)", for the surfaces that would have compared IV with realized."""
+    if not single_session_dominates(row):
+        return None
+    from app.services.briefing import fmt_date
+    return f"one session dominates the 20-day window: {fmt_date(row.dominant_date)} ({float(row.dominant_move_pct):+.1f}%)"
 
 
 async def get_servable_rv(db: AsyncSession, symbol: str) -> tuple[sa.Row | None, str | None]:

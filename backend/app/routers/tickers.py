@@ -1436,9 +1436,12 @@ async def get_options_read(
     rv_max: float | None     = None
     rv_sample_days: int      = 0
 
+    from app.services.rv_hold import rank_holds
+    from app.services.rv_store import single_session_dominates
+    rv_held = (await rank_holds(db, [sym], today)).get(sym)
     if rv_snapshot_row is not None:
         current_rv = float(rv_snapshot_row.rv_20d) if rv_snapshot_row.rv_20d is not None else None
-        rv_rank = float(rv_snapshot_row.rv_rank) if rv_snapshot_row.rv_rank is not None else None
+        rv_rank = float(rv_snapshot_row.rv_rank) if rv_snapshot_row.rv_rank is not None and not rv_held else None
         rv_percentile = float(rv_snapshot_row.rv_percentile) if rv_snapshot_row.rv_percentile is not None else None
         rv_min = float(rv_snapshot_row.rv_min_1y) if rv_snapshot_row.rv_min_1y is not None else None
         rv_max = float(rv_snapshot_row.rv_max_1y) if rv_snapshot_row.rv_max_1y is not None else None
@@ -1447,7 +1450,7 @@ async def get_options_read(
     # IV-RV spread (in percentage points)
     iv_rv_spread_pp: float | None = (
         round((atm_iv - current_rv) * 100, 1)
-        if atm_iv is not None and current_rv is not None else None
+        if atm_iv is not None and current_rv is not None and not (rv_snapshot_row is not None and single_session_dominates(rv_snapshot_row)) else None
     )
 
     # Historical earnings avg absolute 1d move (reactions loaded with the servability probes above)

@@ -494,6 +494,17 @@ def action_reason(action: dict) -> str:
     return f"{verb}; {CLEAN_QUARTERS_NEEDED} full quarters after it are needed"
 
 
+RENAME_FOLLOWS_DAYS = 120        # a rename run within this many days after a recorded merger or acquisition is that deal's rename, not a second action
+
+
+def drop_renames_explained(actions: list[dict]) -> list[dict]:
+    """Pure: a rename_merge action is dropped when a recorded merger or share-exchange acquisition for the same company sits within
+    RENAME_FOLLOWS_DAYS before it: the deal's row carries the completion date and the counterparty (VMRK's merger with AvalonBay on
+    Aug 17, 2026, not "renamed from EQR on Oct 5, 2026", the day the rename ran)."""
+    deals = [a["date"] for a in actions if a.get("kind") in ("merger", "acquisition") and a.get("date")]
+    return [a for a in actions if not (a.get("kind") == "rename_merge" and any(0 <= (a["date"] - d).days <= RENAME_FOLLOWS_DAYS for d in deals))]
+
+
 def actions_in_window(actions: list[dict], start: date, as_of: date) -> list[dict]:
     """Pure: the recorded corporate actions dated from the window's first day through the price date. An action after the
     window's last quarter but before the price still breaks the comparison: today's post-action price over pre-action earnings."""
@@ -505,7 +516,7 @@ def snapshot_with_actions(price: float | None, quarters: list[dict], latest_repo
     not_meaningful_yet with the action's reason: four clean quarters must exist before a P/E."""
     snap = snapshot(price, quarters, latest_report, release, as_of)
     if snap["window_start"] and snap["window_end"]:
-        inside = actions_in_window(actions, snap["window_start"], as_of)
+        inside = actions_in_window(drop_renames_explained(actions), snap["window_start"], as_of)
         if inside:
             return {**snap, "status": "not_meaningful_yet", "pe": None, "reason": action_reason(max(inside, key=lambda a: a["date"]))}
     return snap

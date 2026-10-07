@@ -42,7 +42,8 @@ function join(clauses: (string | null | undefined)[]): string {
 }
 
 /** The vol regime chip's word, as a clause. iv_fair was never marked on a card and is not here either. */
-export function ivClause(regime: string | null | undefined): string | null {
+export function ivClause(regime: string | null | undefined, note?: string | null): string | null {
+  if (note) return note;                       // one session dominates the window: the API sends the note instead of a regime
   const v = regime && regime !== "iv_fair" ? volRegime(regime) : null;
   return v ? v.label.replace(/^IV (\w+)/, (_, w: string) => `IV ${w.toLowerCase()}`) : null;
 }
@@ -114,7 +115,7 @@ export function reportingSoonSentence(item: ReportingSoonItem, now: Date = new D
   const lead = item.confirmation === "expected_unconfirmed"
     ? `Expected to report ${whenPhrase(days)} (${lvl})`
     : `Reports ${whenPhrase(days)} (${lvl})`;
-  return join([lead, item.insight, ivClause(item.vol_regime)]);
+  return join([lead, item.insight, ivClause(item.vol_regime, (item as { iv_rv_note?: string | null }).iv_rv_note)]);
 }
 
 /** Every outcome the API can send has words; "unknown" says so rather than guessing. */
@@ -141,7 +142,7 @@ export function suggestionSentence(item: SuggestionItem, now: Date = new Date())
   return join([
     item.insight,
     earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now),
-    ivClause(item.vol_regime),
+    ivClause(item.vol_regime, (item as { iv_rv_note?: string | null }).iv_rv_note),
   ]);
 }
 
@@ -153,7 +154,7 @@ export function unusuallyActiveSentence(item: UnusuallyActiveItem, now: Date = n
   const tier = discoverRvTier(item.rv_rank);   // the API's 85/93 cutoffs; item.tier is the same word
   const lead = `RV rank ${Math.round(item.rv_rank)}, ${tier.label} for this stock`;
   const insight = item.insight ?? "";
-  const iv = insight.startsWith("RV rank") ? null : insight.split(" · ")[0] || ivClause(item.vol_regime);
+  const iv = item.iv_rv_note ?? (insight.startsWith("RV rank") ? null : insight.split(" · ")[0] || ivClause(item.vol_regime));
   return join([
     lead,
     iv,

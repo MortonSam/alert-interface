@@ -68,3 +68,11 @@ def test_plausibility_guard_refuses_on_price_and_adjusted_eps_and_notes_year_ove
     body = digest_message("2026-10-08", 30, 30, [], None, 90.0, None, None, None, ["MU 2026-09-30: +32.87 is 11.6x the same quarter a year earlier (+2.83)"])[1]
     assert "release EPS year-over-year warning(s) (1), stored, check by hand: MU 2026-09-30: +32.87 is 11.6x" in body
     assert "year-over-year" not in digest_message("2026-10-08", 30, 30, [], None, 90.0, None)[1]
+
+
+def test_every_reading_label_fits_the_column():
+    """release_eps.how is 64 characters wide; the longest label is "net income per share row, basic then diluted" (44)."""
+    import re
+    src = (Path(V.__file__)).read_text()
+    labels = re.findall(r'\(_[A-Z_0-9]+, "([^"]+)", \d+\)', src) + ["highlights sentence"]
+    assert labels and max(len(x) for x in labels) <= 64, max(labels, key=len)

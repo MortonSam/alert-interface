@@ -24,9 +24,11 @@ from app.models.ticker import Ticker
 from app.services.corporate_filings import classify_item_201
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
 from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Corporate actions (8-K Item 2.01)"
+WRITES = WriteFailures(STEP_LABEL)
 MONTHS = 15
 RECORDED_KINDS = ("spin_off", "merger", "acquisition")
 MATCH_SPIN_DAYS = 7
@@ -132,6 +134,7 @@ async def run(argv: list[str]) -> int:
                             await s.commit()
                             print(f"         {what}" + ("; name attached to the Intrinio spin-off row" if attached else ""), flush=True)
             except Exception as exc:
+                WRITES.note(t.symbol, exc)
                 failed += 1
                 print(f"  {t.symbol}: failed: {redact(exc)[:100]}", flush=True)
     finally:
@@ -141,7 +144,7 @@ async def run(argv: list[str]) -> int:
     if write:
         await record_step_fields(STEP_LABEL, {"filings": len(found), **by_kind, "failed": failed,
                                               "rows": [{**f, "date": f["date"].isoformat() if f["date"] else None} for f in found if f["kind"] in RECORDED_KINDS][:50], "error": None})
-    return 0
+    return await WRITES.finish(0)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ Usage
 """
 from __future__ import annotations
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
+from app.services.write_failures import WriteFailures
 
 import asyncio
 import sys
@@ -37,6 +39,8 @@ from app.services.ticker_rename import detect_rename, rename_symbol
 from app.services.step_outcomes import record_step_fields
 
 STEP_LABEL = "Security records (Intrinio)"
+WRITES = WriteFailures(STEP_LABEL)
+WRITES = WriteFailures(STEP_LABEL)
 
 
 async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, bool]:
@@ -227,6 +231,7 @@ async def main(argv: list[str]) -> int:
                         await session.commit()
                     profiles_refreshed.append(sym)
                 except Exception as exc:
+                    WRITES.note(f"{sym} profile", exc)
                     profile_failures.append(f"{sym}: {redact(exc)[:80]}")
             if write:
                 async with ScriptSessionLocal() as session:
@@ -256,7 +261,7 @@ async def main(argv: list[str]) -> int:
                                               "profiles_refreshed": len(profiles_refreshed), "profile_failures": profile_failures[:40], "error": None})
     elif renamed:
         print("  renames the write would apply:", renamed)
-    return 0
+    return await WRITES.finish(0)
 
 
 if __name__ == "__main__":

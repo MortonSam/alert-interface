@@ -50,12 +50,15 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
         INSERT INTO rv_snapshots
             (id, symbol, as_of_date, rv_20d, rv_rank, rv_percentile,
              rv_min_1y, rv_max_1y, sample_days, status,
-             last_bar_date, last_bar_close, created_at)
+             last_bar_date, last_bar_close, created_at, dominant_date, dominant_move_pct, dominant_share)
         VALUES
             (gen_random_uuid(), :symbol, :as_of_date, :rv_20d, :rv_rank,
              :rv_percentile, :rv_min_1y, :rv_max_1y,
-             :sample_days, :status, :last_bar_date, :last_bar_close, now())
+             :sample_days, :status, :last_bar_date, :last_bar_close, now(), :dominant_date, :dominant_move_pct, :dominant_share)
         ON CONFLICT (symbol, as_of_date) DO UPDATE SET
+            dominant_date = EXCLUDED.dominant_date,
+            dominant_move_pct = EXCLUDED.dominant_move_pct,
+            dominant_share = EXCLUDED.dominant_share,
             rv_20d        = EXCLUDED.rv_20d,
             rv_rank       = EXCLUDED.rv_rank,
             rv_percentile = EXCLUDED.rv_percentile,
@@ -79,6 +82,9 @@ async def _upsert_snapshot(symbol: str, as_of: date, metrics: dict) -> None:
             "status": metrics["status"],
             "last_bar_date": metrics.get("last_bar_date"),
             "last_bar_close": metrics.get("last_bar_close"),
+            "dominant_date": metrics.get("dominant_date"),
+            "dominant_move_pct": metrics.get("dominant_move_pct"),
+            "dominant_share": metrics.get("dominant_share"),
         })
         await session.commit()
 

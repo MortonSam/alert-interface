@@ -147,6 +147,22 @@ describe("row sentences", () => {
       `RV rank ${DISCOVER_ELEVATED_RV}, elevated for this stock; reports Oct 21 (confirmed, SEC filing)`);
   });
 
+  it("one session dominating the window replaces the IV comparison on every row", () => {
+    const note = "one session dominates the 20-day window: Oct 5, 2026 (+33.5%)";
+    const u: UnusuallyActiveItem = {
+      ...base, symbol: "PTC", rv_rank: 96.8, rv_20d: 1.07, tier: "extreme", insight: `${note} · RV rank 97, extreme`, vol_regime: null, iv_rv_note: note,
+      earnings_date: null, earnings_source: null, earnings_checked_at: TODAY_CHECK, earnings_confirmation: null, earnings_note: null,
+    };
+    expect(unusuallyActiveSentence(u, NOW)).toBe(`RV rank 97, extreme for this stock; ${note}; no confirmed date yet (Finnhub, checked today)`);
+    expect(unusuallyActiveSentence(u, NOW)).not.toMatch(/IV (cheap|rich)/);
+    const s: SuggestionItem = {
+      ...base, symbol: "PTC", score: 5, reports_in_days: 8, recent_move_pct: null, recent_move_5d: null, recent_outcome: null, event_date: null,
+      insight: "Beats estimates 90% of the time, versus 72% across the S&P", vol_regime: null, iv_rv_note: note,
+      earnings_date: null, earnings_source: null, earnings_checked_at: TODAY_CHECK, earnings_confirmation: null, earnings_note: null,
+    } as SuggestionItem;
+    expect(suggestionSentence(s, NOW)).toContain(note);
+  });
+
   it("just reported: the outcome, then the move against its typical one", () => {
     const j: JustReportedItem = {
       ...base, symbol: "RPTD", event_date: "2026-09-25", pct_change_1d: -6.3, outcome: "beat",

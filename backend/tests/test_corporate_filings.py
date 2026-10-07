@@ -68,3 +68,36 @@ def test_a_reverse_morris_trust_makes_the_filer_the_acquirer_and_names_the_spinn
 def test_a_filer_bought_for_cash_is_other_not_a_merger():
     c = classify_item_201(WBD, date(2026, 10, 6), "Warner Bros. Discovery, Inc.")
     assert c["kind"] == "other"
+
+
+FILINGS = __import__("pathlib").Path(__file__).parent / "fixtures" / "filings"
+
+
+def test_the_three_misread_reason_lines_from_the_full_filings():
+    """CHTR 0001140361-26-033909, VMRK 0001140361-26-033377 and HON 0000773840-26-000084, as filed."""
+    from app.services.corporate_filings import _usable_name, completion_date, counterparties
+    chtr = (FILINGS / "CHTR.txt").read_text()
+    c = classify_item_201(chtr, date(2026, 8, 20), "Charter Communications, Inc.")
+    assert c["kind"] == "merger" and c["date"] == date(2026, 8, 19)                         # the Closing Date, not the agreement's or the cover's date
+    assert c["name"] == "Liberty Broadband Corporation and Cox Enterprises, Inc. (Cox Communications, LLC)", c["name"]
+    assert _usable_name("Company Class B") is None and _usable_name("Charter Class A Common") is None and _usable_name("Series A") is None
+    vmrk = (FILINGS / "VMRK.txt").read_text()
+    c = classify_item_201(vmrk, date(2026, 8, 17), "Equity Residential")
+    assert (c["kind"], c["date"], c["name"]) == ("merger", date(2026, 8, 17), "AvalonBay Communities, Inc.")
+    hon = (FILINGS / "HON.txt").read_text()
+    c = classify_item_201(hon, date(2026, 6, 25), "Honeywell International Inc.")
+    assert (c["kind"], c["date"], c["name"]) == ("spin_off", date(2026, 6, 29), "Honeywell Aerospace")   # the business distributed, on the distribution date
+    assert completion_date("Effective August 19, 2026 (the “Closing Date”), Charter completed") == date(2026, 8, 19)
+    assert completion_date("in connection with the closing on August 17, 2026 (the “Closing Date”) of the Merger") == date(2026, 8, 17)
+    assert completion_date("Nothing dated here.") is None
+    assert counterparties(chtr[:8000], "Charter Communications, Inc.")[0] == "Liberty Broadband Corporation"
+
+
+def test_a_rename_explained_by_a_recorded_merger_defers_to_the_merger():
+    from app.services.valuation import drop_renames_explained
+    acts = [{"kind": "merger", "date": date(2026, 8, 17), "name": "AvalonBay"}, {"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}]
+    assert [a["kind"] for a in drop_renames_explained(acts)] == ["merger"]
+    lone = [{"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}]
+    assert drop_renames_explained(lone) == lone                                                 # no deal recorded: the rename stands
+    far = [{"kind": "merger", "date": date(2025, 1, 1), "name": "X"}] + lone
+    assert len(drop_renames_explained(far)) == 2
