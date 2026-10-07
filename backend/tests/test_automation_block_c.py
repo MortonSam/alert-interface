@@ -102,6 +102,26 @@ def test_a_rename_is_the_same_record_under_a_new_ticker_nobody_uses():
 
 
 @pytest.mark.asyncio
+async def test_the_alias_cache_loads_on_first_call_whatever_the_clock_reads_and_again_after_the_window():
+    """time.monotonic() counts from boot; a process younger than CACHE_SECONDS must still load the table on its first call and after a reset."""
+    class FakeSession:
+        def __init__(self): self.reads = 0
+        async def execute(self, *_):
+            self.reads += 1
+            class R:
+                def all(self_): return [("ZZOLD", "ZZNEW")]
+            return R()
+    s = FakeSession()
+    ticker_aliases.reset_cache()
+    assert await ticker_aliases.alias_map(s, now=10.0) == {"ZZOLD": "ZZNEW"} and s.reads == 1      # a young clock still loads
+    assert await ticker_aliases.alias_map(s, now=200.0) == {"ZZOLD": "ZZNEW"} and s.reads == 1     # inside the window: cached
+    assert await ticker_aliases.alias_map(s, now=10.0 + ticker_aliases.CACHE_SECONDS + 1) and s.reads == 2   # past it: reloaded
+    ticker_aliases.reset_cache()
+    assert await ticker_aliases.alias_map(s, now=12.0) and s.reads == 3                             # a reset forces the next read
+    ticker_aliases.reset_cache()
+
+
+@pytest.mark.asyncio
 async def test_rename_keeps_the_id_moves_every_symbol_column_rewrites_metadata_keys_and_redirects():
     old, new = "ZZOLD", "ZZNEW"
     try:
