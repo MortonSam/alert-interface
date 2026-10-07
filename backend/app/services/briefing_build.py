@@ -19,7 +19,7 @@ from app.services import chain_store, price_bars
 from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.eps_actuals import eps_outcome
 from app.services.trading_calendar import nth_trading_day_after
-from app.services.implied_move import straddle_implied_move
+from app.services.implied_move import implied_move_allowed, straddle_implied_move
 from app.services.next_earnings import next_earnings_for
 from app.services.price_history_exclusion import is_excluded
 from app.services.rv_store import get_servable_rv
@@ -149,7 +149,7 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         ne = await next_earnings_for(db, ticker.id, today)
         if ne.date and 0 <= (ne.date - today).days <= B.NEXT_WITHIN_DAYS:
             ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
-            implied = await _implied(db, sym, quote_price, ne.date, today)
+            implied = await _implied(db, sym, quote_price, ne.date, today) if implied_move_allowed(ne.confirmation) else {}   # never priced against an estimate
             avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
             upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
                         "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
@@ -212,12 +212,12 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
                 raw.update(last_report={"event_date": latest, "timing": timing, "move_pct": move, "outcome": eps_outcome(_f(ev.eps_actual) if ev else None, _f(ev.eps_estimate) if ev else None)})
             cands.append(Q.q_reaction_normal(name=name, symbol=sym, event_date=latest, timing=timing, move_pct=move, typical_abs=typical_abs,
                                              larger_count=sum(1 for m in past if m > abs(move)), n_reports=len(past), sample_as_of=sample_as_of))
-    # 2. a report within 45 days with a fresh implied move
+    # 2. a company-confirmed report within 45 days with a fresh implied move (an estimated date prices nothing: implied_move_allowed)
     ne = await next_earnings_for(db, ticker.id, today)
     if raw is not None and ne.date:
         ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
         raw.update(next_report={"date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source, "timing": ev_t})
-    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs:
+    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs and implied_move_allowed(ne.confirmation):
         implied = await _implied(db, sym, quote_price, ne.date, today)
         if raw is not None:
             raw.update(implied=implied or None)

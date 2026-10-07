@@ -51,3 +51,9 @@ def test_every_page_takes_the_move_from_the_one_service_and_build_tells_the_two_
     assert re.search(r'"quote_price":\s+round\(data\["current_price"\], 2\)', thesis)
     assert re.search(r'"span_days":\s+span_days\(options_as_of, chosen_exp\)', thesis)
     assert "chain_date=str(chain_last_trade)[:10]" in tickers and tickers.count("span_days=span_days(chain_last_trade, chosen_exp)") == 2
+
+
+def test_an_implied_move_is_allowed_only_against_a_company_confirmed_date():
+    from app.services.implied_move import implied_move_allowed
+    assert implied_move_allowed("confirmed") is True
+    assert implied_move_allowed("estimated") is False and implied_move_allowed("expected_unconfirmed") is False and implied_move_allowed(None) is False

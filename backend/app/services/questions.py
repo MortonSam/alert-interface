@@ -54,7 +54,8 @@ def q_reaction_normal(*, name: str, symbol: str, event_date: date, timing: str |
 # 2 ─────────────────────────────────────────────────────────────────────────────
 def q_implied_big(*, name: str, symbol: str, implied_pct: float, chain_date: date, next_date: date, typical_abs: float, n_reports: int,
                   sample_as_of: date | None) -> dict | None:
-    """A report within NEXT_WITHIN_DAYS with a fresh implied move: the options' move against the typical one."""
+    """A company-confirmed report within NEXT_WITHIN_DAYS with a fresh implied move: the options' move against the typical one.
+    The caller (briefing_build) offers no implied move on an estimated date (implied_move.implied_move_allowed)."""
     if n_reports < MIN_REPORTS:
         return None
     imp = fmt_pct(implied_pct * 100, signed=False)
@@ -66,10 +67,10 @@ def q_implied_big(*, name: str, symbol: str, implied_pct: float, chain_date: dat
     idea = ("The implied move is what a straddle costs: the price the options market puts on uncertainty. It tends to run above the move that "
             "actually follows, because option sellers charge for the risk of being wrong.")
     inputs = [_input("implied move", f"±{imp}", chain_date, "ATM straddle over spot, latest fresh chain"), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade"),
-              _input("report date", fmt_date(next_date), next_date, "events"), _input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, historical_reactions"),
+              _input("report date", fmt_date(next_date), next_date, "events, confirmed by the company"), _input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, historical_reactions"),
               _input("reports in the sample", n_reports, sample_as_of)]
     return _q("implied_big", f"Is a ±{imp} expected move big for {name}?", data, idea, inputs, chain_date,
-              f"A report within {NEXT_WITHIN_DAYS} days and a fresh chain; at least {MIN_REPORTS} past reports; more than usual means the implied move is over "
+              f"A company-confirmed report within {NEXT_WITHIN_DAYS} days (an estimated date is never priced) and a fresh chain; at least {MIN_REPORTS} past reports; more than usual means the implied move is over "
               "1.2 times the mean absolute 1-day move, less than usual under 0.8 times (services/move_comparison).")
 
 

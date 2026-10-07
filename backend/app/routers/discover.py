@@ -1160,9 +1160,13 @@ async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today
     MIN_REPORTS stored reports, and the one-sentence comparison. A symbol missing either side gets no comparison."""
     from app.services import price_bars, quote_cache
     from app.services.briefing_build import _implied
+    from app.services.earnings_calendar import level_of
+    from app.services.implied_move import implied_move_allowed
     from app.services.move_comparison import MIN_REPORTS, compare_moves, comparison_sentence
     out: dict[str, dict] = {}
     for r in rows:
+        if not implied_move_allowed(level_of(r.is_confirmed, getattr(r, "unresolved_since", None))):
+            continue            # an estimated date is never priced
         cond = cond_stats.get(r.symbol)
         if not cond or (cond.get("total") or 0) < MIN_REPORTS or not cond.get("avg_abs_1d"):
             continue

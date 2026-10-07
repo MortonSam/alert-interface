@@ -56,3 +56,11 @@ def span_days(chain_last_trade, expiration: str | None) -> int | None:
     except ValueError:
         return None
     return (end - start).days
+
+
+def implied_move_allowed(confirmation: str | None) -> bool:
+    """Pure: an implied move is shown only against a report date the company has confirmed. On an estimated or unresolved
+    date the straddle prices a report that may not happen (FDX's Oct 12, 2026 estimate when the company had set Oct 28), so the
+    strip question, the Overview clause, the Discover options-against-typical line and Ask Ivy's implied-move facts are all
+    absent. `confirmation` is next_earnings.level_of: "confirmed", "estimated" or "expected_unconfirmed"."""
+    return confirmation == "confirmed"
