@@ -93,7 +93,7 @@ def test_the_calendar_step_passes_each_tickers_stored_name_to_the_matcher():
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
     assert "names = {t.symbol: t.name for t in tickers if t.name}" in src
     assert "hit = from_news(news, today, names.get(sym))" in src
-    assert "fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names, feeds)" in src
+    assert "fetch_announcements(finnhub, edgar, near, today, announce_budget_s, names, feeds, candidate_days)" in src
 
 
 # ── A period date is never the results date (production dry run, 2026-09-30: ARES matched to its quarter-end) ──

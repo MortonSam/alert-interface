@@ -209,6 +209,11 @@ async def get_sector_peers(
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")
 
+    # fail closed (services/fact_holds): a held sector-peer stat serves nothing for this ticker
+    from app.services.fact_holds import holds_for
+    if "sector_peer" in await holds_for(db, sym):
+        return SectorPeersRead(symbol=sym, sector=ticker.sector, own_avg_abs_1d=None, sector_avg_abs_1d=None, peer_count=0, as_of=None, peers=[])
+
     # Read everything from stored snapshot
     own_snap = (await db.execute(
         select(SectorPeerSnapshot)

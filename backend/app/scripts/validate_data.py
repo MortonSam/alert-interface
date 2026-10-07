@@ -3123,21 +3123,37 @@ async def run_checks(checks, session_factory=None) -> list[CheckResult]:
 
 
 VALIDATE_STEP_LABEL = "Validate data"     # the label in refresh.STEPS
+
+
+async def write_holds(results: list[CheckResult], session_factory=None) -> list[dict]:
+    """Fail closed: the per-ticker facts the ERROR checks judged wrong, replaced into fact_holds (services/fact_holds)."""
+    from app.services.fact_holds import holds_from_results, replace_holds
+    factory = session_factory or AsyncSessionLocal
+    async with factory() as session:
+        symbols = set((await session.execute(text("SELECT symbol FROM tickers"))).scalars().all())
+        holds = holds_from_results(results, symbols)
+        await replace_holds(session, holds)
+        await session.commit()
+    return holds
 OUTCOME_ERROR_CAP = 10
 
 
-def outcome_fields(results: list[CheckResult]) -> dict:
-    """What /health carries for this run: counts, and the failing checks with their one-line messages."""
+def outcome_fields(results: list[CheckResult], holds: list[dict] | None = None) -> dict:
+    """What /health carries for this run: counts, the failing checks with their one-line messages, and the facts held (hidden) per ticker."""
+    from app.services.fact_holds import hidden_lines
     errors = [r for r in results if r.level == ERROR]
     figures: dict = {}
     for r in results:
         figures.update(r.figures or {})
+    hidden = hidden_lines(holds or [])
     return {
         "pass_count": sum(1 for r in results if r.level == PASS),
         "warn_count": sum(1 for r in results if r.level == WARN),
         "error_count": len(errors),
         "errors": [{"check": r.name, "message": r.message} for r in errors[:OUTCOME_ERROR_CAP]],
         "figures": figures,
+        "hidden_count": len(hidden),
+        "hidden": hidden[:80],
     }
 
 
@@ -3161,8 +3177,11 @@ async def main() -> int:
     from app.services.step_outcomes import record_step_fields
 
     results = await run_checks(CHECKS)
-    await record_step_fields(VALIDATE_STEP_LABEL, outcome_fields(results))
+    holds = await write_holds(results)
+    await record_step_fields(VALIDATE_STEP_LABEL, outcome_fields(results, holds))
     await alert_errors(results)
+    if holds:
+        print(f"\n  fail closed: {len(holds)} fact(s) hidden until their check passes")
 
     passed  = sum(1 for r in results if r.level == PASS)
     warned  = sum(1 for r in results if r.level == WARN)

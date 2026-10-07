@@ -732,7 +732,17 @@ async def reporting_soon(
     # Batch intelligence
     cond_stats = await _batch_conditional_stats(db, symbols)
     vol_data = await _batch_vol_regime(db, symbols)
+    # fail closed (services/fact_holds): a ticker whose report date is held leaves the list; a held typical move or implied move drops its insight and comparison
+    from app.services.fact_holds import holds_for_symbols
+    held = await holds_for_symbols(db, symbols)
+    deduped = [r for r in deduped if "report_date" not in held.get(r.symbol, set())]
+    for sym, facts in held.items():
+        if "typical_move" in facts:
+            cond_stats.pop(sym, None)
     comparisons = await _batch_move_comparison(db, deduped, cond_stats, today)
+    for sym, facts in held.items():
+        if "implied_move" in facts:
+            comparisons.pop(sym, None)
 
     # Build items with insights
     raw_items = []

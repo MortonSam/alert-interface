@@ -20,7 +20,8 @@ from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.eps_actuals import eps_outcome
 from app.services.trading_calendar import nth_trading_day_after
 from app.services.implied_move import implied_move_allowed, straddle_implied_move
-from app.services.next_earnings import next_earnings_for
+from app.services.next_earnings import NextEarnings, next_earnings_for
+from app.services.fact_holds import holds_for
 from app.services.price_history_exclusion import is_excluded
 from app.services.rv_store import get_servable_rv
 from app.services.ticker_aliases import resolve_symbol
@@ -125,11 +126,12 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     stock = {"quote_price": quote_price, "quote_ts": quote_ts, **facts}
 
     excluded = await is_excluded(db, sym)
+    held = await holds_for(db, sym)                      # fail closed: a fact validate found wrong for this ticker is used nowhere below
     mismatch = await basis_mismatch_dates(db, ticker.id)
     rows = (await db.execute(text("""
         SELECT event_date, pct_change_1d, outcome::text AS outcome, eps_actual, eps_estimate, report_timing
         FROM historical_reactions WHERE ticker_id = :t AND event_type = 'earnings' ORDER BY event_date"""), {"t": ticker.id})).mappings().all()
-    sample = [] if excluded else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
+    sample = [] if excluded or "typical_move" in held else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
     sample_as_of = sample[-1]["event_date"] if sample else None
     earnings_dates = (await db.execute(select(Event.event_date).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS,
                                                                        Event.event_date >= today - timedelta(days=60), Event.event_date <= today))).scalars().all()
@@ -146,10 +148,10 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         reported = {"today": today, "event_date": latest, "timing": timing, "eps_actual": actual, "eps_estimate": estimate, "outcome": eps_outcome(actual, estimate),
                     "bars_through": facts.get("last_close_date"), "pct_change_1d": stored if stored is not None else move_from_bars(df, latest, timing)}
     else:
-        ne = await next_earnings_for(db, ticker.id, today)
+        ne = await next_earnings_for(db, ticker.id, today) if "report_date" not in held else NextEarnings()
         if ne.date and 0 <= (ne.date - today).days <= B.NEXT_WITHIN_DAYS:
             ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
-            implied = await _implied(db, sym, quote_price, ne.date, today) if implied_move_allowed(ne.confirmation) else {}   # never priced against an estimate
+            implied = await _implied(db, sym, quote_price, ne.date, today) if implied_move_allowed(ne.confirmation) and "implied_move" not in held else {}   # never priced against an estimate
             avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
             upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
                         "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
@@ -185,11 +187,12 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     daily = daily_moves(df)
 
     excluded = await is_excluded(db, sym)
+    held = await holds_for(db, sym)                      # fail closed (services/fact_holds): a held fact qualifies no question and reaches no Ask Ivy fact
     mismatch = await basis_mismatch_dates(db, ticker.id)
     rows = (await db.execute(text("""
         SELECT event_date, pct_change_1d, outcome::text AS outcome, report_timing FROM historical_reactions
         WHERE ticker_id = :t AND event_type = 'earnings' ORDER BY event_date"""), {"t": ticker.id})).mappings().all()
-    sample = [] if excluded else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
+    sample = [] if excluded or "typical_move" in held else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
     moves = [float(r["pct_change_1d"]) for r in sample]
     sample_as_of = sample[-1]["event_date"] if sample else None
     typical_abs = sum(abs(m) for m in moves) / len(moves) if moves else None
@@ -213,11 +216,11 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
             cands.append(Q.q_reaction_normal(name=name, symbol=sym, event_date=latest, timing=timing, move_pct=move, typical_abs=typical_abs,
                                              larger_count=sum(1 for m in past if m > abs(move)), n_reports=len(past), sample_as_of=sample_as_of))
     # 2. a company-confirmed report within 45 days with a fresh implied move (an estimated date prices nothing: implied_move_allowed)
-    ne = await next_earnings_for(db, ticker.id, today)
+    ne = await next_earnings_for(db, ticker.id, today) if "report_date" not in held else NextEarnings()
     if raw is not None and ne.date:
         ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
         raw.update(next_report={"date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source, "timing": ev_t})
-    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs and implied_move_allowed(ne.confirmation):
+    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs and implied_move_allowed(ne.confirmation) and "implied_move" not in held:
         implied = await _implied(db, sym, quote_price, ne.date, today)
         if raw is not None:
             raw.update(implied=implied or None)
@@ -246,8 +249,8 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         cands.append(Q.q_upgrades(name=name, symbol=sym, upgrades_30d=len(ups), upgrade_sessions=stats["upgrade_sessions"] or 0, median_1d=float(stats["median_1d_upgrade"]),
                                   continuation_pct=_f(stats["upgrade_5d_continuation_pct"]), sample_5d=stats["upgrade_5d_sample"] or 0,
                                   stats_as_of=stats["computed_at"].date() if stats["computed_at"] else None, newest_upgrade=max(ups, default=None)))
-    # 6. an ex-dividend date
-    exd = (await db.execute(text("""
+    # 6. an ex-dividend date (hidden entirely while the dividend amount is held)
+    exd = None if "dividend_amount" in held else (await db.execute(text("""
         SELECT event_date, (metadata->>'dividend_amount')::float AS amount, metadata->>'basis' AS basis, (metadata->>'declared_on')::date AS declared_on,
                metadata->>'declaration_accession' AS accession, COALESCE(updated_at, created_at)::date AS stored_on FROM events
         WHERE ticker_id = :t AND event_type = 'ex_dividend' AND event_date >= :today ORDER BY event_date LIMIT 1"""), {"t": ticker.id, "today": today})).mappings().first()
@@ -277,8 +280,12 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     from app.config import settings
     pe_row = None
     if settings.pe_enabled:
-        pe_row = (await db.execute(text("""SELECT as_of_date, status, pe, window_start, window_end, hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last
+        pe_row = (await db.execute(text("""SELECT as_of_date, status, pe, window_start, window_end, window_source, hist_median, hist_share_above, hist_sessions, hist_excluded, hist_first, hist_last
             FROM pe_snapshots WHERE symbol = :s ORDER BY as_of_date DESC LIMIT 1"""), {"s": sym})).mappings().first()
+    if pe_row and "pe" in held:
+        pe_row = None                                                                        # fail closed: the P/E is held
+    if pe_row and "release_eps" in held and str(pe_row["window_source"] or "").startswith("three XBRL quarters plus the release"):
+        pe_row = None                                                                        # the window rests on a release figure validate found wrong
     if pe_row and pe_row["status"] == "ok" and pe_row["pe"] is not None:
         sec_row = (await db.execute(text("SELECT median_pe, shown, reason, fresh, active FROM pe_sector_snapshots WHERE sector = :sec ORDER BY as_of_date DESC LIMIT 1"),
                                     {"sec": ticker.sector or ""})).mappings().first()
