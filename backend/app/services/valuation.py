@@ -498,11 +498,11 @@ RENAME_FOLLOWS_DAYS = 120        # a rename run within this many days after a re
 
 
 def drop_renames_explained(actions: list[dict]) -> list[dict]:
-    """Pure: a rename_merge action is dropped when a recorded merger or share-exchange acquisition for the same company sits within
-    RENAME_FOLLOWS_DAYS before it: the deal's row carries the completion date and the counterparty (VMRK's merger with AvalonBay on
-    Aug 17, 2026, not "renamed from EQR on Oct 5, 2026", the day the rename ran)."""
-    deals = [a["date"] for a in actions if a.get("kind") in ("merger", "acquisition") and a.get("date")]
-    return [a for a in actions if not (a.get("kind") == "rename_merge" and any(0 <= (a["date"] - d).days <= RENAME_FOLLOWS_DAYS for d in deals))]
+    """Pure: a rename never holds on its own. A rename_merge action (a ticker_aliases row) is dropped: when a recorded merger or
+    share-exchange acquisition explains it, the deal's row carries the completion date and the counterparty (VMRK's merger with
+    AvalonBay on Aug 17, 2026, not "renamed from EQR on Oct 5, 2026", the day the rename ran); when nothing explains it, the alias
+    is a symbol change (PSKY to SKYD on Oct 7, 2026, fourteen months after the Skydance merger) and holds nothing."""
+    return [a for a in actions if a.get("kind") != "rename_merge"]
 
 
 def actions_in_window(actions: list[dict], start: date, as_of: date) -> list[dict]:

@@ -97,7 +97,7 @@ def test_a_rename_explained_by_a_recorded_merger_defers_to_the_merger():
     from app.services.valuation import drop_renames_explained
     acts = [{"kind": "merger", "date": date(2026, 8, 17), "name": "AvalonBay"}, {"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}]
     assert [a["kind"] for a in drop_renames_explained(acts)] == ["merger"]
-    lone = [{"kind": "rename_merge", "date": date(2026, 10, 5), "name": "EQR"}]
-    assert drop_renames_explained(lone) == lone                                                 # no deal recorded: the rename stands
-    far = [{"kind": "merger", "date": date(2025, 1, 1), "name": "X"}] + lone
-    assert len(drop_renames_explained(far)) == 2
+    lone = [{"kind": "rename_merge", "date": date(2026, 10, 7), "name": "PSKY"}]
+    assert drop_renames_explained(lone) == []                                                   # a rename with no deal behind it is a symbol change: no hold
+    far = [{"kind": "merger", "date": date(2025, 8, 7), "name": "Skydance"}] + lone
+    assert [a["kind"] for a in drop_renames_explained(far)] == ["merger"]                      # the deal holds on its own terms
