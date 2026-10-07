@@ -77,9 +77,12 @@ def verify_quote(exhibit_text: str, quote: str | None, eps: float | None) -> lis
     problems = []
     if not quote:
         return ["no quote"]
-    flat = re.sub(r"\s+", " ", exhibit_text or "")
+    # verbatim in substance: whitespace, dollar signs, thousands commas and case are formatting, not words (a table row the model copies
+    # as "$ 1.34 $ 2.68 (50) %" against the exhibit's "$1.34 $2.68 (50)%" is the same row)
+    norm = lambda t: re.sub(r"[\s$,]+", "", t or "").lower()
+    flat = norm(exhibit_text)
     q = re.sub(r"\s+", " ", quote).strip()
-    if q not in flat:
+    if norm(q) not in flat:
         problems.append("quote is not verbatim in the exhibit")
     if eps is None:
         problems.append("no figure")

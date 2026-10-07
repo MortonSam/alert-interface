@@ -18,6 +18,10 @@ def test_the_quote_must_be_verbatim_carry_the_number_and_no_disqualifier():
     assert R.verify_quote(EXHIBIT, "GAAP diluted EPS was $7.23.", 1.70) == ["quote does not contain +1.70"]
     assert R.verify_quote(EXHIBIT, None, 1.70) == ["no quote"]
     assert R.verify_quote("GAAP loss per share of $(0.03)", "GAAP loss per share of $(0.03)", -0.03) == []
+    # formatting is not wording: the model's spacing of a table row still matches the exhibit (CLX, VRSK, WDC on the 2026-10-07 dry run)
+    assert R.verify_quote("Diluted net earnings per share $1.34 $2.68 (50)%", "Diluted net earnings per share $ 1.34 $ 2.68 (50) %", 1.34) == []
+    assert R.verify_quote("Diluted EPS attributable to Verisk $1.75 $1.81 (3.3) 3.48", "Diluted EPS attributable to Verisk $ 1.75 $ 1.81 (3.3 ) 3.48", 1.75) == []
+    assert R.verify_quote("Diluted EPS $1.75", "Diluted EPS $1.57", 1.57) == ["quote is not verbatim in the exhibit"]        # a different number is a different quote
 
 
 def test_store_only_on_agreement_to_the_cent_and_the_notes_carry_both_readings():
