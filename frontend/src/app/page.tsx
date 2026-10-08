@@ -194,20 +194,8 @@ export default async function Home() {
       <div>
         {/* ── 6. Note preview ──────────────────────────────────── */}
         <ScrollReveal>
-          <section className="max-w-3xl mx-auto px-4 sm:px-8 py-24">
-            <div className="text-center mb-12">
-              <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
-                See it in action
-              </p>
-              <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-                The latest verified note
-              </h2>
-              <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
-                Rendered from the stored note: its own figures, its own words, and what the second model found.
-              </p>
-            </div>
-            <LatestVerifiedNote />
-          </section>
+          {/* the heading lives in the component: no current note, no section (services/note_currency) */}
+          <LatestVerifiedNote />
         </ScrollReveal>
 
         {/* ── 7. Market grid ───────────────────────────────────── */}

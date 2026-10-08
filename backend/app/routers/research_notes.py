@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models.research_note import ResearchNote
 from app.models.ticker import Ticker
 from app.schemas.research_note import LatestVerifiedNoteRead
+from app.services.note_currency import report_since
 from sqlalchemy import select
 from app.schemas.research_note import (
     ResearchNoteGenerateRequest,
@@ -102,10 +103,10 @@ async def generate(
         if verification_failed(existing):
             raise HTTPException(status_code=409, detail=NOTE_UNPUBLISHED_MESSAGE)
         response.status_code = 200
-        return note_for_reader(existing, admin)
+        return await note_for_reader(db, existing, admin)
     if existing is not None and _has_note_from_today(existing, now) and not force:
         response.status_code = 200   # the owner without force: today's note is returned
-        return note_for_reader(existing, admin)
+        return await note_for_reader(db, existing, admin)
 
     client_ip = get_client_ip(request)
     await check_limit(db, RESEARCH_GENERATION_POLICY, caller, client_ip)
@@ -117,7 +118,7 @@ async def generate(
         symbol=ticker.symbol,
         charge={"ip": client_ip, "at": charged_at},
     )
-    return note_for_reader(note, admin)
+    return await note_for_reader(db, note, admin)
 
 
 @router.post("/verify", response_model=ResearchNoteRead, dependencies=[Depends(require_admin)])
@@ -128,7 +129,7 @@ async def verify(
     return await verify_existing_note(db, payload.ticker_id, payload.symbol)
 
 
-def note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
+def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     """What this reader may see of a note.
 
     Visitors only ever get the text of a note whose verification completed. A
@@ -150,6 +151,12 @@ def note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     return read
 
 
+async def note_for_reader(db, note: ResearchNote, admin: bool) -> ResearchNoteRead:
+    """_note_for_reader, plus the date the company reported again after the note was written (None while it is current)."""
+    read = _note_for_reader(note, admin)
+    return read.model_copy(update={"report_since": await report_since(db, note.ticker_id, note.generated_at)})
+
+
 def visitor_failure_reason(note: ResearchNote) -> str:
     """Why a failed generation produced nothing, in a sentence without the exception text."""
     if note.error and "timed out" in note.error.lower():
@@ -159,19 +166,24 @@ def visitor_failure_reason(note: ResearchNote) -> str:
 
 @router.get("/latest-verified", response_model=LatestVerifiedNoteRead)
 async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedNoteRead:
-    """The most recently verified complete note on an active ticker, for the home page. 404 when there is none."""
-    row = (await db.execute(
+    """The most recently verified complete note on an active ticker whose company has not reported since it was written, for the
+    home page. A note written before its company's latest report is never shown there as current; 404 when no note qualifies (the
+    home page then hides the section)."""
+    rows = (await db.execute(
         select(ResearchNote, Ticker.symbol, Ticker.name)
         .join(Ticker, Ticker.id == ResearchNote.ticker_id)
         .where(ResearchNote.status == "complete", ResearchNote.verification.is_not(None), Ticker.is_active.is_(True))
         .order_by(ResearchNote.verified_at.desc().nulls_last(), ResearchNote.generated_at.desc())
-        .limit(1)
-    )).first()
+        .limit(200)
+    )).all()
+    row = None
+    for candidate in rows:
+        if is_verified(candidate[0]) and await report_since(db, candidate[0].ticker_id, candidate[0].generated_at) is None:
+            row = candidate
+            break
     if row is None:
-        raise HTTPException(status_code=404, detail="No verified research note yet")
+        raise HTTPException(status_code=404, detail="No current verified research note")
     note, symbol, name = row
-    if not is_verified(note):
-        raise HTTPException(status_code=404, detail="No verified research note yet")
     sc = note.structured_content or {}
     return LatestVerifiedNoteRead(
         symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
@@ -192,7 +204,7 @@ async def get_note(
     note = await get_research_note(db, ticker_id, symbol)
     if note is None:
         raise HTTPException(status_code=404, detail="No research note found for this ticker")
-    return note_for_reader(note, admin)
+    return await note_for_reader(db, note, admin)
 
 
 class StalenessRead(BaseModel):

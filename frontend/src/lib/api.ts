@@ -363,6 +363,7 @@ export interface ResearchNote {
   verification_failed?: boolean;   // only ever true for admins; visitors get a 404
   created_at: string;
   updated_at: string;
+  report_since?: string | null;   // the company reported again on this date after the note was written
 }
 
 export interface SparklinePoint {

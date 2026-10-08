@@ -3,7 +3,12 @@
 
 import type { LatestVerifiedNote, StructuredNoteStats } from "@/lib/api";
 
-export const NO_VERIFIED_NOTE = "No verified research note is available right now. Notes appear here once a second model has checked them against the filing.";
+/** A note written before its company reported again: "Written before the Sep 30 report" (the API's report_since, services/note_currency). */
+export function writtenBeforeLabel(reportSince: string | null | undefined): string | null {
+  if (!reportSince) return null;
+  const [y, m, d] = reportSince.split("-").map(Number);
+  return `Written before the ${new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })} report`;
+}
 
 function fmtCap(n: number): string {
   if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -49,6 +49,7 @@ class ResearchNoteRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     verification_failed: bool = False   # admins only ever see True here; visitors get a 404 instead
+    report_since: date | None = None     # the company reported again on this date after the note was written (services/note_currency)
 
 
 class ResearchNoteGenerateRequest(BaseModel):

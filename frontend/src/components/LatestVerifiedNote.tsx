@@ -1,13 +1,14 @@
 "use client";
 
-// The home page's note block: the most recently verified research note, rendered from the stored note
-// (its ticker, its dates, its own fact figures, its verification counts). Never a sample. When no
-// verified note exists at render time, the block says so.
+// The home page's note section: the most recently verified research note whose company has not reported since it
+// was written (the API skips older notes, services/note_currency), rendered from the stored note (its ticker, its
+// dates, its own fact figures, its verification counts). Never a sample. When no note qualifies, or the request
+// fails, the section is not shown at all.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type LatestVerifiedNote as Note } from "@/lib/api";
-import { NO_VERIFIED_NOTE, noteFacts, verificationLine } from "@/lib/latestNote";
+import { noteFacts, verificationLine } from "@/lib/latestNote";
 
 const RATING_CLASS: Record<string, string> = {
   bullish: "bg-success/10 text-success border-success/25",
@@ -21,18 +22,23 @@ export default function LatestVerifiedNote() {
     api.researchNotes.latestVerified().then(setNote).catch(() => setNote(null));   // a 404 (none yet) or any failure: the block says so
   }, []);
 
-  if (note === undefined) return <div className="rounded-2xl border border-border bg-card min-h-[16rem]" aria-hidden />;
-  if (note === null) {
-    return (
-      <div className="rounded-2xl border border-border bg-card px-6 py-10 text-center" data-testid="no-verified-note">
-        <p className="text-sm text-muted-foreground">{NO_VERIFIED_NOTE}</p>
-      </div>
-    );
-  }
+  if (!note) return null;          // loading, none current, or a failure: no section
   const facts = noteFacts(note.stats);
   const verified = verificationLine(note.verification_summary);
   const generated = new Date(note.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return (
+    <section className="max-w-3xl mx-auto px-4 sm:px-8 py-24">
+      <div className="text-center mb-12">
+        <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
+          See it in action
+        </p>
+        <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+          The latest verified note
+        </h2>
+        <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
+          Rendered from the stored note: its own figures, its own words, and what the second model found.
+        </p>
+      </div>
     <div className="relative rounded-2xl border border-border bg-card" data-testid="latest-verified-note">
       <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border bg-secondary/40">
         <span className="h-2 w-2 rounded-full bg-success" />
@@ -80,5 +86,6 @@ export default function LatestVerifiedNote() {
         </Link>
       </div>
     </div>
+    </section>
   );
 }

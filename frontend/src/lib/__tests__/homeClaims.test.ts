@@ -6,17 +6,21 @@ const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 
 describe("home page claims the disclosures support (audit items 8, 9, 21)", () => {
-  it("the note block is the latest verified note from the API, never a sample, and says so when there is none", async () => {
+  it("the note block is the latest current verified note from the API, never a sample, and hidden when there is none", async () => {
     const home = read("app/page.tsx");
     expect(home).toContain("<LatestVerifiedNote />");
-    expect(home).toContain("The latest verified note");
     expect(home).not.toMatch(/NotePreview|Illustration|Sample note|Generated &amp; verified|4\.30T|18\/20|\$26\.3B/);
     const block = read("components/LatestVerifiedNote.tsx");
     expect(block).toContain("api.researchNotes.latestVerified()");
     expect(block).toContain("href={`/tickers/${note.symbol}`}");
     expect(block).not.toMatch(/\$[0-9]/);   // no typed dollar figure in the markup
-    const { NO_VERIFIED_NOTE, noteFacts, verificationLine } = await import("@/lib/latestNote");
-    expect(NO_VERIFIED_NOTE).toContain("No verified research note is available right now");
+    expect(block).toContain("The latest verified note");
+    expect(block).toContain("if (!note) return null;");                  // none current (or a failure): no section, never an old note as current
+    const { noteFacts, verificationLine, writtenBeforeLabel } = await import("@/lib/latestNote");
+    expect(writtenBeforeLabel("2026-09-30")).toBe("Written before the Sep 30 report");
+    expect(writtenBeforeLabel(null)).toBeNull();
+    const ticker = read("app/tickers/[symbol]/page.tsx");
+    expect(ticker.match(/writtenBeforeLabel\(note\.report_since\) && \(/g)?.length).toBe(2);   // both note headers label an older note
     const facts = noteFacts({ market_cap: 4.3e12, eps_actual: 2.01, eps_estimate: 1.94, eps_beat_pct: 3.6, beat_count: 18, total_quarters: 20,
       revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "+3.56%", latest_outcome: "beat", latest_quarter_date: null });
     expect(facts.map((f) => [f.label, f.value])).toEqual([["Market cap", "$4.30T"], ["EPS", "$2.01"], ["EPS beats", "18/20"]]);

@@ -34,7 +34,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(rn, "start_research_note_generation", no_generation)
     monkeypatch.setattr(rn, "record_use", no_generation)
 
-    def reader(note, admin):
+    async def reader(db, note, admin):
         raise HTTPException(status_code=418, detail=f"existing:{note.status}:{admin}")   # reached the existing-note return
     monkeypatch.setattr(rn, "note_for_reader", reader)
     return monkeypatch

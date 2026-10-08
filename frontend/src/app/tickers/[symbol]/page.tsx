@@ -43,6 +43,7 @@ import { barCellStyle, legendEntries } from "./reactionChartEncoding";
 import { chainDateLabel } from "./optionsReadFootnote";
 import { ANALYST_WINDOW_TEXT, REACTION_WINDOW_TEXT, fedVsEarningsLine } from "./reactionWindowText";
 import { capture } from "@/lib/analytics";
+import { writtenBeforeLabel } from "@/lib/latestNote";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
@@ -2896,6 +2897,9 @@ export default function TickerPage() {
               )}
               <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
                 <span>
+                  {writtenBeforeLabel(note.report_since) && (
+                    <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
+                  )}
                   Generated {timeAgo(note.generated_at)}
                   {note.source_filings.length > 0 && (
                     <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
@@ -2982,6 +2986,9 @@ export default function TickerPage() {
               )}
               <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
                 <span>
+                  {writtenBeforeLabel(note.report_since) && (
+                    <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
+                  )}
                   Generated {timeAgo(note.generated_at)}
                   {note.source_filings.length > 0 && (
                     <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
