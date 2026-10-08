@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { cardEarningsNote, checkedPhrase, earningsSourceNote, eventConfirmationBadge, nextEarningsLine, noDateLine } from "@/lib/earningsSource";
 
-const NOW = new Date(2026, 8, 29, 10, 30);   // Sep 29, 2026, local
+const NOW = new Date(2026, 8, 29, 10, 30);   // Sep 29, 2026, local. Checked-at stamps sit mid-day UTC so their calendar day is the same in every US zone.
 
 describe("next earnings line", () => {
   it("prints the date, the source and when the source was last asked", () => {
-    expect(nextEarningsLine("2026-10-29", "finnhub", "2026-09-29T06:05:00Z", null, null, NOW)).toBe("Next earnings Oct 29, estimated (Finnhub, checked today)");
-    expect(nextEarningsLine("2026-10-28", "yfinance", "2026-09-26T05:23:16Z", null, null, NOW)).toBe("Next earnings Oct 28, estimated (Yahoo Finance, checked 3 days ago)");
+    expect(nextEarningsLine("2026-10-29", "finnhub", "2026-09-29T14:05:00Z", null, null, NOW)).toBe("Next earnings Oct 29, estimated (Finnhub, checked today)");
+    expect(nextEarningsLine("2026-10-28", "yfinance", "2026-09-26T14:23:16Z", null, null, NOW)).toBe("Next earnings Oct 28, estimated (Yahoo Finance, checked 3 days ago)");
   });
   it("a missing date still says when it was checked, and an unchecked ticker says so", () => {
-    expect(nextEarningsLine(null, null, "2026-09-29T06:05:00Z", null, null, NOW)).toBe("No confirmed date yet (Finnhub, checked Sep 29)");
+    expect(nextEarningsLine(null, null, "2026-09-29T14:05:00Z", null, null, NOW)).toBe("No confirmed date yet (Finnhub, checked Sep 29)");
     expect(nextEarningsLine(null, null, null, null, null, NOW)).toBe("No confirmed date yet (not yet checked)");
     expect(nextEarningsLine("2026-12-09", "finnhub", null, null, null, NOW)).toBe("Next earnings Dec 9, estimated (Finnhub, not yet checked)");
   });
@@ -19,16 +19,16 @@ describe("next earnings line", () => {
     expect(checkedPhrase("garbage", NOW)).toBe("not yet checked");
   });
   it("the Discover note is the short form", () => {
-    expect(earningsSourceNote("finnhub", "2026-09-29T06:05:00Z", NOW)).toBe("Finnhub, checked today");
+    expect(earningsSourceNote("finnhub", "2026-09-29T14:05:00Z", NOW)).toBe("Finnhub, checked today");
     expect(earningsSourceNote(null, null, NOW)).toBe("not yet checked");
   });
 });
 
 describe("a ticker the calendar left without a date is never blank", () => {
   it("says so with the source and the check date, everywhere the date would show", () => {
-    expect(noDateLine("2026-09-28T06:05:00Z")).toBe("No confirmed date yet (Finnhub, checked Sep 28)");
-    expect(cardEarningsNote(null, null, "2026-09-29T06:05:00Z", null, null, NOW)).toBe("No confirmed date yet (Finnhub, checked Sep 29)");
-    expect(cardEarningsNote("2026-10-29", "finnhub", "2026-09-29T06:05:00Z", null, null, NOW)).toBe("Earnings Oct 29, estimated \u00B7 Finnhub, checked today");
+    expect(noDateLine("2026-09-28T14:05:00Z")).toBe("No confirmed date yet (Finnhub, checked Sep 28)");
+    expect(cardEarningsNote(null, null, "2026-09-29T14:05:00Z", null, null, NOW)).toBe("No confirmed date yet (Finnhub, checked Sep 29)");
+    expect(cardEarningsNote("2026-10-29", "finnhub", "2026-09-29T14:05:00Z", null, null, NOW)).toBe("Earnings Oct 29, estimated \u00B7 Finnhub, checked today");
   });
   it("the ticker grid, Build fact grid and Discover rows render the no-date line from the API fields", () => {
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
