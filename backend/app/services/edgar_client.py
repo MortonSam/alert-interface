@@ -131,6 +131,15 @@ class EdgarClient:
 
     # ── CIK lookup ────────────────────────────────────────────────────────────
 
+    async def cik_owners(self) -> dict[str, set[str]]:
+        """{10-digit CIK: the ticker symbols EDGAR lists for it} ("BRK.B" read as "BRK-B", as the constituent scrape writes it)."""
+        await self.get_cik("AAPL")                      # loads or refreshes the cached company_tickers.json
+        data = json.loads(_cache_path("company_tickers.json").read_text())
+        out: dict[str, set[str]] = {}
+        for entry in data.values():
+            out.setdefault(str(entry["cik_str"]).zfill(10), set()).add(str(entry.get("ticker", "")).upper().replace(".", "-"))
+        return out
+
     async def get_cik(self, symbol: str) -> str | None:
         """Map ticker symbol to zero-padded 10-digit CIK string."""
         cache_file = _cache_path("company_tickers.json")

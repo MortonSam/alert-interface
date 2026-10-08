@@ -67,7 +67,7 @@ async def test_all_three_signals_delist_two_do_not_and_validate_errors_on_two():
 
 
 @pytest.mark.asyncio
-async def test_index_leavers_become_inactive_with_the_date_and_a_short_scrape_changes_nothing():
+async def test_confirmed_index_leavers_become_inactive_with_the_date_and_what_confirmed_it():
     syms = ["ZZIL1", "ZZIL2"]
     try:
         async with ScriptSessionLocal() as s:
@@ -75,12 +75,10 @@ async def test_index_leavers_become_inactive_with_the_date_and_a_short_scrape_ch
                 await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, index_member) VALUES (gen_random_uuid(), :s, 'Leaver test', true, true)"), {"s": sym})
             await s.commit()
         async with ScriptSessionLocal() as s:
-            assert await seed_sp500.deactivate_index_leavers(s, ["AAPL"] * 10, date(2026, 10, 6)) == {}      # a broken scrape
-            active = (await s.execute(text("SELECT symbol FROM tickers WHERE is_active AND symbol <> 'ZZIL2'"))).scalars().all()
-            out = await seed_sp500.deactivate_index_leavers(s, list(active), date(2026, 10, 6))
+            out = await seed_sp500.deactivate_index_leavers(s, ["ZZIL2"], {"ZZIL2": "missing from the constituent list and from SPY's holdings"}, date(2026, 10, 6))
             await s.commit()
             rows = dict((await s.execute(text("SELECT symbol, inactive_reason FROM tickers WHERE symbol = ANY(:s) AND NOT is_active"), {"s": syms})).all())
-        assert list(out) == ["ZZIL2"] and rows == {"ZZIL2": "left the S&P 500 (first missing from the constituent list on 2026-10-06)"}
+        assert list(out) == ["ZZIL2"] and rows == {"ZZIL2": "left the S&P 500 on 2026-10-06: missing from the constituent list and from SPY's holdings"}
         assert seed_sp500.MIN_CONSTITUENTS == 480
     finally:
         async with ScriptSessionLocal() as s:
@@ -232,7 +230,7 @@ async def test_a_rename_onto_a_duplicate_row_of_the_same_security_absorbs_it_and
 
 def test_membership_is_judged_before_the_per_ticker_work_so_a_quiet_night_still_judges_it():
     src = inspect.getsource(seed_sp500.main)
-    assert src.index("await apply_membership(candidates)") < src.index("if not to_process:")
+    assert src.index("candidates, membership_errors = await apply_membership(candidates)") < src.index("if not to_process:")
 
 
 # ── 2. idempotent nightly steps ──────────────────────────────────────────────
