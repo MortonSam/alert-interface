@@ -76,14 +76,23 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
         WHERE published_at >= :c AND cardinality(related) > 0"""), {"c": now - timedelta(hours=N.FRESH_HOURS)})).all()
     stories = [{"url": r.url, "headline": r.headline, "source": r.source, "published_at": r.published_at, "related": list(r.related)} for r in srows]
     up, down = N.movers(quotes)
+    # a mover's headline and the stories must be published after the previous regular session's close
+    session_day = max((q["quote_time"] for q in session), default=now).astimezone(N.NEW_YORK).date()
+    since = N.previous_session_close(session_day)
+    last_reports = dict((await db.execute(sa.text("""
+        SELECT t.symbol, max(d) FROM tickers t JOIN (
+            SELECT ticker_id, event_date AS d FROM historical_reactions WHERE event_type = 'earnings' AND event_date <= :today
+            UNION ALL
+            SELECT ticker_id, event_date FROM events WHERE event_type = 'earnings' AND is_confirmed AND event_date <= :today
+        ) x ON x.ticker_id = t.id WHERE t.is_active GROUP BY t.symbol"""), {"today": session_day})).all())
 
     def mover(q: dict) -> MoverItem:
-        h = N.top_headline(stories, q["symbol"], q["name"])
+        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since)
         return MoverItem(symbol=q["symbol"], name=q["name"], price=q["price"], change_pct=q["change_pct"], quote_time=q["quote_time"],
                          headline=NewsHeadline(headline=h["headline"], url=h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
 
     change = {q["symbol"]: q["change_pct"] for q in session}
-    ranked = N.in_the_news(stories, change, names={q["symbol"]: q["name"] for q in quotes})
+    ranked = N.in_the_news(stories, change, names={q["symbol"]: q["name"] for q in quotes}, last_reports=last_reports, since=since)
     return NewsSectionsResponse(
         visible=True, quotes_as_of=max((q["quote_time"] for q in session), default=None),
         up=[mover(q) for q in up], down=[mover(q) for q in down],

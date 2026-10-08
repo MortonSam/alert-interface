@@ -77,3 +77,28 @@ def test_the_route_is_gated_and_the_copy_never_says_because():
     assert news_run_due(datetime(2026, 10, 8, 10, 0, tzinfo=ny), None)
     assert not news_run_due(datetime(2026, 10, 8, 10, 30, tzinfo=ny), datetime(2026, 10, 8, 10, 0, tzinfo=ny))
     assert not news_run_due(datetime(2026, 10, 10, 10, 0, tzinfo=ny), None) and not news_run_due(datetime(2026, 10, 8, 20, 0, tzinfo=ny), None)
+
+
+def test_headline_rules_established_first_no_templates_no_other_quarters_and_after_the_previous_close():
+    from datetime import date
+    since = N.previous_session_close(date(2026, 10, 8))
+    assert since == datetime(2026, 10, 7, 16, 0, tzinfo=N.NEW_YORK)
+    assert N.previous_session_close(date(2026, 10, 12)) == datetime(2026, 10, 9, 16, 0, tzinfo=N.NEW_YORK)   # Monday: Friday's close
+    t = lambda h: datetime(2026, 10, 8, h, 0, tzinfo=N.NEW_YORK)
+    st = lambda h, src, hr, rel=("INTC",): {"headline": h, "source": src, "published_at": hr, "related": list(rel), "url": h}
+    p = lambda s, last=date(2026, 7, 23): N.headline_problem(s, "INTC", "Intel Corporation", last, since)
+    assert p(st("Intel (INTC): Buy, Sell, or Hold Post Q2 Earnings?", "Yahoo", t(13))) == "a question or template headline"
+    assert p(st("Should You Buy Intel Stock Now", "Yahoo", t(13))) == "a question or template headline"
+    assert p(st("Intel Among Stocks to Watch Today", "Yahoo", t(13))) == "a question or template headline"
+    assert p(st("Is It Time to Sell Intel", "Yahoo", t(13))) == "a question or template headline"
+    assert p(st("Intel earnings preview: what to expect", "Yahoo", t(13))) == "about an upcoming report, not the latest one"
+    assert p(st("Intel second-quarter results beat", "Yahoo", t(13))).startswith("names an earnings quarter but is not from the 14 days after")
+    assert p(st("Intel second-quarter results beat", "Yahoo", t(13)), date(2026, 10, 1)) is None              # one week after the report
+    assert p(st("Intel slides as chip stocks sell off", "Yahoo", datetime(2026, 10, 7, 15, 59, tzinfo=N.NEW_YORK))) == "published before the previous session's close"
+    assert p(st("Intel slides as chip stocks sell off", "Yahoo", t(9))) is None
+    stories = [st("Intel slides as chip stocks sell off", "Yahoo", t(13)), st("Intel cuts jobs in Oregon", "Reuters", t(9)),
+               st("Intel (INTC): Buy, Sell, or Hold?", "CNBC", t(14))]
+    assert N.top_headline(stories, "INTC", "Intel Corporation", date(2026, 7, 23), since)["source"] == "Reuters"   # established first, then newest
+    assert N.source_tier("Reuters") == 0 and N.source_tier("CNBC") == 0 and N.source_tier("Yahoo") == 1 and N.source_tier(None) == 1
+    out = N.in_the_news(stories, {"INTC": -5.3}, names={"INTC": "Intel Corporation"}, last_reports={"INTC": date(2026, 7, 23)}, since=since)
+    assert [r["source"] for r in out] == ["Yahoo", "Reuters"]                                                  # by move, then recency; the template is out

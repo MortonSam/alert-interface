@@ -56,6 +56,55 @@ def names_company(headline: str, symbol: str, name: str | None) -> bool:
     return False
 
 
+# Established news organisations, preferred over everything else for a mover's headline (then newest). Finnhub labels most stories
+# "Yahoo" behind its own redirect link, which cannot tell Yahoo Finance's own reporting from the syndicated pieces it carries, so
+# "Yahoo" is in the second tier with the rest.
+ESTABLISHED_SOURCES = {"reuters", "bloomberg", "dow jones", "the wall street journal", "wall street journal", "wsj", "marketwatch",
+                       "barron's", "barrons", "cnbc", "associated press", "ap", "financial times", "ft"}
+_TEMPLATE = re.compile(r"buy,?\s+sell,?\s+or\s+hold|should\s+you\s+buy|stocks?\s+to\s+watch|is\s+it\s+time\s+to|\?\s*[\"'’”]?\s*$", re.I)
+_UPCOMING = re.compile(r"earnings\s+preview|ahead\s+of\s+(?:its\s+|the\s+)?(?:q[1-4]\b|earnings|results|report)|next\s+earnings|"
+                       r"(?:to|will)\s+report\s+(?:q[1-4]|earnings|results)|earnings\s+(?:are\s+)?(?:expected|on\s+deck|due)", re.I)
+_QUARTER = re.compile(r"\bq[1-4]\b|\b(?:first|second|third|fourth)[- ]quarter\b|\bquarterly\b|\bearnings\b|\bresults\b|\bEPS\b", re.I)
+REPORT_HEADLINE_DAYS = 14     # a headline naming an earnings quarter counts only this soon after the company's latest report
+
+
+def source_tier(source: str | None) -> int:
+    """Pure: 0 for an established news organisation, 1 for everything else."""
+    return 0 if (source or "").strip().lower() in ESTABLISHED_SOURCES else 1
+
+
+def previous_session_close(session_day) -> datetime:
+    """Pure: 4:00 PM New York on the last trading day before `session_day` (the newest session in the quote snapshot)."""
+    from app.services.trading_calendar import is_trading_day
+    d = session_day - timedelta(days=1)
+    while not is_trading_day(d):
+        d -= timedelta(days=1)
+    return datetime(d.year, d.month, d.day, 16, 0, tzinfo=NEW_YORK)
+
+
+def headline_problem(story: dict, symbol: str, name: str | None, last_report, since: datetime) -> str | None:
+    """Pure: why a story cannot stand as this company's headline, or None. In order: published before the previous session's close;
+    a roundup; does not name the company; a question or template headline; about an upcoming report; names an earnings quarter but
+    was not published within REPORT_HEADLINE_DAYS after the company's latest report (so it is about another quarter)."""
+    h = story["headline"]
+    if story["published_at"] < since:
+        return "published before the previous session's close"
+    if len(story["related"]) > ROUNDUP_TICKERS:
+        return "a roundup about several companies"
+    if not names_company(h, symbol, name):
+        return "does not name the company"
+    if _TEMPLATE.search(h):
+        return "a question or template headline"
+    if _UPCOMING.search(h):
+        return "about an upcoming report, not the latest one"
+    if _QUARTER.search(h):
+        day = story["published_at"].astimezone(NEW_YORK).date()
+        if last_report is None or not 0 <= (day - last_report).days <= REPORT_HEADLINE_DAYS:
+            when = f"latest report {last_report.isoformat()}" if last_report else "no stored report"
+            return f"names an earnings quarter but is not from the {REPORT_HEADLINE_DAYS} days after the company's latest report ({when})"
+    return None
+
+
 def story_time(item: dict) -> datetime | None:
     ts = item.get("datetime")
     try:
@@ -128,24 +177,25 @@ def movers(quotes: list[dict], n: int = MOVERS_EACH_SIDE) -> tuple[list[dict], l
     return up, down
 
 
-def top_headline(stories: list[dict], symbol: str, name: str | None = None) -> dict | None:
-    """Pure: the company's newest story of the last FRESH_HOURS that is not a roundup (Finnhub does not rank stories; the newest is the
-    top one here). Finnhub tags loosely (a PepsiCo story under KO), so the headline must name the company: a mover with no such story
-    shows no headline."""
-    mine = [s for s in stories if symbol in s["related"] and len(s["related"]) <= ROUNDUP_TICKERS and names_company(s["headline"], symbol, name)]
-    return max(mine, key=lambda s: s["published_at"]) if mine else None
+def top_headline(stories: list[dict], symbol: str, name: str | None = None, last_report=None, since: datetime | None = None) -> dict | None:
+    """Pure: the company's headline: among its stories with no headline_problem, an established source first, then the newest. Finnhub
+    tags loosely (a PepsiCo story under KO), so the headline must name the company; a mover with no qualifying story shows none."""
+    since = since or datetime.min.replace(tzinfo=timezone.utc)
+    mine = [s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None]
+    return min(mine, key=lambda s: (source_tier(s.get("source")), -s["published_at"].timestamp())) if mine else None
 
 
 def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_THE_NEWS_LIMIT,
-                per_ticker: int = STORIES_PER_TICKER, names: dict[str, str | None] | None = None) -> list[dict]:
+                per_ticker: int = STORIES_PER_TICKER, names: dict[str, str | None] | None = None,
+                last_reports: dict | None = None, since: datetime | None = None) -> list[dict]:
     """Pure: up to `limit` stories about S&P 500 companies, ranked by the size of the related stock's move today, then recency; at
     most `per_ticker` per stock. A story counts for a related stock only when its headline names that company, and it is shown under
     the named stock with the biggest move."""
     rows = []
     for s in stories:
-        if len(s["related"]) > ROUNDUP_TICKERS:
-            continue                    # a roundup is about no one company
-        moved = [(abs(change[t]), t) for t in s["related"] if t in change and names_company(s["headline"], t, (names or {}).get(t))]
+        since_ = since or datetime.min.replace(tzinfo=timezone.utc)
+        moved = [(abs(change[t]), t) for t in s["related"]
+                 if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None]
         if not moved:
             continue
         size, sym = max(moved)
