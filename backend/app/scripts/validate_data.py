@@ -1037,6 +1037,26 @@ async def check_rv_data_error_tickers(session) -> CheckResult:
     )
 
 
+def missing_snapshot_line(newest: date, missing: list[str]) -> str:
+    """Pure: the line naming every active ticker with no RV snapshot on the newest snapshot date."""
+    return f"{len(missing)} active ticker(s) have no RV snapshot for {newest.isoformat()}, so they leave the tape and the strip silently: " + ", ".join(missing)
+
+
+async def check_rv_snapshot_coverage(session) -> CheckResult:
+    """ERROR when an active ticker has no rv_snapshots row (any status) for the newest snapshot date, naming each one. A ticker that
+    is not active (an index leaver) is not counted: its reason is on the ticker row (inactive_reason) and in seed_sp500's outcome."""
+    newest = await session.scalar(text("SELECT max(as_of_date) FROM rv_snapshots"))
+    if newest is None:
+        return CheckResult("rv_snapshot_coverage", WARN, "No rv_snapshots rows at all")
+    missing = list((await session.execute(text("""
+        SELECT t.symbol FROM tickers t
+        WHERE t.is_active AND NOT EXISTS (SELECT 1 FROM rv_snapshots r WHERE r.symbol = t.symbol AND r.as_of_date = :d)
+        ORDER BY t.symbol"""), {"d": newest})).scalars().all())
+    if missing:
+        return CheckResult("rv_snapshot_coverage", ERROR, missing_snapshot_line(newest, missing))
+    return CheckResult("rv_snapshot_coverage", PASS, f"every active ticker has an RV snapshot for {newest.isoformat()}")
+
+
 async def check_recommendations_freshness(session) -> CheckResult:
     """WARN if fewer than 300 active tickers have a recommendation fetched within recommendations.FRESH_DAYS, or any active ticker's
     newest trend is older than recommendations.MAX_AGE_DAYS (the pages hide it: Build's lean goes neutral, Discover drops the line)."""
@@ -2998,6 +3018,7 @@ CHECKS = [
     check_data_age,
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
+    check_rv_snapshot_coverage,
     check_excluded_ticker_hidden,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,
