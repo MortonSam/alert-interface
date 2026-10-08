@@ -163,6 +163,12 @@ def magnitude_trend_label(trend: str | None) -> LabeledValue | None:
 
 DISCOVER_EXTREME_RV = 93
 DISCOVER_ELEVATED_RV = 85  # retrieval filter
+# The Tape's words (Discover "Unusually active"): rank at or above TAPE_CHOPPIEST_RANK reads "its choppiest in a year", at or above
+# TAPE_ONE_OF_CHOPPIEST_RANK "one of its choppiest", below it "choppier than most of its past year". Implied volatility more than
+# TAPE_OPTIONS_BAND_PP points from realized reads as "a calmer" or "an even bumpier" month ahead; inside the band, "about the same".
+TAPE_CHOPPIEST_RANK = 99
+TAPE_ONE_OF_CHOPPIEST_RANK = 95
+TAPE_OPTIONS_BAND_PP = 5
 
 
 def discover_rv_tier(rv_rank: float) -> LabeledValue:

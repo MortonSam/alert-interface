@@ -145,6 +145,14 @@ class UnusuallyActiveItem(BaseModel):
     insight: str | None = None  # e.g. "IV rich +12pp — options expensive vs realized"
     vol_regime: str | None = None
     iv_rv_note: str | None = None
+    # the Tape's words are built from these (frontend discoverSentences.unusuallyActiveSentence); the figures go to the row's hover
+    iv_rv_spread_pp: float | None = None       # implied minus realized, in points; None without a fresh chain or when one session dominates
+    atm_iv: float | None = None
+    iv_date: str | None = None                 # the chain's date
+    dominant_date: str | None = None           # the session that dominates the 20-day window, when one does
+    dominant_move_pct: float | None = None
+    rank_hold_phrase: str | None = None        # "Spun off Vylor on Oct 1": the action that holds the rank
+    rank_hold_reason: str | None = None
     earnings_date: str | None = None
     earnings_source: str | None = None
     earnings_checked_at: str | None = None
@@ -298,12 +306,13 @@ async def _batch_vol_regime(
             iv_dates[r.symbol] = r.date
 
     # Latest RV per symbol
-    from app.services.rv_hold import rank_holds
+    from app.services.rv_hold import hold_phrase, hold_reason, rank_hold_actions
     from app.services.rv_store import dominant_note, get_latest_rv_bulk
     rv_rows = await get_latest_rv_bulk(db, symbols)
 
     today = date.today()
-    holds = await rank_holds(db, symbols, today)         # the rank is held after a corporate action inside the last 252 sessions
+    actions = await rank_hold_actions(db, symbols, today)     # the rank is held after a corporate action inside the last 252 sessions
+    holds = {sym: hold_reason(a["kind"], a["name"], a["date"]) for sym, a in actions.items()}
     out: dict[str, dict] = {}
     for sym in symbols:
         atm_iv = iv_map.get(sym)
@@ -340,6 +349,10 @@ async def _batch_vol_regime(
             "rv_rank": rv_rank,
             "iv_rv_note": note,
             "rv_rank_hold": holds.get(sym),
+            "rank_hold_phrase": hold_phrase(actions[sym]["kind"], actions[sym]["name"], actions[sym]["date"]) if sym in actions else None,
+            "iv_date": iv_dates.get(sym).isoformat() if atm_iv is not None and iv_dates.get(sym) else None,
+            "dominant_date": rv_row.dominant_date.isoformat() if note is not None and getattr(rv_row, "dominant_date", None) else None,
+            "dominant_move_pct": float(rv_row.dominant_move_pct) if note is not None and getattr(rv_row, "dominant_move_pct", None) is not None else None,
         }
     return out
 
@@ -1029,7 +1042,7 @@ async def unusually_active(
     symbols = [row.symbol for row in rows]
     vol_data = await _batch_vol_regime(db, symbols)
     next_earnings = await _batch_next_earnings(db, symbols)
-    rows = [row for row in rows if not vol_data.get(row.symbol, {}).get("rv_rank_hold")]     # a held rank is not on the tape
+    # a held rank stays on the tape, worded as the action that holds it ("Spun off Vylor on Oct 1, so its past year doesn't compare yet")
 
     items = [
         UnusuallyActiveItem(
@@ -1043,6 +1056,13 @@ async def unusually_active(
             insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol),
             vol_regime=vol_data.get(row.symbol, {}).get("vol_regime"),
             iv_rv_note=vol_data.get(row.symbol, {}).get("iv_rv_note"),
+            iv_rv_spread_pp=vol_data.get(row.symbol, {}).get("iv_rv_spread_pp"),
+            atm_iv=vol_data.get(row.symbol, {}).get("atm_iv"),
+            iv_date=vol_data.get(row.symbol, {}).get("iv_date"),
+            dominant_date=vol_data.get(row.symbol, {}).get("dominant_date"),
+            dominant_move_pct=vol_data.get(row.symbol, {}).get("dominant_move_pct"),
+            rank_hold_phrase=vol_data.get(row.symbol, {}).get("rank_hold_phrase"),
+            rank_hold_reason=vol_data.get(row.symbol, {}).get("rv_rank_hold"),
             **next_earnings.get(row.symbol, {}),
         )
         for row in rows

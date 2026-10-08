@@ -16,8 +16,8 @@ import type {
   UnusuallyActiveItem,
 } from "@/lib/api";
 import { CALENDAR_SOURCE, checkedPhrase, earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
-import { discoverRvTier } from "@/lib/encodings/rvTier";
 import { volRegime } from "@/lib/encodings/volRegime";
+import { TAPE_CHOPPIEST_RANK, TAPE_ONE_OF_CHOPPIEST_RANK, TAPE_OPTIONS_BAND_PP } from "@/lib/thresholds";
 
 /** Whole calendar days from today (viewer's zone) to an ISO date. */
 export function daysUntil(dateStr: string, now: Date = new Date()): number {
@@ -115,7 +115,8 @@ export function reportingSoonSentence(item: ReportingSoonItem, now: Date = new D
   const lead = item.confirmation === "expected_unconfirmed"
     ? `Expected to report ${whenPhrase(days)} (${lvl})`
     : `Reports ${whenPhrase(days)} (${lvl})`;
-  return join([lead, item.insight, ivClause(item.vol_regime, (item as { iv_rv_note?: string | null }).iv_rv_note)]);
+  // no IV rich/cheap here: on a confirmed date the options-against-typical line under the row says it in words
+  return join([lead, item.insight]);
 }
 
 /** Every outcome the API can send has words; "unknown" says so rather than guessing. */
@@ -147,19 +148,64 @@ export function suggestionSentence(item: SuggestionItem, now: Date = new Date())
 }
 
 /**
- * The tape: the rank and the word the API admitted it with (discover_rv_tier), then the IV spread from
- * the stored blurb. The blurb's own rank part uses the general scale, so it is not repeated.
+ * The tape: words only, no figures (the figures are the row's hover, tapeReceipt). The volatility clause by rank tier
+ * (lib/thresholds TAPE_*), then the options clause when a fresh chain exists; one dominating session or a corporate action that
+ * holds the rank replaces both; then the report date at its level. The source and check time are in the hover.
  */
-export function unusuallyActiveSentence(item: UnusuallyActiveItem, now: Date = new Date()): string {
-  const tier = discoverRvTier(item.rv_rank);   // the API's 85/93 cutoffs; item.tier is the same word
-  const lead = `RV rank ${Math.round(item.rv_rank)}, ${tier.label} for this stock`;
-  const insight = item.insight ?? "";
-  const iv = item.iv_rv_note ?? (insight.startsWith("RV rank") ? null : insight.split(" · ")[0] || ivClause(item.vol_regime));
-  return join([
-    lead,
-    iv,
-    earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now),
-  ]);
+export function tapeVolatilityClause(rank: number): string {
+  if (rank >= TAPE_CHOPPIEST_RANK) return "Its last month has been its choppiest in a year.";
+  if (rank >= TAPE_ONE_OF_CHOPPIEST_RANK) return "Its last month has been one of its choppiest in a year.";
+  return "Its last month has been choppier than most of its past year.";
+}
+
+export function tapeOptionsClause(spreadPp: number): string {
+  if (spreadPp < -TAPE_OPTIONS_BAND_PP) return "Options are pricing a calmer month ahead.";
+  if (spreadPp > TAPE_OPTIONS_BAND_PP) return "Options are pricing an even bumpier month ahead.";
+  return "Options are pricing about the same.";
+}
+
+export function tapeReportClause(item: UnusuallyActiveItem): string | null {
+  if (!item.earnings_date) return null;
+  const when = fmtEarningsDate(item.earnings_date);
+  if (item.earnings_confirmation === "confirmed") {
+    return confirmedKind(item.earnings_note) === CONFIRMED_KIND.calendars
+      ? `Reports ${when} (confirmed by two calendars).`              // two calendars agreeing is not the company's word
+      : `Reports ${when} (confirmed by the company).`;
+  }
+  if (item.earnings_confirmation === "expected_unconfirmed") return `Expected to report around ${when} (not confirmed).`;
+  return `Reports around ${when} (estimated).`;
+}
+
+export function unusuallyActiveSentence(item: UnusuallyActiveItem, _now: Date = new Date()): string {
+  const parts: (string | null)[] = [];
+  if (item.rank_hold_phrase) {
+    parts.push(`${item.rank_hold_phrase}, so its past year doesn't compare yet.`);
+  } else if (item.dominant_date) {
+    const kind = (item.dominant_move_pct ?? 0) < 0 ? "drop" : "jump";
+    parts.push(`Its last month looks choppy mostly because of one big ${kind} on ${fmtEarningsDate(item.dominant_date)}.`);
+  } else {
+    parts.push(tapeVolatilityClause(item.rv_rank));
+    if (item.iv_rv_spread_pp != null && item.iv_date) parts.push(tapeOptionsClause(item.iv_rv_spread_pp));
+  }
+  parts.push(tapeReportClause(item));
+  return parts.filter((p): p is string => !!p).join(" ");
+}
+
+function pct(fraction: number): string {
+  return `${(fraction * 100).toFixed(1)}%`;
+}
+
+/** The row's hover: the figures behind the words. */
+export function tapeReceipt(item: UnusuallyActiveItem, now: Date = new Date()): string {
+  const lines = [`RV rank ${Math.round(item.rv_rank)} of 100 against its own past year; 20-day realized volatility ${pct(item.rv_20d)}`];
+  if (item.rank_hold_reason) lines.push(`Rank held: ${item.rank_hold_reason}`);
+  if (item.iv_rv_note) lines.push(`${upperFirst(item.iv_rv_note)}; implied against realized not compared`);
+  else if (item.iv_rv_spread_pp != null && item.atm_iv != null && item.iv_date) {
+    const sign = item.iv_rv_spread_pp > 0 ? "above" : "below";
+    lines.push(`Implied volatility ${pct(item.atm_iv)} from the ${fmtEarningsDate(item.iv_date)} chain, ${Math.abs(item.iv_rv_spread_pp).toFixed(1)} points ${sign} realized`);
+  } else lines.push("No fresh options chain: implied volatility not compared");
+  lines.push(upperFirst(earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now)));
+  return lines.join("\n");
 }
 
 function fmtPrice(n: number): string {

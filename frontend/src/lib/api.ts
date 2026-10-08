@@ -620,6 +620,13 @@ export interface UnusuallyActiveItem {
   insight: string | null;
   vol_regime: string | null;
   iv_rv_note?: string | null;      // "one session dominates the 20-day window: Oct 5, 2026 (+33.5%)" in place of the IV comparison
+  iv_rv_spread_pp?: number | null; // implied minus realized, points; null without a fresh chain or when one session dominates
+  atm_iv?: number | null;
+  iv_date?: string | null;         // the chain's date
+  dominant_date?: string | null;   // the session that dominates the 20-day window
+  dominant_move_pct?: number | null;
+  rank_hold_phrase?: string | null; // "Spun off Vylor on Oct 1": the action that holds the rank
+  rank_hold_reason?: string | null;
   earnings_date?: string | null;
   earnings_source?: string | null;
   earnings_checked_at?: string | null;

@@ -6,11 +6,13 @@ import { datasetAgeLine, fmtQuoteDateTime, freshnessLine } from "@/lib/freshness
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
+import ExplainTip from "@/components/ticker/ExplainTip";
 import {
   justReportedSentence,
   latestPickSentence,
   reportingSoonSentence,
   suggestionSentence,
+  tapeReceipt,
   unusuallyActiveSentence,
 } from "@/lib/discoverSentences";
 import { SectionKicker } from "@/components/SectionKicker";
@@ -314,7 +316,9 @@ export default function DiscoverPage() {
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="The tape" />
             <h2 className="font-display text-xl font-bold text-foreground">Unusually active</h2>
-            <p className="text-sm text-muted-foreground mt-1 mb-6">Volatility high vs. their own norm</p>
+            <p className="text-sm text-muted-foreground mt-1 mb-6">
+              Stocks more <ExplainTip term="realized volatility">volatile</ExplainTip> than usual, each compared with its own past year.
+            </p>
 
             <DiscoverRows>
               {unusuallyActive.map((item) => (
@@ -325,6 +329,7 @@ export default function DiscoverPage() {
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
                     priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
                   sentence={unusuallyActiveSentence(item)}
+                  title={tapeReceipt(item)}
                 />
               ))}
             </DiscoverRows>

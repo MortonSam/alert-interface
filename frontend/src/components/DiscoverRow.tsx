@@ -9,14 +9,17 @@ interface DiscoverRowProps {
   sentence: string;
   /** An optional second line under the sentence (the calendar's options-against-typical comparison), already linked. */
   detail?: React.ReactNode;
+  /** The row's hover: the figures behind a sentence written in words (the tape's receipt). */
+  title?: string;
 }
 
 /** One stock on /discover: ticker, company, last price, then the reason. The whole row opens the ticker page. */
-export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence, detail }: DiscoverRowProps) {
+export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence, detail, title }: DiscoverRowProps) {
   return (
     <li>
       <Link
         href={`/tickers/${symbol}`}
+        title={title}
         className="group block py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6 hover:bg-muted/40 transition-colors"
       >
         <div className="flex items-baseline gap-2 min-w-0">

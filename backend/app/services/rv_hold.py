@@ -32,8 +32,19 @@ def hold_reason(kind: str, name: str | None, day: date) -> str:
     return f"{verb}; {CLEAN_SESSIONS_NEEDED} clean sessions after it are needed"
 
 
+def hold_phrase(kind: str, name: str | None, day: date) -> str:
+    """Pure: "Spun off Vylor on Oct 1": the action in words with a short date, for the Discover tape."""
+    short = f"{day.strftime('%b')} {day.day}"
+    return ACTION_VERBS.get(kind, "Had a corporate action on {date}").format(name=name or "a business", date=short, kind=kind)
+
+
 async def rank_holds(db, symbols: list[str], today: date | None = None) -> dict[str, str]:
     """{symbol: reason} for the tickers with a recorded action inside the last CLEAN_SESSIONS_NEEDED sessions (the newest action)."""
+    return {sym: hold_reason(a["kind"], a["name"], a["date"]) for sym, a in (await rank_hold_actions(db, symbols, today)).items()}
+
+
+async def rank_hold_actions(db, symbols: list[str], today: date | None = None) -> dict[str, dict]:
+    """{symbol: {kind, name, date}}: the newest recorded action inside the last CLEAN_SESSIONS_NEEDED sessions, which holds the rank."""
     if not symbols:
         return {}
     today = today or date.today()
@@ -50,10 +61,9 @@ async def rank_holds(db, symbols: list[str], today: date | None = None) -> dict[
     by_sym: dict[str, list[dict]] = {}
     for sym, day, kind, name in rows:
         by_sym.setdefault(sym, []).append({"kind": kind, "date": day, "name": name})
-    out: dict[str, str] = {}
+    out: dict[str, dict] = {}
     for sym, acts in by_sym.items():
         kept = sorted(drop_renames_explained(acts), key=lambda a: a["date"])      # a rename explained by a recorded deal defers to it
         if kept:
-            a = kept[-1]
-            out[sym] = hold_reason(a["kind"], a["name"], a["date"])
+            out[sym] = kept[-1]
     return out

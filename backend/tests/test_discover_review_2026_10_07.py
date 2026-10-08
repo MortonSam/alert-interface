@@ -68,7 +68,9 @@ async def test_a_recorded_spin_off_holds_the_rank_on_the_strip_discover_and_ask_
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             tape = (await c.get("/api/v1/discover/unusually-active?limit=50")).json()
             latest = (await c.get("/api/v1/discover/latest-pick")).json()
-        assert sym not in [i["symbol"] for i in tape["items"]]                          # rank 100 held: not on the tape
+        row = next((i for i in tape["items"] if i["symbol"] == sym), None)              # rank 100 held: on the tape, worded as the action
+        if row is not None:                                                            # (the tape lists the top ranks; a full one may leave it off)
+            assert row["rank_hold_phrase"].startswith("Spun off Vylor on ") and row["rank_hold_reason"] == holds[sym]
         assert not latest["pick"] or latest["pick"]["symbol"] != sym                    # the void pick is never the ledger strip's pick
         if latest["pick"]:
             assert latest["pick"]["status"] != "void"
