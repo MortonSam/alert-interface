@@ -24,7 +24,7 @@ function MoverRow({ m }: { m: MoverItem }) {
   return (
     <li className="py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6" data-testid="mover-row">
       <div className="flex items-baseline gap-2 min-w-0">
-        <Link href={`/tickers/${m.symbol}`} className="font-display text-sm font-bold text-foreground hover:text-primary shrink-0">{m.symbol}</Link>
+        <Link href={`/tickers/${m.symbol}`} className="tap font-display text-sm font-bold text-foreground hover:text-primary shrink-0">{m.symbol}</Link>
         {m.name && <span className="text-sm text-muted-foreground min-w-0 break-words">{m.name}</span>}
         <span className="ml-auto pl-2 font-mono text-xs text-right shrink-0">
           <span className="text-muted-foreground">${m.price.toFixed(2)}</span>{" "}
@@ -78,7 +78,7 @@ export default function NewsSections({ data, indexes }: { data: NewsSectionsResp
           <ul className="divide-y divide-border/60">
             {data.stories.map((st) => (
               <li key={st.url} className="py-3 sm:grid sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-x-6" data-testid="news-story">
-                <Link href={`/tickers/${st.symbol}`} className="font-display text-sm font-bold text-foreground hover:text-primary">{st.symbol}</Link>
+                <Link href={`/tickers/${st.symbol}`} className="tap font-display text-sm font-bold text-foreground hover:text-primary">{st.symbol}</Link>
                 <p className="text-sm leading-snug min-w-0">
                   <ExternalHeadline url={st.url} headline={st.headline} />
                   <span className="block text-xs text-muted-foreground mt-0.5">{headlineByline(st)}</span>

@@ -143,7 +143,7 @@ export function HeaderTickerSearch() {
         aria-label={openOnPhone ? "Close ticker search" : "Search tickers"}
         aria-expanded={openOnPhone}
         onClick={() => setOpenOnPhone((v) => !v)}
-        className="sm:hidden ml-auto p-1.5 rounded-md text-muted-foreground hover:text-foreground"
+        className="tap sm:hidden ml-auto p-1.5 rounded-md text-muted-foreground hover:text-foreground"
         data-testid="header-search-toggle"
       >
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

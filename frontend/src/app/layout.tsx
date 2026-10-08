@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <PostHogProvider>
           <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
             <div className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[3.25rem] py-2 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-6">
-              <Link href="/" className="font-bold text-sm tracking-tight sm:mr-2">
+              <Link href="/" className="tap font-bold text-sm tracking-tight sm:mr-2">
                 Alert Interface
               </Link>
               <NavLinks />
@@ -32,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
           <footer className="text-[11px] text-muted-foreground/70 text-center py-6">
             Alert Interface is an educational research tool. Nothing here is investment advice. Options involve substantial risk.
-            {" "}<Link href="/disclosures" className="underline hover:text-muted-foreground">Disclosures</Link>
+            {" "}<Link href="/disclosures" className="tap underline hover:text-muted-foreground">Disclosures</Link>
           </footer>
         </PostHogProvider>
       </body>

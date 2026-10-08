@@ -36,7 +36,7 @@ export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
         );
       })}
       <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer select-none font-mono uppercase tracking-[.16em] text-[11px]">Sources</summary>
+        <summary className="tap cursor-pointer select-none font-mono uppercase tracking-[.16em] text-[11px]">Sources</summary>
         <ul className="mt-2 space-y-1.5">
           {sentences.map((s, i) => {
             const r = sentenceReceipt(s);

@@ -10,7 +10,7 @@ describe("390px layout (audit item 24)", () => {
     for (const page of ["app/tickers/[symbol]/page.tsx", "app/build/page.tsx", "app/discover/page.tsx", "app/watchlist/page.tsx", "app/theses/page.tsx"]) {
       const src = read(page);
       expect(src, page).not.toMatch(/<main className="min-h-screen p-8">/);
-      expect(src, page).toContain('<main className="min-h-screen p-4 sm:p-8">');
+      expect(src, page).toMatch(/<main className="(?:sm:)?min-h-screen p-4 sm:p-8">/);       // a short page is full height from 640px up only
     }
     expect(read("app/page.tsx")).not.toMatch(/className="[^"]*(?<!sm:)\bpx-8\b/);
     expect(read("app/layout.tsx")).toContain("px-4 sm:px-8");

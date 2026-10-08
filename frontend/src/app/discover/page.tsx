@@ -174,7 +174,7 @@ export default function DiscoverPage() {
           <div className="flex items-center gap-3 mb-1">
             <Link
               href="/"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="tap text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               &larr; Home
             </Link>

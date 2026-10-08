@@ -187,7 +187,7 @@ function CatalystRow({ event }: { event: Event }) {
           <DaysBadge days={days} />
         </div>
         {event.description && (
-          <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{event.description}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground sm:line-clamp-1">{event.description}</p>
         )}
       </div>
     </div>
@@ -203,7 +203,7 @@ function AnalystDetailTable({ detail }: { detail: AnalystDetailRead }) {
     <div className="mt-3 pt-3 border-t">
       <button
         onClick={() => setExpanded(e => !e)}
-        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+        className="tap text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
       >
         {expanded ? "Hide actions ▴" : `Show all ${detail.total_all} actions ▾`}
       </button>
@@ -304,7 +304,7 @@ function HistoryInsightsPanel({
             <>
               <button
                 onClick={() => setPeersExpanded(p => !p)}
-                className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                className="tap text-[10px] text-muted-foreground hover:text-foreground transition-colors"
               >
                 {peersExpanded ? "Hide peer list ▴" : `Show ${sectorPeers.peers.length} peers ▾`}
               </button>
@@ -720,7 +720,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
 
       <button
         onClick={() => setCollapsed(c => !c)}
-        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+        className="tap text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
       >
         {collapsed
           ? `Show all ${isFed ? "prints" : "prints"} (${reactions.length}) ▾`
@@ -737,7 +737,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                   key={key}
                   onClick={() => setOutcomeFilter(key)}
                   className={cn(
-                    "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                    "tap inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
                     outcomeFilter === key
                       ? "bg-foreground text-background"
                       : "bg-muted text-muted-foreground hover:text-foreground",
@@ -936,7 +936,7 @@ function SourceFilingsRow({ filings }: { filings: ResearchNote["source_filings"]
             href={f.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+            className="tap text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
           >
             {f.form_type} · {f.filing_date}
           </a>
@@ -1112,7 +1112,7 @@ function PriceChart({
             key={p}
             onClick={() => onPeriodChange(p)}
             className={cn(
-              "px-2 py-1 rounded text-xs font-medium transition-colors",
+              "tap px-2 py-1 rounded text-xs font-medium transition-colors",
               p === period
                 ? "bg-foreground text-background"
                 : "text-muted-foreground hover:text-foreground",
@@ -1318,7 +1318,7 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
               document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
             className={cn(
-              "font-mono text-xs uppercase tracking-widest whitespace-nowrap transition-colors",
+              "tap font-mono text-xs uppercase tracking-widest whitespace-nowrap transition-colors",
               active === s.id
                 ? "text-cool"
                 : "text-muted-foreground/50 hover:text-muted-foreground",
@@ -1856,7 +1856,7 @@ export default function TickerPage() {
   return (
     <main className="min-h-screen p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+        <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground transition-colors">
           ← All tickers
         </Link>
 
@@ -2317,7 +2317,7 @@ export default function TickerPage() {
               <button
                 onClick={() => setHistoryView("earnings")}
                 className={cn(
-                  "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  "tap inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
                   historyView === "earnings"
                     ? "bg-cool/10 text-cool"
                     : "bg-muted text-muted-foreground hover:text-foreground",
@@ -2328,7 +2328,7 @@ export default function TickerPage() {
               <button
                 onClick={() => setHistoryView("fed")}
                 className={cn(
-                  "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                  "tap inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
                   historyView === "fed"
                     ? "bg-violet/10 text-violet"
                     : "bg-muted text-muted-foreground hover:text-foreground",
@@ -2855,7 +2855,7 @@ export default function TickerPage() {
                 <>
                   <button
                     onClick={() => void handleGenerate()}
-                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                    className="tap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
                   >
                     Generate research note
                   </button>
@@ -2939,7 +2939,7 @@ export default function TickerPage() {
               {genPolicy?.can_generate ? (
                 <button
                   onClick={() => void handleGenerate()}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                  className="tap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   Try Again
                 </button>
@@ -3088,7 +3088,7 @@ export default function TickerPage() {
                         href={item.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
+                        className="tap text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
                       >
                         {item.headline}
                       </a>
@@ -3098,7 +3098,7 @@ export default function TickerPage() {
                         <span>{timeAgoUnix(item.datetime)}</span>
                       </div>
                       {item.summary && (
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                        <p className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
                           {item.summary}
                         </p>
                       )}
@@ -3108,7 +3108,7 @@ export default function TickerPage() {
                     <button
                       type="button"
                       onClick={() => setNewsExpanded((o) => !o)}
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
+                      className="tap flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
                     >
                       <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
                       {newsExpanded

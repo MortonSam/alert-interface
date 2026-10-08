@@ -71,8 +71,8 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
                 href={href}
                 className={
                   active
-                    ? "px-4 py-2 text-sm font-semibold text-foreground border-b-2 border-primary -mb-px"
-                    : "px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors -mb-px border-b-2 border-transparent"
+                    ? "tap px-4 py-2 text-sm font-semibold text-foreground border-b-2 border-primary -mb-px"
+                    : "tap px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors -mb-px border-b-2 border-transparent"
                 }
               >
                 {label}

@@ -82,3 +82,10 @@
 @media (max-width: 639px) {
   #__POSTHOG_TOOLBAR__ { display: none !important; }
 }
+
+/* Phone tap targets: an element marked .tap answers taps across at least 44 x 44 px below 640px, through an invisible overlay
+   centred on it, so nothing moves and the desktop layout is untouched. (::before, because ExplainTip draws its mark in ::after.) */
+@media (max-width: 639px) {
+  .tap { position: relative; }
+  .tap::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+}

@@ -18,7 +18,7 @@ export default function SignedOutNotice({
       <h2 className="text-lg font-display font-semibold">{title}</h2>
       <p className="text-sm text-muted-foreground max-w-prose mx-auto">{body}</p>
       {openPath && (
-        <Link href={openPath.href} className="inline-block text-sm text-primary hover:text-primary/80">
+        <Link href={openPath.href} className="tap inline-block text-sm text-primary hover:text-primary/80">
           {openPath.label}
         </Link>
       )}

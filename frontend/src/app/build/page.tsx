@@ -923,10 +923,10 @@ function BuildTradePageContent() {
 
   if (step === "done" && savedThesis) {
     return (
-      <main className="min-h-screen p-4 sm:p-8">
+      <main className="sm:min-h-screen p-4 sm:p-8">
         <div className="max-w-2xl mx-auto">
           <div className="mb-8">
-            <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+            <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground">
               ← Home
             </Link>
           </div>
@@ -972,12 +972,12 @@ function BuildTradePageContent() {
   // ── Flow steps ───────────────────────────────────────────────────────────────
 
   return (
-    <main className="min-h-screen p-4 sm:p-8">
+    <main className="sm:min-h-screen p-4 sm:p-8">
       <div className="max-w-2xl mx-auto">
 
         {/* Page header */}
         <div className="mb-10">
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground mb-5 inline-block">
+          <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground mb-5 inline-block">
             ← Home
           </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>

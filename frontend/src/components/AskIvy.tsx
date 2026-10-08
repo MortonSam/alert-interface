@@ -44,9 +44,9 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
         <input
           id="ask-ivy" value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={300} disabled={busy}
           placeholder="Is it more volatile than usual?"
-          className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
+          className="flex-1 min-h-[44px] sm:min-h-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <button type="submit" disabled={busy || !question.trim()} className="rounded-md border border-border px-3 py-2 text-sm hover:text-primary disabled:opacity-50 transition-colors">
+        <button type="submit" disabled={busy || !question.trim()} className="tap rounded-md border border-border px-3 py-2 text-sm hover:text-primary disabled:opacity-50 transition-colors">
           {busy ? "Asking…" : "Ask"}
         </button>
       </div>

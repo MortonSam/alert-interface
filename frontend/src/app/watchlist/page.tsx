@@ -445,14 +445,14 @@ export default function WatchlistPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <main className="min-h-screen p-4 sm:p-8">
+    <main className="sm:min-h-screen p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <Link href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground transition-colors">
                 ← Home
               </Link>
             </div>

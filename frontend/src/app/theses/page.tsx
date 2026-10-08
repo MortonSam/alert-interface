@@ -871,11 +871,11 @@ export default function ThesesPage() {
 
   if (view === "signed_out") {
     return (
-      <main className="min-h-screen p-4 sm:p-8">
+      <main className="sm:min-h-screen p-4 sm:p-8">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-start justify-between mb-6">
             <h1 className="text-2xl font-display font-bold tracking-tight">My Trades</h1>
-            <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+            <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground">
               ← Home
             </Link>
           </div>
@@ -890,7 +890,7 @@ export default function ThesesPage() {
   }
 
   return (
-    <main className="min-h-screen p-4 sm:p-8">
+    <main className="sm:min-h-screen p-4 sm:p-8">
       <div className="max-w-3xl mx-auto">
         <div className="flex items-start justify-between mb-6">
           <div>
@@ -899,7 +899,7 @@ export default function ThesesPage() {
               {openCount} open{dueCount > 0 ? ` · ${dueCount} due for resolution` : ""}
             </p>
           </div>
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground">
             ← Home
           </Link>
         </div>

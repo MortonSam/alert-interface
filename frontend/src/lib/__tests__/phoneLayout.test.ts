@@ -30,3 +30,20 @@ describe("the home page on a phone", () => {
     expect(read("app/globals.css")).toMatch(/@media \(max-width: 639px\) \{\s*#__POSTHOG_TOOLBAR__ \{ display: none !important; \}/);
   });
 });
+
+describe("tap targets and short pages on a phone", () => {
+  it("the .tap overlay gives 44px below 640px and the small controls carry it", () => {
+    const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
+    expect(css).toMatch(/@media \(max-width: 639px\) \{\s*\.tap \{ position: relative; \}\s*\.tap::before \{[^}]*width: max\(100%, 44px\); height: max\(100%, 44px\)/);
+    expect(readFileSync(join(SRC, "app/layout.tsx"), "utf8").match(/className="tap /g)?.length).toBe(2);       // logo and Disclosures
+    expect(readFileSync(join(SRC, "components/NavLinks.tsx"), "utf8")).toContain('className="tap p-1.5');
+    const ticker = readFileSync(join(SRC, "app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(ticker.match(/"tap /g)?.length).toBeGreaterThanOrEqual(12);
+    expect(ticker).toContain("sm:line-clamp-2");
+  });
+  it("a short page is full height from 640px up only, so a phone has no empty band above the footer", () => {
+    for (const p of ["app/build/page.tsx", "app/theses/page.tsx", "app/watchlist/page.tsx"]) {
+      expect(readFileSync(join(SRC, p), "utf8")).not.toContain('<main className="min-h-screen');
+    }
+  });
+});

@@ -133,7 +133,7 @@ export default function ExplainTip({
         tabIndex={0}
         role="button"
         aria-expanded={open}
-        className="cursor-help decoration-dotted underline underline-offset-2 decoration-muted-foreground/40 after:content-['ⓘ'] after:ml-0.5 after:align-top after:text-[10px] after:leading-none after:text-muted-foreground/70 after:no-underline"
+        className="tap cursor-help decoration-dotted underline underline-offset-2 decoration-muted-foreground/40 after:content-['ⓘ'] after:ml-0.5 after:align-top after:text-[10px] after:leading-none after:text-muted-foreground/70 after:no-underline"
       >
         {children}
       </span>
