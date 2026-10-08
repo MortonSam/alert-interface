@@ -67,6 +67,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Corporate actions (8-K Item 2.01)", ["python", "-m", "app.scripts.scan_corporate_actions", "--recent=45", "--write"]),
     ("Trailing P/E",                   ["python", "-m", "app.scripts.compute_pe", "--write"]),
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
+    ("Discover news (Finnhub)",              ["python", "-m", "app.scripts.refresh_news"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
     # RV rank runs before every reaction step: its data_error verdict is the price-history
     # exclusion list the reaction steps and every reader apply, so they act on tonight's verdict.
@@ -107,6 +108,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
     "Analyst recommendations (Finnhub)": 300,
+    "Discover news (Finnhub)": 1800,                # two Finnhub calls per ticker at 40 a minute, about 25 minutes
     "Historical reactions (--all)": 1800,
     "Missed reports (catch_up_reports)": 600,     # one Finnhub call, a few EDGAR calls, re-seed of a few tickers
     "EPS basis check (check_eps_basis)": 900,     # TIME_BUDGET_SECONDS 600 + EDGAR slack

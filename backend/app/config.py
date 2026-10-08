@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # Trailing P/E (pe_snapshots): strip question 9 and the P/E facts Ask Ivy may cite. Off in production until Sam approves the
     # figures; on locally. The nightly still computes the snapshots either way; the flag only gates what the pages serve.
     pe_enabled: bool = False
+    # Discover's "Today's biggest movers" and "In the news" (services/news). Off in production until launched; the admin token sees them.
+    discover_news_enabled: bool = False
 
     # Clerk auth (empty = disabled, admin-token-only mode)
     clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json

@@ -1057,6 +1057,24 @@ async def check_rv_snapshot_coverage(session) -> CheckResult:
     return CheckResult("rv_snapshot_coverage", PASS, f"every active ticker has an RV snapshot for {newest.isoformat()}")
 
 
+async def check_news_freshness(session) -> CheckResult:
+    """Discover news (services/news): the newest stored story, the quote snapshot and the step's last exit. Stale or failed is an
+    ERROR while DISCOVER_NEWS_ENABLED is on (the sections hide themselves, but launch depends on it) and a WARN while it is off."""
+    import json as _json
+    from app.config import settings
+    from app.services import news as N
+    from app.services.system_metadata_service import get_value
+    now = datetime.now(timezone.utc)
+    newest_story = await session.scalar(text("SELECT max(published_at) FROM news_stories"))
+    newest_quote = await session.scalar(text("SELECT max(captured_at) FROM quote_snapshots"))
+    step_exit = (_json.loads(await get_value(session, "step_outcomes") or "{}").get(N.STEP_LABEL) or {}).get("exit")
+    vis = N.visibility(newest_story, step_exit, now, newest_quote)
+    if vis.visible:
+        hours = (now - newest_story).total_seconds() / 3600
+        return CheckResult("news_freshness", PASS, f"newest story {hours:.1f}h old, quote snapshot {newest_quote:%Y-%m-%d %H:%M} UTC")
+    return CheckResult("news_freshness", ERROR if settings.discover_news_enabled else WARN, f"Discover news sections hidden: {vis.reason}")
+
+
 async def check_recommendations_freshness(session) -> CheckResult:
     """WARN if fewer than 300 active tickers have a recommendation fetched within recommendations.FRESH_DAYS, or any active ticker's
     newest trend is older than recommendations.MAX_AGE_DAYS (the pages hide it: Build's lean goes neutral, Discover drops the line)."""
@@ -3019,6 +3037,7 @@ CHECKS = [
     check_rv_rank_bounds,
     check_rv_data_error_tickers,
     check_rv_snapshot_coverage,
+    check_news_freshness,
     check_excluded_ticker_hidden,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,

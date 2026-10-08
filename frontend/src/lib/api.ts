@@ -635,6 +635,36 @@ export interface UnusuallyActiveItem {
   earnings_note?: string | null;
 }
 
+export interface NewsHeadline {
+  headline: string;
+  url: string;
+  source: string | null;
+  published_at: string;
+}
+
+export interface MoverItem {
+  symbol: string;
+  name: string | null;
+  price: number;
+  change_pct: number;
+  quote_time: string;            // the stored quote's last trade time
+  headline: NewsHeadline | null; // the company's newest story that names it; none when there is no such story
+}
+
+export interface NewsStoryItem extends NewsHeadline {
+  symbol: string;
+  change_pct: number;
+}
+
+export interface NewsSectionsResponse {
+  visible: boolean;              // false when the flag is off, or the stories, the quotes or the news step fail the freshness rule
+  reason: string | null;
+  quotes_as_of: string | null;
+  up: MoverItem[];
+  down: MoverItem[];
+  stories: NewsStoryItem[];
+}
+
 export interface LatestPickItem {
   id: string;
   symbol: string;
@@ -1256,6 +1286,7 @@ export const api = {
       request<UnusuallyActiveResponse>(`/discover/unusually-active?limit=${limit}`),
     latestPick: () =>
       request<LatestPickResponse>(`/discover/latest-pick`),
+    news: () => request<NewsSectionsResponse>(`/discover/news`),
     insight: (symbol: string) =>
       request<{ insight: string | null; rule: string | null; as_of: string | null }>(`/discover/insight/${encodeURIComponent(symbol)}`),
   },

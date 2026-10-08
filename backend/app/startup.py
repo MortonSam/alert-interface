@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import sys
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -178,6 +179,38 @@ async def _refresh_loop() -> None:
 
 
 
+NEWS_INTERVAL_MINUTES = 60          # the intraday news run: hourly through the US session
+NEWS_HOURS = (9, 17)                # New York hours the intraday run may start in, weekdays
+
+
+def news_run_due(now_ny: datetime, last_run: datetime | None) -> bool:
+    """Pure: an intraday news run is due on a weekday between NEWS_HOURS (New York) when the last one started an interval ago or more."""
+    if now_ny.weekday() >= 5 or not (NEWS_HOURS[0] <= now_ny.hour < NEWS_HOURS[1]):
+        return False
+    return last_run is None or (now_ny - last_run).total_seconds() >= NEWS_INTERVAL_MINUTES * 60
+
+
+async def _news_loop() -> None:
+    """Hourly through the US session: refresh_news in its own process (its own Finnhub pacing, below the site's)."""
+    from zoneinfo import ZoneInfo
+    ny = ZoneInfo("America/New_York")
+    last: datetime | None = None
+    while True:
+        await asyncio.sleep(LOOP_INTERVAL_SECONDS)
+        try:
+            now = datetime.now(ny)
+            if not news_run_due(now, last) or _refresh_in_progress:
+                continue
+            last = now
+            _log("News loop: starting the intraday news run.")
+            proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "app.scripts.refresh_news",
+                                                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await proc.wait()
+            _log(f"News loop: intraday news run exited {proc.returncode}.")
+        except Exception as exc:
+            _log(f"News loop iteration failed ({exc}); will retry next cycle.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     """Check staleness on startup; fire one background refresh if needed.
@@ -278,11 +311,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
 
     # ── Start the permanent refresh loop, then yield (app serves requests) ────
     loop_task = asyncio.create_task(_refresh_loop())
+    news_task = asyncio.create_task(_news_loop())
     try:
         yield
     finally:
-        loop_task.cancel()
-        try:
-            await loop_task
-        except asyncio.CancelledError:
-            pass
+        for task in (loop_task, news_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass

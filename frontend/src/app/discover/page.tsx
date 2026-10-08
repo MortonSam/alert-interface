@@ -6,6 +6,7 @@ import { datasetAgeLine, fmtQuoteDateTime, freshnessLine } from "@/lib/freshness
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
+import NewsSections, { newsSectionsShown } from "@/components/NewsSections";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import {
   justReportedSentence,
@@ -22,6 +23,7 @@ import {
   type JustReportedItem,
   type SuggestionItem,
   type UnusuallyActiveItem,
+  NewsSectionsResponse,
   type BatchQuote,
   type LatestPickItem,
   type HealthStatus,
@@ -97,6 +99,7 @@ export default function DiscoverPage() {
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [unusuallyActive, setUnusuallyActive] = useState<UnusuallyActiveItem[] | null>(null);
   const [latestPick, setLatestPick] = useState<LatestPickItem | null | undefined>(undefined);
+  const [news, setNews] = useState<NewsSectionsResponse | null>(null);   // behind DISCOVER_NEWS_ENABLED; the admin token sees it
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,6 +117,7 @@ export default function DiscoverPage() {
   function loadDiscover() {
     setLoading(true);
     setFetchError(false);
+    api.discover.news().then(setNews).catch(() => setNews(null));     // fails closed: an error shows nothing
     Promise.all([
       api.discover.reportingSoon(7, LIMIT),
       JUST_REPORTED_ENABLED ? api.discover.justReported(5, LIMIT) : Promise.resolve({ items: [], total: 0 }),
@@ -208,6 +212,13 @@ export default function DiscoverPage() {
             </button>
           </div>
         )}
+
+        {/* ── News: today's movers and headlines, first (behind DISCOVER_NEWS_ENABLED, fail closed) ── */}
+        {(() => {
+          const shown = newsSectionsShown(news);           // numbered here, before the sections below, so the news comes first
+          const indexes = { movers: shown.movers ? nextIndex() : undefined, stories: shown.stories ? nextIndex() : undefined };
+          return <NewsSections data={news} indexes={indexes} />;
+        })()}
 
         {/* ── 01 · Ivy's Pick ──────────────────────────── */}
         {!loading && latestPick && (

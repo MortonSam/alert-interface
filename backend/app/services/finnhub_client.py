@@ -270,6 +270,10 @@ class FinnhubClient:
             params={"symbol": symbol, "from": from_date, "to": to_date},
         )
 
+    async def get_general_news(self, category: str = "general") -> list[dict[str, Any]]:
+        """Market news (GET /news?category=general): the same fields as company news; `related` is often empty."""
+        return await self._request("GET", "/news", params={"category": category})
+
     async def get_basic_financials(self, symbol: str) -> dict[str, Any]:
         """Basic financials / key metrics for a symbol.
         Finnhub endpoint: GET /stock/metric?symbol=&metric=all
