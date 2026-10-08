@@ -16,7 +16,7 @@ WRITES = WriteFailures("Analyst recommendations (Finnhub)")
 
 import asyncio
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import case, select, func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -27,6 +27,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.services.finnhub_client import FinnhubClient
+from app.services.recommendations import EARNINGS_SOON_DAYS, REFRESH_AFTER_DAYS
 
 BATCH_LIMIT = 120
 COMMIT_EVERY = 20
@@ -35,6 +36,7 @@ COMMIT_EVERY = 20
 async def main() -> int:
     updated = 0
     failed = 0
+    empty = 0          # tickers Finnhub lists no analysts for (a dated zero row is stored)
 
     async with ScriptSessionLocal() as session:
         today = date.today()
@@ -60,10 +62,17 @@ async def main() -> int:
             .subquery()
         )
 
-        # never-fetched first, then nearest earnings, then oldest fetched_at
-        never_fetched = case(
+        # never fetched first; then, among tickers fetched more than REFRESH_AFTER_DAYS ago, those reporting within EARNINGS_SOON_DAYS,
+        # then the rest oldest first; tickers fetched recently come last. Nearest-earnings-first ordering (2026-08-27) re-fetched the same
+        # ~120 tickers every night and left 370 of 503 stale (2026-10-08: 129 fresh within 7 days).
+        now = datetime.now(timezone.utc)
+        stale_before = now - timedelta(days=REFRESH_AFTER_DAYS)
+        soon = today + timedelta(days=EARNINGS_SOON_DAYS)
+        priority = case(
             (latest_fetch.c.max_fetched.is_(None), 0),
-            else_=1,
+            ((latest_fetch.c.max_fetched < stale_before) & (next_earnings.c.next_earn <= soon), 1),
+            (latest_fetch.c.max_fetched < stale_before, 2),
+            else_=3,
         )
 
         tickers = (await session.execute(
@@ -72,9 +81,9 @@ async def main() -> int:
             .outerjoin(next_earnings, Ticker.id == next_earnings.c.ticker_id)
             .where(Ticker.is_active.is_(True))
             .order_by(
-                never_fetched,
-                next_earnings.c.next_earn.asc().nulls_last(),
+                priority,
                 latest_fetch.c.max_fetched.asc().nulls_first(),
+                next_earnings.c.next_earn.asc().nulls_last(),
             )
             .limit(BATCH_LIMIT)
         )).scalars().all()
@@ -90,10 +99,12 @@ async def main() -> int:
             for i, ticker in enumerate(tickers):
                 try:
                     trends = await finnhub.get_recommendation_trends(ticker.symbol)
-                    if not trends:
-                        continue
-
                     now = datetime.now(timezone.utc)
+                    if not trends:
+                        # Finnhub lists no analysts: a dated zero-count row for this month, so the ticker leaves the never-fetched slot
+                        # it would otherwise hold every night (pages read zero analysts as "fewer than 5 analysts covering")
+                        trends = [{"period": today.replace(day=1).isoformat(), "strongBuy": 0, "buy": 0, "hold": 0, "sell": 0, "strongSell": 0}]
+                        empty += 1
                     for row in trends:
                         period = date.fromisoformat(row["period"])
                         stmt = pg_insert(AnalystRecommendation).values(
@@ -138,7 +149,7 @@ async def main() -> int:
     print(f"{'─' * 50}")
     from app.services.finnhub_client import finnhub_stats
     from app.services.step_outcomes import record_step_fields
-    await record_step_fields("Analyst recommendations (Finnhub)", {"updated": updated, "failed": failed, "finnhub": finnhub_stats(), "error": None})
+    await record_step_fields("Analyst recommendations (Finnhub)", {"updated": updated, "failed": failed, "empty": empty, "finnhub": finnhub_stats(), "error": None})
     return await WRITES.finish(1 if failed > 10 else 0)
 
 

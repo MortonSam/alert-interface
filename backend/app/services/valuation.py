@@ -105,6 +105,59 @@ _PERIOD_END = re.compile(rf"(?:(?:three|3)\s+months|\d{{1,2}}\s+weeks|quarter|qt
 _QTR_HEADER = re.compile(rf"(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4])[^A-Za-z]{{0,40}}(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4]|Year\s+Ended|Twelve\s+Months)?[^A-Za-z]{{0,40}}(?:Year\s+Ended\s+)?({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
 
 
+# the heading cells that name a table's period columns, nearest before a row: years ("2026 2025", Ford's "2025 2026"), dated period
+# ends ("August 31, 2026 August 31, 2025", "Aug. 30, 2026 Aug. 24, 2025", "6/30/2026 6/30/2025") or quarter labels ("2Q26 (a) 2Q25",
+# "Q2 2026 Q1 2026 Q2 2025"). Consecutive cells (only space, a dollar sign or a footnote mark between them) form one heading; the
+# heading's first two cells decide: the first year earlier than the second means the prior-year column comes first.
+_MON_ANY = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+_PERIOD_CELL = re.compile(rf"\b[1-4]Q\s?'?(\d\d)\b|\bQ[1-4]\s*(?:FY)?\s*'?(\d{{2}}|20\d\d)\b|\b\d{{1,2}}/\d{{1,2}}/(20\d\d)\b"
+                          rf"|(?:{_MON_ANY}\s+\d{{1,2}},?\s+)?\b(20\d\d)\b", re.I)
+_CELL_GAP = re.compile(r"^[\s$]*(?:\([a-z0-9]\)[\s$]*)?(?:(?:vs\.?|versus)\s*)?$", re.I)     # "Q3 2026 vs. 2025": a change column against its base, current first
+HEADER_REACH = 2500               # a row's heading sits within this many characters before it
+_NEXT_NUM = re.compile(r"^\s*\$?\s?(\(?-?\d{1,4}(?:,\d{3})*\.\d{2}\)?)(?!\s*%)")      # a per-share amount (two decimals), never a percent change
+PRIOR_FIRST_LABEL = ", 2nd column"     # appended to `how` when the heading put the prior year first and the second number was read
+
+
+def heading_years(text: str, before: int | None = None) -> list[int]:
+    """Pure: the years of the period cells of the nearest heading before position `before` in `text` (the whole text when None),
+    in column order; [] when no heading of two or more cells sits within HEADER_REACH."""
+    flat = re.sub(r"\s+", " ", text or "")
+    end = len(flat) if before is None else before
+    window = flat[max(0, end - HEADER_REACH):end]
+    runs: list[list[int]] = []
+    prev_end = None
+    for m in _PERIOD_CELL.finditer(window):
+        year = int(next(g for g in m.groups() if g))
+        year += 2000 if year < 100 else 0
+        if prev_end is not None and _CELL_GAP.match(window[prev_end:m.start()]):
+            runs[-1].append(year)
+        else:
+            runs.append([year])
+        prev_end = m.end()
+    runs = [r for r in runs if len(r) >= 2]
+    return runs[-1] if runs else []
+
+
+def header_order(text: str, before: int | None = None) -> str | None:
+    """Pure: "prior-first" or "current-first" from the first two cells of the nearest heading before `before` (see heading_years), or
+    None when there is no such heading or its first two cells share a year (a sequential-quarter table: "Q2 2026 Q1 2026 Q2 2025")."""
+    years = heading_years(text, before)
+    if len(years) < 2 or years[0] == years[1]:
+        return None
+    return "prior-first" if years[0] < years[1] else "current-first"
+
+
+def _current_column(flat: str, hit: re.Match, how: str) -> tuple[str, str]:
+    """Pure: (the figure's text, how) for a table row: the first number unless the heading before the row lists the prior year first
+    and a second number follows (Ford's "2025 2026 Change" tables), in which case the second number is the current quarter's."""
+    if not ("row" in how or "block" in how or "column" in how) or header_order(flat, hit.start()) != "prior-first":
+        return hit.group(1), how
+    nxt = _NEXT_NUM.match(flat[hit.end(1):])
+    if not nxt:
+        return hit.group(1), how
+    return nxt.group(1), how + PRIOR_FIRST_LABEL
+
+
 def _to_date(m: re.Match, g: int = 1) -> date | None:
     try:
         return date(int(m.group(g + 2)), [x.lower() for x in _MONTHS.split("|")].index(m.group(g).lower()) + 1, int(m.group(g + 1)))
@@ -239,7 +292,8 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 continue        # a continuing-operations figure is not the whole GAAP diluted EPS; the net-earnings line of a diluted block is
             if how not in ("diluted EPS block, net earnings line", "diluted EPS block, attributable line") and _CONTINUING_TABLE.search(flat):
                 continue        # the release splits EPS into continuing and discontinued operations: only a stated total counts
-            return {"eps": _num(hit.group(1)), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}
+            figure, how = _current_column(flat, hit, how)
+            return {"eps": _num(figure), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}
     return None
 
 

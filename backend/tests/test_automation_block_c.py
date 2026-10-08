@@ -283,5 +283,6 @@ def test_a_resumed_run_starts_at_the_first_incomplete_step_and_logs_the_interrup
     startup = inspect.getsource(__import__("app.startup", fromlist=["x"]))
     assert "functools.partial(pipeline.main, slot=nightly_slot)" in startup and "_KEY_LAST_REFRESHED, now_iso" not in startup
 
-# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="picks")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

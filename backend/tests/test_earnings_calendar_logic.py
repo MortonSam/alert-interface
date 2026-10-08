@@ -208,3 +208,16 @@ def test_a_plain_disagreement_keeps_the_stored_date_and_notes_the_other_with_no_
     assert (fresh[0].day, fresh[0].source, fresh[0].note) == (date(2026, 10, 27), "finnhub", "estimated (Finnhub); Yahoo Finance says 2026-10-29")
     # the same day is still agreement, and a company announcement still wins
     assert merge_future([Candidate(date(2026, 10, 29), "finnhub"), Candidate(date(2026, 10, 29), "yfinance")], None, TODAY)[0].confirmed
+
+
+def test_fdx_sep_16_estimate_is_removed_once_the_company_confirms_oct_28():
+    """FDX: the Sep 16 Finnhub estimate passed with no report (no 8-K Item 2.02, no actual EPS); the company then announced Oct 28,
+    42 days later and inside the same-report window. The estimate is the same report under the wrong date, so it is removed."""
+    res = resolve_past(date(2026, 9, 16), date(2026, 10, 8), [date(2026, 6, 23)], [date(2026, 12, 16)], [], [], [], NOW,
+                       confirmed_future=[date(2026, 10, 28), date(2026, 12, 16)])
+    assert res.action == "superseded" and res.report_date == date(2026, 10, 28)
+    assert res.note == "the company confirmed 2026-10-28 for this report; the 2026-09-16 estimate is removed"
+    # a confirmed date a full quarter later is the next report, not this one: the estimate stays unresolved
+    assert resolve_past(date(2026, 9, 16), date(2026, 10, 8), [date(2026, 6, 23)], [], [], [], [], NOW, confirmed_future=[date(2026, 12, 16)]).action == "unresolved"
+    assert resolve_past(date(2026, 9, 16), date(2026, 10, 8), [date(2026, 6, 23)], [], [], [], [], NOW).action == "unresolved"
+

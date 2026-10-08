@@ -100,5 +100,6 @@ async def test_the_calendar_check_passes_on_the_stored_spy_bars():
     if r.level == ERROR:
         pytest.fail("calendar disagrees with SPY bars: " + "; ".join(r.rows[:5]))
 
-# shares the ZZCCL and ZZNONE symbols with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="calendar_and_bars")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

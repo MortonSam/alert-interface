@@ -1038,8 +1038,10 @@ async def check_rv_data_error_tickers(session) -> CheckResult:
 
 
 async def check_recommendations_freshness(session) -> CheckResult:
-    """WARN if fewer than 300 active tickers have a recommendation fetched within 7 days."""
-    cutoff = func.now() - text("interval '7 days'")
+    """WARN if fewer than 300 active tickers have a recommendation fetched within recommendations.FRESH_DAYS, or any active ticker's
+    newest trend is older than recommendations.MAX_AGE_DAYS (the pages hide it: Build's lean goes neutral, Discover drops the line)."""
+    from app.services.recommendations import FRESH_DAYS, MAX_AGE_DAYS
+    cutoff = func.now() - text(f"interval '{FRESH_DAYS} days'")
     fresh_count = await session.scalar(
         select(func.count(func.distinct(AnalystRecommendation.ticker_id)))
         .join(Ticker, Ticker.id == AnalystRecommendation.ticker_id)
@@ -1049,15 +1051,18 @@ async def check_recommendations_freshness(session) -> CheckResult:
         select(func.count(Ticker.id)).where(Ticker.is_active.is_(True))
     )
 
-    if fresh_count >= 300:
-        return CheckResult(
-            "recommendations_freshness", PASS,
-            f"{fresh_count}/{total_active} active tickers have recommendations fetched within 7 days",
-        )
-    return CheckResult(
-        "recommendations_freshness", WARN,
-        f"{fresh_count}/{total_active} active tickers have recommendations fetched within 7 days (below 300 threshold)",
+    latest = (
+        select(AnalystRecommendation.ticker_id, func.max(AnalystRecommendation.fetched_at).label("newest"))
+        .group_by(AnalystRecommendation.ticker_id).subquery()
     )
+    hidden = await session.scalar(
+        select(func.count(Ticker.id)).outerjoin(latest, latest.c.ticker_id == Ticker.id)
+        .where(Ticker.is_active.is_(True), (latest.c.newest.is_(None)) | (latest.c.newest < func.now() - text(f"interval '{MAX_AGE_DAYS} days'")))
+    )
+    line = f"{fresh_count}/{total_active} active tickers have recommendations fetched within {FRESH_DAYS} days; {hidden} older than {MAX_AGE_DAYS} days or never fetched (hidden on pages)"
+    if fresh_count >= 300 and hidden == 0:
+        return CheckResult("recommendations_freshness", PASS, line)
+    return CheckResult("recommendations_freshness", WARN, line + ("" if fresh_count >= 300 else " (below 300 threshold)"))
 
 
 async def check_recommendations_bounds(session) -> CheckResult:

@@ -55,6 +55,7 @@ from app.services.price_history_exclusion import EXCLUSION_REASON, is_excluded
 from app.services.finnhub_client import FinnhubClient
 from app.services.price_freshness import assess_quote
 from app.services.rv_store import get_latest_rv
+from app.services.recommendations import analyst_lean as lean_from_recommendations
 from app.models.system_metadata import SystemMetadata
 from app.services.draft_limiter import check_draft_limit, get_client_ip, record_draft
 from app.services.system_metadata_service import get_value
@@ -1475,61 +1476,9 @@ async def compute_alert_pick(
         .order_by(AnalystRecommendation.period.desc())
     )).scalars().all()
 
-    if not rec_rows:
-        analyst_lean = SignalLean(
-            signal="analyst", direction="neutral",
-            justification="No recommendation data yet",
-        )
-    else:
-        latest = rec_rows[0]
-        # Find a row whose period is >= 2 months earlier than latest
-        earlier = None
-        for r in rec_rows:
-            if (latest.period - r.period).days >= 60:
-                earlier = r
-                break
-
-        def _buy_share(row):
-            total = row.strong_buy + row.buy + row.hold + row.sell + row.strong_sell
-            return ((row.strong_buy + row.buy) / total, total) if total else (0, 0)
-
-        latest_share, latest_total = _buy_share(latest)
-
-        if earlier is None:
-            if latest_total < 5:
-                analyst_lean = SignalLean(
-                    signal="analyst", direction="neutral",
-                    justification=f"Fewer than 5 analysts covering ({latest_total})",
-                )
-            else:
-                analyst_lean = SignalLean(
-                    signal="analyst", direction="neutral",
-                    justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, but no earlier period for comparison",
-                )
-        else:
-            earlier_share, earlier_total = _buy_share(earlier)
-            if latest_total < 5 or earlier_total < 5:
-                analyst_lean = SignalLean(
-                    signal="analyst", direction="neutral",
-                    justification=f"Fewer than 5 analysts covering",
-                )
-            else:
-                delta = latest_share - earlier_share
-                if delta >= 0.03:
-                    analyst_lean = SignalLean(
-                        signal="analyst", direction="bullish",
-                        justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, up from {earlier_share:.0%} three months ago",
-                    )
-                elif delta <= -0.03:
-                    analyst_lean = SignalLean(
-                        signal="analyst", direction="bearish",
-                        justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, down from {earlier_share:.0%} three months ago",
-                    )
-                else:
-                    analyst_lean = SignalLean(
-                        signal="analyst", direction="neutral",
-                        justification=f"Buy share {latest_share:.0%} of {latest_total} analysts, stable vs {earlier_share:.0%} three months ago",
-                    )
+    # stale or missing trends are neutral and say so; a usable one names the day it was checked (services/recommendations)
+    lean_direction, lean_why = lean_from_recommendations(rec_rows, datetime.now(timezone.utc))
+    analyst_lean = SignalLean(signal="analyst", direction=lean_direction, justification=lean_why)
 
     # ── Momentum lean ────────────────────────────────────────────────────────
     pct_20d = rv_raw.get("pct_change_20d")

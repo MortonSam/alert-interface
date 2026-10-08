@@ -98,5 +98,6 @@ async def test_shadow_imputes_a_nan_feature_and_its_upsert_saves():
                 assert await s.scalar(text("SELECT count(*) FROM shadow_picks WHERE symbol = 'ZZNAN'")) == 1
                 raise _Rollback
 
-# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="picks")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

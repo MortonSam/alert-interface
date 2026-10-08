@@ -75,5 +75,6 @@ def test_migration_condition_converts_fractions_and_leaves_percents():
     assert not is_fraction(-100.0, -295.0, 2.95)    # expiry close, already a percent (DECK locally)
     assert not is_fraction(0.0, 0.0, 2.00)          # zero is the same in both units
 
-# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="picks")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

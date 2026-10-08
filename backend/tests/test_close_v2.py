@@ -129,5 +129,6 @@ class TestMissingStockClose:
         assert '"--reopen-null-close" in sys.argv' in src
         assert 'record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting, "auto_voided": auto_voided})' in src
 
-# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="picks")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

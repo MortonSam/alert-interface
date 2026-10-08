@@ -196,5 +196,6 @@ async def test_source_consistency_allows_intrinio_beside_stored_history_only_on_
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
 
-# shares the ZZCCL and ZZNONE symbols with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="calendar_and_bars")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

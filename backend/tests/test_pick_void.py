@@ -91,5 +91,6 @@ def test_the_closer_runs_the_void_standard_and_records_it():
     assert "auto_void(session)" in inspect.getsource(close_alert_picks._main) and '"auto_voided": auto_voided' in inspect.getsource(close_alert_picks._main)
     assert 'closer.get("auto_voided")' in inspect.getsource(refresh.digest_fields)
 
-# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="picks")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

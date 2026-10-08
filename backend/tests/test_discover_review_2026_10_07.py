@@ -80,5 +80,6 @@ async def test_a_recorded_spin_off_holds_the_rank_on_the_strip_discover_and_ask_
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
 
-# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
-pytestmark = pytest.mark.xdist_group(name="picks")
+# shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
+# (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="shared_rows")

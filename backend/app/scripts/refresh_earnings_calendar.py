@@ -442,6 +442,7 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
             # months beyond the lookback); one already marked unresolved is re-asked only inside the lookback
         )).scalars().all())
         past: list[tuple[Event, PastResolution]] = []
+        confirmed_future = sorted(d for d, why in protected.items() if why in ("EDGAR", "company announcement"))
         for e in past_estimates:
             if beyond_calendar_reach(_stored_date(e), reactions, []):
                 continue   # it has its row or a non-calendar source: the calendar step leaves it alone
@@ -451,6 +452,7 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
             res = resolve_past(
                 e.event_date, today, reactions, [f.day for f in decided],
                 sources["finnhub_actual"].get(sym, []), sources["yfinance_reported"].get(sym, []), edgar_202, now,
+                confirmed_future=confirmed_future,
             )
             past.append((e, res))
 

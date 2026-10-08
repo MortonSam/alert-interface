@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
-from datetime import date, timedelta, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import sqlalchemy as sa
+
+from app.services.recommendations import buy_share_delta, buy_share_line
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import Date as SADate, func, select
@@ -409,28 +411,12 @@ async def _batch_buy_share_delta(
         if sym:
             by_ticker.setdefault(sym, []).append(r)
 
+    now = datetime.now(timezone.utc)
     out: dict[str, dict] = {}
     for sym, rows in by_ticker.items():
-        if not rows:
-            continue
-        latest = rows[0]
-        earlier = None
-        for r in rows:
-            if (latest.period - r.period).days >= 60:
-                earlier = r
-                break
-
-        def bs(r):
-            tot = r.strong_buy + r.buy + r.hold + r.sell + r.strong_sell
-            return ((r.strong_buy + r.buy) / tot, tot) if tot else (0, 0)
-
-        ls, lt = bs(latest)
-        if earlier is None or lt < 5:
-            continue
-        es, et = bs(earlier)
-        if et < 5:
-            continue
-        out[sym] = {"buy_share": ls, "delta": ls - es, "total": lt, "as_of": latest.period.isoformat()}
+        buy = buy_share_delta(rows, now)        # None when the trend is stale (services/recommendations.MAX_AGE_DAYS) or too thin
+        if buy is not None:
+            out[sym] = buy
 
     return out
 
@@ -676,17 +662,8 @@ def _suggestion_insight(
 
     # ── Generator: buy_delta (analyst buy-share shift) ───────────────────────
     if buy_share:
-        delta = buy_share["delta"]
-        share = buy_share["buy_share"]
-        total = buy_share["total"]
-        z = _z(delta, base, "buy_delta")
-        share_pct = round(share * 100)
-        delta_pp = round(abs(delta) * 100)
-        direction = "up" if delta >= 0 else "down"
-        candidates.append((
-            f"Buy share {share_pct}% of {total} analysts, {direction} {delta_pp} points in 3 months",
-            z, "buy_delta",
-        ))
+        z = _z(buy_share["delta"], base, "buy_delta")
+        candidates.append((buy_share_line(buy_share), z, "buy_delta"))
 
     if not candidates:
         return None, None, 0.0

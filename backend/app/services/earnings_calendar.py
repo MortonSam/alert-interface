@@ -178,12 +178,21 @@ def resolve_past(
     yfinance_reported_dates: list[date],
     edgar_202_dates: list[date],
     checked_at: datetime,
+    *,
+    confirmed_future: list[date] | tuple[date, ...] = (),
 ) -> PastResolution:
-    """What becomes of an estimated earnings date that passed with no reaction row on it."""
+    """What becomes of an estimated earnings date that passed with no reaction row on it. `confirmed_future` are the
+    ticker's later dates the company itself or EDGAR confirmed: one within SAME_REPORT_DAYS after the estimate is the
+    same report under its real date, so the estimate is removed (FDX's Sep 16 estimate against its announced Oct 28)."""
     near_row = [d for d in reaction_dates if abs((d - estimate).days) <= SUPERSEDED_DAYS]
     if near_row:
         d = min(near_row, key=lambda d: abs((d - estimate).days))
         return PastResolution("superseded", f"the quarter was reported on {d.isoformat()}; the {estimate.isoformat()} estimate is removed", d)
+
+    announced = [d for d in confirmed_future if 0 < (d - estimate).days < SAME_REPORT_DAYS]
+    if announced:
+        d = min(announced)
+        return PastResolution("superseded", f"the company confirmed {d.isoformat()} for this report; the {estimate.isoformat()} estimate is removed", d)
 
     replacing = [d for d in future_estimates if 0 <= (d - estimate).days <= REPLACED_BY_ESTIMATE_DAYS]
     if replacing:

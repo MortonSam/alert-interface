@@ -38,11 +38,17 @@ LOOKBACK_DAYS = 45
 MATCH_DAYS = 5          # the 8-K is filed within this many days of the report
 
 
+_SUPPLEMENT = re.compile(r"financial supplement|supplemental (?:financial )?(?:information|data|package)|supplemental|presentation|slides|earnings call", re.I)
+
+
 def exhibit_candidates(texts: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """Pure: the documents worth parsing, press-release exhibits first (EX-99.x by name), then the rest by length; index files,
     bylaws and the cover 8-K last or never."""
     docs = [(n, t) for n, t in texts if t and len(t) > 500 and "index" not in n.lower() and not re.search(r"by-?laws|bylaws", n.lower())]
     press = [d for d in docs if re.search(r"ex(?:hibit)?[-_.]?99|99[-_.]?[1-9]|ex99", d[0].lower())]
+    # among the EX-99s, a financial supplement or slide deck (DLR files its supplement as EX-99.1 and the release as EX-99.2) reads after
+    # the release: the release states the quarter's EPS in one row, the supplement spreads five quarters across the page
+    press = sorted(press, key=lambda d: 1 if _SUPPLEMENT.search(d[0].lower()) or _SUPPLEMENT.search(d[1][:3000].lower()) else 0)
     rest = sorted((d for d in docs if d not in press), key=lambda x: -len(x[1]))
     return press + rest
 

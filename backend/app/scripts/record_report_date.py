@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -31,8 +31,10 @@ def note_for(url: str) -> str:
 def plan_changes(stored: list[Event], day: date, today: date) -> tuple[Event | None, list[Event]]:
     """Pure: (the stored event on `day`, if any; the unconfirmed future estimates within SAME_REPORT_DAYS of it to delete)."""
     same = next((e for e in stored if e.event_date == day), None)
-    # only an earlier estimate is the same report under another date: a later one within the window may be the next quarter (FDX: Oct 28 then Dec 16)
-    drop = [e for e in stored if not e.is_confirmed and today <= e.event_date < day and (day - e.event_date).days < SAME_REPORT_DAYS]
+    # only an earlier estimate is the same report under another date: a later one within the window may be the next quarter (FDX: Oct 28
+    # then Dec 16). A past estimate within the window that never became a report (it stays unconfirmed) is this report under the wrong date
+    # (FDX's Sep 16 estimate against its announced Oct 28); one that was reported is confirmed by then and is not touched
+    drop = [e for e in stored if not e.is_confirmed and e.event_date < day and (day - e.event_date).days < SAME_REPORT_DAYS]
     return same, drop
 
 
@@ -48,9 +50,9 @@ async def run(argv: list[str]) -> int:
         ticker = (await s.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
         if ticker is None:
             print(f"no ticker {sym}"); return 2
-        stored = list((await s.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today.replace(day=1)).order_by(Event.event_date))).scalars().all())
+        stored = list((await s.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= day - timedelta(days=SAME_REPORT_DAYS)).order_by(Event.event_date))).scalars().all())
         same, drop = plan_changes(stored, day, today)
-        print(f"{sym}: stored earnings dates from this month: " + (", ".join(f"{e.event_date} ({'confirmed' if e.is_confirmed else 'estimate'}, {getattr(e.source, 'value', e.source)})" for e in stored) or "none"))
+        print(f"{sym}: stored earnings dates from {SAME_REPORT_DAYS} days before {day}: " + (", ".join(f"{e.event_date} ({'confirmed' if e.is_confirmed else 'estimate'}, {getattr(e.source, 'value', e.source)})" for e in stored) or "none"))
         print(f"  {'update' if same else 'insert'} {day} {timing}: confirmed, {note_for(url)}")
         for e in drop:
             print(f"  delete {e.event_date} ({getattr(e.source, 'value', e.source)}; {e.confirmation_note}): the same report under another date")

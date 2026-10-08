@@ -22,9 +22,10 @@ def test_full_exhibit_reads_its_gaap_diluted_eps(sym, report_date, accession, na
 
 
 def test_the_fixture_set_is_the_production_runs():
-    """The 2026-10-07 dry run's 25 reads and HPE unread, plus the four misreads of the second dry run (CRL, SMCI, CAH, FRT) and
-    Dominion, whose release states a continuing-operations row beside the total row."""
-    assert len(ROWS) == 31 and sum(1 for r in ROWS if r[4] == "") == 1
+    """The 2026-10-07 dry run's 25 reads and HPE unread, plus the four misreads of the second dry run (CRL, SMCI, CAH, FRT),
+    Dominion, whose release states a continuing-operations row beside the total row, and Ford, whose tables list the prior year's
+    column first ("Second Quarter 2025 2026 Change"): the quarter's loss is the second number, -0.33, not the prior year's -0.01."""
+    assert len(ROWS) == 32 and sum(1 for r in ROWS if r[4] == "") == 1
 
 
 def test_the_four_misreads_and_the_rules_behind_them():
@@ -76,3 +77,24 @@ def test_every_reading_label_fits_the_column():
     src = (Path(V.__file__)).read_text()
     labels = re.findall(r'\(_[A-Z_0-9]+, "([^"]+)", \d+\)', src) + ["highlights sentence"]
     assert labels and max(len(x) for x in labels) <= 64, max(labels, key=len)
+
+
+def test_the_heading_names_the_current_column():
+    """A table's current-quarter column is the one its heading names; the first number is the current quarter only when the heading
+    lists the current period first (or no heading is found). Ford lists the prior year first; Northern Trust lists sequential quarters
+    of the same year first (Q2 2026, Q1 2026, Q2 2025), which keeps the first column."""
+    assert V.header_order("Second Quarter First Half 2025 2026 Change 2025 2026 Change Wholesale Units") == "prior-first"
+    assert V.header_order("Three Months Ended July 31, 2026 2025 Net income") == "current-first"
+    assert V.header_order("Quarter Ended Aug. 30, 2026 Aug. 24, 2025 Net sales") == "current-first"
+    assert V.header_order("Three months ended 6/30/2026 6/30/2025 % Change As reported (GAAP)") == "current-first"
+    assert V.header_order("Diluted earnings per share (EPS) 2Q26 (a) 2Q25 (a) YTD 2026 (a) YTD 2025 (a) GAAP") == "current-first"
+    assert V.header_order("($ In Millions except per share data) Q2 2026 Q1 2026 Q2 2025 Q1 2026 Q2 2025 Trust fees") is None
+    assert V.header_order("Net income $ 4,133 $ 1,164 255% Earnings per share: Basic") is None
+    assert V.heading_years("Second Quarter First Half 2025 2026 Change 2025 2026 Change") == [2025, 2026]
+    ford = "Second Quarter First Half 2025 2026 Change 2025 2026 Change Revenue ($B) 50.2 48.3 (4) % EPS (Diluted) $ (0.01) $ (0.33) $ (0.32) $ 0.11 $ 0.30 $ 0.19 Non-GAAP"
+    hit = V.parse_release_eps(ford)
+    assert (hit["eps"], hit["how"]) == (-0.33, "EPS (Diluted) row, 2nd column")
+    ntrs = "Q2 2026 Q1 2026 Q2 2025 Q1 2026 Q2 2025 Net Income $ 792.2 $ 525.5 Diluted Earnings per Common Share $ 4.23 $ 2.71 $ 2.13 56 98 Return"
+    assert V.parse_release_eps(ntrs)["eps"] == 4.23
+    assert V.parse_release_eps("Diluted Earnings per Common Share $ 4.23 $ 2.71 $ 2.13")["eps"] == 4.23       # no heading: the first column
+    assert len(V.PRIOR_FIRST_LABEL) + 44 <= 64                                                                  # the longest label plus the suffix fits release_eps.how
