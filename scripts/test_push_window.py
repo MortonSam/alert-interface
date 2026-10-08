@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from push_window import STEPS, gate, in_window
+from push_window import STEPS, gate, in_window, steps_for
 
 NY = ZoneInfo("America/New_York")
 
@@ -50,3 +50,9 @@ class Gate(unittest.TestCase):
         self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "frontend tests", "frontend build"])
         for _, cmd, _ in STEPS:
             self.assertNotIn("|", " ".join(cmd))                  # exit codes are read directly, never through a pipe
+
+
+class FrontendOnlyLaneTests(unittest.TestCase):
+    def test_the_lane_keeps_both_frontend_steps_and_drops_the_backend_suite(self):
+        self.assertEqual([name for name, _, _ in steps_for(True)], ["frontend tests", "frontend build"])
+        self.assertEqual(steps_for(False), STEPS)

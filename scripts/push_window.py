@@ -39,6 +39,11 @@ def in_window(now: datetime) -> bool:
     return local.weekday() < 5 and WINDOW_START <= local.time() <= WINDOW_END
 
 
+def steps_for(frontend_only: bool) -> list[tuple[str, list[str], Path]]:
+    """The gate's steps: all three, or only the frontend ones when the push carries frontend changes alone."""
+    return [s for s in STEPS if not frontend_only or s[0].startswith("frontend")]
+
+
 def gate(results: list[tuple[str, int]]) -> tuple[bool, str]:
     """Pure: (may push, why) from (step, exit code) pairs: every step must have exited 0."""
     failed = [f"{name} (exit {code})" for name, code in results if code != 0]
@@ -78,8 +83,11 @@ def main(argv: list[str]) -> int:
     print(f"push window open: {now:%a %H:%M} New York")
     if "--check-only" in argv:
         return 0
+    frontend_only = "--frontend-only" in argv
+    if frontend_only:
+        print("frontend-only lane: the backend suite is skipped (the change touches frontend/ alone)")
     results: list[tuple[str, int]] = []
-    for name, cmd, cwd in STEPS:
+    for name, cmd, cwd in steps_for(frontend_only):
         if name == "frontend build":
             was_running = _stop_dev_server()      # the build and the dev server share .next
             try:

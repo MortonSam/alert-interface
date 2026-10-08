@@ -95,8 +95,9 @@ export default async function Home() {
           <SiteCounters initial={initial} />
         </section>
 
-        {/* ── 3. The Challenge ──────────────────────────────────── */}
-        <section className="flex items-center justify-center px-4 sm:px-8 py-24">
+        {/* ── 3. The Challenge: from 640px up, one screen under the sticky header like the counts, so each
+               desktop scroll stop is a complete, centered section. ── */}
+        <section className="flex items-center justify-center px-4 sm:px-8 py-24 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)]">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
