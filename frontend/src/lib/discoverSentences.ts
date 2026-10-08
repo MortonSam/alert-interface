@@ -143,7 +143,7 @@ export function suggestionSentence(item: SuggestionItem, now: Date = new Date())
   return join([
     item.insight,
     earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now),
-    ivClause(item.vol_regime, (item as { iv_rv_note?: string | null }).iv_rv_note),
+    // no IV rich/cheap here, as on the calendar: the stock page carries the options comparison in words
   ]);
 }
 

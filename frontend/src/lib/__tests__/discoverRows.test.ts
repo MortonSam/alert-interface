@@ -129,7 +129,7 @@ describe("row sentences", () => {
       earnings_confirmation: "estimated", earnings_note: null,
     };
     expect(suggestionSentence(s, NOW)).toBe(
-      "Beats estimates 90% of the time, versus 72% across the S&P; reports around Oct 7 (estimated, Finnhub, checked today); IV cheap");
+      "Beats estimates 90% of the time, versus 72% across the S&P; reports around Oct 7 (estimated, Finnhub, checked today)");     // no IV cheap on worth a look
   });
 
   it("the tape: words only, the volatility tier, the options clause, then the report date at its level", () => {
@@ -176,7 +176,9 @@ describe("row sentences", () => {
       insight: "Beats estimates 90% of the time, versus 72% across the S&P", vol_regime: null, iv_rv_note: note,
       earnings_date: null, earnings_source: null, earnings_checked_at: TODAY_CHECK, earnings_confirmation: null, earnings_note: null,
     } as SuggestionItem;
-    expect(suggestionSentence(s, NOW)).toContain(note);
+    expect(suggestionSentence(s, NOW)).not.toContain(note);                          // worth a look carries no options comparison at all
+    expect(suggestionSentence({ ...s, vol_regime: "iv_rich" } as SuggestionItem, NOW)).not.toMatch(/\bIV\b/);
+    expect(suggestionSentence({ ...s, vol_regime: "iv_cheap" } as SuggestionItem, NOW)).not.toMatch(/\bIV\b/);
   });
 
   it("no tape row carries a digit outside a date, or RV, IV, rank or pp", () => {
