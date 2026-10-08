@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.routers import admin, discover, discover_news, events, historical_reactions, research_notes, system, tickers, watchlists, thesis
+from app.routers import admin, discover, discover_news, events, growth, historical_reactions, research_notes, system, tickers, watchlists, thesis
 from app.services.system_metadata_service import get_value
 from app.startup import lifespan, REFRESH_SENTINEL_MAX_MINUTES
 
@@ -50,6 +50,7 @@ app.add_middleware(
 
 app.include_router(discover.router, prefix="/api/v1")
 app.include_router(discover_news.router, prefix="/api/v1")
+app.include_router(growth.router, prefix="/api/v1")
 app.include_router(tickers.router, prefix="/api/v1")
 app.include_router(watchlists.router, prefix="/api/v1")
 app.include_router(events.router, prefix="/api/v1")

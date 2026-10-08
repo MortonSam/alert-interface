@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     pe_enabled: bool = False
     # Discover's "Today's biggest movers" and "In the news" (services/news). Off in production until launched; the admin token sees them.
     discover_news_enabled: bool = False
+    # Revenue and EPS growth against the same quarter a year earlier (services/growth, growth_figures). Off in production; computed locally only.
+    growth_enabled: bool = False
 
     # Clerk auth (empty = disabled, admin-token-only mode)
     clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json
