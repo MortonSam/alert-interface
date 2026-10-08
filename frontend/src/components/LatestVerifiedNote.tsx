@@ -27,7 +27,7 @@ export default function LatestVerifiedNote() {
   const verified = verificationLine(note.verification_summary);
   const generated = new Date(note.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return (
-    <section className="max-w-3xl mx-auto px-4 sm:px-8 py-24">
+    <section className="max-w-3xl mx-auto px-4 sm:px-8 py-12 sm:py-24">
       <div className="text-center mb-12">
         <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
           See it in action

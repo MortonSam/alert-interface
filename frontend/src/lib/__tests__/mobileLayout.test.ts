@@ -18,7 +18,7 @@ describe("390px layout (audit item 24)", () => {
   });
 
   it("the header nav wraps instead of scrolling sideways, and the Ivy CTA row and tabs wrap", () => {
-    expect(read("app/layout.tsx")).toMatch(/min-h-\[3\.25rem\][^"]*flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-6/);
+    expect(read("app/layout.tsx")).toMatch(/min-h-\[3\.25rem\][^"]*flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-6/);
     expect(read("app/layout.tsx")).not.toMatch(/h-\[3\.25rem\] flex items-center gap-6/);
     const ivy = read("app/ivy/page.tsx");
     expect(ivy).toContain("flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 sm:gap-6");

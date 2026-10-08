@@ -21,8 +21,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans antialiased">
         <PostHogProvider>
           <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
-            <div className="max-w-7xl mx-auto px-4 sm:px-8 min-h-[3.25rem] py-2 sm:py-0 flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-6">
-              <Link href="/" className="font-bold text-sm tracking-tight mr-2">
+            <div className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[3.25rem] py-2 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-6">
+              <Link href="/" className="font-bold text-sm tracking-tight sm:mr-2">
                 Alert Interface
               </Link>
               <NavLinks />

@@ -339,16 +339,17 @@ export function TickerGrid() {
 
                 {/* Footer: Sector + Market Cap + Earnings */}
                 <div className="mt-auto pt-1 space-y-0.5">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 text-xs text-muted-foreground">
+                    {/* the sector wraps on a phone, never "Information..." */}
                     {ticker.sector && (
-                      <span className="line-clamp-1">{ticker.sector}</span>
+                      <span className="min-w-0 break-words sm:line-clamp-1">{ticker.sector}</span>
                     )}
                     {ticker.market_cap ? (
                       <span className="shrink-0">{fmtMcap(ticker.market_cap)}</span>
                     ) : null}
                   </div>
                   {ticker.next_earnings_date ? (
-                    <div className="text-xs font-medium text-foreground/70">
+                    <div className="text-xs font-medium text-foreground/70 [overflow-wrap:anywhere]">
                       {cardEarningsNote(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note)}
                     </div>
                   ) : (

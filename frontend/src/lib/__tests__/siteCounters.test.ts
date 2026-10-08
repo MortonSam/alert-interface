@@ -45,7 +45,7 @@ describe("the counters row never overlaps", () => {
     const section = page.match(/<section className="([^"]*)">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
     expect(section).toContain("sm:min-h-[calc(100svh-3.25rem-1px)]");                 // one screen minus the header, from 640px up
     expect(section).toContain("sm:flex sm:items-center sm:justify-center");           // the row centered vertically on that screen
-    expect(section).toContain("py-20 sm:py-0");                                       // normal spacing below 640px, none added on the full screen
+    expect(section).toContain("py-12 sm:py-0");                                       // normal spacing below 640px, none added on the full screen
     expect(section).not.toMatch(/100vh|min-h-\[(?!calc)/);                             // svh, and no full-height rule outside the sm: prefix
     expect(section.split(" ").filter((c) => c.includes("min-h")).every((c) => c.startsWith("sm:"))).toBe(true);
     const layout = read("app/layout.tsx");
@@ -53,7 +53,7 @@ describe("the counters row never overlaps", () => {
     expect(layout).toMatch(/<header className="[^"]*border-b[^"]*sticky top-0/);      // and its one-pixel border
     const challenge = page.slice(page.indexOf("3. The Challenge"), page.indexOf("The challenge"));
     expect(challenge).not.toContain("min-h-[100svh]");                              // normal section spacing after the counters
-    expect(challenge).toContain("py-24");
+    expect(challenge).toContain("py-12 sm:py-0");                                    // phone spacing (gaps near 96px), a full screen from 640px up
     expect(numberWidth("117,310", 60)).toBeCloseTo((6 * 0.6 + 0.28) * 60, 5);
   });
 });

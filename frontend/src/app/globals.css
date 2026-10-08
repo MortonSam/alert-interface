@@ -76,3 +76,9 @@
     @apply bg-background text-foreground font-sans;
   }
 }
+
+/* The PostHog toolbar (injected only for someone who has launched it from PostHog) docks a "‹" tab on the screen edge that covers
+   text on a phone; below 640px it is not shown. */
+@media (max-width: 639px) {
+  #__POSTHOG_TOOLBAR__ { display: none !important; }
+}

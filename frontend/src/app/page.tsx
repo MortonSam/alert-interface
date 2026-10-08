@@ -53,7 +53,7 @@ export default async function Home() {
 
       <StoryFlow>
         {/* ── 1. Hero ────────────────────────────────────────────── */}
-        <section className="min-h-[100svh] flex flex-col bg-background">
+        <section className="min-h-[calc(100svh-3.25rem-1px)] sm:min-h-[100svh] flex flex-col bg-background">
           <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-4 sm:px-8">
             <h1 className="hero-h1 font-display font-extrabold uppercase">
               <span data-hero-line className="block text-foreground">
@@ -83,7 +83,7 @@ export default async function Home() {
             </div>
           </HeroReveal>
 
-          <p className="hero-scroll-cue text-center pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
+          <p className="hero-scroll-cue text-center pb-6 sm:pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
             scroll to explore ↓
           </p>
         </section>
@@ -91,13 +91,13 @@ export default async function Home() {
         {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero. From 640px up the section is
                one screen (the viewport minus the sticky header, in svh) with the row centered and nothing else on it; below
                that it is a normal section. ── */}
-        <section className="px-4 sm:px-6 py-20 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)] sm:flex sm:items-center sm:justify-center">
+        <section className="px-4 sm:px-6 py-12 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)] sm:flex sm:items-center sm:justify-center">
           <SiteCounters initial={initial} />
         </section>
 
         {/* ── 3. The Challenge: from 640px up, one screen under the sticky header like the counts, so each
                desktop scroll stop is a complete, centered section. ── */}
-        <section className="flex items-center justify-center px-4 sm:px-8 py-24 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)]">
+        <section className="flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)]">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
@@ -115,7 +115,7 @@ export default async function Home() {
         </section>
 
         {/* ── 4. The Solution ──────────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
+        <section className="py-12 sm:py-0 sm:min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
@@ -161,7 +161,7 @@ export default async function Home() {
         </section>
 
         {/* ── 5. The Analyst ───────────────────────────────────── */}
-        <section className="min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
+        <section className="py-12 sm:py-0 sm:min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
@@ -200,7 +200,7 @@ export default async function Home() {
 
         {/* ── 7. Market grid ───────────────────────────────────── */}
         <ScrollReveal>
-          <section id="market" className="max-w-7xl mx-auto px-4 sm:px-8 py-24">
+          <section id="market" className="max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-24">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Start anywhere
@@ -218,7 +218,7 @@ export default async function Home() {
 
         {/* ── 8. Closing CTA ───────────────────────────────────── */}
         <ScrollReveal>
-          <section className="max-w-4xl mx-auto px-4 sm:px-8 py-24 text-center">
+          <section className="max-w-4xl mx-auto px-4 sm:px-8 py-12 sm:py-24 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point
             </p>
