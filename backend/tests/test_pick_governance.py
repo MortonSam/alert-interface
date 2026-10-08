@@ -125,3 +125,6 @@ def test_the_calendar_re_judges_every_past_estimate_still_standing_as_resolved()
     assert rec.PAST_LOOKBACK_DAYS == 60
     from app.services.earnings_calendar import SAME_REPORT_DAYS
     assert SAME_REPORT_DAYS >= 45          # a confirmed date replaces an estimate this close (the FDX gap was 16 days)
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

@@ -282,3 +282,6 @@ def test_a_resumed_run_starts_at_the_first_incomplete_step_and_logs_the_interrup
     assert '"interrupted": True' in src and '"resumed_from"' in src and "_db_upsert(slot_progress_key(slot), json.dumps(done))" in src
     startup = inspect.getsource(__import__("app.startup", fromlist=["x"]))
     assert "functools.partial(pipeline.main, slot=nightly_slot)" in startup and "_KEY_LAST_REFRESHED, now_iso" not in startup
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

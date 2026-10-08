@@ -4,7 +4,8 @@ import unittest
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from push_window import STEPS, gate, in_window, steps_for
+import push_window
+from push_window import REBUILD_TEST_DB, STEPS, TEST_DB, gate, in_window, lane_for, steps_for
 
 NY = ZoneInfo("America/New_York")
 
@@ -52,7 +53,29 @@ class Gate(unittest.TestCase):
             self.assertNotIn("|", " ".join(cmd))                  # exit codes are read directly, never through a pipe
 
 
-class FrontendOnlyLaneTests(unittest.TestCase):
-    def test_the_lane_keeps_both_frontend_steps_and_drops_the_backend_suite(self):
-        self.assertEqual([name for name, _, _ in steps_for(True)], ["frontend tests", "frontend build"])
-        self.assertEqual(steps_for(False), STEPS)
+class LaneTests(unittest.TestCase):
+    def test_a_push_of_frontend_files_only_takes_the_frontend_lane(self):
+        self.assertEqual(lane_for(["frontend/src/app/page.tsx", "frontend/src/lib/x.ts"], []), "frontend")
+        self.assertEqual(lane_for(["frontend/src/app/page.tsx", "backend/app/main.py"], []), "full")
+        self.assertEqual(lane_for(["CLAUDE.md"], []), "full")
+        self.assertEqual(lane_for([], []), "full")                                   # nothing to push, or an unreadable diff: the full gate
+        self.assertEqual(lane_for(["frontend/src/app/page.tsx"], ["--full"]), "full")
+        self.assertEqual(lane_for(["backend/app/main.py"], ["--frontend-only"]), "frontend")
+
+    def test_the_frontend_lane_keeps_both_frontend_steps_and_the_full_lane_all_three(self):
+        self.assertEqual([name for name, _, _ in steps_for("frontend")], ["frontend tests", "frontend build"])
+        self.assertEqual(steps_for("full"), STEPS)
+
+    def test_the_backend_suite_runs_on_the_test_database_in_parallel(self):
+        cmd = next(c for n, c, _ in STEPS if n == "backend tests")
+        self.assertIn(f"DATABASE_URL=postgresql+asyncpg://alert:alert@db:5432/{TEST_DB}", cmd)
+        self.assertIn(f"DATABASE_URL_SYNC=postgresql://alert:alert@db:5432/{TEST_DB}", cmd)
+        self.assertEqual(cmd[-4:], ["-n", "auto", "--dist", "loadgroup"])
+        self.assertEqual(TEST_DB, "alertdb_test")
+        self.assertIn(f"pg_dump -U alert alertdb | psql -q -U alert {TEST_DB}", REBUILD_TEST_DB[-1])
+        self.assertIn("set -o pipefail", REBUILD_TEST_DB[-1])
+
+    def test_the_clock_used_for_timings_is_the_monotonic_one(self):
+        """`time` in the module is datetime.time (the window bounds); timings read push_window.clock.monotonic."""
+        self.assertTrue(callable(push_window.clock.monotonic))
+        self.assertIn("clock.monotonic()", open(push_window.__file__).read())

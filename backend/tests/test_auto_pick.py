@@ -1,4 +1,5 @@
 """Unit tests for auto_pick outcome codes and v2 worksheet field extraction."""
+import pytest
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -168,3 +169,6 @@ class TestDuplicateGuardSeason:
         assert "season" in compiled
         # A season 1 pick should NOT match
         assert "season = 2" in compiled or "season == 2" in compiled
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

@@ -161,3 +161,6 @@ async def test_a_not_comparable_release_figure_is_checked_not_overdue():
         assert r.level in (WARN, ERROR) and (r.level == ERROR or any(row == f"{sym}: report of 2026-05-01" for row in r.rows))
     finally:
         await _cleanup(sym)
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

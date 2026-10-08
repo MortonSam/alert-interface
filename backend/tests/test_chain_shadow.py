@@ -240,3 +240,6 @@ def test_the_check_is_one_query_over_stored_nights_and_coverage_is_one_query_ove
     assert inspect.getsource(check_chain_coverage).count("await session.execute") == 2       # the active tickers, then every chain date
     rows = [("chain:MU:2026-10-09", date.today().isoformat()), ("chain:MU:2027-01-15", "2026-01-02"), ("chain:OLD:2026-10-09", "2026-01-02"), ("junk", None)]
     assert fresh_chain_symbols(rows) == {"MU"}
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")

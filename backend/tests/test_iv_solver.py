@@ -194,3 +194,6 @@ async def test_a_courier_row_and_a_solver_row_share_a_symbol_and_date_and_the_se
         async with ScriptSessionLocal() as s:
             await s.execute(text("DELETE FROM iv_history WHERE symbol = :s"), {"s": sym})
             await s.commit()
+
+# shares the ZZIV symbol with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="iv")

@@ -1,5 +1,6 @@
 """Every option P&L percentage is a percent (-35.0), computed in one place."""
 import re
+import pytest
 from pathlib import Path
 
 from app.services.pnl_math import (
@@ -73,3 +74,6 @@ def test_migration_condition_converts_fractions_and_leaves_percents():
     assert not is_fraction(-35.0, -70.0, 2.00)      # already a percent
     assert not is_fraction(-100.0, -295.0, 2.95)    # expiry close, already a percent (DECK locally)
     assert not is_fraction(0.0, 0.0, 2.00)          # zero is the same in both units
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

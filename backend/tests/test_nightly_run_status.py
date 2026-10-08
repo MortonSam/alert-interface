@@ -59,3 +59,6 @@ async def test_activity_read_carries_the_run_status(monkeypatch):
     assert body["last_run_exit"] == 1 and body["last_run_failed"] is True
     assert body["last_run_error"] == "X: invalid input syntax for type json"
     assert body["last_run_at"] == "2026-09-23T06:46:18+00:00"
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")

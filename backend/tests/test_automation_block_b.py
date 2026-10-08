@@ -99,3 +99,6 @@ async def test_the_calendar_check_passes_on_the_stored_spy_bars():
     assert r.level in (PASS, ERROR), r.message
     if r.level == ERROR:
         pytest.fail("calendar disagrees with SPY bars: " + "; ".join(r.rows[:5]))
+
+# shares the ZZCCL and ZZNONE symbols with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="calendar_and_bars")

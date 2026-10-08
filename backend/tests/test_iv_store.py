@@ -89,3 +89,6 @@ def test_both_readers_go_through_iv_store_and_nothing_resets_atm_iv():
     region = src[src.index('@router.get("/options-read/{symbol}"'):src.index("ExplainMetric = ")]
     assert "atm_iv: float | None = None" not in region        # the reset that blanked every read after 3dfa765
     assert '"atm_iv_reason": atm_iv_reason' in region
+
+# shares the ZZIV symbol with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="iv")

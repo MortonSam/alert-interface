@@ -61,3 +61,6 @@ def test_step_labels_match_refresh():
     assert fomc.FOMC_STEP_LABEL in labels
     from app.scripts.validate_data import VALIDATE_STEP_LABEL
     assert VALIDATE_STEP_LABEL in labels
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")

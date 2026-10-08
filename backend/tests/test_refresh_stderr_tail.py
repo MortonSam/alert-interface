@@ -54,3 +54,6 @@ async def test_health_exposes_the_tail(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         body = (await client.get("/health")).json()
     assert body["step_outcomes"]["Auto-pick"]["stderr_tail"] == "X: boom"
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")

@@ -119,7 +119,7 @@ async def test_rows_on_a_stored_history_span_are_found_and_stamped_without_touch
         price_bars.reset_record_map()                 # the map is loaded once per process; the rows above are new
         async with ScriptSessionLocal() as s:
             kept = await price_bars.stored_history_dates(s, sym, [date(2022, 1, 26), date(2022, 2, 2), date(2022, 5, 3)], sessions)
-            assert len((await price_bars.record_map(s)).by) > 500 and price_bars.record_map_sync().stored_history_floor("PSKY") is not None
+            assert len((await price_bars.record_map(s)).by) > 500 and price_bars.record_map_sync().stored_history_floor("SKYD") is not None
             assert kept == {date(2022, 1, 26), date(2022, 2, 2)}          # 02-02's prior session 02-01 is in the span
             assert await price_bars.stored_history_floor(s, sym) == date(2022, 1, 26)
             assert await price_bars.mark_stored_history(s, tid, EventType.EARNINGS, kept) == 2
@@ -195,3 +195,6 @@ async def test_source_consistency_allows_intrinio_beside_stored_history_only_on_
             await s.execute(text("DELETE FROM historical_reactions WHERE ticker_id IN (SELECT id FROM tickers WHERE symbol = :s)"), {"s": sym})
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
+
+# shares the ZZCCL and ZZNONE symbols with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="calendar_and_bars")

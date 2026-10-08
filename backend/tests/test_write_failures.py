@@ -37,3 +37,6 @@ def test_every_loop_writing_script_with_a_row_handler_uses_the_helper():
     for name in SCRIPTS:
         src = (root / f"{name}.py").read_text()
         assert "WriteFailures(" in src and "WRITES.finish(" in src and ("WRITES.note(" in src or "WRITES.add(" in src), name
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")

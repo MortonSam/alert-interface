@@ -97,3 +97,6 @@ async def test_shadow_imputes_a_nan_feature_and_its_upsert_saves():
                 await s.flush()
                 assert await s.scalar(text("SELECT count(*) FROM shadow_picks WHERE symbol = 'ZZNAN'")) == 1
                 raise _Rollback
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

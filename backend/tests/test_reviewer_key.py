@@ -120,3 +120,6 @@ def test_every_ledger_public_gate_in_the_routers_is_the_ledger_gate_not_is_admin
             assert m.group(1) == "ledger_reader", (p.name, m.group(0))
         if "LEDGER_PUBLIC" in src and "if not LEDGER_PUBLIC" in src:
             assert "may_read_ledger" in src and "Depends(is_admin)" not in src, p.name
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

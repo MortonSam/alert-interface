@@ -180,3 +180,6 @@ def test_generation_routes_warm_and_fred_fail_closed():
     assert "return 1  # fail closed" in inspect.getsource(warm_options_reads.main)
     macro = inspect.getsource(seed_macro)
     assert "fetch_bls_via_web" not in macro and "FRED_API_KEY is not set" in macro and "sys.exit(asyncio.run(main()))" in macro
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")

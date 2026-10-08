@@ -17,3 +17,13 @@ async def _dispose_engines_on_the_session_loop():
     yield
     await engine.dispose()
     await script_engine.dispose()
+
+
+@pytest.hookimpl(tryfirst=True)      # before xdist's own hook, which writes the group into each node id
+def pytest_collection_modifyitems(items):
+    """Under pytest-xdist (`-n auto --dist loadgroup`, the push gate), a file's tests stay on one worker: most files create and delete a
+    symbol of their own in each test, and two of those tests on two workers delete each other's rows (test_public_research_generation's
+    ZZGEN, 2026-10-08). A file that shares rows with other files sets its own `pytestmark = pytest.mark.xdist_group(...)`, which wins."""
+    for item in items:
+        if item.get_closest_marker("xdist_group") is None:
+            item.add_marker(pytest.mark.xdist_group(name=item.module.__name__))

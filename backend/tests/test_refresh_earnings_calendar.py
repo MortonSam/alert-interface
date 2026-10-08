@@ -372,3 +372,6 @@ def test_a_manual_restore_records_its_exit_so_health_does_not_read_it_as_a_failu
     # the health page's rule this satisfies
     from app.services.nightly_run import auto_pick_status
     assert auto_pick_status({"Auto-pick": {"at": "2026-09-30T06:30:00+00:00"}}).failed is True
+
+# shares the ZZCCL and ZZNONE symbols with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="calendar_and_bars")

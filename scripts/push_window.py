@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time as clock          # `time` the name is datetime.time (WINDOW_START)
 import sys
 from datetime import datetime, time
 from pathlib import Path
@@ -25,23 +26,52 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEV_PORT = 3000
 
+# The backend suite runs on alertdb_test, a copy of the dev database rebuilt for every run (tests never share a database with the
+# container's refresh loop), in parallel with pytest-xdist; files that share rows carry an xdist_group mark and run on one worker.
+TEST_DB = "alertdb_test"
+TEST_DB_ASYNC = f"postgresql+asyncpg://alert:alert@db:5432/{TEST_DB}"
+TEST_DB_SYNC = f"postgresql://alert:alert@db:5432/{TEST_DB}"
 STEPS: list[tuple[str, list[str], Path]] = [
-    ("backend tests", ["docker", "compose", "exec", "-T", "backend", "python", "-m", "pytest", "tests", "-q"], ROOT),
+    ("backend tests", ["docker", "compose", "exec", "-T", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",
+                       "backend", "python", "-m", "pytest", "tests", "-q", "-n", "auto", "--dist", "loadgroup"], ROOT),
     ("frontend tests", ["npx", "vitest", "run"], FRONTEND),
     ("frontend build", ["npm", "run", "build"], FRONTEND),
 ]
+REBUILD_TEST_DB = ["docker", "compose", "exec", "-T", "db", "sh", "-c",
+                   f"set -o pipefail; psql -q -U alert -d postgres -c 'drop database if exists {TEST_DB}' && psql -q -U alert -d postgres -c 'create database {TEST_DB}' "
+                   f"&& pg_dump -U alert alertdb | psql -q -U alert {TEST_DB}"]
+BACKEND_LOG = Path("/tmp/push_backend_tests.log")
 PUSH = ["git", "push", "origin", "main"]
+
+
+def lane_for(changed: list[str], argv: list[str]) -> str:
+    """Pure: "frontend" when every file the push carries is under frontend/ (or --frontend-only is given), else "full"; --full forces full."""
+    if "--full" in argv:
+        return "full"
+    if "--frontend-only" in argv:
+        return "frontend"
+    if changed and all(f.startswith("frontend/") for f in changed):
+        return "frontend"
+    return "full"
+
+
+def steps_for(lane: str) -> list[tuple[str, list[str], Path]]:
+    """The gate's steps: the frontend lane runs the frontend tests and build; the full lane adds the backend suite."""
+    return [s for s in STEPS if lane == "full" or s[0].startswith("frontend")]
+
+
+def changed_files() -> list[str] | None:
+    """The files the push would carry (origin/main..HEAD), or None when the upstream ref cannot be read (then the lane is full)."""
+    out = subprocess.run(["git", "diff", "--name-only", "origin/main...HEAD"], cwd=ROOT, capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    return [line for line in out.stdout.splitlines() if line.strip()]
 
 
 def in_window(now: datetime) -> bool:
     """True when `now` (any zone; naive is read as New York) falls in the weekday no-push window."""
     local = now.astimezone(ZONE) if now.tzinfo else now.replace(tzinfo=ZONE)
     return local.weekday() < 5 and WINDOW_START <= local.time() <= WINDOW_END
-
-
-def steps_for(frontend_only: bool) -> list[tuple[str, list[str], Path]]:
-    """The gate's steps: all three, or only the frontend ones when the push carries frontend changes alone."""
-    return [s for s in STEPS if not frontend_only or s[0].startswith("frontend")]
 
 
 def gate(results: list[tuple[str, int]]) -> tuple[bool, str]:
@@ -83,24 +113,49 @@ def main(argv: list[str]) -> int:
     print(f"push window open: {now:%a %H:%M} New York")
     if "--check-only" in argv:
         return 0
-    frontend_only = "--frontend-only" in argv
-    if frontend_only:
-        print("frontend-only lane: the backend suite is skipped (the change touches frontend/ alone)")
+    changed = changed_files()
+    lane = lane_for(changed or [], argv) if changed is not None else "full"
+    print(f"{lane} lane: " + ("the push carries frontend/ changes only; the backend suite is skipped" if lane == "frontend"
+                             else "backend suite on a fresh copy of the dev database, in parallel with the frontend tests and build"))
+    started = clock.monotonic()
+    timings: list[tuple[str, float]] = []
     results: list[tuple[str, int]] = []
-    for name, cmd, cwd in steps_for(frontend_only):
-        if name == "frontend build":
-            was_running = _stop_dev_server()      # the build and the dev server share .next
-            try:
+    backend: subprocess.Popen | None = None
+    backend_started = 0.0
+    if lane == "full":
+        t0 = clock.monotonic()
+        code = _run(REBUILD_TEST_DB, ROOT)
+        timings.append(("rebuild test db", clock.monotonic() - t0))
+        results.append(("rebuild test db", code))
+        if code == 0:
+            cmd = next(c for n, c, _ in STEPS if n == "backend tests")
+            print(f"\n$ {' '.join(cmd)}   (in ., background, output to {BACKEND_LOG})", flush=True)
+            backend_started = clock.monotonic()
+            backend = subprocess.Popen(cmd, cwd=ROOT, stdout=open(BACKEND_LOG, "wb"), stderr=subprocess.STDOUT)
+    if all(code == 0 for _, code in results):
+        for name, cmd, cwd in steps_for("frontend"):
+            t0 = clock.monotonic()
+            if name == "frontend build":
+                was_running = _stop_dev_server()      # the build and the dev server share .next
+                try:
+                    code = _run(cmd, cwd)
+                finally:
+                    if was_running:
+                        _start_dev_server()
+                        print("dev server restarted", flush=True)
+            else:
                 code = _run(cmd, cwd)
-            finally:
-                if was_running:
-                    _start_dev_server()
-                    print("dev server restarted", flush=True)
-        else:
-            code = _run(cmd, cwd)
-        results.append((name, code))
-        if code != 0:
-            break
+            timings.append((name, clock.monotonic() - t0))
+            results.append((name, code))
+            if code != 0:
+                break
+    if backend is not None:
+        code = backend.wait()                      # the exit code, read from the process, never through a pipe
+        timings.append(("backend tests", clock.monotonic() - backend_started))
+        results.append(("backend tests", code))
+        tail = BACKEND_LOG.read_text(errors="replace").splitlines()[-40:]
+        print("\n--- backend tests (last 40 lines of " + str(BACKEND_LOG) + ") ---\n" + "\n".join(tail), flush=True)
+    print("\ntimings: " + ", ".join(f"{n} {t:.0f}s" for n, t in timings) + f"; total {clock.monotonic() - started:.0f}s", flush=True)
     ok, why = gate(results)
     print(f"\n{why}", file=sys.stderr if not ok else sys.stdout, flush=True)
     if not ok:

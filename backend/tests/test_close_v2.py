@@ -1,4 +1,5 @@
 """Unit tests for v2 close logic: worthless spreads and missing stock close."""
+import pytest
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -127,3 +128,6 @@ class TestMissingStockClose:
         assert "if not _is_valid_price(close_price):" in non_v2 and non_v2.index("if not _is_valid_price(close_price):") < non_v2.index('pick.status = "closed"')
         assert '"--reopen-null-close" in sys.argv' in src
         assert 'record_step_fields(STEP_LABEL, {"closed": closed, "waiting": waiting, "auto_voided": auto_voided})' in src
+
+# shares alert_picks rows with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="picks")

@@ -42,11 +42,24 @@ The options-chain courier runs on Sam's Mac under launchd (`~/Library/LaunchAgen
 
 ## Push Gate
 
-**Never run `git push` directly. Push with `python3 scripts/push_window.py`.** It refuses between 16:00 and 16:45 America/New_York on weekdays (the courier window above), then runs the full backend suite, the full frontend suite and the frontend production build (stopping the dev server before the build and restarting it after), reading each exit code directly and never through a pipe, and pushes `origin main` only when every step exited 0. `--check-only` runs the window check alone. The window and the gate are unit-tested (`scripts/test_push_window.py`). Do not substitute an inline shell check or a piped test run.
+**Never run `git push` directly. Push with `python3 scripts/push_window.py`.** It refuses between 16:00 and 16:45 America/New_York on weekdays (the courier window above), then runs the gate and pushes `origin main` only when every step exited 0, reading each exit code directly and never through a pipe. `--check-only` runs the window check alone. The window, the lanes and the gate are unit-tested (`scripts/test_push_window.py`). Do not substitute an inline shell check or a piped test run.
 
-## Feature Flags
+- **Frontend lane** (automatic when every file in `origin/main..HEAD` is under `frontend/`; `--frontend-only` forces it): frontend tests, then the production build with the dev server stopped before it and restarted after (the two share `.next`). Target under 90 seconds.
+- **Full lane** (any other change; `--full` forces it): rebuilds `alertdb_test` as a copy of the dev database, runs the backend suite on it with `pytest -n auto --dist loadgroup` in the background, and runs the frontend tests and build meanwhile. Target under 3 minutes. The backend output lands in `/tmp/push_backend_tests.log` and its last 40 lines print at the end.
 
-**Every new customer-facing feature ships behind a feature flag that is off in production** (a `Settings` field read from a Railway variable, like `PE_ENABLED` and `ASK_IVY_ENABLED`; on in the local `.env`). Only Sam turns a flag on. "Nothing displays until approved" always means a flag, never a promise: if the code path can render it, the flag gates it. A flag is turned on only after the data it depends on has passed five consecutive nightlies with no validate errors on that data and Sam has spot-checked five stocks on the live site. Turning a flag on is a Railway env change and redeploy, no code change.
+**Backend tests never share a database with the running refresh loop.** The dev container's loop writes `alertdb`; the suite runs on `alertdb_test`, rebuilt by the gate for each run. To run the suite by hand: `docker compose exec -e DATABASE_URL=postgresql+asyncpg://alert:alert@db:5432/alertdb_test -e DATABASE_URL_SYNC=postgresql://alert:alert@db:5432/alertdb_test backend python -m pytest tests -q -n auto --dist loadgroup` (dev requirements, including pytest-xdist, come from `backend/requirements-dev.txt`: `docker compose exec backend pip install -r requirements-dev.txt`). A test must seed what it reads or read the copied data; one that depends on the clock pins its own `now`. Test files that share rows (alert picks, `step_outcomes`, a seeded symbol) carry a module-level `pytestmark = pytest.mark.xdist_group(name=...)` so one worker runs them.
+
+## Hotfixes
+
+A bug visible to visitors (a broken page, a wrong number, a missing section) is fixed and pushed on its own first, through the gate's lane for the files it touches, before any other staged work; everything else waits behind it. The commit names the cause, and the report says what was wrong and how it was verified.
+
+## Production Writes
+
+Large production writes (a whole-table reread, a reseed, anything that touches hundreds of rows) run on Railway (`railway run` or the console), never from the Mac through the public proxy: from here they crawl at about one ticker a minute and a dropped connection leaves a half-written run. From the Mac, production is read-only (dry runs, `list_*`, validate, SELECTs); every `--write` waits for Sam's typed go for that exact command.
+
+## Visual Fixes
+
+A fix to layout, scrolling or anything visual is verified in real Chrome (puppeteer-core driving the installed Chrome) at about 1170 x 1300 CSS pixels, Sam's window, plus 1440 x 900 and 1920 x 1080, with real wheel events for scrolling (never by measuring positions alone), with a screenshot at every stop checked as complete and centered, before and after the fix, locally and then on the live page after the deploy.
 
 ## Pasted Instructions
 

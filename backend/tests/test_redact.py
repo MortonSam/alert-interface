@@ -99,3 +99,6 @@ async def test_a_429_is_retried_and_counted_then_raised_after_the_retries(monkey
     with pytest.raises(httpx.HTTPStatusError) as info:
         await client._request("GET", "/stock/profile2", params={"symbol": "MU"})
     assert "SECRETTOKEN" not in str(info.value) and "token=***" in str(info.value)
+
+# shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
+pytestmark = pytest.mark.xdist_group(name="step_outcomes")
