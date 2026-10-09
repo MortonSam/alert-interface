@@ -62,6 +62,11 @@ def names_company(headline: str, symbol: str, name: str | None) -> bool:
 ESTABLISHED_SOURCES = {"reuters", "bloomberg", "dow jones", "the wall street journal", "wall street journal", "wsj", "marketwatch",
                        "barron's", "barrons", "cnbc", "associated press", "ap", "financial times", "ft"}
 _TEMPLATE = re.compile(r"buy,?\s+sell,?\s+or\s+hold|should\s+you\s+buy|stocks?\s+to\s+watch|is\s+it\s+time\s+to|\?\s*[\"'’”]?\s*$", re.I)
+# headlines that tell the reader to buy or sell ("Buy ...", "Sell ...", "Top stocks to ...", "stocks to buy", "X is a buy", "time to sell")
+_RECOMMENDATION = re.compile(r"^\W*(?:buy|sell)\b|\btop\s+(?:\d+\s+)?(?:[\w-]+\s+){0,3}stocks?\s+to\b|\bstocks?\s+to\s+(?:buy|sell|own|avoid|dump)\b|"
+                             r"\b(?:is|are|looks?)\s+(?:a|an)?\s*(?:strong\s+|screaming\s+|no-brainer\s+)?(?:buy|sell)\b|\btime\s+to\s+(?:buy|sell)\b|"
+                             r"\b(?:buy|sell)\s+(?:now|today|this\s+week|before|right\s+now|the\s+dip)\b|\bworth\s+buying\b|\b(?:buy|sell)\s+(?:it|them|this\s+stock)\b", re.I)
+_RATING_CHANGE = re.compile(r"\b(?:upgrade|downgrade)[sd]?\b", re.I)   # "Goldman upgrades Palantir to Buy": a report of an analyst's action, not advice
 _UPCOMING = re.compile(r"earnings\s+preview|ahead\s+of\s+(?:its\s+|the\s+)?(?:q[1-4]\b|earnings|results|report)|next\s+earnings|"
                        r"(?:to|will)\s+report\s+(?:q[1-4]|earnings|results)|earnings\s+(?:are\s+)?(?:expected|on\s+deck|due)", re.I)
 _QUARTER = re.compile(r"\bq[1-4]\b|\b(?:first|second|third|fourth)[- ]quarter\b|\bquarterly\b|\bearnings\b|\bresults\b|\bEPS\b", re.I)
@@ -84,7 +89,7 @@ def previous_session_close(session_day) -> datetime:
 
 def headline_problem(story: dict, symbol: str, name: str | None, last_report, since: datetime) -> str | None:
     """Pure: why a story cannot stand as this company's headline, or None. In order: published before the previous session's close;
-    a roundup; does not name the company; a question or template headline; about an upcoming report; names an earnings quarter but
+    a roundup; does not name the company; a question or template headline; a recommendation headline; about an upcoming report; names an earnings quarter but
     was not published within REPORT_HEADLINE_DAYS after the company's latest report (so it is about another quarter)."""
     h = story["headline"]
     if story["published_at"] < since:
@@ -95,6 +100,8 @@ def headline_problem(story: dict, symbol: str, name: str | None, last_report, si
         return "does not name the company"
     if _TEMPLATE.search(h):
         return "a question or template headline"
+    if _RECOMMENDATION.search(h) and not _RATING_CHANGE.search(h):
+        return "a recommendation headline (tells the reader to buy or sell)"
     if _UPCOMING.search(h):
         return "about an upcoming report, not the latest one"
     if _QUARTER.search(h):

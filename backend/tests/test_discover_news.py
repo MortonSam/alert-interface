@@ -102,3 +102,20 @@ def test_headline_rules_established_first_no_templates_no_other_quarters_and_aft
     assert N.source_tier("Reuters") == 0 and N.source_tier("CNBC") == 0 and N.source_tier("Yahoo") == 1 and N.source_tier(None) == 1
     out = N.in_the_news(stories, {"INTC": -5.3}, names={"INTC": "Intel Corporation"}, last_reports={"INTC": date(2026, 7, 23)}, since=since)
     assert [r["source"] for r in out] == ["Yahoo", "Reuters"]                                                  # by move, then recency; the template is out
+
+
+
+def test_recommendation_headlines_never_show():
+    from datetime import date
+    since = N.previous_session_close(date(2026, 10, 8))
+    t = datetime(2026, 10, 8, 13, 0, tzinfo=N.NEW_YORK)
+    p = lambda h: N.headline_problem({"headline": h, "source": "Yahoo", "published_at": t, "related": ["MU"], "url": h}, "MU", "Micron Technology, Inc.", date(2026, 9, 30), since)
+    rec = "a recommendation headline (tells the reader to buy or sell)"
+    for h in ["Buy Micron Before It Soars", "Sell Micron Now", "Top 3 Chip Stocks to Own, Including Micron", "Micron Among Stocks to Buy in October",
+              "Siebert CIO Says Micron Stock Is a Buy, Just Not Forever", "Micron Is a Strong Buy After Earnings", "Time to Sell Micron",
+              "Micron: Buy the Dip", "Micron Stock Is Worth Buying"]:
+        assert p(h) == rec, h
+    for h in ["Micron Could Be Poised for a Major Breakout Late in 2026", "Mizuho Maintains Neutral on Micron, Raises Price Target",
+              "Micron buys a Japanese chip plant", "Micron's buyback adds $10 billion", "Insiders sell Micron shares",
+              "Goldman Sachs upgrades Micron stock to Buy from Neutral"]:
+        assert p(h) is None, h
