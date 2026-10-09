@@ -67,6 +67,10 @@ async def run(argv: list[str]) -> int:
             JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action'))"""),
                                      {"s": symbols})).all():
             actions.setdefault(r[0], []).append({"kind": r[2], "date": r[1], "name": r[3]})
+        # release EPS already stored by seed_release_eps, where its two readers (the pattern parser and the model) agreed: for a fiscal
+        # fourth quarter it replaces the year total less three quarters, which drifts by cents as share counts change
+        stored_release = {r[0]: (float(r[1]), r[2]) for r in (await s.execute(text(
+            "SELECT accession, diluted_eps_gaap, report_date FROM release_eps WHERE symbol = ANY(:s)"), {"s": symbols})).all()}
     edgar = EdgarClient()
     tags_by_sector: dict[str, dict[str, int]] = {}
     rows_out: list[dict] = []
@@ -120,6 +124,10 @@ async def run(argv: list[str]) -> int:
                 if end not in qs:
                     return None
                 rel = releases[end]
+                if metric == "eps" and qs[end]["derived"] and rel["accession"] in stored_release:
+                    eps, report_date = stored_release[rel["accession"]]
+                    return (round(eps / V.split_factor(report_date, splits.get(sym))[0], 4),
+                            "the stored release EPS (its two readers agreed), for a fiscal fourth quarter")
                 rv = rel[metric]
                 if metric == "eps" and rv is not None and rel["filed"]:
                     rv = round(rv / V.split_factor(rel["filed"], splits.get(sym))[0], 4)

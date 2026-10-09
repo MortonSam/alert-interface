@@ -128,3 +128,21 @@ def test_third_pass_reads(sym):
 @pytest.mark.parametrize("sym", sorted(AMBIGUOUS_3))
 def test_third_pass_ambiguous_are_not_read(sym):
     assert V.parse_release_eps(AMBIGUOUS_3[sym], date(2026, 8, 15)) is None, sym
+
+
+def test_msft_and_xom_wordings_and_a_dollar_total_is_never_eps():
+    """2026-10-09: MSFT's December 2025 release read 7.6 from "diluted earnings per share of $7.6 billion and $1.02" (a total); its
+    GAAP line is "Diluted earnings per share on a GAAP basis was $5.16". XOM writes "$1.00 per share assuming dilution" and a table row
+    "Earnings per common share - assuming dilution"; none was read before."""
+    msft = ("• Diluted earnings per share on a GAAP basis was $5.16 and increased 60%, and on a non-GAAP basis was $4.14 and increased 24%. "
+            "Other income included net gains from our investment in OpenAI, which resulted in an increase in net income and diluted earnings per share of $7.6 billion and $1.02, respectively.")
+    hit = V.parse_release_eps(msft)
+    assert (hit["eps"], hit["how"]) == (5.16, "diluted EPS on a GAAP basis sentence")
+    assert V.parse_release_eps("an increase in net income and diluted earnings per share of $7.6 billion and $1.02, respectively.") is None
+    xom = ("Exxon Mobil Corporation today announced first-quarter 2026 earnings of $4.2 billion, or $1.00 per share assuming dilution. "
+           "Earnings excluding identified items were $4.9 billion, or $1.16 per share assuming dilution.")
+    assert V.parse_release_eps(xom)["eps"] == 1.00
+    row = "Three Months Ended June 30, 2026 2025 Earnings per common share (U.S. dollars) 3.48 1.64 Earnings per common share - assuming dilution (U.S. dollars) 3.48 1.64"
+    hit = V.parse_release_eps(row)
+    assert (hit["eps"], hit["how"]) == (3.48, "EPS assuming dilution row")
+    assert V.parse_release_eps("fourth-quarter 2025 earnings of $6.5 billion, or $1.53 per share.") is None      # "per share" alone is not diluted

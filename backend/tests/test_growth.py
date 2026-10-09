@@ -23,6 +23,7 @@ def test_two_readers_must_agree():
     q = {"as_filed": 2.46, "restated": None}
     assert G.confirm("eps", q, 2.46)[0] == 2.46 and G.confirm("eps", q, 2.47)[0] == 2.46     # to the cent
     assert G.confirm("eps", q, 2.48)[0] is None
+    assert G.confirm("eps", {"as_filed": 1.54, "restated": None, "derived": True}, 1.53)[0] == 1.53         # a derived Q4: the company's own figure
     assert G.confirm("eps", q, None)[2] == "one reader only: no readable release and no later filing yet"
     assert G.confirm("eps", {"as_filed": 1.92, "restated": 1.92}, None)[1] == "XBRL as filed and as restated a year later"
     rev = {"as_filed": 49_836_000_000.0, "restated": None}

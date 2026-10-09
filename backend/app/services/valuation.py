@@ -52,6 +52,12 @@ _ANNUAL_LABEL = re.compile(r"fiscal[- ]year|full[- ]year|year[- ]ended|twelve[- 
 _QUARTER_WORD = re.compile(r"quarter|\bQ[1-4]\b|three months|\d{1,2} weeks", re.I)
 _NUM = r"(\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"
 _DNUM = r"(\(?\$\s?\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"      # with the dollar sign, a loss written "($0.35)" or "$(0.35)"
+# "Diluted earnings per share on a GAAP basis was $5.16" (MSFT); "earnings of $4.2 billion, or $1.00 per share assuming dilution" (XOM)
+_GAAP_BASIS_WAS = re.compile(rf"diluted\s+(?:net\s+)?earnings\s+per\s+share\s+on\s+a\s+GAAP\s+basis\s+(?:was|were)\s+{_DNUM}", re.I)
+_ASSUMING_DILUTION = re.compile(rf"\b(?:net\s+income|earnings|income|net\s+loss|loss)\b[^;]{{0,120}}?,?\s+or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?{_DNUM}\s+per\s+(?:common\s+)?share\s+assuming\s+dilution", re.I)
+# the table row: "Earnings per common share - assuming dilution (U.S. dollars) 3.48 1.64" (XOM)
+_ROW_ASSUMING_DILUTION = re.compile(rf"(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share\s*[—–-]+\s*assuming\s+dilution(?:\s*\([^)]{{0,20}}\))?\s*\$?\s?{_NUM}", re.I)
+_DOLLAR_TOTAL_AFTER = re.compile(r"^\s*(?:billion|million|thousand|bn\b|mn\b)", re.I)     # "$7.6 billion" is a total, never a per-share figure
 # other phrasings, tried after _PROSE and _ROW, in this order
 _PROSE_ANY = re.compile(rf"\b(?:net\s+(?:income|earnings|loss)|earnings|income)\b[^;]{{0,120}}?,?\s+or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?{_DNUM}\s+per\s+(?:basic\s+and\s+)?diluted\s+(?:common\s+)?share", re.I)
 # utilities and others: "GAAP net income of $0.37 per share", "earnings per share (EPS) of $5.73 on a GAAP basis", "reported EPS of $1.38 ... (GAAP)",
@@ -269,16 +275,19 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
         if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end(), hit.start(1)):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
-    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
+    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0),
+                (_GAAP_BASIS_WAS, "diluted EPS on a GAAP basis sentence", 12), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
                 (_LABELLED, "labelled GAAP EPS", 40), (_GAAP_EPS_WAS, "GAAP EPS sentence", 12), (_EPS_GAAP_BASIS, "EPS on a GAAP basis", 12), (_REPORTED_EPS_GAAP, "reported EPS, GAAP named", 12),
                 (_AS_REPORTED, "as-reported EPS", 12), (_DILUTED_EPS_GAAP_COL, "diluted EPS, GAAP column", 12), (_ROW_DASH, "EPS row, dash diluted", 12), (_EPS_DILUTED_PAREN, "EPS (Diluted) row", 12),
-                (_ROW_NET, "net income per share row", 12), (_DILUTED_WERE, "diluted EPS were sentence", 12), (_PROSE_ANY, "net income sentence", 12), (_GAAP_PER_SHARE, "GAAP net income per share", 12),
+                (_ROW_NET, "net income per share row", 12), (_DILUTED_WERE, "diluted EPS were sentence", 12), (_PROSE_ANY, "net income sentence", 12), (_ASSUMING_DILUTION, "per share assuming dilution sentence", 12), (_ROW_ASSUMING_DILUTION, "EPS assuming dilution row", 12), (_GAAP_PER_SHARE, "GAAP net income per share", 12),
                 (_GAAP_MILLION_PER_SHARE, "GAAP earnings, or per share", 12), (_GAAP_PAREN_PER_SHARE, "reported earnings (GAAP) per share", 12), (_GAAP_EPS_CHANGE, "GAAP EPS change sentence", 12),
                 (_ROW_FOOTNOTE, "diluted net income per share row (footnote)", 12), (_ROW_POTENTIAL, "GAAP diluted per potential common share", 12), (_ROW_PER_DILUTED, "per diluted share row", 12),
                 (_REPORTED_VS_NONGAAP, "reported EPS against a non-GAAP measure", 12), (_BASIC_AND_DILUTED_BASIS, "basic and diluted basis sentence", 12), (_EPS_WERE, "EPS were sentence", 12),
                 (_PER_DILUTED, "per diluted share", 80), (_PER_SHARE, "per share net income sentence", 12))
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
+            if _DOLLAR_TOTAL_AFTER.match(flat[hit.end(1):hit.end(1) + 12]):
+                continue                                                    # "diluted earnings per share of $7.6 billion and $1.02" (MSFT)
             before = _same_clause(flat, hit.start(), max(back, 12))
             own = "" if how == "reported EPS against a non-GAAP measure" else hit.group(0)      # that pattern names the comparable figure on purpose (STZ)
             if _NON_GAAP_NEAR.search(before + own):                      # joined, so "non-" + "GAAP earnings per share of $3.02" reads as non-GAAP (CRL)

@@ -217,6 +217,8 @@ def confirm(metric: str, q: dict, release_value) -> tuple[float | None, str, str
     if release_value is not None:
         ok = abs(x - release_value) <= EPS_TOLERANCE + 1e-9 if metric == "eps" else revenue_agrees(x, release_value)
         rel = release_value if metric == "eps" else release_value.get("raw")
+        if ok and metric == "eps" and q.get("derived"):
+            return release_value, "XBRL and the earnings release (the release's figure: a derived fourth quarter drifts by cents)", None
         return (x, "XBRL and the earnings release", None) if ok else (None, "", f"XBRL {x:,.4g} against the release {rel}")
     if q.get("restated") is not None:
         r = q["restated"]
