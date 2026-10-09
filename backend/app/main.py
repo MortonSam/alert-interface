@@ -93,6 +93,7 @@ async def health_check():
         "status": "ok",
         "db": "ok",
         "refresh_in_progress": False,
+        "refresh_started_at": None,
         "last_refreshed_at": None,
         "rv_latest_date": None,
         "rv_last_run": None,
@@ -121,6 +122,9 @@ async def health_check():
 
             # Derive refresh_in_progress from the DB sentinel with staleness rule
             sentinel_raw = await get_value(session, "refresh_in_progress_since")
+            # the raw start of a run still marked in progress, whatever its age: the nightly's long steps run for hours, past the
+            # REFRESH_SENTINEL_MAX_MINUTES restart rule below; scripts/push_window.py reads it to refuse a push mid-nightly
+            result["refresh_started_at"] = sentinel_raw if sentinel_raw and sentinel_raw != "done" else None
             if sentinel_raw and sentinel_raw != "done":
                 try:
                     started_at = datetime.fromisoformat(sentinel_raw)

@@ -79,3 +79,22 @@ class LaneTests(unittest.TestCase):
         """`time` in the module is datetime.time (the window bounds); timings read push_window.clock.monotonic."""
         self.assertTrue(callable(push_window.clock.monotonic))
         self.assertIn("clock.monotonic()", open(push_window.__file__).read())
+
+
+class NightlyTests(unittest.TestCase):
+    def test_a_running_nightly_blocks_and_says_when_to_retry(self):
+        from push_window import nightly_block
+        now = datetime(2026, 10, 9, 7, 30, tzinfo=timezone.utc)              # 03:30 New York
+        why = nightly_block({"refresh_started_at": "2026-10-09T06:30:10+00:00", "refresh_in_progress": False}, now)
+        self.assertIn("running since 02:30 New York (59 min)", why)          # /health's 45-minute rule says not in progress; the marker says otherwise
+        self.assertIn("by 08:30 at the latest", why)
+        self.assertIsNone(nightly_block({"refresh_started_at": None, "refresh_in_progress": False}, now))
+        self.assertIsNone(nightly_block({"refresh_started_at": "2026-10-08T06:30:10+00:00"}, now))            # a day-old marker is dead
+        self.assertIn("unreadable", nightly_block(None, now))
+        self.assertIn("in progress", nightly_block({"refresh_in_progress": True}, now))                     # an older /health without the field
+
+    def test_no_push_in_the_quarter_hour_before_the_nightly_starts(self):
+        from push_window import nightly_block
+        self.assertIn("starts at 02:30", nightly_block({}, datetime(2026, 10, 9, 2, 20, tzinfo=NY)))
+        self.assertIsNone(nightly_block({}, datetime(2026, 10, 9, 2, 10, tzinfo=NY)))
+        self.assertIsNone(nightly_block({}, datetime(2026, 10, 8, 23, 10, tzinfo=NY)))

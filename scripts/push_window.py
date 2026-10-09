@@ -15,7 +15,7 @@ import os
 import subprocess
 import time as clock          # `time` the name is datetime.time (WINDOW_START)
 import sys
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -68,6 +68,58 @@ def changed_files() -> list[str] | None:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+HEALTH_URL = "https://alertinterface.com/api/v1/health"
+NIGHTLY_START = time(2, 30)          # app/services/nightly_clock.NIGHTLY_LOCAL_TIME, New York
+NIGHTLY_MAX_HOURS = 6                # a run marked in progress longer than this is a dead marker, not a running nightly
+NIGHTLY_LEAD_MINUTES = 15            # no push this close before the nightly starts: the deploy would restart the backend as it begins
+RECHECK_MINUTES = 15
+
+
+def nightly_block(health: dict | None, now: datetime) -> str | None:
+    """Pure: why a push must wait for the production nightly, or None. `health` is production's /health (None when unreadable)."""
+    local = now.astimezone(ZONE)
+    start_today = local.replace(hour=NIGHTLY_START.hour, minute=NIGHTLY_START.minute, second=0, microsecond=0)
+    if timedelta(0) < start_today - local <= timedelta(minutes=NIGHTLY_LEAD_MINUTES):
+        return (f"no push: the production nightly starts at {NIGHTLY_START:%H:%M} New York and a deploy now would restart the backend as it "
+                f"begins; retry after {start_today:%H:%M} once /health shows it running, or after it finishes")
+    if health is None:
+        return f"no push: production /health is unreadable, so whether the nightly is running is unknown; retry in {RECHECK_MINUTES} minutes (or pass --nightly-unknown-ok if production is down)"
+    started_raw = health.get("refresh_started_at")
+    if started_raw:
+        try:
+            started = datetime.fromisoformat(started_raw)
+        except ValueError:
+            started = None
+        if started is not None:
+            age = now - started
+            if age < timedelta(hours=NIGHTLY_MAX_HOURS):
+                latest = (started + timedelta(hours=NIGHTLY_MAX_HOURS)).astimezone(ZONE)
+                return (f"no push: the production nightly has been running since {started.astimezone(ZONE):%H:%M} New York ({int(age.total_seconds() // 60)} min); "
+                        f"retry in {RECHECK_MINUTES} minutes, and by {latest:%H:%M} at the latest it has finished or its marker has expired")
+    elif health.get("refresh_in_progress"):
+        return f"no push: production /health reports the nightly in progress; retry in {RECHECK_MINUTES} minutes"
+    return None
+
+
+def read_health(url: str = HEALTH_URL) -> dict | None:
+    """Production's /health, or None when it cannot be read."""
+    import json as _json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "push_window"}), timeout=20) as r:
+            return _json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def nightly_check(argv: list[str]) -> str | None:
+    """The live check: None when a push may go now."""
+    why = nightly_block(read_health(), datetime.now(timezone.utc))
+    if why and "--nightly-unknown-ok" in argv and why.startswith("no push: production /health is unreadable"):
+        return None
+    return why
+
+
 def in_window(now: datetime) -> bool:
     """True when `now` (any zone; naive is read as New York) falls in the weekday no-push window."""
     local = now.astimezone(ZONE) if now.tzinfo else now.replace(tzinfo=ZONE)
@@ -111,6 +163,11 @@ def main(argv: list[str]) -> int:
         print(f"no push: {now:%a %H:%M} New York is inside the {WINDOW_START:%H:%M}-{WINDOW_END:%H:%M} courier window", file=sys.stderr)
         return 1
     print(f"push window open: {now:%a %H:%M} New York")
+    why = nightly_check(argv)
+    if why:
+        print(why, file=sys.stderr)
+        return 1
+    print("production nightly: not running")
     if "--check-only" in argv:
         return 0
     changed = changed_files()
@@ -159,6 +216,10 @@ def main(argv: list[str]) -> int:
     ok, why = gate(results)
     print(f"\n{why}", file=sys.stderr if not ok else sys.stdout, flush=True)
     if not ok:
+        return 1
+    why = nightly_check(argv)              # checked again: the gate takes minutes and the nightly may have started meanwhile
+    if why:
+        print(why, file=sys.stderr)
         return 1
     return _run(PUSH, ROOT)
 
