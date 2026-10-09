@@ -1083,8 +1083,8 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     days_expiration_past_earnings: int | None = None
     min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
 
-    post = [e for e in ingested_exps if e >= min_exp]
-    chosen_exp: str | None = post[0] if post else (ingested_exps[-1] if ingested_exps else None)
+    # the shared picker: on an earnings date the expiry must capture the report (chain_store.pick_expiration)
+    chosen_exp: str | None = await chain_store.pick_expiration(db, sym, min_exp) or (ingested_exps[-1] if ingested_exps else None)
 
     if not chosen_exp:
         no_data_note = await no_options_note(db, sym)

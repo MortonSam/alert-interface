@@ -37,3 +37,10 @@ async def test_report_timing_is_read_from_the_stored_event():
         got = await chain_store.report_timing_on(db, "NO-SUCH-TICKER", "2026-11-06")
         assert got is chain_store._NO_REPORT
         assert await chain_store.report_timing_on(db, "EOG", "not a date") is chain_store._NO_REPORT
+
+
+def test_every_page_picks_through_the_shared_picker():
+    from pathlib import Path
+    src = (Path(__file__).parents[1] / "app" / "routers" / "tickers.py").read_text()
+    assert "e >= min_exp]" not in src                     # the options bundle (the ticker page's panel) once chose inline
+    assert "chosen_exp: str | None = await chain_store.pick_expiration(db, sym, min_exp)" in src
