@@ -1,3 +1,4 @@
+import { fmtIsoDateTime } from "@/lib/freshness";
 import type { LegendItem } from "./encodings/types";
 // How an option mark describes itself. One label per backend mark_basis
 // (backend/app/schemas/thesis.py MARK_BASES); a vitest fails if one is missing.
@@ -25,15 +26,11 @@ export function markBasisLabel(basis: string): string {
 }
 
 /** "HH:MM:SS" today, "EEE HH:MM" otherwise, or null when the input is not a real timestamp. */
-export function fmtTimestamp(iso: string | null | undefined, now: Date = new Date()): string | null {
-  // Strict ISO-8601 only: V8 will happily "parse" a sentence that contains a date.
+export function fmtTimestamp(iso: string | null | undefined, _now: Date = new Date()): string | null {
+  // Strict ISO-8601 only: V8 will happily "parse" a sentence that contains a date. Always on the market clock with its date
+  // and "ET" (lib/freshness fmtIsoDateTime), never the browser's own zone.
   if (!iso || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso)) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  return sameDay
-    ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
-    : d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  return fmtIsoDateTime(iso);
 }
 
 interface MarkDates {

@@ -39,6 +39,9 @@ export const MAGNITUDE_DECREASE_THRESHOLD = -0.20;
 export const DISCOVER_EXTREME_RV = 93;
 export const DISCOVER_ELEVATED_RV = 85;
 
+// ── Expected-move caveat ───────────────────────────────────────────
+export const EXPIRY_CAVEAT_DAYS = 7;   // an expiry more than this many days after earnings carries the full-period caveat
+
 // ── Discover tape words ────────────────────────────────────────────
 export const TAPE_CHOPPIEST_RANK = 99;
 export const TAPE_ONE_OF_CHOPPIEST_RANK = 95;

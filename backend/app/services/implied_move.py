@@ -89,6 +89,19 @@ def straddle_implied_move(calls: list[dict], puts: list[dict], spot: float | Non
     return ImpliedMove(atm_strike=atm, straddle=straddle, pct=straddle / spot, low=spot - straddle, high=spot + straddle)
 
 
+def expiry_caveat(expiration: str | None, earnings_date: str | None) -> str | None:
+    """The full-period caveat when the move's expiry is more than EXPIRY_CAVEAT_DAYS after the earnings date. The page builds
+    the same sentence (frontend/src/lib/optionsReadFacts.ts expiryCaveat, mirrored by test)."""
+    from app.thresholds import EXPIRY_CAVEAT_DAYS
+    if not expiration or not earnings_date:
+        return None
+    days = (date.fromisoformat(str(expiration)[:10]) - date.fromisoformat(str(earnings_date)[:10])).days
+    if days <= EXPIRY_CAVEAT_DAYS:
+        return None
+    return (f"Nearest available expiration ({str(expiration)[:10]}) is {days} days after the {str(earnings_date)[:10]} earnings date. "
+            f"The implied move covers the full period to expiration, not just the earnings event.")
+
+
 def span_days(chain_last_trade, expiration: str | None) -> int | None:
     """Days the implied move covers: from the chain's own date to the expiry. None when either is missing."""
     if not chain_last_trade or not expiration:

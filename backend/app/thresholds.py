@@ -169,6 +169,8 @@ DISCOVER_ELEVATED_RV = 85  # retrieval filter
 TAPE_CHOPPIEST_RANK = 99
 TAPE_ONE_OF_CHOPPIEST_RANK = 95
 TAPE_OPTIONS_BAND_PP = 5
+# The expected-move caveat: an expiry more than this many days after the earnings date carries the "covers the full period" note.
+EXPIRY_CAVEAT_DAYS = 7
 
 
 def discover_rv_tier(rv_rank: float) -> LabeledValue:

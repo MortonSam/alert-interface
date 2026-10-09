@@ -3,6 +3,7 @@
 // never disagree. Without a read, the rows render from the live endpoints.
 
 import type { ExpectedMove, OptionsRead, RealizedVol } from "@/lib/api";
+import { EXPIRY_CAVEAT_DAYS } from "@/lib/thresholds";
 
 export const READ_PRICE_DRIFT_PCT = 1;   // note the read's price when the quote has moved more than this
 
@@ -15,6 +16,7 @@ export interface OptionFactValues {
   implied_range_low: number | null;
   implied_range_high: number | null;
   expiration_used: string | null;
+  next_earnings_date?: string | null;   // the earnings date the expiry was chosen for
   atm_strike: number | null;
   atm_iv: number | null;
   atm_iv_as_of: string | null;
@@ -56,6 +58,7 @@ export function displayedOptionFacts(
     implied_range_low: expectedMove?.implied_range_low ?? null,
     implied_range_high: expectedMove?.implied_range_high ?? null,
     expiration_used: expectedMove?.expiration_used ?? null,
+    next_earnings_date: expectedMove?.earnings_date ?? null,
     atm_strike: expectedMove?.atm_strike ?? null,
     atm_iv: realizedVol?.atm_iv ?? null,
     atm_iv_as_of: realizedVol?.atm_iv_as_of ?? null,
@@ -66,6 +69,16 @@ export function displayedOptionFacts(
     rv_rank: realizedVol?.rv_rank ?? null,
     iv_rv_spread_pp: realizedVol?.iv_rv_spread_pp ?? null,
   };
+}
+
+/** The full-period caveat when the expiry is more than EXPIRY_CAVEAT_DAYS after earnings: the same sentence the API writes
+ * (backend services/implied_move.expiry_caveat, mirrored by test), built from the figures the block shows. */
+export function expiryCaveat(expiration: string | null | undefined, earningsDate: string | null | undefined): string | null {
+  if (!expiration || !earningsDate) return null;
+  const exp = expiration.slice(0, 10), earn = earningsDate.slice(0, 10);
+  const days = Math.round((Date.parse(`${exp}T00:00:00Z`) - Date.parse(`${earn}T00:00:00Z`)) / 86_400_000);
+  if (!Number.isFinite(days) || days <= EXPIRY_CAVEAT_DAYS) return null;
+  return `Nearest available expiration (${exp}) is ${days} days after the ${earn} earnings date. The implied move covers the full period to expiration, not just the earnings event.`;
 }
 
 /** "priced at $339.07, last trade 17:59" for the block's label. */

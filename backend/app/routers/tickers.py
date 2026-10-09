@@ -156,7 +156,7 @@ def _build_plain_summary(
     return " ".join(parts)
 
 
-from app.services.implied_move import WIDE_QUOTES_NOTE, mid_or_last as _mid_or_last, span_days, straddle_implied_move, too_wide, wide_quotes  # noqa: E402
+from app.services.implied_move import WIDE_QUOTES_NOTE, expiry_caveat, mid_or_last as _mid_or_last, span_days, straddle_implied_move, too_wide, wide_quotes  # noqa: E402
 
 # The one absent-read reason that is not a failure: the warm step writes the read for the latest chain every night.
 # The page shows this sentence alone, without "Unavailable."; frontend lib/optionsReadFacts.ts mirrors it by test.
@@ -760,12 +760,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
         earnings_date_obj = date.fromisoformat(earnings_str)
         exp_date_obj = date.fromisoformat(chosen_exp)
         days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
-        if days_expiration_past_earnings > 7:
-            data_quality_note = (
-                f"Nearest available expiration ({chosen_exp}) is "
-                f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
-                f"The implied move covers the full period to expiration, not just the earnings event."
-            )
+        data_quality_note = expiry_caveat(chosen_exp, earnings_str) or data_quality_note
     else:
         data_quality_note = "No earnings date found; using nearest weekly expiration."
 
@@ -1124,12 +1119,8 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
         days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
         if exp_date_obj < earnings_date_obj:
             data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
-        elif days_expiration_past_earnings > 7:
-            data_quality_note = (
-                f"Nearest available expiration ({chosen_exp}) is "
-                f"{days_expiration_past_earnings} days after the {earnings_str} earnings date. "
-                f"The implied move covers the full period to expiration, not just the earnings event."
-            )
+        elif expiry_caveat(chosen_exp, earnings_str):
+            data_quality_note = expiry_caveat(chosen_exp, earnings_str)
 
     # ── Fetch chain from ingested store ───────────────────────────────────────
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)

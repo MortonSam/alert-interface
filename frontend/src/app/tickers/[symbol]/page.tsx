@@ -2,11 +2,11 @@
 
 import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
-import { absentReadLine, displayedOptionFacts, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
+import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { datasetAgeLine, fmtQuoteDateTime, impliedSpanPhrase, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
@@ -968,10 +968,7 @@ const PERIOD_WINDOW_LABEL: Record<ChartPeriod, string> = {
 function formatTooltipDate(date: string, period: ChartPeriod): string {
   if (date.length > 10) {
     const d = new Date(date);
-    return d.toLocaleString("en-US", {
-      month: "short", day: "numeric",
-      hour: "numeric", minute: "2-digit", timeZoneName: "short",
-    });
+    return fmtIsoDateTime(d.toISOString()) ?? date;
   }
   return date;
 }
@@ -1141,7 +1138,7 @@ function PriceChart({
                   if (!pt) return "";
                   if (period === "1d") {
                     const d = new Date(pt.date);
-                    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+                    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
                   }
                   return pt.date.slice(5, 10);
                 }
@@ -2467,6 +2464,11 @@ export default function TickerPage() {
                     {impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date)}
                   </p>
                 )}
+                {emPct != null && expiryCaveat(facts.expiration_used, facts.next_earnings_date) && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {expiryCaveat(facts.expiration_used, facts.next_earnings_date)}
+                  </p>
+                )}
                 {emDol != null && facts.atm_strike != null && (
                   <p className="text-sm text-muted-foreground mt-1">
                     <ExplainTip term="atm">ATM</ExplainTip> {fmtDollars(facts.atm_strike)} <ExplainTip term="straddle">straddle</ExplainTip> at {fmtDollars(emDol)}
@@ -2790,7 +2792,7 @@ export default function TickerPage() {
                 <div className="flex items-center gap-2">
                   {marksAsOf && (
                     <span className="text-xs text-muted-foreground">
-                      marks as of {marksAsOf.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                      marks as of {fmtIsoDateTime(marksAsOf.toISOString())}
                     </span>
                   )}
                   <button
@@ -2972,7 +2974,7 @@ export default function TickerPage() {
               {noteStaleness?.stale && (
                 <div className="flex items-center justify-between px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
                   <span>
-                    {noteStaleness.reason}. Last generated {new Date(note.generated_at).toLocaleDateString()}.
+                    {noteStaleness.reason}. Last generated {new Date(note.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" })}.
                   </span>
                   {genPolicy?.can_regenerate && (
                     <button
