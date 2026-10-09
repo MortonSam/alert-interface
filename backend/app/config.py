@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     pe_enabled: bool = False
     # Discover's "Today's biggest movers" and "In the news" (services/news). Off in production until launched; the admin token sees them.
     discover_news_enabled: bool = False
+    # The hourly intraday news run (startup's news loop, 9-17 New York on weekdays). A Railway variable, NEWS_INTRADAY_ENABLED=false,
+    # pauses it; the nightly's news step runs either way.
+    news_intraday_enabled: bool = True
     # Revenue and EPS growth against the same quarter a year earlier (services/growth, growth_figures). Off in production; computed locally only.
     growth_enabled: bool = False
     # The options chain every page reads (services/options_source): "courier" (the default) or "intrinio", with the courier as the

@@ -183,8 +183,11 @@ NEWS_INTERVAL_MINUTES = 60          # the intraday news run: hourly through the 
 NEWS_HOURS = (9, 17)                # New York hours the intraday run may start in, weekdays
 
 
-def news_run_due(now_ny: datetime, last_run: datetime | None) -> bool:
-    """Pure: an intraday news run is due on a weekday between NEWS_HOURS (New York) when the last one started an interval ago or more."""
+def news_run_due(now_ny: datetime, last_run: datetime | None, enabled: bool = True) -> bool:
+    """Pure: an intraday news run is due on a weekday between NEWS_HOURS (New York) when the last one started an interval ago or more,
+    and never while NEWS_INTRADAY_ENABLED is false."""
+    if not enabled:
+        return False
     if now_ny.weekday() >= 5 or not (NEWS_HOURS[0] <= now_ny.hour < NEWS_HOURS[1]):
         return False
     return last_run is None or (now_ny - last_run).total_seconds() >= NEWS_INTERVAL_MINUTES * 60
@@ -199,7 +202,7 @@ async def _news_loop() -> None:
         await asyncio.sleep(LOOP_INTERVAL_SECONDS)
         try:
             now = datetime.now(ny)
-            if not news_run_due(now, last) or _refresh_in_progress:
+            if not news_run_due(now, last, settings.news_intraday_enabled) or _refresh_in_progress:
                 continue
             last = now
             _log("News loop: starting the intraday news run.")

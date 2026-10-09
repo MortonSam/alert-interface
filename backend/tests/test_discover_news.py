@@ -76,6 +76,7 @@ def test_the_route_is_gated_and_the_copy_never_says_because():
     ny = ZoneInfo("America/New_York")
     assert news_run_due(datetime(2026, 10, 8, 10, 0, tzinfo=ny), None)
     assert not news_run_due(datetime(2026, 10, 8, 10, 30, tzinfo=ny), datetime(2026, 10, 8, 10, 0, tzinfo=ny))
+    assert not news_run_due(datetime(2026, 10, 8, 10, 0, tzinfo=ny), None, enabled=False)       # NEWS_INTRADAY_ENABLED=false pauses it
     assert not news_run_due(datetime(2026, 10, 10, 10, 0, tzinfo=ny), None) and not news_run_due(datetime(2026, 10, 8, 20, 0, tzinfo=ny), None)
 
 
