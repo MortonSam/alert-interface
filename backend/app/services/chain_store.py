@@ -8,8 +8,10 @@ Two sources, told apart by key prefix and by the chain's own chain_source field:
   courier   chain:{SYM}:{EXP}            written by the residential courier through /admin/ingest-options-chains.
             Every reader reads this one. A chain stored before the field existed is a courier chain.
   intrinio  intrinio_chain:{SYM}:{EXP}   written nightly by scripts/shadow_option_chains.py from Intrinio's
-            EOD chain, by security record. Read only by validate's chain_shadow check. Nothing switches
-            until the shadow week's retirement criteria pass.
+            EOD chain, by security record.
+Readers that name no source get the ticker's serving source (services/options_source.resolve): the primary source set by
+OPTIONS_PRIMARY_SOURCE (courier by default), its chain fresh and through the put-call parity check, else the fallback, else
+nothing (the pages hide the figures with the reason). Writers and the shadow comparison always name their source.
 """
 from __future__ import annotations
 
@@ -51,6 +53,8 @@ async def put_chain(db: AsyncSession, sym: str, exp: str, chain: dict, source: s
         raise ValueError(f"chain_source {chain.get('chain_source')!r} does not match the key's source {source!r}")
     key = chain_key(sym, exp, source)
     await set_value(db, key, json.dumps(chain))
+    from app.services.options_source import forget
+    forget(sym)
     return key
 
 
@@ -84,8 +88,18 @@ def is_fresh(chain_last_trade: str | None, max_trading_days: int = CHAIN_FRESH_T
     return trading_days_since(chain_last_trade, today) <= max_trading_days
 
 
-async def get_ingested_expirations(db: AsyncSession, sym: str, source: str = COURIER) -> list[str]:
-    """Return sorted expiration date strings from a source's chain keys (the courier's by default)."""
+async def _serving(db: AsyncSession, sym: str) -> str | None:
+    from app.services.options_source import resolve
+    return (await resolve(db, sym)).source
+
+
+async def get_ingested_expirations(db: AsyncSession, sym: str, source: str | None = None) -> list[str]:
+    """Return sorted expiration date strings from a source's chain keys (the ticker's serving source when none is named; none when
+    the ticker's options are hidden)."""
+    if source is None:
+        source = await _serving(db, sym)
+        if source is None:
+            return []
     rows = (await db.execute(
         select(SystemMetadata.key).where(SystemMetadata.key.like(f"{_PREFIX[source]}:{sym}:%"))
     )).scalars().all()
@@ -98,9 +112,14 @@ async def get_ingested_expirations(db: AsyncSession, sym: str, source: str = COU
 
 
 async def get_chain(
-    db: AsyncSession, sym: str, exp: str, source: str = COURIER,
+    db: AsyncSession, sym: str, exp: str, source: str | None = None,
 ) -> tuple[dict, str | None] | None:
-    """Return (chain_dict, chain_last_trade) or None if not ingested. Readers take the courier's (the default)."""
+    """Return (chain_dict, chain_last_trade) or None if not ingested. With no source named, the ticker's serving source; None when
+    its options are hidden (missing, stale or failing the parity check with no passing fallback)."""
+    if source is None:
+        source = await _serving(db, sym)
+        if source is None:
+            return None
     row = await db.scalar(
         select(SystemMetadata).where(SystemMetadata.key == chain_key(sym, exp, source))
     )
@@ -113,31 +132,26 @@ async def get_chain(
     return chain, chain.get("chain_last_trade")
 
 
-async def get_latest_chain_date(db: AsyncSession, sym: str) -> str | None:
-    """Return the chain_last_trade date for any chain of this symbol, or None.
+async def get_latest_chain_date(db: AsyncSession, sym: str, source: str | None = None) -> str | None:
+    """Return the chain_last_trade date for any chain of this symbol from a source (the serving source when none is named), or None.
 
-    All expirations for a symbol share the same chain_last_trade (ingested
-    in the same courier batch), so we just grab the first one.
+    Expirations a night's run skipped keep their older chain_last_trade, so the newest date across them is the chain's date.
     """
-    row = await db.scalar(
-        select(SystemMetadata)
-        .where(SystemMetadata.key.like(f"chain:{sym}:%"))
-        .limit(1)
-    )
-    if not row:
-        return None
-    try:
-        chain = json.loads(row.value)
-        clt = chain.get("chain_last_trade")
-        return clt[:10] if clt else None  # "YYYY-MM-DD" or full ISO → just date part
-    except (json.JSONDecodeError, TypeError):
-        return None
+    if source is None:
+        source = await _serving(db, sym)
+        if source is None:
+            return None
+    from sqlalchemy import text as _text
+    rows = (await db.execute(_text("SELECT value::json->>'chain_last_trade' FROM system_metadata WHERE key LIKE :p"),
+                             {"p": f"{_PREFIX[source]}:{sym}:%"})).scalars().all()
+    dates = [d[:10] for d in rows if d]
+    return max(dates) if dates else None     # the newest batch: an expiration a night's run skipped keeps its older date
 
 
 async def pick_expiration(
-    db: AsyncSession, sym: str, min_date: str,
+    db: AsyncSession, sym: str, min_date: str, source: str | None = None,
 ) -> str | None:
-    """Return nearest ingested expiration >= min_date, or None."""
-    exps = await get_ingested_expirations(db, sym)
+    """Return nearest ingested expiration >= min_date from the serving source (or the named one), or None."""
+    exps = await get_ingested_expirations(db, sym, source=source)
     matches = [e for e in exps if e >= min_date]
     return matches[0] if matches else None

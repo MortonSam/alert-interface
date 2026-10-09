@@ -160,7 +160,7 @@ async def run(argv: list[str]) -> int:
                 cfront = front_expiration([e for e, d in courier.get(sym, {}).items() if d == expected.isoformat()], expected.isoformat())
                 if cfront and cfront in stored_chains and stored_chains[cfront]["chain_last_trade"] == expected.isoformat():
                     async with ScriptSessionLocal() as s:
-                        got = await chain_store.get_chain(s, sym, cfront)
+                        got = await chain_store.get_chain(s, sym, cfront, source=chain_store.COURIER)
                     if got:
                         per_ticker[sym] = compare_front(got[0], stored_chains[cfront])
             except IntrinioAuthError as exc:

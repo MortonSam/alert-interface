@@ -1,7 +1,8 @@
 """Read helper for iv_history. The only way ATM implied volatility reaches a response.
 
-Only courier rows (iv_source = 'courier') are served; the solver's rows (iv_source = 'intrinio_mid') sit beside
-them and reach no response. Rows are dated by their chain, so an unrefreshed chain leaves the window empty and the
+Rows from the ticker's serving chain source are served (services/options_source): the courier's (iv_source = 'courier')
+or, with OPTIONS_PRIMARY_SOURCE=intrinio, the solver's rows from Intrinio's chain (iv_source = 'intrinio_mid'). When the
+ticker's options are hidden (no fresh chain passing the parity check), no IV is served and the reason says why. Rows are dated by their chain, so an unrefreshed chain leaves the window empty and the
 reason names the chain's age in sessions.
 
 get_servable_iv(db, symbol) -> IVState(value, as_of, reason)
@@ -32,20 +33,21 @@ class IVState:
 
 _WINDOW_SQL = sa.text("""
     SELECT date, atm_iv, atm_iv_reason FROM iv_history
-    WHERE symbol = :s AND iv_source = 'courier' AND date >= :cutoff
+    WHERE symbol = :s AND iv_source = :src AND date >= :cutoff
     ORDER BY date DESC
 """)
 _LAST_GOOD_SQL = sa.text("""
     SELECT date, atm_iv FROM iv_history
-    WHERE symbol = :s AND iv_source = 'courier' AND atm_iv IS NOT NULL
+    WHERE symbol = :s AND iv_source = :src AND atm_iv IS NOT NULL
     ORDER BY date DESC LIMIT 1
 """)
 
 
 async def stale_chain_line(db: AsyncSession, symbol: str, today: date) -> str | None:
     """"options chain is N sessions old" when the newest stored chain fails chain_store's freshness rule; None otherwise."""
+    from app.config import settings
     from app.services import chain_store
-    chain_date = await chain_store.get_latest_chain_date(db, symbol)
+    chain_date = await chain_store.get_latest_chain_date(db, symbol, source=settings.options_primary_source)   # the primary's own age
     if not chain_date or chain_store.is_fresh(chain_date, today=today):
         return None
     try:
@@ -65,7 +67,13 @@ def pick_servable(rows: list, today: date) -> tuple[object | None, object | None
 
 async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = None) -> IVState:
     today = today or date.today()
-    rows = (await db.execute(_WINDOW_SQL, {"s": symbol, "cutoff": today - timedelta(days=IV_WINDOW_DAYS)})).all()
+    from app.services.options_source import IV_SOURCE, resolve
+    serving = await resolve(db, symbol)
+    if serving.source is None and serving.reason and "parity" in serving.reason:
+        return IVState(None, None, f"No ATM implied volatility: {serving.reason.removeprefix('options hidden: ')}")
+    from app.config import settings
+    src = IV_SOURCE[serving.source or settings.options_primary_source]     # no chain at all: the primary's rows, under the window rule
+    rows = (await db.execute(_WINDOW_SQL, {"s": symbol, "src": src, "cutoff": today - timedelta(days=IV_WINDOW_DAYS)})).all()
     served, newest = pick_servable(rows, today)
     if served is not None:
         return IVState(float(served.atm_iv), served.date.isoformat(), None)
@@ -76,7 +84,7 @@ async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = No
     if newest is not None:
         reason += f" (the {newest.date.isoformat()} snapshot recorded none"
         reason += f": {newest.atm_iv_reason})" if newest.atm_iv_reason else ")"
-    last_good = (await db.execute(_LAST_GOOD_SQL, {"s": symbol})).first()
+    last_good = (await db.execute(_LAST_GOOD_SQL, {"s": symbol, "src": src})).first()
     if last_good is not None:
         reason += f"; last: {float(last_good.atm_iv) * 100:.1f}% on {last_good.date.isoformat()}"
     return IVState(None, None, reason)

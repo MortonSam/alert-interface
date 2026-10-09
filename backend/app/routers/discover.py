@@ -291,17 +291,27 @@ async def _batch_vol_regime(
         return {}
 
     # Latest IV per symbol — use iv_history with DISTINCT ON
+    # each ticker's IV from its serving chain source (services/options_source); a ticker whose options are hidden has none
+    from app.services.options_source import IV_SOURCE, resolve
+    from app.config import settings
+    serving_src = {}
+    for sym in symbols:
+        sv = await resolve(db, sym)
+        if sv.source:
+            serving_src[sym] = IV_SOURCE[sv.source]
+        elif not (sv.reason and "parity" in sv.reason):
+            serving_src[sym] = IV_SOURCE[settings.options_primary_source]     # no chain at all: the primary's rows, as before
     iv_stmt = sa.text("""
-        SELECT DISTINCT ON (symbol) symbol, atm_iv, date
+        SELECT DISTINCT ON (symbol, iv_source) symbol, atm_iv, date, iv_source
         FROM iv_history
-        WHERE symbol = ANY(:syms) AND iv_source = 'courier'
-        ORDER BY symbol, date DESC
+        WHERE symbol = ANY(:syms) AND iv_source IN ('courier', 'intrinio_mid')
+        ORDER BY symbol, iv_source, date DESC
     """)
-    iv_result = await db.execute(iv_stmt, {"syms": symbols})
+    iv_result = await db.execute(iv_stmt, {"syms": list(serving_src)})
     iv_map: dict[str, float] = {}
     iv_dates: dict[str, date] = {}
     for r in iv_result.all():
-        if r.atm_iv is not None:
+        if r.atm_iv is not None and r.iv_source == serving_src.get(r.symbol):      # only the serving source's row
             iv_map[r.symbol] = float(r.atm_iv)
             iv_dates[r.symbol] = r.date
 

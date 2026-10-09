@@ -180,10 +180,10 @@ async def _courier_chain(sym: str) -> tuple[str, dict] | None:
         finally:
             await conn.close()
     async with ScriptSessionLocal() as s:
-        exps = await chain_store.get_ingested_expirations(s, sym)
+        exps = await chain_store.get_ingested_expirations(s, sym, source=chain_store.COURIER)
         if not exps:
             return None
-        got = await chain_store.get_chain(s, sym, exps[0])
+        got = await chain_store.get_chain(s, sym, exps[0], source=chain_store.COURIER)
         return (exps[0], got[0]) if got else None
 
 

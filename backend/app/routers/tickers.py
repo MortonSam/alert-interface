@@ -18,6 +18,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.event import Event
 from app.models.iv_history import COURIER_SOURCE, IVHistory
+from app.services.options_source import no_options_note
 from app.models.rv_snapshot import RVSnapshot
 from app.models.ticker import Ticker
 from app.models.historical_reaction import HistoricalReaction
@@ -747,7 +748,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             days_expiration_past_earnings=None,
             straddle_price=None, atm_strike=None,
             historical_stats=None, plain_summary=None,
-            data_quality_note="No current options data is available for this ticker",
+            data_quality_note=await no_options_note(db, sym),
             as_of=as_of,
         )
 
@@ -775,7 +776,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
             days_expiration_past_earnings=days_expiration_past_earnings,
             straddle_price=None, atm_strike=None,
             historical_stats=None, plain_summary=None,
-            data_quality_note="No current options data is available for this ticker",
+            data_quality_note=await no_options_note(db, sym),
             as_of=as_of,
         )
 
@@ -863,7 +864,7 @@ async def get_options_chain(
             **_quote_fields(q),
             symbol=sym, expiration="", current_price=current_price,
             calls=[], puts=[], available_expirations=[],
-            as_of=as_of, data_quality_note="No current options data is available for this ticker",
+            as_of=as_of, data_quality_note=await no_options_note(db, sym),
         )
 
     chosen = expiration if (expiration and expiration in available) else available[0]
@@ -873,7 +874,7 @@ async def get_options_chain(
             **_quote_fields(q),
             symbol=sym, expiration=chosen, current_price=current_price,
             calls=[], puts=[], available_expirations=available,
-            as_of=as_of, data_quality_note="No current options data is available for this ticker",
+            as_of=as_of, data_quality_note=await no_options_note(db, sym),
         )
 
     chain, chain_last_trade = chain_result
@@ -965,7 +966,7 @@ async def get_strategy_data(
             symbol=sym, current_price=current_price, expiration=None,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
-            data_quality_note="No current options data is available for this ticker",
+            data_quality_note=await no_options_note(db, sym),
         )
 
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)
@@ -975,7 +976,7 @@ async def get_strategy_data(
             symbol=sym, current_price=current_price, expiration=chosen_exp,
             implied_range_low=None, implied_range_high=None,
             strikes=[], as_of=as_of,
-            data_quality_note="No current options data is available for this ticker",
+            data_quality_note=await no_options_note(db, sym),
         )
 
     chain, chain_last_trade = chain_result
@@ -1085,7 +1086,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     chosen_exp: str | None = post[0] if post else (ingested_exps[-1] if ingested_exps else None)
 
     if not chosen_exp:
-        no_data_note = "No current options data is available for this ticker"
+        no_data_note = await no_options_note(db, sym)
         empty_em = ExpectedMoveRead(
             **_quote_fields(q),
             symbol=sym, current_price=current_price,
@@ -1127,7 +1128,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     # ── Fetch chain from ingested store ───────────────────────────────────────
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
-        no_data_note = "No current options data is available for this ticker"
+        no_data_note = await no_options_note(db, sym)
         empty_em = ExpectedMoveRead(
             **_quote_fields(q),
             symbol=sym, current_price=current_price,
@@ -1315,7 +1316,7 @@ async def get_options_read(
     # Key by chain snapshot date (chain_last_trade) so reads survive UTC midnight.
     # v4: reads generated before the fresh-chain/fresh-quote gate are not reused.
     chain_date = await chain_store.get_latest_chain_date(db, sym)
-    chain_gate = check_chain(chain_date, chain_store.is_fresh(chain_date))
+    chain_gate = check_chain(chain_date, chain_store.is_fresh(chain_date), None if chain_date else await no_options_note(db, sym))
     if not chain_gate.ok:
         return absent(chain_gate.reason, chain_gate.detail)
     cache_key = options_read_cache_key(sym, chain_date)

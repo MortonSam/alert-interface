@@ -94,6 +94,8 @@ STEPS: list[tuple[str, list[str]]] = [
     # Scheduled at 03:05 America/New_York by the script itself (it waits when reached early); shadow only, no reader switches.
     ("Options chains (Intrinio)",      ["python", "-m", "app.scripts.shadow_option_chains"]),
     ("ATM IV (solver)",                ["python", "-m", "app.scripts.solve_atm_iv"]),
+    # every ticker's newest chain from each source against the official close (services/options_source); before the warmed reads
+    ("Chain parity (both sources)",    ["python", "-m", "app.scripts.check_chain_parity"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
@@ -119,6 +121,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Shadow eval": 600,
     "Options chains (Intrinio)": 3 * 3600 + 1800,   # may wait up to MAX_WAIT_SECONDS for 03:05 New York, then ~2 requests per ticker
     "Recompute reactions (Intrinio)": 900,          # the first production night recomputes every row; afterwards only new rows and corrected windows
+    "Chain parity (both sources)": 1200,             # two chains and the close per ticker, read from the database
     "ATM IV (solver)": 1200,                        # batched: ~60 round trips for 510 tickers; the backstop covers a slow database link
     "Warm options reads": 3600,
 }

@@ -30,8 +30,11 @@ class ReadGate:
     quote: QuoteState | None = None
 
 
-def check_chain(chain_date: str | None, chain_is_fresh: bool) -> ReadGate:
-    """Applies to cached reads too: a read about an old chain is not served."""
+def check_chain(chain_date: str | None, chain_is_fresh: bool, hidden_reason: str | None = None) -> ReadGate:
+    """Applies to cached reads too: a read about an old chain is not served. `hidden_reason` is set when the ticker's chains exist
+    but none may be read (services/options_source: stale or failing the parity check)."""
+    if not chain_date and hidden_reason:
+        return ReadGate(False, hidden_reason, "no serving chain")
     if not chain_date:
         return ReadGate(False, "No options data is available for this ticker", "no ingested chain")
     if not chain_is_fresh:

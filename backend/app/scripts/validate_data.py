@@ -1057,6 +1057,34 @@ async def check_rv_snapshot_coverage(session) -> CheckResult:
     return CheckResult("rv_snapshot_coverage", PASS, f"every active ticker has an RV snapshot for {newest.isoformat()}")
 
 
+async def check_chain_parity(session) -> CheckResult:
+    """Every ticker whose newest chain from either source fails the put-call parity check (services/options_source), named with the
+    reason; those chains are hidden from the pages (or the fallback serves). ERROR when more than 5% of the primary source's chains
+    fail (a systemic fault, not a few odd quotes), WARN when any fail."""
+    import json as _json
+    from app.config import settings
+    from app.services.options_source import PARITY_TOLERANCE_PCT
+    rows = (await session.execute(text("SELECT key, value FROM system_metadata WHERE key LIKE 'chain_parity:%'"))).all()
+    if not rows:
+        return CheckResult("chain_parity", WARN, "No chain parity verdicts stored yet")
+    fails: dict[str, list[str]] = {"courier": [], "intrinio": []}
+    checked = {"courier": 0, "intrinio": 0}
+    for key, raw in rows:
+        sym = key.split(":", 1)[1]
+        for src, v in (_json.loads(raw) or {}).items():
+            checked[src] = checked.get(src, 0) + 1
+            if not v.get("ok"):
+                gap = f" ({v['gap_pct']:+.2f}%)" if v.get("gap_pct") is not None else ""
+                fails.setdefault(src, []).append(f"{sym} {v.get('chain_date')}{gap}: {v.get('reason')}")
+    primary = settings.options_primary_source
+    share = len(fails.get(primary, [])) / max(checked.get(primary, 0), 1) * 100
+    line = (f"parity limit {PARITY_TOLERANCE_PCT:g}% of the close; courier {len(fails['courier'])}/{checked['courier']} fail, "
+            f"Intrinio {len(fails['intrinio'])}/{checked['intrinio']} fail; primary {primary}")
+    named = [f"courier {f}" for f in fails["courier"]] + [f"Intrinio {f}" for f in fails["intrinio"]]
+    level = ERROR if share > 5 else (WARN if named else PASS)
+    return CheckResult("chain_parity", level, line + (": " + "; ".join(named[:30]) if named else ""), rows=named)
+
+
 async def check_news_freshness(session) -> CheckResult:
     """Discover news (services/news): the newest stored story, the quote snapshot and the step's last exit. Stale or failed is an
     ERROR while DISCOVER_NEWS_ENABLED is on (the sections hide themselves, but launch depends on it) and a WARN while it is off."""
@@ -3038,6 +3066,7 @@ CHECKS = [
     check_rv_data_error_tickers,
     check_rv_snapshot_coverage,
     check_news_freshness,
+    check_chain_parity,
     check_excluded_ticker_hidden,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,

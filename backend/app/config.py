@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     discover_news_enabled: bool = False
     # Revenue and EPS growth against the same quarter a year earlier (services/growth, growth_figures). Off in production; computed locally only.
     growth_enabled: bool = False
+    # The options chain every page reads (services/options_source): "courier" (the default) or "intrinio", with the courier as the
+    # fallback. A Railway variable; switching is an env change and a redeploy, never a code change.
+    options_primary_source: str = "courier"
 
     # Clerk auth (empty = disabled, admin-token-only mode)
     clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json
