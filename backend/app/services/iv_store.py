@@ -69,6 +69,8 @@ async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = No
     today = today or date.today()
     from app.services.options_source import IV_SOURCE, resolve
     serving = await resolve(db, symbol)
+    if serving.deal_note:
+        return IVState(None, None, serving.deal_note)
     if serving.source is None and serving.hidden_by_check:
         from app.services.options_source import PAUSED_NOTE
         return IVState(None, None, PAUSED_NOTE)

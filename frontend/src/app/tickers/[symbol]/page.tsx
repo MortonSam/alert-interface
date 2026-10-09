@@ -2302,6 +2302,11 @@ export default function TickerPage() {
               Earnings reaction figures are being recomputed under a corrected definition.
             </Callout>
           )}
+          {reactionSummary?.deal_note && (
+            <Callout severity="caution" banner>
+              {reactionSummary.deal_note}
+            </Callout>
+          )}
           {reactionSummary?.exclusion_reason && (
             <Callout severity="caution" banner>
               Earnings and analyst reactions are not shown for this ticker. {reactionSummary.exclusion_reason}.
@@ -2406,7 +2411,7 @@ export default function TickerPage() {
             <p className="text-sm text-muted-foreground mb-6">Could not load options data.</p>
           )}
           {bundleStatus === "empty" && (
-            <p className="text-sm text-muted-foreground mb-6">No options data available for {upperSymbol}.</p>
+            <p className="text-sm text-muted-foreground mb-6">{expectedMove?.data_quality_note ?? `No options data available for ${upperSymbol}.`}</p>
           )}
           {bundleStatus === "done" && expectedMove && (() => {
             const facts = shownOptionFacts;

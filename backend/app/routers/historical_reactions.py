@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, basis_mismatch_dates, excluded_note
+from app.services.pending_deals import deal_for, note_for
 from app.services.price_history_exclusion import exclusion_reason, is_excluded
 from app.thresholds import eps_surprise
 from app.auth import require_admin
@@ -120,7 +121,8 @@ async def get_reaction_summary(
     )
     basis_unclear = await basis_mismatch_dates(db, ticker.id)
     excluded_reason = await exclusion_reason(db, sym)      # rows stay stored; an excluded ticker shows none
-    all_rows = [] if excluded_reason else list(result.scalars().all())
+    deal = await deal_for(db, sym)                          # a pending cash deal: none either, with its note
+    all_rows = [] if excluded_reason or deal else list(result.scalars().all())
     rows = [r for r in all_rows if r.event_date not in basis_unclear]
     basis_excluded = len(all_rows) - len(rows)
 
@@ -134,6 +136,7 @@ async def get_reaction_summary(
             sector_avg_abs_1d=None, sector_peer_count=0,
             basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
             price_history_excluded=excluded_reason is not None, exclusion_reason=excluded_reason,
+            deal_note=note_for(deal) if deal else None,
         )
 
     beats  = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
@@ -370,7 +373,8 @@ async def get_conditional_earnings(
     )
     basis_unclear = await basis_mismatch_dates(db, ticker.id)
     excluded_reason = await exclusion_reason(db, sym)      # rows stay stored; an excluded ticker shows none
-    all_rows = [] if excluded_reason else list(result.scalars().all())
+    deal = await deal_for(db, sym)                          # a pending cash deal: none either, with its note
+    all_rows = [] if excluded_reason or deal else list(result.scalars().all())
     rows = [r for r in all_rows if r.event_date not in basis_unclear]
     basis_excluded = len(all_rows) - len(rows)
     total = len(rows)
@@ -391,6 +395,7 @@ async def get_conditional_earnings(
             meet_count=len(meets), unknown_count=len(unknowns),
             basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
             price_history_excluded=excluded_reason is not None, exclusion_reason=excluded_reason,
+            deal_note=note_for(deal) if deal else None,
             avg_1d_on_beat=None, median_1d_on_beat=None,
             avg_1d_on_miss=None, median_1d_on_miss=None,
             beat_avg_5d=None, beat_continuation_rate_pct=None, beat_5d_sample=0,

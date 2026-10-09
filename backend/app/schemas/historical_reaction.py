@@ -81,6 +81,7 @@ class ReactionSummaryRead(BaseModel):
     basis_excluded_note: str | None = None  # sentence to show next to any rate when basis_excluded > 0
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
+    deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
 
 
 class ConditionalEarningsRead(BaseModel):
@@ -98,6 +99,7 @@ class ConditionalEarningsRead(BaseModel):
     basis_excluded_note: str | None = None
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
+    deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
 
     # ── Conditional 1d moves ─────────────────────────────────────────────────
     avg_1d_on_beat: float | None
@@ -156,6 +158,7 @@ class AnalystDetailRead(BaseModel):
     total_all: int                   # all rows including null moves
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
+    deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
 
 
 class AnalystReactionStatsRead(BaseModel):
@@ -187,3 +190,4 @@ class AnalystReactionStatsRead(BaseModel):
     last_event_date: str | None = None     # ISO date of most recent analyst action
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
+    deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note

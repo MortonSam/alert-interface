@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from sqlalchemy import Date as SADate, func, select
 
 from app.constants import LEDGER_START
+from app.services.pending_deals import not_held
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.credit_shadow_pick import CreditShadowPick
@@ -305,6 +306,7 @@ async def _load_candidates(session, today: date, horizon: date) -> list:
         .join(Event, Event.ticker_id == Ticker.id)
         .where(
             Ticker.is_active.is_(True),
+            not_held(Ticker.symbol),               # a pending cash deal is never picked (services/pending_deals)
             Event.event_type == EventType.EARNINGS,
             Event.event_date > today,
             Event.event_date <= horizon,

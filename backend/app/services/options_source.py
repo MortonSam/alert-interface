@@ -89,6 +89,7 @@ class Serving:
     reason: str | None           # why hidden, or why the fallback is in use: for validate and the logs, never for visitors
     provisional: bool = False    # checked against the courier's post-close price, not yet the official close
     hidden_by_check: bool = False  # hidden because a fresh chain failed the check (not merely missing or stale)
+    deal_note: str | None = None   # hidden because the ticker is under a pending cash deal (services/pending_deals): the visitor note
 
 
 def choose(primary: str, verdicts: dict[str, dict | None]) -> Serving:
@@ -187,6 +188,12 @@ async def resolve(db, sym: str, primary: str | None = None) -> Serving:
     hit = _RESOLVED.get((sym, primary))
     if hit and _time.monotonic() - hit[0] < RESOLVE_TTL_SECONDS:
         return hit[1]
+    from app.services.pending_deals import deal_for, note_for
+    deal = await deal_for(db, sym)
+    if deal is not None:                            # a pending cash deal: no chain is served, whatever the sources hold
+        serving = Serving(None, None, f"pending deal: {deal.acquirer} at {deal.price}", deal_note=note_for(deal))
+        _RESOLVED[(sym, primary)] = (_time.monotonic(), serving)
+        return serving
     verdicts: dict[str, dict | None] = {}
     for src in order(primary):                      # lazily: a source that serves ends the search (the fallback is not read)
         verdicts[src] = await compute_verdict(db, sym, src)
@@ -222,8 +229,11 @@ PAUSED_NOTE = ("Options figures for this stock are paused until the next update.
 
 
 async def no_options_note(db, sym: str) -> str:
-    """The visitor-facing note when a page has no chain to read: PAUSED_NOTE when a check hid it, else the general one."""
+    """The visitor-facing note when a page has no chain to read: the deal note for a pending cash deal, PAUSED_NOTE when a
+    check hid it, else the general one."""
     sv = await resolve(db, sym)
+    if sv.deal_note:
+        return sv.deal_note
     if sv.source is None and sv.hidden_by_check:
         return PAUSED_NOTE
     return NO_OPTIONS_NOTE

@@ -152,6 +152,7 @@ export interface ReactionSummary {
   basis_excluded_note?: string | null; // sentence to show next to any rate
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
+  deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
 }
 
 export interface SectorPeerItem {
@@ -214,6 +215,7 @@ export interface ConditionalEarningsRead {
   last_event_date: string | null;
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
+  deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
 }
 
 export interface AnalystReactionStatsRead {
@@ -238,6 +240,7 @@ export interface AnalystReactionStatsRead {
   last_event_date: string | null;
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
+  deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
 }
 
 export interface WatchlistTicker {
@@ -393,6 +396,7 @@ export interface TickerChart {
   last_bar_date?: string | null;
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
+  deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
 }
 
 export interface BatchQuote {

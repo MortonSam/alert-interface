@@ -1397,6 +1397,58 @@ async def check_chain_coverage(session) -> CheckResult:
     )
 
 
+def deal_band_rows(deals: dict, closes: dict, band_pct: float) -> list[str]:
+    """Pure: "SYM  close $x on d is y% above/below the $p deal price" for each held stock outside the band, or with no close."""
+    rows = []
+    for sym, deal in sorted(deals.items()):
+        got = closes.get(sym)
+        if got is None:
+            rows.append(f"{sym}  no stored close to compare with the ${deal.price:,.2f} deal price")
+            continue
+        close, d = got
+        off = (close / deal.price - 1) * 100
+        if abs(off) > band_pct:
+            rows.append(f"{sym}  close ${close:,.2f} on {d} is {abs(off):.1f}% {'above' if off > 0 else 'below'} the ${deal.price:,.2f} deal price")
+    return rows
+
+
+async def check_pending_deal_price_band(session) -> CheckResult:
+    """WARN when a stock held for a pending cash deal closes more than PRICE_BAND_PCT from the deal price, either way (the deal may
+    be in trouble, or the row is wrong), or when a held ticker is no longer active (the deal closed: end the row)."""
+    from app.services.pending_deals import PRICE_BAND_PCT, deals_for
+    deals = await deals_for(session)
+    if not deals:
+        return CheckResult("pending_deal_price_band", PASS, "No pending deals held")
+    closes = {r[0]: (float(r[1]), r[2]) for r in (await session.execute(text(
+        "SELECT DISTINCT ON (symbol) symbol, close, date FROM price_bars_shadow WHERE symbol = ANY(:s) ORDER BY symbol, date DESC"),
+        {"s": list(deals)})).all()}
+    inactive = set((await session.execute(text("SELECT symbol FROM tickers WHERE symbol = ANY(:s) AND NOT is_active"), {"s": list(deals)})).scalars().all())
+    rows = deal_band_rows(deals, closes, PRICE_BAND_PCT) + [f"{sym}  is no longer active: the deal may have closed; end its row" for sym in sorted(inactive)]
+    if rows:
+        return CheckResult("pending_deal_price_band", WARN, f"{len(rows)} pending-deal problem(s) (band {PRICE_BAND_PCT:g}% of the deal price)", rows)
+    return CheckResult("pending_deal_price_band", PASS, f"{len(deals)} held stock(s) within {PRICE_BAND_PCT:g}% of their deal price")
+
+
+async def check_pinned_without_deal(session) -> CheckResult:
+    """WARN for each active ticker the deal detector (scripts/list_pinned_tickers) flags that has no pending-deal row: a person checks it."""
+    import asyncio as _asyncio
+    from app.scripts import list_pinned_tickers as P
+    from app.services import price_bars
+    from app.services.pending_deals import deals_for
+    held = set(await deals_for(session))
+    syms = [r for r in (await session.execute(text("SELECT symbol FROM tickers WHERE is_active ORDER BY symbol"))).scalars().all() if r not in held]
+    bars = await _asyncio.to_thread(price_bars.bulk_closes_sync, syms, date.today() - timedelta(days=400))
+    rows = []
+    for sym in syms:
+        df = bars.get(sym)
+        a = P.assess(df["Close"].astype(float).to_numpy()) if df is not None else None
+        if a and a["collapsed"] and a["pinned"]:
+            rows.append(f"{sym}  20-day volatility {a['rv20']:.1%} (prior-year median {a['rv_median_1y']:.1%}), 10-day range {a['pin_range_pct']:.2f}%: check for a pending deal")
+    if rows:
+        return CheckResult("pinned_without_deal", WARN, f"{len(rows)} ticker(s) behave like a pending cash deal with no deal row", rows)
+    return CheckResult("pinned_without_deal", PASS, "No unheld ticker behaves like a pending cash deal")
+
+
 CHAIN_SOURCE_LABELS = {"courier": "courier", "intrinio": "Intrinio"}
 CHAIN_COVERAGE_MIN_PCT = 90      # below this the options layer is failing for too many tickers to call it a quirk: ERROR, and an alert
 
@@ -3092,6 +3144,8 @@ CHECKS = [
     check_iv_history_out_of_band,
     # Options chains
     check_chain_coverage,
+    check_pending_deal_price_band,
+    check_pinned_without_deal,
     # NaN guard
     check_nan_numeric_values,
     # IV history price drift

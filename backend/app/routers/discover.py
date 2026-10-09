@@ -29,6 +29,7 @@ from app.models.event import Event
 from app.models.eps_basis_check import EpsBasisCheck
 from app.services.basis_exclusion import excluded_note
 from app.services.price_history_exclusion import EXCLUDED_SYMBOLS_SQL, EXCLUSION_REASON, excluded_symbols, not_excluded
+from app.services.pending_deals import not_held
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
 
@@ -817,6 +818,7 @@ async def just_reported(
             HistoricalReaction.pct_change_1d.isnot(None),
             Ticker.is_active.is_(True),
             not_excluded(Ticker.symbol),
+            not_held(Ticker.symbol),              # a pending cash deal pauses earnings figures (services/pending_deals)
         )
         .order_by(HistoricalReaction.event_date.desc(), Ticker.symbol)
     )
@@ -970,6 +972,9 @@ async def suggestions(
     # ── Signal 3: RV rank (elevated vol vs own history) ─────────────────────
     from app.services.rv_store import get_latest_rv_bulk
 
+    from app.services.pending_deals import held_symbols
+    for sym in await held_symbols(db):                 # a pending cash deal is never suggested (services/pending_deals)
+        tickers.pop(sym, None)
     all_syms = list(tickers.keys())
     rv_rows = await get_latest_rv_bulk(db, all_syms) if all_syms else {}
     for sym, t in tickers.items():
@@ -1041,6 +1046,7 @@ async def unusually_active(
         FROM rv_snapshots r
         JOIN tickers t ON t.symbol = r.symbol AND t.is_active = true
         WHERE r.as_of_date = :latest_date
+          AND r.symbol NOT IN (SELECT symbol FROM pending_deals WHERE status = 'active')   -- a pending cash deal leaves the tape
           AND r.status = 'ok'
           AND r.rv_rank >= :min_rank
         ORDER BY r.rv_rank DESC

@@ -1019,6 +1019,10 @@ async def draft_thesis(
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftRead:
     """AI-assisted thesis parameter drafting."""
+    from app.services.pending_deals import deal_for, note_for
+    deal = await deal_for(db, payload.symbol.upper())
+    if deal:                                            # a pending cash deal: no draft, and no draft slot spent
+        raise HTTPException(status_code=409, detail=note_for(deal))
     client_ip = get_client_ip(request)
     await check_draft_limit(db, user_id, client_ip)
     data = await _gather_draft_data(payload.symbol.upper(), db)
@@ -1380,6 +1384,13 @@ async def compute_alert_pick(
     Raises on data-fetch errors (HTTPException from _gather_draft_data).
     """
     generated_at = datetime.now(tz=timezone.utc).isoformat()
+
+    # ── A pending cash deal: no pick, the note says why (services/pending_deals) ──
+    from app.services.pending_deals import deal_for, note_for
+    deal = await deal_for(db, sym)
+    if deal:
+        return {"outcome": "skipped", "leans": None, "pick_id": None, "note": note_for(deal), "generated_at": generated_at,
+                "existing_pick": False, "draft": None, "receipt": None}
 
     # ── Duplicate refusal: one open pick per symbol per source class ────────
     # Visitor picks are isolated: they don't block Ivy's picks and vice-versa.

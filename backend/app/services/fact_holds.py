@@ -80,6 +80,10 @@ async def holds_for(db, symbol: str) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for fact, check in rows:
         out.setdefault(fact, []).append(check)
+    from app.services.pending_deals import HELD_FACTS, HOLD_CHECK, deal_for
+    if await deal_for(db, symbol):                       # a pending cash deal holds the move facts (services/pending_deals)
+        for fact in HELD_FACTS:
+            out.setdefault(fact, []).append(HOLD_CHECK)
     return out
 
 
@@ -91,4 +95,7 @@ async def holds_for_symbols(db, symbols: list[str]) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for sym, fact in rows:
         out.setdefault(sym, set()).add(fact)
+    from app.services.pending_deals import HELD_FACTS, deals_for
+    for sym in await deals_for(db, list(symbols)):
+        out.setdefault(sym, set()).update(HELD_FACTS)
     return out

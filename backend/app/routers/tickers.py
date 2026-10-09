@@ -1949,6 +1949,10 @@ async def get_put_call(
 ) -> PutCallRead:
     """Return the latest stored put/call ratio for a symbol (within 3 days)."""
     sym = symbol.upper()
+    from app.services.pending_deals import deal_for, note_for
+    deal = await deal_for(db, sym)
+    if deal:                                            # a pending cash deal pauses options figures
+        return PutCallRead(symbol=sym, ratio=None, reason=note_for(deal))
     cutoff = date.today() - timedelta(days=3)
     row = (await db.execute(
         select(PutCallSnapshot)
