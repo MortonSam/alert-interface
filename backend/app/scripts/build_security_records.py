@@ -47,11 +47,18 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
     """Write a symbol's rows. Returns (inserted, updated, figi_changed)."""
     inserted = updated = 0
     changed = False
-    existing = {r.valid_from: r for r in (await session.execute(
-        select(SecurityRecord).where(SecurityRecord.symbol == rows[0].symbol))).scalars().all()}
+    stored = list((await session.execute(select(SecurityRecord).where(SecurityRecord.symbol == rows[0].symbol))).scalars().all())
+    existing = {r.valid_from: r for r in stored}
     now = datetime.now(timezone.utc)
     for r in rows:
         row = existing.get(r.valid_from)
+        if row is None and r.role == CURRENT and r.intrinio_security_id:
+            # the same Intrinio security under a moved first-price date is the same record: its start moves, no second current row
+            # (BKR, 2026-10-09: Intrinio's first_stock_price for sec_gN27dE went from 1987-04-07 to 2013-10-14)
+            same = next((x for x in stored if x.role == CURRENT and x.intrinio_security_id == r.intrinio_security_id), None)
+            if same is not None:
+                same.valid_from = r.valid_from
+                row = same
         if row is None:
             row = SecurityRecord(symbol=r.symbol, valid_from=r.valid_from)
             session.add(row)
