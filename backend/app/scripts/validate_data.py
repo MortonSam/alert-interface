@@ -1078,7 +1078,7 @@ async def check_chain_parity(session) -> CheckResult:
                 fails.setdefault(src, []).append(f"{sym} {v.get('chain_date')}{gap}: {v.get('reason')}")
     primary = settings.options_primary_source
     share = len(fails.get(primary, [])) / max(checked.get(primary, 0), 1) * 100
-    line = (f"parity limit {PARITY_TOLERANCE_PCT:g}% of the close; courier {len(fails['courier'])}/{checked['courier']} fail, "
+    line = (f"put-call band limit {PARITY_TOLERANCE_PCT:g}% of the close; courier {len(fails['courier'])}/{checked['courier']} fail, "
             f"Intrinio {len(fails['intrinio'])}/{checked['intrinio']} fail; primary {primary}")
     named = [f"courier {f}" for f in fails["courier"]] + [f"Intrinio {f}" for f in fails["intrinio"]]
     level = ERROR if share > 5 else (WARN if named else PASS)

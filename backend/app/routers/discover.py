@@ -299,7 +299,7 @@ async def _batch_vol_regime(
         sv = await resolve(db, sym)
         if sv.source:
             serving_src[sym] = IV_SOURCE[sv.source]
-        elif not (sv.reason and "parity" in sv.reason):
+        elif not sv.hidden_by_check:
             serving_src[sym] = IV_SOURCE[settings.options_primary_source]     # no chain at all: the primary's rows, as before
     iv_stmt = sa.text("""
         SELECT DISTINCT ON (symbol, iv_source) symbol, atm_iv, date, iv_source

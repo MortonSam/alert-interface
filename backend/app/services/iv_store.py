@@ -69,8 +69,9 @@ async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = No
     today = today or date.today()
     from app.services.options_source import IV_SOURCE, resolve
     serving = await resolve(db, symbol)
-    if serving.source is None and serving.reason and "parity" in serving.reason:
-        return IVState(None, None, f"No ATM implied volatility: {serving.reason.removeprefix('options hidden: ')}")
+    if serving.source is None and serving.hidden_by_check:
+        from app.services.options_source import PAUSED_NOTE
+        return IVState(None, None, PAUSED_NOTE)
     from app.config import settings
     src = IV_SOURCE[serving.source or settings.options_primary_source]     # no chain at all: the primary's rows, under the window rule
     rows = (await db.execute(_WINDOW_SQL, {"s": symbol, "src": src, "cutoff": today - timedelta(days=IV_WINDOW_DAYS)})).all()
