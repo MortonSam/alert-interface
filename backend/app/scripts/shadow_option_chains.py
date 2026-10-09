@@ -2,8 +2,10 @@
 
 Scheduled at 03:05 America/New_York (services/chain_shadow): when the pipeline reaches this step earlier it waits,
 and the step outcome names the clock it ran on. For every active ticker with a current security record, one
-request lists Intrinio's expirations after the EOD date; the front expiry and every expiration the courier holds
-(up to MAX_EXPIRATIONS) are fetched and stored under intrinio_chain:{SYM}:{EXP} with chain_last_trade = the EOD
+request lists Intrinio's expirations after the EOD date; the front expiry, and for a ticker reporting within
+EARNINGS_WINDOW_DAYS the nearest expiry that captures each report (after the report day, or on it for a before-open report) and the last
+one that does not, are always fetched,
+then the expirations the courier holds up to MAX_EXPIRATIONS in all (services/chain_shadow.wanted_expirations). They are fetched and stored under intrinio_chain:{SYM}:{EXP} with chain_last_trade = the EOD
 date, the quote timestamps kept, and the spot from the stored shadow bar of that date. Expired Intrinio chains
 are removed. As each ticker's front-expiry chain is stored it is compared with the courier's chain for the same session
 (services/chain_shadow.compare_front) and the night's figures go to chain_shadow:{date} and the outcome, which validate's
@@ -22,7 +24,7 @@ from app.services.redact import redact
 import asyncio
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select, text
 
@@ -30,8 +32,9 @@ from app.database import ScriptSessionLocal
 from app.models.security_record import SecurityRecord
 from app.models.ticker import Ticker
 from app.services import chain_store
-from app.services.chain_shadow import (MAX_WAIT_SECONDS, PER_TICKER_COLUMNS, chain_dates, clock_fields, compare_front, expected_session,
-                                       front_expiration, local_now, night_totals, to_stored_chain, wait_seconds)
+from app.services.chain_shadow import (EARNINGS_WINDOW_DAYS, MAX_WAIT_SECONDS, PER_TICKER_COLUMNS, chain_dates, clock_fields, compare_front,
+                                       expected_session, front_expiration, local_now, night_totals, to_stored_chain, wait_seconds,
+                                       wanted_expirations)
 from app.services.system_metadata_service import set_value
 from app.services.intrinio_client import IntrinioAuthError, IntrinioClient
 from app.services.security_records import CURRENT
@@ -80,6 +83,19 @@ async def _courier_index() -> dict[str, dict[str, str]]:
     return out
 
 
+async def _earnings_dates(on: date) -> dict[str, list[tuple[str, str | None]]]:
+    """{symbol: [(earnings date, report timing)]} for active tickers reporting from the session through EARNINGS_WINDOW_DAYS
+    after it: one query."""
+    async with ScriptSessionLocal() as s:
+        rows = (await s.execute(text("""SELECT DISTINCT t.symbol, e.event_date, e.report_timing FROM events e JOIN tickers t ON t.id = e.ticker_id
+            WHERE t.is_active AND e.event_type = 'earnings' AND e.event_date >= :a AND e.event_date <= :b"""),
+            {"a": on, "b": on + timedelta(days=EARNINGS_WINDOW_DAYS)})).all()
+    out: dict[str, list[tuple[str, str | None]]] = {}
+    for sym, d, timing in rows:
+        out.setdefault(sym, []).append((d.isoformat(), timing))
+    return out
+
+
 async def record_night(chain_date: str, per_ticker: dict[str, dict], missing_intrinio: list[str]) -> dict:
     """Store the night (chain_shadow:{date}: totals and per-ticker figures) and put the compact figures in the step outcome."""
     totals = night_totals(chain_date, per_ticker, missing_intrinio)
@@ -110,6 +126,7 @@ async def run(argv: list[str]) -> int:
     targets = await _targets(only)
     courier = await _courier_index()                                     # one query: every courier chain's expiry and date
     spots = await _spots_on([t["symbol"] for t in targets], expected)   # one query: every stored close for the session
+    earnings = await _earnings_dates(expected)                           # one query: who reports in the window, and when
     client = IntrinioClient()
     chains_written = 0
     tickers_with_chains: list[str] = []
@@ -127,12 +144,7 @@ async def run(argv: list[str]) -> int:
                 if not exps:
                     no_options.append(sym)
                     continue
-                courier_exps = sorted(courier.get(sym, {}))
-                front = front_expiration(exps, expected.isoformat())
-                wanted = [e for e in sorted(set(courier_exps) & set(exps)) if e > expected.isoformat()]
-                if front and front not in wanted:
-                    wanted = [front] + wanted
-                wanted = wanted[:MAX_EXPIRATIONS]
+                wanted = wanted_expirations(exps, expected.isoformat(), sorted(courier.get(sym, {})), earnings.get(sym, []), MAX_EXPIRATIONS)
                 wrote = 0
                 stored_chains: dict[str, dict] = {}
                 for exp in wanted:

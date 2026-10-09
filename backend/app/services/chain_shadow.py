@@ -117,6 +117,45 @@ def front_expiration(expirations: list[str], chain_date: str) -> str | None:
     return later[0] if later else None
 
 
+EARNINGS_WINDOW_DAYS = 45      # a ticker reporting within this many days of the chain date gets its earnings expiries stored
+
+
+BEFORE_OPEN = "bmo"            # events.report_timing for a report before the open; anything else (amc, unknown) is after the day's close
+
+
+def counts_for_report(expiry: str, report_date: str, timing: str | None) -> bool:
+    """Pure: an expiry captures the report's move when it comes after the report day, or on the report day itself for a
+    before-open report. After-close and unknown timing need a later expiry."""
+    return expiry > report_date or (expiry == report_date and (timing or "").lower() == BEFORE_OPEN)
+
+
+def earnings_expirations(expirations: list[str], chain_date: str, earnings: list[tuple[str, str | None]]) -> list[str]:
+    """Pure: for each (earnings date, report timing), the nearest listed expiry that captures the report (the expected
+    move's) and the last one that does not (the pre-earnings leg that isolates the earnings move), both after the chain date."""
+    later = sorted(e for e in expirations if e > chain_date)
+    out: list[str] = []
+    for ed, timing in sorted(set(earnings)):
+        post = next((e for e in later if counts_for_report(e, ed, timing)), None)
+        pre = [e for e in later if not counts_for_report(e, ed, timing)]
+        for e in ([pre[-1]] if pre else []) + ([post] if post else []):
+            if e not in out:
+                out.append(e)
+    return out
+
+
+def wanted_expirations(expirations: list[str], chain_date: str, courier_exps: list[str], earnings: list[tuple[str, str | None]], cap: int) -> list[str]:
+    """Pure: the expiries the Intrinio step stores. The front expiry and the earnings expiries always; then the courier's
+    expiries Intrinio also lists, up to `cap` chains in all."""
+    front = front_expiration(expirations, chain_date)
+    keep: list[str] = []
+    for e in ([front] if front else []) + earnings_expirations(expirations, chain_date, earnings):
+        if e not in keep:
+            keep.append(e)
+    listed = set(expirations)
+    rest = [e for e in sorted(set(courier_exps)) if e in listed and e > chain_date and e not in keep]
+    return sorted(keep + rest[:max(0, cap - len(keep))])
+
+
 def _mids(side: list[dict]) -> dict[float, float]:
     out = {}
     for c in side:
