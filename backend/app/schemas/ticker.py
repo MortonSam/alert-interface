@@ -85,6 +85,7 @@ class TickerQuoteRead(BaseModel):
     open: float | None          # day open
     prev_close: float | None
     timestamp: int | None       # Unix UTC
+    quote_basis: str = "last_trade"      # last_trade | close (the stored close served when Finnhub had no answer in time)
     sparkline: list[SparklinePoint]  # daily closes, chronological; [] unless history_state is ok
     quote_state: str = "ok"              # ok | stale; price fields are null when stale
     quote_reason: str | None = None
@@ -98,7 +99,8 @@ class BatchQuoteRead(BaseModel):
     price: float | None
     change: float | None
     change_pct: float | None
-    timestamp: int | None = None  # Unix UTC (exchange last-trade time)
+    timestamp: int | None = None  # Unix UTC (exchange last-trade time, or the session's close when quote_basis is close)
+    quote_basis: str = "last_trade"   # last_trade | close
     quote_state: str = "ok"           # ok | stale | no_data; price fields are null unless ok
     quote_reason: str | None = None   # plain language, shown in place of the price
 
@@ -109,7 +111,8 @@ class BatchEnrichRead(BaseModel):
     price: float | None = None
     change: float | None = None
     change_pct: float | None = None
-    quote_ts: int | None = None       # Unix UTC (exchange last-trade time)
+    quote_ts: int | None = None       # Unix UTC (exchange last-trade time, or the session's close when quote_basis is close)
+    quote_basis: str = "last_trade"   # last_trade | close
     expected_move_pct: float | None = None
     earnings_date: str | None = None
     rv_rank: float | None = None

@@ -401,6 +401,7 @@ export interface BatchQuote {
   change: number | null;
   change_pct: number | null;
   timestamp: number | null;
+  quote_basis?: "last_trade" | "close";
   quote_state?: "ok" | "stale" | "no_data";   // price fields are null unless ok
   quote_reason?: string | null;
 }
@@ -427,6 +428,7 @@ export interface TickerQuote {
   open: number | null;
   prev_close: number | null;
   timestamp: number | null;
+  quote_basis?: "last_trade" | "close";
   sparkline: SparklinePoint[];
   quote_state?: "ok" | "stale";
   quote_reason?: string | null;
@@ -696,6 +698,7 @@ export interface BatchEnrichItem {
   change: number | null;
   change_pct: number | null;
   quote_ts: number | null;
+  quote_basis?: "last_trade" | "close";
   expected_move_pct: number | null;
   earnings_date: string | null;
   rv_rank: number | null;
@@ -912,6 +915,7 @@ export interface AlertPickLedgerItem {
   entry_price: number;
   current_price: number | null;
   quote_ts: number | null;
+  quote_basis?: "last_trade" | "close";
   unrealized_move_pct: number | null;
   cost_to_enter: number | null;
   max_loss: number | null;

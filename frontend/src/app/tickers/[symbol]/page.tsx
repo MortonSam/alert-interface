@@ -6,7 +6,7 @@ import { absentReadLine, displayedOptionFacts, ivUnavailableReason, priceDriftNo
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { datasetAgeLine, fmtQuoteDateTime, impliedSpanPhrase, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtQuoteDateTime, impliedSpanPhrase, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
@@ -1965,13 +1965,13 @@ export default function TickerPage() {
                 <span className="text-xs text-muted-foreground ml-auto">
                   H&nbsp;{quote.high.toFixed(2)} · L&nbsp;{quote.low.toFixed(2)}
                   {quote.timestamp != null && (
-                    <span className="text-muted-foreground/50 ml-2">as of {fmtQuoteDateTime(quote.timestamp)}</span>
+                    <span className="text-muted-foreground/50 ml-2">as of {quoteAsOf(quote.timestamp, quote.quote_basis)}</span>
                   )}
                 </span>
               )}
               {(quote.high == null || quote.low == null) && quote.timestamp != null && (
                 <span className="text-xs text-muted-foreground/50 ml-auto">
-                  as of {fmtQuoteDateTime(quote.timestamp)}
+                  as of {quoteAsOf(quote.timestamp, quote.quote_basis)}
                 </span>
               )}
             </div>

@@ -1143,13 +1143,13 @@ async def latest_pick(
         # and dated by that trade
         try:
             from app.services import quote_cache
-            from app.services.finnhub_client import FinnhubClient
+            from app.services.finnhub_client import FinnhubClient, VISITOR
             from app.services.price_freshness import assess_quote
             cached = quote_cache.get(pick.symbol)
             if cached is not None:
                 cp, ts = cached.get("price"), cached.get("timestamp")
             else:
-                finnhub = FinnhubClient()
+                finnhub = FinnhubClient(priority=VISITOR)
                 try:
                     q = await finnhub.get_quote(pick.symbol)
                     cp = float(q.get("c") or 0) or None
@@ -1157,7 +1157,7 @@ async def latest_pick(
                     if cp:
                         change = float(q.get("d")) if q.get("d") is not None else None
                         change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-                        quote_cache.set(pick.symbol, {"price": cp, "change": change, "change_pct": change_pct, "timestamp": ts})
+                        quote_cache.set(pick.symbol, {"price": cp, "change": change, "change_pct": change_pct, "timestamp": ts, "basis": q.get("basis", "last_trade")})
                 finally:
                     await finnhub.close()
             state = assess_quote(cp, ts)

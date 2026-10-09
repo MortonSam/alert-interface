@@ -15,9 +15,14 @@ Implemented
 
 Rate limiting
 -------------
-  One module-level pace for every client in the process: at most REQUESTS_PER_MINUTE (55) requests in any rolling
-  minute. A 429 is retried with backoff that honours Retry-After (RETRY_DELAYS), counted in STATS for step outcomes,
-  and raised as FinnhubRateLimited only after the retries. Every error message passes through services.redact.
+  One budget for every process (services/finnhub_limiter, kept in Postgres): a client is a visitor's (the routers) or a
+  job's (the default), and jobs always leave part of each minute to visitors. When the database cannot be used, the
+  in-process window (REQUESTS_PER_MINUTE) paces alone. A 429 is retried with backoff that honours Retry-After
+  (RETRY_DELAYS), counted in STATS for step outcomes, and raised as FinnhubRateLimited only after the retries. Every
+  error message passes through services.redact.
+
+  A visitor's quote never waits: one with no answer within QUOTE_WAIT_SECONDS (or none at all) is the last stored close
+  from the Intrinio bars (services/quote_fallback), dated by that session's close and marked basis "close".
 
 Finnhub field key reference
 ---------------------------
@@ -34,6 +39,8 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.services import finnhub_limiter
+from app.services.finnhub_limiter import BACKGROUND, VISITOR
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 
@@ -42,7 +49,8 @@ FINNHUB_BASE = "https://finnhub.io/api/v1"
 # at most REQUESTS_PER_MINUTE requests in any rolling minute, a 429 retried with backoff that honours Retry-After, and the
 # counts kept for step outcomes.
 
-REQUESTS_PER_MINUTE = 55
+REQUESTS_PER_MINUTE = 55                     # the in-process window, used only when the shared budget cannot be read
+QUOTE_WAIT_SECONDS = 2.0                     # a visitor's quote waits no longer than this before the stored close serves
 RETRY_DELAYS = (2.0, 5.0, 15.0, 30.0)        # after a 429 without a usable Retry-After; a Retry-After larger than these wins
 _rate_lock = asyncio.Lock()
 _recent_calls: list[float] = []              # monotonic times of the calls in the last minute
@@ -58,8 +66,11 @@ class FinnhubRateLimited(RuntimeError):
     """A request still 429 after every retry."""
 
 
-async def _pace() -> None:
-    """Block until a request can be made without exceeding REQUESTS_PER_MINUTE in the trailing minute."""
+async def _pace(priority: str = BACKGROUND) -> None:
+    """Block until the shared budget has a slot for this priority; the in-process window when it cannot be read."""
+    if await finnhub_limiter.acquire(priority):
+        STATS["requests"] += 1
+        return
     async with _rate_lock:
         loop = asyncio.get_event_loop()
         while True:
@@ -82,7 +93,8 @@ def retry_delay(retry_after: str | None, attempt: int) -> float:
 
 
 class FinnhubClient:
-    def __init__(self) -> None:
+    def __init__(self, priority: str = BACKGROUND) -> None:
+        self.priority = priority
         self._client = httpx.AsyncClient(
             base_url=FINNHUB_BASE,
             # token injected on every request via default params
@@ -99,7 +111,7 @@ class FinnhubClient:
         """A paced request; a 429 is retried with backoff honouring Retry-After; every error message is redacted."""
         attempt = 0
         while True:
-            await _pace()
+            await _pace(self.priority)
             try:
                 resp = await self._client.request(method, path, params=params)
             except httpx.HTTPError as exc:
@@ -136,7 +148,20 @@ class FinnhubClient:
                 "t":  1716912000 # Unix timestamp
             }
         """
-        return await self._request("GET", "/quote", params={"symbol": symbol})
+        if self.priority != VISITOR:
+            return await self._request("GET", "/quote", params={"symbol": symbol})
+        from app.services.quote_fallback import stored_close_quote
+        try:
+            q = await asyncio.wait_for(self._request("GET", "/quote", params={"symbol": symbol}), QUOTE_WAIT_SECONDS)
+            if q.get("c") and q.get("t"):
+                return {**q, "basis": "last_trade"}
+            reason = "no price in the answer"
+        except asyncio.TimeoutError:
+            reason = f"no answer within {QUOTE_WAIT_SECONDS:g}s"
+        except Exception as exc:
+            reason = redact(exc)[:120]
+        print(f"[quote] {symbol}: serving the stored close ({reason})", flush=True)
+        return await stored_close_quote(symbol)
 
     # ── Candles ────────────────────────────────────────────────────────────────
 

@@ -33,6 +33,18 @@ export function fmtQuoteDateTime(unix: number | null | undefined): string | null
   return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: MARKET_TZ }) + " ET";
 }
 
+/** What a quote's time marks, by the API's quote_basis (backend services/quote_fallback.BASIS_LABELS, mirrored by test):
+ * a last trade from the quote source, or the stored session close served when the source had no answer in time. */
+export const QUOTE_BASIS_LABELS: Record<"last_trade" | "close", string> = { last_trade: "last trade", close: "close" };
+export type QuoteBasis = keyof typeof QUOTE_BASIS_LABELS;
+
+/** A quote's as-of with its date and time, naming a close as a close: "Oct 8, 4:00 PM ET close". */
+export function quoteAsOf(unix: number | null | undefined, basis?: QuoteBasis | string | null): string | null {
+  const when = fmtQuoteDateTime(unix);
+  if (!when) return null;
+  return basis === "close" ? `${when} ${QUOTE_BASIS_LABELS.close}` : when;
+}
+
 /** An ISO timestamp the same way. */
 export function fmtIsoDateTime(iso: string | null | undefined): string | null {
   if (!iso) return null;

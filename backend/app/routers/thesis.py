@@ -52,7 +52,7 @@ from app.services import chain_store, quote_cache
 from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
 from app.services.corporate_actions import load_action_dates
 from app.services.price_history_exclusion import EXCLUSION_REASON, is_excluded
-from app.services.finnhub_client import FinnhubClient
+from app.services.finnhub_client import FinnhubClient, VISITOR
 from app.services.price_freshness import assess_quote
 from app.services.rv_store import get_latest_rv
 from app.services.recommendations import analyst_lean as lean_from_recommendations
@@ -205,7 +205,7 @@ async def _compute_option_mark(
                     current_price = cached["price"]
                     price_as_of = _quote_time(cached.get("timestamp"))
                 else:
-                    finnhub = FinnhubClient()
+                    finnhub = FinnhubClient(priority=VISITOR)
                     try:
                         quote = await finnhub.get_quote(sym)
                         p = quote.get("c")
@@ -215,7 +215,7 @@ async def _compute_option_mark(
                             change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
                             price_as_of = _quote_time(quote.get("t"))
                             quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
-                            "timestamp": int(quote["t"]) if quote.get("t") else None})
+                            "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
                     except Exception:
                         pass
                     finally:
@@ -242,7 +242,7 @@ async def _compute_option_mark(
                 current_price = cached["price"]
                 price_as_of = _quote_time(cached.get("timestamp"))
             else:
-                finnhub = FinnhubClient()
+                finnhub = FinnhubClient(priority=VISITOR)
                 try:
                     quote = await finnhub.get_quote(sym)
                     p = quote.get("c")
@@ -252,7 +252,7 @@ async def _compute_option_mark(
                         change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
                         price_as_of = _quote_time(quote.get("t"))
                         quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
-                        "timestamp": int(quote["t"]) if quote.get("t") else None})
+                        "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
                 except Exception:
                     pass
                 finally:
@@ -334,7 +334,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
 
     # ── 1. Parallel market data fetch ─────────────────────────────────────────
     action_dates = (await load_action_dates(db, [sym])).get(sym, set())
-    finnhub = FinnhubClient()
+    finnhub = FinnhubClient(priority=VISITOR)
     try:
         quote, rv_raw = await asyncio.gather(
             finnhub.get_quote(sym),
@@ -1882,6 +1882,7 @@ async def list_alert_picks(
     open_symbols = list({r.symbol for r in rows if r.status == "open"})
     price_map: dict[str, float | None] = {}
     ts_map: dict[str, int | None] = {}
+    basis_map: dict[str, str] = {}
     if open_symbols:
         to_fetch: list[str] = []
         for sym in open_symbols:
@@ -1889,11 +1890,12 @@ async def list_alert_picks(
             if cached is not None:
                 price_map[sym] = cached.get("price")
                 ts_map[sym] = cached.get("timestamp")
+                basis_map[sym] = cached.get("basis", "last_trade")
             else:
                 to_fetch.append(sym)
 
         if to_fetch:
-            finnhub = FinnhubClient()
+            finnhub = FinnhubClient(priority=VISITOR)
             try:
                 raw_quotes = await asyncio.gather(
                     *(finnhub.get_quote(s) for s in to_fetch),
@@ -1910,9 +1912,11 @@ async def list_alert_picks(
                     change = float(q.get("d")) if q.get("d") is not None else None
                     change_pct = float(q.get("dp")) if q.get("dp") is not None else None
                     ts = int(q["t"]) if q.get("t") else None
-                    quote_cache.set(sym, {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts})
+                    quote_cache.set(sym, {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts,
+                                         "basis": q.get("basis", "last_trade")})
                     price_map[sym] = price
                     ts_map[sym] = ts
+                    basis_map[sym] = q.get("basis", "last_trade")
 
     # A stale quote is not a current price: withhold it, as the quote endpoints do.
     for sym in list(price_map):
@@ -2039,6 +2043,7 @@ async def list_alert_picks(
             entry_price=entry,
             current_price=current,
             quote_ts=ts_map.get(r.symbol) if not (is_closed or is_void) else None,
+            quote_basis=basis_map.get(r.symbol, "last_trade"),
             unrealized_move_pct=unrealized,
             cost_to_enter=float(r.cost_to_enter) if r.cost_to_enter else None,
             max_loss=float(r.max_loss) if r.max_loss else None,
@@ -2098,7 +2103,7 @@ async def draft_alternative(
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
     # ── 1. Finnhub quote ─────────────────────────────────────────────────────
-    finnhub = FinnhubClient()
+    finnhub = FinnhubClient(priority=VISITOR)
     try:
         quote = await finnhub.get_quote(sym)
     except Exception as exc:
@@ -2471,7 +2476,7 @@ async def create_thesis(
 
     # ── Capture entry_price from live quote ───────────────────────────────────
     entry_price: float | None = None
-    finnhub = FinnhubClient()
+    finnhub = FinnhubClient(priority=VISITOR)
     try:
         quote = await finnhub.get_quote(sym)
         p = quote.get("c")
@@ -2594,7 +2599,7 @@ async def stock_mark_thesis(
     if cached is not None and cached.get("price"):
         current_price = cached["price"]
     else:
-        finnhub = FinnhubClient()
+        finnhub = FinnhubClient(priority=VISITOR)
         try:
             quote = await finnhub.get_quote(sym)
             p = quote.get("c")
@@ -2602,7 +2607,8 @@ async def stock_mark_thesis(
                 current_price = float(p)
                 change = float(quote.get("d")) if quote.get("d") is not None else None
                 change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
-                quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct})
+                quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
+                                     "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
         except Exception:
             pass
         finally:
@@ -2720,7 +2726,7 @@ async def resolve_thesis(
     if payload.price_override is not None:
         resolution_price = float(payload.price_override)
     else:
-        finnhub = FinnhubClient()
+        finnhub = FinnhubClient(priority=VISITOR)
         try:
             quote = await finnhub.get_quote(thesis.ticker.symbol)
             p = quote.get("c")

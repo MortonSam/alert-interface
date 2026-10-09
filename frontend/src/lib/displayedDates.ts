@@ -33,7 +33,7 @@ export const DATE_REQUIREMENTS: { file: string; require: RegExp; because: string
   { file: "app/tickers/[symbol]/page.tsx", require: /putCall\.snapshot_date/, because: "the put/call ratio shows its snapshot date" },
   { file: "app/tickers/[symbol]/page.tsx", require: /realizedVol\?\.as_of/, because: "RV and RV rank show their snapshot date" },
   { file: "app/tickers/[symbol]/page.tsx", require: /magnitude_trend_as_of/, because: "the magnitude trend shows its snapshot date" },
-  { file: "app/discover/page.tsx", require: /priceAsOf=\{fmtQuoteDateTime\(/, because: "every Discover price carries its as-of" },
+  { file: "app/discover/page.tsx", require: /priceAsOf=\{quoteAsOf\(/, because: "every Discover price carries its as-of" },
   { file: "app/build/page.tsx", require: /absentCell\(fb, "atm_iv_pct"/, because: "the fact grid gives a reason for an absent ATM IV" },
 ];
 

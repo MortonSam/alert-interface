@@ -1,5 +1,6 @@
 "use client";
 
+import { quoteAsOf } from "@/lib/freshness";
 import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, nightSummary, privateLedgerBody } from "@/lib/ivyOutcomes";
 import EncodingLegend from "@/components/EncodingLegend";
 import { pickMove, pickResult, pickResultLegend } from "@/lib/encodings/pickResult";
@@ -14,11 +15,6 @@ import { capture } from "@/lib/analytics";
 
 const EXP_TAIL_RE = /\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$/i;
 
-function fmtQuoteTime(unix: number | null | undefined): string {
-  if (unix == null) return "";
-  const d = new Date(unix * 1000);
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
 
 function stripExpTail(strategy: string | null): string | null {
   if (!strategy) return strategy;
@@ -126,7 +122,7 @@ function PickCard({
             <span className="font-mono font-medium">${pick.current_price.toFixed(2)}</span>
             {!isClosed && pick.quote_ts != null && (
               <span className="text-[10px] text-muted-foreground/50 ml-1">
-                {fmtQuoteTime(pick.quote_ts)}
+                {quoteAsOf(pick.quote_ts, pick.quote_basis)}
               </span>
             )}
           </div>

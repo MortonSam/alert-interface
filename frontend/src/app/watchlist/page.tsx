@@ -4,7 +4,7 @@ import SignedOutNotice from "@/components/SignedOutNotice";
 import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
 
 import { earningsProximity } from "@/lib/encodings/earningsProximity";
-import { datasetAgeLine, priceSourceLine } from "@/lib/freshness";
+import { datasetAgeLine, priceSourceLine, quoteAsOf } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
@@ -40,11 +40,6 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function fmtQuoteTime(unix: number | null | undefined): string {
-  if (unix == null) return "";
-  const d = new Date(unix * 1000);
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
 
 function fmtPrice(n: number | null): string {
   return n == null ? "n/a" : `$${n.toFixed(2)}`;
@@ -166,7 +161,7 @@ function WatchlistRow({
             {fmtPrice(data?.price ?? null)}
             {data?.price != null && data?.quote_ts != null && (
               <span className="text-[10px] text-muted-foreground/50 ml-1.5">
-                {fmtQuoteTime(data.quote_ts)}
+                {quoteAsOf(data.quote_ts, data.quote_basis)}
               </span>
             )}
           </span>

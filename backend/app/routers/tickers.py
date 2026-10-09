@@ -29,7 +29,7 @@ from app.services.anthropic_client import AnthropicClient
 from app.services.system_metadata_service import get_value as _get_meta, set_value as _set_meta
 from app.schemas.ticker import BatchEnrichRead, BatchQuoteRead, EarningsMarker, NewsItem, NewsRead, SparklinePoint, TickerChartRead, TickerCreate, TickerQuoteRead, TickerRead, TickerUpdate
 from app.services import chain_store
-from app.services.finnhub_client import FinnhubClient
+from app.services.finnhub_client import FinnhubClient, VISITOR
 from app.models.put_call_snapshot import PutCallSnapshot
 from app.thresholds import rv_rank_label, spread_label, put_call_label, vol_regime_label, discover_rv_tier
 from app.schemas.options import LabelRule as OptionsLabelRule
@@ -266,7 +266,7 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         quote_data = cached
         candles = await loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo")
     else:
-        finnhub = FinnhubClient()
+        finnhub = FinnhubClient(priority=VISITOR)
         try:
             raw_quote, candles = await asyncio.gather(
                 finnhub.get_quote(sym),
@@ -289,6 +289,7 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
             "open": _f(raw_quote.get("o")) or None,
             "prev_close": _f(raw_quote.get("pc")) or None,
             "timestamp": int(raw_quote["t"]) if raw_quote.get("t") else None,
+            "basis": raw_quote.get("basis", "last_trade"),
         }
         quote_cache.set(sym, quote_data)
 
@@ -318,6 +319,7 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         open=quote_data.get("open") if live else None,
         prev_close=quote_data.get("prev_close") if live else None,
         timestamp=ts,
+        quote_basis=quote_data.get("basis", "last_trade"),
         sparkline=[SparklinePoint(date=c["date"], close=c["close"]) for c in candles] if hist.ok else [],
         quote_state=quote_state,
         quote_reason=quote_reason,
@@ -340,6 +342,7 @@ def _served_quote(data: dict) -> dict:
         "change": data.get("change") if live else None,
         "change_pct": data.get("change_pct") if live else None,
         "timestamp": data.get("timestamp"),
+        "quote_basis": data.get("basis", "last_trade"),
         "quote_state": q.state,
         "quote_reason": q.reason,
     }
@@ -363,7 +366,7 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
 
     # Fetch all misses concurrently via one FinnhubClient
     if to_fetch:
-        finnhub = FinnhubClient()
+        finnhub = FinnhubClient(priority=VISITOR)
         try:
             raw_quotes = await asyncio.gather(
                 *(finnhub.get_quote(s) for s in to_fetch),
@@ -380,7 +383,7 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
             change = float(q.get("d")) if q.get("d") is not None else None
             change_pct = float(q.get("dp")) if q.get("dp") is not None else None
             ts = int(q["t"]) if q.get("t") else None
-            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts}
+            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts, "basis": q.get("basis", "last_trade")}
             quote_cache.set(sym, data)
             results[sym] = BatchQuoteRead(symbol=sym, **_served_quote(data))
 
@@ -440,7 +443,7 @@ async def batch_enrich(
             to_fetch.append(sym)
 
     if to_fetch:
-        finnhub = FinnhubClient()
+        finnhub = FinnhubClient(priority=VISITOR)
         try:
             raw_quotes = await asyncio.gather(
                 *(finnhub.get_quote(s) for s in to_fetch),
@@ -456,7 +459,7 @@ async def batch_enrich(
             change = float(q.get("d")) if q.get("d") is not None else None
             change_pct = float(q.get("dp")) if q.get("dp") is not None else None
             ts = int(q["t"]) if q.get("t") else None
-            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts}
+            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts, "basis": q.get("basis", "last_trade")}
             quote_cache.set(sym, data)
             quotes[sym] = data
 
@@ -513,6 +516,7 @@ async def batch_enrich(
                 change=q.get("change"),
                 change_pct=q.get("change_pct"),
                 quote_ts=q.get("timestamp"),
+                quote_basis=q.get("quote_basis", "last_trade"),
                 quote_state=q["quote_state"],
                 quote_reason=q["quote_reason"],
                 expected_move_pct=em_pct,
@@ -557,7 +561,7 @@ async def get_company_news(
     to_date = now.strftime("%Y-%m-%d")
     from_date = (now - timedelta(days=2)).strftime("%Y-%m-%d")
 
-    finnhub = FinnhubClient()
+    finnhub = FinnhubClient(priority=VISITOR)
     try:
         raw = await finnhub.get_company_news(sym, from_date, to_date)
     except Exception:
@@ -687,7 +691,7 @@ async def _guarded_price(sym: str) -> QuoteState:
     cached = quote_cache.get(sym)
     if cached is not None:
         return assess_quote(cached.get("price"), cached.get("timestamp"))
-    finnhub = FinnhubClient()
+    finnhub = FinnhubClient(priority=VISITOR)
     try:
         raw = await finnhub.get_quote(sym)
     except Exception as exc:
@@ -1360,7 +1364,7 @@ async def get_options_read(
         return absent(READ_PENDING_NIGHTLY, "cache miss, no admin token")
 
     # ── Finnhub quote. RV comes from the stored snapshot or is absent. ─────────
-    finnhub = FinnhubClient()
+    finnhub = FinnhubClient(priority=VISITOR)
     try:
         quote = await finnhub.get_quote(sym)
     except Exception as exc:

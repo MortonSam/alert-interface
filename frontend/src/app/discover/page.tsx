@@ -2,7 +2,7 @@
 
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { MoveComparisonLine } from "@/components/MoveComparisonLine";
-import { datasetAgeLine, fmtQuoteDateTime, freshnessLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtQuoteDateTime, freshnessLine, quoteAsOf } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
@@ -228,7 +228,7 @@ export default function DiscoverPage() {
               <DiscoverRow
                 symbol={latestPick.symbol}
                 price={quotes.get(latestPick.symbol)?.price != null ? fmtPrice(quotes.get(latestPick.symbol)!.price) : undefined}
-                priceAsOf={fmtQuoteDateTime(quotes.get(latestPick.symbol)?.timestamp)}
+                priceAsOf={quoteAsOf(quotes.get(latestPick.symbol)?.timestamp, quotes.get(latestPick.symbol)?.quote_basis)}
                 sentence={latestPickSentence(latestPick)}
               />
             </DiscoverRows>
@@ -256,7 +256,7 @@ export default function DiscoverPage() {
                     symbol={item.symbol}
                     name={item.name}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
                     sentence={reportingSoonSentence(item)}
                     detail={<MoveComparisonLine item={item} />}
                   />
@@ -282,7 +282,7 @@ export default function DiscoverPage() {
                   symbol={item.symbol}
                   name={item.name}
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
                   sentence={justReportedSentence(item)}
                 />
               ))}
@@ -311,7 +311,7 @@ export default function DiscoverPage() {
                     symbol={item.symbol}
                     name={item.name}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
                     sentence={suggestionSentence(item)}
                   />
                 ))}
@@ -338,7 +338,7 @@ export default function DiscoverPage() {
                   symbol={item.symbol}
                   name={item.name}
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={fmtQuoteDateTime(quotes.get(item.symbol)?.timestamp)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
                   sentence={unusuallyActiveSentence(item)}
                   title={tapeReceipt(item)}
                 />
