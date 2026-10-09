@@ -134,6 +134,9 @@ async def test_the_route_is_absent_behind_the_flag_and_serves_a_checked_answer_w
     async def fake(db, pack, question, *, client=None):
         return canned
     monkeypatch.setattr(A, "answer_question", fake)
+    # the cache test, not the fingerprint test: the page's facts carry a live price and the shared fact holds, which other
+    # workers and the clock can change between the two requests below
+    monkeypatch.setattr(A, "fingerprint", lambda facts: "fixed-for-the-cache-test")
     from app.services import draft_limiter
     async def no_limit(*a, **k):
         return None

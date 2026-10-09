@@ -24,6 +24,7 @@ VISITOR_LIMIT = 58          # every request in the trailing minute, all processe
 BACKGROUND_LIMIT = 45       # a job waits once this many were made; the rest of the minute is held for visitors
 WINDOW_SECONDS = 60.0
 LOCK_KEY = 0x46484E42       # "FHNB"
+TABLE = "finnhub_calls"     # a test points this at its own table so filling it never slows another test's quotes
 
 log = logging.getLogger("finnhub_limiter")
 _engines: dict[int, AsyncEngine] = {}
@@ -62,13 +63,13 @@ async def try_take(priority: str) -> float | None:
         async with _engine().begin() as conn:
             await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": LOCK_KEY})
             ages = (await conn.execute(text(
-                "SELECT extract(epoch FROM clock_timestamp() - at) FROM finnhub_calls WHERE at > clock_timestamp() - interval '60 seconds'"
+                f"SELECT extract(epoch FROM clock_timestamp() - at) FROM {TABLE} WHERE at > clock_timestamp() - interval '60 seconds'"
             ))).scalars().all()
             wait = wait_seconds([float(a) for a in ages], limit_for(priority))
             if wait == 0.0:
-                await conn.execute(text("INSERT INTO finnhub_calls (priority) VALUES (:p)"), {"p": priority})
+                await conn.execute(text(f"INSERT INTO {TABLE} (priority) VALUES (:p)"), {"p": priority})
                 if random.random() < 0.02:
-                    await conn.execute(text("DELETE FROM finnhub_calls WHERE at < clock_timestamp() - interval '10 minutes'"))
+                    await conn.execute(text(f"DELETE FROM {TABLE} WHERE at < clock_timestamp() - interval '10 minutes'"))
             return wait
     except Exception as exc:
         if not _db_fault_logged:

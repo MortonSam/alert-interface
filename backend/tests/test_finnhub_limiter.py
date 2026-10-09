@@ -28,17 +28,22 @@ def test_wait_seconds_holds_the_last_part_of_each_minute_for_visitors():
     assert L.BACKGROUND_LIMIT < L.VISITOR_LIMIT <= 60
 
 
+TEST_TABLE = "finnhub_calls_limiter_test"     # its own table: filling the real one would slow other workers' visitor quotes
+
+
 async def _seed_calls(n: int, priority: str) -> None:
     async with AsyncSessionLocal() as s:
-        await s.execute(text("DELETE FROM finnhub_calls"))
+        await s.execute(text(f"CREATE TABLE IF NOT EXISTS {TEST_TABLE} (LIKE finnhub_calls INCLUDING ALL)"))
+        await s.execute(text(f"DELETE FROM {TEST_TABLE}"))
         if n:
-            await s.execute(text("INSERT INTO finnhub_calls (priority, at) SELECT :p, clock_timestamp() - interval '30 seconds' FROM generate_series(1, :n)"),
+            await s.execute(text(f"INSERT INTO {TEST_TABLE} (priority, at) SELECT :p, clock_timestamp() - interval '30 seconds' FROM generate_series(1, :n)"),
                             {"p": priority, "n": n})
         await s.commit()
 
 
 @pytest.mark.asyncio
-async def test_a_job_waits_at_its_limit_while_a_visitor_still_goes_across_processes():
+async def test_a_job_waits_at_its_limit_while_a_visitor_still_goes_across_processes(monkeypatch):
+    monkeypatch.setattr(L, "TABLE", TEST_TABLE)
     await _seed_calls(L.BACKGROUND_LIMIT, L.BACKGROUND)                         # as if other processes made these
     try:
         wait = await L.try_take(L.BACKGROUND)
