@@ -7,6 +7,7 @@ OHLCV data).
 """
 from __future__ import annotations
 
+import functools
 from datetime import date, timedelta
 
 import pandas as pd
@@ -57,12 +58,19 @@ CALENDAR_CORRECTIONS: dict[date, tuple[str, date]] = {
 _NYSE_BDAY = CustomBusinessDay(calendar=NYSEHolidayCalendar(), holidays=[pd.Timestamp(d) for d in SPECIAL_CLOSURES])
 
 
+@functools.lru_cache(maxsize=None)
+def _holidays_in_year(year: int) -> frozenset[date]:
+    """The calendar's holidays in one year, computed once per process (building them costs about 5 ms; Discover's rank-hold
+    cutoff asks for a year of days on every request)."""
+    days = NYSEHolidayCalendar().holidays(pd.Timestamp(year, 1, 1), pd.Timestamp(year, 12, 31))
+    return frozenset(ts.date() for ts in days)
+
+
 def is_trading_day(d: date) -> bool:
     """A weekday that is not an NYSE holiday or a special closure."""
     if d.weekday() >= 5 or d in SPECIAL_CLOSURES:
         return False
-    holidays = NYSEHolidayCalendar().holidays(pd.Timestamp(d), pd.Timestamp(d))
-    return len(holidays) == 0
+    return d not in _holidays_in_year(d.year)
 
 
 def is_half_day(d: date) -> bool:
