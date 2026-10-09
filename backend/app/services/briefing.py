@@ -138,12 +138,15 @@ def description_text(short_description: str | None) -> str | None:
 
 
 def short_name(name: str | None) -> str | None:
-    """"Micron Technology" from "Micron Technology, Inc."; "Constellation Brands" from "Constellation Brands, Inc."."""
+    """"Micron Technology" from "Micron Technology, Inc."; "Constellation Brands" from "Constellation Brands, Inc."; a leading
+    "The" is dropped so the name reads mid-sentence: "AES" from "The AES Corporation", "Home Depot" from "The Home Depot, Inc."."""
     if not name:
         return None
     words = name.replace(",", " ").split()
     while len(words) > 1 and words[-1].lower().rstrip(".") in NAME_SUFFIXES:
         words.pop()
+    if len(words) > 1 and words[0].lower() == "the":
+        words.pop(0)
     return " ".join(words)
 
 

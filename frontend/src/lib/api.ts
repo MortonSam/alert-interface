@@ -728,6 +728,7 @@ export interface RealizedVol {
   iv_rv_spread_pp: number | null;
   data_error: boolean;
   reason?: string | null;
+  deal_note?: string | null;       // a pending cash deal: the rank is withheld and the IV-RV line shows this note alone
 }
 
 export type ThesisDirection = "bullish" | "bearish" | "neutral";

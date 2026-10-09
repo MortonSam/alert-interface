@@ -272,7 +272,9 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     from app.services.rv_hold import rank_holds
     from app.services.rv_store import get_servable_rv
     rv_hold = (await rank_holds(db, [sym], today)).get(sym)
-    rv_row, _ = (None, None) if rv_hold else await get_servable_rv(db, sym)
+    from app.services.pending_deals import deal_for
+    deal_held = await deal_for(db, sym) is not None       # a pending cash deal: no rank, no "more volatile than usual" question
+    rv_row, _ = (None, None) if rv_hold or deal_held else await get_servable_rv(db, sym)
     if rv_hold and raw is not None:
         raw.update(rv_hold=rv_hold)
     if rv_row is not None and rv_row.rv_20d is not None and rv_row.rv_rank is not None:

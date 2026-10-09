@@ -146,6 +146,7 @@ export function spreadUnavailableReason(
   rvStatus: "loading" | "done" | "empty" | "error" | undefined,
   spreadShown: boolean,
 ): string | null {
+  if (realizedVol?.deal_note) return realizedVol.deal_note;      // a pending cash deal: its note alone, never inside a sentence
   const ivMissing = shown.atm_iv == null;
   const rvMissing = shown.rv_20d == null;
   if (ivMissing && rvMissing) {

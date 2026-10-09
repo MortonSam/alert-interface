@@ -92,6 +92,10 @@ async def test_a_held_ticker_shows_the_note_everywhere_and_gets_no_pick(held, mo
         assert not [r for r in rows if r["event_type"] == "earnings"]          # the earnings chart and distribution have nothing
         cond = (await c.get(f"/api/v1/reactions/conditional?symbol={SYM}")).json()
         assert cond["deal_note"] == note and cond["total_quarters"] == 0
+        rv = (await c.get(f"/api/v1/tickers/rv/{SYM}")).json()
+        assert rv["deal_note"] == note and rv["rv_rank"] is None and rv["rv_rank_labeled"] is None and rv["rv_percentile"] is None
+        qs = (await c.get(f"/api/v1/tickers/{SYM}/questions")).json()
+        assert "volatile_now" not in [q.get("key") for q in qs.get("questions", [])]
         sugg = (await c.get("/api/v1/discover/suggestions?limit=10")).json()
         assert SYM not in [i["symbol"] for i in sugg["items"]]
         ua = (await c.get("/api/v1/discover/unusually-active?limit=50")).json()
@@ -107,3 +111,12 @@ async def test_auto_pick_never_loads_a_held_ticker(held):
     async with AsyncSessionLocal() as s:
         rows = await _load_candidates(s, date.today() - timedelta(days=400), date.today() + timedelta(days=400))
     assert SYM not in [r.symbol for r in rows]
+
+
+def test_a_leading_the_is_dropped_from_the_name_mid_sentence():
+    from app.services.briefing import short_name
+    assert short_name("The AES Corporation") == "AES"
+    assert short_name("The Home Depot, Inc.") == "Home Depot"
+    assert short_name("The Hershey Company") == "Hershey"
+    assert short_name("Micron Technology, Inc.") == "Micron Technology"
+    assert short_name("The") == "The"                      # nothing left to name: kept

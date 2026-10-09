@@ -110,6 +110,7 @@ class RealizedVolRead(BaseModel):
     iv_rv_spread_pp: float | None = None     # IV minus RV in percentage points (same rows as atm_iv + current_rv)
     data_error: bool = False                 # True if latest rv_snapshot has status='data_error'
     reason: str | None = None                # why current_rv is null
+    deal_note: str | None = None             # a pending cash deal (services/pending_deals): the rank is withheld and the IV-RV line shows this note alone
 
 
 # ── AI-generated options setup read ───────────────────────────────────────────

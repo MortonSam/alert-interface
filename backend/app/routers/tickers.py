@@ -468,6 +468,9 @@ async def batch_enrich(
 
     rv_rows = await get_latest_rv_bulk(db, syms)
 
+    from app.services.pending_deals import held_symbols
+    held_deals = await held_symbols(db)                 # a pending cash deal withholds the RV rank (services/pending_deals)
+
     # ── 4. Per-symbol: expected-move (concurrent, semaphore-capped) ────────
     sem = asyncio.Semaphore(10)
 
@@ -507,7 +510,7 @@ async def batch_enrich(
             current_rv: float | None = None
             rv_row = rv_rows.get(sym)
             if rv_row is not None:
-                rv_rank = float(rv_row.rv_rank) if rv_row.rv_rank is not None else None
+                rv_rank = float(rv_row.rv_rank) if rv_row.rv_rank is not None and sym not in held_deals else None
                 current_rv = float(rv_row.rv_20d) if rv_row.rv_20d is not None else None
 
             return BatchEnrichRead(
@@ -1917,7 +1920,9 @@ async def get_realized_vol(
     if row is None:
         return absent(reason or "Realized volatility unavailable")
 
-    rank_val = float(row.rv_rank) if row.rv_rank is not None else None
+    from app.services.pending_deals import deal_for, note_for
+    deal = await deal_for(db, sym)                      # a pending cash deal withholds the rank (its year compares a business, not a deal)
+    rank_val = float(row.rv_rank) if row.rv_rank is not None and not deal else None
     current_rv_val = float(row.rv_20d) if row.rv_20d is not None else None
     spread_pp = (
         round((atm_iv - current_rv_val) * 100, 1)
@@ -1927,13 +1932,14 @@ async def get_realized_vol(
         symbol=sym,
         current_rv=current_rv_val,
         rv_rank=rank_val,
-        rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None else None,
-        rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None else None,
-        rv_max_1y=float(row.rv_max_1y) if row.rv_max_1y is not None else None,
+        rv_percentile=float(row.rv_percentile) if row.rv_percentile is not None and not deal else None,
+        rv_min_1y=float(row.rv_min_1y) if row.rv_min_1y is not None and not deal else None,
+        rv_max_1y=float(row.rv_max_1y) if row.rv_max_1y is not None and not deal else None,
         sample_days=row.sample_days,
         window_days=20,
         as_of=row.as_of_date.isoformat(),
-        rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)),
+        rv_rank_labeled=_to_options_lr(rv_rank_label(rank_val)) if rank_val is not None else None,
+        deal_note=note_for(deal) if deal else None,
         atm_iv=atm_iv,
         atm_iv_as_of=atm_iv_as_of,
         atm_iv_reason=atm_iv_reason,
