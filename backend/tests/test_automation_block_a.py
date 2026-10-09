@@ -183,3 +183,27 @@ def test_generation_routes_warm_and_fred_fail_closed():
 
 # shares the step_outcomes metadata key with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
 pytestmark = pytest.mark.xdist_group(name="step_outcomes")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source,prefix,label", [("intrinio", "intrinio_chain", "Intrinio"), ("courier", "chain", "courier")])
+async def test_chain_coverage_counts_the_primary_sources_chains(monkeypatch, source, prefix, label):
+    from app.config import settings
+    monkeypatch.setattr(settings, "options_primary_source", source)
+    seen = {}
+
+    class Result:
+        def __init__(self, rows): self.rows = rows
+        def scalars(self): return self
+        def all(self): return self.rows
+
+    class Session:
+        async def execute(self, stmt, params=None):
+            if params is None:
+                return Result(["AAA", "BBB"])                                 # the active tickers
+            seen["p"] = params["p"]
+            return Result([])                                                 # no chain from that source
+
+    res = await check_chain_coverage(Session())
+    assert seen["p"] == f"{prefix}:%"
+    assert res.level == ERROR and f"fresh {label} chain" in res.message and f"the {label} chains did not land" in res.message

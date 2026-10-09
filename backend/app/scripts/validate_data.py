@@ -1350,7 +1350,7 @@ async def check_quote_sanity(session) -> CheckResult:
 
 
 def fresh_chain_symbols(rows, today: date | None = None) -> set[str]:
-    """Pure: symbols whose newest courier chain date is within CHAIN_FRESH_TRADING_DAYS. `rows`: (key, chain_last_trade)."""
+    """Pure: symbols whose newest chain date is within CHAIN_FRESH_TRADING_DAYS. `rows`: (key, chain_last_trade) of one source."""
     newest: dict[str, str] = {}
     for key, d in rows:
         parts = key.split(":")
@@ -1360,8 +1360,12 @@ def fresh_chain_symbols(rows, today: date | None = None) -> set[str]:
 
 
 async def check_chain_coverage(session) -> CheckResult:
-    """Percent of active tickers with a courier chain no older than 2 trading days. One query: the chain dates are
-    extracted server-side, no chain body is transferred."""
+    """Percent of active tickers with a chain from the primary source (settings.options_primary_source: the courier or
+    Intrinio) no older than 2 trading days. One query: the chain dates are extracted server-side, no chain body is
+    transferred."""
+    from app.config import settings
+    source = settings.options_primary_source
+    label = CHAIN_SOURCE_LABELS.get(source, source)
     active_syms = (await session.execute(
         select(Ticker.symbol).where(Ticker.is_active.is_(True)).order_by(Ticker.symbol)
     )).scalars().all()
@@ -1369,7 +1373,8 @@ async def check_chain_coverage(session) -> CheckResult:
     if not active_syms:
         return CheckResult("chain_coverage", PASS, "No active tickers")
 
-    rows = (await session.execute(text("SELECT key, value::json->>'chain_last_trade' FROM system_metadata WHERE key LIKE 'chain:%'"))).all()
+    rows = (await session.execute(text("SELECT key, value::json->>'chain_last_trade' FROM system_metadata WHERE key LIKE :p"),
+                                  {"p": f"{chain_store._PREFIX[source]}:%"})).all()
     fresh = fresh_chain_symbols(rows)
     stale = [sym for sym in active_syms if sym not in fresh]
 
@@ -1380,17 +1385,19 @@ async def check_chain_coverage(session) -> CheckResult:
     if pct >= CHAIN_COVERAGE_MIN_PCT:
         return CheckResult(
             "chain_coverage", PASS,
-            f"{covered}/{len(active_syms)} active tickers ({pct:.0f}%) have a fresh chain", figures=figures,
+            f"{covered}/{len(active_syms)} active tickers ({pct:.0f}%) have a fresh {label} chain", figures=figures,
         )
 
     details = [f"{sym}  no fresh chain" for sym in stale]
     return CheckResult(
         "chain_coverage", ERROR,
-        f"{covered}/{len(active_syms)} ({pct:.0f}%) active tickers have a fresh chain (below {CHAIN_COVERAGE_MIN_PCT}%): the courier did not deliver",
+        f"{covered}/{len(active_syms)} ({pct:.0f}%) active tickers have a fresh {label} chain (below {CHAIN_COVERAGE_MIN_PCT}%): "
+        f"the {label} chains did not land",
         details, figures=figures,
     )
 
 
+CHAIN_SOURCE_LABELS = {"courier": "courier", "intrinio": "Intrinio"}
 CHAIN_COVERAGE_MIN_PCT = 90      # below this the options layer is failing for too many tickers to call it a quirk: ERROR, and an alert
 
 
