@@ -81,6 +81,9 @@ async def test_a_429_is_retried_and_counted_then_raised_after_the_retries(monkey
         sleeps.append(seconds)
 
     monkeypatch.setattr(fc.asyncio, "sleep", fake_sleep)
+    async def slot(priority):                       # the shared budget has its own tests (test_finnhub_limiter); a parallel
+        return True                                 # worker filling it must not turn these retries into budget waits
+    monkeypatch.setattr(fc.finnhub_limiter, "acquire", slot)
     client = fc.FinnhubClient()
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=fc.FINNHUB_BASE, params={"token": "SECRETTOKEN"})
     before = fc.finnhub_stats()
