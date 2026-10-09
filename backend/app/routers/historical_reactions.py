@@ -513,6 +513,12 @@ async def list_reactions(
         return []      # the rows stay stored; /reactions/summary carries the reason
     result = await db.execute(q)
     rows = list(result.scalars().all())
+    # a pending cash deal pauses earnings figures (services/pending_deals): its earnings rows are not served; Fed days stay
+    from sqlalchemy import text as _text
+    held_ids = set((await db.execute(_text(
+        "SELECT t.id FROM tickers t JOIN pending_deals d ON d.symbol = t.symbol AND d.status = 'active'"))).scalars().all())
+    if held_ids:
+        rows = [r for r in rows if not (r.ticker_id in held_ids and r.event_type == EventType.EARNINGS)]
     basis_unclear: set = set()
     for tid in {r.ticker_id for r in rows}:
         basis_unclear |= {(tid, d) for d in await basis_mismatch_dates(db, tid)}
