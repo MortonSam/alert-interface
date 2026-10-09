@@ -151,7 +151,33 @@ async def get_latest_chain_date(db: AsyncSession, sym: str, source: str | None =
 async def pick_expiration(
     db: AsyncSession, sym: str, min_date: str, source: str | None = None,
 ) -> str | None:
-    """Return nearest ingested expiration >= min_date from the serving source (or the named one), or None."""
+    """Return nearest ingested expiration >= min_date from the serving source (or the named one), or None.
+
+    When min_date is the ticker's earnings date, the expiry must capture the report (chain_shadow.counts_for_report): one
+    on the report day counts only for a before-open report, so an after-close or unknown-timing report takes a later one.
+    The Intrinio step stores the expiry on an after-close report day as the pre-earnings leg; it is never the move's."""
+    from app.services.chain_shadow import counts_for_report
     exps = await get_ingested_expirations(db, sym, source=source)
-    matches = [e for e in exps if e >= min_date]
+    timing = await report_timing_on(db, sym, min_date)
+    if timing is not _NO_REPORT:
+        matches = [e for e in exps if counts_for_report(e, min_date, timing)]
+    else:
+        matches = [e for e in exps if e >= min_date]
     return matches[0] if matches else None
+
+
+_NO_REPORT = object()
+
+
+async def report_timing_on(db: AsyncSession, sym: str, day: str):
+    """The report timing of the ticker's earnings event on `day` (None when unknown), or _NO_REPORT when none is on that day."""
+    from sqlalchemy import text as _text
+    try:
+        d = date.fromisoformat(str(day)[:10])
+    except ValueError:
+        return _NO_REPORT
+    rows = (await db.execute(_text("""SELECT e.report_timing::text FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE t.symbol = :s AND e.event_type = 'earnings' AND e.event_date = :d"""), {"s": sym, "d": d})).scalars().all()
+    if not rows:
+        return _NO_REPORT
+    return "bmo" if all(r == "bmo" for r in rows) else next((r for r in rows if r and r != "bmo"), None)
