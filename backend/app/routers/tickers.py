@@ -156,7 +156,7 @@ def _build_plain_summary(
     return " ".join(parts)
 
 
-from app.services.implied_move import mid_or_last as _mid_or_last, span_days, straddle_implied_move  # noqa: E402
+from app.services.implied_move import WIDE_QUOTES_NOTE, mid_or_last as _mid_or_last, span_days, straddle_implied_move, too_wide, wide_quotes  # noqa: E402
 
 # The one absent-read reason that is not a failure: the warm step writes the read for the latest chain every night.
 # The page shows this sentence alone, without "Unavailable."; frontend lib/optionsReadFacts.ts mirrors it by test.
@@ -497,7 +497,7 @@ async def batch_enrich(
                                     p = next((x for x in puts if x["strike"] == atm), None)
                                     cp = _mid_or_last(c["bid"], c["ask"], c["lastPrice"]) if c else None
                                     pp = _mid_or_last(p["bid"], p["ask"], p["lastPrice"]) if p else None
-                                    if cp is not None and pp is not None:
+                                    if cp is not None and pp is not None and not too_wide(c, p):
                                         em_pct = (cp + pp) / current_price
             except Exception:
                 pass
@@ -791,6 +791,8 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> 
     puts = chain.get("puts", [])
 
     im = straddle_implied_move(calls, puts, current_price)
+    if im is None and wide_quotes(calls, puts, current_price):
+        data_quality_note = WIDE_QUOTES_NOTE
     atm_strike = im.atm_strike if im else None
     straddle_price = im.straddle if im else None
     expected_move_pct = im.pct if im else None
@@ -1172,6 +1174,8 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
 
     # ── ATM + straddle + expected move: the one computation every page uses ──
     im = straddle_implied_move(calls_raw, puts_raw, current_price)
+    if im is None and wide_quotes(calls_raw, puts_raw, current_price):
+        data_quality_note = WIDE_QUOTES_NOTE
     atm_strike = im.atm_strike if im else None
     straddle_price = im.straddle if im else None
     expected_move_pct = im.pct if im else None
@@ -1427,7 +1431,7 @@ async def get_options_read(
             atm_put  = next((p for p in puts  if p["strike"] == atm_strike), None)
             call_price = _mid_or_last(atm_call["bid"], atm_call["ask"], atm_call["lastPrice"]) if atm_call else None
             put_price  = _mid_or_last(atm_put["bid"],  atm_put["ask"],  atm_put["lastPrice"])  if atm_put  else None
-            if call_price is not None and put_price is not None:
+            if call_price is not None and put_price is not None and not too_wide(atm_call, atm_put):
                 straddle = call_price + put_price
                 expected_move_pct    = straddle / current_price
                 expected_move_dollars = straddle

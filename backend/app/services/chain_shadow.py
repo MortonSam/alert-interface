@@ -176,8 +176,8 @@ def compare_front(courier: dict, intrinio: dict) -> dict:
     for side in ("calls", "puts"):
         mc, mi = _mids(courier.get(side, [])), _mids(intrinio.get(side, []))
         diffs += [mi[k] - mc[k] for k in mc.keys() & mi.keys()]
-    imc = straddle_implied_move(courier.get("calls", []), courier.get("puts", []), courier.get("underlying_price"))
-    imi = straddle_implied_move(intrinio.get("calls", []), intrinio.get("puts", []), intrinio.get("underlying_price"))
+    imc = straddle_implied_move(courier.get("calls", []), courier.get("puts", []), courier.get("underlying_price"), gate=False)
+    imi = straddle_implied_move(intrinio.get("calls", []), intrinio.get("puts", []), intrinio.get("underlying_price"), gate=False)
     spot = courier.get("underlying_price")
     both = {float(c["strike"]) for c in courier.get("calls", []) if c.get("strike") is not None} & \
            {float(p["strike"]) for p in courier.get("puts", []) if p.get("strike") is not None}
