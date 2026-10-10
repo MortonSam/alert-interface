@@ -20,6 +20,7 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.scripts.seed_dividend_declarations import cik_for
+from app.services.earnings_release import is_earnings_release
 from app.services.edgar_client import EdgarClient
 
 HISTORY_YEARS = 5
@@ -69,8 +70,12 @@ async def run(argv: list[str]) -> int:
             reports = report_dates(await edgar.get_all_8k_records(cik), date.today())
             existing = {e.event_date: e for e in (await s.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS))).scalars().all()}
             print(f"{sym} (CIK {cik}): {len(reports)} Item 2.02 report(s) in {HISTORY_YEARS} years; {len(existing)} earnings event(s) stored ({'write' if write else 'dry run'})")
-            inserted = kept = confirmed = 0
+            inserted = kept = confirmed = skipped = 0
             for r in reports:
+                if not await is_earnings_release(edgar, cik, r["accession"]):     # Item 2.02 without per-share results (Tesla's deliveries)
+                    skipped += 1
+                    print(f"  {r['date']} {r['timing']:7s} not an earnings release (no per-share results in 8-K {r['accession']}): skipped")
+                    continue
                 near = [d for d in existing if abs((d - r['date']).days) <= 3]
                 if near:
                     kept += 1
@@ -94,7 +99,7 @@ async def run(argv: list[str]) -> int:
                                 report_timing=r["timing"], report_timing_source="edgar" if r["timing"] != "unknown" else "unknown", metadata_={}))
             if write:
                 await s.commit()
-            print(f"  {inserted} to insert, {kept} already stored ({confirmed} to confirm from the filing)" + ("" if write else "; dry run, nothing written") +
+            print(f"  {inserted} to insert, {kept} already stored ({confirmed} to confirm from the filing), {skipped} not earnings" + ("" if write else "; dry run, nothing written") +
                   (f"\n  next: python -m app.scripts.seed_historical_reactions {sym}" if write else ""))
     finally:
         await edgar.close()

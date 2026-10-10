@@ -6,6 +6,10 @@ import pytest
 
 import app.scripts.auto_pick as ap
 
+# writes today's alert_pick_evaluations rows (a real _run with a failing candidate), which the ledger reads compare
+# (test_reviewer_key): the same group, so the two never run at once
+pytestmark = pytest.mark.xdist_group(name="shared_rows")
+
 
 @pytest.mark.asyncio
 async def test_finish_exits_1_and_names_the_failed_symbols(capsys):

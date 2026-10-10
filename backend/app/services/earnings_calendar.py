@@ -246,3 +246,16 @@ def level_of(is_confirmed: bool, unresolved_since: date | None) -> str:
     if unresolved_since is not None:
         return "expected_unconfirmed"
     return "confirmed" if is_confirmed else "estimated"
+
+
+SAME_RELEASE_LOOKBACK_DAYS = 45      # a confirmed date this recent or later may be cleared by a later reading of the same release
+SAME_RELEASE_KEY_CHARS = 60          # notes are cut short when stored: the release is matched on this much of its evidence
+
+
+def same_release_stale(event_date: date, confirmation_note: str | None, announced: date, evidence: str, reaction_dates) -> bool:
+    """Pure: a confirmed date stored from the same release that now confirms `announced` is stale when it is another date and no
+    reaction row stands on it."""
+    if not confirmation_note or event_date == announced or event_date in set(reaction_dates):
+        return False
+    key = (evidence or "")[:SAME_RELEASE_KEY_CHARS]
+    return bool(key) and key in confirmation_note

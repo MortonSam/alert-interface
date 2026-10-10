@@ -22,6 +22,15 @@ DATASETS: dict[str, tuple[str, ...]] = {
     "earnings_calendar": ("Refresh earnings calendar (Finnhub)", "EPS actuals (Finnhub)"),
 }
 
+# the chains dataset follows the source the pages read (settings.options_primary_source): the courier's ingest, or Intrinio's step
+CHAIN_STEPS: dict[str, tuple[str, ...]] = {"courier": (COURIER_STEP_LABEL,), "intrinio": ("Options chains (Intrinio)",)}
+
+
+def datasets_for(primary: str | None) -> dict[str, tuple[str, ...]]:
+    """DATASETS with the chains dataset read from the primary options source's step."""
+    return {**DATASETS, "chains": CHAIN_STEPS.get(primary or "courier", DATASETS["chains"])}
+
+
 DATASET_LABELS = {"prices": "Prices", "chains": "Options data", "reactions": "Earnings history", "analyst": "Analyst data",
                   "iv": "Implied volatility", "rv": "Realized volatility", "earnings_calendar": "Earnings calendar"}
 
@@ -36,11 +45,15 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
-def dataset_ages(step_outcomes: dict, last_success: dict[str, str | None]) -> dict[str, dict]:
+def dataset_ages(step_outcomes: dict, last_success: dict[str, str | None], primary: str | None = None) -> dict[str, dict]:
     """{dataset: {at, ok, failed, steps}}. `at` is the oldest last-success stamp among the dataset's steps (None when
-    any step has never succeeded); `failed` names the steps whose latest outcome did not exit 0."""
+    any step has never succeeded); `failed` names the steps whose latest outcome did not exit 0. The chains dataset reads
+    the primary options source's step (settings.options_primary_source unless `primary` is given)."""
+    if primary is None:
+        from app.config import settings
+        primary = settings.options_primary_source
     out = {}
-    for name, steps in DATASETS.items():
+    for name, steps in datasets_for(primary).items():
         stamps = [_parse(last_success.get(s)) for s in steps]
         failed = [s for s in steps if (step_outcomes.get(s) or {}).get("exit") not in (0,)]
         at = min(stamps) if stamps and all(stamps) else None

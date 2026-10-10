@@ -18,13 +18,13 @@ PYTHON="$(command -v python3 || true)"
 cd "$PROJECT"
 
 # ── Gate: quiet unless it is time (no log line for the other 70-odd fires a day) ──────────────────────────────────────────────
-GATE_NOW=()
+GATE_NOW=()                                                         # empty-safe below: macOS /bin/bash 3.2 under set -u calls "${GATE_NOW[@]}" on an empty array unbound
 [[ -n "${COURIER_NOW:-}" ]] && GATE_NOW=(--now "$COURIER_NOW")      # tests simulate a clock
-"$PYTHON" -m app.scripts.courier_gate check --state "$STATE" "${GATE_NOW[@]}" > /dev/null || exit 0
+"$PYTHON" -m app.scripts.courier_gate check --state "$STATE" ${GATE_NOW[@]+"${GATE_NOW[@]}"} > /dev/null || exit 0
 [[ -d "$LOCK" ]] && find "$LOCK" -maxdepth 0 -mmin +120 -exec rmdir {} \; 2>/dev/null   # a lock left by a crash two hours ago is stale
 mkdir "$LOCK" 2>/dev/null || exit 0                                   # a run is already going
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
-"$PYTHON" -m app.scripts.courier_gate mark --state "$STATE" "${GATE_NOW[@]}"
+"$PYTHON" -m app.scripts.courier_gate mark --state "$STATE" ${GATE_NOW[@]+"${GATE_NOW[@]}"}
 
 exec >> "$LOG" 2>&1
 echo ""

@@ -34,6 +34,8 @@ TEST_DB_SYNC = f"postgresql://alert:alert@db:5432/{TEST_DB}"
 STEPS: list[tuple[str, list[str], Path]] = [
     ("backend tests", ["docker", "compose", "exec", "-T", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",
                        "backend", "python", "-m", "pytest", "tests", "-q", "-n", "auto", "--dist", "loadgroup"], ROOT),
+    # host-side tests (the gate's own, and the courier wrapper under the Mac's /bin/bash 3.2, which the container's bash cannot stand in for)
+    ("host tests", [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"], ROOT),
     ("frontend tests", ["npx", "vitest", "run"], FRONTEND),
     ("frontend build", ["npm", "run", "build"], FRONTEND),
 ]
@@ -58,6 +60,11 @@ def lane_for(changed: list[str], argv: list[str]) -> str:
 def steps_for(lane: str) -> list[tuple[str, list[str], Path]]:
     """The gate's steps: the frontend lane runs the frontend tests and build; the full lane adds the backend suite."""
     return [s for s in STEPS if lane == "full" or s[0].startswith("frontend")]
+
+
+def foreground_steps(lane: str) -> list[tuple[str, list[str], Path]]:
+    """The steps run in turn while the backend suite runs in the background: every step of the lane but the backend suite."""
+    return [s for s in steps_for(lane) if s[0] != "backend tests"]
 
 
 def changed_files() -> list[str] | None:
@@ -190,7 +197,7 @@ def main(argv: list[str]) -> int:
             backend_started = clock.monotonic()
             backend = subprocess.Popen(cmd, cwd=ROOT, stdout=open(BACKEND_LOG, "wb"), stderr=subprocess.STDOUT)
     if all(code == 0 for _, code in results):
-        for name, cmd, cwd in steps_for("frontend"):
+        for name, cmd, cwd in foreground_steps(lane):
             t0 = clock.monotonic()
             if name == "frontend build":
                 was_running = _stop_dev_server()      # the build and the dev server share .next

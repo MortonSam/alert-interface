@@ -1449,6 +1449,59 @@ async def check_pinned_without_deal(session) -> CheckResult:
     return CheckResult("pinned_without_deal", PASS, "No unheld ticker behaves like a pending cash deal")
 
 
+COURIER_DUE_NY = (16, 50)          # the courier runs 16:05-16:45 New York on a trading day; after this its chains for the day are due
+
+
+def courier_session_due(now_ny) -> date:
+    """Pure: the newest session the courier should have delivered by `now_ny` (New York): today once COURIER_DUE_NY has passed on
+    a trading day, else the last session before today."""
+    from app.services.trading_calendar import is_trading_day, last_session_before
+    today = now_ny.date()
+    if is_trading_day(today) and (now_ny.hour, now_ny.minute) >= COURIER_DUE_NY:
+        return today
+    return last_session_before(today)
+
+
+async def check_courier_delivered(session) -> CheckResult:
+    """WARN when the courier, the fallback while Intrinio is primary, missed a trading day: its newest chain is older than the
+    session it should have delivered. (While the courier is primary, chain_coverage judges it.)"""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from app.config import settings
+    if settings.options_primary_source == "courier":
+        return CheckResult("courier_delivered", PASS, "The courier is the primary source; chain_coverage judges it")
+    newest = (await session.execute(text("SELECT max(value::json->>'chain_last_trade') FROM system_metadata WHERE key LIKE 'chain:%'"))).scalar()
+    due = courier_session_due(_dt.now(ZoneInfo("America/New_York")))
+    have = date.fromisoformat(str(newest)[:10]) if newest else None
+    if have is None or have < due:
+        return CheckResult("courier_delivered", WARN, f"The courier (the fallback) missed a trading day: its newest chain is from {have or 'never'}, "
+                           f"the {due} session was due; check the launchd job and ~/.alert-interface/courier.launchd.log on the Mac")
+    return CheckResult("courier_delivered", PASS, f"The courier delivered the {have} session")
+
+
+REPORT_EVIDENCE_SESSIONS = 2      # a confirmed past report with neither an EPS actual nor a reaction row after this many sessions is suspect
+
+
+async def check_reports_have_evidence(session) -> CheckResult:
+    """ERROR for a confirmed earnings report dated in the past that, REPORT_EVIDENCE_SESSIONS sessions on, has neither an EPS actual
+    nor a reaction row: it was likely never an earnings report (Tesla's deliveries release of 2026-10-02 read from an Item 2.02 8-K,
+    ARES's quarter-end date of 2026-09-30 read from the release that scheduled its results)."""
+    from app.services.trading_calendar import sessions_after
+    rows = (await session.execute(text("""
+        SELECT t.symbol, e.event_date, e.confirmation_note FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE t.is_active AND e.event_type = 'earnings' AND e.is_confirmed AND e.eps_actual IS NULL AND e.event_date < CURRENT_DATE
+          AND e.event_date >= CURRENT_DATE - 120
+          AND NOT EXISTS (SELECT 1 FROM historical_reactions h WHERE h.ticker_id = e.ticker_id AND h.event_type = 'earnings'
+                          AND abs(h.event_date - e.event_date) <= 1)
+        ORDER BY t.symbol, e.event_date"""))).all()
+    today = date.today()
+    bad = [f"{sym}  reported {d} ({(note or 'no note')[:90]}): no EPS actual and no reaction row {sessions_after(d, today)} sessions on"
+           for sym, d, note in rows if sessions_after(d, today) >= REPORT_EVIDENCE_SESSIONS]
+    if bad:
+        return CheckResult("reports_have_evidence", ERROR, f"{len(bad)} confirmed past report(s) have no EPS actual and no reaction row", bad)
+    return CheckResult("reports_have_evidence", PASS, "Every confirmed past report has an EPS actual or a reaction row")
+
+
 CHAIN_SOURCE_LABELS = {"courier": "courier", "intrinio": "Intrinio"}
 CHAIN_COVERAGE_MIN_PCT = 90      # below this the options layer is failing for too many tickers to call it a quirk: ERROR, and an alert
 
@@ -3144,6 +3197,8 @@ CHECKS = [
     check_iv_history_out_of_band,
     # Options chains
     check_chain_coverage,
+    check_courier_delivered,
+    check_reports_have_evidence,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

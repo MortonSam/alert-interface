@@ -279,8 +279,12 @@ class EdgarClient:
             print(f"Warning: could not cache filing {accession_number}: {redact(exc)}", flush=True)
         return html
 
-    async def list_filing_documents(self, cik: str, accession_number: str) -> list[str]:
-        """The .htm documents in a filing (the cover and its exhibits), from the filing's index. Cached 24h."""
+    async def list_filing_documents(self, cik: str, accession_number: str, every_exhibit: bool = False) -> list[str]:
+        """The .htm documents in a filing (the cover and its exhibits), from the filing's index. Cached 24h.
+
+        The default filter also drops any name starting with "r" (meant for the R1.htm viewer pages), which loses exhibits named
+        "release2q26earnings.htm" or "rf-...exhibit991.htm"; every_exhibit=True drops only the viewer pages and the index pages.
+        The default is kept for the release-EPS, dividend, growth and corporate-action readers until they are rechecked with it."""
         import json as _json
         safe_acc = accession_number.replace("-", "")
         cache_file = _cache_path(f"edgar_{accession_number}_index.json")
@@ -294,8 +298,7 @@ class EdgarClient:
                 cache_file.write_text(_json.dumps(data), encoding="utf-8")
             except OSError:
                 pass
-        names = [it.get("name", "") for it in data.get("directory", {}).get("item", [])]
-        return [n for n in names if n.lower().endswith((".htm", ".html")) and not n.lower().startswith("r") or n.lower().startswith("ex")]
+        return document_names([it.get("name", "") for it in data.get("directory", {}).get("item", [])], every_exhibit)
 
     async def fetch_filing_document(self, cik: str, accession_number: str, name: str) -> str:
         """One document of a filing (an exhibit, say), cached 24h by accession and name."""
@@ -389,6 +392,15 @@ class EdgarClient:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def document_names(names: list[str], every_exhibit: bool = False) -> list[str]:
+    """Pure: the filing's .htm documents. every_exhibit drops only the XBRL viewer pages (R1.htm) and the index pages; the
+    default also drops any name starting with "r" (see EdgarClient.list_filing_documents)."""
+    import re as _re
+    if every_exhibit:
+        return [n for n in names if n.lower().endswith((".htm", ".html")) and not _re.fullmatch(r"r\d+\.htm", n.lower()) and "-index" not in n.lower()]
+    return [n for n in names if n.lower().endswith((".htm", ".html")) and not n.lower().startswith("r") or n.lower().startswith("ex")]
+
 
 def _extract_section(text: str, start_pattern: str, end_pattern: str) -> str:
     """Extract text between a start heading and an end heading (case-insensitive)."""

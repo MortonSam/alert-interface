@@ -145,9 +145,14 @@ async def health_check():
                 result["status"] = "degraded"
 
             try:
-                opt_row = await session.execute(sa.text("SELECT max(snapshot_date) FROM put_call_snapshots"))
+                # the newest chain date of the source the pages read (settings.options_primary_source), not the courier's put/call rows
+                from app.services import chain_store
+                from app.config import settings as _settings
+                prefix = chain_store._PREFIX.get(_settings.options_primary_source, "chain")
+                opt_row = await session.execute(sa.text(
+                    "SELECT max(value::json->>'chain_last_trade') FROM system_metadata WHERE key LIKE :p"), {"p": f"{prefix}:%"})
                 opt_date = opt_row.scalar()
-                result["options_data_date"] = opt_date.isoformat() if opt_date else None
+                result["options_data_date"] = str(opt_date)[:10] if opt_date else None
             except Exception:
                 result["status"] = "degraded"
 

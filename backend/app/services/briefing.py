@@ -38,7 +38,7 @@ LISTING_COMMAS = 3             # a sentence with this many commas is a list of s
 LISTING_STARTS = ("the company operates through", "it operates through", "its ")   # "Its <x> segment offers ..." is a listing
 # names that read badly when shortened from the stored one: BNY's stored name is cut off ("The Bank of New York Mellon Cor"),
 # and Southern Company alone reads as a region. Keyed by symbol; the name a sentence uses, exactly.
-DISPLAY_NAMES = {"BNY": "BNY", "SO": "Southern Company"}
+DISPLAY_NAMES = {"BNY": "BNY", "SO": "Southern Company", "AIG": "AIG", "PEG": "PSEG", "DIS": "Disney", "HIG": "Hartford"}
 TRAILING_WORDS = ("group", "companies")   # dropped from the end of a shortened name when a word remains: "Cigna Group" reads "Cigna"
 NAME_SUFFIXES = ("incorporated", "inc", "corporation", "corp", "company", "co", "plc", "ltd", "limited", "holdings")   # stripped from the end of a company name
 TIMING_PHRASE = {"bmo": "before the open", "amc": "after the close"}

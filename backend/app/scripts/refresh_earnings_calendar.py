@@ -47,10 +47,11 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
-from app.services.earnings_calendar import (
+from app.services.earnings_calendar import (SAME_RELEASE_LOOKBACK_DAYS, same_release_stale,
     CALENDAR_SOURCES, EDGAR_202_LOOKBACK_DAYS, SAME_REPORT_DAYS, SOURCE_LABELS, Candidate, FutureDate, PastResolution,
     StoredDate, beyond_calendar_reach, far_note, merge_future, resolve_past, standing_candidates,
 )
+from app.services.earnings_release import is_earnings_release
 from app.services.edgar_client import EdgarClient
 from app.services.finnhub_client import FinnhubClient
 from app.services.report_announcements import edgar_ir_8ks, from_8k_text, from_news
@@ -407,6 +408,17 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
                 HistoricalReaction.ticker_id == ticker.id, HistoricalReaction.event_type == EventType.EARNINGS)
         )).scalars().all())
 
+        # the same release cannot confirm two dates: a date stored from it earlier (ARES's Sep 30, read as the report date before
+        # quarter-end dates were refused) is removed once it confirms another, unless a reaction row stands on it
+        if company is not None:
+            for e in (await session.execute(select(Event).where(
+                    Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True),
+                    Event.event_date >= today - timedelta(days=SAME_RELEASE_LOOKBACK_DAYS)))).scalars().all():
+                if same_release_stale(e.event_date, e.confirmation_note, company.day, company.evidence, reactions):
+                    plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; the same release confirms {company.day.isoformat()}")
+                    await session.delete(e)
+            await session.flush()
+
         actuals = sources["finnhub_actual"].get(sym, []) + sources["yfinance_reported"].get(sym, [])
         stored = list((await session.execute(
             select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today)
@@ -477,7 +489,9 @@ async def _edgar_202_dates(edgar: EdgarClient, sym: str, today: date) -> list[da
                     d = date.fromisoformat(r["filing_date"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                if (today - d).days <= 30:
+                # an Item 2.02 filing is evidence of a report only when it states per-share results (services/earnings_release):
+                # Tesla's deliveries release of 2026-10-02 is filed under the same item
+                if (today - d).days <= 30 and await is_earnings_release(edgar, cik, r["accession"]):
                     out.append(d)
         return out
     except Exception as exc:

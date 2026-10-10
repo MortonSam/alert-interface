@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import push_window
-from push_window import REBUILD_TEST_DB, STEPS, TEST_DB, gate, in_window, lane_for, steps_for
+from push_window import REBUILD_TEST_DB, STEPS, TEST_DB, foreground_steps, gate, in_window, lane_for, steps_for
 
 NY = ZoneInfo("America/New_York")
 
@@ -48,7 +48,7 @@ class Gate(unittest.TestCase):
         self.assertFalse(gate([("backend tests", 2)])[0])
 
     def test_the_steps_are_the_two_suites_and_the_build(self):
-        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "frontend tests", "frontend build"])
+        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "host tests", "frontend tests", "frontend build"])
         for _, cmd, _ in STEPS:
             self.assertNotIn("|", " ".join(cmd))                  # exit codes are read directly, never through a pipe
 
@@ -65,6 +65,12 @@ class LaneTests(unittest.TestCase):
     def test_the_frontend_lane_keeps_both_frontend_steps_and_the_full_lane_all_three(self):
         self.assertEqual([name for name, _, _ in steps_for("frontend")], ["frontend tests", "frontend build"])
         self.assertEqual(steps_for("full"), STEPS)
+
+    def test_the_full_lane_runs_the_host_tests_beside_the_backend_suite(self):
+        self.assertEqual([n for n, _, _ in foreground_steps("full")], ["host tests", "frontend tests", "frontend build"])
+        self.assertEqual([n for n, _, _ in foreground_steps("frontend")], ["frontend tests", "frontend build"])
+        host = next(c for n, c, _ in STEPS if n == "host tests")
+        self.assertEqual(host[1:], ["-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])   # picks up test_courier_wrapper.py
 
     def test_the_backend_suite_runs_on_the_test_database_in_parallel(self):
         cmd = next(c for n, c, _ in STEPS if n == "backend tests")
