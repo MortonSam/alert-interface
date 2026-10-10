@@ -89,14 +89,15 @@ async def build_sections(db, now: datetime):
     quotes = [{"symbol": r.symbol, "name": r.name, "price": float(r.price) if r.price is not None else None,
                "change_pct": float(r.change_pct) if r.change_pct is not None else None, "quote_time": r.quote_time} for r in qrows]
     session = N.session_quotes(quotes)
-    srows = (await db.execute(sa.text("""
-        SELECT url, headline, source, published_at, related FROM news_stories
-        WHERE published_at >= :c AND cardinality(related) > 0"""), {"c": now - timedelta(hours=N.FRESH_HOURS)})).all()
-    stories = [{"url": r.url, "headline": r.headline, "source": r.source, "published_at": r.published_at, "related": list(r.related)} for r in srows]
     up, down = N.movers(quotes)
-    # a mover's headline and the stories must be published after the previous regular session's close
+    # the news window follows the session the prices come from: from the close before that session until now (not a rolling 24
+    # hours), so Friday's movers keep their headlines over the weekend and before Monday's open
     session_day = max((q["quote_time"] for q in session), default=now).astimezone(N.NEW_YORK).date()
     since = N.previous_session_close(session_day)
+    srows = (await db.execute(sa.text("""
+        SELECT url, headline, source, published_at, related FROM news_stories
+        WHERE published_at >= :c AND published_at <= :n AND cardinality(related) > 0"""), {"c": since, "n": now})).all()
+    stories = [{"url": r.url, "headline": r.headline, "source": r.source, "published_at": r.published_at, "related": list(r.related)} for r in srows]
     last_reports = dict((await db.execute(sa.text("""
         SELECT t.symbol, max(d) FROM tickers t JOIN (
             SELECT ticker_id, event_date AS d FROM historical_reactions WHERE event_type = 'earnings' AND event_date <= :today
@@ -105,18 +106,18 @@ async def build_sections(db, now: datetime):
         ) x ON x.ticker_id = t.id WHERE t.is_active GROUP BY t.symbol"""), {"today": session_day})).all())
 
     change = {q["symbol"]: q["change_pct"] for q in session}
-    # our move, close to close from the stored bars once the session's bar is in, else the quote's change against the prior close
-    moves = {**change, **(await N.close_to_close(db, list(change), session_day))}
+    # the guard compares a headline's stated percent with the exact figure the page prints beside it: the quote's change
+    moves = change
     suppressed: dict = {}
-    session_close = N.session_close_at(session_day)
+
+    names = {q["symbol"]: q["name"] for q in quotes}
 
     def mover(q: dict) -> MoverItem:
-        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed,
-                           session_close)
+        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed, names)
         return MoverItem(symbol=q["symbol"], name=q["name"], price=q["price"], change_pct=q["change_pct"], quote_time=q["quote_time"],
                          headline=NewsHeadline(headline=h["headline"], url=h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
 
     up_items, down_items = [mover(q) for q in up], [mover(q) for q in down]
-    ranked = N.in_the_news(stories, change, names={q["symbol"]: q["name"] for q in quotes}, last_reports=last_reports, since=since,
-                           moves=moves, suppressed=suppressed, session_close=session_close)
+    ranked = N.in_the_news(stories, change, names=names, last_reports=last_reports, since=since, moves=moves, suppressed=suppressed,
+                           exclude_urls={m.headline.url for m in up_items + down_items if m.headline})
     return up_items, down_items, ranked, change, suppressed, session

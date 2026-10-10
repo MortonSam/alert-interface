@@ -8,9 +8,9 @@ count. In what remains, a headline is suppressed when
   - its verb clearly points the other way from the day's move: an UP_VERBS word on a down day, or a DOWN_VERBS word on an up
     day. The verb counts only when it directly follows the stock's name (or "shares"/"stock" after it) within three words with
     no hedge (HEDGES: might, could, poised, ...) before it; words from both lists are not clear, and pass;
-  - it states a percent move for the stock with the opposite sign. A same-direction percent that differs from our close passes:
-    headlines are written while the stock is still moving. A percent counts as a move only when a move word sits right before
-    it, or "shares"/"stock" leads into it.
+  - it states a percent move for the stock more than PERCENT_TOLERANCE_PP points from, or of the other sign than, the exact
+    figure the page prints beside it (the mover's change, or the change shown with the story), at every hour. A percent counts
+    as a move only when a move word sits right before it, or "shares"/"stock" leads into it.
 Freshness (published after the previous session's 4:00pm New York close) is services/news.headline_problem's first test.
 """
 from __future__ import annotations
@@ -37,7 +37,8 @@ _MONTHS = "january|february|march|april|may|june|july|august|september|october|n
 _PERIOD = re.compile(rf"\b(?:since|this\s+(?:year|month|week|quarter)|year[- ]to[- ]date|ytd|so\s+far|last\s+(?:week|month|year|quarter)|"
                      rf"over\s+the\s+(?:past|last)|in\s+(?:{_MONTHS})|in\s+\d{{4}}|in\s+a\s+year|for\s+the\s+(?:week|month|year)|"
                      rf"(?:week|month|year)ly\s+(?:gain|loss|drop|rise)|"
-                     rf"in\s+(?:\d+|a|one|two|three|four|five|six|seven|eight|nine|ten|twelve|several|a\s+few)\s+(?:trading\s+)?(?:day|week|month|year|session)s?|"
+                     rf"in\s+(?:[2-9]|\d{{2,}}|two|three|four|five|six|seven|eight|nine|ten|twelve|several|a\s+few)\s+(?:trading\s+)?(?:days|sessions)|"
+                     rf"in\s+(?:\d+|a|one|two|three|four|five|six|seven|eight|nine|ten|twelve|several|a\s+few)\s+(?:week|month|year)s?|"
                      rf"(?:from|off|below|above)\s+(?:its|their|the|a)\s+(?:record|all[- ]time|52[- ]week)?\s*(?:high|highs|peak|peaks|low|lows|top)|"
                      rf"(?:from|off)\s+(?:record|all[- ]time|52[- ]week)\s+(?:high|highs|low|lows))\b", re.I)
 # hedged forms: a verb after these is a forecast or a possibility, not the day's move
@@ -119,7 +120,7 @@ def clauses_about(headline: str, forms: list[str]) -> list[str]:
     return [p for p in parts if not _PERIOD.search(p) and not _FIGURE.search(p)]
 
 
-AFTER_CLOSE_TOLERANCE_PP = 1.5     # after the close the day's move is known: a stated percent must be this close to ours
+PERCENT_TOLERANCE_PP = 1.5     # a stated percent must be this close to the figure the page prints beside it, and of the same sign
 
 # commentary: explainers and opinion. It may appear in "In the news", never in a mover's slot (services/news.top_headline).
 _COMMENTARY = re.compile(
@@ -138,11 +139,10 @@ def is_commentary(headline: str) -> bool:
     return bool(_COMMENTARY.search(headline or ""))
 
 
-def check(headline: str, move_pct: float | None, forms: list[str] | None = None, after_close: bool = False) -> Verdict:
-    """Pure: whether a headline may show beside a stock that moved `move_pct` percent close to close. `forms` are the words that
-    name the stock (services/news.name_forms); only the clauses that name it are judged. `after_close`: the headline was
-    published after the session's close, when the day's move is known, so a stated percent must match ours within
-    AFTER_CLOSE_TOLERANCE_PP points and in sign (a different number describes a different period)."""
+def check(headline: str, move_pct: float | None, forms: list[str] | None = None) -> Verdict:
+    """Pure: whether a headline may show beside a stock whose printed change is `move_pct` percent (the exact figure the page
+    shows next to it). `forms` are the words that name the stock (services/news.name_forms); only the clauses that name it are
+    judged. A stated percent must be within PERCENT_TOLERANCE_PP points of the printed figure and of the same sign, at every hour."""
     judged = clauses_about(headline, forms or [])
     stated = next((v for v in (stated_move(c) for c in judged) if v is not None), None)
     if move_pct is None or move_pct == 0 or not judged:
@@ -154,9 +154,9 @@ def check(headline: str, move_pct: float | None, forms: list[str] | None = None,
         return Verdict(f"its verb says {'up' if d > 0 else 'down'} on {'a down' if move_pct < 0 else 'an up'} day", stated)
     if stated is not None and (stated > 0) != (move_pct > 0):
         return Verdict("its stated move has the opposite sign", stated)
-    if after_close and stated is not None and abs(stated - move_pct) > AFTER_CLOSE_TOLERANCE_PP:
-        return Verdict(f"published after the close, it states {stated:+g}% against our close-to-close {move_pct:+.2f}% "
-                       f"(more than {AFTER_CLOSE_TOLERANCE_PP:g} points apart)", stated)
+    if stated is not None and abs(stated - move_pct) > PERCENT_TOLERANCE_PP:
+        return Verdict(f"it states {stated:+g}% against the {move_pct:+.2f}% printed beside it "
+                       f"(more than {PERCENT_TOLERANCE_PP:g} points apart)", stated)
     return Verdict(None, stated)
 
 

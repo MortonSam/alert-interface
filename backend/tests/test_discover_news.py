@@ -45,13 +45,17 @@ def test_a_headline_counts_for_a_company_only_when_it_names_it():
     assert N.top_headline(stories[:1], "KO", "The Coca-Cola Company") is None             # no such story: no headline
 
 
-def test_in_the_news_ranks_by_the_named_stocks_move_then_recency_two_per_stock():
+def test_in_the_news_ranks_by_the_named_stocks_move_one_story_per_stock_plain_news_first():
     s = lambda u, h, rel, mins: {"url": u, "headline": h, "related": rel, "published_at": NOW - timedelta(minutes=mins), "source": "Yahoo"}
     stories = [s("1", "Intel slides", ["INTC"], 50), s("2", "Intel and AMD slip", ["INTC", "AMD"], 10), s("3", "Is AMD stock worth it", ["INTC", "AMD"], 5),
                s("4", "Intel third story", ["INTC"], 1), s("5", "Micron breakout", ["MU"], 30), s("6", "Unrelated", ["MU"], 2)]
     names = {"INTC": "Intel Corporation", "AMD": "Advanced Micro Devices, Inc.", "MU": "Micron Technology, Inc."}
     out = N.in_the_news(stories, {"INTC": -6.6, "AMD": -4.4, "MU": -4.6}, names=names)
-    assert [(r["url"], r["symbol"]) for r in out] == [("4", "INTC"), ("2", "INTC"), ("5", "MU"), ("3", "AMD")]   # "Is AMD stock" goes under AMD
+    assert [(r["url"], r["symbol"]) for r in out] == [("4", "INTC"), ("5", "MU"), ("3", "AMD")]   # one per stock; "Is AMD stock" goes under AMD
+    out = N.in_the_news(stories, {"INTC": -6.6, "AMD": -4.4, "MU": -4.6}, names=names, exclude_urls={"4"})          # "4" is a mover's headline
+    assert [(r["url"], r["symbol"]) for r in out][0] == ("2", "INTC")
+    expl = [s("7", "Why Intel Stock Slid Today", ["INTC"], 0), s("8", "Intel cuts jobs in Oregon", ["INTC"], 40)]
+    assert N.in_the_news(expl, {"INTC": -6.6}, names=names)[0]["url"] == "8"                                          # plain news before an explainer
 
 
 def test_the_sections_fail_closed():
@@ -90,7 +94,7 @@ def test_headline_rules_established_first_no_templates_no_other_quarters_and_aft
     p = lambda s, last=date(2026, 7, 23): N.headline_problem(s, "INTC", "Intel Corporation", last, since)
     assert p(st("Intel (INTC): Buy, Sell, or Hold Post Q2 Earnings?", "Yahoo", t(13))) == "a question or template headline"
     assert p(st("Should You Buy Intel Stock Now", "Yahoo", t(13))) == "a question or template headline"
-    assert p(st("Intel Among Stocks to Watch Today", "Yahoo", t(13))) == "a question or template headline"
+    assert p(st("Intel Among Stocks to Watch Today", "Yahoo", t(13))) == "a roundup about several companies"   # roundup wording
     assert p(st("Is It Time to Sell Intel", "Yahoo", t(13))) == "a question or template headline"
     assert p(st("Intel earnings preview: what to expect", "Yahoo", t(13))) == "about an upcoming report, not the latest one"
     assert p(st("Intel second-quarter results beat", "Yahoo", t(13))).startswith("names an earnings quarter but is not from the 14 days after")
@@ -102,7 +106,7 @@ def test_headline_rules_established_first_no_templates_no_other_quarters_and_aft
     assert N.top_headline(stories, "INTC", "Intel Corporation", date(2026, 7, 23), since)["source"] == "Reuters"   # established first, then newest
     assert N.source_tier("Reuters") == 0 and N.source_tier("CNBC") == 0 and N.source_tier("Yahoo") == 1 and N.source_tier(None) == 1
     out = N.in_the_news(stories, {"INTC": -5.3}, names={"INTC": "Intel Corporation"}, last_reports={"INTC": date(2026, 7, 23)}, since=since)
-    assert [r["source"] for r in out] == ["Yahoo", "Reuters"]                                                  # by move, then recency; the template is out
+    assert [r["source"] for r in out] == ["Yahoo"]                                                             # one story per stock; the template is out
 
 
 

@@ -48,10 +48,26 @@ def test_the_mover_slot_takes_an_established_source_or_an_agreeing_headline():
     assert [r["url"] for r in N.in_the_news([commentary], {"INTC": -2.2}, names={"INTC": "Intel Corporation"})] == ["c"]   # still in the news
 
 
-def test_the_number_check_suppresses_only_an_opposite_sign():
-    assert G.check("Intel Slides 3% as Chip Stocks Sell Off", -5.3, INTC).reason is None     # same direction, a different size: passes
+def test_a_stated_percent_must_match_the_printed_figure_within_one_and_a_half_points():
+    assert G.check("Intel Slides 3% as Chip Stocks Sell Off", -3.9, INTC).reason is None
+    assert G.check("Intel Slides 3% as Chip Stocks Sell Off", -5.3, INTC).reason.startswith("it states -3% against the -5.30% printed")
     assert G.check("Intel stock +5% premarket", -1.0, INTC).reason == "its stated move has the opposite sign"
     assert G.check("Intel stock falls 4%", None, INTC).reason is None
+    assert G.check("SBA Communications (SBAC) Jumped, But What Is Driving Attention Now?", -2.0,
+                   N.name_forms("SBAC", "SBA Communications Corporation")).reason == "its verb says up on a down day"   # "(SBAC)" is part of the name
+
+
+def test_roundups_are_judged_from_the_headline_not_the_vendor_tags():
+    u = {"CCI": "Crown Castle Inc.", "T": "AT&T Inc.", "TMUS": "T-Mobile US, Inc.", "VZ": "Verizon Communications Inc.", "MRNA": "Moderna, Inc.", "MRK": "Merck & Co., Inc."}
+    assert not N.is_roundup("Crown Castle Soars 13% as SpaceX’s $8 Billion Spectrum Buy Keeps Tower Build Option “Very Much Alive”", u)
+    assert N.is_roundup("Verizon, AT&T, T-Mobile Stocks Slide as SpaceX Expands Wireless Ambitions", u)
+    assert N.is_roundup("Stocks making the biggest moves midday: T-Mobile, Verizon, AT&T, Crown Castle, Teva & more", u)
+    assert N.is_roundup("BNTX, NVAX, MRNA Lead Vaccine Rally After Report Of An NIH Cancer-Vaccine Push", u)
+    assert N.is_roundup("Novavax Soars 16%, Moderna Surges 11%, Merck Climbs 3% as Biotech Rallies", u)
+    assert N.is_roundup("These Stocks Are the Hidden Winners of SpaceX’s Spectrum Binge", u)
+    story = {"headline": "Crown Castle Soars 13% as SpaceX Buy Keeps Tower Option Alive", "related": ["CCI", "AMT", "SBAC", "T", "VZ"],
+             "published_at": datetime(2026, 10, 9, 15, tzinfo=timezone.utc), "url": "x", "source": "Yahoo"}
+    assert N.headline_problem(story, "CCI", "Crown Castle Inc.", None, datetime(2026, 10, 8, 20, tzinfo=timezone.utc), u) is None
 
 
 def test_both_word_lists_live_in_one_file():

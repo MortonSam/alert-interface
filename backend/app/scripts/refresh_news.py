@@ -18,7 +18,7 @@ from sqlalchemy import text
 from app.database import ScriptSessionLocal
 from app.services import finnhub_client
 from app.services.finnhub_client import FinnhubClient
-from app.services.news import FRESH_HOURS, STEP_LABEL, dedupe
+from app.services.news import FRESH_HOURS, RETENTION_DAYS, STEP_LABEL, dedupe
 from app.services.redact import redact
 from app.services.step_outcomes import record_step_fields
 
@@ -81,7 +81,7 @@ async def run(argv: list[str]) -> int:
                         related = ARRAY(SELECT DISTINCT unnest(news_stories.related || EXCLUDED.related) ORDER BY 1),
                         category = CASE WHEN EXCLUDED.category = 'company' THEN 'company' ELSE news_stories.category END,
                         fetched_at = now()"""), st)
-            pruned = (await s.execute(text("DELETE FROM news_stories WHERE published_at < :c"), {"c": now - timedelta(hours=FRESH_HOURS)})).rowcount
+            pruned = (await s.execute(text("DELETE FROM news_stories WHERE published_at < :c"), {"c": now - timedelta(days=RETENTION_DAYS)})).rowcount
             for sym, q in snaps.items():
                 await s.execute(text("""
                     INSERT INTO quote_snapshots (symbol, price, change_pct, prev_close, quote_time, captured_at)
@@ -98,7 +98,7 @@ async def run(argv: list[str]) -> int:
         exit_code = 1
     seconds = round(time.time() - t0, 1)
     print(f"News: {len(stories)} stories from {len(raw)} items ({sum(1 for s in stories.values() if s['related'])} about S&P 500 companies), "
-          f"{len(snaps)} quotes, {len(failed)} failed request(s), {pruned} stories older than {FRESH_HOURS}h pruned, {seconds}s")
+          f"{len(snaps)} quotes, {len(failed)} failed request(s), {pruned} stories older than {RETENTION_DAYS} days pruned, {seconds}s")
     for f in failed[:20]:
         print(f"  failed: {f}")
     await record_step_fields(STEP_LABEL, {"exit": exit_code, "at": datetime.now(timezone.utc).isoformat(), "seconds": seconds,
