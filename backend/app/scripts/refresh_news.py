@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 
+from app.config import settings
 from app.database import ScriptSessionLocal
 from app.services import finnhub_client
 from app.services.finnhub_client import FinnhubClient
@@ -75,9 +76,10 @@ async def run(argv: list[str]) -> int:
         async with ScriptSessionLocal() as s:
             for st in stories.values():
                 await s.execute(text("""
-                    INSERT INTO news_stories (url, headline, source, published_at, related, category, fetched_at)
-                    VALUES (:url, :headline, :source, :published_at, :related, :category, now())
+                    INSERT INTO news_stories (url, headline, source, published_at, related, category, summary, fetched_at)
+                    VALUES (:url, :headline, :source, :published_at, :related, :category, :summary, now())
                     ON CONFLICT (url) DO UPDATE SET
+                        summary = COALESCE(EXCLUDED.summary, news_stories.summary),
                         related = ARRAY(SELECT DISTINCT unnest(news_stories.related || EXCLUDED.related) ORDER BY 1),
                         category = CASE WHEN EXCLUDED.category = 'company' THEN 'company' ELSE news_stories.category END,
                         fetched_at = now()"""), st)
@@ -103,6 +105,12 @@ async def run(argv: list[str]) -> int:
         print(f"  failed: {f}")
     await record_step_fields(STEP_LABEL, {"exit": exit_code, "at": datetime.now(timezone.utc).isoformat(), "seconds": seconds,
                                           "stories": len(stories), "quotes": len(snaps), "failed": len(failed), "failed_sample": failed[:10]})
+    if exit_code == 0 and settings.discover_news_enabled:       # Ivy's sentences for the rows the page now shows (behind the news flag)
+        from app.scripts.explain_moves import run as explain_moves
+        try:
+            await explain_moves([])
+        except Exception as exc:                                  # a failed sentence run never fails the news step: rows show headlines
+            print(f"  Ivy's sentences failed: {redact(exc)[:200]}")
     return exit_code
 
 

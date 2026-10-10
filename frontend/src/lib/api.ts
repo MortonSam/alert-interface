@@ -656,11 +656,21 @@ export interface MoverItem {
   change_pct: number;
   quote_time: string;            // the stored quote's last trade time
   headline: NewsHeadline | null; // the company's newest story that names it; none when there is no such story
+  ivy?: IvyLine | null;          // Ivy's sentence (backend services/ivy_moves); absent when the row falls back to the headline
+}
+
+export interface IvyLine {
+  sentence: string;              // passed the check, or exactly "No reported news explains this move."
+  result: "passed" | "no_news";
+  lead: NewsHeadline | null;     // the story that informed her most
+  more: number;                  // how many other stories informed her
+  written_at: string | null;
 }
 
 export interface NewsStoryItem extends NewsHeadline {
   symbol: string;
   change_pct: number;
+  ivy?: IvyLine | null;
 }
 
 export interface NewsSectionsResponse {

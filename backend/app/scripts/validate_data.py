@@ -1524,6 +1524,29 @@ async def check_news_headline_guard(session) -> CheckResult:
     return CheckResult("news_headline_guard", PASS, f"{len(suppressed)} headline(s) suppressed against {shown} shown", rows)
 
 
+async def check_ivy_sentences(session) -> CheckResult:
+    """WARN when more than ivy_moves.FALLBACK_WARN_SHARE of the rows in the latest run of Ivy's Discover sentences fell back to the
+    headline display (her sentence failed the check twice). Only while DISCOVER_NEWS_ENABLED is on."""
+    import json as _json
+    from app.config import settings
+    from app.services import ivy_moves as M
+    from app.services.system_metadata_service import get_value
+    if not settings.discover_news_enabled:
+        return CheckResult("ivy_sentences", PASS, "Discover news is off (DISCOVER_NEWS_ENABLED): no sentences shown")
+    raw = await get_value(session, M.RUN_KEY)
+    if not raw:
+        return CheckResult("ivy_sentences", PASS, "No run of Ivy's Discover sentences recorded yet")
+    run = _json.loads(raw)
+    rows, fallback = int(run.get("rows") or 0), int(run.get("fallback") or 0)
+    detail = (f"run at {run.get('at')}: {rows} rows, {run.get('passed', 0)} passed, {run.get('no_news', 0)} no news, {fallback} fell back, "
+              f"{run.get('written', 0)} written for ${run.get('cost_usd', 0)}")
+    if rows and fallback / rows > M.FALLBACK_WARN_SHARE:
+        rec = (await session.execute(text("""SELECT symbol, problems FROM ivy_move_notes WHERE result = 'fallback' ORDER BY written_at DESC LIMIT 10"""))).all()
+        return CheckResult("ivy_sentences", WARN, f"{fallback} of {rows} rows fell back to the headline display (more than {M.FALLBACK_WARN_SHARE:.0%}); {detail}",
+                           [f"{r.symbol}: {_json.dumps(r.problems)[:200]}" for r in rec])
+    return CheckResult("ivy_sentences", PASS, detail)
+
+
 CHAIN_SOURCE_LABELS = {"courier": "courier", "intrinio": "Intrinio"}
 CHAIN_COVERAGE_MIN_PCT = 90      # below this the options layer is failing for too many tickers to call it a quirk: ERROR, and an alert
 
@@ -3222,6 +3245,7 @@ CHECKS = [
     check_courier_delivered,
     check_reports_have_evidence,
     check_news_headline_guard,
+    check_ivy_sentences,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard
