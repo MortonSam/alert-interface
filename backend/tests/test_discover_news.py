@@ -38,9 +38,9 @@ def test_a_headline_counts_for_a_company_only_when_it_names_it():
     assert N.names_company("How XOM's Strong Balance Sheet Helps", "XOM", "Exxon Mobil Corporation")
     assert not N.names_company("PepsiCo cuts guidance: what these red flags say", "KO", "The Coca-Cola Company")
     assert not N.names_company("It is a good day to buy", "IT", "Gartner, Inc.") and not N.names_company("ko and pep", "KO", None)
-    stories = [{"headline": "PepsiCo cuts guidance", "related": ["KO", "PEP"], "published_at": NOW, "url": "a", "source": None},
-               {"headline": "Coca-Cola raises its dividend", "related": ["KO"], "published_at": NOW - timedelta(hours=2), "url": "b", "source": None},
-               {"headline": "These Dow stocks are moving: Coca-Cola, Intel, AMD, Micron", "related": ["KO", "INTC", "AMD", "MU"], "published_at": NOW, "url": "c", "source": None}]
+    stories = [{"headline": "PepsiCo cuts guidance", "related": ["KO", "PEP"], "published_at": NOW, "url": "a", "source": "Reuters"},
+               {"headline": "Coca-Cola raises its dividend", "related": ["KO"], "published_at": NOW - timedelta(hours=2), "url": "b", "source": "Reuters"},
+               {"headline": "These Dow stocks are moving: Coca-Cola, Intel, AMD, Micron", "related": ["KO", "INTC", "AMD", "MU"], "published_at": NOW, "url": "c", "source": "Reuters"}]
     assert N.top_headline(stories, "KO", "The Coca-Cola Company")["url"] == "b"           # newest that names KO and is not a roundup
     assert N.top_headline(stories[:1], "KO", "The Coca-Cola Company") is None             # no such story: no headline
 

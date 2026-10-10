@@ -3,9 +3,11 @@ headline text, the stock's own name forms and our close-to-close move, never any
 
 Only the clauses that name the stock are judged (a headline is split at ";", ":", dashes, commas and "as", "while", "after",
 "amid", "but", "following", "and"), and a clause about a non-price figure (FIGURE_WORDS: volume, revenue, sales, ...) or a
-longer period (since December, this year, in September, ...) does not count. In what remains, a headline is suppressed when
+longer period (since December, this year, in September, in three months, from its record high, off its highs, ...) does not
+count. In what remains, a headline is suppressed when
   - its verb clearly points the other way from the day's move: an UP_VERBS word on a down day, or a DOWN_VERBS word on an up
-    day (words from both lists are not clear, and pass);
+    day. The verb counts only when it directly follows the stock's name (or "shares"/"stock" after it) within three words with
+    no hedge (HEDGES: might, could, poised, ...) before it; words from both lists are not clear, and pass;
   - it states a percent move for the stock with the opposite sign. A same-direction percent that differs from our close passes:
     headlines are written while the stock is still moving. A percent counts as a move only when a move word sits right before
     it, or "shares"/"stock" leads into it.
@@ -34,7 +36,15 @@ FIGURE_WORDS = ("volume", "volumes", "revenue", "revenues", "sales", "earnings",
 _MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december"
 _PERIOD = re.compile(rf"\b(?:since|this\s+(?:year|month|week|quarter)|year[- ]to[- ]date|ytd|so\s+far|last\s+(?:week|month|year|quarter)|"
                      rf"over\s+the\s+(?:past|last)|in\s+(?:{_MONTHS})|in\s+\d{{4}}|in\s+a\s+year|for\s+the\s+(?:week|month|year)|"
-                     rf"(?:week|month|year)ly\s+(?:gain|loss|drop|rise))\b", re.I)
+                     rf"(?:week|month|year)ly\s+(?:gain|loss|drop|rise)|"
+                     rf"in\s+(?:\d+|a|one|two|three|four|five|six|seven|eight|nine|ten|twelve|several|a\s+few)\s+(?:trading\s+)?(?:day|week|month|year|session)s?|"
+                     rf"(?:from|off|below|above)\s+(?:its|their|the|a)\s+(?:record|all[- ]time|52[- ]week)?\s*(?:high|highs|peak|peaks|low|lows|top)|"
+                     rf"(?:from|off)\s+(?:record|all[- ]time|52[- ]week)\s+(?:high|highs|low|lows))\b", re.I)
+# hedged forms: a verb after these is a forecast or a possibility, not the day's move
+# a word that starts a new subject: a verb after it is about something else ("Home Depot until rates fall")
+BREAKERS = ("until", "if", "when", "before", "after", "despite", "because", "unless", "as", "while", "amid", "with", "on", "for",
+            "than", "since", "even", "though", "although", "where", "whose", "that", "which", "its", "their", "his", "her")
+HEDGES = ("might", "could", "may", "would", "should", "poised", "set", "likely", "expected", "aims", "eyes", "seen", "can", "will", "to")
 _FIGURE = re.compile(r"\b(?:" + "|".join(FIGURE_WORDS) + r")\b", re.I)
 _CLAUSE = re.compile(r"\s*(?:[;:|\u2014\u2013]|\s-\s|,\s+|\s(?:as|while|after|amid|but|following|and)\s)\s*", re.I)
 
@@ -54,6 +64,36 @@ def direction(headline: str) -> int:
     """Pure: +1 when the headline's verbs clearly say up, -1 clearly down, 0 when neither or both."""
     up, down = bool(_UP.search(headline)), bool(_DOWN.search(headline))
     return 1 if up and not down else -1 if down and not up else 0
+
+
+def subject_direction(clause: str, forms: list[str]) -> int:
+    """Pure: +1 or -1 when a direction verb directly follows the stock's name (or "shares"/"stock" after the name) within three
+    words, with no hedge (might, could, poised, ...) in between; 0 otherwise. `clause` starts at the name
+    (clauses_about). With no forms, any clear verb in the clause counts."""
+    if not forms:
+        return direction(clause)
+    words = re.findall(r"[A-Za-z0-9'’.&+-]+|\([^)]*\)", clause)
+    # skip the name itself (it may be several words) and an optional "(TICKER)", "'s", "shares"/"stock"
+    start = 0
+    for f in sorted(forms, key=len, reverse=True):
+        n = len(f.split())
+        if " ".join(words[:n]).lower().rstrip("'’s").rstrip("'’") == f.lower() or " ".join(words[:n]).lower().startswith(f.lower()):
+            start = n
+            break
+    rest = words[start:]
+    if rest and rest[0].startswith("("):
+        rest = rest[1:]
+    if rest and rest[0].lower() in ("shares", "stock", "stocks"):
+        rest = rest[1:]
+    window = [w.lower().strip(".,'’") for w in rest[:3]]
+    for i, w in enumerate(window):
+        if w in HEDGES or w in BREAKERS:
+            return 0
+        if w in UP_VERBS:
+            return 1
+        if w in DOWN_VERBS:
+            return -1
+    return 0
 
 
 def stated_move(headline: str) -> float | None:
@@ -86,11 +126,25 @@ def check(headline: str, move_pct: float | None, forms: list[str] | None = None)
     stated = next((v for v in (stated_move(c) for c in judged) if v is not None), None)
     if move_pct is None or move_pct == 0 or not judged:
         return Verdict(None, stated)
-    ups = sum(1 for c in judged if direction(c) > 0)
-    downs = sum(1 for c in judged if direction(c) < 0)
+    dirs = [subject_direction(c, forms or []) for c in judged]
+    ups, downs = sum(1 for x in dirs if x > 0), sum(1 for x in dirs if x < 0)
     d = 1 if ups and not downs else -1 if downs and not ups else 0
     if d and (d > 0) != (move_pct > 0):
         return Verdict(f"its verb says {'up' if d > 0 else 'down'} on {'a down' if move_pct < 0 else 'an up'} day", stated)
     if stated is not None and (stated > 0) != (move_pct > 0):
         return Verdict("its stated move has the opposite sign", stated)
     return Verdict(None, stated)
+
+
+def agrees(headline: str, move_pct: float | None, forms: list[str] | None = None) -> bool:
+    """Pure: the headline states a move in the same direction as the stock's: a verb that follows its name, or a stated percent,
+    with the stock's sign. The mover slot takes a headline from a source outside the established ones only when this holds."""
+    if not move_pct:
+        return False
+    judged = clauses_about(headline, forms or [])
+    for c in judged:
+        d = subject_direction(c, forms or [])
+        v = stated_move(c)
+        if (d and (d > 0) == (move_pct > 0)) or (v is not None and (v > 0) == (move_pct > 0)):
+            return True
+    return False

@@ -26,6 +26,28 @@ def test_only_the_clause_naming_the_stock_counts():
     assert G.check("Intel Stock Is Up 212% Since December", -5.3, INTC).reason is None
 
 
+def test_longer_periods_hedges_and_other_subjects_do_not_count():
+    assert G.check("CPAY Stock Rises 14.6% in Three Months", -0.09, N.name_forms("CPAY", "Corpay, Inc.")).reason is None
+    assert G.check("Goldman Sachs Falls 20% From Record High", 0.42, N.name_forms("GS", "The Goldman Sachs Group, Inc.")).reason is None
+    assert G.check("Meta Stock Up 21% in One Month", -0.41, N.name_forms("META", "Meta Platforms, Inc.")).reason is None
+    assert G.check("Jim Cramer Sees Little Relief for Home Depot (HD) Until Rates Fall", 1.97, N.name_forms("HD", "The Home Depot, Inc.")).reason is None
+    assert G.check("PepsiCo Admits Its Soda Business Is Falling Behind Rivals", 3.73, N.name_forms("PEP", "PepsiCo, Inc.")).reason is None
+    assert G.check("Why Micron (MU) Might be Well Poised for a Surge", -4.79, N.name_forms("MU", "Micron Technology, Inc.")).reason is None
+    assert G.check("MU Stock Slides For Fourth Day", 4.06, N.name_forms("MU", "Micron Technology, Inc.")).reason.startswith("its verb says down")
+    assert G.check("Humana Soars On Medicare Advantage Star Rating", -2.37, N.name_forms("HUM", "Humana Inc.")).reason.startswith("its verb says up")
+
+
+def test_the_mover_slot_takes_an_established_source_or_an_agreeing_headline():
+    t = datetime(2026, 10, 9, 15, tzinfo=timezone.utc)
+    commentary = {"url": "c", "headline": "Intel Is Worth More Than Coca-Cola and PepsiCo Put Together", "source": "Yahoo", "published_at": t, "related": ["INTC"]}
+    agreeing = {"url": "a", "headline": "Intel stock slides as chip stocks sell off", "source": "Yahoo", "published_at": t, "related": ["INTC"]}
+    reuters = {"url": "r", "headline": "Intel names new foundry chief", "source": "Reuters", "published_at": t, "related": ["INTC"]}
+    assert N.top_headline([commentary], "INTC", "Intel Corporation", None, None, -2.2) is None
+    assert N.top_headline([commentary, agreeing], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "a"
+    assert N.top_headline([commentary, reuters], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "r"
+    assert [r["url"] for r in N.in_the_news([commentary], {"INTC": -2.2}, names={"INTC": "Intel Corporation"})] == ["c"]   # still in the news
+
+
 def test_the_number_check_suppresses_only_an_opposite_sign():
     assert G.check("Intel Slides 3% as Chip Stocks Sell Off", -5.3, INTC).reason is None     # same direction, a different size: passes
     assert G.check("Intel stock +5% premarket", -1.0, INTC).reason == "its stated move has the opposite sign"
@@ -43,7 +65,7 @@ def test_both_word_lists_live_in_one_file():
 def test_only_a_headline_that_would_have_shown_is_counted():
     t, t2 = datetime(2026, 10, 8, 18, tzinfo=timezone.utc), datetime(2026, 10, 8, 17, tzinfo=timezone.utc)
     stories = [{"url": "u1", "headline": "Intel shares surge 9% on foundry deal", "source": "Reuters", "published_at": t, "related": ["INTC"]},
-               {"url": "u2", "headline": "Intel stock jumps on chip news", "source": "Yahoo", "published_at": t2, "related": ["INTC"]},
+               {"url": "u2", "headline": "Intel stock jumps on chip news", "source": "Reuters", "published_at": t2, "related": ["INTC"]},
                {"url": "u3", "headline": "Intel stock falls 3% on chip glut worries", "source": "Yahoo", "published_at": t2, "related": ["INTC"]}]
     suppressed: dict = {}
     h = N.top_headline(stories, "INTC", "Intel Corporation", None, None, -3.4, suppressed)

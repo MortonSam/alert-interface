@@ -200,13 +200,18 @@ def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict |
 
 def top_headline(stories: list[dict], symbol: str, name: str | None = None, last_report=None, since: datetime | None = None,
                  move_pct: float | None = None, suppressed: dict | None = None) -> dict | None:
-    """Pure: the company's headline: among its stories with no headline_problem that the headline guard lets beside a `move_pct`
-    move, an established source first, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
+    """Pure: the company's headline: among its stories with no headline_problem, from an established source or stating a move in
+    the stock's own direction, that the headline guard lets beside a `move_pct` move, an established source first, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
     the company; a mover with no qualifying story shows none. Only the headline that would have shown without the guard is
     recorded when the guard suppresses it."""
+    from app.services.headline_guard import agrees
     since = since or datetime.min.replace(tzinfo=timezone.utc)
     order = lambda s: (source_tier(s.get("source")), -s["published_at"].timestamp())
-    eligible = sorted((s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None), key=order)
+    forms = name_forms(symbol, name)
+    # the mover slot: an established source, or a headline that states a move in the stock's own direction; commentary from other
+    # sources may still appear in "In the news", never beside a mover
+    eligible = sorted((s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None
+                       and (source_tier(s.get("source")) == 0 or agrees(s["headline"], move_pct, forms))), key=order)
     for i, s in enumerate(eligible):
         if guarded(s, symbol, move_pct, suppressed, name, record=(i == 0)):
             return s
