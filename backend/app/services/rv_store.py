@@ -24,14 +24,23 @@ from app.services.price_freshness import assess_history
 # 5 trading days ≈ 7 calendar days
 _FRESHNESS_DAYS = 7
 
+# The dominant session's move is printed as traded: that day's close against the previous session's close, unadjusted, the same
+# figure a quote prints for that day. The stored dominant_move_pct is dividend-adjusted (it comes from the adjusted log returns the
+# variance uses), so on an ex-dividend day it differs from the day's printed move (AT&T, Oct 9, 2026: -9.81% adjusted against
+# -10.82% as traded, a $0.2775 dividend). Without both stored closes the move is absent, never the adjusted figure.
 _LATEST_SQL = sa.text("""
-    SELECT DISTINCT ON (symbol)
-           symbol, as_of_date, rv_20d, rv_rank, rv_percentile,
-           rv_min_1y, rv_max_1y, sample_days, status, last_bar_date,
-           dominant_date, dominant_move_pct, dominant_share
-    FROM rv_snapshots
-    WHERE symbol = ANY(:symbols)
-    ORDER BY symbol, as_of_date DESC
+    SELECT DISTINCT ON (r.symbol)
+           r.symbol, r.as_of_date, r.rv_20d, r.rv_rank, r.rv_percentile,
+           r.rv_min_1y, r.rv_max_1y, r.sample_days, r.status, r.last_bar_date,
+           r.dominant_date, r.dominant_share,
+           r.dominant_move_pct AS dominant_move_adjusted_pct,
+           CASE WHEN d.close IS NOT NULL AND p.close > 0 THEN round(CAST(((d.close / p.close) - 1) * 100 AS numeric), 2) END AS dominant_move_pct
+    FROM rv_snapshots r
+    LEFT JOIN price_bars_shadow d ON d.symbol = r.symbol AND d.date = r.dominant_date
+    LEFT JOIN LATERAL (SELECT close FROM price_bars_shadow WHERE symbol = r.symbol AND date < r.dominant_date
+                       ORDER BY date DESC LIMIT 1) p ON true
+    WHERE r.symbol = ANY(:symbols)
+    ORDER BY r.symbol, r.as_of_date DESC
 """)
 
 
@@ -74,7 +83,8 @@ def dominant_note(row) -> str | None:
     if not single_session_dominates(row):
         return None
     from app.services.briefing import fmt_date
-    return f"one session dominates the 20-day window: {fmt_date(row.dominant_date)} ({float(row.dominant_move_pct):+.1f}%)"
+    move = getattr(row, "dominant_move_pct", None)
+    return f"one session dominates the 20-day window: {fmt_date(row.dominant_date)}" + (f" ({float(move):+.1f}%)" if move is not None else "")
 
 
 def single_session_dominates(row) -> bool:
@@ -89,7 +99,8 @@ def dominant_note(row) -> str | None:
     if not single_session_dominates(row):
         return None
     from app.services.briefing import fmt_date
-    return f"one session dominates the 20-day window: {fmt_date(row.dominant_date)} ({float(row.dominant_move_pct):+.1f}%)"
+    move = getattr(row, "dominant_move_pct", None)
+    return f"one session dominates the 20-day window: {fmt_date(row.dominant_date)}" + (f" ({float(move):+.1f}%)" if move is not None else "")
 
 
 async def get_servable_rv(db: AsyncSession, symbol: str) -> tuple[sa.Row | None, str | None]:
