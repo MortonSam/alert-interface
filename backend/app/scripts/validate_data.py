@@ -1502,6 +1502,24 @@ async def check_reports_have_evidence(session) -> CheckResult:
     return CheckResult("reports_have_evidence", PASS, "Every confirmed past report has an EPS actual or a reaction row")
 
 
+async def check_news_headline_guard(session) -> CheckResult:
+    """WARN when the headline guard (services/headline_guard) suppresses more than GUARD_WARN_SHARE of the headlines Discover shows
+    (the movers' headlines and "In the news"): the news feed or the guard's word lists need a look. Recomputed from the stored
+    quotes and stories, the same code the page runs."""
+    from datetime import datetime as _dt, timezone as _tz
+    from app.routers.discover_news import build_sections
+    from app.services.news import GUARD_WARN_SHARE, guard_share
+    if (await session.execute(text("SELECT count(*) FROM news_stories"))).scalar() == 0:
+        return CheckResult("news_headline_guard", PASS, "No stored news stories")
+    up, down, ranked, _c, suppressed, _s = await build_sections(session, _dt.now(_tz.utc))
+    shown = sum(1 for m in up + down if m.headline) + len(ranked)
+    share = guard_share(len(suppressed), shown)
+    rows = [f"{x['symbol']}  {x['headline'][:90]!r}: {x['reason']} (stated {x['stated_pct']}, ours {x['move_pct']})" for x in suppressed.values()]
+    if share is not None and share > GUARD_WARN_SHARE:
+        return CheckResult("news_headline_guard", WARN, f"{len(suppressed)} headline(s) suppressed against {shown} shown (more than {GUARD_WARN_SHARE:.0%})", rows)
+    return CheckResult("news_headline_guard", PASS, f"{len(suppressed)} headline(s) suppressed against {shown} shown", rows)
+
+
 CHAIN_SOURCE_LABELS = {"courier": "courier", "intrinio": "Intrinio"}
 CHAIN_COVERAGE_MIN_PCT = 90      # below this the options layer is failing for too many tickers to call it a quirk: ERROR, and an alert
 
@@ -3199,6 +3217,7 @@ CHECKS = [
     check_chain_coverage,
     check_courier_delivered,
     check_reports_have_evidence,
+    check_news_headline_guard,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

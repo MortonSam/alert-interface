@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import is_admin
 from app.database import get_db
 
+import logging
+_log = logging.getLogger("headline_guard")
 router = APIRouter(prefix="/discover", tags=["discover"])
 
 
@@ -65,6 +67,22 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
     vis = N.visibility(newest_story, step_exit, now, newest_quote)
     if not vis.visible:
         return NewsSectionsResponse(visible=False, reason=vis.reason)
+    up_items, down_items, ranked, change, suppressed, session = await build_sections(db, now)
+    for x in suppressed.values():          # every suppression, with both numbers, in the logs
+        _log.info("headline suppressed: %s %r (%s; stated %s, ours %s)", x["symbol"], x["headline"], x["reason"], x["stated_pct"], x["move_pct"])
+    return NewsSectionsResponse(
+        visible=True, quotes_as_of=max((q["quote_time"] for q in session), default=None),
+        up=up_items, down=down_items,
+        stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r["url"], source=r["source"],
+                               published_at=r["published_at"]) for r in ranked],
+    )
+
+
+
+async def build_sections(db, now: datetime):
+    """The movers (with headlines), "In the news" and the suppressed headlines from the stored quotes and stories, as of `now`.
+    Shared by the route and validate's news_headline_guard check."""
+    from app.services import news as N
     qrows = (await db.execute(sa.text("""
         SELECT q.symbol, t.name, q.price, q.change_pct, q.quote_time FROM quote_snapshots q
         JOIN tickers t ON t.symbol = q.symbol AND t.is_active"""))).all()
@@ -86,17 +104,17 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
             SELECT ticker_id, event_date FROM events WHERE event_type = 'earnings' AND is_confirmed AND event_date <= :today
         ) x ON x.ticker_id = t.id WHERE t.is_active GROUP BY t.symbol"""), {"today": session_day})).all())
 
+    change = {q["symbol"]: q["change_pct"] for q in session}
+    # our move, close to close from the stored bars once the session's bar is in, else the quote's change against the prior close
+    moves = {**change, **(await N.close_to_close(db, list(change), session_day))}
+    suppressed: dict = {}
+
     def mover(q: dict) -> MoverItem:
-        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since)
+        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed)
         return MoverItem(symbol=q["symbol"], name=q["name"], price=q["price"], change_pct=q["change_pct"], quote_time=q["quote_time"],
                          headline=NewsHeadline(headline=h["headline"], url=h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
 
-    change = {q["symbol"]: q["change_pct"] for q in session}
-    ranked = N.in_the_news(stories, change, names={q["symbol"]: q["name"] for q in quotes}, last_reports=last_reports, since=since)
-    return NewsSectionsResponse(
-        visible=True, quotes_as_of=max((q["quote_time"] for q in session), default=None),
-        up=[mover(q) for q in up], down=[mover(q) for q in down],
-        stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r["url"], source=r["source"],
-                               published_at=r["published_at"]) for r in ranked],
-    )
-
+    up_items, down_items = [mover(q) for q in up], [mover(q) for q in down]
+    ranked = N.in_the_news(stories, change, names={q["symbol"]: q["name"] for q in quotes}, last_reports=last_reports, since=since,
+                           moves=moves, suppressed=suppressed)
+    return up_items, down_items, ranked, change, suppressed, session

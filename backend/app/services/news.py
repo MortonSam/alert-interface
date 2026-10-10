@@ -184,25 +184,43 @@ def movers(quotes: list[dict], n: int = MOVERS_EACH_SIDE) -> tuple[list[dict], l
     return up, down
 
 
-def top_headline(stories: list[dict], symbol: str, name: str | None = None, last_report=None, since: datetime | None = None) -> dict | None:
-    """Pure: the company's headline: among its stories with no headline_problem, an established source first, then the newest. Finnhub
-    tags loosely (a PepsiCo story under KO), so the headline must name the company; a mover with no qualifying story shows none."""
+def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict | None) -> bool:
+    """The headline guard (services/headline_guard) for one story beside one stock: True when it may show. A suppression is
+    recorded once per (symbol, url) in `suppressed` with the headline, the reason and both numbers."""
+    from app.services.headline_guard import check
+    v = check(story["headline"], move_pct)
+    if v.reason is None:
+        return True
+    if suppressed is not None:
+        suppressed.setdefault((symbol, story["url"]), {"symbol": symbol, "headline": story["headline"], "reason": v.reason,
+                                                        "stated_pct": v.stated_pct, "move_pct": move_pct, "url": story["url"]})
+    return False
+
+
+def top_headline(stories: list[dict], symbol: str, name: str | None = None, last_report=None, since: datetime | None = None,
+                 move_pct: float | None = None, suppressed: dict | None = None) -> dict | None:
+    """Pure: the company's headline: among its stories with no headline_problem that the headline guard lets beside a `move_pct`
+    move, an established source first, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
+    the company; a mover with no qualifying story shows none."""
     since = since or datetime.min.replace(tzinfo=timezone.utc)
-    mine = [s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None]
+    mine = [s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None
+            and guarded(s, symbol, move_pct, suppressed)]
     return min(mine, key=lambda s: (source_tier(s.get("source")), -s["published_at"].timestamp())) if mine else None
 
 
 def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_THE_NEWS_LIMIT,
                 per_ticker: int = STORIES_PER_TICKER, names: dict[str, str | None] | None = None,
-                last_reports: dict | None = None, since: datetime | None = None) -> list[dict]:
+                last_reports: dict | None = None, since: datetime | None = None,
+                moves: dict[str, float] | None = None, suppressed: dict | None = None) -> list[dict]:
     """Pure: up to `limit` stories about S&P 500 companies, ranked by the size of the related stock's move today, then recency; at
     most `per_ticker` per stock. A story counts for a related stock only when its headline names that company, and it is shown under
-    the named stock with the biggest move."""
+    the named stock with the biggest move. The headline guard checks it against `moves` (close to close; `change` when absent)."""
     rows = []
     for s in stories:
         since_ = since or datetime.min.replace(tzinfo=timezone.utc)
         moved = [(abs(change[t]), t) for t in s["related"]
-                 if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None]
+                 if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None
+                 and guarded(s, t, (moves or change).get(t), suppressed)]
         if not moved:
             continue
         size, sym = max(moved)
@@ -217,3 +235,25 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
         if len(out) == limit:
             break
     return out
+
+
+GUARD_WARN_SHARE = 0.2      # validate warns when suppressed headlines exceed this share of shown ones
+
+
+def guard_share(suppressed: int, shown: int) -> float | None:
+    """Pure: suppressed headlines per shown headline; None with nothing shown."""
+    return suppressed / shown if shown else None
+
+
+async def close_to_close(db, symbols: list[str], session_day) -> dict[str, float]:
+    """{symbol: percent move} from the stored Intrinio bars: the session's close against the previous session's close. A symbol
+    without both bars is absent (the caller falls back to the quote's change)."""
+    from sqlalchemy import text as _t
+    from app.services.trading_calendar import last_session_before
+    prev = last_session_before(session_day)
+    rows = (await db.execute(_t("""SELECT symbol, date, close FROM price_bars_shadow WHERE symbol = ANY(:s) AND date IN (:a, :b)"""),
+                             {"s": list(symbols), "a": session_day, "b": prev})).all()
+    by: dict[str, dict] = {}
+    for sym, d, c in rows:
+        by.setdefault(sym, {})[d] = float(c)
+    return {sym: round((v[session_day] / v[prev] - 1) * 100, 4) for sym, v in by.items() if session_day in v and prev in v and v[prev]}
