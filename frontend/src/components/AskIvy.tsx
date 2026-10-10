@@ -1,5 +1,6 @@
 "use client";
 
+import { IvyMark } from "@/components/IvyMark";
 import { useState } from "react";
 import posthog from "posthog-js";
 import ExplainTip from "@/components/ticker/ExplainTip";
@@ -38,7 +39,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
   const asOf = answer ? asOfLabel(answer.as_of, answer.as_of_kind) : null;
   return (
     <form onSubmit={submit} className="mt-6">
-      <label htmlFor="ask-ivy" className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">Ask Ivy about {name}</label>
+      <label htmlFor="ask-ivy" className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground inline-flex items-center gap-1.5"><IvyMark />Ask Ivy about {name}</label>
       <p className="text-xs text-muted-foreground mt-1">She answers only from this page&apos;s stored data and says when it doesn&apos;t cover a question. No recommendations.</p>
       <div className="mt-2 flex gap-2">
         <input

@@ -49,6 +49,7 @@ import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
 import { Briefing } from "@/components/Briefing";
 import { QuestionStrip } from "@/components/QuestionStrip";
+import { IvyMark } from "@/components/IvyMark";
 import { hasBriefing, type BriefingResponse } from "@/lib/briefing";
 import StructuredNoteView from "@/components/StructuredNoteView";
 
@@ -2623,16 +2624,16 @@ export default function TickerPage() {
           )}
           {orStatus === "done" && optionsRead && optionsRead.available === false && optionsRead.reason && (
             <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6">
-              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2">
-                Ivy&apos;s Read
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2 flex items-center gap-1.5">
+                <IvyMark />Ivy&apos;s Read
               </p>
               <p className="text-sm text-muted-foreground">{absentReadLine(optionsRead.reason)}</p>
             </div>
           )}
           {orStatus === "done" && optionsRead && optionsRead.model_used !== "none" && (
             <div className="border-l-2 border-muted-foreground/30 pl-4 py-2 mb-6">
-              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2">
-                Ivy&apos;s Read
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400 mb-2 flex items-center gap-1.5">
+                <IvyMark />Ivy&apos;s Read
               </p>
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
               <p className="text-[10px] text-muted-foreground/60 mt-2">

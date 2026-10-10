@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import push_window
-from push_window import REBUILD_TEST_DB, STEPS, TEST_DB, foreground_steps, gate, in_window, lane_for, steps_for
+from push_window import REBUILD_TEST_DB, STEPS, TEST_DB, foreground_steps, push_command, gate, in_window, lane_for, steps_for
 
 NY = ZoneInfo("America/New_York")
 
@@ -65,6 +65,12 @@ class LaneTests(unittest.TestCase):
     def test_the_frontend_lane_keeps_both_frontend_steps_and_the_full_lane_all_three(self):
         self.assertEqual([name for name, _, _ in steps_for("frontend")], ["frontend tests", "frontend build"])
         self.assertEqual(steps_for("full"), STEPS)
+
+    def test_a_preview_branch_pushes_head_to_that_branch_and_never_to_main(self):
+        self.assertEqual(push_command([]), ["git", "push", "origin", "main"])
+        self.assertEqual(push_command(["--branch=brand"]), ["git", "push", "origin", "HEAD:refs/heads/brand"])
+        with self.assertRaises(SystemExit):
+            push_command(["--branch=main"])
 
     def test_the_full_lane_runs_the_host_tests_beside_the_backend_suite(self):
         self.assertEqual([n for n, _, _ in foreground_steps("full")], ["host tests", "frontend tests", "frontend build"])

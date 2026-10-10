@@ -6,6 +6,7 @@ import { AskIvy } from "@/components/AskIvy";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import { api, type QuestionsResponse } from "@/lib/api";
 import { splitTerms } from "@/lib/briefing";
+import { IvyMark } from "@/components/IvyMark";
 import { answerParts, asOfLabel, hasQuestions, questionsHeader } from "@/lib/questions";
 
 /**
@@ -31,7 +32,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
   };
   return (
     <div className="mt-10 max-w-[65ch]">
-      <p className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground mb-3">{questionsHeader(data!.name ?? symbol)}</p>
+      <p className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground mb-3 flex items-center gap-1.5"><IvyMark />{questionsHeader(data!.name ?? symbol)}</p>
       <ul className="divide-y divide-border border-y border-border">
         {data!.questions.map((q) => {
           const isOpen = open === q.key;

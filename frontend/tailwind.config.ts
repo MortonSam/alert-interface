@@ -69,6 +69,7 @@ const config: Config = {
         sans: ["var(--font-ui)", "system-ui", "sans-serif"],
         display: ["var(--font-display)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+        brand: ["var(--font-brand)", "Georgia", "serif"],          // the wordmark only (Playfair Display)
       },
     },
   },

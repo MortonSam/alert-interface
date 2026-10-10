@@ -46,6 +46,16 @@ BACKEND_LOG = Path("/tmp/push_backend_tests.log")
 PUSH = ["git", "push", "origin", "main"]
 
 
+def push_command(argv: list[str]) -> list[str]:
+    """Pure: `git push origin main`, or with --branch=NAME the current HEAD to origin NAME (a preview branch, never main)."""
+    name = next((a.split("=", 1)[1] for a in argv if a.startswith("--branch=")), None)
+    if not name:
+        return PUSH
+    if name in ("main", "master") or not name.replace("-", "").replace("_", "").replace("/", "").isalnum():
+        raise SystemExit(f"--branch={name}: a preview branch name, never main")
+    return ["git", "push", "origin", f"HEAD:refs/heads/{name}"]
+
+
 def lane_for(changed: list[str], argv: list[str]) -> str:
     """Pure: "frontend" when every file the push carries is under frontend/ (or --frontend-only is given), else "full"; --full forces full."""
     if "--full" in argv:
@@ -228,7 +238,7 @@ def main(argv: list[str]) -> int:
     if why:
         print(why, file=sys.stderr)
         return 1
-    return _run(PUSH, ROOT)
+    return _run(push_command(argv), ROOT)
 
 
 if __name__ == "__main__":
