@@ -119,9 +119,30 @@ def clauses_about(headline: str, forms: list[str]) -> list[str]:
     return [p for p in parts if not _PERIOD.search(p) and not _FIGURE.search(p)]
 
 
-def check(headline: str, move_pct: float | None, forms: list[str] | None = None) -> Verdict:
+AFTER_CLOSE_TOLERANCE_PP = 1.5     # after the close the day's move is known: a stated percent must be this close to ours
+
+# commentary: explainers and opinion. It may appear in "In the news", never in a mover's slot (services/news.top_headline).
+_COMMENTARY = re.compile(
+    r"^\W*(?:why\b|here['’]?s\s+why|what['’]?s\s+going\s+on\s+with|should\s+you\b|is\s+it\s+time)|\?|"
+    r"\b(?:buy|sell)\b(?![\s-]*off)|worth\s+more\s+than|\b(?:top|best)\s+(?:\d+\s+)?stocks?\b|\branks?\b|\branking\b|"
+    r"\b(?:top|best)\s+\d+\b|#\s?\d+\b|"
+    # opinion and filler in the same family: valuation views, hedged takes, "facts to note" digests, trailing "here is why"
+    r"\b(?:under|over)valued\b|\b(?:may|might|could)\s+be\b|important\s+facts\s+to\s+note|"
+    r"\bhere\s+is\s+(?:why|what|how)\b|\bhere['’]?s\b|what\s+you\s+(?:should|need\s+to)\s+know|things\s+to\s+know|"
+    r"what\s+needs\s+to\s+happen", re.I)
+
+
+def is_commentary(headline: str) -> bool:
+    """Pure: an explainer or opinion headline (Why..., Here's why..., Should you..., a question, buy/sell, worth more than, top or
+    best stocks, a ranking, a valuation view, a hedged take, a "facts to note" digest)."""
+    return bool(_COMMENTARY.search(headline or ""))
+
+
+def check(headline: str, move_pct: float | None, forms: list[str] | None = None, after_close: bool = False) -> Verdict:
     """Pure: whether a headline may show beside a stock that moved `move_pct` percent close to close. `forms` are the words that
-    name the stock (services/news.name_forms); only the clauses that name it are judged."""
+    name the stock (services/news.name_forms); only the clauses that name it are judged. `after_close`: the headline was
+    published after the session's close, when the day's move is known, so a stated percent must match ours within
+    AFTER_CLOSE_TOLERANCE_PP points and in sign (a different number describes a different period)."""
     judged = clauses_about(headline, forms or [])
     stated = next((v for v in (stated_move(c) for c in judged) if v is not None), None)
     if move_pct is None or move_pct == 0 or not judged:
@@ -133,6 +154,9 @@ def check(headline: str, move_pct: float | None, forms: list[str] | None = None)
         return Verdict(f"its verb says {'up' if d > 0 else 'down'} on {'a down' if move_pct < 0 else 'an up'} day", stated)
     if stated is not None and (stated > 0) != (move_pct > 0):
         return Verdict("its stated move has the opposite sign", stated)
+    if after_close and stated is not None and abs(stated - move_pct) > AFTER_CLOSE_TOLERANCE_PP:
+        return Verdict(f"published after the close, it states {stated:+g}% against our close-to-close {move_pct:+.2f}% "
+                       f"(more than {AFTER_CLOSE_TOLERANCE_PP:g} points apart)", stated)
     return Verdict(None, stated)
 
 
@@ -146,5 +170,27 @@ def agrees(headline: str, move_pct: float | None, forms: list[str] | None = None
         d = subject_direction(c, forms or [])
         v = stated_move(c)
         if (d and (d > 0) == (move_pct > 0)) or (v is not None and (v > 0) == (move_pct > 0)):
+            return True
+    return False
+
+
+def period_move_against(headline: str, move_pct: float | None, forms: list[str] | None = None) -> bool:
+    """Pure: the headline states a move for the stock over a longer period (since December, in one month, from its record high)
+    that runs against today's move. It may stand in "In the news", never beside a mover, where it reads as today's move."""
+    if not move_pct:
+        return False
+    parts = [p for p in _CLAUSE.split(headline) if p and p.strip()]
+    for p in parts:
+        if not _PERIOD.search(p):
+            continue
+        hits = [m.start() for f in (forms or []) for m in [re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}(?:'s|’s)?(?![A-Za-z0-9])", p,
+                                                                     0 if f.isupper() else re.I)] if m]
+        if forms and not hits:
+            continue
+        c = p[min(hits):] if hits else p
+        d = subject_direction(c, forms or [])
+        v = stated_move(c)
+        sign = d or (1 if v and v > 0 else -1 if v and v < 0 else 0)
+        if sign and (sign > 0) != (move_pct > 0):
             return True
     return False

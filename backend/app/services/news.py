@@ -184,12 +184,14 @@ def movers(quotes: list[dict], n: int = MOVERS_EACH_SIDE) -> tuple[list[dict], l
     return up, down
 
 
-def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict | None, name: str | None = None, record: bool = True) -> bool:
+def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict | None, name: str | None = None, record: bool = True,
+            session_close: datetime | None = None) -> bool:
     """The headline guard (services/headline_guard) for one story beside one stock, judged on the clauses that name the stock:
     True when it may show. With `record`, a suppression goes into `suppressed` once per (symbol, url) with the headline, the
     reason and both numbers; callers record only a headline that would otherwise have shown."""
     from app.services.headline_guard import check
-    v = check(story["headline"], move_pct, name_forms(symbol, name))
+    after = session_close is not None and story["published_at"] >= session_close
+    v = check(story["headline"], move_pct, name_forms(symbol, name), after_close=after)
     if v.reason is None:
         return True
     if record and suppressed is not None:
@@ -198,22 +200,33 @@ def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict |
     return False
 
 
+def mover_slot_ok(headline: str, source: str | None, move_pct: float | None, forms: list[str]) -> bool:
+    """Pure: the headline may sit beside a mover: plain news (not commentary), or an established source, or a statement of the stock's
+    own move; never a longer-period move that runs against today's. Commentary may still appear in "In the news"."""
+    from app.services.headline_guard import agrees, is_commentary, period_move_against
+    return ((not is_commentary(headline)) or source_tier(source) == 0 or agrees(headline, move_pct, forms)) \
+        and not period_move_against(headline, move_pct, forms)
+
+
 def top_headline(stories: list[dict], symbol: str, name: str | None = None, last_report=None, since: datetime | None = None,
-                 move_pct: float | None = None, suppressed: dict | None = None) -> dict | None:
+                 move_pct: float | None = None, suppressed: dict | None = None, session_close: datetime | None = None) -> dict | None:
     """Pure: the company's headline: among its stories with no headline_problem, from an established source or stating a move in
-    the stock's own direction, that the headline guard lets beside a `move_pct` move, an established source first, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
+    the stock's own direction, that the headline guard lets beside a `move_pct` move: an established source first, then a headline
+    stating the stock's own move, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
     the company; a mover with no qualifying story shows none. Only the headline that would have shown without the guard is
     recorded when the guard suppresses it."""
     from app.services.headline_guard import agrees
     since = since or datetime.min.replace(tzinfo=timezone.utc)
-    order = lambda s: (source_tier(s.get("source")), -s["published_at"].timestamp())
     forms = name_forms(symbol, name)
-    # the mover slot: an established source, or a headline that states a move in the stock's own direction; commentary from other
-    # sources may still appear in "In the news", never beside a mover
+    # an established source first; within a tier, a headline that states the stock's own move first; then the newest
+    order = lambda s: (source_tier(s.get("source")), 0 if agrees(s["headline"], move_pct, forms) else 1, -s["published_at"].timestamp())
+    # the mover slot: any plain news headline (not commentary: services/headline_guard.is_commentary), or an established source,
+    # or a headline that states a move in the stock's own direction; commentary may still appear in "In the news"
     eligible = sorted((s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None
-                       and (source_tier(s.get("source")) == 0 or agrees(s["headline"], move_pct, forms))), key=order)
+                       and mover_slot_ok(s["headline"], s.get("source"), move_pct, forms)),
+                      key=order)
     for i, s in enumerate(eligible):
-        if guarded(s, symbol, move_pct, suppressed, name, record=(i == 0)):
+        if guarded(s, symbol, move_pct, suppressed, name, record=(i == 0), session_close=session_close):
             return s
     return None
 
@@ -222,7 +235,7 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
                 per_ticker: int = STORIES_PER_TICKER, names: dict[str, str | None] | None = None,
                 last_reports: dict | None = None, since: datetime | None = None,
                 moves: dict[str, float] | None = None, suppressed: dict | None = None, guard: bool | None = True,
-                would_show: set | None = None) -> list[dict]:
+                would_show: set | None = None, session_close: datetime | None = None) -> list[dict]:
     """Pure: up to `limit` stories about S&P 500 companies, ranked by the size of the related stock's move today, then recency; at
     most `per_ticker` per stock. A story counts for a related stock only when its headline names that company, and it is shown under
     the named stock with the biggest move. The headline guard checks it against `moves` (close to close; `change` when absent);
@@ -236,7 +249,7 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
         moved = [(abs(change[t]), t) for t in s["related"]
                  if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None
                  and (guard is None or guarded(s, t, (moves or change).get(t), suppressed, (names or {}).get(t),
-                                               record=(t, s["url"]) in (would_show or set())))]
+                                               record=(t, s["url"]) in (would_show or set()), session_close=session_close))]
         if not moved:
             continue
         size, sym = max(moved)
@@ -273,3 +286,9 @@ async def close_to_close(db, symbols: list[str], session_day) -> dict[str, float
     for sym, d, c in rows:
         by.setdefault(sym, {})[d] = float(c)
     return {sym: round((v[session_day] / v[prev] - 1) * 100, 4) for sym, v in by.items() if session_day in v and prev in v and v[prev]}
+
+
+def session_close_at(session_day) -> datetime:
+    """Pure: the session's close on the New York clock: 4:00pm, or 1:00pm on an early-close day."""
+    from app.services.trading_calendar import is_half_day
+    return datetime(session_day.year, session_day.month, session_day.day, 13 if is_half_day(session_day) else 16, 0, tzinfo=NEW_YORK)

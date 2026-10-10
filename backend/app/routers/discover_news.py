@@ -108,13 +108,15 @@ async def build_sections(db, now: datetime):
     # our move, close to close from the stored bars once the session's bar is in, else the quote's change against the prior close
     moves = {**change, **(await N.close_to_close(db, list(change), session_day))}
     suppressed: dict = {}
+    session_close = N.session_close_at(session_day)
 
     def mover(q: dict) -> MoverItem:
-        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed)
+        h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed,
+                           session_close)
         return MoverItem(symbol=q["symbol"], name=q["name"], price=q["price"], change_pct=q["change_pct"], quote_time=q["quote_time"],
                          headline=NewsHeadline(headline=h["headline"], url=h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
 
     up_items, down_items = [mover(q) for q in up], [mover(q) for q in down]
     ranked = N.in_the_news(stories, change, names={q["symbol"]: q["name"] for q in quotes}, last_reports=last_reports, since=since,
-                           moves=moves, suppressed=suppressed)
+                           moves=moves, suppressed=suppressed, session_close=session_close)
     return up_items, down_items, ranked, change, suppressed, session
