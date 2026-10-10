@@ -1504,11 +1504,15 @@ async def check_reports_have_evidence(session) -> CheckResult:
 
 async def check_news_headline_guard(session) -> CheckResult:
     """WARN when the headline guard (services/headline_guard) suppresses more than GUARD_WARN_SHARE of the headlines Discover shows
-    (the movers' headlines and "In the news"): the news feed or the guard's word lists need a look. Recomputed from the stored
-    quotes and stories, the same code the page runs."""
+    (the movers' headlines and "In the news"), counting only headlines that would otherwise have shown: the news feed or the
+    guard's word lists need a look. Recomputed from the stored quotes and stories, the same code the page runs. Only while
+    DISCOVER_NEWS_ENABLED is on."""
     from datetime import datetime as _dt, timezone as _tz
     from app.routers.discover_news import build_sections
+    from app.config import settings
     from app.services.news import GUARD_WARN_SHARE, guard_share
+    if not settings.discover_news_enabled:
+        return CheckResult("news_headline_guard", PASS, "Discover news is off (DISCOVER_NEWS_ENABLED): nothing shown, nothing judged")
     if (await session.execute(text("SELECT count(*) FROM news_stories"))).scalar() == 0:
         return CheckResult("news_headline_guard", PASS, "No stored news stories")
     up, down, ranked, _c, suppressed, _s = await build_sections(session, _dt.now(_tz.utc))

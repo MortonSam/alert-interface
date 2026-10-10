@@ -184,14 +184,15 @@ def movers(quotes: list[dict], n: int = MOVERS_EACH_SIDE) -> tuple[list[dict], l
     return up, down
 
 
-def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict | None) -> bool:
-    """The headline guard (services/headline_guard) for one story beside one stock: True when it may show. A suppression is
-    recorded once per (symbol, url) in `suppressed` with the headline, the reason and both numbers."""
+def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict | None, name: str | None = None, record: bool = True) -> bool:
+    """The headline guard (services/headline_guard) for one story beside one stock, judged on the clauses that name the stock:
+    True when it may show. With `record`, a suppression goes into `suppressed` once per (symbol, url) with the headline, the
+    reason and both numbers; callers record only a headline that would otherwise have shown."""
     from app.services.headline_guard import check
-    v = check(story["headline"], move_pct)
+    v = check(story["headline"], move_pct, name_forms(symbol, name))
     if v.reason is None:
         return True
-    if suppressed is not None:
+    if record and suppressed is not None:
         suppressed.setdefault((symbol, story["url"]), {"symbol": symbol, "headline": story["headline"], "reason": v.reason,
                                                         "stated_pct": v.stated_pct, "move_pct": move_pct, "url": story["url"]})
     return False
@@ -201,26 +202,36 @@ def top_headline(stories: list[dict], symbol: str, name: str | None = None, last
                  move_pct: float | None = None, suppressed: dict | None = None) -> dict | None:
     """Pure: the company's headline: among its stories with no headline_problem that the headline guard lets beside a `move_pct`
     move, an established source first, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
-    the company; a mover with no qualifying story shows none."""
+    the company; a mover with no qualifying story shows none. Only the headline that would have shown without the guard is
+    recorded when the guard suppresses it."""
     since = since or datetime.min.replace(tzinfo=timezone.utc)
-    mine = [s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None
-            and guarded(s, symbol, move_pct, suppressed)]
-    return min(mine, key=lambda s: (source_tier(s.get("source")), -s["published_at"].timestamp())) if mine else None
+    order = lambda s: (source_tier(s.get("source")), -s["published_at"].timestamp())
+    eligible = sorted((s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None), key=order)
+    for i, s in enumerate(eligible):
+        if guarded(s, symbol, move_pct, suppressed, name, record=(i == 0)):
+            return s
+    return None
 
 
 def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_THE_NEWS_LIMIT,
                 per_ticker: int = STORIES_PER_TICKER, names: dict[str, str | None] | None = None,
                 last_reports: dict | None = None, since: datetime | None = None,
-                moves: dict[str, float] | None = None, suppressed: dict | None = None) -> list[dict]:
+                moves: dict[str, float] | None = None, suppressed: dict | None = None, guard: bool | None = True,
+                would_show: set | None = None) -> list[dict]:
     """Pure: up to `limit` stories about S&P 500 companies, ranked by the size of the related stock's move today, then recency; at
     most `per_ticker` per stock. A story counts for a related stock only when its headline names that company, and it is shown under
-    the named stock with the biggest move. The headline guard checks it against `moves` (close to close; `change` when absent)."""
+    the named stock with the biggest move. The headline guard checks it against `moves` (close to close; `change` when absent);
+    a suppression is recorded only for a story that would have shown without the guard."""
+    if guard and would_show is None:
+        unguarded = in_the_news(stories, change, limit, per_ticker, names, last_reports, since, guard=None)
+        would_show = {(r["symbol"], r["url"]) for r in unguarded}
     rows = []
     for s in stories:
         since_ = since or datetime.min.replace(tzinfo=timezone.utc)
         moved = [(abs(change[t]), t) for t in s["related"]
                  if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None
-                 and guarded(s, t, (moves or change).get(t), suppressed)]
+                 and (guard is None or guarded(s, t, (moves or change).get(t), suppressed, (names or {}).get(t),
+                                               record=(t, s["url"]) in (would_show or set())))]
         if not moved:
             continue
         size, sym = max(moved)
