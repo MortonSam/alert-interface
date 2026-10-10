@@ -45,17 +45,17 @@ def test_a_headline_counts_for_a_company_only_when_it_names_it():
     assert N.top_headline(stories[:1], "KO", "The Coca-Cola Company") is None             # no such story: no headline
 
 
-def test_in_the_news_ranks_by_the_named_stocks_move_one_story_per_stock_plain_news_first():
+def test_in_the_news_ranks_by_move_then_explaining_headlines_then_plain_news_one_per_stock():
     s = lambda u, h, rel, mins: {"url": u, "headline": h, "related": rel, "published_at": NOW - timedelta(minutes=mins), "source": "Yahoo"}
     stories = [s("1", "Intel slides", ["INTC"], 50), s("2", "Intel and AMD slip", ["INTC", "AMD"], 10), s("3", "Is AMD stock worth it", ["INTC", "AMD"], 5),
                s("4", "Intel third story", ["INTC"], 1), s("5", "Micron breakout", ["MU"], 30), s("6", "Unrelated", ["MU"], 2)]
     names = {"INTC": "Intel Corporation", "AMD": "Advanced Micro Devices, Inc.", "MU": "Micron Technology, Inc."}
     out = N.in_the_news(stories, {"INTC": -6.6, "AMD": -4.4, "MU": -4.6}, names=names)
-    assert [(r["url"], r["symbol"]) for r in out] == [("4", "INTC"), ("5", "MU"), ("3", "AMD")]   # one per stock; "Is AMD stock" goes under AMD
-    out = N.in_the_news(stories, {"INTC": -6.6, "AMD": -4.4, "MU": -4.6}, names=names, exclude_urls={"4"})          # "4" is a mover's headline
-    assert [(r["url"], r["symbol"]) for r in out][0] == ("2", "INTC")
-    expl = [s("7", "Why Intel Stock Slid Today", ["INTC"], 0), s("8", "Intel cuts jobs in Oregon", ["INTC"], 40)]
-    assert N.in_the_news(expl, {"INTC": -6.6}, names=names)[0]["url"] == "8"                                          # plain news before an explainer
+    assert [(r["url"], r["symbol"]) for r in out] == [("1", "INTC"), ("5", "MU"), ("3", "AMD")]   # "Intel slides" explains the move
+    out = N.in_the_news(stories, {"INTC": -6.6, "AMD": -4.4, "MU": -4.6}, names=names, exclude_urls={"1"})          # "1" is a mover's headline
+    assert [(r["url"], r["symbol"]) for r in out][0] == ("4", "INTC")
+    expl = [s("7", "Why Intel Stock Slid Today", ["INTC"], 0), s("8", "Intel cuts jobs in Oregon", ["INTC"], 40), s("9", "Why Intel Stock Is Moving Today", ["INTC"], 1)]
+    assert [r["url"] for r in N.in_the_news(expl, {"INTC": -6.6}, names=names, per_ticker=3)] == ["7", "8", "9"]   # explains, plain news, other explainers
 
 
 def test_the_sections_fail_closed():
@@ -120,7 +120,8 @@ def test_recommendation_headlines_never_show():
               "Siebert CIO Says Micron Stock Is a Buy, Just Not Forever", "Micron Is a Strong Buy After Earnings", "Time to Sell Micron",
               "Micron: Buy the Dip", "Micron Stock Is Worth Buying"]:
         assert p(h) == rec, h
-    for h in ["Micron Could Be Poised for a Major Breakout Late in 2026", "Mizuho Maintains Neutral on Micron, Raises Price Target",
+    assert p("Micron Could Be Poised for a Major Breakout Late in 2026") == "opinion or promotion"          # a hedged take
+    for h in ["Mizuho Maintains Neutral on Micron, Raises Price Target",
               "Micron buys a Japanese chip plant", "Micron's buyback adds $10 billion", "Insiders sell Micron shares",
               "Goldman Sachs upgrades Micron stock to Buy from Neutral"]:
         assert p(h) is None, h

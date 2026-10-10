@@ -107,36 +107,75 @@ def stated_move(headline: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
+_ITEM = r"[A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3}(?:\s*\([A-Z.]{1,6}\))?"
+_SEP = r"(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s*&\s*)"
+_GROUP = re.compile(rf"((?:{_ITEM})(?:{_SEP}(?:{_ITEM}))+)\s+(?:(?i:shares|stocks?)\s+)?(?:(?i:are|were|is)\s+)?"
+                    rf"((?i:{'|'.join(UP_VERBS + DOWN_VERBS)}))\b((?:\s+(?i:by\s+)?[+-]?\d+(?:\.\d+)?\s?%)?)")
+
+
+def group_clauses(headline: str, forms: list[str]) -> list[str]:
+    """Pure: when a list of companies shares one move verb ("Verizon, AT&T, T-Mobile Stocks Slide as ..."), that verb (and a
+    percent right after it) is each listed company's move: one "<name> <verb>" clause for the stock when the list names it."""
+    out = []
+    for m in _GROUP.finditer(headline):
+        listed = m.group(1)
+        for f in forms:
+            if re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}(?:'s|’s)?(?![A-Za-z0-9])", listed, 0 if f.isupper() else re.I):
+                out.append(f"{f} {m.group(2)}{m.group(3) or ''}")
+                break
+    return out
+
+
 def clauses_about(headline: str, forms: list[str]) -> list[str]:
     """Pure: the clauses of the headline that name the stock (by any of `forms`), each from the point where it names the stock,
-    less those about a non-price figure or a longer period. With no forms, the whole headline is one clause."""
+    plus its clause from a group sharing one move verb (group_clauses), less those about a non-price figure or a longer period.
+    With no forms, the whole headline is one clause."""
     parts = [p for p in _CLAUSE.split(headline) if p and p.strip()]
     if forms:
         def from_name(p: str) -> str | None:       # the clause from where it names the stock: a verb before the name is another's
             hits = [m.start() for f in forms for m in [re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}(?:'s|’s)?(?![A-Za-z0-9])", p,
                                                                    0 if f.isupper() else re.I)] if m]
             return p[min(hits):] if hits else None
-        parts = [q for q in (from_name(p) for p in parts) if q]
+        parts = [q for q in (from_name(p) for p in parts) if q] + group_clauses(headline, forms)
     return [p for p in parts if not _PERIOD.search(p) and not _FIGURE.search(p)]
 
 
 PERCENT_TOLERANCE_PP = 1.5     # a stated percent must be this close to the figure the page prints beside it, and of the same sign
 
-# commentary: explainers and opinion. It may appear in "In the news", never in a mover's slot (services/news.top_headline).
-_COMMENTARY = re.compile(
-    r"^\W*(?:why\b|here['’]?s\s+why|what['’]?s\s+going\s+on\s+with|should\s+you\b|is\s+it\s+time)|\?|"
-    r"\b(?:buy|sell)\b(?![\s-]*off)|worth\s+more\s+than|\b(?:top|best)\s+(?:\d+\s+)?stocks?\b|\branks?\b|\branking\b|"
-    r"\b(?:top|best)\s+\d+\b|#\s?\d+\b|"
-    # opinion and filler in the same family: valuation views, hedged takes, "facts to note" digests, trailing "here is why"
-    r"\b(?:under|over)valued\b|\b(?:may|might|could)\s+be\b|important\s+facts\s+to\s+note|"
-    r"\bhere\s+is\s+(?:why|what|how)\b|\bhere['’]?s\b|what\s+you\s+(?:should|need\s+to)\s+know|things\s+to\s+know|"
-    r"what\s+needs\s+to\s+happen", re.I)
+# Explainers of today's move ("Why X stock soared today", "Why X shares are trading lower today", "Here's why X fell") are news:
+# eligible everywhere, ranked as news when they agree with today's direction. Opinion and promotion show nowhere on Discover.
+_EXPLAINER = re.compile(r"^\W*why\b|\bhere['’]?s\s+why\b|\bhere\s+is\s+why\b|what['’]?s\s+going\s+on\s+with", re.I)
+_OPINION = re.compile(
+    # valuation views
+    r"\b(?:under|over)valued\b|\blooks?\s+(?:discounted|cheap|expensive|attractive)\b|\bmay\s+be\s+reasonable\b|"
+    r"\bfairly\s+(?:priced|valued)\b|\bthesis\b|"
+    # hedged takes
+    r"\b(?:may|might|could)\b|"
+    # recommendations
+    # (buy and sell advice is services/news._RECOMMENDATION, which tells "Sell Micron Now" from "Insiders sell Micron shares")
+    r"\bshould\s+you\b|\bis\s+it\s+time\b|\bjim\s+cramer\b|"
+    # rankings and lists
+    r"\b(?:top|best)\s+(?:\d+\s+)?(?:[\w-]+\s+){0,2}stocks?\b|\b(?:top|best)\s+\d+\b|\branks?\b|\branking\b|#\s?\d+\b|"
+    # digests
+    r"important\s+facts\s+to\s+note|what\s+you\s+(?:should|need\s+to)\s+know|things\s+to\s+know|what\s+to\s+know|"
+    r"\bhere['’]?s\s+(?:what|how)\b|\bhere\s+is\s+(?:what|how)\b|what\s+needs\s+to\s+happen|"
+    # comparisons
+    r"worth\s+more\s+than|\bvs\.?\s|\bversus\b|^\W*better\b", re.I)
+# thesis pieces: "Company (TICKER): Expanding ...", "Company (TICKER) Capitalizing on ..." (case-sensitive: the ticker's capitals)
+_THESIS = re.compile(r"\([A-Z][A-Z.-]{0,6}\)\s*:?\s+[A-Z][a-z]+ing\b")
 
 
-def is_commentary(headline: str) -> bool:
-    """Pure: an explainer or opinion headline (Why..., Here's why..., Should you..., a question, buy/sell, worth more than, top or
-    best stocks, a ranking, a valuation view, a hedged take, a "facts to note" digest)."""
-    return bool(_COMMENTARY.search(headline or ""))
+def is_explainer(headline: str) -> bool:
+    """Pure: an explainer of the day's move (Why..., Here's why..., What's going on with...)."""
+    return bool(_EXPLAINER.search(headline or ""))
+
+
+def is_opinion(headline: str) -> bool:
+    """Pure: opinion or promotion, shown nowhere on Discover: valuation views, hedged takes (may, might, could), recommendations
+    (buy, sell, should you, is it time, Jim Cramer), rankings and lists, digests (important facts to note, what you should know,
+    here's what), comparisons (worth more than), and thesis pieces ("Company (TICKER): Expanding ...")."""
+    h = headline or ""
+    return bool(_THESIS.search(h) or _OPINION.search(h))
 
 
 def check(headline: str, move_pct: float | None, forms: list[str] | None = None) -> Verdict:

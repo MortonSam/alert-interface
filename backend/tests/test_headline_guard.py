@@ -1,6 +1,6 @@
 """The Discover headline guard (services/headline_guard): a headline beside a move must not contradict it, judged on the clauses
 that name the stock."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -37,15 +37,17 @@ def test_longer_periods_hedges_and_other_subjects_do_not_count():
     assert G.check("Humana Soars On Medicare Advantage Star Rating", -2.37, N.name_forms("HUM", "Humana Inc.")).reason.startswith("its verb says up")
 
 
-def test_the_mover_slot_takes_an_established_source_or_an_agreeing_headline():
+def test_opinion_shows_nowhere_and_the_mover_slot_prefers_a_headline_explaining_the_move():
     t = datetime(2026, 10, 9, 15, tzinfo=timezone.utc)
-    commentary = {"url": "c", "headline": "Intel Is Worth More Than Coca-Cola and PepsiCo Put Together", "source": "Yahoo", "published_at": t, "related": ["INTC"]}
-    agreeing = {"url": "a", "headline": "Intel stock slides as chip stocks sell off", "source": "Yahoo", "published_at": t, "related": ["INTC"]}
+    opinion = {"url": "c", "headline": "Intel Is Worth More Than Coca-Cola and PepsiCo Put Together", "source": "Yahoo", "published_at": t, "related": ["INTC"]}
+    agreeing = {"url": "a", "headline": "Intel stock slides as chip stocks sell off", "source": "Yahoo", "published_at": t - timedelta(hours=2), "related": ["INTC"]}
     reuters = {"url": "r", "headline": "Intel names new foundry chief", "source": "Reuters", "published_at": t, "related": ["INTC"]}
-    assert N.top_headline([commentary], "INTC", "Intel Corporation", None, None, -2.2) is None
-    assert N.top_headline([commentary, agreeing], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "a"
-    assert N.top_headline([commentary, reuters], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "r"
-    assert [r["url"] for r in N.in_the_news([commentary], {"INTC": -2.2}, names={"INTC": "Intel Corporation"})] == ["c"]   # still in the news
+    explainer = {"url": "e", "headline": "Why Intel Stock Slid Today", "source": "Yahoo", "published_at": t, "related": ["INTC"]}
+    assert N.top_headline([opinion], "INTC", "Intel Corporation", None, None, -2.2) is None
+    assert N.in_the_news([opinion], {"INTC": -2.2}, names={"INTC": "Intel Corporation"}) == []                     # nowhere on Discover
+    assert N.top_headline([reuters, agreeing], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "a"   # explains the move first
+    assert N.top_headline([reuters, explainer], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "e"  # an agreeing explainer is news
+    assert N.top_headline([reuters], "INTC", "Intel Corporation", None, None, -2.2)["url"] == "r"
 
 
 def test_a_stated_percent_must_match_the_printed_figure_within_one_and_a_half_points():
@@ -57,17 +59,20 @@ def test_a_stated_percent_must_match_the_printed_figure_within_one_and_a_half_po
                    N.name_forms("SBAC", "SBA Communications Corporation")).reason == "its verb says up on a down day"   # "(SBAC)" is part of the name
 
 
-def test_roundups_are_judged_from_the_headline_not_the_vendor_tags():
-    u = {"CCI": "Crown Castle Inc.", "T": "AT&T Inc.", "TMUS": "T-Mobile US, Inc.", "VZ": "Verizon Communications Inc.", "MRNA": "Moderna, Inc.", "MRK": "Merck & Co., Inc."}
-    assert not N.is_roundup("Crown Castle Soars 13% as SpaceX’s $8 Billion Spectrum Buy Keeps Tower Build Option “Very Much Alive”", u)
-    assert N.is_roundup("Verizon, AT&T, T-Mobile Stocks Slide as SpaceX Expands Wireless Ambitions", u)
-    assert N.is_roundup("Stocks making the biggest moves midday: T-Mobile, Verizon, AT&T, Crown Castle, Teva & more", u)
-    assert N.is_roundup("BNTX, NVAX, MRNA Lead Vaccine Rally After Report Of An NIH Cancer-Vaccine Push", u)
-    assert N.is_roundup("Novavax Soars 16%, Moderna Surges 11%, Merck Climbs 3% as Biotech Rallies", u)
-    assert N.is_roundup("These Stocks Are the Hidden Winners of SpaceX’s Spectrum Binge", u)
+def test_a_roundup_is_only_roundup_wording_and_a_group_shares_its_verb():
+    assert N.is_roundup("Stocks making the biggest moves midday: T-Mobile, Verizon, AT&T, Crown Castle, Teva & more")
+    assert N.is_roundup("These Stocks Are the Hidden Winners of SpaceX’s Spectrum Binge")
+    assert not N.is_roundup("Verizon, AT&T, T-Mobile Stocks Slide as SpaceX Expands Wireless Ambitions")
+    assert not N.is_roundup("BNTX, NVAX, MRNA Lead Vaccine Rally After Report Of An NIH Cancer-Vaccine Push")
+    assert not N.is_roundup("Crown Castle Soars 13% as SpaceX’s $8 Billion Spectrum Buy Keeps Tower Build Option “Very Much Alive”")
+    group = "Verizon, AT&T, T-Mobile Stocks Slide as SpaceX Expands Wireless Ambitions"
+    for sym, name, move in (("VZ", "Verizon Communications Inc.", -10.14), ("T", "AT&T Inc.", -10.82), ("TMUS", "T-Mobile US, Inc.", -13.27)):
+        assert G.agrees(group, move, N.name_forms(sym, name)), sym
+        assert G.check(group, -move, N.name_forms(sym, name)).reason == "its verb says down on an up day", sym
+    assert G.check("Novavax Soars 16%, Moderna Surges 11%, Merck Climbs 3%", 14.21, N.name_forms("MRNA", "Moderna, Inc.")).reason.startswith("it states +11%")
     story = {"headline": "Crown Castle Soars 13% as SpaceX Buy Keeps Tower Option Alive", "related": ["CCI", "AMT", "SBAC", "T", "VZ"],
              "published_at": datetime(2026, 10, 9, 15, tzinfo=timezone.utc), "url": "x", "source": "Yahoo"}
-    assert N.headline_problem(story, "CCI", "Crown Castle Inc.", None, datetime(2026, 10, 8, 20, tzinfo=timezone.utc), u) is None
+    assert N.headline_problem(story, "CCI", "Crown Castle Inc.", None, datetime(2026, 10, 8, 20, tzinfo=timezone.utc)) is None
 
 
 def test_both_word_lists_live_in_one_file():
@@ -80,14 +85,14 @@ def test_both_word_lists_live_in_one_file():
 
 def test_only_a_headline_that_would_have_shown_is_counted():
     t, t2 = datetime(2026, 10, 8, 18, tzinfo=timezone.utc), datetime(2026, 10, 8, 17, tzinfo=timezone.utc)
-    stories = [{"url": "u1", "headline": "Intel shares surge 9% on foundry deal", "source": "Reuters", "published_at": t, "related": ["INTC"]},
-               {"url": "u2", "headline": "Intel stock jumps on chip news", "source": "Reuters", "published_at": t2, "related": ["INTC"]},
+    stories = [{"url": "u1", "headline": "Intel stock falls 9% on foundry delay", "source": "Reuters", "published_at": t, "related": ["INTC"]},
+               {"url": "u2", "headline": "Intel shares surge on chip news", "source": "Reuters", "published_at": t2, "related": ["INTC"]},
                {"url": "u3", "headline": "Intel stock falls 3% on chip glut worries", "source": "Yahoo", "published_at": t2, "related": ["INTC"]}]
     suppressed: dict = {}
     h = N.top_headline(stories, "INTC", "Intel Corporation", None, None, -3.4, suppressed)
     assert h["url"] == "u3"
     assert list(suppressed) == [("INTC", "u1")]                    # u2 was suppressed too, but would never have shown
-    assert suppressed[("INTC", "u1")]["stated_pct"] == 9.0 and suppressed[("INTC", "u1")]["move_pct"] == -3.4
+    assert suppressed[("INTC", "u1")]["stated_pct"] == -9.0 and suppressed[("INTC", "u1")]["move_pct"] == -3.4
     suppressed = {}
     ranked = N.in_the_news(stories, {"INTC": -3.4}, per_ticker=1, names={"INTC": "Intel Corporation"}, moves={"INTC": -3.4}, suppressed=suppressed)
     assert [r["url"] for r in ranked] == ["u3"]

@@ -6,7 +6,6 @@ Fail closed: when the newest stored story is more than FRESH_HOURS old, or the n
 """
 from __future__ import annotations
 
-import functools
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -88,70 +87,25 @@ def previous_session_close(session_day) -> datetime:
     return datetime(d.year, d.month, d.day, 16, 0, tzinfo=NEW_YORK)
 
 
-# a roundup is judged from the headline, never from the tickers a vendor attaches: roundup wording, or three or more companies named
-ROUNDUP_COMPANIES = 3
+# a roundup is judged from the headline's wording alone, never from the tickers a vendor attaches or how many companies it names:
+# a group sharing one move ("Verizon, AT&T, T-Mobile Stocks Slide") is each company's move (services/headline_guard)
 _ROUNDUP_WORDS = re.compile(r"\bstocks?\s+that\b|\bthese\s+(?:[\w&-]+\s+){0,2}stocks\b|\bmovers?\b|\bstocks?\s+to\s+watch\b|"
                             r"\band\s+more\b|&\s*more\b|\bbiggest\s+(?:moves|movers|gainers|losers)\b|\bstocks\s+(?:making|moving)\b", re.I)
-_TICKER_LIST = re.compile(r"(?<![A-Za-z])[A-Z]{2,5}(?:\s*,\s*[A-Z]{2,5}){2,}(?![a-z])")   # "BNTX, NVAX, MRNA"
 
 
-@functools.lru_cache(maxsize=4)
-def _universe_matchers(items: tuple) -> tuple:
-    """Compiled matchers for every company's name forms: (case-insensitive names, case-sensitive tickers), each mapping a match
-    to its symbol."""
-    by_name, by_ticker = {}, {}
-    for sym, name in items:
-        for f in name_forms(sym, name):
-            (by_ticker if f == sym else by_name).setdefault(f.lower() if f != sym else f, sym)
-    def rx(keys, flags):
-        if not keys:
-            return None
-        alt = "|".join(re.escape(k) for k in sorted(keys, key=len, reverse=True))
-        return re.compile(rf"(?<![A-Za-z0-9])(?:{alt})(?:'s|’s)?(?![A-Za-z0-9])", flags)
-    return rx(by_name, re.I), by_name, rx(by_ticker, 0), by_ticker
+def is_roundup(headline: str) -> bool:
+    """Pure: roundup wording (stocks making the biggest moves, movers, stocks to watch, these stocks, and more)."""
+    return bool(_ROUNDUP_WORDS.search(headline))
 
 
-def companies_named(headline: str, universe: dict | None) -> set[str]:
-    """Pure: the symbols of the universe's companies a headline names (by name, distinctive first word or ticker)."""
-    if not universe:
-        return set()
-    rn, by_name, rt, by_ticker = _universe_matchers(tuple(sorted(universe.items())))
-    out = set()
-    if rn:
-        out |= {by_name[m.group(0).lower().replace("'s", "").replace("’s", "")] for m in rn.finditer(headline)
-                if m.group(0).lower().replace("'s", "").replace("’s", "") in by_name}
-    if rt:
-        out |= {by_ticker[m.group(0).replace("'s", "").replace("’s", "")] for m in rt.finditer(headline)
-                if m.group(0).replace("'s", "").replace("’s", "") in by_ticker}
-    return out
-
-
-def listed_moves(headline: str) -> int:
-    """Pure: how many "Company <move word>" items the headline lists before its first clause break ("Novavax Soars 16%, Moderna
-    Surges 11%, Merck Climbs 3% as Biotech Rallies" lists three), whether or not the companies are in the universe."""
-    from app.services.headline_guard import CUE_SIGN
-    head = re.split(r"\s(?:as|while|after|amid|on)\s|[:;\u2014]", headline, maxsplit=1)[0]
-    parts = [p.strip() for p in re.split(r",\s*(?:and\s+)?|\s+and\s+|\s*&\s*", head) if p.strip()]
-    move = "|".join(sorted(CUE_SIGN, key=len, reverse=True))
-    return sum(1 for p in parts if re.match(rf"^[A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){{0,3}}\s+(?:{move})\b", p, re.I))
-
-
-def is_roundup(headline: str, universe: dict | None = None) -> bool:
-    """Pure: the headline is a roundup: roundup wording (stocks that, these stocks, movers, stocks to watch, and more), a list of
-    three or more tickers or of three or more "Company <move>" items, or three or more of the universe's companies named. One company's headline is never a roundup,
-    however many tickers a vendor attaches."""
-    return bool(_ROUNDUP_WORDS.search(headline) or _TICKER_LIST.search(headline) or listed_moves(headline) >= ROUNDUP_COMPANIES
-                or len(companies_named(headline, universe)) >= ROUNDUP_COMPANIES)
-
-
-def headline_problem(story: dict, symbol: str, name: str | None, last_report, since: datetime, universe: dict | None = None) -> str | None:
+def headline_problem(story: dict, symbol: str, name: str | None, last_report, since: datetime) -> str | None:
     """Pure: why a story cannot stand as this company's headline, or None. In order: published before the previous session's close;
-    a roundup (judged from the headline: is_roundup); does not name the company; a question or template headline; a recommendation headline; about an upcoming report; names an earnings quarter but
+    a roundup (judged from its wording: is_roundup); does not name the company; opinion or promotion (headline_guard.is_opinion); a question or template headline; a recommendation headline; about an upcoming report; names an earnings quarter but
     was not published within REPORT_HEADLINE_DAYS after the company's latest report (so it is about another quarter)."""
     h = story["headline"]
     if story["published_at"] < since:
         return "published before the previous session's close"
-    if is_roundup(h, universe):
+    if is_roundup(h):
         return "a roundup about several companies"
     if not names_company(h, symbol, name):
         return "does not name the company"
@@ -159,6 +113,9 @@ def headline_problem(story: dict, symbol: str, name: str | None, last_report, si
         return "a question or template headline"
     if _RECOMMENDATION.search(h) and not _RATING_CHANGE.search(h):
         return "a recommendation headline (tells the reader to buy or sell)"
+    from app.services.headline_guard import is_opinion
+    if is_opinion(h) and not _RATING_CHANGE.search(h):
+        return "opinion or promotion"
     if _UPCOMING.search(h):
         return "about an upcoming report, not the latest one"
     if _QUARTER.search(h):
@@ -255,30 +212,29 @@ def guarded(story: dict, symbol: str, move_pct: float | None, suppressed: dict |
     return False
 
 
-def mover_slot_ok(headline: str, source: str | None, move_pct: float | None, forms: list[str]) -> bool:
-    """Pure: the headline may sit beside a mover: plain news (not commentary), or an established source, or a statement of the stock's
-    own move; never a longer-period move that runs against today's. Commentary may still appear in "In the news"."""
-    from app.services.headline_guard import agrees, is_commentary, period_move_against
-    return ((not is_commentary(headline)) or source_tier(source) == 0 or agrees(headline, move_pct, forms)) \
-        and not period_move_against(headline, move_pct, forms)
+def mover_slot_ok(headline: str, move_pct: float | None, forms: list[str]) -> bool:
+    """Pure: the headline may sit beside a mover: anything that passed headline_problem (so no opinion or promotion), except a
+    longer-period move that runs against today's, which reads as today's move there. It may still appear in "In the news"."""
+    from app.services.headline_guard import period_move_against
+    return not period_move_against(headline, move_pct, forms)
 
 
 def top_headline(stories: list[dict], symbol: str, name: str | None = None, last_report=None, since: datetime | None = None,
-                 move_pct: float | None = None, suppressed: dict | None = None, universe: dict | None = None) -> dict | None:
-    """Pure: the company's headline: among its stories with no headline_problem, from an established source or stating a move in
-    the stock's own direction, that the headline guard lets beside a `move_pct` move: an established source first, then a headline
-    stating the stock's own move, then the newest. Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
+                 move_pct: float | None = None, suppressed: dict | None = None) -> dict | None:
+    """Pure: the company's headline: among its stories with no headline_problem (so no opinion or promotion) that the headline
+    guard lets beside a `move_pct` move: a headline explaining today's move first, then an established source, then the newest.
+    Finnhub tags loosely (a PepsiCo story under KO), so the headline must name
     the company; a mover with no qualifying story shows none. Only the headline that would have shown without the guard is
     recorded when the guard suppresses it."""
     from app.services.headline_guard import agrees
     since = since or datetime.min.replace(tzinfo=timezone.utc)
     forms = name_forms(symbol, name)
-    # an established source first; within a tier, a headline that states the stock's own move first; then the newest
-    order = lambda s: (source_tier(s.get("source")), 0 if agrees(s["headline"], move_pct, forms) else 1, -s["published_at"].timestamp())
-    # the mover slot: any plain news headline (not commentary: services/headline_guard.is_commentary), or an established source,
-    # or a headline that states a move in the stock's own direction; commentary may still appear in "In the news"
-    eligible = sorted((s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since, universe) is None
-                       and mover_slot_ok(s["headline"], s.get("source"), move_pct, forms)),
+    # a headline that explains today's move (states the stock's own move in today's direction, alone or in a group) first, then an
+    # established source, then the newest
+    order = lambda s: (0 if agrees(s["headline"], move_pct, forms) else 1, source_tier(s.get("source")), -s["published_at"].timestamp())
+    # the mover slot: every story that passed headline_problem (opinion and promotion never do), less contrary longer-period moves
+    eligible = sorted((s for s in stories if symbol in s["related"] and headline_problem(s, symbol, name, last_report, since) is None
+                       and mover_slot_ok(s["headline"], move_pct, forms)),
                       key=order)
     for i, s in enumerate(eligible):
         if guarded(s, symbol, move_pct, suppressed, name, record=(i == 0)):
@@ -296,7 +252,7 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
     the named stock with the biggest move. A story listed in `exclude_urls` (a mover's headline) is left out, so each story shows
     once on the page; within a stock's place in the ranking plain news comes before explainers. The headline guard checks it against `moves` (close to close; `change` when absent);
     a suppression is recorded only for a story that would have shown without the guard."""
-    from app.services.headline_guard import is_commentary
+    from app.services.headline_guard import agrees, is_explainer
     exclude_urls = exclude_urls or set()
     if guard and would_show is None:
         unguarded = in_the_news(stories, change, limit, per_ticker, names, last_reports, since, guard=None, exclude_urls=exclude_urls)
@@ -307,15 +263,19 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
             continue
         since_ = since or datetime.min.replace(tzinfo=timezone.utc)
         moved = [(abs(change[t]), t) for t in s["related"]
-                 if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_, names) is None
+                 if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None
                  and (guard is None or guarded(s, t, (moves or change).get(t), suppressed, (names or {}).get(t),
                                                record=(t, s["url"]) in (would_show or set())))]
         if not moved:
             continue
         size, sym = max(moved)
         rows.append({**s, "symbol": sym, "move": size})
-    # by the size of the stock's move; within it, plain news ahead of explainers and opinion; then the newest
-    rows.sort(key=lambda r: (-r["move"], 1 if is_commentary(r["headline"]) else 0, -r["published_at"].timestamp()))
+    # by the size of the stock's move; then a headline explaining today's move; then plain news events; then other explainers; newest
+    def explains(r: dict) -> int:
+        if agrees(r["headline"], (moves or change).get(r["symbol"]), name_forms(r["symbol"], (names or {}).get(r["symbol"]))):
+            return 0
+        return 2 if is_explainer(r["headline"]) else 1
+    rows.sort(key=lambda r: (-r["move"], explains(r), -r["published_at"].timestamp()))
     out, per = [], {}
     for r in rows:
         if per.get(r["symbol"], 0) >= per_ticker:
