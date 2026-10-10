@@ -43,11 +43,10 @@ describe("the counters row never overlaps", () => {
     const page = read("app/page.tsx");
     expect(page).toContain(`font-size: ${STAT_NUMBER_CLAMP};`);
     const section = page.match(/<section className="([^"]*)">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
-    expect(section).toContain("sm:min-h-[calc(100svh-3.25rem-1px)]");                 // one screen minus the header, from 640px up
-    expect(section).toContain("sm:flex sm:items-center sm:justify-center");           // the row centered vertically on that screen
-    expect(section).toContain("py-12 sm:py-0");                                       // normal spacing below 640px, none added on the full screen
-    expect(section).not.toMatch(/100vh|min-h-\[(?!calc)/);                             // svh, and no full-height rule outside the sm: prefix
-    expect(section.split(" ").filter((c) => c.includes("min-h")).every((c) => c.startsWith("sm:"))).toBe(true);
+    expect(section).toContain("snap-section");                                         // one screen minus the header from 640px up (globals.css)
+    expect(section).toContain("flex items-center justify-center");                    // the row centered vertically on that screen
+    expect(section).toContain("py-12");
+    expect(section).not.toMatch(/100vh|min-h-/);                                      // the height comes from the one snap rule
     const layout = read("app/layout.tsx");
     expect(layout).toContain("min-h-[3.25rem]");                                      // the header height the calc subtracts
     expect(layout).toMatch(/<header className="[^"]*border-b[^"]*sticky top-0/);      // and its one-pixel border

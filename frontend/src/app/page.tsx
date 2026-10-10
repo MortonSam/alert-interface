@@ -2,14 +2,12 @@ import Link from "next/link";
 import LatestVerifiedNote from "@/components/LatestVerifiedNote";
 import { HeroSearchButton } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
-import { ScrollReveal } from "@/components/ScrollReveal";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
 import { SiteCounters } from "@/components/SiteCounters";
 import { fetchSiteStatsServer } from "@/lib/siteStats";
 import { IvyStatLine } from "@/components/IvyStatLine";
-import { StoryFlow } from "@/components/StoryFlow";
-import { HeroReveal } from "@/components/HeroReveal";
-import { ProofCards } from "@/components/ProofCards";
+import { IvyMark } from "@/components/IvyMark";
+import { HomeSnap } from "@/components/HomeSnap";
 import { BRAND } from "@/lib/brand";
 
 // The counters are rendered on the server and revalidated: a backend that is slow, restarting or erroring never costs the
@@ -21,12 +19,32 @@ export default async function Home() {
   const initial = await fetchSiteStatsServer();
   return (
     <main>
+      {/* one section per screen: the browser's own scroll snap moves one section per gesture (components/HomeSnap) */}
+      <HomeSnap />
       <style>{`
-
-        .hero-h1 {
-          font-size: clamp(40px, 10vw, 104px);
-          line-height: 1.05;
-          letter-spacing: -.03em;
+        .open-h1 {
+          font-size: clamp(34px, 10.4vw, 76px);   /* "Wall Street sees." is about 8.6em wide: one line from a 390px phone up */
+          white-space: nowrap;
+          line-height: 1.02;
+          letter-spacing: -.035em;
+        }
+        .open-heron { width: min(58vw, 260px); height: auto; }
+        @media (min-width: 1024px) {
+          .open-h1 { font-size: clamp(54px, 5.4vw, 84px); }
+          .open-heron { width: 100%; max-width: 760px; max-height: 70svh; object-fit: contain; }
+        }
+        /* the entrance: the heron settles first, then the headline reveals, then the rest */
+        @keyframes heron-settle { from { opacity: 0; transform: translateX(-28px) scale(.985); } to { opacity: 1; transform: none; } }
+        @keyframes line-reveal  { from { opacity: 0; transform: translateY(.35em); clip-path: inset(0 0 100% 0); } to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); } }
+        @keyframes soft-in      { from { opacity: 0; } to { opacity: 1; } }
+        .open-heron  { animation: heron-settle 1100ms cubic-bezier(.2,.7,.15,1) both; }
+        .open-line   { animation: line-reveal 700ms cubic-bezier(.2,.7,.2,1) both; }
+        .open-line-1 { animation-delay: 650ms; }
+        .open-line-2 { animation-delay: 820ms; }
+        .open-rest   { animation: soft-in 700ms ease-out 1150ms both; }
+        .open-cue    { animation: soft-in 900ms ease-out 1700ms both; }
+        @media (prefers-reduced-motion: reduce) {
+          .open-heron, .open-line, .open-rest, .open-cue { animation: none; }
         }
         .stat-number {
           font-size: clamp(36px, 4.2vw, 60px);   /* lib/siteCounters.ts COUNTER_LAYOUT.font: seven characters fit a quarter column from 1024px up */
@@ -39,70 +57,49 @@ export default async function Home() {
           line-height: 1.15;
           letter-spacing: -.025em;
         }
-        .hero-heron { height: clamp(110px, 30vw, 170px); }
-        @media (min-width: 1024px) {
-          .hero-h1 { font-size: clamp(46px, 5vw, 76px); white-space: nowrap; }
-          .hero-heron { height: auto; width: 100%; max-width: 640px; max-height: 52svh; object-fit: contain; }
-        }
-
       `}</style>
 
-      <StoryFlow>
-        {/* ── 1. Hero: the headline and buttons on the left, the heron large on the right in its cream (above the headline,
-               smaller, on a phone), and three live proof cards along the bottom of the same screen. ── */}
-        <section className="min-h-[calc(100svh-3.25rem-1px)] flex flex-col bg-background">
-          <HeroReveal className="flex-1 flex flex-col max-w-7xl w-full mx-auto px-4 sm:px-8">
-            <div className="flex-1 grid items-center gap-y-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-x-12 pt-8 lg:pt-3">
-              <div className="order-2 lg:order-1 text-left">
-                <h1 className="hero-h1 font-display font-extrabold uppercase">
-                  <span data-hero-line className="block text-foreground">
-                    Stock research
-                  </span>
-                  <span data-hero-line className="block text-primary">
-                    that verifies
-                  </span>
-                  <span data-hero-line className="block text-foreground">
-                    itself.
-                  </span>
-                </h1>
-
-                <p data-hero-fade className="text-foreground/70 text-lg mt-6 lg:mt-5 max-w-[36em]">
-                  One workspace for the retail investor, starting with the S&amp;P 500.
-                  Every number explained; every claim checked, and the unsupported ones shown as unsupported.
-                </p>
-
-                <div data-hero-fade className="flex flex-wrap gap-[13px] mt-8 lg:mt-6">
-                  <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
-                  <Link
-                    href="/build"
-                    className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
-                  >
-                    Build a trade →
-                  </Link>
-                </div>
-              </div>
-              <div data-hero-fade className="order-1 lg:order-2 flex justify-start lg:justify-end">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={BRAND.heron} alt="" aria-hidden="true" className="hero-heron w-auto" />
+      {/* ── 1. The opening: the heron large on the left facing the words, the headline, subhead and buttons on its right; on a
+             phone the heron sits above the headline, left-aligned. Nothing else on the screen but a quiet scroll cue. ── */}
+      <section className="snap-section relative flex flex-col bg-background">
+        <div className="flex-1 grid items-center max-w-[88rem] w-full mx-auto px-4 sm:px-8 pt-8 pb-16 lg:py-0 gap-y-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-x-14">
+          <div className="flex justify-start lg:justify-end">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={BRAND.heron} alt="" aria-hidden="true" className="open-heron" />
+          </div>
+          <div className="text-left">
+            <h1 className="open-h1 font-display font-extrabold">
+              <span className="open-line open-line-1 block text-foreground">Know what</span>
+              <span className="open-line open-line-2 block text-primary">Wall Street sees.</span>
+            </h1>
+            <div className="open-rest">
+              <p className="text-foreground/70 text-lg mt-6 max-w-[34em]">
+                One workspace for the retail investor, starting with the S&amp;P 500. Every number explained.
+              </p>
+              <div className="flex flex-wrap gap-[13px] mt-8">
+                <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
+                <Link
+                  href="/build"
+                  className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
+                >
+                  Build a trade →
+                </Link>
               </div>
             </div>
+          </div>
+        </div>
+        <p className="open-cue absolute inset-x-0 bottom-0 text-center pb-6 sm:pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
+          scroll to explore ↓
+        </p>
+      </section>
 
-            <div data-hero-fade className="pb-4 sm:pb-6 pt-8 lg:pt-5">
-              <ProofCards />
-            </div>
-          </HeroReveal>
-        </section>
+      {/* ── 2. The counts: four live numbers from stored tables, on their own screen. ── */}
+      <section className="snap-section px-4 sm:px-6 py-12 sm:py-0 flex items-center justify-center">
+        <SiteCounters initial={initial} />
+      </section>
 
-        {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero. From 640px up the section is
-               one screen (the viewport minus the sticky header, in svh) with the row centered and nothing else on it; below
-               that it is a normal section. ── */}
-        <section className="px-4 sm:px-6 py-12 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)] sm:flex sm:items-center sm:justify-center">
-          <SiteCounters initial={initial} />
-        </section>
-
-        {/* ── 3. The Challenge: from 640px up, one screen under the sticky header like the counts, so each
-               desktop scroll stop is a complete, centered section. ── */}
-        <section className="flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0 sm:min-h-[calc(100svh-3.25rem-1px)]">
+        {/* ── 3. The Challenge ── */}
+        <section className="snap-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
@@ -120,15 +117,14 @@ export default async function Home() {
         </section>
 
         {/* ── 4. The Solution ──────────────────────────────────── */}
-        <section className="py-12 sm:py-0 sm:min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
+        <section className="snap-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
                 The solution
               </p>
               <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-                One workspace where every number comes with its meaning
-                attached, and every claim is checked, with unsupported ones shown as unsupported.
+                Every number comes with its meaning attached.
               </h2>
             </div>
 
@@ -166,8 +162,9 @@ export default async function Home() {
         </section>
 
         {/* ── 5. The Analyst ───────────────────────────────────── */}
-        <section className="py-12 sm:py-0 sm:min-h-[100svh] flex items-center justify-center px-4 sm:px-8">
+        <section className="snap-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
+            <IvyMark size={48} className="mb-5" />
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
             </p>
@@ -193,19 +190,11 @@ export default async function Home() {
             </div>
           </div>
         </section>
-      </StoryFlow>
-
-      {/* ── Free-scroll zone ───────────────────────────────────── */}
-      <div>
-        {/* ── 6. Note preview ──────────────────────────────────── */}
-        <ScrollReveal>
-          {/* the heading lives in the component: no current note, no section (services/note_currency) */}
-          <LatestVerifiedNote />
-        </ScrollReveal>
+      {/* ── 6. See it in action: the latest verified note (the component renders nothing when none is current) ── */}
+      <LatestVerifiedNote className="snap-section flex flex-col justify-center" />
 
         {/* ── 7. Market grid ───────────────────────────────────── */}
-        <ScrollReveal>
-          <section id="market" className="max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-24">
+          <section id="market" className="snap-section max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Start anywhere
@@ -219,13 +208,14 @@ export default async function Home() {
             </div>
             <TickerGrid />
           </section>
-        </ScrollReveal>
 
         {/* ── 8. Closing CTA ───────────────────────────────────── */}
-        <ScrollReveal>
-          <section className="max-w-4xl mx-auto px-4 sm:px-8 py-12 sm:py-24 text-center">
+          <section className="snap-section flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 py-12 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point
+            </p>
+            <p className="text-lg sm:text-xl text-foreground/70 max-w-[34ch] mx-auto mb-5">
+              Robinhood teaches you to tap. Bloomberg assumes you know.
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
               Know what Wall Street knows. See the proof.
@@ -255,8 +245,6 @@ export default async function Home() {
               </Link>
             </div>
           </section>
-        </ScrollReveal>
-      </div>
     </main>
   );
 }

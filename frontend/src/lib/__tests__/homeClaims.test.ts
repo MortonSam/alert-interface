@@ -8,7 +8,7 @@ const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 describe("home page claims the disclosures support (audit items 8, 9, 21)", () => {
   it("the note block is the latest current verified note from the API, never a sample, and hidden when there is none", async () => {
     const home = read("app/page.tsx");
-    expect(home).toContain("<LatestVerifiedNote />");
+    expect(home).toContain("<LatestVerifiedNote ");
     expect(home).not.toMatch(/NotePreview|Illustration|Sample note|Generated &amp; verified|4\.30T|18\/20|\$26\.3B/);
     const block = read("components/LatestVerifiedNote.tsx");
     expect(block).toContain("api.researchNotes.latestVerified()");
@@ -50,7 +50,6 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     for (const banned of ["No confident hallucinations", "the numbers are exact", "checked before you see it"]) {
       expect(home, banned).not.toContain(banned);
     }
-    expect(home).toContain("unsupported ones shown as unsupported");
     expect(home).toContain("marks each one supported, unsupported or contradicted");
     expect(home).toContain("the check reduces errors, it does not remove them");
     const disc = read("app/disclosures/page.tsx");

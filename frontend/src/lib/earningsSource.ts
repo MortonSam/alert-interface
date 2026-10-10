@@ -122,3 +122,16 @@ export function earningsSourceNote(
   const checked = checkedPhrase(checkedAt, now);
   return src ? `${src}, ${checked}` : checked;
 }
+
+
+/** The Browse the market card's earnings line: the date and whether it is confirmed or estimated, nothing else (no source, no
+ *  check time, no press-release text). */
+export function gridEarningsLine(date: string | null | undefined, confirmation: Confirmation | string | null | undefined): string {
+  if (!date) return "No confirmed date yet";
+  return `Earnings ${fmtEarningsDate(date)}, ${confirmation === "confirmed" ? "confirmed" : "estimated"}`;
+}
+
+/** A company listed under two share classes in the S&P 500 labels each card with its class (both share one company name). */
+export const SHARE_CLASS: Record<string, string> = {
+  GOOGL: "Class A", GOOG: "Class C", FOXA: "Class A", FOX: "Class B", NWSA: "Class A", NWS: "Class B",
+};

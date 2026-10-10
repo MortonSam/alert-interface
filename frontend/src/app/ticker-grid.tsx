@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
 import { fmtMarketCap } from "@/lib/utils";
-import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
+import { SHARE_CLASS, gridEarningsLine } from "@/lib/earningsSource";
 
 const PAGE_SIZE = 24;
 
@@ -333,30 +333,24 @@ export function TickerGrid() {
                 {/* Company name */}
                 {ticker.name && (
                   <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
-                    {ticker.name}
+                    {ticker.name}{SHARE_CLASS[ticker.symbol] ? `, ${SHARE_CLASS[ticker.symbol]}` : ""}
                   </div>
                 )}
 
                 {/* Footer: Sector + Market Cap + Earnings */}
                 <div className="mt-auto pt-1 space-y-0.5">
-                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 text-xs text-muted-foreground">
-                    {/* the sector wraps on a phone, never "Information..." */}
+                  <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    {/* the full sector name, wrapped, never truncated */}
                     {ticker.sector && (
-                      <span className="min-w-0 break-words sm:line-clamp-1">{ticker.sector}</span>
+                      <span className="min-w-0 break-words">{ticker.sector}</span>
                     )}
                     {ticker.market_cap ? (
                       <span className="shrink-0">{fmtMcap(ticker.market_cap)}</span>
                     ) : null}
                   </div>
-                  {ticker.next_earnings_date ? (
-                    <div className="text-xs font-medium text-foreground/70 [overflow-wrap:anywhere]">
-                      {cardEarningsNote(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note)}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-muted-foreground/70">
-                      {noDateLine(ticker.next_earnings_checked_at)}
-                    </div>
-                  )}
+                  <div className={ticker.next_earnings_date ? "text-xs font-medium text-foreground/70 [overflow-wrap:anywhere]" : "text-[11px] text-muted-foreground/70"}>
+                    {gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation)}
+                  </div>
                 </div>
               </Link>
             );

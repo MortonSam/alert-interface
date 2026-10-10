@@ -9,17 +9,18 @@ describe("the home page on a phone", () => {
   it("no section is a full screen below 640px, and the padding keeps gaps near 96px", () => {
     const home = read("app/page.tsx") + read("components/LatestVerifiedNote.tsx");
     const sections = home.match(/<section className="[^"]*"/g) ?? [];
-    expect(sections.length).toBeGreaterThanOrEqual(7);
+    expect(sections.length).toBeGreaterThanOrEqual(6);                  // plus Browse the market (id first) and the note (a template class)
     for (const s of sections.slice(1)) {
       expect(s, s).not.toMatch(/(^|[" ])min-h-\[100svh\]/);           // a full screen only from sm up
       expect(s, s).not.toMatch(/(^|[" ])py-(2[0-9]|1[3-9])\b/);         // phone padding at most py-12 (48px a side)
     }
   });
-  it("the hero is the screen below the header at every width, with the heron above the headline on a phone and the proof cards at its bottom", () => {
+  it("the opening: the heron first (above the headline on a phone, on the left from 1024px), one section per screen from 640px up", () => {
     const home = read("app/page.tsx");
-    expect(home).toContain('<section className="min-h-[calc(100svh-3.25rem-1px)] flex flex-col bg-background">');
-    expect(home).toMatch(/order-1 lg:order-2[^"]*"[\s\S]*BRAND\.heron/);            // the heron first on a phone, on the right from 1024px
-    expect(home.indexOf("<ProofCards />")).toBeLessThan(home.indexOf("<SiteCounters initial={initial} />"));
+    expect(home).toContain('<section className="snap-section relative flex flex-col bg-background">');
+    expect(home.indexOf("BRAND.heron")).toBeLessThan(home.indexOf("Know what</span>"));
+    expect(home).not.toMatch(/ProofCards|StoryFlow/);
+    expect(read("app/globals.css")).toMatch(/@media \(min-width: 640px\) \{ html\.home-snap \.snap-section \{ min-height: calc\(100svh - 3\.25rem - 1px\); \} \}/);
   });
   it("the header is one row: the logo, a menu button for the five links, and the search icon", () => {
     const nav = read("components/NavLinks.tsx");
@@ -28,7 +29,7 @@ describe("the home page on a phone", () => {
     expect(nav).toMatch(/aria-label=\{open \? "Close menu" : "Open menu"\}/);
   });
   it("stock cards wrap the sector name on a phone; the PostHog toolbar tab is hidden below 640px", () => {
-    expect(read("app/ticker-grid.tsx")).toContain('<span className="min-w-0 break-words sm:line-clamp-1">{ticker.sector}</span>');
+    expect(read("app/ticker-grid.tsx")).toContain('<span className="min-w-0 break-words">{ticker.sector}</span>');   // the full sector, never truncated
     expect(read("app/ticker-grid.tsx")).toContain('text-xs font-medium text-foreground/70 [overflow-wrap:anywhere]');   // a long note or URL never widens the page
     expect(read("app/globals.css")).toMatch(/@media \(max-width: 639px\) \{\s*#__POSTHOG_TOOLBAR__ \{ display: none !important; \}/);
   });

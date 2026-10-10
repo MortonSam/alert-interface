@@ -220,7 +220,8 @@ export function evidenceSummary(rule: IvyRule, backtest: IvyBacktest | null) {
     folds: backtest.folds.map((f) => ({ label: f.label, setups: f.setups, hitRate: f.hit_rate, baseRate: f.base_rate })),
     honest:
       `That edge is small, and most of it came in ${best.f.label} (${pct(best.f.hit_rate ?? 0)}% against ${pct(best.f.base_rate ?? 0)}%). ` +
-      `${restOfRecordPhrase(backtest, best.i)} Those years chose the rule as much as tested it, so the only test that counts is ${liveRecordPhrase(rule)}.`,
+      `${restOfRecordPhrase(backtest, best.i)} Those years chose the rule as much as tested it, so the only test that counts is ${liveRecordPhrase(rule)}. ` +
+      smallEdgeSentence(rule),
   };
 }
 
@@ -230,7 +231,7 @@ export function limitLines(rule: IvyRule): string[] {
     `At most ${rule.max_new_picks_per_night} new picks a night`,
     `At most ${rule.max_open_picks} open at once`,
     "One pick per symbol, no stacking",
-    "No bearish calls: the data has not earned them yet",
+    "No bearish calls. The data has not earned them yet.",
     "Picks are never deleted or re-dated; settlement only fills in the outcome",
     ledgerRecordSentence(rule),
     "Every pick carries its receipt: comparable setups, the base rate, the expected move, and what the options were pricing",

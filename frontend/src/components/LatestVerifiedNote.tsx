@@ -16,7 +16,7 @@ const RATING_CLASS: Record<string, string> = {
   bearish: "bg-destructive/10 text-destructive border-destructive/25",
 };
 
-export default function LatestVerifiedNote() {
+export default function LatestVerifiedNote({ className = "" }: { className?: string }) {
   const [note, setNote] = useState<Note | null | undefined>(undefined);   // undefined: loading; null: none
   useEffect(() => {
     api.researchNotes.latestVerified().then(setNote).catch(() => setNote(null));   // a 404 (none yet) or any failure: the block says so
@@ -27,7 +27,7 @@ export default function LatestVerifiedNote() {
   const verified = verificationLine(note.verification_summary);
   const generated = new Date(note.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return (
-    <section className="max-w-3xl mx-auto px-4 sm:px-8 py-12 sm:py-24">
+    <section className={`max-w-3xl mx-auto px-4 sm:px-8 py-12 sm:py-24 ${className}`}>
       <div className="text-center mb-12">
         <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
           See it in action

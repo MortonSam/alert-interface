@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardEarningsNote, checkedPhrase, earningsSourceNote, eventConfirmationBadge, nextEarningsLine, noDateLine } from "@/lib/earningsSource";
+import { SHARE_CLASS, cardEarningsNote, checkedPhrase, earningsSourceNote, eventConfirmationBadge, gridEarningsLine, nextEarningsLine, noDateLine } from "@/lib/earningsSource";
 
 const NOW = new Date(2026, 8, 29, 10, 30);   // Sep 29, 2026, local. Checked-at stamps sit mid-day UTC so their calendar day is the same in every US zone.
 
@@ -35,8 +35,14 @@ describe("a ticker the calendar left without a date is never blank", () => {
     const { join } = require("node:path") as typeof import("node:path");
     const src = join(__dirname, "../..");
     const grid = readFileSync(join(src, "app/ticker-grid.tsx"), "utf8");
-    expect(grid).toMatch(/noDateLine\(ticker\.next_earnings_checked_at\)/);
+    expect(grid).toContain("gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation)");   // date and status only
     expect(grid).not.toMatch(/\{ticker\.next_earnings_date && \(/);
+    expect(grid).not.toMatch(/cardEarningsNote|noDateLine|checked/);
+    expect(gridEarningsLine("2026-10-29", "estimated")).toBe("Earnings Oct 29, estimated");
+    expect(gridEarningsLine("2026-10-29", "expected_unconfirmed")).toBe("Earnings Oct 29, estimated");
+    expect(gridEarningsLine("2026-10-01", "confirmed")).toBe("Earnings Oct 1, confirmed");
+    expect(gridEarningsLine(null, null)).toBe("No confirmed date yet");
+    expect([SHARE_CLASS.GOOGL, SHARE_CLASS.GOOG, SHARE_CLASS.FOXA, SHARE_CLASS.FOX, SHARE_CLASS.NWSA, SHARE_CLASS.NWS]).toEqual(["Class A", "Class C", "Class A", "Class B", "Class A", "Class B"]);
     const build = readFileSync(join(src, "app/build/page.tsx"), "utf8");
     expect(build).toMatch(/fb\.earnings_date \? cardEarningsNote\([\s\S]{0,200}: noDateLine\(fb\.earnings_checked_at\)/);
     expect(build).not.toContain('fb.earnings_date ?? "n/a"');
