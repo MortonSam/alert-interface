@@ -15,8 +15,11 @@ describe("the home page on a phone", () => {
       expect(s, s).not.toMatch(/(^|[" ])py-(2[0-9]|1[3-9])\b/);         // phone padding at most py-12 (48px a side)
     }
   });
-  it("the hero is the screen below the header on a phone, so the scroll cue sits at its bottom", () => {
-    expect(read("app/page.tsx")).toContain('<section className="min-h-[calc(100svh-3.25rem-1px)] sm:min-h-[100svh] flex flex-col bg-background">');
+  it("the hero is the screen below the header at every width, with the heron above the headline on a phone and the proof cards at its bottom", () => {
+    const home = read("app/page.tsx");
+    expect(home).toContain('<section className="min-h-[calc(100svh-3.25rem-1px)] flex flex-col bg-background">');
+    expect(home).toMatch(/order-1 lg:order-2[^"]*"[\s\S]*BRAND\.heron/);            // the heron first on a phone, on the right from 1024px
+    expect(home.indexOf("<ProofCards />")).toBeLessThan(home.indexOf("<SiteCounters initial={initial} />"));
   });
   it("the header is one row: the logo, a menu button for the five links, and the search icon", () => {
     const nav = read("components/NavLinks.tsx");

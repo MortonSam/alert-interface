@@ -180,3 +180,59 @@ export function chainFreshnessSentence(rule: IvyRule): string {
     `so a name can show no implied move even when it has options.`
   );
 }
+
+// ── The Meet Ivy page's tiles, evidence and limits. Every number is a slot filled from GET /theses/ivy-rule. ──
+
+export interface RuleTile {
+  figure: string;      // the tile's number, from the rule
+  unit: string;        // what the number counts
+  caption: string;     // the condition in words
+}
+
+/** Her three conditions, all required, as tiles. */
+export function ruleTiles(rule: IvyRule): RuleTile[] {
+  return [
+    { figure: `${rule.candidate_window_days}`, unit: "calendar days", caption: "Earnings in the next few days" },
+    { figure: `−${Math.abs(rule.momentum_cutoff_pct)}%`, unit: `over ${rule.momentum_lookback_days} trading days`,
+      caption: `Down more than ${Math.abs(rule.momentum_cutoff_pct)}% over the prior ${rule.momentum_lookback_days} trading days` },
+    { figure: `${rule.min_prior_quarters}`, unit: "quarters", caption: `At least ${rule.min_prior_quarters} quarters of earnings history` },
+  ];
+}
+
+/** The refusal check, the fourth tile: what the options price against the stock's usual earnings move. */
+export function refusalTile(rule: IvyRule): RuleTile {
+  return {
+    figure: `${rule.implied_move_multiple}×`, unit: "the usual earnings move",
+    caption: `If the implied move is more than ${rule.implied_move_multiple} times the stock's usual earnings move, she refuses.`,
+  };
+}
+
+/** The evidence block's numbers and its one honest sentence, or null when no backtest is stored. */
+export function evidenceSummary(rule: IvyRule, backtest: IvyBacktest | null) {
+  if (!backtest || backtest.setups <= 0) return null;
+  const scored = backtest.folds.map((f, i) => ({ f, i, lift: (f.hit_rate ?? 0) - (f.base_rate ?? 0) }));
+  const best = scored.reduce((a, b) => (b.lift > a.lift ? b : a));
+  return {
+    setups: backtest.setups,
+    hitRate: pct(backtest.hit_rate),
+    baseRate: pct(backtest.base_rate),
+    years: joinYears(backtest.folds.map((f) => f.label)),
+    folds: backtest.folds.map((f) => ({ label: f.label, setups: f.setups, hitRate: f.hit_rate, baseRate: f.base_rate })),
+    honest:
+      `That edge is small, and most of it came in ${best.f.label} (${pct(best.f.hit_rate ?? 0)}% against ${pct(best.f.base_rate ?? 0)}%). ` +
+      `${restOfRecordPhrase(backtest, best.i)} Those years chose the rule as much as tested it, so the only test that counts is ${liveRecordPhrase(rule)}.`,
+  };
+}
+
+/** Her limits, one short line each. */
+export function limitLines(rule: IvyRule): string[] {
+  return [
+    `At most ${rule.max_new_picks_per_night} new picks a night`,
+    `At most ${rule.max_open_picks} open at once`,
+    "One pick per symbol, no stacking",
+    "No bearish calls: the data has not earned them yet",
+    "Picks are never deleted or re-dated; settlement only fills in the outcome",
+    ledgerRecordSentence(rule),
+    "Every pick carries its receipt: comparable setups, the base rate, the expected move, and what the options were pricing",
+  ];
+}

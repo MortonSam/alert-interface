@@ -2,7 +2,10 @@ import type { LegendItem } from "@/lib/encodings/types";
 
 /** A swatch that looks like the mark it names: same color, opacity and dash. */
 export function LegendSwatch({ swatch }: { swatch: LegendItem["swatch"] }) {
-  const { kind, color, className, opacity, dashed } = swatch;
+  const { kind, color, className, opacity, dashed, hollow } = swatch;
+  if (kind === "dot") {
+    return <span className="inline-block w-2.5 h-2.5 rounded-full align-middle" style={{ backgroundColor: hollow ? "transparent" : color, border: `2px solid ${color}` }} />;
+  }
   if (kind === "line") {
     return (
       <span

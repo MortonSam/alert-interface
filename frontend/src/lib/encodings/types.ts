@@ -4,10 +4,11 @@ export interface LegendItem {
   label: string;
   /** What the mark looks like: enough for a swatch to demonstrate it. */
   swatch: {
-    kind: "fill" | "line" | "bar" | "pill" | "text";
+    kind: "fill" | "line" | "bar" | "pill" | "text" | "dot";
     color?: string;          // CSS color, for fills, lines and bars
     className?: string;      // tailwind classes, for pills and text
     opacity?: number;
     dashed?: boolean;
+    hollow?: boolean;        // a dot drawn as a ring
   };
 }

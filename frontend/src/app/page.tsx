@@ -9,6 +9,8 @@ import { fetchSiteStatsServer } from "@/lib/siteStats";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { StoryFlow } from "@/components/StoryFlow";
 import { HeroReveal } from "@/components/HeroReveal";
+import { ProofCards } from "@/components/ProofCards";
+import { BRAND } from "@/lib/brand";
 
 // The counters are rendered on the server and revalidated: a backend that is slow, restarting or erroring never costs the
 // page its first screen, because a failed revalidation keeps the last good render (lib/siteStats). Next needs this export as a
@@ -20,17 +22,14 @@ export default async function Home() {
   return (
     <main>
       <style>{`
-        @keyframes hero-bob {
-          0%, 100% { transform: translateY(0); }
-          50%      { transform: translateY(4px); }
-        }
-        .hero-scroll-cue {
-          animation: hero-bob 2.4s ease-in-out infinite;
-          animation-delay: 1.4s;
+        .hero-heron { height: clamp(110px, 30vw, 170px); }
+        @media (min-width: 1024px) {
+          .hero-h1 { font-size: clamp(52px, 5.5vw, 96px); }
+          .hero-heron { height: auto; width: 100%; max-width: 640px; max-height: 52svh; object-fit: contain; }
         }
 
         .hero-h1 {
-          font-size: clamp(40px, 10vw, 120px);
+          font-size: clamp(40px, 10vw, 104px);
           line-height: 1.05;
           letter-spacing: -.03em;
         }
@@ -46,46 +45,52 @@ export default async function Home() {
           letter-spacing: -.025em;
         }
 
-        @media (prefers-reduced-motion: reduce) {
-          .hero-scroll-cue { animation: none; }
-        }
       `}</style>
 
       <StoryFlow>
-        {/* ── 1. Hero ────────────────────────────────────────────── */}
-        <section className="min-h-[calc(100svh-3.25rem-1px)] sm:min-h-[100svh] flex flex-col bg-background">
-          <HeroReveal className="flex-1 flex flex-col items-center justify-center text-center max-w-7xl w-full mx-auto px-4 sm:px-8">
-            <h1 className="hero-h1 font-display font-extrabold uppercase">
-              <span data-hero-line className="block text-foreground">
-                Stock research
-              </span>
-              <span data-hero-line className="block text-primary">
-                that verifies
-              </span>
-              <span data-hero-line className="block text-foreground">
-                itself.
-              </span>
-            </h1>
+        {/* ── 1. Hero: the headline and buttons on the left, the heron large on the right in its cream (above the headline,
+               smaller, on a phone), and three live proof cards along the bottom of the same screen. ── */}
+        <section className="min-h-[calc(100svh-3.25rem-1px)] flex flex-col bg-background">
+          <HeroReveal className="flex-1 flex flex-col max-w-7xl w-full mx-auto px-4 sm:px-8">
+            <div className="flex-1 grid items-center gap-y-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-x-12 pt-8 lg:pt-6">
+              <div className="order-2 lg:order-1 text-left">
+                <h1 className="hero-h1 font-display font-extrabold uppercase">
+                  <span data-hero-line className="block text-foreground">
+                    Stock research
+                  </span>
+                  <span data-hero-line className="block text-primary">
+                    that verifies
+                  </span>
+                  <span data-hero-line className="block text-foreground">
+                    itself.
+                  </span>
+                </h1>
 
-            <p data-hero-fade className="text-foreground/70 text-lg mt-6 max-w-[42em]">
-              One workspace for the retail investor, starting with the S&amp;P 500.
-              Every number explained; every claim checked, and the unsupported ones shown as unsupported.
-            </p>
+                <p data-hero-fade className="text-foreground/70 text-lg mt-6 max-w-[36em]">
+                  One workspace for the retail investor, starting with the S&amp;P 500.
+                  Every number explained; every claim checked, and the unsupported ones shown as unsupported.
+                </p>
 
-            <div data-hero-fade className="flex flex-wrap gap-[13px] justify-center mt-8">
-              <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
-              <Link
-                href="/build"
-                className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
-              >
-                Build a trade →
-              </Link>
+                <div data-hero-fade className="flex flex-wrap gap-[13px] mt-8">
+                  <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
+                  <Link
+                    href="/build"
+                    className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors"
+                  >
+                    Build a trade →
+                  </Link>
+                </div>
+              </div>
+              <div data-hero-fade className="order-1 lg:order-2 flex justify-start lg:justify-end">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={BRAND.heron} alt="" aria-hidden="true" className="hero-heron w-auto" />
+              </div>
+            </div>
+
+            <div data-hero-fade className="pb-6 sm:pb-8 pt-8">
+              <ProofCards />
             </div>
           </HeroReveal>
-
-          <p className="hero-scroll-cue text-center pb-6 sm:pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
-            scroll to explore ↓
-          </p>
         </section>
 
         {/* ── 2. The counts: four live numbers from stored tables, the first thing under the hero. From 640px up the section is
