@@ -13,6 +13,11 @@ export function fmtMovePct(pct: number): string {
   return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
 }
 
+/** The printed change's color, one rule for the mover rows and In the news: green up (or unchanged), red down. */
+export function moveTone(pct: number): string {
+  return pct >= 0 ? "text-success" : "text-destructive";
+}
+
 /** "Yahoo · Oct 8, 11:29 AM ET": where and when a headline was published. */
 export function headlineByline(h: NewsHeadline): string {
   const when = fmtIsoDateTime(h.published_at);

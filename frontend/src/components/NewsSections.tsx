@@ -8,7 +8,7 @@ import type { MoverItem, NewsSectionsResponse } from "@/lib/api";
 import { SectionKicker } from "@/components/SectionKicker";
 import { fmtIsoDateTime } from "@/lib/freshness";
 import {
-  MOVERS_SUBTITLE, MOVERS_TITLE, NEWS_LABEL, STORIES_SUBTITLE, STORIES_TITLE, fmtMovePct, headlineByline,
+  MOVERS_SUBTITLE, MOVERS_TITLE, NEWS_LABEL, STORIES_SUBTITLE, STORIES_TITLE, fmtMovePct, headlineByline, moveTone,
 } from "@/lib/newsSections";
 
 function ExternalHeadline({ url, headline }: { url: string; headline: string }) {
@@ -19,8 +19,12 @@ function ExternalHeadline({ url, headline }: { url: string; headline: string }) 
   );
 }
 
+/** A stock's printed change, the same in the mover rows and In the news (the figure the headline guard checks headlines against). */
+function MoveChange({ pct }: { pct: number }) {
+  return <span className={`font-mono text-xs font-semibold ${moveTone(pct)}`} data-testid="move-change">{fmtMovePct(pct)}</span>;
+}
+
 function MoverRow({ m }: { m: MoverItem }) {
-  const tone = m.change_pct >= 0 ? "text-success" : "text-destructive";
   return (
     <li className="py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6" data-testid="mover-row">
       <div className="flex items-baseline gap-2 min-w-0">
@@ -28,7 +32,7 @@ function MoverRow({ m }: { m: MoverItem }) {
         {m.name && <span className="text-sm text-muted-foreground min-w-0 break-words">{m.name}</span>}
         <span className="ml-auto pl-2 font-mono text-xs text-right shrink-0">
           <span className="text-muted-foreground">${m.price.toFixed(2)}</span>{" "}
-          <span className={`font-semibold ${tone}`}>{fmtMovePct(m.change_pct)}</span>
+          <MoveChange pct={m.change_pct} />
           <span className="block text-[10px] text-muted-foreground/60 font-sans">as of {fmtIsoDateTime(m.quote_time)}</span>
         </span>
       </div>
@@ -78,7 +82,10 @@ export default function NewsSections({ data, indexes }: { data: NewsSectionsResp
           <ul className="divide-y divide-border/60">
             {data.stories.map((st) => (
               <li key={st.url} className="py-3 sm:grid sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-x-6" data-testid="news-story">
-                <Link href={`/tickers/${st.symbol}`} className="tap font-display text-sm font-bold text-foreground hover:text-primary">{st.symbol}</Link>
+                <div className="flex items-baseline gap-2 sm:flex-col sm:gap-0">
+                  <Link href={`/tickers/${st.symbol}`} className="tap font-display text-sm font-bold text-foreground hover:text-primary">{st.symbol}</Link>
+                  <MoveChange pct={st.change_pct} />
+                </div>
                 <p className="text-sm leading-snug min-w-0">
                   <ExternalHeadline url={st.url} headline={st.headline} />
                   <span className="block text-xs text-muted-foreground mt-0.5">{headlineByline(st)}</span>

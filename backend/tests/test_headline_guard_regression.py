@@ -99,13 +99,16 @@ CASES = [
     ('COIN', 'Coinbase Global, Inc.', 4.3, 'Chevron’s Venezuela Plan Will Pay Off, Says Analyst. Plus, Coinbase and 3 More Stocks.', None, True, True, False, False, False),
     ('CEG', 'Constellation Energy Corporation', 4.56, 'Big Tech Needs Power. Constellation Just Found a $1 Billion Buyer in Google.', None, True, False, False, False, False),
     ('VEEV', 'Veeva Systems Inc.', 3.96, 'Reasons to Hold Veeva Systems Stock in Your Portfolio for Now', None, True, False, True, False, True),
-    ('ORCL', 'Oracle Corporation', 4.21, 'Oracle vs. Cisco: The Dividend Battle Wall Street Didn’t See Coming', None, True, False, False, False, True),
+    ('ORCL', 'Oracle Corporation', 4.21, 'Oracle vs. Cisco: The Dividend Battle Wall Street Didn’t See Coming', None, True, False, True, False, True),
     ('CRWD', 'CrowdStrike Holdings, Inc.', 4.57, "CrowdStrike Recommends Stockholders Reject Tutanota's $260/Share Mini-Tender Offer", None, True, False, False, False, True),
     ('DE', 'Deere & Company', -4.85, "Deere (DE) Stock Sinks As Market Gains: Here's Why", None, True, False, False, True, True),
     ('VZ', 'Verizon Communications Inc.', -10.14, 'Why Verizon (VZ) Shares Are Trading Lower Today', None, True, False, False, True, True),
     ('EL', 'The Estée Lauder Companies Inc.', 3.95, 'Estée Lauder Companies (EL) Gets A Bobbi Brown Reset On A Discount To Fair Value', None, True, False, True, False, True),
     ('COIN', 'Coinbase Global, Inc.', 4.3, 'Coinbase Has Lost 56% in a Year: Citizens JMP Sees 63% Upside', None, False, False, False, False, True),
     ('HPE', 'Hewlett Packard Enterprise Company', 3.46, 'Hewlett Packard Enterprise (HPE) Wins AI Infrastructure Deployment In Financial Services', None, True, False, False, False, True),
+    ('ORCL', 'Oracle Corporation', 4.21, "Oracle vs. Cisco: The Dividend Battle Wall Street Didn't See Coming", None, True, False, True, False, True),
+    ('AAPL', 'Apple Inc.', 0.8, 'Apple vs. Epic: Supreme Court Declines Appeal', None, True, False, False, False, True),
+    ('KO', 'The Coca-Cola Company', 1.1, 'Coca-Cola versus PepsiCo: The Cola War Heats Up', None, True, False, True, False, True),
 ]
 
 

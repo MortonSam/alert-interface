@@ -234,11 +234,15 @@ _OPINION = re.compile(
     r"\bhere['’]?s\s+(?:what|how)\b|\bhere\s+is\s+(?:what|how)\b|what\s+needs\s+to\s+happen|"
     # comparisons
     r"worth\s+more\s+than|^\W*better\b", re.I)
-# "vs." or "versus" is opinion only when it compares stocks: with better, which, stock(s), buy, or two tickers ("NVDA vs. AMD");
-# "Apple vs. Epic ruling" is news
+# "vs." or "versus" is opinion when it compares stocks: with better, which, stock(s), buy, or two tickers ("NVDA vs. AMD"), or a
+# company on either side ("Oracle vs. Cisco: The Dividend Battle ..."); legal news ("Apple vs. Epic ruling", "FTC vs. Meta trial")
+# and a regulator on the left stay eligible
 _VERSUS = re.compile(r"\bvs\.?(?=\s)|\bversus\b", re.I)
 _COMPARES_STOCKS = re.compile(r"\bbetter\b|\bwhich\b|\bstocks?\b|\bbuy\b", re.I)
 _TICKER_TOKEN = re.compile(r"(?<![A-Za-z&])[A-Z]{2,5}(?![A-Za-z&])")
+_NAME_VS_NAME = re.compile(r"(?<![\w&.'’-])[A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3}\s+(?:vs\.?|versus)\s+[A-Z][\w&'’-]")
+_LEGAL = re.compile(r"\b(?:ruling|rules|trial|lawsuit|suit|sues|sued|case|court|courts|judge|jury|verdict|appeal|appeals|settlement|"
+                    r"settle|settles|antitrust|litigation|patent|injunction|arbitration|ftc|doj|sec|regulators?|state\s+of)\b", re.I)
 NOT_TICKERS = {"AI", "US", "USA", "UK", "EU", "CEO", "CFO", "IPO", "ETF", "EPS", "FDA", "FTC", "SEC", "DOJ", "GDP", "NYSE", "CMS",
                "NIH", "GLP", "EV", "EVS", "TV", "PC", "ID", "OK", "MHZ"}
 # thesis pieces: "Company (TICKER): Expanding ...", "Company (TICKER) Capitalizing on ..." (case-sensitive: the ticker's capitals)
@@ -255,7 +259,8 @@ def is_opinion(headline: str) -> bool:
     (buy, sell, should you, is it time, Jim Cramer), rankings and lists, digests (important facts to note, what you should know,
     here's what), comparisons (worth more than; "vs." between stocks), and thesis pieces ("Company (TICKER): Expanding ...")."""
     h = headline or ""
-    if _VERSUS.search(h) and (_COMPARES_STOCKS.search(h) or len({t for t in _TICKER_TOKEN.findall(h) if t not in NOT_TICKERS}) >= 2):
+    if _VERSUS.search(h) and (_COMPARES_STOCKS.search(h) or len({t for t in _TICKER_TOKEN.findall(h) if t not in NOT_TICKERS}) >= 2
+                              or (_NAME_VS_NAME.search(h) and not _LEGAL.search(h))):
         return True
     return bool(_THESIS.search(h) or _OPINION.search(h))
 

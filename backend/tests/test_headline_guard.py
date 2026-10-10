@@ -146,6 +146,9 @@ def test_vs_is_opinion_only_when_it_compares_stocks():
     assert not G.is_opinion("FTC vs. Meta Trial Opens in Washington")
     assert G.is_opinion("Better Buy: Nvidia vs. AMD") and G.is_opinion("NVDA vs. AMD: Which Chip Stock Wins?")
     assert G.is_opinion("CrowdStrike vs. Palantir: one AI stock to own")
+    assert G.is_opinion("Oracle vs. Cisco: The Dividend Battle Wall Street Didn't See Coming")            # company vs. company
+    assert G.is_opinion("Coca-Cola versus PepsiCo: The Cola War Heats Up")
+    assert not G.is_opinion("Apple vs. Epic: Supreme Court Declines Appeal")                           # legal news
 
 
 def test_in_the_news_leaves_out_the_top_movers():

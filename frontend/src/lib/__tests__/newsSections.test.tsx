@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import NewsSections from "@/components/NewsSections";
 import type { NewsSectionsResponse } from "@/lib/api";
-import { NEWS_LABEL, fmtMovePct } from "@/lib/newsSections";
+import { NEWS_LABEL, fmtMovePct, moveTone } from "@/lib/newsSections";
 
 const SRC = join(__dirname, "../..");
 const H = { headline: "Micron Could Be Poised for a Major Breakout", url: "https://example.com/mu", source: "Yahoo", published_at: "2026-10-08T15:20:00Z" };
@@ -30,6 +30,17 @@ describe("Discover news sections", () => {
     expect(html).toContain("+3.25%");
     expect(html.indexOf(">01<")).toBeLessThan(html.indexOf(">02<"));          // the page numbers them first
     expect(fmtMovePct(-4.6158)).toBe("-4.62%");
+  });
+  it("print each In the news stock's change beside its ticker, in the mover rows' style and colors", () => {
+    const html = renderToStaticMarkup(<NewsSections data={DATA} indexes={{ movers: "01", stories: "02" }} />);
+    const changes = [...html.matchAll(/<span class="([^"]*)" data-testid="move-change">([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+    expect(changes).toHaveLength(3);                                         // two movers and one story
+    const story = html.slice(html.indexOf('data-testid="news-stories"'));
+    expect(story).toContain('data-testid="move-change">-4.62%<');
+    const [moverMU, storyMU] = changes.filter(([, text]) => text === "-4.62%");
+    expect(storyMU[0]).toBe(moverMU[0]);                                     // the same classes as the mover row
+    expect(moveTone(-1)).toBe("text-destructive");
+    expect(moveTone(1)).toBe("text-success");
   });
   it("is the first thing on Discover and carries headlines only", () => {
     const page = readFileSync(join(SRC, "app/discover/page.tsx"), "utf8");
