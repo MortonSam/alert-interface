@@ -460,7 +460,7 @@ async def finish(failures: list[dict], dry_run: bool = False) -> int:
     """
     if not failures:
         if not dry_run:
-            await record_step_fields(AUTO_PICK_STEP, {"failed_symbols": [], "failed_count": 0})
+            await record_step_fields(AUTO_PICK_STEP, {"failed_symbols": [], "failed_count": 0, "failed_errors": {}})
         return 0
     symbols = [f["symbol"] for f in failures]
     print(f"[auto-pick] {len(failures)} candidate(s) raised: {', '.join(symbols)}", file=sys.stderr, flush=True)
