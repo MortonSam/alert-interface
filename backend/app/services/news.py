@@ -108,6 +108,10 @@ def headline_problem(story: dict, symbol: str, name: str | None, last_report, si
     h = story["headline"]
     if story["published_at"] < since:
         return "published before the previous session's close"
+    from app.services.news_links import DISPLAYABLE
+    state = story.get("link_state", "ok")                 # stories built in tests carry no link fields
+    if state not in DISPLAYABLE:
+        return "its link is not resolved to the article yet" if state is None else f"its link lands on a {state} page" if state in ("paywall", "login") else "its link is broken"
     if is_roundup(h):
         return "a roundup about several companies"
     if not names_company(h, symbol, name):

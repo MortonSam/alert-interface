@@ -233,7 +233,10 @@ _OPINION = re.compile(
     r"important\s+facts\s+to\s+note|what\s+you\s+(?:should|need\s+to)\s+know|things\s+to\s+know|what\s+to\s+know|"
     r"\bhere['’]?s\s+(?:what|how)\b|\bhere\s+is\s+(?:what|how)\b|what\s+needs\s+to\s+happen|"
     # comparisons
-    r"worth\s+more\s+than|^\W*better\b", re.I)
+    r"worth\s+more\s+than|^\W*better\b|"
+    # trading ideas ("How to Play Unusual Options Activity in Oracle Stock")
+    r"\bhow\s+to\s+(?:play|trade|profit)\b|\bways?\s+to\s+play\b|\bunusual\s+options\s+activity\b|\btrade\s+ideas?\b|"
+    r"\boptions?\s+trade\s+(?:idea|of\s+the)|\bplay(?:ing)?\s+(?:the|this)\s+(?:dip|move|rally|breakout|earnings)\b", re.I)
 # "vs." or "versus" is opinion when it compares stocks: with better, which, stock(s), buy, or two tickers ("NVDA vs. AMD"), or a
 # company on either side ("Oracle vs. Cisco: The Dividend Battle ..."); legal news ("Apple vs. Epic ruling", "FTC vs. Meta trial")
 # and a regulator on the left stay eligible
@@ -257,7 +260,7 @@ def is_explainer(headline: str) -> bool:
 def is_opinion(headline: str) -> bool:
     """Pure: opinion or promotion, shown nowhere on Discover: valuation views, hedged takes (may, might, could), recommendations
     (buy, sell, should you, is it time, Jim Cramer), rankings and lists, digests (important facts to note, what you should know,
-    here's what), comparisons (worth more than; "vs." between stocks), and thesis pieces ("Company (TICKER): Expanding ...")."""
+    here's what), comparisons (worth more than; "vs." between stocks), trading ideas (how to play, unusual options activity), and thesis pieces ("Company (TICKER): Expanding ...")."""
     h = headline or ""
     if _VERSUS.search(h) and (_COMPARES_STOCKS.search(h) or len({t for t in _TICKER_TOKEN.findall(h) if t not in NOT_TICKERS}) >= 2
                               or (_NAME_VS_NAME.search(h) and not _LEGAL.search(h))):

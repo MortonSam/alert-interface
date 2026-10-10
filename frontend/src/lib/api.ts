@@ -660,8 +660,8 @@ export interface MoverItem {
 }
 
 export interface IvyLine {
-  sentence: string;              // passed the check, or exactly "No reported news explains this move."
-  result: "passed" | "no_news";
+  sentence: string;              // passed the check, "No reported news explains this move." or "Ivy couldn't confirm what moved this stock."
+  result: "passed" | "no_news" | "unconfirmed";
   lead: NewsHeadline | null;     // the story that informed her most
   more: number;                  // how many other stories informed her
   written_at: string | null;

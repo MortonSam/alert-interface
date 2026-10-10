@@ -55,6 +55,30 @@ async def _fetch(client: FinnhubClient, symbols: list[str], quotes: bool) -> tup
     return raw, snaps, failed
 
 
+LINK_RESOLVE_DAYS = 3            # stories this recent get their vendor link resolved to the article (services/news_links)
+LINK_RESOLVE_LIMIT = 800         # at most this many per run; the rest wait for the next run
+
+
+async def resolve_links(now: datetime) -> dict:
+    """Resolve each recent story's vendor link to its article URL and record where it landed (news_links.classify)."""
+    from app.services.news_links import resolve_many
+    async with ScriptSessionLocal() as s:
+        urls = list((await s.execute(text("""SELECT url FROM news_stories WHERE link_state IS NULL AND published_at >= :c
+                                             ORDER BY published_at DESC LIMIT :n"""),
+                                     {"c": now - timedelta(days=LINK_RESOLVE_DAYS), "n": LINK_RESOLVE_LIMIT})).scalars().all())
+    if not urls:
+        return {"resolved": 0}
+    results = await resolve_many(urls)
+    counts: dict[str, int] = {}
+    async with ScriptSessionLocal() as s:
+        for u, (article, state) in results.items():
+            counts[state] = counts.get(state, 0) + 1
+            await s.execute(text("UPDATE news_stories SET article_url = :a, link_state = :st, link_checked_at = now() WHERE url = :u"),
+                            {"a": article, "st": state, "u": u})
+        await s.commit()
+    return {"resolved": len(results), **counts}
+
+
 async def run(argv: list[str]) -> int:
     finnhub_client.REQUESTS_PER_MINUTE = int(os.environ.get("NEWS_FINNHUB_RPM", "40"))
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), None)
@@ -105,6 +129,12 @@ async def run(argv: list[str]) -> int:
         print(f"  failed: {f}")
     await record_step_fields(STEP_LABEL, {"exit": exit_code, "at": datetime.now(timezone.utc).isoformat(), "seconds": seconds,
                                           "stories": len(stories), "quotes": len(snaps), "failed": len(failed), "failed_sample": failed[:10]})
+    if exit_code == 0:
+        try:
+            resolved = await resolve_links(now)
+            print(f"  links: {resolved}")
+        except Exception as exc:                                  # an unresolved story is never shown; the next run tries again
+            print(f"  link resolution failed: {redact(exc)[:200]}")
     if exit_code == 0 and settings.discover_news_enabled:       # Ivy's sentences for the rows the page now shows (behind the news flag)
         from app.scripts.explain_moves import run as explain_moves
         try:

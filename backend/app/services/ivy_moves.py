@@ -28,6 +28,7 @@ from app.services.headline_guard import _CLAUSE, CUE_SIGN, clauses_about, stated
 from app.services.news import NEW_YORK, name_forms, names_company
 
 NO_NEWS = "No reported news explains this move."
+CANNOT_CONFIRM = "Ivy couldn't confirm what moved this stock."   # a row whose sentence did not pass and that has no displayable headline
 MAX_WORDS = 25
 MAX_INPUT_STORIES = 30          # newest first; a stock with more stories than this is read from its newest
 FALLBACK_WARN_SHARE = 0.2       # validate warns when more than this share of a run's rows fall back to the headline display
@@ -39,7 +40,7 @@ ADVICE = re.compile(
     r"\b(?:a|strong|time\s+to|good\s+time\s+to)\s+(?:buy|sell)\b(?!-?\s?offs?\b)|\b(?:buy|sell)\s+(?:the\s+(?:stock|shares|dip)|shares|now|signal|rating)\b|"
     r"\b(?:buy|sell)(?=\s*(?:[.,;!]|$))|\bshould\b|\brecommend\w*|\bopportunit\w*|\bbargain\b|"
     r"\b(?:under|over)valued\b|\bcheap\b|\bexpensive\b|\battractive\b|\bbullish\b|\bbearish\b|\bi\s+think\b|\bwe\s+think\b|\bbelieve\b|"
-    r"\b(?:up|down)side\b|\bcramer\b|\bwill\b|\bwould\b|\bcould\b|\bmay\b|\bmight\b|\blikely\b|(?<!than\s)(?<!than-)\bexpect(?:s|ed|ing)?\b|\bpoised\b|\bforecasts?\b|\bpredict\w*|\bgoing\s+to\b",
+    r"\b(?:up|down)side\b|\bcramer\b|\bmomentum\b|\bwill\b|\bwould\b|\bcould\b|\bmay\b|\bmight\b|\blikely\b|(?<!than\s)(?<!than-)\bexpect(?:s|ed|ing)?\b|\bpoised\b|\bforecasts?\b|\bpredict\w*|\bgoing\s+to\b",
     re.I)
 NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 PROPER = re.compile(r"(?<![A-Za-z0-9$])[A-Z][A-Za-z0-9&.'’-]*")
@@ -48,7 +49,8 @@ COMMON_CAPS = {"the", "a", "an", "its", "it", "shares", "share", "stock", "stock
                "investors", "investor", "analysts", "analyst", "traders", "today", "this", "that", "his", "her", "their", "and", "of", "for", "to", "from", "by", "s&p",
                "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february", "march", "april",
                "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun",
-               "jul", "aug", "sep", "sept", "oct", "nov", "dec", "ceo", "cfo", "q1", "q2", "q3", "q4", "u.s.", "us", "wall", "street"}
+               "jul", "aug", "sep", "sept", "oct", "nov", "dec", "ceo", "cfo", "q1", "q2", "q3", "q4", "u.s.", "us", "wall", "street",
+               "inc", "corp", "corporation", "co", "ltd", "plc", "llc", "mhz", "ghz"}      # corporate suffixes and units are not names
 
 
 def story_text(story: dict) -> str:
@@ -82,6 +84,9 @@ STORIES (your only source; use no outside knowledge):
 {stories}
 
 RULES
+- Name the company as {(display_forms(symbol, name) or [symbol])[0]}, never only by its ticker or as "the stock".
+- Name a cause only when a story says that event moved {name or symbol}'s stock (after, on, as, following, sent shares); an event
+  that merely happened the same day is not a cause. Cite only the stories that say so.
 - Use only facts from the stories. Every company, person, dollar figure, percent and event you mention must appear in a story.
 - Do not restate the stock's own percent change; it is printed beside your sentence. If you must, write it as {abs(move_pct):.1f}% exactly.
 - Count the words: at most {MAX_WORDS}. Name one or two events, not every detail.
@@ -156,6 +161,9 @@ def check_sentence(sentence: str, inputs: list[dict], symbol: str, name: str | N
     pct = stock_percent_problem(s, symbol, name, move_pct)
     if pct:
         problems.append(pct)
+    shown = display_forms(symbol, name)
+    if shown and not any(re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}(?:'s|’s)?(?![A-Za-z0-9])", s, re.I) for f in shown):
+        problems.append(f"it does not name {shown[0]} by its name")
     return problems
 
 
@@ -165,6 +173,46 @@ FILLER = {"the", "a", "an", "and", "as", "on", "in", "of", "its", "it", "with", 
           "decliner", "decliners", "gainer", "gainers", "standing", "out", "stock", "stocks", "share", "shares", "investor", "investors",
           "index", "sharply", "trading", "traded", "other", "peers", "sector", "attention", "interest", "s&p", "500", "move", "moved", "big",
           "biggest", "one", "this", "that", "friday", "monday", "tuesday", "wednesday", "thursday", "slightly", "steeply", "solidly"}
+
+
+# a source says an event moved the stock when it names the company, a move (a move word, or shares/stock) and a causal link
+CAUSAL = re.compile(r"\b(?:after|on|as|following|amid|due\s+to|thanks\s+to|sent|sends|send|lifted|lifts|lifting|boosted|boosts|boosting|"
+                    r"pushed|pushes|dragged|drags|weighed|weighs|drove|drives|driven|fueled|fuels|sparked|sparks|triggered|hit|hits)\b", re.I)
+
+
+def display_forms(symbol: str, name: str | None) -> list[str]:
+    """Pure: the forms that name the company by its name (never only its ticker)."""
+    return [f for f in name_forms(symbol, name) if f != symbol]
+
+
+def says_it_moved(story: dict, symbol: str, name: str | None) -> bool:
+    """Pure: the story names the company, a move, and a cause for it ("Humana Soars 16% on Improved Star Ratings")."""
+    from app.services.headline_guard import CUE_SIGN as _CUES
+    text_ = story_text(story)
+    words = {w.lower() for w in re.findall(r"[A-Za-z]+", text_)}
+    moved = bool(words & set(_CUES)) or bool(words & {"shares", "stock", "stocks"})
+    return names_company(text_, symbol, name) and moved and bool(CAUSAL.search(text_))
+
+
+def cause_problems(sentence: str, cited: list[dict], symbol: str, name: str | None) -> list[str]:
+    """Pure: a cause is named only when one of her cited sources says that event moved this stock; every other company, person or
+    named thing in the sentence must appear in such a source, so an event that merely happened the same day is not offered as a cause."""
+    label = (display_forms(symbol, name) or [symbol])[0]
+    causal = [s for s in cited if says_it_moved(s, symbol, name)]
+    if not causal:
+        return [f"none of her sources says an event moved {label}"]
+    own = {w.lower() for f in name_forms(symbol, name) for w in f.split()} | {symbol.lower()}
+    corpus = " ".join(story_text(s) for s in causal).lower()
+    out = []
+    for m in PROPER.finditer(sentence):
+        tok = re.sub(r"(?:'s|’s|['’.,;:])+$", "", m.group(0))
+        key = tok.lower()
+        if not tok or key in COMMON_CAPS or key in own or key.isdigit():
+            continue
+        parts = [x.lower() for x in tok.split("-") if x[:1].isupper()]
+        if not re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", corpus) and not (parts and all(re.search(rf"(?<![a-z0-9]){re.escape(x)}(?![a-z0-9])", corpus) for x in parts)):
+            out.append(f"{tok} appears in no source that says it moved {label}")
+    return out
 
 
 def explains_nothing(sentence: str, symbol: str, name: str | None) -> bool:
@@ -204,7 +252,8 @@ SENTENCE:
 {sentence}
 
 "supported": every company, person, figure and event in the sentence, and the link it draws between the event and the stock's move,
-is stated in the stories. "unsupported": anything in it is not in the stories (outside knowledge, an inference the stories do not
+is stated in the stories. A cause is supported only when a story says that event moved this stock (after, on, as, following, sent
+shares); an event that merely happened the same day, or a sentence that joins such an event to the move with "and", is unsupported. "unsupported": anything in it is not in the stories (outside knowledge, an inference the stories do not
 make). "contradicted": it conflicts with a story. Bias toward "unsupported" when in doubt. Use no outside knowledge.
 
 Return JSON only: {{"status": "supported|unsupported|contradicted", "evidence": "..."}}"""
@@ -259,6 +308,8 @@ async def explain(symbol: str, name: str | None, move_pct: float, inputs: list[d
         sources = source_rows(inputs, numbers)
         if not sources:
             reasons.append("it names none of her stories as a source")
+        else:
+            reasons += cause_problems(sentence, [inputs[n - 1] for n in numbers if 1 <= n <= len(inputs)], symbol, name)
         if not reasons:
             ver = await client.verify_research_note(build_verification_prompt(symbol, name, sentence, inputs))
             charge(ver)
@@ -273,11 +324,16 @@ async def explain(symbol: str, name: str | None, move_pct: float, inputs: list[d
 
 
 def lead_index(sources: list[dict], move_pct: float | None, symbol: str, name: str | None) -> int | None:
-    """Pure: which of her sources to link under the sentence: the first whose headline the headline guard lets beside the printed
-    change (a source saying "Rallies 6%" never sits beside a printed +4.30%); None when none does."""
-    from app.services.headline_guard import check
+    """Pure: which of her sources to link under the sentence: the first whose link lands on the article (never a paywall, a login
+    or an unresolved vendor redirect), that is no roundup or opinion piece, and whose headline the headline guard lets beside the printed change (a source saying
+    "Rallies 6%" never sits beside a printed +4.30%); None when none does."""
+    from app.services.headline_guard import check, is_opinion
+    from app.services.news import is_roundup
+    from app.services.news_links import DISPLAYABLE
     forms = name_forms(symbol, name)
-    return next((i for i, s in enumerate(sources) if check(s["headline"], move_pct, forms).reason is None), None)
+    return next((i for i, s in enumerate(sources) if s.get("link_state", "ok") in DISPLAYABLE and (s.get("link") or "link" not in s)
+                 and not is_roundup(s["headline"]) and not is_opinion(s["headline"])          # a roundup or an opinion piece shows nowhere
+                 and check(s["headline"], move_pct, forms).reason is None), None)
 
 
 def display_ok(note: dict, move_pct: float | None, symbol: str, name: str | None) -> bool:

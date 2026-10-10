@@ -44,6 +44,8 @@ describe("Discover news sections", () => {
     expect(rows[1].indexOf("Micron fell after Taiwan workers authorized a strike.")).toBeLessThan(rows[1].indexOf("https://example.com/strike"));
     expect(rows[1]).toContain("/brand/ivy-mark.svg");
     expect(rows[1]).toContain("and 2 more");
+    const unconfirmed = renderToStaticMarkup(<NewsSections data={{ ...DATA, up: [{ ...DATA.up[0], ivy: { sentence: "Ivy couldn\u2019t confirm what moved this stock.".replace("\u2019", "'"), result: "unconfirmed", lead: null, more: 0, written_at: null } }] }} indexes={{ movers: "01", stories: "02" }} />);
+    expect(unconfirmed.split('data-testid="mover-row"')[1]).toContain("Ivy couldn&#x27;t confirm what moved this stock.");   // never a blank row
     expect(moreStoriesLabel(0)).toBeNull();
     expect(moreStoriesLabel(1)).toBe("and 1 more");
   });
