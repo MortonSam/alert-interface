@@ -22,11 +22,6 @@ export default async function Home() {
   return (
     <main>
       <style>{`
-        .hero-heron { height: clamp(110px, 30vw, 170px); }
-        @media (min-width: 1024px) {
-          .hero-h1 { font-size: clamp(52px, 5.5vw, 96px); }
-          .hero-heron { height: auto; width: 100%; max-width: 640px; max-height: 52svh; object-fit: contain; }
-        }
 
         .hero-h1 {
           font-size: clamp(40px, 10vw, 104px);
@@ -44,6 +39,11 @@ export default async function Home() {
           line-height: 1.15;
           letter-spacing: -.025em;
         }
+        .hero-heron { height: clamp(110px, 30vw, 170px); }
+        @media (min-width: 1024px) {
+          .hero-h1 { font-size: clamp(46px, 5vw, 76px); white-space: nowrap; }
+          .hero-heron { height: auto; width: 100%; max-width: 640px; max-height: 52svh; object-fit: contain; }
+        }
 
       `}</style>
 
@@ -52,7 +52,7 @@ export default async function Home() {
                smaller, on a phone), and three live proof cards along the bottom of the same screen. ── */}
         <section className="min-h-[calc(100svh-3.25rem-1px)] flex flex-col bg-background">
           <HeroReveal className="flex-1 flex flex-col max-w-7xl w-full mx-auto px-4 sm:px-8">
-            <div className="flex-1 grid items-center gap-y-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-x-12 pt-8 lg:pt-6">
+            <div className="flex-1 grid items-center gap-y-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-x-12 pt-8 lg:pt-3">
               <div className="order-2 lg:order-1 text-left">
                 <h1 className="hero-h1 font-display font-extrabold uppercase">
                   <span data-hero-line className="block text-foreground">
@@ -66,12 +66,12 @@ export default async function Home() {
                   </span>
                 </h1>
 
-                <p data-hero-fade className="text-foreground/70 text-lg mt-6 max-w-[36em]">
+                <p data-hero-fade className="text-foreground/70 text-lg mt-6 lg:mt-5 max-w-[36em]">
                   One workspace for the retail investor, starting with the S&amp;P 500.
                   Every number explained; every claim checked, and the unsupported ones shown as unsupported.
                 </p>
 
-                <div data-hero-fade className="flex flex-wrap gap-[13px] mt-8">
+                <div data-hero-fade className="flex flex-wrap gap-[13px] mt-8 lg:mt-6">
                   <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
                   <Link
                     href="/build"
@@ -87,7 +87,7 @@ export default async function Home() {
               </div>
             </div>
 
-            <div data-hero-fade className="pb-6 sm:pb-8 pt-8">
+            <div data-hero-fade className="pb-4 sm:pb-6 pt-8 lg:pt-5">
               <ProofCards />
             </div>
           </HeroReveal>
