@@ -47,7 +47,7 @@ def test_a_headline_counts_for_a_company_only_when_it_names_it():
 
 def test_in_the_news_ranks_by_move_then_explaining_headlines_then_plain_news_one_per_stock():
     s = lambda u, h, rel, mins: {"url": u, "headline": h, "related": rel, "published_at": NOW - timedelta(minutes=mins), "source": "Yahoo"}
-    stories = [s("1", "Intel slides", ["INTC"], 50), s("2", "Intel and AMD slip", ["INTC", "AMD"], 10), s("3", "Is AMD stock worth it", ["INTC", "AMD"], 5),
+    stories = [s("1", "Intel slides", ["INTC"], 50), s("2", "Intel and AMD sign a packaging deal", ["INTC", "AMD"], 10), s("3", "Is AMD stock worth it", ["INTC", "AMD"], 5),
                s("4", "Intel third story", ["INTC"], 1), s("5", "Micron breakout", ["MU"], 30), s("6", "Unrelated", ["MU"], 2)]
     names = {"INTC": "Intel Corporation", "AMD": "Advanced Micro Devices, Inc.", "MU": "Micron Technology, Inc."}
     out = N.in_the_news(stories, {"INTC": -6.6, "AMD": -4.4, "MU": -4.6}, names=names)

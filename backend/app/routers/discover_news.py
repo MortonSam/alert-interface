@@ -119,5 +119,6 @@ async def build_sections(db, now: datetime):
 
     up_items, down_items = [mover(q) for q in up], [mover(q) for q in down]
     ranked = N.in_the_news(stories, change, names=names, last_reports=last_reports, since=since, moves=moves, suppressed=suppressed,
-                           exclude_urls={m.headline.url for m in up_items + down_items if m.headline})
+                           exclude_urls={m.headline.url for m in up_items + down_items if m.headline},
+                           exclude_symbols={m.symbol for m in up_items + down_items})
     return up_items, down_items, ranked, change, suppressed, session

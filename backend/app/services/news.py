@@ -90,7 +90,7 @@ def previous_session_close(session_day) -> datetime:
 # a roundup is judged from the headline's wording alone, never from the tickers a vendor attaches or how many companies it names:
 # a group sharing one move ("Verizon, AT&T, T-Mobile Stocks Slide") is each company's move (services/headline_guard)
 _ROUNDUP_WORDS = re.compile(r"\bstocks?\s+that\b|\bthese\s+(?:[\w&-]+\s+){0,2}stocks\b|\bmovers?\b|\bstocks?\s+to\s+watch\b|"
-                            r"\band\s+more\b|&\s*more\b|\bbiggest\s+(?:moves|movers|gainers|losers)\b|\bstocks\s+(?:making|moving)\b", re.I)
+                            r"\band\s+(?:\d+\s+|two\s+|three\s+|four\s+|five\s+)?more\b|&\s*more\b|\bbiggest\s+(?:moves|movers|gainers|losers)\b|\bstocks\s+(?:making|moving)\b", re.I)
 
 
 def is_roundup(headline: str) -> bool:
@@ -100,7 +100,8 @@ def is_roundup(headline: str) -> bool:
 
 def headline_problem(story: dict, symbol: str, name: str | None, last_report, since: datetime) -> str | None:
     """Pure: why a story cannot stand as this company's headline, or None. In order: published before the previous session's close;
-    a roundup (judged from its wording: is_roundup); does not name the company; opinion or promotion (headline_guard.is_opinion); a question or template headline; a recommendation headline; about an upcoming report; names an earnings quarter but
+    a roundup (judged from its wording: is_roundup); does not name the company; does not lead with it (headline_guard.leads_with:
+    named in the first clause, after any market-wrap prefix); opinion or promotion (headline_guard.is_opinion); a question or template headline; a recommendation headline; about an upcoming report; names an earnings quarter but
     was not published within REPORT_HEADLINE_DAYS after the company's latest report (so it is about another quarter)."""
     h = story["headline"]
     if story["published_at"] < since:
@@ -109,11 +110,13 @@ def headline_problem(story: dict, symbol: str, name: str | None, last_report, si
         return "a roundup about several companies"
     if not names_company(h, symbol, name):
         return "does not name the company"
+    from app.services.headline_guard import is_opinion, leads_with
+    if not leads_with(h, name_forms(symbol, name)):
+        return "does not lead with the company (not named in its first clause)"
     if _TEMPLATE.search(h):
         return "a question or template headline"
     if _RECOMMENDATION.search(h) and not _RATING_CHANGE.search(h):
         return "a recommendation headline (tells the reader to buy or sell)"
-    from app.services.headline_guard import is_opinion
     if is_opinion(h) and not _RATING_CHANGE.search(h):
         return "opinion or promotion"
     if _UPCOMING.search(h):
@@ -246,16 +249,17 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
                 per_ticker: int = STORIES_PER_TICKER, names: dict[str, str | None] | None = None,
                 last_reports: dict | None = None, since: datetime | None = None,
                 moves: dict[str, float] | None = None, suppressed: dict | None = None, guard: bool | None = True,
-                would_show: set | None = None, exclude_urls: set | None = None) -> list[dict]:
+                would_show: set | None = None, exclude_urls: set | None = None, exclude_symbols: set | None = None) -> list[dict]:
     """Pure: up to `limit` stories about S&P 500 companies, ranked by the size of the related stock's move today, then recency; at
     most `per_ticker` per stock. A story counts for a related stock only when its headline names that company, and it is shown under
     the named stock with the biggest move. A story listed in `exclude_urls` (a mover's headline) is left out, so each story shows
-    once on the page; within a stock's place in the ranking plain news comes before explainers. The headline guard checks it against `moves` (close to close; `change` when absent);
+    once on the page, and a stock in `exclude_symbols` (the top movers, shown above) is not listed again; within a stock's place in the ranking plain news comes before explainers. The headline guard checks it against `moves` (close to close; `change` when absent);
     a suppression is recorded only for a story that would have shown without the guard."""
     from app.services.headline_guard import agrees, is_explainer
-    exclude_urls = exclude_urls or set()
+    exclude_urls, exclude_symbols = exclude_urls or set(), exclude_symbols or set()
     if guard and would_show is None:
-        unguarded = in_the_news(stories, change, limit, per_ticker, names, last_reports, since, guard=None, exclude_urls=exclude_urls)
+        unguarded = in_the_news(stories, change, limit, per_ticker, names, last_reports, since, guard=None, exclude_urls=exclude_urls,
+                                exclude_symbols=exclude_symbols)
         would_show = {(r["symbol"], r["url"]) for r in unguarded}
     rows = []
     for s in stories:
@@ -263,7 +267,7 @@ def in_the_news(stories: list[dict], change: dict[str, float], limit: int = IN_T
             continue
         since_ = since or datetime.min.replace(tzinfo=timezone.utc)
         moved = [(abs(change[t]), t) for t in s["related"]
-                 if t in change and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None
+                 if t in change and t not in exclude_symbols and headline_problem(s, t, (names or {}).get(t), (last_reports or {}).get(t), since_) is None
                  and (guard is None or guarded(s, t, (moves or change).get(t), suppressed, (names or {}).get(t),
                                                record=(t, s["url"]) in (would_show or set())))]
         if not moved:

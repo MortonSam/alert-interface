@@ -107,3 +107,51 @@ async def test_validate_judges_only_while_the_news_flag_is_on(monkeypatch):
     monkeypatch.setattr(settings, "discover_news_enabled", False)
     r = await check_news_headline_guard(None)
     assert r.level == PASS and "off" in r.message
+
+
+def test_a_headline_counts_only_for_the_stock_it_leads_with():
+    from datetime import date
+    since = N.previous_session_close(date(2026, 10, 9))
+    at = datetime(2026, 10, 9, 17, 0, tzinfo=timezone.utc)
+    p = lambda h, sym, name: N.headline_problem({"headline": h, "source": "Yahoo", "published_at": at, "related": [sym], "url": h},
+                                                sym, name, date(2026, 7, 1), since)
+    lead = "does not lead with the company (not named in its first clause)"
+    assert p("Stock Market Today, Oct. 9: AT&T Slides on SpaceX Spectrum Deal Threat", "T", "AT&T Inc.") is None   # wrap prefix skipped
+    assert p("Stock Market Midday, Oct. 9: Stocks Edge Higher, Humana jumps 13%", "HUM", "Humana Inc.") == lead
+    assert p("Apple Drops 3% on Reported iPhone 18 Pro Component Order Cuts; Skyworks Slips", "SWKS", "Skyworks Solutions, Inc.") == lead
+    assert p("Zscaler Jumps 6% on Reaffirmed Revenue Outlook; Palo Alto and CrowdStrike Gain 4%", "PANW", "Palo Alto Networks, Inc.") == lead
+    assert p("Intel Slides 3% as Chip Stocks Sell Off; NVIDIA and AMD Slip", "NVDA", "NVIDIA Corporation") == lead
+    assert p("Verizon, AT&T, T-Mobile Stocks Slide as SpaceX Expands Wireless Ambitions", "TMUS", "T-Mobile US, Inc.") is None   # a list leads
+    assert p("Big Tech Needs Power. Constellation Just Found a $1 Billion Buyer in Google.", "CEG", "Constellation Energy Corporation") == lead
+    assert G.first_clause("U.S. Steel Jumps on Nippon Deal") == "U.S. Steel Jumps on Nippon Deal"
+    assert N.is_roundup("Chevron's Venezuela Plan Will Pay Off, Says Analyst. Plus, Coinbase and 3 More Stocks.")
+
+
+def test_every_move_word_is_a_direction_word_and_flat_words_contradict_a_big_move():
+    NV, QC = N.name_forms("NVDA", "NVIDIA Corporation"), N.name_forms("QCOM", "QUALCOMM Incorporated")
+    for w in ("slips", "slipped", "drops", "dropped", "tumbles", "sinks", "crashes", "edges lower", "trades down"):
+        assert G.check(f"Nvidia {w} 2% on export curbs", 2.0, NV).reason == "its verb says down on an up day", w
+    for w in ("gains", "gained", "climbs", "rises", "rose", "edges higher", "trades up"):
+        assert G.check(f"Nvidia {w} 2% on China approval", -2.0, NV).reason == "its verb says up on a down day", w
+    assert set(G.MOVE_WORDS) == set(G.UP_VERBS) | set(G.DOWN_VERBS) | set(G.ADVERBS)                    # one word list: the guard's
+    assert G.check("Nvidia Gains Approval to Sell Chips in China", -2.0, NV).reason is None          # a verb taking an object
+    assert G.check("Intel Steps Up Foundry Push", -3.0, INTC).reason is None                         # a phrasal verb, not a move
+    flat = G.check("Skyworks Slips, Qualcomm Treads Water", 2.5, QC).reason
+    assert flat.startswith("its words say flat") and G.check("Qualcomm Treads Water", -1.9, QC).reason is None
+    assert G.check("Qualcomm shares little changed after report", -3.1, QC).reason.startswith("its words say flat")
+
+
+def test_vs_is_opinion_only_when_it_compares_stocks():
+    assert not G.is_opinion("Apple vs. Epic Ruling Lets Developers Link to Outside Payments")
+    assert not G.is_opinion("FTC vs. Meta Trial Opens in Washington")
+    assert G.is_opinion("Better Buy: Nvidia vs. AMD") and G.is_opinion("NVDA vs. AMD: Which Chip Stock Wins?")
+    assert G.is_opinion("CrowdStrike vs. Palantir: one AI stock to own")
+
+
+def test_in_the_news_leaves_out_the_top_movers():
+    now = datetime(2026, 10, 9, 20, 0, tzinfo=timezone.utc)
+    st = lambda u, h, rel: {"url": u, "headline": h, "related": rel, "published_at": now, "source": "Yahoo"}
+    stories = [st("1", "Verizon slides on SpaceX spectrum deal", ["VZ"]), st("2", "Skyworks slips on iPhone order cuts", ["SWKS"])]
+    names = {"VZ": "Verizon Communications Inc.", "SWKS": "Skyworks Solutions, Inc."}
+    out = N.in_the_news(stories, {"VZ": -10.1, "SWKS": -5.4}, names=names, exclude_symbols={"VZ"})
+    assert [r["symbol"] for r in out] == ["SWKS"]
