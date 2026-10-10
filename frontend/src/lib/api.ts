@@ -57,6 +57,7 @@ export interface Ticker {
   id: string;
   symbol: string;
   name: string | null;
+  deal_note?: string | null;       // a pending cash deal (backend services/pending_deals): the page shows plain price facts below it
   sector: string | null;
   industry: string | null;
   exchange: string | null;

@@ -38,6 +38,7 @@ class TickerRead(TickerBase):
     next_earnings_checked_at: datetime | None = None  # tickers.earnings_checked_at: when Finnhub was last asked
     next_earnings_confirmation: str | None = None    # "confirmed" | "estimated" | "expected_unconfirmed"
     next_earnings_note: str | None = None            # why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
+    deal_note: str | None = None                     # a pending cash deal (services/pending_deals): the visitor note; the page shows plain price facts below it
     created_at: datetime
     updated_at: datetime
 

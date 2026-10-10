@@ -1374,6 +1374,7 @@ export default function TickerPage() {
   const upperSymbol = symbol.toUpperCase();
 
   const [ticker, setTicker]             = useState<Ticker | null>(null);
+  const dealNote = ticker?.deal_note ?? null;     // a pending cash deal (backend services/pending_deals): below its note, plain price facts only
   const [tickerStatus, setTickerStatus] = useState<TickerStatus>("loading");
   const [tickerError, setTickerError]   = useState<string | null>(null);
 
@@ -1924,7 +1925,7 @@ export default function TickerPage() {
           {/* "Why now" strip */}
           <WhyNowStrip events={events} />
 
-          {datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo) && (
+          {!dealNote && datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-2">
               {datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo)}
             </p>
@@ -2188,7 +2189,7 @@ export default function TickerPage() {
               )}
               <div className={cn(
                 "grid gap-6",
-                analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions))
+                !dealNote && analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions))
                   ? "grid-cols-1 md:grid-cols-2"
                   : "grid-cols-1",
               )}>
@@ -2227,7 +2228,7 @@ export default function TickerPage() {
                 </div>
 
                 {/* Right: Aggregate Stats */}
-                {analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions)) && (
+                {!dealNote && analystStats && (hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) || hasAnalystSignal(analystStats.median_1d_downgrade, analystStats.downgrade_sessions)) && (
                   <div className="space-y-3">
                     {hasAnalystSignal(analystStats.median_1d_upgrade, analystStats.upgrade_sessions) && (
                       <div>
@@ -2254,7 +2255,7 @@ export default function TickerPage() {
                   </div>
                 )}
               </div>
-              {analystInsight && (
+              {!dealNote && analystInsight && (
                 <div className="mt-3 pt-3 border-t">
                   <p className="text-xs text-muted-foreground">{analystInsight}</p>
                   {analystInsightRule && (
@@ -2264,7 +2265,7 @@ export default function TickerPage() {
               )}
               {/* Expandable analyst detail table */}
               {(() => {
-                if (!analystDetail || !analystStats) return null;
+                if (dealNote || !analystDetail || !analystStats) return null;
                 // Consistency check: total_with_moves must match sample_count
                 if (analystDetail.total_with_moves !== analystStats.sample_count) {
                   const sk = `analyst-mismatch:${upperSymbol}`;
@@ -2297,14 +2298,12 @@ export default function TickerPage() {
         <section id="evidence" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="03" label="Evidence" />
 
+          {dealNote ? (
+            <p className="text-sm text-muted-foreground" data-testid="evidence-deal-note">{dealNote}</p>
+          ) : (<>
           {reactionSummary?.mixed_versions && (
             <Callout severity="caution" banner>
               Earnings reaction figures are being recomputed under a corrected definition.
-            </Callout>
-          )}
-          {reactionSummary?.deal_note && (
-            <Callout severity="caution" banner>
-              {reactionSummary.deal_note}
             </Callout>
           )}
           {reactionSummary?.exclusion_reason && (
@@ -2394,6 +2393,7 @@ export default function TickerPage() {
               <ReactionsTable reactions={fomcReactions} mode="fed" />
             </>
           )}
+          </>)}
         </section>
 
         {/* ── OPTIONS ─────────────────────────────────────────────────── */}

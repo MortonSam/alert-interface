@@ -84,7 +84,7 @@ async def auto_void(session, today: date | None = None) -> list[str]:
             out.append(f"{p.symbol} picked {pick_day.isoformat()}: already void")
             continue
         from app.services.briefing import short_name
-        reason = standard_reason(short_name(p.name) or p.symbol, n, actual, target)
+        reason = standard_reason(short_name(p.name, p.symbol) or p.symbol, n, actual, target)
         await session.execute(text(f"UPDATE alert_picks SET status = 'void', void_reason = :r, voided_at = :at, {', '.join(f'{c} = NULL' for c in PRICE_FIELDS)} WHERE id = :i"),
                               {"r": reason, "at": datetime.now(timezone.utc), "i": p.id})
         out.append(f"{p.symbol} picked {pick_day.isoformat()} ({p.status}): {reason}")

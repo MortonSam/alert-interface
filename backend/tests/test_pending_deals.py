@@ -88,8 +88,12 @@ async def test_a_held_ticker_shows_the_note_everywhere_and_gets_no_pick(held, mo
         assert (await c.get(f"/api/v1/tickers/put-call/{SYM}")).json()["reason"] == note
         summ = (await c.get(f"/api/v1/reactions/summary?symbol={SYM}")).json()
         assert summ["deal_note"] == note and summ["total_quarters"] == 0
-        rows = (await c.get(f"/api/v1/reactions?symbol={SYM}")).json()
-        assert not [r for r in rows if r["event_type"] == "earnings"]          # the earnings chart and distribution have nothing
+        assert (await c.get(f"/api/v1/reactions?symbol={SYM}")).json() == []            # no earnings rows, no Fed-day rows
+        assert (await c.get(f"/api/v1/reactions?symbol={SYM}&event_type=fomc")).json() == []
+        assert (await c.get(f"/api/v1/tickers/by-symbol/{SYM}")).json()["deal_note"] == note
+        assert (await c.get(f"/api/v1/tickers/chart/{SYM}?period=1y")).json()["earnings_markers"] == []
+        st = (await c.get(f"/api/v1/reactions/analyst-stats?symbol={SYM}")).json()
+        assert st["deal_note"] == note and st["median_1d_upgrade"] is None and st["median_1d_downgrade"] is None
         cond = (await c.get(f"/api/v1/reactions/conditional?symbol={SYM}")).json()
         assert cond["deal_note"] == note and cond["total_quarters"] == 0
         rv = (await c.get(f"/api/v1/tickers/rv/{SYM}")).json()
@@ -120,3 +124,6 @@ def test_a_leading_the_is_dropped_from_the_name_mid_sentence():
     assert short_name("The Hershey Company") == "Hershey"
     assert short_name("Micron Technology, Inc.") == "Micron Technology"
     assert short_name("The") == "The"                      # nothing left to name: kept
+    assert short_name("The Cigna Group") == "Cigna" and short_name("The Travelers Companies, Inc.") == "Travelers"
+    assert short_name("The Goldman Sachs Group, Inc.") == "Goldman Sachs" and short_name("Group") == "Group"
+    assert short_name("The Bank of New York Mellon Cor", "BNY") == "BNY" and short_name("The Southern Company", "SO") == "Southern Company"

@@ -472,6 +472,16 @@ async def get_analyst_reaction_stats(
     """Precomputed stats: how does this stock react to analyst upgrades/downgrades?"""
     sym = symbol.upper()
     excluded_reason = await exclusion_reason(db, sym)
+    deal = await deal_for(db, sym)
+    if deal:                        # a pending cash deal: no move statistics on analyst actions
+        return AnalystReactionStatsRead(
+            symbol=sym, computed_at=None,
+            upgrade_count=0, upgrade_sessions=0, avg_1d_upgrade=None, median_1d_upgrade=None,
+            avg_5d_upgrade=None, upgrade_5d_continuation_pct=None, upgrade_5d_sample=0,
+            downgrade_count=0, downgrade_sessions=0, avg_1d_downgrade=None, median_1d_downgrade=None,
+            avg_5d_downgrade=None, downgrade_5d_continuation_pct=None, downgrade_5d_sample=0,
+            deal_note=note_for(deal),
+        )
     if excluded_reason:
         return AnalystReactionStatsRead(
             symbol=sym, computed_at=None,
@@ -513,12 +523,12 @@ async def list_reactions(
         return []      # the rows stay stored; /reactions/summary carries the reason
     result = await db.execute(q)
     rows = list(result.scalars().all())
-    # a pending cash deal pauses earnings figures (services/pending_deals): its earnings rows are not served; Fed days stay
+    # a pending cash deal pauses earnings figures (services/pending_deals): none of its reaction rows are served
     from sqlalchemy import text as _text
     held_ids = set((await db.execute(_text(
         "SELECT t.id FROM tickers t JOIN pending_deals d ON d.symbol = t.symbol AND d.status = 'active'"))).scalars().all())
-    if held_ids:
-        rows = [r for r in rows if not (r.ticker_id in held_ids and r.event_type == EventType.EARNINGS)]
+    if held_ids:                    # nor its Fed-day rows: below the deal note the page shows plain price facts only
+        rows = [r for r in rows if r.ticker_id not in held_ids]
     basis_unclear: set = set()
     for tid in {r.ticker_id for r in rows}:
         basis_unclear |= {(tid, d) for d in await basis_mismatch_dates(db, tid)}

@@ -112,7 +112,7 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     # block 1: what it is (description from the stored Intrinio profile; sector and sub-industry are GICS from the constituent list)
     prof = (await db.execute(text("SELECT short_description, source, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
     if prof:
-        s1 = B.profile_sentence(name=ticker.name, short_description=prof["short_description"], profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
+        s1 = B.profile_sentence(name=ticker.name, symbol=sym, short_description=prof["short_description"], profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
                                 profile_source=(prof["source"] or "intrinio").capitalize(), gics_sector=ticker.sector, gics_sub_industry=ticker.industry,
                                 gics_as_of=ticker.updated_at.date() if ticker.updated_at else None, index_member=bool(ticker.index_member),
                                 quote_price=quote_price, quote_ts=quote_ts, shares_outstanding=_f(ticker.shares_outstanding),
@@ -178,7 +178,7 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     ticker = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     if ticker is None or not ticker.is_active:
         return {"symbol": sym, "name": None, "questions": []}
-    name = B.short_name(ticker.name) or sym
+    name = B.short_name(ticker.name, sym) or sym
 
     q = await _quote(sym)
     quote_price = q.price if q and q.state == "ok" else None

@@ -628,7 +628,9 @@ async def get_ticker_chart(
 
     markers: list[EarningsMarker] = []
     excluded_reason = await exclusion_reason(db, sym) if ticker_row else None
-    if ticker_row and not excluded_reason:
+    from app.services.pending_deals import deal_for
+    held_deal = await deal_for(db, sym) if ticker_row else None     # a pending cash deal: no earnings markers on the chart
+    if ticker_row and not excluded_reason and not held_deal:
         r_q = (
             select(HistoricalReaction)
             .where(
@@ -2094,6 +2096,9 @@ async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) 
     r = TickerRead.model_validate(ticker)
     for k, v in (await next_earnings_for(db, ticker.id)).as_api().items():
         setattr(r, k, v)
+    from app.services.pending_deals import deal_for, note_for
+    deal = await deal_for(db, sym)
+    r.deal_note = note_for(deal) if deal else None
     return r
 
 

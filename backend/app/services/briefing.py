@@ -36,6 +36,10 @@ DESCRIPTION_CAP = 280          # characters; whole sentences are dropped to fit,
 SECOND_SENTENCE_IF_FIRST_UNDER = 120   # characters: the second sentence joins only after a short first one
 LISTING_COMMAS = 3             # a sentence with this many commas is a list of segments, products or brands, not a description
 LISTING_STARTS = ("the company operates through", "it operates through", "its ")   # "Its <x> segment offers ..." is a listing
+# names that read badly when shortened from the stored one: BNY's stored name is cut off ("The Bank of New York Mellon Cor"),
+# and Southern Company alone reads as a region. Keyed by symbol; the name a sentence uses, exactly.
+DISPLAY_NAMES = {"BNY": "BNY", "SO": "Southern Company"}
+TRAILING_WORDS = ("group", "companies")   # dropped from the end of a shortened name when a word remains: "Cigna Group" reads "Cigna"
 NAME_SUFFIXES = ("incorporated", "inc", "corporation", "corp", "company", "co", "plc", "ltd", "limited", "holdings")   # stripped from the end of a company name
 TIMING_PHRASE = {"bmo": "before the open", "amc": "after the close"}
 SOURCE_NAMES = {"yfinance": "Yahoo Finance", "finnhub": "Finnhub", "company": "the company", "edgar": "EDGAR"}   # reader-facing names; receipts keep the technical ones
@@ -137,9 +141,12 @@ def description_text(short_description: str | None) -> str | None:
     return " ".join(out)
 
 
-def short_name(name: str | None) -> str | None:
+def short_name(name: str | None, symbol: str | None = None) -> str | None:
     """"Micron Technology" from "Micron Technology, Inc."; "Constellation Brands" from "Constellation Brands, Inc."; a leading
-    "The" is dropped so the name reads mid-sentence: "AES" from "The AES Corporation", "Home Depot" from "The Home Depot, Inc."."""
+    "The" and a trailing "Group" or "Companies" are dropped so the name reads mid-sentence: "AES" from "The AES Corporation",
+    "Home Depot" from "The Home Depot, Inc.", "Cigna" from "The Cigna Group". DISPLAY_NAMES wins for its symbols."""
+    if symbol and symbol.upper() in DISPLAY_NAMES:
+        return DISPLAY_NAMES[symbol.upper()]
     if not name:
         return None
     words = name.replace(",", " ").split()
@@ -147,10 +154,12 @@ def short_name(name: str | None) -> str | None:
         words.pop()
     if len(words) > 1 and words[0].lower() == "the":
         words.pop(0)
+    while len(words) > 1 and words[-1].lower() in TRAILING_WORDS:
+        words.pop()
     return " ".join(words)
 
 
-def profile_sentence(*, name: str | None = None, short_description: str | None = None, profile_as_of: date | None = None, profile_source: str | None = "Intrinio",
+def profile_sentence(*, name: str | None = None, symbol: str | None = None, short_description: str | None = None, profile_as_of: date | None = None, profile_source: str | None = "Intrinio",
                      gics_sector: str | None = None, gics_sub_industry: str | None = None, gics_as_of: date | None = None, index_member: bool = False,
                      quote_price: float | None = None, quote_ts: int | None = None, shares_outstanding: float | None = None, shares_as_of: date | None = None) -> dict | None:
     """The description, then "It's part of the S&P 500's <GICS sector> sector (<sub-industry>), worth about <quote x shares>." None without a profile."""
@@ -160,7 +169,7 @@ def profile_sentence(*, name: str | None = None, short_description: str | None =
     inputs = [_input("description", desc, profile_as_of, f"{profile_source} company profile, short_description")]
     dates: list[date] = [d for d in (profile_as_of,) if d]
     if name:
-        inputs.append(_input("company name", short_name(name), profile_as_of, f"tickers.name, read as {name!r} with its corporate suffix dropped"))
+        inputs.append(_input("company name", short_name(name, symbol), profile_as_of, f"tickers.name, read as {name!r} with its corporate suffix dropped"))
     bits = []
     if gics_sector:
         bits.append((f"part of the S&P 500's {gics_sector} sector" if index_member else f"in the {gics_sector} sector") + (f" ({gics_sub_industry})" if gics_sub_industry else ""))
