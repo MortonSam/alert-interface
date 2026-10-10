@@ -6,6 +6,7 @@ import { useIvyRule } from "@/lib/useIvyRule";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type HealthStatus, type IvyActivity } from "@/lib/api";
+import { IvyMark } from "@/components/IvyMark";
 
 function timeAgo(iso: string): string {
   const seconds = Math.floor(
@@ -152,8 +153,9 @@ export default function MeetIvyPage() {
         </div>
         <section className="border-t border-border pt-10 pb-20">
           <SectionLabel label="Who she is" />
-          <h2 className="font-display text-5xl font-bold text-foreground leading-tight text-balance">
-            The analyst inside Alert Interface
+          <h2 className="font-display text-5xl font-bold text-foreground leading-tight text-balance flex items-center gap-4">
+            <IvyMark size={48} className="shrink-0" />
+            <span>The analyst inside Alert Interface</span>
           </h2>
           <p className="text-lg text-muted-foreground leading-relaxed mt-2 max-w-prose">
             {ivy ? whoSheIsLine(ivy.rule) : "She reads the tape overnight and makes a call only when her one setup appears."}

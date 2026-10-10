@@ -22,7 +22,7 @@ import { capture } from "@/lib/analytics";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
 import { GiBull, GiBearFace } from "react-icons/gi";
-import { HiSparkles } from "react-icons/hi2";
+import { IvyMark } from "@/components/IvyMark";
 import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
 import { NO_DRAFT_NOT_CHARGED, ivyDecisionSentence } from "@/lib/ivyOutcomes";
 import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
@@ -1142,7 +1142,7 @@ function BuildTradePageContent() {
                         : "border-border text-muted-foreground hover:border-orange-500/50 hover:bg-orange-500/5",
                     )}
                   >
-                    <HiSparkles aria-hidden="true" className="w-9 h-9 mx-auto mb-2" />
+                    <IvyMark size={36} className="!block mx-auto mb-2" />
                     <div className="text-base font-bold">Let Ivy decide</div>
                     <div className="text-xs opacity-60 mt-1">Ivy picks from the data</div>
                   </button>

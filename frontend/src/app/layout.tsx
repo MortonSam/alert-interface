@@ -13,14 +13,14 @@ const fontMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600
 const fontBrand = Playfair_Display({ subsets: ["latin"], weight: ["500"], variable: "--font-brand", display: "swap" });   // the wordmark only
 
 export const metadata: Metadata = {
-  title: "Alert Interface",
-  description: "Personal finance research tool: catalyst panel, watchlists, Ivy-powered research.",
+  title: "Alert Interface | Stock research that verifies itself",
+  description: "One workspace for the retail investor, starting with the S&P 500. Every number explained, every claim checked, and the unsupported ones shown as unsupported.",
   icons: {
     icon: [{ url: BRAND.favicon, sizes: "any" }, { url: BRAND.favicon32, sizes: "32x32", type: "image/png" }, { url: BRAND.favicon16, sizes: "16x16", type: "image/png" }],
     apple: [{ url: BRAND.appleTouchIcon, sizes: "180x180" }],
   },
   manifest: BRAND.manifest,
-  openGraph: { title: "Alert Interface", images: [{ url: BRAND.ogImage, width: 1200, height: 630, alt: "Alert Interface" }] },
+  openGraph: { title: "Alert Interface | Stock research that verifies itself", images: [{ url: BRAND.ogImage, width: 1200, height: 630, alt: "Alert Interface" }] },
   twitter: { card: "summary_large_image", images: [BRAND.ogImage] },
 };
 
