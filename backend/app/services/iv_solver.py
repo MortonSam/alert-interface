@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from scipy.optimize import brentq
 from scipy.stats import norm
 
-IV_SOLVER_VERSION = 1
+IV_SOLVER_VERSION = 2       # 2: solves read chains stored through services/chain_quality (adjusted and impossible quotes removed)
 
 DAY_COUNT = 365              # time to expiry is calendar days from the chain date to the expiry, over 365
 DIVIDEND_YIELD = 0.0         # no dividend term: the front expiry rarely spans an ex-date, and the error is below the vendor band

@@ -1524,6 +1524,34 @@ async def check_news_headline_guard(session) -> CheckResult:
     return CheckResult("news_headline_guard", PASS, f"{len(suppressed)} headline(s) suppressed against {shown} shown", rows)
 
 
+async def check_chain_quality(session) -> CheckResult:
+    """ERROR if any stored chain (either source) holds a contract services/chain_quality would have removed: an adjusted root, implied
+    volatility above MAX_SANE_IV, a call priced at or above the stock or a put at or above its strike, or two contracts at the same
+    strike, expiry and side. put_chain cleans every chain it stores, so a hit means a chain was written around it."""
+    import json as _json
+    from app.services.chain_quality import problems
+    bad: list[str] = []
+    totals = {"root": 0, "iv": 0, "price": 0, "duplicate": 0}
+    checked = 0
+    for prefix in ("chain:%:%", "intrinio_chain:%:%"):
+        stream = await session.stream(text("SELECT key, value FROM system_metadata WHERE key LIKE :p ORDER BY key"), {"p": prefix})
+        async for key, value in stream:
+            try:
+                chain = _json.loads(value)
+            except (ValueError, TypeError):
+                continue
+            checked += 1
+            found = problems(chain, key.split(":")[1])
+            if any(found.values()):
+                for k, v in found.items():
+                    totals[k] += v
+                bad.append(f"{key}: " + ", ".join(f"{v} {k}" for k, v in found.items() if v))
+    if bad:
+        return CheckResult("chain_quality", ERROR, f"{len(bad)} of {checked} stored chain(s) hold non-standard contracts "
+                           f"({totals['root']} adjusted root, {totals['iv']} implied volatility, {totals['price']} price, {totals['duplicate']} duplicate strike)", bad[:40])
+    return CheckResult("chain_quality", PASS, f"{checked} stored chain(s), every contract standard and every strike listed once per side")
+
+
 async def check_ai_api(session) -> CheckResult:
     """ERROR when the latest nightly key check failed or an Anthropic call failed for billing, credit or authentication within
     ai_health.RECENT_HOURS (every AI feature fails closed then, so visitors see no note, read or draft); WARN when the key check
@@ -3267,6 +3295,7 @@ CHECKS = [
     check_news_headline_guard,
     check_ivy_sentences,
     check_ai_api,
+    check_chain_quality,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

@@ -89,7 +89,7 @@ def _extract_json(text: str) -> dict:
         raise ValueError(f"JSON parse failed after sanitization: {redact(exc)}\nText: {raw[:300]}")
 
 
-MAX_SANE_IV = 5.0    # 500% implied volatility: above this a quote is not a standard contract's
+from app.services.chain_quality import MAX_SANE_IV   # the stored-chain filter's cap; Build a Trade checks it again as a second line
 
 
 def _build_strike_lines(

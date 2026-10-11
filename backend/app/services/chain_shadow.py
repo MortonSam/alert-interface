@@ -75,7 +75,7 @@ def expected_session(now_local: datetime) -> date:
 
 def _contract(c: dict) -> dict:
     o, p = c.get("option") or {}, c.get("prices") or {}
-    return {"strike": o.get("strike"), "bid": p.get("close_bid"), "ask": p.get("close_ask"), "lastPrice": p.get("close"), "mark": p.get("mark"),
+    return {"strike": o.get("strike"), "root": o.get("ticker"), "bid": p.get("close_bid"), "ask": p.get("close_ask"), "lastPrice": p.get("close"), "mark": p.get("mark"),
             "volume": p.get("volume"), "openInterest": p.get("open_interest"), "impliedVolatility": p.get("implied_volatility"), "delta": p.get("delta"),
             "bid_time": p.get("close_bid_time"), "ask_time": p.get("close_ask_time"), "last_time": p.get("close_time"), "date": p.get("date")}
 

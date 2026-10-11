@@ -33,7 +33,7 @@ def test_a_known_case_prices_and_solves_back_to_four_decimals():
 
 
 def test_the_assumptions_are_the_stated_constants():
-    assert IV_SOLVER_VERSION == 1 and DAY_COUNT == 365 and DIVIDEND_YIELD == 0.0
+    assert IV_SOLVER_VERSION == 2 and DAY_COUNT == 365 and DIVIDEND_YIELD == 0.0
     assert RATE_SERIES == "DTB3" and RATE_SCALE == 0.01 and RATE_MAX_AGE_SESSIONS == 5
     assert IV_BRACKET_LOW < IV_SANITY_MIN == 0.02 and IV_SANITY_MAX == 5.0 < IV_BRACKET_HIGH
     assert MIN_EXPIRY_DAYS == 7
@@ -85,7 +85,7 @@ def test_a_penny_atm_mid_marks_the_chain_nonstandard_and_the_step_writes_no_row_
     assert solve_target("X", {**wbd, "underlying_price": None}, "2026-10-09", date(2026, 10, 2), 0.04, date(2026, 10, 1)) == ("skip", {"reason": "no stored close for the chain date"})
     ok = {"calls": [{"strike": 1095, "bid": 35.25, "ask": 37.0, "impliedVolatility": 0.57}], "puts": [{"strike": 1095, "bid": 31.75, "ask": 34.5, "impliedVolatility": 0.50}], "underlying_price": 1097.39}
     kind, row = solve_target("MU", ok, "2026-10-09", date(2026, 10, 1), 0.04, date(2026, 10, 1))
-    assert kind == "row" and row["_sides"] == 2 and row["iv_source"] == "intrinio_mid" and row["iv_version"] == 1 and row["rate_date"] == date(2026, 10, 1)
+    assert kind == "row" and row["_sides"] == 2 and row["iv_source"] == "intrinio_mid" and row["iv_version"] == IV_SOLVER_VERSION and row["rate_date"] == date(2026, 10, 1)
 
 
 def test_the_solver_picks_one_chain_per_ticker_from_keys_and_dates_alone():

@@ -38,6 +38,9 @@ def _sanitize_floats(obj):
     return obj
 
 
+PUT_CALL_COMPUTATION_VERSION = 2   # 2: counted on the stored chain, non-standard contracts removed (services/chain_quality)
+
+
 class ChainIngestItem(BaseModel):
     symbol: str
     expiration: str
@@ -82,13 +85,13 @@ async def ingest_options_chains(
         try:
             chain_dict = _sanitize_floats(chain_store.build_courier_chain(
                 item.calls, item.puts, item.expiration, item.chain_last_trade, item.underlying_price, item.chain_captured_at))
-            await chain_store.put_chain(db, sym, item.expiration, chain_dict, chain_store.COURIER)
+            stored = await chain_store.put_chain(db, sym, item.expiration, chain_dict, chain_store.COURIER)
             ingested.append(sym)
-            # Track nearest future expiration per symbol for put/call
+            # Track nearest future expiration per symbol for put/call, counted on the chain as stored (standard contracts only)
             if item.expiration >= today_str:
                 prev = nearest_chain.get(sym)
                 if prev is None or item.expiration < prev.expiration:
-                    nearest_chain[sym] = item
+                    nearest_chain[sym] = item.model_copy(update={"calls": stored["calls"], "puts": stored["puts"]})
         except Exception as exc:
             errors.append(f"{sym}: {redact(exc)}")
 
@@ -113,12 +116,13 @@ async def ingest_options_chains(
                  expiration_used, computation_version, created_at)
             VALUES
                 (gen_random_uuid(), :symbol, :snapshot_date, :ratio, 'volume',
-                 :put_total, :call_total, :expiration_used, 1, :now)
+                 :put_total, :call_total, :expiration_used, :version, :now)
             ON CONFLICT (symbol, snapshot_date) DO UPDATE SET
                 ratio = :ratio,
                 put_total = :put_total,
                 call_total = :call_total,
                 expiration_used = :expiration_used,
+                computation_version = :version,
                 created_at = :now
         """), {
             "symbol": sym,
@@ -127,6 +131,7 @@ async def ingest_options_chains(
             "put_total": put_vol,
             "call_total": call_vol,
             "expiration_used": item.expiration,
+            "version": PUT_CALL_COMPUTATION_VERSION,
             "now": datetime.now(timezone.utc),
         })
         pc_stored += 1

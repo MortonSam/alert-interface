@@ -47,15 +47,17 @@ def build_courier_chain(calls: list[dict], puts: list[dict], expiration: str, ch
             "underlying_price": underlying_price, "chain_source": COURIER, "chain_captured_at": chain_captured_at}
 
 
-async def put_chain(db: AsyncSession, sym: str, exp: str, chain: dict, source: str) -> str:
-    """Store a chain under its source's key. The chain must name the same source."""
+async def put_chain(db: AsyncSession, sym: str, exp: str, chain: dict, source: str) -> dict:
+    """Store a chain under its source's key, cleaned of non-standard contracts first (services/chain_quality). The chain must
+    name the same source. Returns the chain as stored."""
     if chain.get("chain_source") != source:
         raise ValueError(f"chain_source {chain.get('chain_source')!r} does not match the key's source {source!r}")
-    key = chain_key(sym, exp, source)
-    await set_value(db, key, json.dumps(chain))
+    from app.services.chain_quality import clean_chain
+    chain = clean_chain(chain, sym)
+    await set_value(db, chain_key(sym, exp, source), json.dumps(chain))
     from app.services.options_source import forget
     forget(sym)
-    return key
+    return chain
 
 
 async def delete_expired(db: AsyncSession, source: str, before: date) -> list[str]:

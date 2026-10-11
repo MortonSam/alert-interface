@@ -161,7 +161,7 @@ async def run(argv: list[str]) -> int:
                     if chain["late"]:
                         late[sym] = eod.isoformat()
                     async with ScriptSessionLocal() as s:
-                        await chain_store.put_chain(s, sym, exp, chain, chain_store.INTRINIO)
+                        chain = await chain_store.put_chain(s, sym, exp, chain, chain_store.INTRINIO)   # as stored, cleaned
                         await s.commit()
                     stored_chains[exp] = chain
                     wrote += 1
