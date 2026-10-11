@@ -4,7 +4,7 @@ import { Bodoni_Moda, DM_Serif_Display, Gloock, Instrument_Serif, Libre_Caslon_D
 import { HeroSearchButton } from "@/components/TickerSearch";
 import { BRAND } from "@/lib/brand";
 
-// A type study for Sam: the home page's opening screen with its headline set in seven candidate faces, each at its strongest
+// A type study: the home page's opening screen with its headline set in seven candidate faces, each at its strongest
 // available weight. Only the headline changes face; the subhead and buttons stay in the site's sans. Not linked from any page,
 // not in the sitemap, and noindex.
 export const metadata: Metadata = { title: "Type preview", robots: { index: false, follow: false } };
@@ -48,7 +48,7 @@ export default function TypePreview() {
             </div>
             <div className="text-left">
               <h1 className={`tp-h1 ${font.className} text-foreground`} style={{ fontWeight: weight }}>
-                Robinhood teaches you to tap. Bloomberg assumes you know.{" "}
+                Trading apps teach you to tap. Pro tools assume you know.{" "}
                 <span className="text-primary">Alert Interface teaches you what Wall Street knows.</span>
               </h1>
               <p className="text-foreground/70 text-lg mt-6 max-w-[34em]">

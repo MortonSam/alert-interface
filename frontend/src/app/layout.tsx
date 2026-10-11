@@ -44,7 +44,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <footer className="text-[11px] text-muted-foreground/70 text-center py-6">
             Alert Interface is an educational research tool. Nothing here is investment advice. Options involve substantial risk.
             {" "}<Link href="/disclosures" className="tap underline hover:text-muted-foreground">Disclosures</Link>
-            <span className="block mt-1">Robinhood and Bloomberg are trademarks of their respective owners. Alert Interface is not affiliated with either.</span>
           </footer>
         </PostHogProvider>
       </body>

@@ -64,7 +64,7 @@ export default async function Home() {
           </div>
           <div className="text-left">
             <h1 className="open-h1 open-line font-display font-extrabold text-foreground">
-              Robinhood teaches you to tap. Bloomberg assumes you know.{" "}
+              Trading apps teach you to tap. Pro tools assume you know.{" "}
               <span className="text-primary">Alert Interface teaches you what Wall Street knows.</span>
             </h1>
             <div className="open-rest">
