@@ -82,3 +82,16 @@ def test_options_that_are_not_expensive_keep_the_usual_draft(monkeypatch):
     monkeypatch.setattr(T, "AnthropicClient", NoAI)
     with pytest.raises(AssertionError, match="no AI call"):                               # it went on to the AI draft
         asyncio.run(T._run_draft_generation(_data(), "bullish", "moderate", premium={**PREMIUM, "expensive": False}))
+
+
+def test_a_split_stocks_adjusted_contracts_never_price_a_draft():
+    # PANW on Oct 9, 2026: Intrinio lists the adjusted contracts beside the standard ones at the same strikes
+    calls = [{"strike": 360.0, "bid": 71.75, "ask": 78.75, "lastPrice": 79.56, "impliedVolatility": 0.54},
+             {"strike": 360.0, "bid": 607.45, "ask": 611.5, "lastPrice": 482.2, "impliedVolatility": 105526808639.2},
+             {"strike": 420.0, "bid": 38.75, "ask": 41.10, "lastPrice": 42.85, "impliedVolatility": 0.53},
+             {"strike": 420.0, "bid": 547.8, "ask": 552.0, "lastPrice": None, "impliedVolatility": 1532.19},
+             {"strike": 460.0, "bid": 24.0, "ask": 26.4, "lastPrice": 25.0, "impliedVolatility": 0.52}]
+    _, rows = T._build_strike_lines(calls, 420.0, 418.78)
+    assert [(r["strike"], r["mid"]) for r in rows] == [(360.0, 75.25), (420.0, 39.92), (460.0, 25.2)]
+    s = T.build_defined_risk_spread("bullish", rows, 418.78, 9.37)
+    assert (s["long_strike"], s["short_strike"], s["net_debit"]) == (360.0, 460.0, 50.05)

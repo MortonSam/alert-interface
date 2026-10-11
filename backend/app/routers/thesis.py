@@ -89,14 +89,23 @@ def _extract_json(text: str) -> dict:
         raise ValueError(f"JSON parse failed after sanitization: {redact(exc)}\nText: {raw[:300]}")
 
 
+MAX_SANE_IV = 5.0    # 500% implied volatility: above this a quote is not a standard contract's
+
+
 def _build_strike_lines(
     side_raw: list[dict],
     atm_strike: float | None,
     current_price: float,
     limit: int = 12,
 ) -> tuple[str, list[dict]]:
-    """Return (formatted text block, list of {strike, mid, iv} dicts) for quality strikes."""
-    quality = [c for c in side_raw if (c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0]
+    """Return (formatted text block, list of {strike, mid, iv} dicts) for quality strikes. A quote no standard 100-share contract
+    could carry is dropped: a price at or above the stock's, or an implied volatility above MAX_SANE_IV (Intrinio lists a split
+    stock's adjusted contracts beside the standard ones at the same strikes: PANW's $360 call at $609 beside $75, IV 1e11)."""
+    def standard(c: dict) -> bool:
+        mid = _mid_or_last(c.get("bid"), c.get("ask"), c.get("lastPrice"))
+        iv = c.get("impliedVolatility")
+        return not ((mid is not None and current_price > 0 and mid >= current_price) or (iv is not None and iv > MAX_SANE_IV))
+    quality = [c for c in side_raw if ((c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0) and standard(c)]
     all_strikes = sorted({c["strike"] for c in quality})
     if atm_strike and atm_strike in all_strikes:
         idx = all_strikes.index(atm_strike)
