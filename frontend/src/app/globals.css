@@ -90,8 +90,6 @@
   .tap::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
 
-/* The home page: one section per screen, one section per gesture (components/HomeSnap) */
-html.home-snap { scroll-snap-type: y mandatory; scroll-padding-top: calc(3.25rem + 1px); }
-html.home-snap .snap-section { scroll-snap-align: start; scroll-snap-stop: always; }
-@media (min-width: 640px) { html.home-snap .snap-section { min-height: calc(100svh - 3.25rem - 1px); } }   /* phones keep content heights */
-html.home-snap footer { scroll-snap-align: end; }
+/* The home page: each section one screen under the sticky header from 640px up (phones keep content heights). The page
+   scrolls natively: no snapping, and nothing on it intercepts wheel, trackpad, keyboard or touch input. */
+@media (min-width: 640px) { main .screen-section { min-height: calc(100svh - 3.25rem - 1px); } }

@@ -7,7 +7,6 @@ import { SiteCounters } from "@/components/SiteCounters";
 import { fetchSiteStatsServer } from "@/lib/siteStats";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { IvyMark } from "@/components/IvyMark";
-import { HomeSnap } from "@/components/HomeSnap";
 import { BRAND } from "@/lib/brand";
 
 // The counters are rendered on the server and revalidated: a backend that is slow, restarting or erroring never costs the
@@ -19,8 +18,6 @@ export default async function Home() {
   const initial = await fetchSiteStatsServer();
   return (
     <main>
-      {/* one section per screen: the browser's own scroll snap moves one section per gesture (components/HomeSnap) */}
-      <HomeSnap />
       <style>{`
         .open-h1 {
           font-size: clamp(34px, 10.4vw, 76px);   /* "Wall Street sees." is about 8.6em wide: one line from a 390px phone up */
@@ -61,7 +58,7 @@ export default async function Home() {
 
       {/* ── 1. The opening: the heron large on the left facing the words, the headline, subhead and buttons on its right; on a
              phone the heron sits above the headline, left-aligned. Nothing else on the screen but a quiet scroll cue. ── */}
-      <section className="snap-section relative flex flex-col bg-background">
+      <section className="screen-section relative flex flex-col bg-background">
         <div className="flex-1 grid items-center max-w-[88rem] w-full mx-auto px-4 sm:px-8 pt-8 pb-16 lg:py-0 gap-y-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-x-14">
           <div className="flex justify-start lg:justify-end">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -94,12 +91,12 @@ export default async function Home() {
       </section>
 
       {/* ── 2. The counts: four live numbers from stored tables, on their own screen. ── */}
-      <section className="snap-section px-4 sm:px-6 py-12 sm:py-0 flex items-center justify-center">
+      <section className="screen-section px-4 sm:px-6 py-12 sm:py-0 flex items-center justify-center">
         <SiteCounters initial={initial} />
       </section>
 
         {/* ── 3. The Challenge ── */}
-        <section className="snap-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
+        <section className="screen-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
@@ -117,7 +114,7 @@ export default async function Home() {
         </section>
 
         {/* ── 4. The Solution ──────────────────────────────────── */}
-        <section className="snap-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
+        <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
@@ -162,7 +159,7 @@ export default async function Home() {
         </section>
 
         {/* ── 5. The Analyst ───────────────────────────────────── */}
-        <section className="snap-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
+        <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <IvyMark size={48} className="mb-5" />
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
@@ -191,10 +188,10 @@ export default async function Home() {
           </div>
         </section>
       {/* ── 6. See it in action: the latest verified note (the component renders nothing when none is current) ── */}
-      <LatestVerifiedNote className="snap-section flex flex-col justify-center" />
+      <LatestVerifiedNote className="screen-section flex flex-col justify-center" />
 
         {/* ── 7. Market grid ───────────────────────────────────── */}
-          <section id="market" className="snap-section max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
+          <section id="market" className="screen-section max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Start anywhere
@@ -210,7 +207,7 @@ export default async function Home() {
           </section>
 
         {/* ── 8. Closing CTA ───────────────────────────────────── */}
-          <section className="snap-section flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 py-12 text-center">
+          <section className="screen-section flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 py-12 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point
             </p>

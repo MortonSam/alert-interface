@@ -43,7 +43,7 @@ describe("the counters row never overlaps", () => {
     const page = read("app/page.tsx");
     expect(page).toContain(`font-size: ${STAT_NUMBER_CLAMP};`);
     const section = page.match(/<section className="([^"]*)">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
-    expect(section).toContain("snap-section");                                         // one screen minus the header from 640px up (globals.css)
+    expect(section).toContain("screen-section");                                       // one screen minus the header from 640px up (globals.css)
     expect(section).toContain("flex items-center justify-center");                    // the row centered vertically on that screen
     expect(section).toContain("py-12");
     expect(section).not.toMatch(/100vh|min-h-/);                                      // the height comes from the one snap rule

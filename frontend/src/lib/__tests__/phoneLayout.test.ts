@@ -17,10 +17,13 @@ describe("the home page on a phone", () => {
   });
   it("the opening: the heron first (above the headline on a phone, on the left from 1024px), one section per screen from 640px up", () => {
     const home = read("app/page.tsx");
-    expect(home).toContain('<section className="snap-section relative flex flex-col bg-background">');
+    expect(home).toContain('<section className="screen-section relative flex flex-col bg-background">');
     expect(home.indexOf("BRAND.heron")).toBeLessThan(home.indexOf("Know what</span>"));
     expect(home).not.toMatch(/ProofCards|StoryFlow/);
-    expect(read("app/globals.css")).toMatch(/@media \(min-width: 640px\) \{ html\.home-snap \.snap-section \{ min-height: calc\(100svh - 3\.25rem - 1px\); \} \}/);
+    const css = read("app/globals.css");
+    expect(css).toMatch(/@media \(min-width: 640px\) \{ main \.screen-section \{ min-height: calc\(100svh - 3\.25rem - 1px\); \} \}/);
+    expect(css).not.toMatch(/scroll-snap/);                                          // the page scrolls natively
+    expect(home).not.toMatch(/HomeSnap|preventDefault|addEventListener\("wheel"/);
   });
   it("the header is one row: the logo, a menu button for the five links, and the search icon", () => {
     const nav = read("components/NavLinks.tsx");
