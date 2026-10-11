@@ -18,7 +18,7 @@ describe("the home page on a phone", () => {
   it("the opening: the heron first (above the headline on a phone, on the left from 1024px), one section per screen from 640px up", () => {
     const home = read("app/page.tsx");
     expect(home).toContain('<section className="screen-section relative flex flex-col bg-background">');
-    expect(home.indexOf("BRAND.heron")).toBeLessThan(home.indexOf("Know what</span>"));
+    expect(home.indexOf("BRAND.heron")).toBeLessThan(home.indexOf("Robinhood teaches you to tap."));
     expect(home).not.toMatch(/ProofCards|StoryFlow/);
     const css = read("app/globals.css");
     expect(css).toMatch(/@media \(min-width: 640px\) \{ main \.screen-section \{ min-height: calc\(100svh - 3\.25rem - 1px\); \} \}/);

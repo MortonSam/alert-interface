@@ -1,51 +1,55 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { IBM_Plex_Sans, Instrument_Serif, Inter_Tight, Playfair_Display } from "next/font/google";
+import { Bodoni_Moda, DM_Serif_Display, Gloock, Instrument_Serif, Libre_Caslon_Display, Newsreader, Source_Serif_4 } from "next/font/google";
 import { HeroSearchButton } from "@/components/TickerSearch";
 import { BRAND } from "@/lib/brand";
 
-// A type study for Sam: the home page's opening screen and The Challenge headline set in four candidate faces. Not linked from
-// any page, not in the sitemap, and noindex.
+// A type study for Sam: the home page's opening screen with its headline set in seven candidate faces, each at its strongest
+// available weight. Only the headline changes face; the subhead and buttons stay in the site's sans. Not linked from any page,
+// not in the sitemap, and noindex.
 export const metadata: Metadata = { title: "Type preview", robots: { index: false, follow: false } };
 
-const playfair = Playfair_Display({ subsets: ["latin"], weight: ["700"], display: "swap" });
 const instrument = Instrument_Serif({ subsets: ["latin"], weight: ["400"], display: "swap" });
-const interTight = Inter_Tight({ subsets: ["latin"], weight: ["400", "800"], display: "swap" });
-const plex = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "700"], display: "swap" });
+const dmSerif = DM_Serif_Display({ subsets: ["latin"], weight: ["400"], display: "swap" });
+const newsreader = Newsreader({ subsets: ["latin"], weight: ["800"], display: "swap" });
+const caslon = Libre_Caslon_Display({ subsets: ["latin"], weight: ["400"], display: "swap" });
+const gloock = Gloock({ subsets: ["latin"], weight: ["400"], display: "swap" });
+const sourceSerif = Source_Serif_4({ subsets: ["latin"], weight: ["900"], display: "swap" });
+const bodoni = Bodoni_Moda({ subsets: ["latin"], weight: ["900"], display: "swap" });
 
 const FACES = [
-  { name: "Playfair Display", font: playfair, weight: "font-bold" },
-  { name: "Instrument Serif", font: instrument, weight: "font-normal" },
-  { name: "Inter Tight", font: interTight, weight: "font-extrabold" },
-  { name: "IBM Plex Sans", font: plex, weight: "font-bold" },
+  { name: "Instrument Serif", font: instrument, weight: 400 },
+  { name: "DM Serif Display", font: dmSerif, weight: 400 },
+  { name: "Newsreader", font: newsreader, weight: 800 },
+  { name: "Libre Caslon Display", font: caslon, weight: 400 },
+  { name: "Gloock", font: gloock, weight: 400 },
+  { name: "Source Serif 4", font: sourceSerif, weight: 900 },
+  { name: "Bodoni Moda", font: bodoni, weight: 900 },
 ];
 
 export default function TypePreview() {
   return (
     <main className="pb-16">
       <style>{`
-        .tp-h1 { font-size: clamp(34px, 10.4vw, 76px); line-height: 1.02; letter-spacing: -.03em; white-space: nowrap; }
+        .tp-h1 { font-size: clamp(26px, 7.4vw, 44px); line-height: 1.08; letter-spacing: -.02em; text-wrap: balance; }
         .tp-heron { width: min(58vw, 260px); height: auto; }
-        .tp-h2 { font-size: clamp(32px, 6vw, 72px); line-height: 1.15; letter-spacing: -.025em; }
         @media (min-width: 1024px) {
-          .tp-h1 { font-size: clamp(54px, 5.4vw, 84px); }
-          .tp-heron { width: 100%; max-width: 680px; max-height: 62svh; object-fit: contain; }
+          .tp-h1 { font-size: clamp(34px, min(3.5vw, 6.2svh), 66px); }
+          .tp-heron { width: 100%; max-width: 760px; max-height: 70svh; object-fit: contain; }
         }
       `}</style>
       {FACES.map(({ name, font, weight }) => (
-        <section key={name} className={`${font.className} border-t border-border`}>
-          <p className="font-mono text-xs text-primary px-4 sm:px-8 pt-6" style={{ fontFamily: "var(--font-mono)" }}>{name}</p>
-
-          {/* the opening screen */}
-          <div className="grid items-center max-w-[88rem] w-full mx-auto px-4 sm:px-8 py-10 lg:py-16 gap-y-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-x-14">
+        <section key={name} className="border-t border-border sm:min-h-[calc(100svh-3.25rem-1px)] flex flex-col">
+          <p className="font-mono text-xs text-primary px-4 sm:px-8 pt-6">{name} · {weight}</p>
+          <div className="flex-1 grid items-center max-w-[88rem] w-full mx-auto px-4 sm:px-8 pt-8 pb-16 lg:py-0 gap-y-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-x-14">
             <div className="flex justify-start lg:justify-end">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={BRAND.heron} alt="" aria-hidden="true" className="tp-heron" />
             </div>
             <div className="text-left">
-              <h1 className={`tp-h1 ${weight}`}>
-                <span className="block text-foreground">Know what</span>
-                <span className="block text-primary">Wall Street sees.</span>
+              <h1 className={`tp-h1 ${font.className} text-foreground`} style={{ fontWeight: weight }}>
+                Robinhood teaches you to tap. Bloomberg assumes you know.{" "}
+                <span className="text-primary">Alert Interface teaches you what Wall Street knows.</span>
               </h1>
               <p className="text-foreground/70 text-lg mt-6 max-w-[34em]">
                 One workspace for the retail investor, starting with the S&amp;P 500. Every number explained.
@@ -57,13 +61,6 @@ export default function TypePreview() {
                 </Link>
               </div>
             </div>
-          </div>
-
-          {/* The Challenge headline */}
-          <div className="text-center px-4 sm:px-8 pb-14">
-            <h2 className={`tp-h2 ${weight} text-foreground max-w-[20ch] mx-auto`}>
-              Trading apps hand you confetti. Terminals cost thirty grand a year.
-            </h2>
           </div>
         </section>
       ))}

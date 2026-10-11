@@ -20,14 +20,14 @@ export default async function Home() {
     <main>
       <style>{`
         .open-h1 {
-          font-size: clamp(34px, 10.4vw, 76px);   /* "Wall Street sees." is about 8.6em wide: one line from a 390px phone up */
-          white-space: nowrap;
+          font-size: clamp(26px, 7.4vw, 44px);    /* the three sentences wrap; under the heron on a phone */
+          text-wrap: balance;
           line-height: 1.02;
           letter-spacing: -.035em;
         }
         .open-heron { width: min(58vw, 260px); height: auto; }
         @media (min-width: 1024px) {
-          .open-h1 { font-size: clamp(54px, 5.4vw, 84px); }
+          .open-h1 { font-size: clamp(34px, min(3.5vw, 6.2svh), 66px); }   /* beside the heron: the full headline, subhead and buttons fit the screen */
           .open-heron { width: 100%; max-width: 760px; max-height: 70svh; object-fit: contain; }
         }
         /* the entrance: the heron settles first, then the headline reveals, then the rest */
@@ -35,9 +35,7 @@ export default async function Home() {
         @keyframes line-reveal  { from { opacity: 0; transform: translateY(.35em); clip-path: inset(0 0 100% 0); } to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); } }
         @keyframes soft-in      { from { opacity: 0; } to { opacity: 1; } }
         .open-heron  { animation: heron-settle 1100ms cubic-bezier(.2,.7,.15,1) both; }
-        .open-line   { animation: line-reveal 700ms cubic-bezier(.2,.7,.2,1) both; }
-        .open-line-1 { animation-delay: 650ms; }
-        .open-line-2 { animation-delay: 820ms; }
+        .open-line   { animation: line-reveal 800ms cubic-bezier(.2,.7,.2,1) 650ms both; }
         .open-rest   { animation: soft-in 700ms ease-out 1150ms both; }
         .open-cue    { animation: soft-in 900ms ease-out 1700ms both; }
         @media (prefers-reduced-motion: reduce) {
@@ -65,9 +63,9 @@ export default async function Home() {
             <img src={BRAND.heron} alt="" aria-hidden="true" className="open-heron" />
           </div>
           <div className="text-left">
-            <h1 className="open-h1 font-display font-extrabold">
-              <span className="open-line open-line-1 block text-foreground">Know what</span>
-              <span className="open-line open-line-2 block text-primary">Wall Street sees.</span>
+            <h1 className="open-h1 open-line font-display font-extrabold text-foreground">
+              Robinhood teaches you to tap. Bloomberg assumes you know.{" "}
+              <span className="text-primary">Alert Interface teaches you what Wall Street knows.</span>
             </h1>
             <div className="open-rest">
               <p className="text-foreground/70 text-lg mt-6 max-w-[34em]">
@@ -210,9 +208,6 @@ export default async function Home() {
           <section className="screen-section flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 py-12 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point
-            </p>
-            <p className="text-lg sm:text-xl text-foreground/70 max-w-[34ch] mx-auto mb-5">
-              Robinhood teaches you to tap. Bloomberg assumes you know.
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
               Know what Wall Street knows. See the proof.
