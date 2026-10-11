@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { volRegime } from "@/lib/encodings/volRegime";
 import { impliedSpanPhrase, optionsCadencePhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
 import { useIvyRule } from "@/lib/useIvyRule";
@@ -402,7 +403,7 @@ function DraftDisplay({
 
         {/* E) Leg detail — verbose strategy name, muted */}
         {draft.strategy && (
-          <p className="font-mono text-sm text-muted-foreground">{draft.strategy}</p>
+          <p className="font-mono text-sm text-muted-foreground"><Explained text={draft.strategy} /></p>
         )}
       </div>
 
@@ -436,7 +437,7 @@ function DraftDisplay({
       <div className="border border-border/60 bg-transparent rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
         <span className="sm:col-span-2">Price: <span className="text-foreground">{pricedAtLine(fb, fmtTimestamp)}</span></span>
         <span>
-          Implied move:{" "}
+          <Explained text="Implied move:" />{" "}
           <span className="font-mono text-foreground">
             {fb.expected_move_pct != null && fb.expected_move_dollars != null ? `±${fb.expected_move_pct.toFixed(1)}% (±$${fb.expected_move_dollars.toFixed(2)})` : absentCell(fb, "expected_move_pct", "no priced ATM straddle on the chain")}
           </span>
@@ -455,13 +456,13 @@ function DraftDisplay({
           One-day earnings move, avg ±:{" "}
           <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct != null ? `${fb.hist_avg_abs_move_pct.toFixed(2)}%` : absentCell(fb, "hist_avg_abs_move_pct", "no stored earnings reactions with a one-day move")}</span>
         </span>
-        <span>Beat rate: <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no stored quarters with an EPS outcome")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
-        <span>ATM IV: <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
-        <span>Realized-vol rank: {fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
-        <span>IV−RV spread: <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
+        <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no stored quarters with an EPS outcome")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
+        <span><Explained text="ATM IV:" /> <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
+        <span><Explained text="Realized-vol rank: " />{fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
+        <span><Explained text="IV\u2212RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
         {draft.vol_regime && (
           <span>
-            Vol regime:{" "}
+            <Explained text="Vol regime:" />{" "}
             <span
               title={volRegime(draft.vol_regime)?.rule}
               className={cn("font-mono font-medium rounded px-1", volRegime(draft.vol_regime)?.className ?? "text-foreground")}
@@ -476,7 +477,7 @@ function DraftDisplay({
       {draft.suggested_strike != null && (
         <div className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Position cost &amp; risk · per contract
+            <Explained text="Position cost & risk \u00b7 per contract" />
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="border border-border/60 bg-transparent rounded-md p-5">
@@ -508,7 +509,7 @@ function DraftDisplay({
           </div>
           {isSpread && netDebit != null && spreadWidth != null && (
             <p className="text-xs text-muted-foreground">
-              Net debit ${netDebit.toFixed(2)} · spread width ${spreadWidth.toFixed(0)}
+              <Explained text="Net debit $" />{netDebit.toFixed(2)}<Explained text=" \u00b7 spread width $" />{spreadWidth.toFixed(0)}
             </p>
           )}
           {leg1Mid == null && (
@@ -579,7 +580,7 @@ function DraftDisplay({
                     <span className="ml-1.5 font-normal text-muted-foreground">· cheaper option, with tradeoffs</span>
                   </p>
                   {altResult.strategy && (
-                    <p className="text-lg font-bold text-foreground">{altResult.strategy}</p>
+                    <p className="text-lg font-bold text-foreground"><Explained text={altResult.strategy} /></p>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-0.5">
                     <div className="border border-border/60 bg-transparent rounded-md p-5">
@@ -1069,14 +1070,14 @@ function BuildTradePageContent() {
                     Ivy already has an open {alertPick.picked_direction} pick on {alertPick.symbol} from{" "}
                     {new Date(alertPick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                   </p>
-                  <p className="text-xs text-muted-foreground">Ivy holds one pick per symbol until it expires.</p>
+                  <p className="text-xs text-muted-foreground"><Explained text="Ivy holds one pick per symbol until it expires." /></p>
                 </div>
               )}
 
               {/* Ivy's decision when the engine produced no draft: one sentence, the reason, the slot kept */}
               {alertPick && !alertPick.existing_pick && !alertPick.draft && alertPick.outcome !== "picked" && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4" data-testid="ivy-decision">
-                  <p className="text-sm font-medium">{ivyDecisionSentence(alertPick.symbol, alertPick.outcome, alertPick.outcome_label)}</p>
+                  <p className="text-sm font-medium"><Explained text={ivyDecisionSentence(alertPick.symbol, alertPick.outcome, alertPick.outcome_label)} /></p>
                   {alertPick.leans.length > 0 && (
                     <div className="text-xs text-muted-foreground space-y-1.5">
                       {alertPick.leans.map((lean) => (
@@ -1239,7 +1240,7 @@ function BuildTradePageContent() {
             <section className="space-y-4">
               <StepHeader n={3} label="Review the suggestion" done />
               <div className="rounded-2xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground flex items-center gap-2">
-                <span className="font-medium text-foreground">{draft.strategy}</span>
+                <span className="font-medium text-foreground"><Explained text={draft.strategy} /></span>
                 {optionLeg?.strike != null && (
                   <span>· {optionLeg.option_type} ${optionLeg.strike.toFixed(0)}{optionLeg.strike2 != null ? `/$${optionLeg.strike2.toFixed(0)}` : ""} exp {optionLeg.option_expiration}</span>
                 )}

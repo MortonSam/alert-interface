@@ -1,3 +1,4 @@
+import Explained from "@/components/Explained";
 import Link from "next/link";
 
 interface DiscoverRowProps {
@@ -34,8 +35,8 @@ export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence, 
           )}
         </div>
         <div className="mt-0.5 sm:mt-0 min-w-0">
-          <p className="text-sm text-foreground/80 leading-snug break-words">{sentence}</p>
-          {detail && <p className="mt-1 text-xs text-muted-foreground leading-snug break-words">{detail}</p>}
+          <p className="text-sm text-foreground/80 leading-snug break-words"><Explained text={sentence} /></p>
+          {detail && <p className="mt-1 text-xs text-muted-foreground leading-snug break-words">{typeof detail === "string" ? <Explained text={detail} /> : detail}</p>}
         </div>
       </Link>
     </li>

@@ -1524,6 +1524,26 @@ async def check_news_headline_guard(session) -> CheckResult:
     return CheckResult("news_headline_guard", PASS, f"{len(suppressed)} headline(s) suppressed against {shown} shown", rows)
 
 
+async def check_ai_api(session) -> CheckResult:
+    """ERROR when the latest nightly key check failed or an Anthropic call failed for billing, credit or authentication within
+    ai_health.RECENT_HOURS (every AI feature fails closed then, so visitors see no note, read or draft); WARN when the key check
+    has not run in two days."""
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.services import ai_health as H
+    from app.services.system_metadata_service import get_value
+    summary = H.health_summary(await get_value(session, H.FAILURES_KEY), await get_value(session, H.CHECK_KEY))
+    check, serious = summary["key_check"], summary["last_billing_or_auth_failure"]
+    rows = [f"{f['at']} {f['feature']}: {f['kind']} (status {f['status']}) {f['message'][:120]}" for f in _json.loads(await get_value(session, H.FAILURES_KEY) or "[]")[:10]]
+    if check and check.get("ok") is False:
+        return CheckResult("ai_api", ERROR, f"The nightly AI key check failed at {check['at']}: {check.get('error')}", rows)
+    if summary["billing_or_auth_failure_recent"]:
+        return CheckResult("ai_api", ERROR, f"An Anthropic call failed for {serious['kind']} at {serious['at']} ({serious['feature']}): {serious['message'][:160]}", rows)
+    if not check or _dt.fromisoformat(check["at"]) < _dt.now(_tz.utc) - _td(days=2):
+        return CheckResult("ai_api", WARN, "The nightly AI key check has not run in two days", rows)
+    return CheckResult("ai_api", PASS, f"Key check ok at {check['at']}; {summary['failures_last_day']} failed call(s) in the last day", rows)
+
+
 async def check_ivy_sentences(session) -> CheckResult:
     """WARN when more than ivy_moves.FALLBACK_WARN_SHARE of the rows in the latest run of Ivy's Discover sentences fell back to the
     headline display (her sentence failed the check twice). Only while DISCOVER_NEWS_ENABLED is on."""
@@ -3246,6 +3266,7 @@ CHECKS = [
     check_reports_have_evidence,
     check_news_headline_guard,
     check_ivy_sentences,
+    check_ai_api,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

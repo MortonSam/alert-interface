@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
@@ -315,7 +316,7 @@ function HistoryInsightsPanel({
                     <thead>
                       <tr className="border-b border-border/40">
                         <th className="text-left font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-3">Symbol</th>
-                        <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-3">Avg 1d move</th>
+                        <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1 pr-3"><Explained text="Avg 1d move" /></th>
                         <th className="text-right font-mono text-[10px] uppercase tracking-wide text-muted-foreground pb-1">Quarters</th>
                       </tr>
                     </thead>
@@ -357,7 +358,7 @@ function HistoryInsightsPanel({
       )}
       {showMagnitude && (
         <p className="text-xs text-muted-foreground">
-          Recent prints moving ±{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
+          <Explained text="Recent prints moving \u00b1" />{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
           {" "}, reactions{" "}
           <span className="font-medium">
             <ExplainTip term="magnitude trend">{ce!.magnitude_trend_labeled?.label ?? ce!.magnitude_trend ?? "stable"}</ExplainTip>
@@ -393,7 +394,7 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
       <p className="font-medium">{formatEventDate(d.date)}</p>
       {!isFed && <p className="capitalize text-muted-foreground">{d.outcome}</p>}
       {!isFed && d.epsActual != null && d.epsEstimate != null && (
-        <p>EPS ${parseFloat(d.epsActual).toFixed(2)} vs est ${parseFloat(d.epsEstimate).toFixed(2)}</p>
+        <p><Explained text="EPS $" />{parseFloat(d.epsActual).toFixed(2)} vs est ${parseFloat(d.epsEstimate).toFixed(2)}</p>
       )}
       {d.pct1d != null ? (
         <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
@@ -580,7 +581,7 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
       </div>
       {mode === "earnings" && (
         <p className="text-xs text-muted-foreground italic mb-3">
-          Stats below show stock price moves, not EPS surprise magnitude.
+          <Explained text="Stats below show stock price moves, not EPS surprise magnitude." />
         </p>
       )}
 
@@ -1000,7 +1001,7 @@ function PriceChartTooltip({
           </p>
           {marker.eps_estimate != null && marker.eps_actual != null && (
             <p className="text-zinc-500 dark:text-zinc-400">
-              EPS: {marker.eps_actual.toFixed(2)} vs {marker.eps_estimate.toFixed(2)} est.
+              <Explained text="EPS: " />{marker.eps_actual.toFixed(2)} vs {marker.eps_estimate.toFixed(2)} est.
             </p>
           )}
           {marker.pct_change_1d != null && (
@@ -1008,7 +1009,7 @@ function PriceChartTooltip({
               "font-medium",
               marker.pct_change_1d > 0 ? "text-green-600 dark:text-green-400" : marker.pct_change_1d < 0 ? "text-red-500 dark:text-red-400" : "text-zinc-500",
             )}>
-              1-day move{marker.report_timing === "bmo" ? " (pre-market)" : marker.report_timing === "amc" ? " (after close)" : ""}: {marker.pct_change_1d > 0 ? "+" : ""}{marker.pct_change_1d.toFixed(2)}%
+              <Explained text="1-day move" />{marker.report_timing === "bmo" ? " (pre-market)" : marker.report_timing === "amc" ? " (after close)" : ""}: {marker.pct_change_1d > 0 ? "+" : ""}{marker.pct_change_1d.toFixed(2)}%
             </p>
           )}
         </div>
@@ -1218,7 +1219,7 @@ function PriceChart({
             )}
             {earningsMarkers.length > 0 && (
               <span className="flex items-center gap-1.5">
-                Earnings dates, colored by EPS outcome:
+                <Explained text="Earnings dates, colored by EPS outcome:" />
                 <EncodingLegend items={earningsMarkerLegend()} />
               </span>
             )}
@@ -2034,7 +2035,7 @@ export default function TickerPage() {
             if (!displayEvent) {
               return (
                 <p className="text-sm text-muted-foreground mb-4">
-                  No upcoming catalysts
+                  <Explained text="No upcoming catalysts" />
                 </p>
               );
             }
@@ -2151,7 +2152,7 @@ export default function TickerPage() {
                       </div>
                       {pricingNote && reactionSummary!.beat_count >= 3 && (
                         <p className="text-xs mt-2 text-muted-foreground">
-                          Stock fell on its 1-day reaction in {reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
+                          <Explained text="Stock fell on its 1-day reaction in " />{reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
                           {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.
                           {" "}<ExplainTip term="priced in">{pricingNote}</ExplainTip>
                           {pricedIn?.rule && <span className="text-xs ml-1">({pricedIn.rule})</span>}
@@ -2223,7 +2224,7 @@ export default function TickerPage() {
                     <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
                       <span>▲ <ExplainTip term="upgrade">upgrade</ExplainTip></span>
                       <span>▼ <ExplainTip term="downgrade">downgrade</ExplainTip></span>
-                      <span>→ initiate or reiterate</span>
+                      <span><Explained text="\u2192 initiate or reiterate" /></span>
                     </div>
                   )}
                 </div>
@@ -2435,7 +2436,7 @@ export default function TickerPage() {
                   <p className="text-sm text-muted-foreground mb-2">
                     {priceStateLine(expectedMove.quote_state, expectedMove.quote_reason)}
                     {priceAsOfPhrase(expectedMove.price_as_of) && ` (${priceAsOfPhrase(expectedMove.price_as_of)})`}
-                    {" "}The implied range, straddle and breakevens need a current price and are not shown.
+                    {" "}<Explained text="The implied range, straddle and breakevens need a current price and are not shown." />
                   </p>
                 )}
                 {emPct != null ? (
@@ -2445,7 +2446,7 @@ export default function TickerPage() {
                 ) : (
                   <>
                     <p className="text-2xl font-semibold text-muted-foreground">
-                      Implied move unavailable
+                      <Explained text="Implied move unavailable" />
                     </p>
                     {expectedMove.data_quality_note && (
                       <p className="text-sm text-muted-foreground mt-1">
@@ -2481,7 +2482,7 @@ export default function TickerPage() {
                   </p>
                 )}
                 {oneDayHistoryLine(hist) && (
-                  <p className="text-xs text-muted-foreground mt-2">{oneDayHistoryLine(hist)}</p>
+                  <p className="text-xs text-muted-foreground mt-2"><Explained text={oneDayHistoryLine(hist)} /></p>
                 )}
               </div>
             );
@@ -2530,9 +2531,9 @@ export default function TickerPage() {
                   </span>
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {ivVal != null
-                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">(ATM, nearest expiry ≥7d out{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
+                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1"><Explained text="(ATM, nearest expiry \u22657d out" />{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
                       : <span className="text-muted-foreground" title={ivUnavailableReason(shown, realizedVol, rvStatus)}>
-                          IV unavailable<span className="block text-xs font-sans font-normal">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
+                          <Explained text="IV unavailable" /><span className="block text-xs font-sans font-normal">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
                   </span>
                 </div>
@@ -2545,7 +2546,7 @@ export default function TickerPage() {
                     {rvVal != null
                       ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback{realizedVol?.as_of ? `, as of ${realizedVol.as_of.slice(0, 10)}` : ""})</span></>
                       : <span className="text-muted-foreground" title={rvUnavailableReason(shown, realizedVol, rvStatus)}>
-                          RV unavailable<span className="block text-xs font-sans font-normal">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
+                          <Explained text="RV unavailable" /><span className="block text-xs font-sans font-normal">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
                   </span>
                 </div>
@@ -2607,7 +2608,7 @@ export default function TickerPage() {
                 </div>
                 {dataError && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                    RV excluded for this ticker: a move of more than 50% in one day with no volume spike and no recorded split or dividend, so the price history is not trusted.
+                    <Explained text="RV excluded for this ticker: a move of more than 50% in one day with no volume spike and no recorded split or dividend, so the price history is not trusted." />
                   </p>
                 )}
               </div>

@@ -181,6 +181,15 @@ async def health_check():
             except Exception:
                 result["status"] = "degraded"
 
+            try:                              # the AI API: the nightly key check and the latest billing or auth failure (services/ai_health)
+                from app.services import ai_health
+                result["ai_api"] = redact_deep(ai_health.health_summary(await get_value(session, ai_health.FAILURES_KEY),
+                                                                       await get_value(session, ai_health.CHECK_KEY)))
+                if result["ai_api"]["billing_or_auth_failure_recent"] or (result["ai_api"]["key_check"] or {}).get("ok") is False:
+                    result["status"] = "degraded"
+            except Exception:
+                result["status"] = "degraded"
+
             try:
                 from app.services.cadence import cadence
                 result["cadence"] = cadence()

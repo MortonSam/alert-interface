@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { MoveComparisonLine } from "@/components/MoveComparisonLine";
 import { datasetAgeLine, fmtQuoteDateTime, freshnessLine, quoteAsOf } from "@/lib/freshness";
@@ -297,7 +298,7 @@ export default function DiscoverPage() {
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="Suggestion score" />
             <h2 className="font-display text-xl font-bold text-foreground">Worth a look</h2>
-            <p className="text-sm text-muted-foreground mt-1 mb-6">Ranked by a simple score: earnings soon, a recent reaction, realized volatility. Not Ivy&apos;s rule; her picks are on the ledger.</p>
+            <p className="text-sm text-muted-foreground mt-1 mb-6"><Explained text="Ranked by a simple score: earnings soon, a recent reaction, realized volatility. Not Ivy's rule; her picks are on the ledger." /></p>
 
             {suggestions && suggestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">

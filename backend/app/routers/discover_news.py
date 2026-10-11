@@ -68,6 +68,7 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
     import json as _json
     from app.config import settings
     from app.services import news as N
+    from app.services.news_links import publisher
     from app.services.system_metadata_service import get_value
     if not (settings.discover_news_enabled or admin):
         return NewsSectionsResponse(visible=False, reason="off")
@@ -93,7 +94,7 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
     return NewsSectionsResponse(
         visible=True, quotes_as_of=max((q["quote_time"] for q in session), default=None),
         up=up_items, down=down_items,
-        stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r.get("link") or r["url"], source=r["source"],
+        stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r.get("link") or r["url"], source=publisher(r.get("link"), r["source"]),
                                published_at=r["published_at"], ivy=lines.get(r["symbol"])) for r in ranked],
     )
 
@@ -137,10 +138,12 @@ async def build_sections(db, now: datetime, extra: dict | None = None):
     if extra is not None:
         extra.update(window=window, since=since, names=names)
 
+    from app.services.news_links import publisher
+
     def mover(q: dict) -> MoverItem:
         h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed)
         return MoverItem(symbol=q["symbol"], name=q["name"], price=q["price"], change_pct=q["change_pct"], quote_time=q["quote_time"],
-                         headline=NewsHeadline(headline=h["headline"], url=h.get("link") or h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
+                         headline=NewsHeadline(headline=h["headline"], url=h.get("link") or h["url"], source=publisher(h.get("link"), h["source"]), published_at=h["published_at"]) if h else None)
 
     up_items, down_items = [mover(q) for q in up], [mover(q) for q in down]
     ranked = N.in_the_news(stories, change, names=names, last_reports=last_reports, since=since, moves=moves, suppressed=suppressed,
@@ -154,6 +157,7 @@ async def ivy_lines(db, extra: dict, rows: list[tuple[str, str | None, float | N
     the stories she would read now (by their fingerprint), when it passed and still fits the printed change. A stock with no
     such sentence (not written yet, or it failed the check twice) gets none, and its row shows the headline display."""
     from app.services import ivy_moves as M
+    from app.services.news_links import publisher
     out: dict[str, IvyLine] = {}
     want: dict[str, tuple[str, str | None, float | None, list]] = {}
     for sym, name, move in rows:
@@ -178,7 +182,7 @@ async def ivy_lines(db, extra: dict, rows: list[tuple[str, str | None, float | N
         i = M.lead_index(sources, move, r.symbol, name)
         lead = sources[i] if i is not None else None
         out[r.symbol] = IvyLine(sentence=r.sentence if r.result == "passed" else M.NO_NEWS, result=r.result, written_at=r.written_at,
-                                lead=NewsHeadline(headline=lead["headline"], url=lead["link"], source=lead.get("source"),
+                                lead=NewsHeadline(headline=lead["headline"], url=lead["link"], source=publisher(lead["link"], lead.get("source")),
                                                   published_at=lead["published_at"]) if lead else None,
                                 more=max(0, len(sources) - 1))
     return out

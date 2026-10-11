@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { datasetAgeLine, optionsDataPhrase } from "@/lib/freshness";
 import { evidenceSummary, ledgerHeadline, ledgerLinkLabel, limitLines, refusalTile, ruleTiles, whoSheIsLine, type RuleTile } from "@/lib/ivyRule";
 import { IVY_BACKTEST_ENCODING, backtestScale, ivyBacktestLegend } from "@/lib/encodings/ivyBacktest";
@@ -39,7 +40,7 @@ function fmtRvDate(iso: string): string {
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between border-b border-border/60 py-2.5">
-      <span className="font-mono text-xs uppercase text-muted-foreground">{label}</span>
+      <span className="font-mono text-xs uppercase text-muted-foreground"><Explained text={label} /></span>
       <span className="font-mono text-lg text-foreground">{value}</span>
     </div>
   );
@@ -89,7 +90,7 @@ function Tile({ tile, refusal = false }: { tile: RuleTile; refusal?: boolean }) 
     <div className={`h-full rounded-lg p-4 sm:p-5 ${refusal ? "border border-primary/60 bg-primary/[0.06]" : "border border-border bg-card/40"}`}>
       <p className="font-display text-3xl sm:text-4xl font-bold leading-none tracking-tight text-foreground tabular-nums">{tile.figure}</p>
       <p className="text-xs text-muted-foreground mt-1.5">{tile.unit}</p>
-      <p className="text-sm text-foreground/85 leading-snug mt-4">{tile.caption}</p>
+      <p className="text-sm text-foreground/85 leading-snug mt-4"><Explained text={tile.caption} /></p>
     </div>
   );
 }
@@ -201,11 +202,10 @@ export default function MeetIvyPage() {
             <span>The analyst inside Alert Interface</span>
           </h2>
           <p className="text-lg text-foreground/80 leading-relaxed mt-4 max-w-prose">
-            {ivy ? whoSheIsLine(ivy.rule) : "She reads the tape overnight and makes a call only when her one setup appears."}
+            <Explained text={ivy ? whoSheIsLine(ivy.rule) : "She reads the tape overnight and makes a call only when her one setup appears."} />
           </p>
           <p className="text-base text-muted-foreground leading-relaxed mt-3 max-w-prose">
-            She reads each company&apos;s earnings history and {optionsDataPhrase(health?.options_data_date, health?.cadence)},
-            applies one rule the backtest supports, and refuses when the options are too expensive for the edge.
+            She reads each company&apos;s earnings history and {optionsDataPhrase(health?.options_data_date, health?.cadence)}<Explained text=", applies one rule the backtest supports, and refuses when the options are too expensive for the edge." />
           </p>
           {activity?.run_date && (
             <Link href="/ivy/desk" className="inline-block text-sm text-muted-foreground hover:text-foreground transition-colors mt-4">
@@ -243,7 +243,7 @@ export default function MeetIvyPage() {
                 <p className="text-xs text-muted-foreground mt-2 max-w-[16ch]">for all earnings reports in those years</p>
               </div>
             </div>
-            <p className="text-sm text-foreground/80 leading-relaxed mt-6 max-w-prose">{evidence.honest}</p>
+            <p className="text-sm text-foreground/80 leading-relaxed mt-6 max-w-prose"><Explained text={evidence.honest} /></p>
           </div>
           <div className="mt-8 lg:mt-1">
             <p className="text-sm text-muted-foreground mb-4">Higher five days later, by year</p>
@@ -260,7 +260,7 @@ export default function MeetIvyPage() {
             {limitLines(ivy.rule).map((line) => (
               <li key={line} className="flex gap-3 border-b border-border/60 py-3 text-sm text-foreground/85 leading-snug">
                 <span aria-hidden="true" className="mt-[0.45em] h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                <span>{line}</span>
+                <span><Explained text={line} /></span>
               </li>
             ))}
           </ul>

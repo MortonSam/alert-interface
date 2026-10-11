@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -447,7 +448,7 @@ export default function ThesisDetailPage() {
             <p className="text-sm text-muted-foreground mb-2">
               {priceStateLine(strategyData?.quote_state, strategyData?.quote_reason)}
               {priceAsOfPhrase(strategyData?.price_as_of) && ` (${priceAsOfPhrase(strategyData?.price_as_of)})`}
-              {" "}The current-price mark, implied range and P&amp;L marks are not shown.
+              {" "}<Explained text="The current-price mark, implied range and P&L marks are not shown." />
             </p>
           )}
           <PayoffSimulator

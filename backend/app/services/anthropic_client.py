@@ -35,13 +35,22 @@ class AnthropicClient:
     def __init__(self) -> None:
         self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
+    async def _create(self, method: str, **kwargs):
+        """Every call: a failure is recorded with its feature (services/ai_health) before it propagates to the caller."""
+        try:
+            return await self._client.messages.create(**kwargs)
+        except Exception as exc:
+            from app.services.ai_health import record_failure
+            await record_failure(method, exc)
+            raise
+
     async def generate_research_note(self, prompt: str) -> dict:
         """Generate a research note (structured JSON output).
 
         Returns:
             {"content": str, "model_used": str, "input_tokens": int, "output_tokens": int}
         """
-        msg = await self._client.messages.create(
+        msg = await self._create("generate_research_note", 
             model=GENERATION_MODEL,
             max_tokens=2500,
             messages=[{"role": "user", "content": prompt}],
@@ -59,7 +68,7 @@ class AnthropicClient:
         Uses Sonnet; max_tokens is tight because the output is prose-only,
         60–100 words. All numbers are injected by the caller — the model only narrates.
         """
-        msg = await self._client.messages.create(
+        msg = await self._create("generate_options_read", 
             model=GENERATION_MODEL,
             max_tokens=350,
             messages=[{"role": "user", "content": prompt}],
@@ -77,7 +86,7 @@ class AnthropicClient:
         Uses Sonnet; tight max_tokens for short prose output.
         All numbers are injected by the caller — the model only narrates.
         """
-        msg = await self._client.messages.create(
+        msg = await self._create("generate_explain", 
             model=GENERATION_MODEL,
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
@@ -99,7 +108,7 @@ class AnthropicClient:
         thinking budget.  The helper _extract_text skips any thinking blocks in
         the response, and _scrub_em_dashes enforces house style.
         """
-        msg = await self._client.messages.create(
+        msg = await self._create("generate_thesis_draft", 
             model=DRAFT_MODEL,
             max_tokens=16_000,
             messages=[{"role": "user", "content": prompt}],
@@ -118,7 +127,7 @@ class AnthropicClient:
         thinking budget.  _extract_text skips thinking blocks; _scrub_em_dashes
         enforces house style.
         """
-        msg = await self._client.messages.create(
+        msg = await self._create("generate_thesis_draft_alternative", 
             model=DRAFT_MODEL,
             max_tokens=16_000,
             messages=[{"role": "user", "content": prompt}],
@@ -133,7 +142,7 @@ class AnthropicClient:
     async def read_release_eps(self, prompt: str) -> dict:
         """The second reader of an earnings release (services/release_reader): Sonnet returns JSON with the quarter's GAAP diluted
         EPS and the verbatim quote it came from; the caller verifies the quote and stores only on agreement with the pattern parser."""
-        msg = await self._client.messages.create(
+        msg = await self._create("read_release_eps", 
             model=GENERATION_MODEL,
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
@@ -148,7 +157,7 @@ class AnthropicClient:
     async def generate_answer(self, prompt: str, max_tokens: int = 400) -> dict:
         """Ask Ivy (services/ask_ivy): a short answer written from a fact pack. Sonnet; the caller forbids any typed number
         and inserts every value itself, so the output is prose with placeholders only."""
-        msg = await self._client.messages.create(
+        msg = await self._create("generate_answer", 
             model=GENERATION_MODEL,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
@@ -166,7 +175,7 @@ class AnthropicClient:
         Returns:
             {"content": str, "model_used": str, "input_tokens": int, "output_tokens": int}
         """
-        msg = await self._client.messages.create(
+        msg = await self._create("verify_research_note", 
             model=VERIFICATION_MODEL,
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],

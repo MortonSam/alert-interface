@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import EncodingLegend from "@/components/EncodingLegend";
 import { payoffChartLegend, payoffMark } from "@/lib/encodings/payoffChart";
 import { useEffect, useMemo, useState } from "react";
@@ -205,14 +206,14 @@ export default function PayoffSimulator({
         <span className="bg-cool/10 text-cool border border-cool/40 text-xs font-medium px-2 py-0.5 rounded-full">
           SIMULATED
         </span>
-        <span className="text-xs text-muted-foreground">Black-Scholes projection</span>
+        <span className="text-xs text-muted-foreground"><Explained text="Black-Scholes projection" /></span>
       </div>
       {pricing && <p className="text-xs text-muted-foreground">{symbol} {pricing}</p>}
 
       {/* IV disclosure — always show what IV the simulation holds constant */}
       {ivLabel && !sdFailed && !usingIVFallback && (
         <p className="text-xs text-muted-foreground">
-          Simulated at IV {ivLabel}, held constant
+          <Explained text="Simulated at IV " />{ivLabel}, held constant
           {ivContext?.expiration ? `, from the ${ivContext.expiration} expiration` : ""}
           {ivContext?.chainDate ? ` · options data as of ${ivContext.chainDate}` : ""}
         </p>
@@ -224,7 +225,7 @@ export default function PayoffSimulator({
               ? "Could not load current IV for this strike. Simulation uses a 30% default and may be inaccurate."
               : "IV for one or more strikes not found. Simulation uses a 30% default and may be inaccurate."}
           </strong>{" "}
-          Real IV may differ significantly (e.g. high-vol names can be 50-80%).
+          <Explained text="Real IV may differ significantly (e.g. high-vol names can be 50-80%)." />
         </Callout>
       )}
 
@@ -409,7 +410,7 @@ export default function PayoffSimulator({
           </div>
           <div className="flex flex-col items-center gap-0.5">
             <div className="w-px h-2 bg-border rounded-full" />
-            <span>Expiry {expiryLabel}</span>
+            <span><Explained text="Expiry " />{expiryLabel}</span>
           </div>
         </div>
       </div>
@@ -417,15 +418,13 @@ export default function PayoffSimulator({
       {/* IV-crush caveat */}
       {showDisclaimer && (
         <Callout severity="info" compact>
-          This curve holds today&apos;s implied volatility constant.
-          In practice, IV typically collapses after an earnings release. Option values at
-          or around earnings will likely be lower than shown.
+          <Explained text="This curve holds today's implied volatility constant. In practice, IV typically collapses after an earnings release. Option values at or around earnings will likely be lower than shown." />
         </Callout>
       )}
 
       {/* Footnote — keeps the "not a forecast" label visible at all times */}
       <p className="text-[10px] text-muted-foreground">
-        Simulated values use Black-Scholes with IV held constant. Not a forecast.
+        <Explained text="Simulated values use Black-Scholes with IV held constant. Not a forecast." />
       </p>
     </div>
   );

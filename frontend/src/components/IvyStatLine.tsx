@@ -1,4 +1,5 @@
 "use client";
+import Explained from "@/components/Explained";
 
 import { useEffect, useState } from "react";
 import { api, type AlertPickLedgerItem } from "@/lib/api";
@@ -31,5 +32,5 @@ export function IvyStatLine({ className = "" }: { className?: string }) {
   }, []);
 
   if (!line) return null;
-  return <p className={className}>{line}</p>;
+  return <p className={className}><Explained text={line} /></p>;
 }

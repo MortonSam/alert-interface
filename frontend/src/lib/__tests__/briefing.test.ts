@@ -40,7 +40,7 @@ describe("the briefing renders the API's sentences and receipts, nothing typed",
     expect(parts.map((p) => p.text).join("")).toBe("EPS $2.03 against a $1.91 estimate, a beat. The sector is Finance; a sector peer reports Oct 6 (estimated). EPS again.");
     expect(splitTerms("Nothing to link.")).toEqual([{ text: "Nothing to link." }]);
     expect(splitTerms("")).toEqual([]);
-    for (const [, term] of GLOSSARY_LINKS) expect(GLOSSARY[term], term).toMatch(/\. .+\.$/);      // an entry exists and has two sentences
+    for (const [, term] of GLOSSARY_LINKS) expect(GLOSSARY[term], term).toMatch(/^[A-Z].+\.$/);   // an entry exists (one or two plain sentences: lib/__tests__/glossary.test.ts)
     expect(BLOCK_LABELS).toEqual({ profile: "What it is", happening: "What's been happening" });
   });
 

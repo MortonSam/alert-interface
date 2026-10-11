@@ -1,4 +1,5 @@
 "use client";
+import Explained from "@/components/Explained";
 
 import { IvyMark } from "@/components/IvyMark";
 import { useState } from "react";
@@ -61,7 +62,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
               ) : part.term ? (
                 <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
               ) : (
-                <span key={j}>{part.text}</span>
+                <span key={j}><Explained text={part.text} /></span>
               ),
             )}
           </p>

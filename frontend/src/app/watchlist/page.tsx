@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import SignedOutNotice from "@/components/SignedOutNotice";
 import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
 
@@ -116,7 +117,7 @@ function RVRankCell({ data, status }: { data: BatchEnrichItem | null; status: st
         <span className="tabular-nums">{rank.toFixed(0)} · <span className={colorClass}>{tag}</span></span>
         {data.current_rv != null && (
           <span className="font-mono text-[10px] text-muted-foreground/60">
-            RV {(data.current_rv * 100).toFixed(0)}% ann.
+            <Explained text="RV " />{(data.current_rv * 100).toFixed(0)}<Explained text="% ann." />
           </span>
         )}
       </span>
@@ -181,7 +182,7 @@ function WatchlistRow({
             return (
               <span className="inline-flex items-center gap-1.5" title={`${prox.full} · reports ${scale.label}`}>
                 <span className={`text-[10px] font-semibold uppercase tracking-wider px-1 py-0.5 rounded ${scale.className}`}>
-                  EPS
+                  <Explained text="EPS" />
                 </span>
                 <span className="text-muted-foreground font-medium">{prox.label}</span>
               </span>
@@ -655,14 +656,14 @@ export default function WatchlistPage() {
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         <Tip text={IMPLIED_MOVE_TIP}>
                           <span className="border-b border-dotted border-muted-foreground/40 cursor-help">
-                            Implied Move
+                            <Explained text="Implied Move" />
                           </span>
                         </Tip>
                       </th>
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         <Tip text={RV_RANK_TIP}>
                           <span className="border-b border-dotted border-muted-foreground/40 cursor-help">
-                            Realized-vol rank
+                            <Explained text="Realized-vol rank" />
                           </span>
                         </Tip>
                       </th>
@@ -685,8 +686,7 @@ export default function WatchlistPage() {
 
                 <div className="px-4 py-3 bg-muted/20 border-t border-border">
                   <p className="text-[11px] text-muted-foreground/60">
-                    {priceSourceLine(health?.cadence)}. Implied move derived from near-term options straddle.
-                    RV rank: where this stock&apos;s current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute).
+                    {priceSourceLine(health?.cadence)}<Explained text=". Implied move derived from near-term options straddle. RV rank: where this stock's current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute)." />
                   </p>
                 </div>
               </div>

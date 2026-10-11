@@ -53,6 +53,8 @@ def _db_get(key: str) -> str | None:
 # ── Steps ─────────────────────────────────────────────────────────────────────
 
 STEPS: list[tuple[str, list[str]]] = [
+    # first: one tiny API call, so a dead Anthropic key or an empty credit balance shows tonight, not when a visitor asks
+    ("AI key check",                     ["python", "-m", "app.scripts.ai_key_check"]),
     ("Ticker data (seed_sp500)",              ["python", "-m", "app.scripts.seed_sp500"]),
     ("Refresh profiles (Finnhub)",            ["python", "-m", "app.scripts.refresh_profiles"]),
     ("Security records (Intrinio)",           ["python", "-m", "app.scripts.build_security_records", "--write"]),

@@ -176,10 +176,10 @@ COIN_STORIES = [st("1", "Circle Internet Spikes 7% After Backing OKX at $25B Val
 def test_an_event_that_merely_happened_the_same_day_is_not_a_cause():                       # COIN, Oct 9
     s = "Coinbase rallied after Circle Internet backed OKX, and President Trump disclosed purchasing Coinbase shares in new ethics filings."
     p = M.cause_problems(s, COIN_STORIES, "COIN", "Coinbase Global, Inc.")
-    assert "President appears in no source that says it moved Coinbase Global" in p and "Trump appears in no source that says it moved Coinbase Global" in p
+    assert "President appears in no source that says it moved Coinbase" in p and "Trump appears in no source that says it moved Coinbase" in p
     assert M.cause_problems("Coinbase rallied after Circle Internet backed OKX.", COIN_STORIES, "COIN", "Coinbase Global, Inc.") == []
     assert M.cause_problems("Coinbase rose as President Trump disclosed trades.", COIN_STORIES[1:], "COIN", "Coinbase Global, Inc.") == \
-        ["none of her sources says an event moved Coinbase Global"]
+        ["none of her sources says an event moved Coinbase"]
     assert "an event that merely happened the same day" in M.build_verification_prompt("COIN", "Coinbase Global, Inc.", s, COIN_STORIES)
 
 
@@ -235,4 +235,20 @@ def test_her_linked_source_is_never_a_roundup_and_suffixes_are_not_names():
             {"headline": "Crown Castle Rises After SpaceX Spectrum Deal", "url": "b"}]
     assert M.lead_index(srcs, 15.6, "CCI", "Crown Castle Inc.") == 1
     inputs = [st("1", "Verizon falls after SpaceX buys 800 MHz spectrum")]
-    assert M.check_sentence("Verizon Communications Inc. fell after SpaceX bought 800 MHz spectrum.", inputs, "VZ", "Verizon Communications Inc.", -10.14) == []
+    assert M.check_sentence("Verizon fell after SpaceX bought 800 MHz spectrum.", inputs, "VZ", "Verizon Communications Inc.", -10.14) == []
+    assert "it uses the legal name; call it Verizon" in M.check_sentence(
+        "Verizon Communications Inc. fell after SpaceX bought 800 MHz spectrum.", inputs, "VZ", "Verizon Communications Inc.", -10.14)
+    assert M.display_label("VZ", "Verizon Communications Inc.") == "Verizon" and M.display_label("AMT", "American Tower Corporation") == "American Tower"
+
+
+def test_the_byline_names_the_publisher_the_link_lands_on():
+    from app.services.news_links import PUBLISHERS, publisher
+    assert publisher("https://www.fool.com/investing/2026/10/09/why-t-mobile-stock-just-crashed/", "Yahoo") == "Motley Fool"
+    assert publisher("https://finance.yahoo.com/markets/stocks/articles/x.html", "Yahoo") == "Yahoo Finance"
+    assert publisher("https://www.benzinga.com/x", "Benzinga") == "Benzinga" and publisher("https://247wallst.com/x", "Yahoo") == "24/7 Wall St."
+    assert publisher("https://unknown-news.example/x", "Yahoo") == "Yahoo"          # an unlisted host keeps the vendor's label
+    assert publisher(None, "Yahoo") == "Yahoo"
+    assert len(set(PUBLISHERS.values())) == len(PUBLISHERS)                          # one name per host, no duplicates
+    from pathlib import Path
+    src = (Path(__file__).parents[1] / "app" / "routers" / "discover_news.py").read_text()
+    assert src.count("source=publisher(") == 3                                       # mover headline, In the news, Ivy's source line

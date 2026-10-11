@@ -1,4 +1,5 @@
 "use client";
+import Explained from "@/components/Explained";
 
 import { chainFreshnessSentence } from "@/lib/ivyRule";
 import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, impliedMoveAbsentLabel, ivyOutcomeLabel, nightSummary, privateLedgerBody, runFailureLine } from "@/lib/ivyOutcomes";
@@ -62,7 +63,7 @@ function ImpliedCell({ row }: { row: IvyWorksheetRow }) {
 function V2Verdict({ row }: { row: IvyWorksheetRow }) {
   if (!row.verdict) {
     const label = ivyOutcomeLabel(row.outcome);
-    return <td className="px-3 py-2.5 text-muted-foreground">{label}</td>;
+    return <td className="px-3 py-2.5 text-muted-foreground"><Explained text={label} /></td>;
   }
   const isPicked = row.outcome === "picked";
   return (
@@ -165,7 +166,7 @@ export default function IvyDeskPage() {
                   key={col}
                   className="px-3 py-2 text-left font-mono text-xs uppercase tracking-wider text-muted-foreground font-normal"
                 >
-                  {col}
+                  <Explained text={col} />
                 </th>
               ))}
             </tr>

@@ -54,7 +54,7 @@ describe("Discover names what it is (audit item 12)", () => {
     const page = read("app/discover/page.tsx");
     expect(page).not.toMatch(/Ivy&apos;s Picks|From Ivy|Stocks Ivy thinks/);
     expect(page).toContain('label="Suggestion score"');
-    expect(page).toContain("Not Ivy&apos;s rule; her picks are on the ledger.");
+    expect(page).toContain("Not Ivy's rule; her picks are on the ledger.");
     expect(page).not.toMatch(/index="0\d"/);
     expect(page.match(/index=\{nextIndex\(\)\}/g)?.length).toBe(5);
     expect(page).toContain('const nextIndex = () => String(++sectionN).padStart(2, "0");');

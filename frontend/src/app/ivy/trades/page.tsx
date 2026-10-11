@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { quoteAsOf } from "@/lib/freshness";
 import { NIGHT_SUMMARY_KEY, PRIVATE_LEDGER_BODY, PRIVATE_LEDGER_TITLE, nightSummary, privateLedgerBody } from "@/lib/ivyOutcomes";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -106,7 +107,7 @@ function PickCard({
       )}
       {pick.exit_date && isClosed && (
         <p className="text-xs text-muted-foreground">
-          Closed {new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} at planned exit
+          Closed {new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}<Explained text=" at planned exit" />
         </p>
       )}
 
@@ -251,7 +252,7 @@ function PickCard({
               <span>{((pick.receipt.base_rate_up_5d as number) * 100).toFixed(0)}% up at 5d (n={pick.receipt.base_rate_n as number})</span>
             )}
             {pick.receipt.momentum_20d != null && (
-              <span>momentum {(pick.receipt.momentum_20d as number) >= 0 ? "+" : ""}{(pick.receipt.momentum_20d as number).toFixed(1)}%</span>
+              <span><Explained text="momentum " />{(pick.receipt.momentum_20d as number) >= 0 ? "+" : ""}{(pick.receipt.momentum_20d as number).toFixed(1)}%</span>
             )}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
@@ -388,7 +389,7 @@ export default function IvyTradesPage() {
               </div>
               {totalOptionPnl !== null && (
                 <div>
-                  <span className="text-muted-foreground">Option P&L</span>{" "}
+                  <span className="text-muted-foreground"><Explained text="Option P&L" /></span>{" "}
                   <span
                     className={cn(
                       "font-semibold font-mono",
@@ -402,7 +403,7 @@ export default function IvyTradesPage() {
               )}
               {avgOptionPnlPct !== null && (
                 <div>
-                  <span className="text-muted-foreground">Avg P&L %</span>{" "}
+                  <span className="text-muted-foreground"><Explained text="Avg P&L %" /></span>{" "}
                   <span
                     className={cn(
                       "font-semibold font-mono",
@@ -418,7 +419,7 @@ export default function IvyTradesPage() {
           )}
           {openOptionPnl !== null && (
             <div>
-              <span className="text-muted-foreground">Open option P&L</span>{" "}
+              <span className="text-muted-foreground"><Explained text="Open option P&L" /></span>{" "}
               <span
                 className={cn(
                   "font-semibold font-mono",
@@ -435,7 +436,7 @@ export default function IvyTradesPage() {
           )}
         </div>
         <p className="text-[11px] text-muted-foreground/60 -mt-4">
-          Hypothetical, unexecuted picks. No commissions, fees, or slippage.{" "}
+          <Explained text="Hypothetical, unexecuted picks. No commissions, fees, or slippage." />{" "}
           <a href="/disclosures" className="underline">See Disclosures</a>.
         </p>
       </>)}

@@ -43,6 +43,33 @@ def visible_text(html: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", t))
 
 
+# the publisher shown in a byline: the site the link lands on (its resolved article URL), by host, here and nowhere else; the
+# vendor's label (Finnhub calls most stories "Yahoo") is used only for a host not listed
+PUBLISHERS = {
+    "finance.yahoo.com": "Yahoo Finance", "fool.com": "Motley Fool", "benzinga.com": "Benzinga", "cnbc.com": "CNBC",
+    "reuters.com": "Reuters", "bloomberg.com": "Bloomberg", "wsj.com": "The Wall Street Journal", "barrons.com": "Barron's",
+    "marketwatch.com": "MarketWatch", "ft.com": "Financial Times", "nytimes.com": "The New York Times", "apnews.com": "AP",
+    "247wallst.com": "24/7 Wall St.", "stocktwits.com": "Stocktwits", "tikr.com": "TIKR", "proactiveinvestors.com": "Proactive Investors",
+    "barchart.com": "Barchart", "marketbeat.com": "MarketBeat", "investorshub.advfn.com": "InvestorsHub", "qz.com": "Quartz",
+    "trefis.com": "Trefis", "chartmill.com": "ChartMill", "seekingalpha.com": "Seeking Alpha", "thestreet.com": "TheStreet",
+    "investopedia.com": "Investopedia", "zacks.com": "Zacks", "nasdaq.com": "Nasdaq", "businesswire.com": "Business Wire",
+    "prnewswire.com": "PR Newswire", "globenewswire.com": "GlobeNewswire", "investing.com": "Investing.com", "fortune.com": "Fortune",
+    "forbes.com": "Forbes", "cnn.com": "CNN", "foxbusiness.com": "Fox Business", "axios.com": "Axios", "theverge.com": "The Verge",
+    "techcrunch.com": "TechCrunch", "fintel.io": "Fintel", "blockspace.media": "Blockspace", "kiplinger.com": "Kiplinger",
+    "insidermonkey.com": "Insider Monkey", "simplywall.st": "Simply Wall St", "gurufocus.com": "GuruFocus", "tipranks.com": "TipRanks",
+}
+
+
+def publisher(article_url: str | None, vendor_label: str | None) -> str | None:
+    """Pure: the publisher of the page a link lands on, from its resolved article URL; the vendor's label for an unlisted host."""
+    host = urlparse(article_url or "").netloc.lower().removeprefix("www.")
+    if host:
+        for h, name in PUBLISHERS.items():
+            if host == h or host.endswith("." + h):
+                return name
+    return vendor_label
+
+
 def is_vendor_redirect(url: str) -> bool:
     return urlparse(url).netloc.lower().endswith("finnhub.io")
 

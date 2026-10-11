@@ -1,4 +1,5 @@
 "use client";
+import Explained from "@/components/Explained";
 
 import { useEffect, useState } from "react";
 import posthog from "posthog-js";
@@ -52,7 +53,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
                       ) : part.term ? (
                         <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
                       ) : (
-                        <span key={j}>{part.text}</span>
+                        <span key={j}><Explained text={part.text} /></span>
                       ),
                     )}
                   </p>
@@ -61,7 +62,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
                       part.term ? (
                         <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
                       ) : (
-                        <span key={j}>{part.text}</span>
+                        <span key={j}><Explained text={part.text} /></span>
                       ),
                     )}
                   </p>

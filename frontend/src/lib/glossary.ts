@@ -4,8 +4,9 @@
  */
 
 import { PC_CALL_HEAVY, PC_PUT_HEAVY } from "@/lib/thresholds";
+import { TERMS } from "@/lib/glossaryTerms";
 
-const GLOSSARY: Record<string, string> = {
+const LEGACY: Record<string, string> = {
   straddle:
     "Buying both a call and put at the same strike. The total cost reflects the market's expected move.",
   "atm strike":
@@ -101,5 +102,12 @@ const GLOSSARY: Record<string, string> = {
   "1-day move":
     "The stock's percentage change over the one session that first trades on the report, close to close. For an after-close report that is the next session; for a before-open report it is the report day itself.",
 };
+
+// One map for ExplainTip: every term by its key, its name and each of its visible strings (lowercase), from TERMS; the older
+// entries above stay only for keys TERMS does not cover.
+const GLOSSARY: Record<string, string> = { ...LEGACY, ...Object.fromEntries(Object.entries(LEGACY).map(([k, v]) => [k.toLowerCase(), v])) };
+for (const t of TERMS) {
+  for (const alias of [t.key, t.term, ...t.match]) { GLOSSARY[alias.toLowerCase()] = t.explanation; GLOSSARY[alias] = t.explanation; }
+}
 
 export default GLOSSARY;

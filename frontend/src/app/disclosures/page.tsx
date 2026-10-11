@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Explained from "@/components/Explained";
 import DisclosuresTracker from "./tracker";
 import { LedgerVisibilityClause } from "@/components/IvyCopy";
 import { fmtLongDate } from "@/lib/ivyRule";
@@ -57,13 +58,7 @@ export default async function DisclosuresPage() {
       <section className="mt-8">
         <p className="text-sm leading-normal text-muted-foreground">
           <span className="font-bold text-foreground">2. Hypothetical performance.</span>{" "}
-          Ivy's ledger tracks picks that were generated and recorded but never
-          executed. Settled and open P&L are computed from published option
-          prices at entry and at settlement or the latest mark. They do not
-          include commissions, fees, slippage, bid-ask spread costs, assignment,
-          or early exercise, and a real trade would not have filled at these
-          prices. Hypothetical results have inherent limitations and past
-          results do not indicate future results.{" "}
+          <Explained text="Ivy's ledger tracks picks that were generated and recorded but never executed. Settled and open P&L are computed from published option prices at entry and at settlement or the latest mark. They do not include commissions, fees, slippage, bid-ask spread costs, assignment, or early exercise, and a real trade would not have filled at these prices. Hypothetical results have inherent limitations and past results do not indicate future results." />{" "}
           {start ? <>The ledger began {fmtLongDate(start)}.</> : <>The ledger&apos;s start date is shown on Ivy&apos;s page.</>}{" "}
           Picks generated before that date, during
           development, are not published.

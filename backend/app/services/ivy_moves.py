@@ -84,7 +84,7 @@ STORIES (your only source; use no outside knowledge):
 {stories}
 
 RULES
-- Name the company as {(display_forms(symbol, name) or [symbol])[0]}, never only by its ticker or as "the stock".
+- Name the company as {display_label(symbol, name)}, never by its legal name, only by its ticker or as "the stock".
 - Name a cause only when a story says that event moved {name or symbol}'s stock (after, on, as, following, sent shares); an event
   that merely happened the same day is not a cause. Cite only the stories that say so.
 - Use only facts from the stories. Every company, person, dollar figure, percent and event you mention must appear in a story.
@@ -162,8 +162,11 @@ def check_sentence(sentence: str, inputs: list[dict], symbol: str, name: str | N
     if pct:
         problems.append(pct)
     shown = display_forms(symbol, name)
-    if shown and not any(re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}(?:'s|’s)?(?![A-Za-z0-9])", s, re.I) for f in shown):
-        problems.append(f"it does not name {shown[0]} by its name")
+    label = display_label(symbol, name)
+    if shown and not any(re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}(?:'s|’s)?(?![A-Za-z0-9])", s, re.I) for f in shown + [label]):
+        problems.append(f"it does not name {label} by its name")
+    if any(re.search(rf"(?<![A-Za-z0-9]){re.escape(f)}{LEGAL_SUFFIX}", s) for f in set(shown + [label])):
+        problems.append(f"it uses the legal name; call it {label}")
     return problems
 
 
@@ -178,6 +181,15 @@ FILLER = {"the", "a", "an", "and", "as", "on", "in", "of", "its", "it", "with", 
 # a source says an event moved the stock when it names the company, a move (a move word, or shares/stock) and a causal link
 CAUSAL = re.compile(r"\b(?:after|on|as|following|amid|due\s+to|thanks\s+to|sent|sends|send|lifted|lifts|lifting|boosted|boosts|boosting|"
                     r"pushed|pushes|dragged|drags|weighed|weighs|drove|drives|driven|fueled|fuels|sparked|sparks|triggered|hit|hits)\b", re.I)
+
+
+def display_label(symbol: str, name: str | None) -> str:
+    """Pure: the site's display name for the company ("Verizon", "American Tower"), never its legal name or only its ticker."""
+    from app.services.briefing import short_name
+    return short_name(name, symbol) or (display_forms(symbol, name) or [symbol])[0]
+
+
+LEGAL_SUFFIX = r"\s*,?\s*(?:Inc\.?|Incorporated|Corp\.?|Corporation|Company|Co\.|plc|PLC|Ltd\.?|Limited|Holdings|Group)(?![A-Za-z])"
 
 
 def display_forms(symbol: str, name: str | None) -> list[str]:
@@ -197,7 +209,7 @@ def says_it_moved(story: dict, symbol: str, name: str | None) -> bool:
 def cause_problems(sentence: str, cited: list[dict], symbol: str, name: str | None) -> list[str]:
     """Pure: a cause is named only when one of her cited sources says that event moved this stock; every other company, person or
     named thing in the sentence must appear in such a source, so an event that merely happened the same day is not offered as a cause."""
-    label = (display_forms(symbol, name) or [symbol])[0]
+    label = display_label(symbol, name)
     causal = [s for s in cited if says_it_moved(s, symbol, name)]
     if not causal:
         return [f"none of her sources says an event moved {label}"]

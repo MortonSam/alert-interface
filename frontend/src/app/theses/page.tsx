@@ -1,5 +1,6 @@
 "use client";
 
+import Explained from "@/components/Explained";
 import { volRegime } from "@/lib/encodings/volRegime";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -176,7 +177,7 @@ function OptionPnlSection({
       {isLoading ? (
         <div className="h-6 bg-muted rounded w-28 animate-pulse" />
       ) : isError ? (
-        <span className="text-xs text-muted-foreground italic">Mark unavailable</span>
+        <span className="text-xs text-muted-foreground italic"><Explained text="Mark unavailable" /></span>
       ) : (
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className={`text-xl font-bold font-mono tabular-nums leading-tight transition-opacity ${pnlColor} ${refreshing ? "opacity-50" : ""}`}>
@@ -362,7 +363,7 @@ function ResolveForm({
         />
       </div>
       {thesis.option_type && (
-        <p className="text-xs text-muted-foreground">Option P&L is computed from the stored options data at resolution, or at intrinsic value once expired.</p>
+        <p className="text-xs text-muted-foreground"><Explained text="Option P&L is computed from the stored options data at resolution, or at intrinsic value once expired." /></p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex gap-2">
@@ -516,7 +517,7 @@ function ThesisCard({
       {thesis.entry_premium && (
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-xs text-muted-foreground">
-            Option entry: <span className="font-mono tabular-nums text-foreground">
+            <Explained text="Option entry:" /> <span className="font-mono tabular-nums text-foreground">
               {thesis.strike2 && thesis.entry_premium2
                 ? `$${Math.abs(parseFloat(thesis.entry_premium) - parseFloat(thesis.entry_premium2)).toFixed(2)} net debit`
                 : `$${parseFloat(thesis.entry_premium).toFixed(2)} mid`}

@@ -1,4 +1,5 @@
 "use client";
+import Explained from "@/components/Explained";
 
 import type { BriefingSentence } from "@/lib/api";
 import ExplainTip from "@/components/ticker/ExplainTip";
@@ -28,7 +29,7 @@ export function Briefing({ sentences }: { sentences: BriefingSentence[] }) {
                     <span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
                   </ExplainTip>
                 ) : (
-                  <span key={j}>{part.text}</span>
+                  <span key={j}><Explained text={part.text} /></span>
                 ),
               )}
             </p>

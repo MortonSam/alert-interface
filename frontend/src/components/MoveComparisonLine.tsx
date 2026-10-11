@@ -1,4 +1,5 @@
 "use client";
+import Explained from "@/components/Explained";
 
 import ExplainTip from "@/components/ticker/ExplainTip";
 import type { ReportingSoonItem } from "@/lib/api";
@@ -17,7 +18,7 @@ export function MoveComparisonLine({ item }: { item: ReportingSoonItem }) {
             <span className="underline decoration-dotted underline-offset-4 cursor-help" onClick={(e) => e.preventDefault()}>{p.text}</span>
           </ExplainTip>
         ) : (
-          <span key={i}>{p.text}</span>
+          <span key={i}><Explained text={p.text} /></span>
         ),
       )}
     </span>
