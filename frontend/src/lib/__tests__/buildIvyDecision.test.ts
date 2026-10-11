@@ -34,7 +34,8 @@ describe("Let Ivy decide without a draft", () => {
     const src = read("app/build/page.tsx");
     expect(src).toContain("ivyDecisionSentence(alertPick.symbol, alertPick.outcome, alertPick.outcome_label)");
     expect(src).toContain('{NO_DRAFT_NOT_CHARGED} Pick a direction manually below.');
-    expect(src).toMatch(/alertPick && !alertPick\.existing_pick && !alertPick\.draft && alertPick\.outcome !== "picked" && \(/);
+    // every outcome without a draft names itself in one sentence, except expensive options, where the customer gets a cheaper draft
+    expect(src).toMatch(/alertPick && !alertPick\.existing_pick && !alertPick\.draft && alertPick\.outcome !== "picked" && alertPick\.outcome !== "vol_gate" && \(/);
     expect(src).toMatch(/const ivyDecided = !!alertPick && !alertPick\.draft && alertPick\.outcome !== "picked";/);
     expect(src).toMatch(/else if \(result\.outcome === "picked" && dir\) \{[\s\S]{0,300}await handleGenerate\(dir\);/);
     expect(src).not.toContain("mixed_evidence");   // no outcome is special-cased by name

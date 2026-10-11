@@ -889,6 +889,8 @@ export interface ThesisDraftRead {
   };
   model_used: string;
   generated_at: string;
+  // set when the options price a bigger move than the stock usually makes: the draft is a cheaper defined-risk spread
+  options_expensive?: { implied_pct: number; usual_pct: number; cap: number; outright_strike: number; outright_mid: number; outright_kind: "call" | "put" } | null;
 }
 
 export interface ThesisDraftAlternativeRequest {

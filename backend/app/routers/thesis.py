@@ -569,8 +569,10 @@ async def _run_draft_generation(
     aggressiveness: str,
     proposed_target: float | None = None,
     extra_prompt_section: str = "",
+    premium: dict | None = None,
 ) -> ThesisDraftRead:
-    """Build prompt from gathered data, call AI, parse, and return ThesisDraftRead."""
+    """Build prompt from gathered data, call AI, parse, and return ThesisDraftRead. When `premium` (ivy_v2.options_premium_check)
+    says the options are expensive, the draft is a cheaper defined-risk spread built from the same checked strikes, no AI call."""
     sym = data["sym"]
     current_price = data["draft_spot"]  # snapshot spot, not live quote
     earnings_str = data["earnings_str"]
@@ -779,6 +781,24 @@ async def _run_draft_generation(
         "secondary_strikes":         secondary_rows,
         "options_as_of":             options_as_of,
     }
+
+    # ── 8b. Expensive options: a cheaper defined-risk spread in the customer's direction, from the same checked strikes ──
+    if premium and premium.get("expensive"):
+        spread = build_defined_risk_spread(direction, primary_rows, current_price, premium["usual_pct"])
+        if spread is not None:
+            kind = "call" if direction == "bullish" else "put"
+            label = "Bull call spread" if direction == "bullish" else "Bear put spread"
+            return ThesisDraftRead(
+                symbol=sym, direction=direction, aggressiveness=aggressiveness,
+                suggested_target=spread["target"], suggested_strike=spread["long_strike"], suggested_spread_strike=spread["short_strike"],
+                strategy=f"{label} ${spread['long_strike']:g}/${spread['short_strike']:g} (${spread['net_debit']:.2f} net debit)",
+                reasoning=defined_risk_reasoning(sym, direction, spread, premium), realism_flag=None, vol_regime=vol_regime,
+                fact_block=fact_block,
+                model_used="deterministic", generated_at=generated_at,
+                options_expensive={**{k: premium[k] for k in ("implied_pct", "usual_pct", "cap")},
+                                   "outright_strike": spread["long_strike"], "outright_mid": spread["outright_mid"], "outright_kind": kind},
+            )
+
 
     # ── 9. Build prompt ───────────────────────────────────────────────────────
     def _n(v, fmt=".2f"): return f"{v:{fmt}}" if v is not None else "(unavailable)"
@@ -1009,6 +1029,48 @@ Return ONLY this JSON object (no other text):
     )
 
 
+# ── Cheaper defined-risk draft (Build a Trade when the options are expensive) ───────
+
+def build_defined_risk_spread(direction: str, primary_rows: list[dict], spot: float, usual_pct: float) -> dict | None:
+    """Pure: a debit spread in the customer's direction from the draft's own priced strikes (calls for bullish, puts for bearish):
+    the long leg at the money (nearest strike at or just below spot for a call, at or just above for a put), the short leg at the
+    nearest strike past the stock's usual move (spot × (1 ± usual_pct/100)), or the farthest priced strike when none is that far.
+    None unless the net debit is positive and below the width. Also returns the outright long option's mid at the same strike, the
+    expensive version of the same bet."""
+    rows = sorted((r for r in primary_rows if r.get("mid") and r["mid"] > 0), key=lambda r: r["strike"])
+    if len(rows) < 2 or spot <= 0 or usual_pct <= 0:
+        return None
+    if direction == "bullish":
+        at_or_below = [r for r in rows if r["strike"] <= spot]
+        long = at_or_below[-1] if at_or_below else rows[0]
+        past = [r for r in rows if r["strike"] > long["strike"] and r["strike"] >= spot * (1 + usual_pct / 100)]
+        beyond = [r for r in rows if r["strike"] > long["strike"]]
+        short = past[0] if past else (beyond[-1] if beyond else None)
+    else:
+        at_or_above = [r for r in rows if r["strike"] >= spot]
+        long = at_or_above[0] if at_or_above else rows[-1]
+        past = [r for r in rows if r["strike"] < long["strike"] and r["strike"] <= spot * (1 - usual_pct / 100)]
+        beyond = [r for r in rows if r["strike"] < long["strike"]]
+        short = past[-1] if past else (beyond[0] if beyond else None)
+    if short is None:
+        return None
+    debit = round(long["mid"] - short["mid"], 2)
+    width = abs(short["strike"] - long["strike"])
+    if debit <= 0 or debit >= width:
+        return None
+    return {"long_strike": long["strike"], "short_strike": short["strike"], "net_debit": debit, "width": width,
+            "outright_mid": long["mid"], "target": round(spot * (1 + usual_pct / 100 if direction == "bullish" else 1 - usual_pct / 100), 2)}
+
+
+def defined_risk_reasoning(sym: str, direction: str, spread: dict, premium: dict) -> str:
+    """Pure: the draft's reasoning in plain words, every figure from the stored chain and Ivy's comparison."""
+    kind = "call" if direction == "bullish" else "put"
+    return (f"Options on {sym} are pricing a {premium['implied_pct']:.1f}% move, while the stock has usually moved "
+            f"{premium['usual_pct']:.1f}% after earnings. Buying the ${spread['long_strike']:g} {kind} and selling the "
+            f"${spread['short_strike']:g} {kind} costs ${spread['net_debit']:.2f} a share instead of ${spread['outright_mid']:.2f} for the "
+            f"{kind} alone, and caps the gain at the ${spread['short_strike']:g} strike.")
+
+
 # ── Draft endpoint ─────────────────────────────────────────────────────────────
 
 @router.post("/draft", response_model=ThesisDraftRead)
@@ -1026,11 +1088,14 @@ async def draft_thesis(
     client_ip = get_client_ip(request)
     await check_draft_limit(db, user_id, client_ip)
     data = await _gather_draft_data(payload.symbol.upper(), db)
+    from app.services.ivy_v2 import options_premium_check
+    premium = await options_premium_check(db, payload.symbol.upper())     # Ivy's own comparison: expensive options get a cheaper spread
     result = await _run_draft_generation(
         data,
         payload.direction.lower(),
         payload.aggressiveness.lower(),
         proposed_target=payload.proposed_target,
+        premium=premium,
     )
     await record_draft(db, user_id, client_ip, payload.symbol.upper())
     return result

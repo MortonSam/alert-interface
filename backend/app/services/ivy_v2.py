@@ -181,6 +181,25 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
     )
 
 
+def vol_gate_trips(implied_pct: float, usual_pct: float) -> bool:
+    """Pure: the options price a bigger move than the stock usually makes, by Ivy's rule (more than IV_PREMIUM_CAP times it).
+    Ivy refuses her own ledger pick then; Build a Trade drafts a cheaper defined-risk structure instead."""
+    return usual_pct > 0 and implied_pct > IV_PREMIUM_CAP * usual_pct
+
+
+async def options_premium_check(db: AsyncSession, symbol: str) -> dict | None:
+    """Ivy's vol-gate figures for a stock today, from the same stored data and functions her pick uses: {implied_pct, usual_pct,
+    cap, expensive}, or None when a figure is missing (no upcoming report in the window, too little history, no fresh chain)."""
+    features = await compute_live_features(symbol, db)
+    if features is None:
+        return None
+    usual = compute_expected_move_live(features)
+    implied, fresh = await compute_implied_move(db, symbol, features.event_date)
+    if not fresh or implied is None or not usual:
+        return None
+    return {"implied_pct": round(implied, 2), "usual_pct": round(usual, 2), "cap": IV_PREMIUM_CAP, "expensive": vol_gate_trips(implied, usual)}
+
+
 def compute_expected_move_live(features: LiveFeatures) -> float | None:
     """Return prior_avg_abs_5d if enough history, else None (live variant)."""
     if features.prior_n < MIN_PRIOR_N:
@@ -333,7 +352,7 @@ async def decide(
         )
 
     if implied_move is not None and expected is not None and expected > 0:
-        if implied_move > IV_PREMIUM_CAP * expected:
+        if vol_gate_trips(implied_move, expected):
             reason = f"options pricing {implied_move:.1f}%, history says {expected:.1f}%"
             receipt["gate_reason"] = reason
             return V2Result(

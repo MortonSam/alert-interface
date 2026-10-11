@@ -1,6 +1,7 @@
 "use client";
 
 import Explained from "@/components/Explained";
+import { cheaperCostLine, expensiveOptionsLine, expensiveOptionsPrompt } from "@/lib/cheaperDraft";
 import { volRegime } from "@/lib/encodings/volRegime";
 import { impliedSpanPhrase, optionsCadencePhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
 import { useIvyRule } from "@/lib/useIvyRule";
@@ -356,15 +357,24 @@ function DraftDisplay({
     onAccept(draft.suggested_target, draft.reasoning, leg);
   }
 
+  const cheaperLine = cheaperCostLine(draft, costPerContract);
   return (
     <div className="space-y-4">
+
+      {/* Expensive options: the draft is a cheaper way to make the same bet, its cost beside the outright one */}
+      {draft.options_expensive && (
+        <div className="rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 space-y-1" data-testid="cheaper-draft">
+          <p className="text-sm text-foreground">{expensiveOptionsLine(draft.symbol)}</p>
+          {cheaperLine && <p className="text-sm text-muted-foreground">{cheaperLine}</p>}
+        </div>
+      )}
 
       {/* A) Header */}
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
           Ivy&apos;s Draft · {draft.aggressiveness} · {draft.direction}
         </p>
-        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && <>drafted by Ivy · {draft.model_used}</>}</span>
+        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && (draft.model_used === "deterministic" ? <>drafted by Ivy from the stored options</> : <>drafted by Ivy · {draft.model_used}</>)}</span>
       </div>
 
       {/* B) Realism flag */}
@@ -1074,8 +1084,15 @@ function BuildTradePageContent() {
                 </div>
               )}
 
+              {/* Expensive options: no refusal, the customer picks a direction and gets a cheaper draft */}
+              {alertPick && !alertPick.existing_pick && !alertPick.draft && alertPick.outcome === "vol_gate" && (
+                <p className="rounded-lg border border-primary/40 bg-primary/5 px-5 py-4 mb-4 text-sm" data-testid="expensive-options">
+                  {expensiveOptionsPrompt(alertPick.symbol)}
+                </p>
+              )}
+
               {/* Ivy's decision when the engine produced no draft: one sentence, the reason, the slot kept */}
-              {alertPick && !alertPick.existing_pick && !alertPick.draft && alertPick.outcome !== "picked" && (
+              {alertPick && !alertPick.existing_pick && !alertPick.draft && alertPick.outcome !== "picked" && alertPick.outcome !== "vol_gate" && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-3 mb-4" data-testid="ivy-decision">
                   <p className="text-sm font-medium"><Explained text={ivyDecisionSentence(alertPick.symbol, alertPick.outcome, alertPick.outcome_label)} /></p>
                   {alertPick.leans.length > 0 && (

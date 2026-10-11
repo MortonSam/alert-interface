@@ -146,6 +146,9 @@ class ThesisDraftRead(BaseModel):
     fact_block: dict                       # all injected facts (for transparency/verification)
     model_used: str
     generated_at: str
+    # set when the options price a bigger move than the stock usually makes (ivy_v2.vol_gate_trips) and the draft is therefore a
+    # cheaper defined-risk spread: {implied_pct, usual_pct, cap, outright_strike, outright_mid}; the page compares the two costs
+    options_expensive: dict | None = None
 
 
 class ThesisDraftAlternativeRequest(BaseModel):
