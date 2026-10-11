@@ -66,7 +66,7 @@ def test_the_auto_pick_loop_records_a_raising_ticker_and_moves_on_and_takes_a_sy
 @pytest.mark.asyncio
 async def test_validate_errors_on_a_reaction_dated_before_the_first_bar_and_the_merge_refuses_one():
     from app.services.ticker_rename import absorb_duplicate
-    keep, dup = "ZZFB1", "ZZFB2"
+    keep, dup = "0ZFB1", "0ZFB2"     # sort first: the check lists at most 40 rows, and other workers add their own
     try:
         async with ScriptSessionLocal() as s:
             for sym in (keep, dup):
