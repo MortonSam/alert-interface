@@ -40,6 +40,18 @@ def test_outcome_stores_the_tail_and_a_clean_run_clears_it(monkeypatch):
     refresh._record_step_outcome("Auto-pick", exit_code=0, seconds=2.0)
     entry = json.loads(store["step_outcomes"])["Auto-pick"]
     assert "stderr_tail" not in entry                                     # the next clean run does not keep an old tail
+    assert "stderr_head" not in entry                                     # nor an old head (Oct 6's FDX head showed through Oct 10)
+
+
+def test_a_clean_auto_pick_run_reports_no_error_even_with_an_old_head():
+    from datetime import datetime, timezone
+    from app.services.nightly_run import auto_pick_status
+    now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+    stale_head = {"Auto-pick": {"exit": 0, "at": "2026-10-10T07:38:22+00:00",
+                                "stderr_head": "[auto-pick] 1 candidate(s) raised: FDX\n--- FDX\nTraceback (most recent call last):"}}
+    assert auto_pick_status(stale_head, now).error is None
+    failed = {"Auto-pick": {"exit": 1, "at": "2026-10-10T07:38:22+00:00", "stderr_tail": "UnboundLocalError: boom [FDX]"}}
+    assert auto_pick_status(failed, now).error == "UnboundLocalError: boom [FDX]"
 
 
 @pytest.mark.asyncio

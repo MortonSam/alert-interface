@@ -27,6 +27,16 @@ class NewsHeadline(BaseModel):
     published_at: datetime
 
 
+class IvyLine(BaseModel):
+    """Ivy's sentence for a row (services/ivy_moves): passed the check, or her exact no-news sentence. Absent when the row falls
+    back to the headline display."""
+    sentence: str
+    result: str                       # "passed" | "no_news" | "unconfirmed" (no checked sentence and no displayable headline)
+    lead: NewsHeadline | None = None  # the story that informed her most, linked to the original article
+    more: int = 0                     # how many other stories informed her
+    written_at: datetime | None = None
+
+
 class MoverItem(BaseModel):
     symbol: str
     name: str | None = None
@@ -34,11 +44,13 @@ class MoverItem(BaseModel):
     change_pct: float
     quote_time: datetime              # the last trade's time, from the stored quote
     headline: NewsHeadline | None = None
+    ivy: IvyLine | None = None
 
 
 class NewsStoryItem(NewsHeadline):
     symbol: str
     change_pct: float
+    ivy: IvyLine | None = None
 
 
 class NewsSectionsResponse(BaseModel):
@@ -67,21 +79,30 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
     vis = N.visibility(newest_story, step_exit, now, newest_quote)
     if not vis.visible:
         return NewsSectionsResponse(visible=False, reason=vis.reason)
-    up_items, down_items, ranked, change, suppressed, session = await build_sections(db, now)
+    extra: dict = {}
+    up_items, down_items, ranked, change, suppressed, session = await build_sections(db, now, extra)
+    lines = await ivy_lines(db, extra, [(m.symbol, m.name, m.change_pct) for m in up_items + down_items]
+                            + [(r["symbol"], extra["names"].get(r["symbol"]), change[r["symbol"]]) for r in ranked])
+    from app.services.ivy_moves import CANNOT_CONFIRM
+    for m in up_items + down_items:
+        m.ivy = lines.get(m.symbol)
+        if m.ivy is None and m.headline is None:          # never a blank row
+            m.ivy = IvyLine(sentence=CANNOT_CONFIRM, result="unconfirmed")
     for x in suppressed.values():          # every suppression, with both numbers, in the logs
         _log.info("headline suppressed: %s %r (%s; stated %s, ours %s)", x["symbol"], x["headline"], x["reason"], x["stated_pct"], x["move_pct"])
     return NewsSectionsResponse(
         visible=True, quotes_as_of=max((q["quote_time"] for q in session), default=None),
         up=up_items, down=down_items,
-        stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r["url"], source=r["source"],
-                               published_at=r["published_at"]) for r in ranked],
+        stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r.get("link") or r["url"], source=r["source"],
+                               published_at=r["published_at"], ivy=lines.get(r["symbol"])) for r in ranked],
     )
 
 
 
-async def build_sections(db, now: datetime):
+async def build_sections(db, now: datetime, extra: dict | None = None):
     """The movers (with headlines), "In the news" and the suppressed headlines from the stored quotes and stories, as of `now`.
-    Shared by the route and validate's news_headline_guard check."""
+    Shared by the route, Ivy's sentences step and validate's news_headline_guard check. `extra`, when given, receives every stored
+    story in the window (tagged or not, with summaries: Ivy's inputs), the window's start and the stock names."""
     from app.services import news as N
     qrows = (await db.execute(sa.text("""
         SELECT q.symbol, t.name, q.price, q.change_pct, q.quote_time FROM quote_snapshots q
@@ -95,9 +116,11 @@ async def build_sections(db, now: datetime):
     session_day = max((q["quote_time"] for q in session), default=now).astimezone(N.NEW_YORK).date()
     since = N.previous_session_close(session_day)
     srows = (await db.execute(sa.text("""
-        SELECT url, headline, source, published_at, related FROM news_stories
-        WHERE published_at >= :c AND published_at <= :n AND cardinality(related) > 0"""), {"c": since, "n": now})).all()
-    stories = [{"url": r.url, "headline": r.headline, "source": r.source, "published_at": r.published_at, "related": list(r.related)} for r in srows]
+        SELECT url, headline, source, published_at, related, summary, article_url, link_state FROM news_stories
+        WHERE published_at >= :c AND published_at <= :n"""), {"c": since, "n": now})).all()
+    window = [{"url": r.url, "headline": r.headline, "source": r.source, "published_at": r.published_at, "related": list(r.related or []),
+               "summary": r.summary, "link": r.article_url, "link_state": r.link_state} for r in srows]
+    stories = [st for st in window if st["related"]]
     last_reports = dict((await db.execute(sa.text("""
         SELECT t.symbol, max(d) FROM tickers t JOIN (
             SELECT ticker_id, event_date AS d FROM historical_reactions WHERE event_type = 'earnings' AND event_date <= :today
@@ -111,14 +134,51 @@ async def build_sections(db, now: datetime):
     suppressed: dict = {}
 
     names = {q["symbol"]: q["name"] for q in quotes}
+    if extra is not None:
+        extra.update(window=window, since=since, names=names)
 
     def mover(q: dict) -> MoverItem:
         h = N.top_headline(stories, q["symbol"], q["name"], last_reports.get(q["symbol"]), since, moves.get(q["symbol"]), suppressed)
         return MoverItem(symbol=q["symbol"], name=q["name"], price=q["price"], change_pct=q["change_pct"], quote_time=q["quote_time"],
-                         headline=NewsHeadline(headline=h["headline"], url=h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
+                         headline=NewsHeadline(headline=h["headline"], url=h.get("link") or h["url"], source=h["source"], published_at=h["published_at"]) if h else None)
 
     up_items, down_items = [mover(q) for q in up], [mover(q) for q in down]
     ranked = N.in_the_news(stories, change, names=names, last_reports=last_reports, since=since, moves=moves, suppressed=suppressed,
                            exclude_urls={m.headline.url for m in up_items + down_items if m.headline},
                            exclude_symbols={m.symbol for m in up_items + down_items})
     return up_items, down_items, ranked, change, suppressed, session
+
+
+async def ivy_lines(db, extra: dict, rows: list[tuple[str, str | None, float | None]]) -> dict[str, IvyLine]:
+    """Ivy's line for each row's stock: her exact no-news sentence when no stored story names it; otherwise the sentence stored for
+    the stories she would read now (by their fingerprint), when it passed and still fits the printed change. A stock with no
+    such sentence (not written yet, or it failed the check twice) gets none, and its row shows the headline display."""
+    from app.services import ivy_moves as M
+    out: dict[str, IvyLine] = {}
+    want: dict[str, tuple[str, str | None, float | None, list]] = {}
+    for sym, name, move in rows:
+        inputs = M.input_stories(extra["window"], sym, name, extra["since"])
+        if not inputs:
+            out[sym] = IvyLine(sentence=M.NO_NEWS, result="no_news")
+        else:
+            want[sym] = (M.fingerprint(sym, inputs), name, move, inputs)
+    if not want:
+        return out
+    stored = (await db.execute(sa.text("""SELECT symbol, fingerprint, sentence, result, sources, written_at FROM ivy_move_notes
+                                          WHERE (symbol, fingerprint) IN (SELECT unnest(CAST(:s AS text[])), unnest(CAST(:f AS text[])))"""),
+                               {"s": list(want), "f": [v[0] for v in want.values()]})).all()
+    for r in stored:
+        fp, name, move, _inputs = want[r.symbol]
+        note = {"result": r.result, "sentence": r.sentence}
+        if r.fingerprint != fp or not M.display_ok(note, move, r.symbol, name):
+            continue
+        by_url = {st["url"]: st for st in extra["window"]}
+        sources = [{**src, "link": by_url.get(src["url"], {}).get("link"), "link_state": by_url.get(src["url"], {}).get("link_state")}
+                   for src in (r.sources or [])]
+        i = M.lead_index(sources, move, r.symbol, name)
+        lead = sources[i] if i is not None else None
+        out[r.symbol] = IvyLine(sentence=r.sentence if r.result == "passed" else M.NO_NEWS, result=r.result, written_at=r.written_at,
+                                lead=NewsHeadline(headline=lead["headline"], url=lead["link"], source=lead.get("source"),
+                                                  published_at=lead["published_at"]) if lead else None,
+                                more=max(0, len(sources) - 1))
+    return out

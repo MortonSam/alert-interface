@@ -1,5 +1,6 @@
 """Discover news: "Today's biggest movers" and "In the news", from stored Finnhub headlines (news_stories, the last 24 hours) and the
-quote snapshot the same step stores (quote_snapshots). Headlines only: no article text, no summaries. A headline beside a move is
+quote snapshot the same step stores (quote_snapshots). Headlines only on the page: no article text, no summaries (a story's summary is
+stored as Ivy's input only, services/ivy_moves). A headline beside a move is
 labelled "In the news:" and never "because": being next to a move does not make it the cause.
 
 Fail closed: when the newest stored story is more than FRESH_HOURS old, or the news step's last run failed, neither section shows.
@@ -17,6 +18,7 @@ FRESH_HOURS = 24            # the sections hide when the newest story or the quo
 RETENTION_DAYS = 14         # stored stories are kept this long (the page reads from the close before the priced session onward)
 MOVERS_EACH_SIDE = 5
 IN_THE_NEWS_LIMIT = 10
+SUMMARY_CHARS = 800         # a story's stored summary: Ivy's input beside the headline (services/ivy_moves), never displayed
 STORIES_PER_TICKER = 1      # "In the news" ranks by the related stock's move; at most this many stories per stock, so one mover cannot fill it
 STEP_LABEL = "Discover news (Finnhub)"
 
@@ -106,6 +108,10 @@ def headline_problem(story: dict, symbol: str, name: str | None, last_report, si
     h = story["headline"]
     if story["published_at"] < since:
         return "published before the previous session's close"
+    from app.services.news_links import DISPLAYABLE
+    state = story.get("link_state", "ok")                 # stories built in tests carry no link fields
+    if state not in DISPLAYABLE:
+        return "its link is not resolved to the article yet" if state is None else f"its link lands on a {state} page" if state in ("paywall", "login") else "its link is broken"
     if is_roundup(h):
         return "a roundup about several companies"
     if not names_company(h, symbol, name):
@@ -158,8 +164,9 @@ def dedupe(raw: list[tuple[str, dict]], now: datetime, universe: set[str]) -> di
                 out[url]["category"] = "company"
             continue
         seen_headline[key] = url
+        summary = " ".join((item.get("summary") or "").split())[:SUMMARY_CHARS] or None
         out[url] = {"url": url, "headline": headline, "source": (item.get("source") or "").strip() or None,
-                    "published_at": published, "related": sorted(related), "category": category}
+                    "published_at": published, "related": sorted(related), "category": category, "summary": summary}
     return out
 
 

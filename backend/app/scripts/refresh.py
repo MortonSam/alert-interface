@@ -177,6 +177,8 @@ def _record_step_outcome(label: str, exit_code: int, seconds: float,
         })
         if stderr_head:
             existing["stderr_head"] = stderr_head
+        elif "stderr_head" in existing:
+            del existing["stderr_head"]      # nor an older run's head (Auto-pick kept Oct 6's FDX traceback head through clean runs)
         if stderr_tail:
             existing["stderr_tail"] = stderr_tail
         elif "stderr_tail" in existing:

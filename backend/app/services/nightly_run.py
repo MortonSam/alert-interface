@@ -49,7 +49,7 @@ def auto_pick_status(step_outcomes: dict | None, now: datetime | None = None) ->
     entry = (step_outcomes or {}).get(AUTO_PICK_STEP) or {}
     at = entry.get("at")
     exit_code = entry.get("exit")
-    error = exception_line(entry.get("stderr_tail"), entry.get("stderr_head"))
+    error = exception_line(entry.get("stderr_tail"), entry.get("stderr_head")) if exit_code != 0 else None   # a clean run reports no error
     try:
         at_dt = datetime.fromisoformat(at) if at else None
     except ValueError:

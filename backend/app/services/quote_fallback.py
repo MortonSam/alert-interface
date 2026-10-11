@@ -36,9 +36,8 @@ def quote_from_bars(rows: list[tuple[date, float, float | None, float | None, fl
 
 
 def stored_close_quote_sync(symbol: str, today: date | None = None) -> dict:
-    df = price_bars.bars_sync(symbol, start=(today or date.today()) - timedelta(days=LOOKBACK_DAYS))
-    rows = [(ix.date(), float(r["Close"]), _f(r.get("Open")), _f(r.get("High")), _f(r.get("Low"))) for ix, r in df.iterrows()] if not df.empty else []
-    return quote_from_bars(rows)
+    # as traded, so the change against the previous close is the day's printed move on an ex-dividend day too (price_bars.raw_closes_sync)
+    return quote_from_bars(price_bars.raw_closes_sync(symbol, (today or date.today()) - timedelta(days=LOOKBACK_DAYS)))
 
 
 def _f(v) -> float | None:

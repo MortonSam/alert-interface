@@ -97,6 +97,16 @@ def _as_date(d) -> date:
     return d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
 
 
+def raw_closes_sync(symbol: str, start: date) -> list[tuple[date, float, float | None, float | None, float | None]]:
+    """[(date, close, open, high, low)] as traded (unadjusted), oldest first: a day's printed move is its close against the previous
+    close as traded, the figure a quote prints. Adjusted series are for returns and volatility, never for a printed daily move."""
+    with _engine().connect() as conn:
+        rows = conn.execute(text("SELECT date, close, open, high, low FROM price_bars_shadow WHERE symbol = :s AND date >= :d AND close IS NOT NULL ORDER BY date"),
+                            {"s": symbol, "d": start}).all()
+    f = lambda v: None if v is None else float(v)
+    return [(_as_date(r[0]), float(r[1]), f(r[2]), f(r[3]), f(r[4])) for r in rows]
+
+
 def close_on_date_sync(symbol: str, on) -> float | None:
     """The official close on that date, as traded (unadjusted); None when no bar is stored for it."""
     with _engine().connect() as conn:
