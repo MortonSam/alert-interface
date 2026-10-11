@@ -95,3 +95,11 @@ def test_a_split_stocks_adjusted_contracts_never_price_a_draft():
     assert [(r["strike"], r["mid"]) for r in rows] == [(360.0, 75.25), (420.0, 39.92), (460.0, 25.2)]
     s = T.build_defined_risk_spread("bullish", rows, 418.78, 9.37)
     assert (s["long_strike"], s["short_strike"], s["net_debit"]) == (360.0, 460.0, 50.05)
+
+
+def test_a_strike_listed_twice_keeps_the_contract_people_trade():
+    puts = [{"strike": 430.0, "bid": 38.0, "ask": 42.0, "lastPrice": 40.0, "impliedVolatility": 0.55, "openInterest": 412},
+            {"strike": 430.0, "bid": 2.2, "ask": 2.8, "lastPrice": 2.5, "impliedVolatility": 0.9, "openInterest": 3},
+            {"strike": 420.0, "bid": 33.0, "ask": 36.0, "lastPrice": 34.0, "impliedVolatility": 0.55, "openInterest": 300}]
+    _, rows = T._build_strike_lines(puts, 420.0, 418.78)
+    assert [(r["strike"], r["mid"]) for r in rows] == [(420.0, 34.5), (430.0, 40.0)]

@@ -106,6 +106,13 @@ def _build_strike_lines(
         iv = c.get("impliedVolatility")
         return not ((mid is not None and current_price > 0 and mid >= current_price) or (iv is not None and iv > MAX_SANE_IV))
     quality = [c for c in side_raw if ((c.get("bid") or 0) > 0 or (c.get("ask") or 0) > 0) and standard(c)]
+    # a strike listed twice (the standard and an adjusted contract): keep the one people trade, the most open interest
+    by_strike: dict[float, dict] = {}
+    for c in quality:
+        k = c["strike"]
+        if k not in by_strike or (c.get("openInterest") or 0) > (by_strike[k].get("openInterest") or 0):
+            by_strike[k] = c
+    quality = list(by_strike.values())
     all_strikes = sorted({c["strike"] for c in quality})
     if atm_strike and atm_strike in all_strikes:
         idx = all_strikes.index(atm_strike)
