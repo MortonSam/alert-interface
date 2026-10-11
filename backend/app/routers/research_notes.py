@@ -164,15 +164,21 @@ def visitor_failure_reason(note: ResearchNote) -> str:
     return "Generation failed before a note was produced. Your limit was not charged."
 
 
+HOME_NOTE_FRESH_DAYS = 14     # the home page shows a note only if it was verified this recently; otherwise the section is hidden
+
+
 @router.get("/latest-verified", response_model=LatestVerifiedNoteRead)
 async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedNoteRead:
-    """The most recently verified complete note on an active ticker whose company has not reported since it was written, for the
-    home page. A note written before its company's latest report is never shown there as current; 404 when no note qualifies (the
-    home page then hides the section)."""
+    """The most recently verified complete note on an active ticker, verified within HOME_NOTE_FRESH_DAYS, whose company has not
+    reported since it was written, for the home page. A note written before its company's latest report is never shown there as
+    current; 404 when no note qualifies (the home page then hides the section)."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    fresh_since = _dt.now(_tz.utc) - _td(days=HOME_NOTE_FRESH_DAYS)
     rows = (await db.execute(
         select(ResearchNote, Ticker.symbol, Ticker.name)
         .join(Ticker, Ticker.id == ResearchNote.ticker_id)
-        .where(ResearchNote.status == "complete", ResearchNote.verification.is_not(None), Ticker.is_active.is_(True))
+        .where(ResearchNote.status == "complete", ResearchNote.verification.is_not(None), Ticker.is_active.is_(True),
+               ResearchNote.verified_at >= fresh_since)
         .order_by(ResearchNote.verified_at.desc().nulls_last(), ResearchNote.generated_at.desc())
         .limit(200)
     )).all()
