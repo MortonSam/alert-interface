@@ -53,6 +53,6 @@ describe("the counters row never overlaps", () => {
     const challenge = page.slice(page.indexOf("3. The Challenge"), page.indexOf("The challenge"));
     expect(challenge).not.toContain("min-h-[100svh]");                              // normal section spacing after the counters
     expect(challenge).toContain("py-12 sm:py-0");                                    // phone spacing (gaps near 96px), a full screen from 640px up
-    expect(numberWidth("117,310", 60)).toBeCloseTo((6 * 0.6 + 0.28) * 60, 5);
+    expect(numberWidth("117,310", 60)).toBeCloseTo((6 * 0.631 + 0.241) * 60, 5);
   });
 });

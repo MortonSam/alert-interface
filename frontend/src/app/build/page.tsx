@@ -1015,7 +1015,7 @@ function BuildTradePageContent() {
                               onClick={() => match && handleSelectTicker(match)}
                               className="flex items-center gap-2 rounded-lg border border-border bg-secondary px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
                             >
-                              <span className="font-display font-bold">{r.symbol}</span>
+                              <span className="font-sans font-bold">{r.symbol}</span>
                               {r.name && (
                                 <span className="text-muted-foreground text-xs truncate max-w-[120px]">{r.name}</span>
                               )}
@@ -1030,7 +1030,7 @@ function BuildTradePageContent() {
             ) : (
               <div className="flex items-center justify-between rounded-[var(--radius)] border border-border/60 bg-transparent px-5 py-3.5">
                 <div className="flex items-center gap-4 min-w-0">
-                  <span className="text-2xl font-display font-bold tracking-tight text-foreground">{selectedTicker.symbol}</span>
+                  <span className="text-2xl font-sans font-bold tracking-tight text-foreground">{selectedTicker.symbol}</span>
                   {selectedTicker.name && (
                     <span className="text-sm text-muted-foreground truncate hidden sm:block">
                       {selectedTicker.name}

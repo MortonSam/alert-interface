@@ -67,7 +67,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-ui)", "system-ui", "sans-serif"],
-        display: ["var(--font-display)", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],          // headings (Newsreader)
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
         brand: ["var(--font-brand)", "Georgia", "serif"],          // the wordmark only (Playfair Display)
       },

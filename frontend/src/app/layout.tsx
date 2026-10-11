@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Playfair_Display, Schibsted_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import Link from "next/link";
 import NavLinks from "@/components/NavLinks";
 import { HeaderTickerSearch } from "@/components/TickerSearch";
@@ -7,14 +7,24 @@ import PostHogProvider from "@/components/PostHogProvider";
 import { BRAND } from "@/lib/brand";
 import "./globals.css";
 
-const fontDisplay = Bricolage_Grotesque({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-display", display: "swap" });
-const fontUi = Schibsted_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-ui", display: "swap" });
-const fontMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-mono", display: "swap" });
-const fontBrand = Playfair_Display({ subsets: ["latin"], weight: ["500"], variable: "--font-brand", display: "swap" });   // the wordmark only
+// Every face is self-hosted from src/fonts (the Latin subsets, each with its OFL licence): no build or page load fetches from
+// Google Fonts. Headings are Newsreader; body text, buttons and labels Schibsted Grotesk; data IBM Plex Mono; the wordmark
+// Playfair Display.
+const fontDisplay = localFont({ src: "../fonts/newsreader-latin.woff2", weight: "200 800", variable: "--font-display", display: "swap" });
+const fontUi = localFont({ src: "../fonts/schibsted-grotesk-latin.woff2", weight: "400 900", variable: "--font-ui", display: "swap" });
+const fontMono = localFont({
+  src: [
+    { path: "../fonts/ibm-plex-mono-400-latin.woff2", weight: "400" },
+    { path: "../fonts/ibm-plex-mono-500-latin.woff2", weight: "500" },
+    { path: "../fonts/ibm-plex-mono-600-latin.woff2", weight: "600" },
+  ],
+  variable: "--font-mono", display: "swap",
+});
+const fontBrand = localFont({ src: "../fonts/playfair-display-latin.woff2", weight: "400 900", variable: "--font-brand", display: "swap" });   // the wordmark only
 
 export const metadata: Metadata = {
   title: "Alert Interface | Teaches you what Wall Street knows",
-  description: "One workspace for the retail investor, starting with the S&P 500. Every number explained.",
+  description: "One workspace for the retail investor, starting with the S&P 500. Every number explained, by an AI analyst who shows her work.",
   icons: {
     icon: [{ url: BRAND.favicon, sizes: "any" }, { url: BRAND.favicon32, sizes: "32x32", type: "image/png" }, { url: BRAND.favicon16, sizes: "16x16", type: "image/png" }],
     apple: [{ url: BRAND.appleTouchIcon, sizes: "180x180" }],

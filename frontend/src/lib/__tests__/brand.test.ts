@@ -30,7 +30,7 @@ describe("the interim brand set", () => {
 
   it("the header lockup is the heron and live text in Playfair Display", () => {
     const layout = readFileSync(join(SRC, "app/layout.tsx"), "utf8");
-    expect(layout).toContain("Playfair_Display(");
+    expect(layout).toContain('localFont({ src: "../fonts/playfair-display-latin.woff2"');   // the wordmark, self-hosted
     expect(layout).toMatch(/<img src=\{BRAND\.heron\}[^>]*\/>\s*<span className="font-brand[^"]*">Alert Interface<\/span>/);
     expect(BRAND.heron).toBe("/brand/heron-transparent.svg");          // the site is always dark (html.dark)
     expect(layout).toContain('<html lang="en" className={`dark ');
@@ -39,5 +39,20 @@ describe("the interim brand set", () => {
   it("the manifest's icons are in the brand folder", () => {
     const m = JSON.parse(readFileSync(join(PUBLIC, BRAND.manifest), "utf8"));
     for (const icon of m.icons) expect(existsSync(join(PUBLIC, icon.src)), icon.src).toBe(true);
+  });
+
+  it("every font is self-hosted with its licence: nothing loads from Google Fonts", () => {
+    const { readdirSync } = require("node:fs") as typeof import("node:fs");
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
+    for (const f of walk(SRC).filter((f) => /\.(tsx?|css)$/.test(f) && !f.includes("__tests__"))) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/next\/font\/google|fonts\.googleapis|fonts\.gstatic/);
+    }
+    const fonts = readdirSync(join(SRC, "fonts"));
+    for (const face of ["newsreader", "schibsted-grotesk", "ibm-plex-mono-400", "ibm-plex-mono-500", "ibm-plex-mono-600", "playfair-display"]) {
+      expect(fonts).toContain(`${face}-latin.woff2`);
+    }
+    expect(fonts.filter((f) => f.endsWith(".woff2")).length).toBe(6);           // no unused face ships
+    for (const lic of ["newsreader", "schibstedgrotesk", "ibmplexmono", "playfairdisplay"]) expect(fonts).toContain(`OFL-${lic}.txt`);
   });
 });

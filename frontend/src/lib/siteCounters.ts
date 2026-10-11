@@ -46,8 +46,8 @@ export const COUNTER_LAYOUT = {
   breakpoints: { sm: 640, lg: 1024 },
   gapX: 20,                  // gap-x-5
   font: { min: 36, vw: 4.2, max: 60 },   // clamp(36px, 4.2vw, 60px) on .stat-number
-  digitEm: 0.6,              // tabular digit advance in the display face, bold
-  commaEm: 0.28,
+  digitEm: 0.631,            // tabular digit advance in the display face (Newsreader 600), measured in Chrome at 60px
+  commaEm: 0.241,
   label: { fontPx: 10, trackingEm: 0.08 },   // text-[10px] tracking-[.08em], mono
   monoCharEm: 0.6,
 } as const;

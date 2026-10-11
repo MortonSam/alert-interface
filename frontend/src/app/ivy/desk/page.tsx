@@ -179,7 +179,7 @@ export default function IvyDeskPage() {
                 <td className="px-3 py-2.5">
                   <Link
                     href={`/tickers/${row.symbol}`}
-                    className="font-display font-semibold text-foreground hover:underline"
+                    className="font-sans font-semibold text-foreground hover:underline"
                   >
                     {row.symbol}
                   </Link>

@@ -22,8 +22,8 @@ export default async function Home() {
         .open-h1 {
           font-size: clamp(26px, 7.4vw, 44px);    /* the three sentences wrap; under the heron on a phone */
           text-wrap: balance;
-          line-height: 1.02;
-          letter-spacing: -.035em;
+          line-height: 1.1;
+          letter-spacing: -.01em;
         }
         .open-heron { width: min(58vw, 260px); height: auto; }
         @media (min-width: 1024px) {
@@ -44,13 +44,13 @@ export default async function Home() {
         .stat-number {
           font-size: clamp(36px, 4.2vw, 60px);   /* lib/siteCounters.ts COUNTER_LAYOUT.font: seven characters fit a quarter column from 1024px up */
           line-height: 1;
-          letter-spacing: -.02em;
+          letter-spacing: -.01em;
           font-variant-numeric: tabular-nums;
         }
         .statement-h2 {
           font-size: clamp(32px, 6vw, 72px);
-          line-height: 1.15;
-          letter-spacing: -.025em;
+          line-height: 1.12;
+          letter-spacing: -.01em;
         }
       `}</style>
 
@@ -63,13 +63,13 @@ export default async function Home() {
             <img src={BRAND.heron} alt="" aria-hidden="true" className="open-heron" />
           </div>
           <div className="text-left">
-            <h1 className="open-h1 open-line font-display font-extrabold text-foreground">
+            <h1 className="open-h1 open-line font-display font-semibold text-foreground">
               Trading apps teach you to tap. Pro tools assume you know.{" "}
               <span className="text-primary">Alert Interface teaches you what Wall Street knows.</span>
             </h1>
             <div className="open-rest">
               <p className="text-foreground/70 text-lg mt-6 max-w-[34em]">
-                One workspace for the retail investor, starting with the S&amp;P 500. Every number explained.
+                One workspace for the retail investor, starting with the S&amp;P 500. Every number explained, by an AI analyst who shows her work.
               </p>
               <div className="flex flex-wrap gap-[13px] mt-8">
                 <HeroSearchButton className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity" />
@@ -100,7 +100,7 @@ export default async function Home() {
               The challenge
             </p>
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              Trading apps hand you confetti. Terminals cost thirty grand a year.
+              Six tabs. No answers.
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-2xl mx-auto">
               Most people research the way there&#39;s always been to research: Yahoo for the

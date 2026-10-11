@@ -49,7 +49,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
       <div className="px-6 py-5 space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Link href={`/tickers/${note.symbol}`} className="font-display text-2xl font-bold text-foreground hover:text-primary transition-colors">
+            <Link href={`/tickers/${note.symbol}`} className="font-sans text-2xl font-bold text-foreground hover:text-primary transition-colors">
               {note.symbol}
             </Link>
             {note.company_name && <p className="text-sm text-muted-foreground">{note.company_name}</p>}

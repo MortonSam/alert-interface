@@ -352,7 +352,7 @@ export default function ThesisDetailPage() {
 
         {/* Row 1: Ticker · direction pill · state badge */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-lg font-display font-semibold tracking-tight">
+          <span className="text-lg font-sans font-semibold tracking-tight">
             {thesis.ticker_symbol}
           </span>
           <span className={cn(
