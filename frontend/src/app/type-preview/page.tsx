@@ -1,37 +1,37 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Bodoni_Moda, DM_Serif_Display, Gloock, Instrument_Serif, Libre_Caslon_Display, Newsreader, Source_Serif_4 } from "next/font/google";
+import { Crimson_Pro, EB_Garamond, Gloock, Libre_Baskerville, Libre_Caslon_Display, Libre_Caslon_Text, Newsreader } from "next/font/google";
 import { HeroSearchButton } from "@/components/TickerSearch";
 import { BRAND } from "@/lib/brand";
 
-// A type study: the home page's opening screen with its headline set in seven candidate faces, each at its strongest
-// available weight. Only the headline changes face; the subhead and buttons stay in the site's sans. Not linked from any page,
+// A type study: the home page's opening screen with its headline set in seven faces, each at the weight on its label. Only the headline changes face; the subhead and buttons stay in the site's sans. Not linked from any page,
 // not in the sitemap, and noindex.
 export const metadata: Metadata = { title: "Type preview", robots: { index: false, follow: false } };
 
-const instrument = Instrument_Serif({ subsets: ["latin"], weight: ["400"], display: "swap" });
-const dmSerif = DM_Serif_Display({ subsets: ["latin"], weight: ["400"], display: "swap" });
-const newsreader = Newsreader({ subsets: ["latin"], weight: ["800"], display: "swap" });
-const caslon = Libre_Caslon_Display({ subsets: ["latin"], weight: ["400"], display: "swap" });
+const caslonDisplay = Libre_Caslon_Display({ subsets: ["latin"], weight: ["400"], display: "swap" });
+const caslonText = Libre_Caslon_Text({ subsets: ["latin"], weight: ["700"], display: "swap" });
+const garamond = EB_Garamond({ subsets: ["latin"], weight: ["700"], display: "swap" });
+const crimson = Crimson_Pro({ subsets: ["latin"], display: "swap" });            // variable: 650 sits between the named weights
+const baskerville = Libre_Baskerville({ subsets: ["latin"], weight: ["700"], display: "swap" });
+const newsreader = Newsreader({ subsets: ["latin"], weight: ["600"], display: "swap" });
 const gloock = Gloock({ subsets: ["latin"], weight: ["400"], display: "swap" });
-const sourceSerif = Source_Serif_4({ subsets: ["latin"], weight: ["900"], display: "swap" });
-const bodoni = Bodoni_Moda({ subsets: ["latin"], weight: ["900"], display: "swap" });
 
+// Libre Caslon Display first and Gloock last, as references
 const FACES = [
-  { name: "Instrument Serif", font: instrument, weight: 400 },
-  { name: "DM Serif Display", font: dmSerif, weight: 400 },
-  { name: "Newsreader", font: newsreader, weight: 800 },
-  { name: "Libre Caslon Display", font: caslon, weight: 400 },
+  { name: "Libre Caslon Display", font: caslonDisplay, weight: 400 },
+  { name: "Libre Caslon Text", font: caslonText, weight: 700 },
+  { name: "EB Garamond", font: garamond, weight: 700 },
+  { name: "Crimson Pro", font: crimson, weight: 650 },
+  { name: "Libre Baskerville", font: baskerville, weight: 700 },
+  { name: "Newsreader", font: newsreader, weight: 600 },
   { name: "Gloock", font: gloock, weight: 400 },
-  { name: "Source Serif 4", font: sourceSerif, weight: 900 },
-  { name: "Bodoni Moda", font: bodoni, weight: 900 },
 ];
 
 export default function TypePreview() {
   return (
     <main className="pb-16">
       <style>{`
-        .tp-h1 { font-size: clamp(26px, 7.4vw, 44px); line-height: 1.08; letter-spacing: -.02em; text-wrap: balance; }
+        .tp-h1 { font-size: clamp(26px, 7.4vw, 44px); line-height: 1.02; letter-spacing: -.035em; text-wrap: balance; }   /* the home page's .open-h1 */
         .tp-heron { width: min(58vw, 260px); height: auto; }
         @media (min-width: 1024px) {
           .tp-h1 { font-size: clamp(34px, min(3.5vw, 6.2svh), 66px); }
