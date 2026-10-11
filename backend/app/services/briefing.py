@@ -167,18 +167,18 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
     desc = description_text(short_description)
     if not desc:
         return None
-    inputs = [_input("description", desc, profile_as_of, f"{profile_source} company profile, short_description")]
+    inputs = [_input("description", desc, profile_as_of, f"{profile_source} company profile, short description")]
     dates: list[date] = [d for d in (profile_as_of,) if d]
     if name:
-        inputs.append(_input("company name", short_name(name, symbol), profile_as_of, f"tickers.name, read as {name!r} with its corporate suffix dropped"))
+        inputs.append(_input("company name", short_name(name, symbol), profile_as_of, f"company name on file, read as {name!r} with its corporate suffix dropped"))
     bits = []
     if gics_sector:
         bits.append((f"part of the S&P 500's {gics_sector} sector" if index_member else f"in the {gics_sector} sector") + (f" ({gics_sub_industry})" if gics_sub_industry else ""))
-        inputs.append(_input("GICS sector", gics_sector, gics_as_of, "S&P 500 constituent list (tickers.sector), the same source Discover shows"))
+        inputs.append(_input("GICS sector", gics_sector, gics_as_of, "S&P 500 constituent list, the same source Discover shows"))
         if gics_sub_industry:
-            inputs.append(_input("GICS sub-industry", gics_sub_industry, gics_as_of, "S&P 500 constituent list (tickers.industry)"))
+            inputs.append(_input("GICS sub-industry", gics_sub_industry, gics_as_of, "S&P 500 constituent list"))
         if index_member:
-            inputs.append(_input("index membership", "S&P 500", gics_as_of, "tickers.index_member, from the nightly constituent list"))
+            inputs.append(_input("index membership", "S&P 500", gics_as_of, "the nightly S&P 500 constituent list"))
         if gics_as_of:
             dates.append(gics_as_of)
     mv = market_value_words(quote_price * shares_outstanding) if quote_price and shares_outstanding else None
@@ -186,7 +186,7 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
         bits.append(f"worth about {mv}")
         t = fmt_quote_time(quote_ts)
         inputs += [_input("market cap", mv, t, "latest quote times shares outstanding"), _input("quote", fmt_money(quote_price), t, "quote cache, dated by its last trade"),
-                   _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "tickers.shares_outstanding (Finnhub profile)")]
+                   _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "Finnhub company profile")]
         dates += [datetime.fromtimestamp(int(quote_ts), NY).date(), shares_as_of]
     text = desc + (f" It's {', '.join(bits)}." if bits else "")
     rule = (f"The first sentence of the company's description as stored by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
@@ -217,14 +217,14 @@ def stock_sentence(symbol: str, *, quote_price: float | None, quote_ts: int | No
         else:
             bits.append(f"{fmt_pct(below, signed=False)} below its 52-week high of {fmt_money(high_52w)} ({fmt_date(high_52w_date)})")
             inputs.append(_input("distance below 52-week high", fmt_pct(below, signed=False), high_52w_date, "quote against the highest stored close"))
-        inputs.append(_input("52-week high", fmt_money(high_52w), high_52w_date, f"price_bars_shadow, highest close over {WINDOW_52W_DAYS} days"))
+        inputs.append(_input("52-week high", fmt_money(high_52w), high_52w_date, f"stored daily closes, highest close over {WINDOW_52W_DAYS} days"))
     if anchor_close_3m and anchor_date_3m:
         change = (quote_price / anchor_close_3m - 1) * 100
         bits.append(f"{'up' if change >= 0 else 'down'} {fmt_pct(abs(change), signed=False)} over three months")
         inputs += [_input("three-month change", fmt_pct(change), anchor_date_3m, "quote against the three-month anchor close"),
                    _input("three-month anchor close", fmt_money(anchor_close_3m), anchor_date_3m, f"first stored close on or after {WINDOW_3M_DAYS} days back")]
     if last_close is not None and last_close_date:
-        inputs.append(_input("last close", fmt_money(last_close), last_close_date, "price_bars_shadow"))
+        inputs.append(_input("last close", fmt_money(last_close), last_close_date, "stored daily closes"))
     return ", ".join(bits) + ".", inputs, dates
 
 
@@ -266,19 +266,19 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
                     outcome: str | None = None, pct_change_1d: float | None = None, bars_through: date | None = None) -> tuple[str, list[dict], list[date]]:
     """"Reported <date> <timing>: EPS $a against a $e estimate, a beat; the stock moved +x% the next session." The EPS clause is
     omitted without an actual; the move clause reads "the move settles at today's close" while the second bar is missing."""
-    inputs = [_input("report date", fmt_date(event_date), event_date, "events"), _input("report timing", timing or "unknown", event_date, "events.report_timing")]
+    inputs = [_input("report date", fmt_date(event_date), event_date, "earnings calendar"), _input("report timing", timing or "unknown", event_date, "earnings calendar, report timing")]
     head = f"Reported {fmt_date(event_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "")
     clauses: list[str] = []
     if eps_actual is not None and eps_estimate is not None:
         word = {"beat": "a beat", "miss": "a miss", "meet": "a match"}.get(outcome or "", None)
         clauses.append(f"EPS {fmt_money(eps_actual)} against a {fmt_money(eps_estimate)} estimate" + (f", {word}" if word else ""))
-        inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "events.eps_actual (Finnhub, else Yahoo Finance), the night of the report"),
-                   _input("EPS estimate", fmt_money(eps_estimate), event_date, "events.eps_estimate"), _input("outcome", outcome or "unknown", event_date, "actual above estimate is a beat")]
+        inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "reported EPS (Finnhub, else Yahoo Finance), the night of the report"),
+                   _input("EPS estimate", fmt_money(eps_estimate), event_date, "analyst consensus EPS estimate"), _input("outcome", outcome or "unknown", event_date, "actual above estimate is a beat")]
     base_date, after_date = move_dates(event_date, timing)
     when = "that session" if timing == "bmo" else "the next session"
     if pct_change_1d is not None and after_date:
         clauses.append(f"the stock moved {fmt_pct(pct_change_1d)} {when}")
-        inputs += [_input("1-day move", fmt_pct(pct_change_1d), after_date, "stored bars through the seeder's window (close to close)"),
+        inputs += [_input("1-day move", fmt_pct(pct_change_1d), after_date, "stored daily closes (close to close)"),
                    _input("1-day move window", f"close {fmt_date(base_date)} to close {fmt_date(after_date)}", after_date, "trading calendar")]
     elif after_date is None:
         clauses.append("the move is recorded once the report timing is known")
@@ -290,7 +290,7 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
         inputs.append(_input("settlement session", fmt_date(after_date), after_date, "trading calendar"))
     else:
         clauses.append(f"the move (close {fmt_date(base_date)} to close {fmt_date(after_date)}) is not yet stored")
-        inputs.append(_input("newest stored bar", fmt_date(bars_through) if bars_through else "none", bars_through, "price_bars_shadow"))
+        inputs.append(_input("newest stored bar", fmt_date(bars_through) if bars_through else "none", bars_through, "stored daily closes"))
     return f"{head}: " + "; ".join(clauses) + ".", inputs, [event_date]
 
 
@@ -316,7 +316,7 @@ def big_move_clause(*, move_date: date, move_pct: float, typical_abs: float, mul
     """"Its biggest move in the past month was +Z% on <date>, about N times a typical day for this stock." No cause is stated."""
     n = f"{multiple:.0f}"
     text = f"Its biggest move in the past month was {fmt_pct(move_pct)} on {fmt_date(move_date)}, about {n} times a typical day for this stock."
-    inputs = [_input("biggest daily move", fmt_pct(move_pct), move_date, f"price_bars_shadow, close to close, largest absolute move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates"),
+    inputs = [_input("biggest daily move", fmt_pct(move_pct), move_date, f"stored daily closes, close to close, largest absolute move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates"),
               _input("typical daily move", fmt_pct(typical_abs, signed=False), move_date, f"median absolute daily move over {WINDOW_52W_DAYS} days"),
               _input("multiple of a typical day", n, move_date, f"at least {BIG_MOVE_MULTIPLE} to be shown")]
     return text, inputs, [move_date]
@@ -331,7 +331,7 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     text = f"Reports {fmt_date(next_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "") + ", " + ("today" if days == 0 else plural(days, "day away", "days away"))
     text += f" ({conf})" if conf else ""
     inputs = [_input("next earnings date", fmt_date(next_date), next_date, source_name(source) or source), _input("days away", days, today),
-              _input("report timing", timing or "unknown", next_date, "events.report_timing"), _input("confidence", confirmation or "none", next_date, note)]
+              _input("report timing", timing or "unknown", next_date, "earnings calendar, report timing"), _input("confidence", confirmation or "none", next_date, note)]
     ev = evidence_phrase(note) if confirmation == "confirmed" else None
     if ev:
         inputs.append(_input("evidence", ev, next_date, "earnings calendar note"))
@@ -339,14 +339,14 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     if implied_pct is not None and chain_date:
         pct = fmt_pct(implied_pct * 100, signed=False)
         clause = f"options price a move of about ±{pct}"
-        inputs += [_input("implied move", pct, chain_date, "ATM straddle over spot, services/implied_move; chain " + fmt_date(chain_date)), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade")]
+        inputs += [_input("implied move", pct, chain_date, "at-the-money straddle over the stock price; chain " + fmt_date(chain_date)), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade")]
         if expiration:
             inputs.append(_input("expiration", fmt_date(expiration), expiration, "chosen expiry"))
         dates.append(chain_date)
         if avg_abs_1d is not None and sample_n > 0:
             avg = fmt_pct(avg_abs_1d, signed=False)
             clause += f" against a typical ±{avg}"
-            inputs += [_input("typical move after a report", avg, sample_as_of, f"historical_reactions, mean absolute 1-day move over {last_reports(sample_n)}"), _input("reports in the sample", sample_n, sample_as_of)]
+            inputs += [_input("typical move after a report", avg, sample_as_of, f"stored earnings reactions, mean absolute 1-day move over {last_reports(sample_n)}"), _input("reports in the sample", sample_n, sample_as_of)]
             if sample_as_of:
                 dates.append(sample_as_of)
         text += f"; {clause}"

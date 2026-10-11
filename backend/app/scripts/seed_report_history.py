@@ -1,5 +1,5 @@
-"""Earnings report history for a ticker from EDGAR by CIK: every 8-K with Item 2.02 (results of operations) becomes a
-company-confirmed earnings event, with its timing read from the filing's acceptance time. The CIK is found by the symbol
+"""Earnings report history for a ticker from EDGAR by CIK: every 8-K with Item 2.02 (results of operations) whose documents state
+per-share results becomes a company-confirmed earnings event, with its timing read from the filing's acceptance time. The CIK is found by the symbol
 or by an old symbol the ticker was renamed from (VMRK through its EQR alias). Dry run by default.
 
     python -m app.scripts.seed_report_history VMRK
@@ -68,6 +68,13 @@ async def run(argv: list[str]) -> int:
             if not cik:
                 print(f"{sym}: no CIK by the symbol or any alias"); return 1
             reports = report_dates(await edgar.get_all_8k_records(cik), date.today())
+            # Item 2.02 alone is not a report: only a filing whose documents state per-share results (services/earnings_release)
+            from app.services.earnings_release import is_earnings_release
+            kept = [r for r in reports if r["accession"] and await is_earnings_release(edgar, cik, r["accession"])]
+            for r in reports:
+                if r not in kept:
+                    print(f"  {r['date']}: Item 2.02 without per-share results ({r['accession']}), not a report")
+            reports = kept
             existing = {e.event_date: e for e in (await s.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS))).scalars().all()}
             print(f"{sym} (CIK {cik}): {len(reports)} Item 2.02 report(s) in {HISTORY_YEARS} years; {len(existing)} earnings event(s) stored ({'write' if write else 'dry run'})")
             inserted = kept = confirmed = skipped = 0

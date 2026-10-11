@@ -4,7 +4,7 @@ The seeder only learns about a report from the events table, so a report whose
 date was never stored (or stored wrong) is never measured. This step asks the
 sources that know a report happened: Finnhub's past earnings calendar (an entry
 with an actual EPS) for every active ticker, and EDGAR (an 8-K carrying Item
-2.02, the earnings release) for tickers Finnhub does not list whose report was
+2.02 whose documents state per-share results, the earnings release) for tickers Finnhub does not list whose report was
 expected in the window: a stored earnings date fell inside it, or the last
 reaction row is REPORT_DUE_DAYS or more old, so a quarterly report was due whether
 or not the calendar still holds a date for it. For each report in the last
@@ -78,10 +78,11 @@ def finnhub_reports(entries: list[dict], today: date, lookback_days: int = LOOKB
     return out
 
 
-def edgar_release_dates(records: list[dict], today: date, lookback_days: int = LOOKBACK_DAYS) -> list[date]:
-    """Filing dates of 8-Ks carrying Item 2.02 inside the window."""
+def edgar_release_filings(records: list[dict], today: date, lookback_days: int = LOOKBACK_DAYS) -> list[tuple[date, str | None]]:
+    """(filing date, accession) of 8-Ks carrying Item 2.02 inside the window. Item 2.02 alone is not a report: services/earnings_release
+    decides from the documents (Tesla's deliveries and Freeport's operational update of 2026-10-02 were filed under it)."""
     start = today - timedelta(days=lookback_days)
-    out: list[date] = []
+    out: list[tuple[date, str | None]] = []
     for r in records:
         items = [i.strip() for i in (r.get("items") or "").split(",")]
         if EDGAR_EARNINGS_ITEM not in items:
@@ -91,8 +92,24 @@ def edgar_release_dates(records: list[dict], today: date, lookback_days: int = L
         except (KeyError, TypeError, ValueError):
             continue
         if start <= d <= today:
-            out.append(d)
-    return sorted(set(out))
+            out.append((d, r.get("accession")))
+    return sorted(set(out), key=lambda x: (x[0], x[1] or ""))
+
+
+def edgar_release_dates(records: list[dict], today: date, lookback_days: int = LOOKBACK_DAYS) -> list[date]:
+    """Filing dates of 8-Ks carrying Item 2.02 inside the window (before the per-share check)."""
+    return sorted({d for d, _ in edgar_release_filings(records, today, lookback_days)})
+
+
+async def earnings_release_dates(edgar, cik: str, records: list[dict], today: date) -> list[date]:
+    """Filing dates in the window of Item 2.02 8-Ks whose documents state per-share results: the same rule the calendar step
+    applies (refresh_earnings_calendar._edgar_202_dates), so neither step stores a report from a filing that carries none."""
+    from app.services.earnings_release import is_earnings_release
+    out = set()
+    for d, accession in edgar_release_filings(records, today):
+        if d not in out and accession and await is_earnings_release(edgar, cik, accession):
+            out.add(d)
+    return sorted(out)
 
 
 # ── Matching ─────────────────────────────────────────────────────────────────
@@ -232,7 +249,7 @@ async def find_missing(session, tickers: list, entries: list[dict], edgar: Edgar
                 cik = await edgar.get_cik(sym)
                 if not cik:
                     continue
-                dates = edgar_release_dates(await edgar.get_all_8k_records(cik), today)
+                dates = await earnings_release_dates(edgar, cik, await edgar.get_all_8k_records(cik), today)
             except Exception as exc:   # one filer must not stop the check
                 print(f"  EDGAR check skipped for {sym}: {redact(exc)}", flush=True)
                 continue

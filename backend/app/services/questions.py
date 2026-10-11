@@ -43,8 +43,8 @@ def q_reaction_normal(*, name: str, symbol: str, event_date: date, timing: str |
             f"over {last_reports(n_reports)}; {plural(larger_count, 'of those reports moved it more', 'of those reports moved it more')}.")
     idea = ("A 1-day move is the close-to-close change over the first session that trades on the news; a report released after the close "
             "is priced the next morning, so that next session is the one that counts.")
-    inputs = [_input("1-day move", fmt_pct(move_pct), event_date, "stored bars through the seeder's window"), _input("report date", fmt_date(event_date), event_date, "events"),
-              _input("typical move", f"±{fmt_pct(typical_abs, signed=False)}", sample_as_of, "mean absolute 1-day move, historical_reactions"),
+    inputs = [_input("1-day move", fmt_pct(move_pct), event_date, "stored daily closes"), _input("report date", fmt_date(event_date), event_date, "earnings calendar"),
+              _input("typical move", f"±{fmt_pct(typical_abs, signed=False)}", sample_as_of, "mean absolute 1-day move, stored earnings reactions"),
               _input("reports moving more", larger_count, sample_as_of, "past reports with a larger absolute 1-day move"), _input("reports in the sample", n_reports, sample_as_of)]
     return _q("reaction_normal", f"Was {name}'s move after this report normal?", data, idea, inputs, event_date,
               f"Shown through five sessions after a report with at least {MIN_REPORTS} past reports; the move is the seeder's 1-day window on the stored bars; "
@@ -60,18 +60,18 @@ def q_implied_big(*, name: str, symbol: str, implied_pct: float, chain_date: dat
         return None
     imp = fmt_pct(implied_pct * 100, signed=False)
     typ = fmt_pct(typical_abs, signed=False)
-    from app.services.move_comparison import compare_moves
+    from app.services.move_comparison import LESS_RATIO, MORE_RATIO, compare_moves
     verdict = compare_moves(implied_pct * 100, typical_abs)
     data = (f"Options price a move of about ±{imp} for the {fmt_date(next_date)} report; over {last_reports(n_reports)} {symbol} has moved ±{typ} on average, "
             f"so the market is pricing {verdict}.")
     idea = ("The implied move is what a straddle costs: the price the options market puts on uncertainty. It tends to run above the move that "
             "actually follows, because option sellers charge for the risk of being wrong.")
-    inputs = [_input("implied move", f"±{imp}", chain_date, "ATM straddle over spot, latest fresh chain"), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade"),
-              _input("report date", fmt_date(next_date), next_date, "events, confirmed by the company"), _input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, historical_reactions"),
+    inputs = [_input("implied move", f"±{imp}", chain_date, "at-the-money straddle over the stock price, latest fresh chain"), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade"),
+              _input("report date", fmt_date(next_date), next_date, "earnings calendar, confirmed by the company"), _input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, stored earnings reactions"),
               _input("reports in the sample", n_reports, sample_as_of)]
     return _q("implied_big", f"Is a ±{imp} expected move big for {name}?", data, idea, inputs, chain_date,
               f"A company-confirmed report within {NEXT_WITHIN_DAYS} days (an estimated date is never priced) and a fresh chain; at least {MIN_REPORTS} past reports; more than usual means the implied move is over "
-              "1.2 times the mean absolute 1-day move, less than usual under 0.8 times (services/move_comparison).")
+              f"{MORE_RATIO:g} times the mean absolute 1-day move, less than usual under {LESS_RATIO:g} times.")
 
 
 # 3 ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ def q_beat_fell(*, name: str, symbol: str, beats: int, fell: int, as_of: date | 
     data = f"{symbol} fell the next session after {fell} of its last {beats} beats ({share_txt})."
     idea = ("By report day the price usually already reflects an expected beat, so what moves the stock is the size of the surprise against the estimate "
             "and what the company says about the months ahead.")
-    inputs = [_input("beats", beats, as_of, "EPS actual above estimate, historical_reactions"), _input("beats followed by a fall", fell, as_of, "1-day move below zero"),
+    inputs = [_input("beats", beats, as_of, "EPS actual above estimate, stored earnings reactions"), _input("beats followed by a fall", fell, as_of, "1-day move below zero"),
               _input("share", share_txt, as_of)]
     return _q("beat_fell", f"Why does {name} sometimes fall after beating estimates?", data, idea, inputs, as_of,
               f"Asked when at least {BEAT_FELL_SHARE}% of at least {MIN_REPORTS} beats were followed by a negative 1-day move.")
@@ -104,7 +104,7 @@ def q_big_move(*, name: str, symbol: str, move_date: date, move_pct: float, typi
             f"over the past {RANK_YEARS} years ({n_sessions:,} sessions).")
     idea = ("Realized volatility measures how much a stock actually moves from one close to the next; a single day like this can dominate a 20-day reading "
             "for weeks after it.")
-    inputs = [_input("daily move", fmt_pct(move_pct), move_date, "price_bars_shadow, close to close"), _input("multiple of a typical day", mult, move_date, "against the median absolute daily move of the past year"),
+    inputs = [_input("daily move", fmt_pct(move_pct), move_date, "stored daily closes, close to close"), _input("multiple of a typical day", mult, move_date, "against the median absolute daily move of the past year"),
               _input("typical daily move", f"±{fmt_pct(typical_abs, signed=False)}", move_date, "median absolute daily move, past year"),
               _input("share of daily moves smaller", share, move_date, f"all stored daily moves over {RANK_YEARS} years"), _input("sessions compared", f"{n_sessions:,}", move_date)]
     return _q("big_move", f"How unusual was {name}'s move on {fmt_date(move_date)}?", data, idea, inputs, move_date,
@@ -120,12 +120,12 @@ def q_upgrades(*, name: str, symbol: str, upgrades_30d: int, upgrade_sessions: i
         return None
     med = fmt_pct(median_1d)
     data = f"On its {upgrade_sessions} past upgrade days {symbol}'s median move was {med}"
-    inputs = [_input("recent upgrades", upgrades_30d, newest_upgrade, f"events, analyst_action up, last {UPGRADE_DAYS} days"),
-              _input("upgrade sessions", upgrade_sessions, stats_as_of, "analyst_reaction_stats"), _input("median upgrade-day move", med, stats_as_of, "analyst_reaction_stats.median_1d_upgrade")]
+    inputs = [_input("recent upgrades", upgrades_30d, newest_upgrade, f"analyst upgrades on file, last {UPGRADE_DAYS} days"),
+              _input("upgrade sessions", upgrade_sessions, stats_as_of, "stored analyst-reaction statistics"), _input("median upgrade-day move", med, stats_as_of, "stored analyst-reaction statistics, median 1-day move on upgrade days")]
     if continuation_pct is not None and sample_5d >= MIN_SESSIONS:
         cont = f"{continuation_pct:.0f}%"
         data += f", and in {cont} of them the five-session move kept the first day's direction."
-        inputs.append(_input("direction kept after five sessions", cont, stats_as_of, f"analyst_reaction_stats.upgrade_5d_continuation_pct over {sample_5d} sessions"))
+        inputs.append(_input("direction kept after five sessions", cont, stats_as_of, f"stored analyst-reaction statistics, upgrades whose direction held five sessions later, over {sample_5d} sessions"))
     else:
         data += "."
     idea = "An upgrade can move a stock because it changes what some investors expect of it; the move often fades once the new view is priced in."
@@ -146,7 +146,7 @@ def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None
     data = f"{symbol} goes ex-dividend on {fmt_date(ex_date)}{amt}."
     idea = "On the ex-dividend date the price typically opens lower by about the dividend, because buyers from that day on no longer receive that payment."
     knew = declared_on or stored_on or today
-    inputs = [_input("ex-dividend date", fmt_date(ex_date), knew, "events, ex_dividend")]
+    inputs = [_input("ex-dividend date", fmt_date(ex_date), knew, "dividend calendar")]
     if amount:
         inputs.append(_input("dividend per share", fmt_money(amount), knew, (f"declared in the 8-K filed {fmt_date(declared_on)}" + (f" ({accession})" if accession else "")) if declared_on
                              else "the last per-payment amount (Intrinio's bars, else yfinance's last declared payment)"))
@@ -166,8 +166,8 @@ def q_usual_move(*, name: str, symbol: str, typical_abs: float, n_reports: int, 
             f"({fmt_date(best[0])}) and {fmt_pct(worst[1])} ({fmt_date(worst[0])}).")
     idea = ("The typical move is the average size of the stock's past reactions, up or down; it is the yardstick an expected move is measured "
             "against, because the options market is pricing a move of some size, not a direction.")
-    inputs = [_input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, historical_reactions"), _input("reports in the sample", n_reports, sample_as_of),
-              _input("largest up move", fmt_pct(best[1]), best[0], "historical_reactions"), _input("largest down move", fmt_pct(worst[1]), worst[0], "historical_reactions")]
+    inputs = [_input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, stored earnings reactions"), _input("reports in the sample", n_reports, sample_as_of),
+              _input("largest up move", fmt_pct(best[1]), best[0], "stored earnings reactions"), _input("largest down move", fmt_pct(worst[1]), worst[0], "stored earnings reactions")]
     return _q("usual_move", f"How much does {name} usually move on earnings?", data, idea, inputs, sample_as_of,
               f"At least {MIN_REPORTS} past reports with a 1-day move; typical is the mean absolute move; the largest are the extremes of the same sample.")
 
@@ -183,8 +183,8 @@ def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_rank: float, sam
     data = f"{symbol}'s realized volatility over the last 20 sessions is {rv} annualized, {phrase} of its own 20-day windows over the past year."
     idea = ("Realized volatility measures how much a stock actually moved from one close to the next; a stock is only \"volatile\" relative to its own "
             "normal, so the comparison that matters is with its own past year.")
-    inputs = [_input("20-day realized volatility", rv, as_of, "rv_snapshots.rv_20d, annualized"), _input("share of past-year windows", share, as_of, f"rv_snapshots.rv_rank {rv_rank:.0f}"),
-              _input("sessions in the past year", sample_days, as_of, "rv_snapshots.sample_days")]
+    inputs = [_input("20-day realized volatility", rv, as_of, "stored realized volatility over 20 sessions, annualized"), _input("share of past-year windows", share, as_of, f"stored volatility rank, {rv_rank:.0f}"),
+              _input("sessions in the past year", sample_days, as_of, "stored volatility rank, sessions in its sample")]
     return _q("volatile_now", f"Is {name} more volatile than usual right now?", data, idea, inputs, as_of,
               f"The latest servable realized-volatility snapshot with at least {MIN_SESSIONS} sessions; the rank is the percentile of the current 20-day value among the past year's windows.")
 
@@ -209,26 +209,26 @@ def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: d
     """The stock's trailing P/E against its own five-year history and its sector. Shown with any stored P/E; the history and the
     sector clauses appear only when stored (a sector median is absent below 90% coverage, and the answer says so)."""
     data = f"{symbol} trades at {pe:.1f} times its earnings over {fmt_date(window_start)} to {fmt_date(window_end)}"
-    inputs = [_input("P/E", f"{pe:.1f}", as_of, "pe_snapshots: stored close over four reported quarters of GAAP diluted EPS (XBRL, else the earnings release), restated across recorded splits"),
+    inputs = [_input("P/E", f"{pe:.1f}", as_of, "stored close over four reported quarters of GAAP diluted EPS (from the filings' tagged data, else the earnings release), restated across recorded splits"),
               _input("window start", fmt_date(window_start), window_start, "the first of the four quarters"), _input("window end", fmt_date(window_end), window_end, "the latest reported quarter")]
     if hist_median is not None and hist_share_above is not None and hist_sessions:
         data += (f", {pe_history_words(pe, hist_median)} its five-year median of {hist_median:.1f} and higher than in {hist_share_above}% of {hist_sessions:,} sessions"
                  + (f" ({hist_excluded:,} left out for negative or tiny earnings)" if hist_excluded else ""))
-        inputs += [_input("five-year median P/E", f"{hist_median:.1f}", hist_last, f"pe_snapshots.hist_median, sessions {fmt_date(hist_first)} to {fmt_date(hist_last)}"),
-                   _input("sessions below today's P/E", f"{hist_share_above}%", hist_last, "pe_snapshots.hist_share_above, share of the five-year sessions"),
-                   _input("sessions compared", f"{hist_sessions:,}", hist_last, "pe_snapshots.hist_sessions")]
+        inputs += [_input("five-year median P/E", f"{hist_median:.1f}", hist_last, f"stored P/E history, median over sessions {fmt_date(hist_first)} to {fmt_date(hist_last)}"),
+                   _input("sessions below today's P/E", f"{hist_share_above}%", hist_last, "stored P/E history, share of the five-year sessions"),
+                   _input("sessions compared", f"{hist_sessions:,}", hist_last, "stored P/E history, sessions counted")]
         if hist_excluded:
             inputs.append(_input("sessions left out", f"{hist_excluded:,}", hist_last, "trailing EPS negative or under 1% of price (P/E above 100)"))
     data += "."
     if sector and sector_median is not None:
         data += f" Its {sector} sector's median is {sector_median:.1f}, so it sits {pe_history_words(pe, sector_median)} its peers."
-        inputs.append(_input("sector median P/E", f"{sector_median:.1f}", as_of, f"pe_sector_snapshots, {sector}, over the sector's active tickers with a fresh window"))
+        inputs.append(_input("sector median P/E", f"{sector_median:.1f}", as_of, f"stored sector P/E, {sector}, over the sector's active stocks with a fresh window"))
     elif sector and sector_fresh is not None and sector_active:
         from app.services.valuation import SECTOR_COVERAGE_MIN
         needed = f"{SECTOR_COVERAGE_MIN:.0%}"
         data += f" No sector median is shown: only {sector_fresh} of the {sector_active} active stocks in its sector have a fresh P/E window, and {needed} are needed."
-        inputs += [_input("sector stocks with a fresh window", sector_fresh, as_of, "pe_sector_snapshots.fresh"), _input("active stocks in the sector", sector_active, as_of, "pe_sector_snapshots.active"),
-                   _input("coverage needed", needed, as_of, "services/valuation SECTOR_COVERAGE_MIN")]
+        inputs += [_input("sector stocks with a fresh window", sector_fresh, as_of, "stored sector P/E, stocks with a fresh window"), _input("active stocks in the sector", sector_active, as_of, "stored sector P/E, active stocks"),
+                   _input("coverage needed", needed, as_of, "the coverage a sector median needs")]
     idea = ("P/E is the price paid for each dollar of the last year's earnings, and it means most when compared with the same company's history and its peers; "
             "for companies whose earnings swing with the cycle, a low P/E near a peak in earnings can mislead.")
     if sector == REIT_SECTOR:

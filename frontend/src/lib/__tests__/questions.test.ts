@@ -9,7 +9,7 @@ import { GLOSSARY_LINKS } from "@/lib/briefing";
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 const INPUTS = [
-  { name: "1-day move", value: "+3.0%", as_of: "2026-09-30", source: "stored bars through the seeder's window" },
+  { name: "1-day move", value: "+3.0%", as_of: "2026-09-30", source: "stored daily closes" },
   { name: "typical move", value: "±7.0%", as_of: "2026-06-25", source: "mean absolute 1-day move" },
   { name: "reports moving more", value: "15", as_of: "2026-06-25", source: null },
   { name: "reports in the sample", value: "20", as_of: "2026-06-25", source: null },
@@ -21,7 +21,7 @@ describe("the question strip renders answers from the API with a receipt on ever
     const parts = answerParts(DATA, INPUTS);
     const numbers = parts.filter((p) => p.receipt !== undefined);
     expect(numbers.map((p) => p.text)).toEqual(["+3.0%", "Sep 30, 2026", "±7.0%", "20", "15"]);          // a date is one span
-    expect(receiptFor("+3.0%", INPUTS)).toBe("1-day move: +3.0% (As of Sep 30, 2026; stored bars through the seeder's window)");
+    expect(receiptFor("+3.0%", INPUTS)).toBe("1-day move: +3.0% (As of Sep 30, 2026; stored daily closes)");
     expect(receiptFor("20", INPUTS)).toBe("reports in the sample: 20 (As of Jun 25, 2026)");
     expect(parts.map((p) => p.text).join("")).toBe(DATA);                                 // nothing lost or reordered
     const twice = answerParts("A beat after a beat; the 1-day move and the 1-day move.", []);

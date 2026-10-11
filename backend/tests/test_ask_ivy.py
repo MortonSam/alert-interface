@@ -11,7 +11,7 @@ from app.services import ask_ivy as A
 
 FACTS = [
     {"id": "quote", "name": "quote", "value": "$1,045.56", "as_of": "Oct 6, 4:00 PM ET", "source": "quote cache", "kind": "number"},
-    {"id": "typical_move", "name": "typical move", "value": "±7.0%", "as_of": "2026-06-24", "source": "historical_reactions", "kind": "number"},
+    {"id": "typical_move", "name": "typical move", "value": "±7.0%", "as_of": "2026-06-24", "source": "stored earnings reactions", "kind": "number"},
     {"id": "report_date", "name": "report date", "value": "Sep 30, 2026", "as_of": "2026-09-30", "source": "events", "kind": "number"},
     {"id": "implied_vs_typical", "name": "implied move against the typical move", "value": "more than usual", "as_of": "2026-10-05", "source": "x", "kind": "word"},
     {"id": "price_vs_52w_high", "name": "price against the 52-week high", "value": "below", "as_of": "2026-06-25", "source": "x", "kind": "word"},

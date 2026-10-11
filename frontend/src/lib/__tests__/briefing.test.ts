@@ -13,7 +13,7 @@ const S: BriefingSentence[] = [
     as_of: "2026-10-05", inputs: [{ name: "next earnings date", value: "Oct 14, 2026", as_of: "2026-10-14", source: "finnhub" }, { name: "days away", value: "9", as_of: "2026-10-05", source: null }] },
   { key: "profile", text: "Beat estimates in 15 of 20 stored quarters and fell the next session after 8 of those 15 beats (53%), so a beat alone has not been a buy signal.",
     rule: "Earnings quarters with a stored 1-day move; a share of 50% or more reads as no buy signal.", as_of: "2026-06-25",
-    inputs: [{ name: "stored quarters", value: "20", as_of: "2026-06-25", source: "historical_reactions" }] },
+    inputs: [{ name: "stored quarters", value: "20", as_of: "2026-06-25", source: "stored earnings reactions" }] },
 ];
 
 describe("the briefing renders the API's sentences and receipts, nothing typed", () => {

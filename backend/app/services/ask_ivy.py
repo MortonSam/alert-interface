@@ -288,20 +288,20 @@ def word_facts(raw: dict) -> list[dict]:
         out.append(_fact("price_vs_52w_high", "price against the 52-week high", "near" if below < B.NEAR_HIGH_PCT else "below", bars.get("high_52w_date"),
                          f"within {B.NEAR_HIGH_PCT}% of the highest stored close is near", "word"))
         if bars.get("high_52w_date"):
-            out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "price_bars_shadow, the day of the highest close"))
+            out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "stored daily closes, the day of the highest close"))
     rv = raw.get("rv")
     if rv:
         out.append(_fact("volatility_vs_year", "20-day realized volatility against the stock's own past year", volatility_word(rv["rv_rank"]), rv["as_of"],
-                         f"rv_snapshots.rv_rank: at or above the {RV_ELEVATED_RANK}th percentile is elevated, at or below the {RV_QUIET_RANK}th quiet", "word"))
+                         f"stored volatility rank: at or above the {RV_ELEVATED_RANK}th percentile is elevated, at or below the {RV_QUIET_RANK}th quiet", "word"))
     last = raw.get("last_report")
     if last:
         if last.get("timing") in B.TIMING_PHRASE:
-            out.append(_fact("last_report_timing", "last report timing", B.TIMING_PHRASE[last["timing"]], last["event_date"], "events.report_timing", "word"))
+            out.append(_fact("last_report_timing", "last report timing", B.TIMING_PHRASE[last["timing"]], last["event_date"], "earnings calendar, report timing", "word"))
         if last.get("move_pct") is not None and typ:
             out.append(_fact("last_move_vs_typical", "move after the last report against the typical move", compare_moves(abs(last["move_pct"]), typ), last["event_date"],
                              "services/move_comparison: over 1.2x the typical move is more than usual, under 0.8x less", "word"))
         if last.get("outcome"):
-            out.append(_fact("last_report_outcome", "last report against the EPS estimate", last["outcome"], last["event_date"], "events.eps_actual against events.eps_estimate", "word"))
+            out.append(_fact("last_report_outcome", "last report against the EPS estimate", last["outcome"], last["event_date"], "reported EPS against the analyst consensus estimate", "word"))
         if last.get("move_pct") is not None:
             out.append(_fact("last_report_direction", "direction of the move after the last report", "rose" if last["move_pct"] > 0 else "fell" if last["move_pct"] < 0 else "unchanged",
                              last["event_date"], "sign of the stored 1-day move", "word"))
@@ -309,7 +309,7 @@ def word_facts(raw: dict) -> list[dict]:
     if nxt and nxt.get("date"):
         out.append(_fact("next_report_status", "next report date", "confirmed" if nxt.get("confirmation") == "confirmed" else "estimated", nxt["date"], nxt.get("note"), "word"))
         if nxt.get("timing") in B.TIMING_PHRASE:
-            out.append(_fact("next_report_timing", "next report timing", B.TIMING_PHRASE[nxt["timing"]], nxt["date"], "events.report_timing", "word"))
+            out.append(_fact("next_report_timing", "next report timing", B.TIMING_PHRASE[nxt["timing"]], nxt["date"], "earnings calendar, report timing", "word"))
     pe = raw.get("pe")
     if pe:
         if pe.get("sector") == "Real Estate":
@@ -319,10 +319,10 @@ def word_facts(raw: dict) -> list[dict]:
         from app.services.questions import pe_history_words
         if pe.get("hist_median") is not None:
             out.append(_fact("pe_vs_history", "P/E against its five-year median", pe_history_words(pe["pe"], pe["hist_median"]),
-                             pe["as_of"], "pe_snapshots.pe against pe_snapshots.hist_median; judged at one decimal (services/questions pe_history_words)", "word"))
+                             pe["as_of"], "stored P/E against its five-year median, judged at one decimal", "word"))
         if pe.get("sector_median") is not None:
             out.append(_fact("pe_vs_sector", "P/E against its sector median", pe_history_words(pe["pe"], pe["sector_median"]),
-                             pe["as_of"], "pe_snapshots.pe against pe_sector_snapshots.median_pe; judged at one decimal (services/questions pe_history_words)", "word"))
+                             pe["as_of"], "stored P/E against its sector median, judged at one decimal", "word"))
     div = raw.get("dividend")
     if div:
         out.append(_fact("dividend_status", "next dividend", "declared" if div.get("declared_on") else "estimated", div.get("declared_on") or div.get("ex_date"), "events (ex_dividend)", "word"))

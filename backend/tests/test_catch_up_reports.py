@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 from app.database import ScriptSessionLocal
 from app.models.ticker import Ticker
 from app.scripts.catch_up_reports import (
-    LOOKBACK_DAYS, MATCH_TOLERANCE_DAYS, REPORT_DUE_DAYS, catch_up, edgar_release_dates, find_missing, finnhub_reports,
+    LOOKBACK_DAYS, MATCH_TOLERANCE_DAYS, REPORT_DUE_DAYS, catch_up, earnings_release_dates, edgar_release_dates, find_missing, finnhub_reports,
     missing_reports,
 )
 
@@ -34,6 +34,16 @@ def test_edgar_release_is_an_8k_with_item_202_in_the_window():
         {"filing_date": "2026-09-24", "items": " 2.02 , 7.01"},
     ]
     assert edgar_release_dates(records, TODAY) == [date(2026, 9, 24)]
+
+
+@pytest.mark.asyncio
+async def test_an_item_202_filing_without_per_share_results_is_not_a_report():
+    """Production, 2026-10-11: Tesla's deliveries release and Freeport's operational update, both 8-K Item 2.02 of 2026-10-02, came
+    back as confirmed reports from this step once each stock's last reaction row was REPORT_DUE_DAYS old (TSLA's had been deleted
+    the day before). The step now applies the per-share rule the calendar step uses."""
+    recs = await _Edgar().get_all_8k_records("0000815097")
+    assert edgar_release_dates(recs, date(2026, 9, 29)) == [date(2026, 9, 24), date(2026, 9, 29)]
+    assert await earnings_release_dates(_Edgar(), "0000815097", recs, date(2026, 9, 29)) == [date(2026, 9, 29)]
 
 
 def test_missing_is_a_report_with_no_row_within_the_tolerance():
@@ -65,7 +75,17 @@ class _Edgar:
         return "0000815097" if symbol == "ZZCCL" else None
 
     async def get_all_8k_records(self, cik):
-        return [{"filing_date": "2026-09-29", "items": "2.02,9.01"}, {"filing_date": "2026-06-23", "items": "2.02,9.01"}]
+        return [{"filing_date": "2026-09-29", "items": "2.02,9.01", "accession": "0000815097-26-000104"},
+                {"filing_date": "2026-09-24", "items": "2.02,7.01,9.01", "accession": "0000815097-26-000099"},   # an operational update
+                {"filing_date": "2026-06-23", "items": "2.02,9.01", "accession": "0000815097-26-000050"}]
+
+    async def list_filing_documents(self, cik, accession, every_exhibit=False):
+        return ["ex99.htm"]
+
+    async def fetch_filing_document(self, cik, accession, name):
+        if accession.endswith("000099"):
+            return "<p>Third-quarter copper production of approximately 830 million pounds was in line with expectations.</p>"
+        return "<p>Net income of $2.1 billion, or $1.64 per diluted share, for the third quarter.</p>"
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,7 @@ export default async function Home() {
           .open-heron, .open-line, .open-rest, .open-cue { animation: none; }
         }
         .stat-number {
-          font-size: clamp(36px, 4.2vw, 60px);   /* lib/siteCounters.ts COUNTER_LAYOUT.font: seven characters fit a quarter column from 1024px up */
+          font-size: clamp(36px, 4.2vw, 60px);   /* seven counter characters fit a quarter column from 1024px up */
           line-height: 1;
           letter-spacing: -.01em;
           font-variant-numeric: tabular-nums;

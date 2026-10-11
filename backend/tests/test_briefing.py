@@ -40,7 +40,7 @@ def test_profile_quotes_the_first_sentence_then_the_gics_sentence_with_quote_tim
                            gics_as_of=date(2026, 10, 5), index_member=True, quote_price=1063.96, quote_ts=QUOTE_TS, shares_outstanding=1_119_000_000, shares_as_of=date(2026, 10, 5))
     assert s["text"] == ("Micron Technology, Inc. designs, manufactures, and sells memory and storage products. "
                          "It's part of the S&P 500's Information Technology sector (Semiconductors), worth about $1.2 trillion.")
-    assert {"name": "GICS sector", "value": "Information Technology", "as_of": "2026-10-05", "source": "S&P 500 constituent list (tickers.sector), the same source Discover shows"} in s["inputs"]
+    assert {"name": "GICS sector", "value": "Information Technology", "as_of": "2026-10-05", "source": "S&P 500 constituent list, the same source Discover shows"} in s["inputs"]
     assert any(i["name"] == "shares outstanding" and i["value"] == "1,119.0 million" and i["as_of"] == "2026-10-05" for i in s["inputs"])
     assert any(i["name"] == "market cap" and i["value"] == "$1.2 trillion" and i["as_of"] == "Oct 5, 4:00 PM ET" for i in s["inputs"])
     assert any(i["name"] == "company name" and i["value"] == "Micron Technology" for i in s["inputs"])
