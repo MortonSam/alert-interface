@@ -34,6 +34,11 @@ PRIOR_MOVES_SHOWN = 20
 REPORT_WINDOW_DAYS = 7
 STRUCTURES = ("long_call", "long_straddle", "bull_call_spread", "iron_condor")
 VERDICT_NO_EDGE, VERDICT_POSSIBLE_EDGE = "no_edge", "possible_edge"
+# "possible edge" must be earned on held-out data before any card carries it: on the 2024-2026 events the cards this model would have
+# called a possible edge realized +0.02 per $100 at the bid and ask held to expiration (95% interval -4.36 to +4.68; ops/ivy_v3/verdict_check.md,
+# app/scripts/ivy_v3_verdicts.py). Until that interval sits above zero every verdict is no_edge and the expected values show as computed.
+POSSIBLE_EDGE_EARNED = False
+VERDICT_RULE_NOTE = "possible edge is not yet earned on held-out data: every verdict reads no edge; the expected values are shown as computed"
 EXPECTED_PAYOFF_METHOD = ("payoff at expiration averaged over prior report moves measured over the same number of sessions as this expiry is from the "
                           "chain date (each standardized by the typical 1-day move known at the time, rescaled by today's typical move, the pool's mean drift "
                           "removed), less the entry cost at the real bid and ask")
@@ -253,10 +258,11 @@ def evaluate_structure(name: str, legs: list[dict], spot: float, tau: float, z: 
             "ev_per_100": round(ev, 2), "ev_per_100_full_spread": round(ev_full, 2), "expected_payoff_method": EXPECTED_PAYOFF_METHOD}
 
 
-def verdict_for(structures: dict[str, dict]) -> tuple[str, str | None]:
-    """Pure: "possible_edge" only when a structure clears zero at a full spread (that structure named); else "no_edge"."""
+def verdict_for(structures: dict[str, dict], earned: bool = POSSIBLE_EDGE_EARNED) -> tuple[str, str | None]:
+    """Pure: "possible_edge" only when a structure clears zero at a full spread (that structure named) AND the verdict has been earned on
+    held-out data (POSSIBLE_EDGE_EARNED); else "no_edge"."""
     best = max(((s["ev_per_100_full_spread"], n) for n, s in structures.items() if s), default=None)
-    if best and best[0] > 0:
+    if earned and best and best[0] > 0:
         return VERDICT_POSSIBLE_EDGE, best[1]
     return VERDICT_NO_EDGE, None
 
@@ -291,7 +297,8 @@ def build_card(*, symbol: str, report_date: date, report_confirmation: str | Non
             "expiration": expiration, "spot": spot, "atm_strike": atm, "implied_move_pct": round(implied * 100, 2), "typical_move_pct": round(tau * 100, 2),
             "horizon_sessions": h, "pooled_move_to_expiry_pct": round(float(np.mean(np.abs(z))) * tau * 100, 2),
             "prior_n": len(own), "prior_moves": [{"date": d.isoformat(), "pct_1d": round(m * 100, 2)} for d, m in own[-PRIOR_MOVES_SHOWN:]],
-            "p_beyond_implied": round(p_beyond(z, tau, implied), 3), "structures": structures, "verdict": verdict, "verdict_structure": which}
+            "p_beyond_implied": round(p_beyond(z, tau, implied), 3), "structures": structures, "verdict": verdict, "verdict_structure": which,
+            "verdict_rule": None if POSSIBLE_EDGE_EARNED else VERDICT_RULE_NOTE}
 
 
 def band_problems(card: dict) -> list[str]:

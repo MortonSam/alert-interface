@@ -48,3 +48,5 @@ backend/app/scripts/cache/*.json
 frontend/test-results/
 backend/ops/ivy_v3/events*.jsonl
 .claude/worktrees/
+backend/ops/ivy_v3/results.json
+backend/ops/ivy_v3/picks.json

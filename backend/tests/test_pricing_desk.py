@@ -55,13 +55,16 @@ def test_each_structure_prices_from_the_chain_with_known_numbers():
 
 def test_the_verdict_and_the_bands():
     assert P.verdict_for({"long_call": {"ev_per_100_full_spread": -5}, "iron_condor": {"ev_per_100_full_spread": -1}}) == ("no_edge", None)
-    assert P.verdict_for({"long_call": {"ev_per_100_full_spread": -5}, "iron_condor": {"ev_per_100_full_spread": 2.5}}) == ("possible_edge", "iron_condor")
+    assert P.verdict_for({"long_call": {"ev_per_100_full_spread": -5}, "iron_condor": {"ev_per_100_full_spread": 2.5}}, earned=True) == ("possible_edge", "iron_condor")
     assert P.verdict_for({"long_call": {"ev_per_100_full_spread": 0.0}}) == ("no_edge", None)              # clearing zero means above it
     card = {"implied_move_pct": 6.1, "typical_move_pct": 4.0, "p_beyond_implied": 0.3, "structures": {"long_call": {"ev_per_100": -45.4, "ev_per_100_full_spread": -47.0}, "iron_condor": None}}
     assert P.band_problems(card) == []
     bad = {**card, "typical_move_pct": 55.0, "structures": {"long_call": {"ev_per_100": 400.0, "ev_per_100_full_spread": -47.0}}}
     assert P.band_problems(bad) == ["typical_move_pct=55.0 outside [0.5, 40.0]", "long_call.ev_per_100=400.0 outside [-100.0, 300.0]"]
     assert P.PRICING_COMPUTATION_VERSION == 2 and check_pricing_cards in CHECKS
+    cleared = {"long_call": {"ev_per_100_full_spread": 4.0}, "iron_condor": {"ev_per_100_full_spread": -3.0}}
+    assert P.verdict_for(cleared) == ("no_edge", None) and P.POSSIBLE_EDGE_EARNED is False          # not earned on held-out data: no card says possible edge
+    assert P.verdict_for(cleared, earned=True) == ("possible_edge", "long_call")
     assert P.horizon_sessions(date(2026, 10, 9), date(2026, 10, 17)) == 5 and P.horizon_sessions(date(2026, 10, 9), date(2026, 10, 10)) == 1 and P.horizon_sessions(date(2026, 10, 9), date(2027, 1, 15)) == P.MAX_HORIZON
 
 
