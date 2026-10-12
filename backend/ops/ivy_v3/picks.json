@@ -1,0 +1,74 @@
+{
+ "variant": {
+  "family": "e_analyst_drift",
+  "variant": {
+   "action": "up"
+  },
+  "passes": true
+ },
+ "cards": [
+  {
+   "risk": 1.0,
+   "pnl": -0.032752787260999394,
+   "p": 0.4897119341563786,
+   "stated_ev": 0.15646288189684998,
+   "symbol": "HBAN",
+   "date": "2024-01-02",
+   "detail": {
+    "firm": "Barclays",
+    "from_grade": "Underweight",
+    "to_grade": "Equal-Weight",
+    "price_target": "15.0",
+    "entry_close": 11.504023988484782,
+    "exit_close": 11.387731366517206,
+    "entry_date": "2024-01-02",
+    "exit_date": "2024-01-31",
+    "index_20d": 0.021643922564265283,
+    "excess_20d": -0.03175278726099939,
+    "prior_n": 1944
+   }
+  },
+  {
+   "risk": 1.0,
+   "pnl": -0.20732002346280476,
+   "p": 0.4811940298507463,
+   "stated_ev": 0.055756248092578425,
+   "symbol": "CHD",
+   "date": "2025-04-15",
+   "detail": {
+    "firm": "B of A Securities",
+    "from_grade": "Neutral",
+    "to_grade": "Buy",
+    "price_target": "125.0",
+    "entry_close": 103.07036071393414,
+    "exit_close": 91.38702583144669,
+    "entry_date": "2025-04-15",
+    "exit_date": "2025-05-14",
+    "index_20d": 0.09296702070273999,
+    "excess_20d": -0.20632002346280476,
+    "prior_n": 3350
+   }
+  },
+  {
+   "risk": 1.0,
+   "pnl": -0.11002640563721888,
+   "p": 0.4889589905362776,
+   "stated_ev": 0.30580692865538106,
+   "symbol": "CPRT",
+   "date": "2026-09-11",
+   "detail": {
+    "firm": "Barrington Research",
+    "from_grade": "Market Perform",
+    "to_grade": "Outperform",
+    "price_target": "40.0",
+    "entry_close": 29.95,
+    "exit_close": 27.32,
+    "entry_date": "2026-09-11",
+    "exit_date": "2026-10-09",
+    "index_20d": 0.02121338393438088,
+    "excess_20d": -0.10902640563721888,
+    "prior_n": 4755
+   }
+  }
+ ]
+}

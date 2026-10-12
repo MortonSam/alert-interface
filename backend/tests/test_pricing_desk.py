@@ -61,7 +61,8 @@ def test_the_verdict_and_the_bands():
     assert P.band_problems(card) == []
     bad = {**card, "typical_move_pct": 55.0, "structures": {"long_call": {"ev_per_100": 400.0, "ev_per_100_full_spread": -47.0}}}
     assert P.band_problems(bad) == ["typical_move_pct=55.0 outside [0.5, 40.0]", "long_call.ev_per_100=400.0 outside [-100.0, 300.0]"]
-    assert P.PRICING_COMPUTATION_VERSION == 1 and check_pricing_cards in CHECKS
+    assert P.PRICING_COMPUTATION_VERSION == 2 and check_pricing_cards in CHECKS
+    assert P.horizon_sessions(date(2026, 10, 9), date(2026, 10, 17)) == 5 and P.horizon_sessions(date(2026, 10, 9), date(2026, 10, 10)) == 1 and P.horizon_sessions(date(2026, 10, 9), date(2027, 1, 15)) == P.MAX_HORIZON
 
 
 def test_picks_are_paused_with_the_reason_recorded_and_the_outcome_labelled():
@@ -80,7 +81,9 @@ async def test_a_built_card_is_stored_served_behind_the_flag_and_judged_by_valid
     from app.services.system_metadata_service import set_value
     sym = "ZZPRC"
     today = date(2026, 10, 12)
-    reactions = [{"symbol": f"ZZS{i % 10}", "sector": "Test Sector", "event_date": date(2021, 1, 1) + timedelta(days=7 * i), "pct_change_1d": (2.0, -3.0, 7.5, -9.0, 1.0)[i % 5]} for i in range(400)]     # a sector whose reports sometimes gap past the implied move
+    # a sector whose reports sometimes gap past the implied move; over five sessions (the card's horizon) the moves run wider than on the day
+    reactions = [{"symbol": f"ZZS{i % 10}", "sector": "Test Sector", "event_date": date(2021, 1, 1) + timedelta(days=7 * i), "pct_change_1d": (2.0, -3.0, 7.5, -9.0, 1.0)[i % 5],
+                  "moves": {h: (0.025, -0.04, 0.09, -0.11, 0.015)[i % 5] * (1 + 0.1 * (h - 1)) for h in range(2, P.MAX_HORIZON + 1)}} for i in range(400)]
     reactions += [{"symbol": sym, "sector": "Test Sector", "event_date": date(2026, 1, 15), "pct_change_1d": 5.0}, {"symbol": sym, "sector": "Test Sector", "event_date": date(2026, 4, 15), "pct_change_1d": -6.0}]
     odds = Odds(reactions)
     chain = {"calls": [{"strike": k, "bid": v["call"]["bid"], "ask": v["call"]["ask"]} for k, v in CHAIN.items()], "puts": [{"strike": k, "bid": v["put"]["bid"], "ask": v["put"]["ask"]} for k, v in CHAIN.items()], "chain_source": "intrinio"}
@@ -88,6 +91,9 @@ async def test_a_built_card_is_stored_served_behind_the_flag_and_judged_by_valid
                       expiration="2026-10-17", spot=100.0, odds=odds, today=today, computed_at=datetime.now(timezone.utc))
     assert isinstance(card, dict), card
     assert card["implied_move_pct"] == 6.1 and card["prior_n"] == 2 and len(card["prior_moves"]) == 2 and set(card["structures"]) == set(P.STRUCTURES)
+    assert card["horizon_sessions"] == 5 and card["computation_version"] == 2 and card["pooled_move_to_expiry_pct"] > card["typical_move_pct"]   # the wider distribution
+    assert isinstance(P.build_card(symbol=sym, report_date=date(2026, 10, 15), report_confirmation="confirmed", chain=chain, chain_date="2026-10-09", chain_source="intrinio",
+                                   expiration="2026-10-17", spot=100.0, odds=P.Odds([{**r, "moves": {}} for r in reactions]), today=today), str)   # no horizon pool: no card, never the 1-day pool
     assert card["verdict"] in ("no_edge", "possible_edge") and card["typical_move_pct"] == pytest.approx(round((2 * 5.5 + 6 * 4.5) / 8, 2), abs=0.05)   # own 5.5% over 2 reports against the sector's 4.5%
     async with ScriptSessionLocal() as s:
         try:

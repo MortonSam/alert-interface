@@ -4,9 +4,12 @@ and the expected value per $100 risked of the four trades a visitor would be tem
 Definitions follow the v3 research (app/scripts/ivy_v3_analyze.py, ops/ivy_v3_research.md):
 - typical move τ: the mean absolute 1-day report move of the stock's own prior reports, shrunk toward its sector's mean with weight
   SHRINK_K (a stock with n reports gets weight n); fewer than MIN_PRIOR own reports uses the sector alone;
-- the stock's own distribution: every prior report's move standardized by the τ known at the time (z = move / τ), pooled; the move
-  to expiry is taken as the report move (EXPECTED_PAYOFF_METHOD), so a structure's expected payoff integrates its expiration payoff
-  over spot × (1 + z τ);
+- the stock's own distribution: every prior report's move over h sessions from the close before the report (h = the sessions the
+  card's expiry is away from its chain date, 1 to MAX_HORIZON), standardized by the 1-day τ known at the time (z_h = move_h / τ) and
+  pooled per horizon; a structure's expected payoff integrates its expiration payoff over spot × (1 + z_h τ). Version 1 used the
+  1-day move for every horizon and predicted +2.8 per $100 for iron condors that made −10.8 held out (ops/ivy_v3_research.md, the
+  calibration check); the move to expiry is the wider distribution, and with it the same model predicts −11.0. The pool is centered
+  (its mean drift removed): the years in it rose, and a long call priced on that drift looked worth +22 per $100 at the ask;
 - fills: a buy at mid + c × spread, a sell at mid − c × spread; c = 0.5 is the real bid and ask, c = 1.0 a full spread each way;
 - risk: the net debit, or for the iron condor the width less the credit; expected value per $100 risked = (E[payoff] − cost) / risk × 100.
 
@@ -21,7 +24,8 @@ from datetime import date, datetime, timezone
 
 import numpy as np
 
-PRICING_COMPUTATION_VERSION = 1
+PRICING_COMPUTATION_VERSION = 2       # 2 (2026-10-12): expected payoff over the move to expiry, not the 1-day move
+MAX_HORIZON = 10                      # sessions from the chain date to the expiry that the distribution is built for; further expiries use this
 SHRINK_K = 6
 MIN_PRIOR = 2
 MIN_SECTOR = 20                 # fewer sector reports than this: no typical move
@@ -30,12 +34,13 @@ PRIOR_MOVES_SHOWN = 20
 REPORT_WINDOW_DAYS = 7
 STRUCTURES = ("long_call", "long_straddle", "bull_call_spread", "iron_condor")
 VERDICT_NO_EDGE, VERDICT_POSSIBLE_EDGE = "no_edge", "possible_edge"
-EXPECTED_PAYOFF_METHOD = ("payoff at expiration averaged over the stock's own prior report moves (each standardized by the typical move known at the "
-                          "time, rescaled by today's typical move), the report move taken as the move to expiry, less the entry cost at the real bid and ask")
+EXPECTED_PAYOFF_METHOD = ("payoff at expiration averaged over prior report moves measured over the same number of sessions as this expiry is from the "
+                          "chain date (each standardized by the typical 1-day move known at the time, rescaled by today's typical move, the pool's mean drift "
+                          "removed), less the entry cost at the real bid and ask")
 CARD_KEY = "pricing_card:{sym}"
 STEP_LABEL = "Pricing desk (Ivy v3)"
 # validate's bands (check_pricing_cards): a card outside them is an ERROR
-BANDS = {"implied_move_pct": (0.5, 60.0), "typical_move_pct": (0.5, 40.0), "p_beyond_implied": (0.05, 0.95), "ev_per_100": (-100.0, 300.0)}
+BANDS = {"implied_move_pct": (0.5, 60.0), "typical_move_pct": (0.5, 40.0), "p_beyond_implied": (0.05, 0.95), "ev_per_100": (-100.0, 300.0), "horizon_sessions": (1, MAX_HORIZON)}
 
 
 # ── the stock's own odds ──────────────────────────────────────────────────────
@@ -47,7 +52,7 @@ class Odds:
         self.by_stock: dict[str, list[tuple[date, float]]] = defaultdict(list)
         self.by_sector: dict[str, list[tuple[date, float]]] = defaultdict(list)
         self.sector_of: dict[str, str] = {}
-        self.pool: list[tuple[date, float]] = []
+        self.pools: dict[int, list[tuple[date, float]]] = defaultdict(list)     # horizon h -> (date, move_h / tau)
         for r in sorted(reactions, key=lambda r: r["event_date"]):
             sym, d, m = r["symbol"], r["event_date"], float(r["pct_change_1d"]) / 100
             self.sector_of[sym] = r.get("sector") or "Unknown"
@@ -56,9 +61,18 @@ class Odds:
         for r in sorted(reactions, key=lambda r: r["event_date"]):
             sym, d, m = r["symbol"], r["event_date"], float(r["pct_change_1d"]) / 100
             tau = self.tau(sym, d)
-            if tau:
-                self.pool.append((d, m / tau))
-        self.pool.sort()
+            if not tau:
+                continue
+            self.pools[1].append((d, m / tau))
+            for h, mh in (r.get("moves") or {}).items():          # {h: move over h sessions from the close before the report}, fractions
+                if int(h) > 1 and mh is not None:
+                    self.pools[int(h)].append((d, float(mh) / tau))
+        for h in self.pools:
+            self.pools[h].sort()
+
+    @property
+    def pool(self) -> list[tuple[date, float]]:
+        return self.pools[1]
 
     @staticmethod
     def _before(series: list[tuple[date, float]], d: date) -> list[float]:
@@ -73,8 +87,19 @@ class Odds:
         sect = [abs(m) for m in self._before(self.by_sector.get(self.sector_of.get(sym, "Unknown"), []), d)]
         return typical_move(own, sect)
 
-    def z(self, d: date) -> np.ndarray:
-        return np.array([v for _, v in self.pool[: bisect_left(self.pool, (d, -1e9))]])
+    def z(self, d: date, horizon: int = 1, centered: bool = True) -> np.ndarray:
+        """The pooled standardized moves over `horizon` sessions, from reports before d. Centered: the pool's mean drift is removed, so a
+        directional trade is priced on the size of report moves, never on the market's drift over the years in the pool."""
+        pool = self.pools.get(max(1, min(int(horizon), MAX_HORIZON)), [])
+        z = np.array([v for _, v in pool[: bisect_left(pool, (d, -1e9))]])
+        return z - z.mean() if centered and len(z) else z
+
+
+def horizon_sessions(chain_date: date, expiration: date) -> int:
+    """Pure: the sessions from the chain date to the expiry inclusive (at least 1, at most MAX_HORIZON)."""
+    from app.services.trading_calendar import is_trading_day, sessions_after
+    n = sessions_after(chain_date, expiration) + (1 if is_trading_day(expiration) else 0)
+    return max(1, min(n, MAX_HORIZON))
 
 
 def typical_move(own_abs: list[float], sector_abs: list[float]) -> float | None:
@@ -249,9 +274,10 @@ def build_card(*, symbol: str, report_date: date, report_confirmation: str | Non
     tau = odds.tau(symbol, today)
     if not tau:
         return "not enough sector history for a typical move"
-    z = odds.z(today)
+    h = horizon_sessions(date.fromisoformat(str(chain_date)[:10]), date.fromisoformat(expiration)) if chain_date else 1
+    z = odds.z(today, h)
     if len(z) < MIN_POOL:
-        return "not enough pooled report moves for a probability"
+        return f"not enough pooled report moves over {h} session(s) for a probability"
     structures: dict[str, dict | None] = {}
     for name in STRUCTURES:
         legs = structure_legs(name, quotes, spot, implied, tau)
@@ -263,6 +289,7 @@ def build_card(*, symbol: str, report_date: date, report_confirmation: str | Non
     return {"symbol": symbol, "computed_at": (computed_at or datetime.now(timezone.utc)).isoformat(), "computation_version": PRICING_COMPUTATION_VERSION,
             "report_date": report_date.isoformat(), "report_confirmation": report_confirmation, "chain_date": chain_date, "chain_source": chain_source,
             "expiration": expiration, "spot": spot, "atm_strike": atm, "implied_move_pct": round(implied * 100, 2), "typical_move_pct": round(tau * 100, 2),
+            "horizon_sessions": h, "pooled_move_to_expiry_pct": round(float(np.mean(np.abs(z))) * tau * 100, 2),
             "prior_n": len(own), "prior_moves": [{"date": d.isoformat(), "pct_1d": round(m * 100, 2)} for d, m in own[-PRIOR_MOVES_SHOWN:]],
             "p_beyond_implied": round(p_beyond(z, tau, implied), 3), "structures": structures, "verdict": verdict, "verdict_structure": which}
 

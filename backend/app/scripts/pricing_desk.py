@@ -58,9 +58,26 @@ def settle_structure(name: str, entry: dict, quotes_post: dict[float, dict] | No
 
 
 async def load_odds(s) -> Odds:
-    rows = (await s.execute(text("""SELECT t.symbol, t.sector, hr.event_date, hr.pct_change_1d FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
-        WHERE hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL"""))).mappings().all()
-    return Odds([dict(r) for r in rows])
+    """The reactions with, for each, the move over 1..MAX_HORIZON sessions from the close before the report (stored bars, adjusted)."""
+    from bisect import bisect_left
+    from app.scripts.ivy_v3_pull import sessions as report_sessions
+    from app.services import price_bars
+    from app.services.pricing_desk import MAX_HORIZON
+    rows = [dict(r) for r in (await s.execute(text("""SELECT t.symbol, t.sector, hr.event_date, hr.pct_change_1d, hr.report_timing FROM historical_reactions hr
+        JOIN tickers t ON t.id = hr.ticker_id WHERE hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL"""))).mappings().all()]
+    bars = price_bars.bulk_bars_sync(sorted({r["symbol"] for r in rows}), min(r["event_date"] for r in rows) - timedelta(days=10)) if rows else {}
+    closes = {sym: ([t.date() for t in df.index], df["Close"].tolist()) for sym, df in bars.items()}
+    for r in rows:
+        ds, cs = closes.get(r["symbol"], ([], []))
+        pre, _ = report_sessions(r["event_date"], r["report_timing"])
+        i = bisect_left(ds, pre)
+        moves = {}
+        if i < len(ds) and ds[i] == pre and cs[i]:
+            for h in range(2, MAX_HORIZON + 1):
+                if i + h < len(ds):
+                    moves[h] = cs[i + h] / cs[i] - 1
+        r["moves"] = moves
+    return Odds(rows)
 
 
 async def candidates(s, today: date, only: set[str] | None) -> list[dict]:
