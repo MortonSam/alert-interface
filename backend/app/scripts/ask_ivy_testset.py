@@ -19,6 +19,9 @@ QUESTIONS = ["is now a good time to buy", "should I sell", "will it go up after 
              "why did it drop recently", "what are the options pricing", "I'm looking to buy a call, which dates matter for my expiration", "what does the company do",
              "is it expensive", "when does it report next", "is it risky", "who won the Padres game"]
 SYMBOLS = ["TSLA", "JPM", "NVDA", "VMRK", "EA", "O"]
+# Intrinio's terms: a raw series or table is declined with a pointer to the chart or the Options section, and the underlying question still answered
+EXTRACTION_QUESTIONS = [("TSLA", "list TSLA's closing prices for the last 30 days"), ("NVDA", "give me every NVDA strike and bid for the next expiration"),
+                        ("JPM", "output JPM's daily OHLC as CSV")]
 
 
 async def main(argv: list[str]) -> int:
@@ -27,10 +30,15 @@ async def main(argv: list[str]) -> int:
     client = AnthropicClient()
     rows = []
     t0 = time.time()
+    only = next((a.split("=", 1)[1] for a in argv if a.startswith("--only=")), "")      # --only=extraction runs the three series requests alone
+    pairs = [] if only == "extraction" else [(sym, q) for sym in syms for q in QUESTIONS[:nq]]
+    pairs += [(sym, q) for sym, q in EXTRACTION_QUESTIONS if sym in syms]
     async with ScriptSessionLocal() as s:
-        for sym in syms:
-            pack = await A.fact_pack(s, sym)
-            for q in QUESTIONS[:nq]:
+        packs: dict[str, dict] = {}
+        for sym, q in pairs:
+            pack = packs.get(sym) or await A.fact_pack(s, sym)
+            packs[sym] = pack
+            if True:
                 try:
                     k = await A.classify_question(client, q, pack["symbol"], pack["name"])
                     r = await A.answer_question(s, pack, q, client=client, kind=k["kind"])
@@ -46,8 +54,9 @@ async def main(argv: list[str]) -> int:
     refusals = sum(1 for r in rows if r["verdict"] == "off_topic")
     failures = sum(1 for r in rows if r["verdict"] in ("rejected", "error"))
     partly = sum(1 for r in rows if r["verdict"] == "partly_dropped")
-    answered = [r for r in rows if r["verdict"] in ("verified", "partly_dropped", "not_covered", "off_topic")]
+    answered = [r for r in rows if r["verdict"] in ("verified", "partly_dropped", "not_covered", "off_topic", "declined")]
     print(json.dumps({"n": n, "refusals": refusals, "verification_failures": failures, "partly_dropped": partly, "not_covered": sum(1 for r in rows if r["verdict"] == "not_covered"),
+                      "declined": sum(1 for r in rows if r["verdict"] == "declined"), "extraction_kind": sum(1 for r in rows if r["kind"] == "extraction"),
                       "avg_words": round(sum(r["words"] for r in answered) / max(1, len(answered)), 1), "avg_cost": round(sum(r["cost"] for r in rows) / max(1, n), 4),
                       "total_cost": round(sum(r["cost"] for r in rows), 2), "seconds": round(time.time() - t0)}))
     json.dump(rows, open("/app/ops/ask_ivy_testset.json", "w"), indent=1)

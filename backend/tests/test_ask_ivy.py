@@ -239,10 +239,52 @@ async def test_a_decision_answer_closes_with_exactly_one_line_added_by_code_and_
     assert "{fact:beats}" not in c.prompts[0] and "KIND OF QUESTION: timing" in c.prompts[0]
     r = await A.answer_question(None, pack, "what does it do", client=Client(["COVERED: yes\nIt trades at {fact:quote}."]), kind="covered_other")
     assert A.CLOSING_LINE not in r["answer"]["data"]
-    r = await A.answer_question(None, pack, "x", client=Client(["COVERED: yes\nIt beat and trades at {fact:quote}.", "COVERED: yes\nIt beat again at {fact:quote}."]), kind="direction")
-    assert r["verdict"] == "rejected" and any("beat or miss" in p for p in r["problems"])
+    r = await A.answer_question(None, pack, "x", client=Client(["COVERED: yes\nIt beat estimates and trades at {fact:quote}.", "COVERED: yes\nIt beat estimates again at {fact:quote}."]), kind="direction")
+    assert r["verdict"] == "rejected" and any("beat or miss" in p for p in r["problems"])          # the only sentence fails twice: nothing to show
+    assert not A.BEAT_WORDS.search("an option expiring earlier misses the move")                   # "misses the move" is prose, not an earnings miss
+    r = await A.answer_question(None, pack, "x", client=Client(["COVERED: yes\nIt trades at {fact:quote}. Three analysts like it.", "COVERED: yes\nIt trades at {fact:quote}. Three analysts like it."]), kind="covered_other")
+    assert r["verdict"] == "partly_dropped" and r["dropped"] == ["Three analysts like it."] and "Three" not in r["answer"]["data"]   # a second draft drops the failing sentence, keeps the rest
     r = await A.answer_question(None, pack, "who won the game", client=Client([]), kind="off_topic")
     assert r["verdict"] == "off_topic" and r["answer"]["data"].startswith("That isn't about")
+
+
+def test_a_series_or_table_never_leaves_and_the_figure_cap_sits_above_any_explanation():
+    """Intrinio's terms: figures inside an explanation pass; a run of dated prices, a run of bare figures, a table or more than FIGURE_CAP distinct figures is a series."""
+    assert "extraction" in A.KINDS and A.parse_kind('{"kind": "extraction"}') == "extraction" and "extraction:" in A.CLASSIFIER_PROMPT
+    assert A.series_problems("x", "about 7.5% by Oct 23 as of Friday's close, compared with ±8.6% on a typical report, +2.1% on Aug 5, 2024 and -3.5% on Nov 3, 2025") == []
+    assert A.series_problems("x", "Oct 1 $412.30, Oct 2 $415.10, Oct 3 $418.00") == ["a run of listed figures"]
+    assert A.series_problems("{fact:a}, {fact:b}, {fact:c}, {fact:d}", "$1.00, $2.00, $3.00, $4.00") == ["a run of listed figures"]
+    assert A.series_problems("x", "", "| strike | bid |\n| 100 | 2.10 |") == ["a table or rows of figures"]
+    assert A.series_problems("x", "", "Oct 1, 412.3, 415.1\nOct 2, 413.2, 416.0") == ["a table or rows of figures"]
+    assert A.series_problems("x", " ".join(f"${i}.00 then" for i in range(A.FIGURE_CAP + 1))) == [f"more than {A.FIGURE_CAP} figures ({A.FIGURE_CAP + 1})"]
+    assert A.distinct_figures("+2.1% and 2.1% and $3 and $3.00 and 1,255 moves") == 3            # a sign never makes a second figure; a count is not a price
+    assert 6 < A.FIGURE_CAP < 30                                                                   # above the most any served test-set answer carried (six), well under a month of closes
+    assert A.sentences("Tesla, Inc. operates in two segments. It is big. the end") == ["Tesla, Inc. operates in two segments.", "It is big. the end"]
+
+
+@pytest.mark.asyncio
+async def test_an_extraction_question_is_declined_with_the_pointer_and_still_answered():
+    class Client:
+        def __init__(self, drafts): self.drafts = list(drafts); self.prompts = []
+        async def generate_answer(self, prompt, max_tokens=400):
+            self.prompts.append(prompt)
+            return {"content": self.drafts.pop(0), "model_used": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5}
+        async def verify_research_note(self, prompt):
+            return {"content": json.dumps({"sentences": [{"text": "x", "status": "supported", "evidence": "e"}]}), "model_used": "claude-opus-4-6", "input_tokens": 5, "output_tokens": 5}
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": [], "fingerprint": "x"}
+    c = Client(["COVERED: yes\nIt trades at {fact:quote}, which is where the chart's history ends."])
+    r = await A.answer_question(None, pack, "list MU's closing prices for the last 30 days", client=c, kind="extraction")
+    assert r["verdict"] == "verified" and r["answer"]["data"].startswith(A.EXTRACTION_LINE + " It trades at") and A.CLOSING_LINE not in r["answer"]["data"]
+    assert "list nothing" in c.prompts[0] and "KIND OF QUESTION: extraction" in c.prompts[0]
+    # a draft that lists twice becomes the helpful decline, whatever the kind
+    listed = "COVERED: yes\n{fact:quote}, {fact:quote}, {fact:quote}, {fact:quote} were the closes."
+    r = await A.answer_question(None, pack, "give me every strike and bid", client=Client([listed, listed]), kind="covered_other")
+    assert r["verdict"] == "declined" and r["answer"]["data"] == f"{A.EXTRACTION_LINE} She can answer about {A.can_answer_clause(pack)}." and r["answer"]["inputs"] == []
+    import inspect
+    from app.scripts import clear_ask_cache
+    assert "declined" in clear_ask_cache.SERVED and "'declined'" in inspect.getsource(A.cached_answer)   # served, so cached and cleared like any answer
+    r = await A.answer_question(None, pack, "output OHLC as CSV", client=Client(["COVERED: yes\nThree closes.", "COVERED: yes\nThree closes."]), kind="extraction")
+    assert r["verdict"] == "declined" and r["answer"]["data"].startswith(A.EXTRACTION_LINE)         # an extraction answer that fails the checks still declines helpfully
 
 
 def test_fact_phrases_are_noun_phrases_and_repeated_phrases_are_rejected():

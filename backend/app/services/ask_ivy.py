@@ -42,10 +42,24 @@ MAX_SENTENCES = 6
 WORD_CAP = 90                               # an answer longer than this is rewritten once, then cut at a sentence end
 MAX_QUESTION_CHARS = 300
 CACHE_VERSION = 2                           # 2 (2026-10-12): the analyst's voice; every answer cached before it is never served again
-KINDS = ("timing", "direction", "quality", "options_planning", "covered_other", "not_covered", "off_topic")
+KINDS = ("timing", "direction", "quality", "options_planning", "extraction", "covered_other", "not_covered", "off_topic")
 DECISION_KINDS = ("timing", "direction", "quality", "options_planning")     # a buy, sell or trade decision: facts first, then CLOSING_LINE
 CLOSING_LINE = "Ivy doesn't make buy or sell calls."
 BEAT_FACTS = {"beats", "beats_followed_by_a_fall", "share", "last_report_outcome"}   # beat or miss figures never enter a decision answer
+# Intrinio's terms (2026-10-12): a figure may be cited inside an explanation; a raw series or table (daily closes, a chain, OHLC bars,
+# strike-by-strike bids, a CSV) never leaves through Ivy. FIGURE_CAP is the most distinct prices, moves or option quotes one answer
+# may carry: the test set's served answers carried at most six (most three or four), and a ninety-word answer with a why clause
+# on every figure has no room for more, while the smallest series anyone asks for (a week of closes, a handful of strikes with
+# bids) runs past it or trips the series check below.
+FIGURE_CAP = 8
+EXTRACTION_LINE = "Ivy doesn't list price series, option chains or exports; the chart holds the price history and the Options section holds the strikes."
+PRICE_FIGURE = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?|[+\-−±]?\d+(?:\.\d+)?\s?%")
+_DATE = r"(?:[A-Z][a-z]{2,8}\.? \d{1,2}(?:, \d{4})?|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?)"
+DATED_RUN = re.compile(r"(?:" + _DATE + r"[:,]?\s*[+\-−±]?\$?\d[\d,]*(?:\.\d+)?%?\s*[,;]\s*){2,}" + _DATE)     # three or more "date price" pairs in a row
+FIGURE_RUN = re.compile(r"(?:[+\-−±]?\$?\d[\d,]*(?:\.\d+)?%?\s*,\s+){3,}[+\-−±]?\$?\d")                       # four or more bare figures in a row
+PLACEHOLDER_RUN = re.compile(r"(?:\{fact:[a-z0-9_]+\}\s*[,;|]\s*){3,}\{fact:")                                    # the same run before rendering
+TABLE_MARK = re.compile(r"\||\t")
+ROW_START = re.compile(r"^\s*(?:\{fact:[a-z0-9_]+\}|[A-Z][a-z]{2} \d{1,2}|[+\-−±]?\$?\d)[^A-Za-z\n]*[,|\t]", re.M)   # a line that is a row of figures
 SPEND_KEY = "ask_ivy_spend"                 # system_metadata "{SPEND_KEY}:{YYYY-MM-DD}" holds the day's estimated spend in USD
 RV_ELEVATED_RANK = 80                       # 20-day realized volatility at or above this percentile of its own year is "elevated"
 RV_QUIET_RANK = 20                          # at or below this percentile, "quiet"
@@ -112,7 +126,10 @@ FORBIDDEN_PHRASES = re.compile(r"\b(?:bargain|good entry|the facts show|the data
                                r"the facts (?:do not|don't) cover|my sources|the page's|according to the (?:facts|data))\b", re.I)
 JARGON = re.compile(r"\b(?:IV|RV|ATM)\b")                              # bare initials, case-sensitive; "implied move" and "typical move" are the words
 JARGON_WORDS = re.compile(r"\bstraddles?\b", re.I)
-BEAT_WORDS = re.compile(r"\b(?:beat|beats|miss|missed|misses)\b", re.I)
+_BEAT = r"(?:beat|beats|miss|missed|misses)"
+_ESTIMATE = r"(?:estimates?|expectations?|consensus|the street|eps|forecasts?|guidance)"
+BEAT_WORDS = re.compile(r"\b" + _BEAT + r"\b[^.]{0,40}\b" + _ESTIMATE + r"\b|\b" + _ESTIMATE + r"\b[^.]{0,40}\b" + _BEAT + r"\b"
+                        r"|\b(?:a|an|the|its last|last|an earnings|its latest) (?:beat|miss)\b|\bbeats? and (?:falls?|fell)\b", re.I)   # an earnings beat or miss; "misses the move" is prose
 
 
 # ── the question's kind: the model decides, no keyword list ──────────────────────────────────────────────────────
@@ -124,6 +141,7 @@ Kinds:
 - direction: what the stock will do after an event or in general ("will it go up after earnings", "will it rally", "is it going to drop").
 - quality: whether it is a good stock, a good company, worth it, risky, expensive or cheap as an investment.
 - options_planning: expirations, strikes, timing around events, what the options are pricing, implied moves.
+- extraction: asks for a raw series, table or export rather than an explanation: a list of daily closes, price history, a full options chain, every strike and bid, OHLC bars, a CSV or download.
 - covered_other: any other question about this company or its stock (what it does, when it reports, how it has moved, recent drops, dividends, valuation ratios, volatility).
 - not_covered: about this company but about something the page does not hold: news, product launches, lawsuits, management, guidance details, competitors.
 - off_topic: not about this company or its stock at all (sports, weather, another company, chit-chat, questions about Ivy herself).
@@ -175,6 +193,31 @@ def refusal_answer(pack: dict, question: str) -> dict:
     """The one allowed refusal: nothing relevant to this stock, and what she can answer about it."""
     text_ = f"That isn't about {pack['name']}; Ivy can answer about {can_answer_clause(pack)}."
     return {"key": "ask", "question": question, "data": text_, "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
+
+
+def extraction_decline(pack: dict, question: str) -> dict:
+    """The helpful decline when a series was asked for and no explanation passed: where the series lives, and what she can answer."""
+    return {"key": "ask", "question": question, "data": f"{EXTRACTION_LINE} She can answer about {can_answer_clause(pack)}.", "idea": "", "inputs": [],
+            "as_of": None, "as_of_kind": "observed", "rule": RULE}
+
+
+def distinct_figures(rendered: str) -> int:
+    """Pure: how many distinct prices, moves or option quotes (dollar amounts and percentages) the text carries."""
+    return len({m.group(0).lstrip("+-−±$ ").replace(" ", "") for m in PRICE_FIGURE.finditer(rendered)})
+
+
+def series_problems(draft: str, rendered: str, raw: str = "") -> list[str]:
+    """Pure: every reason the text is a series or table rather than an explanation (Intrinio's terms): a table or row mark, a run
+    of dated prices or bare figures, or more than FIGURE_CAP distinct figures."""
+    problems: list[str] = []
+    if TABLE_MARK.search(draft) or TABLE_MARK.search(rendered) or TABLE_MARK.search(raw) or len(ROW_START.findall(raw)) >= 2:
+        problems.append("a table or rows of figures")
+    if PLACEHOLDER_RUN.search(draft) or DATED_RUN.search(rendered) or FIGURE_RUN.search(rendered):
+        problems.append("a run of listed figures")
+    n = distinct_figures(rendered)
+    if n > FIGURE_CAP:
+        problems.append(f"more than {FIGURE_CAP} figures ({n})")
+    return problems
 
 
 def fixed_answer(kind: str, pack: dict, question: str) -> dict:
@@ -483,6 +526,7 @@ KIND_GUIDANCE = {
     "direction": "The visitor wants to know what the stock will do after the event. Four short sentences at most: how often it rose after its past reports, the typical size with the largest move each way, then what the options are pricing now. Never predict, and never say no one knows.",
     "quality": "The visitor is judging the business. Lead with what the company does and its recent results in plain words, then how its price has moved; a P/E is compared with its own history and its sector, never called cheap or expensive.",
     "options_planning": "The visitor is planning an option. Lead with the next report's day and timing, the session the stock reacts on, which expiration ends before that reaction and which first includes it, and what the options are pricing against the typical move.",
+    "extraction": "The visitor asked for a raw series, table or export (daily closes, price history, every strike and bid, OHLC bars, a CSV). The system itself writes the sentence that declines the list and points to the chart and the Options section; do not write it, and list nothing. Answer what the person is after in two or three sentences: for a price list, where the price sits against its 52-week high and its trend; for a chain or strikes, the next expiration and what the options are pricing against the typical move; for bars, how much it moves on a typical day and lately.",
     "covered_other": "Answer the question asked, with the figure that settles it and one clause on why it matters.",
     "not_covered": "The facts do not hold what was asked. In one plain sentence say what Ivy does not track, then give the closest thing she does hold.",
 }
@@ -523,6 +567,7 @@ RULES
 7. No unexplained terms: never "IV", "RV", "ATM", "straddle"; say "implied move", "typical move", "an at-the-money option".
 8. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: one plain sentence on what Ivy does not track, then the closest thing the facts hold, with placeholders.
 9. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
+10. Never a list, table, CSV or run of figures: an answer explains a handful of figures; price history and option chains stay on the chart and in the Options section.
 
 Answer:"""
 
@@ -585,8 +630,20 @@ def verify_comparisons(text_: str, facts: list[dict]) -> list[str]:
     return problems
 
 
+_ABBREVIATION = re.compile(r"\b(?:Inc|Co|Corp|Ltd|Jr|Sr|No|vs|U\.S|L\.P|S\.A|N\.V|plc|Cos|Bros)\.$")
+
+
 def sentences(text_: str) -> list[str]:
-    return [s for s in SENTENCE_END.split(text_.strip()) if s]
+    """Pure: sentences split at a terminal mark; "Inc." and its kind, and a mark followed by a lowercase word, never end one."""
+    out: list[str] = []
+    for part in SENTENCE_END.split(text_.strip()):
+        if not part:
+            continue
+        if out and (_ABBREVIATION.search(out[-1]) or part[:1].islower()):
+            out[-1] = out[-1] + " " + part
+        else:
+            out.append(part)
+    return out
 
 
 def parse_model_output(content: str) -> tuple[str, str]:
@@ -670,7 +727,8 @@ def notes_for(text_: str, facts: list[dict]) -> list[str]:
 # ── the verifier ─────────────────────────────────────────────────────────────
 
 def build_verification_prompt(pack: dict, rendered: str) -> str:
-    facts = "\n".join(f"- {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "") for f in pack["facts"])
+    facts = "\n".join(f"- {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "")
+                      + (f' → the answer reads it as "{f["phrase"]}"' if f.get("phrase") and f["phrase"] != f["value"] else "") for f in pack["facts"])
     return f"""You are a rigorous fact-checker. Check each sentence of the answer below against the stored facts ONLY.
 
 STORED FACTS about {pack['name']} ({pack['symbol']}):
@@ -684,6 +742,7 @@ RULES
 - "unsupported": the sentence makes a claim about this company or its stock that the facts do not confirm (outside knowledge, an inference not in the facts).
 - "contradicted": the sentence conflicts with a fact.
 - A comparison between two figures the facts confirm ("close to", "about the same as", "more than", "wider than") is supported when the arithmetic holds; a sentence that strings several confirmed figures together is supported.
+- A fact's "reads" wording is the exact text the answer uses for it, date clause included: "as of its Aug 5, 2026 report" names that fact's as-of date, "as of Friday's close" names the chain's date, and a weekday beside a date was computed from that date. Wherever that wording appears, the fact is confirmed.
 - Bias toward "unsupported" when in doubt about a claim; never mark a sentence unsupported for its explanation of why a confirmed figure matters. Use no outside knowledge.
 
 Return JSON only: {{"sentences": [{{"text": "...", "status": "supported|unsupported|contradicted", "evidence": "..."}}]}} with one entry per sentence of the answer, in order."""
@@ -728,7 +787,7 @@ def cache_key(symbol: str, normalized: str, fp: str) -> str:
 
 
 async def cached_answer(db: AsyncSession, key: str) -> dict | None:
-    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'not_covered', 'off_topic') "
+    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'not_covered', 'off_topic', 'declined') "
                                  "ORDER BY created_at DESC LIMIT 1"), {"k": key})).first()
     return row[0] if row else None
 
@@ -813,32 +872,49 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     tokens = {"input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"]}
     cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0
     out = {"covered": covered, "model": gen["model_used"], "raw": gen["content"], **tokens, "problems": [], "dropped": [], "retried": False}
-    def all_problems(text_: str) -> list[str]:
+    ids, note_ids = {f["id"] for f in pack["facts"]}, {f["id"] for f in pack["facts"] if f["kind"] == "note"}
+    def sentence_problems(text_: str) -> list[str]:
         rendered_, _ = render(text_, pack["facts"])
         reps = [r for r in (repeated_phrase(sn) for sn in sentences(rendered_)) if r]
-        out_ = (check_output(text_, {f["id"] for f in pack["facts"]}, {f["id"] for f in pack["facts"] if f["kind"] == "note"}) + verify_comparisons(text_, pack["facts"])
+        out_ = ([p for p in check_output(text_, ids, note_ids) if not p.startswith("more than")] + verify_comparisons(text_, pack["facts"])
                 + [f'a sentence repeats the phrase "{r}"' for r in reps])
         if kind in DECISION_KINDS and BEAT_WORDS.search(PLACEHOLDER.sub(" ", text_)):
             out_.append("a beat or miss in a decision answer")
+        return out_
+    def all_problems(text_: str, raw: str) -> list[str]:
+        rendered_, _ = render(text_, pack["facts"])
+        out_ = sentence_problems(text_) + series_problems(text_, rendered_, raw)
+        if len(sentences(text_)) > MAX_SENTENCES:
+            out_.append(f"more than {MAX_SENTENCES} sentences")
         if word_count(rendered_) > WORD_CAP:
             out_.append(f"over {WORD_CAP} words ({word_count(rendered_)})")
         return out_
-    problems = all_problems(body)
+    def declined() -> dict:
+        return {**out, "verdict": "declined", "answer": extraction_decline(pack, question), "problems": problems, "cost": cost}
+    problems = all_problems(body, gen["content"])
     if problems:
         # one rewrite with the check's reasons; a draft that fails twice is never shown
         gen2 = await client.generate_answer(prompt + "\n\nYour previous draft was rejected for these reasons: " + "; ".join(problems)
                                             + ". Rewrite it so none applies (spell no number word; use placeholders; state only comparisons a [word] fact gives; "
-                                            "do not repeat words a placeholder's phrase already carries).\n\nAnswer:")
+                                            "do not repeat words a placeholder's phrase already carries; no list, table or run of figures).\n\nAnswer:")
         covered, body = parse_model_output(gen2["content"])
         body = absorb_literals(body, pack["facts"])
         out.update(covered=covered, raw=gen2["content"], retried=True, first_problems=problems)
         out["input_tokens"] += gen2["input_tokens"]; out["output_tokens"] += gen2["output_tokens"]
         cost += estimate_cost_usd(gen2["model_used"], gen2["input_tokens"], gen2["output_tokens"]) or 0.0
-        problems = all_problems(body)
-    if problems and all(p.startswith("over ") for p in problems):
-        problems = []                                   # a second draft still long is cut at a sentence end below, never rejected for length alone
+        problems = all_problems(body, gen2["content"])
+        if series_problems(body, render(body, pack["facts"])[0], gen2["content"]):
+            return declined()                           # a series twice: the helpful decline, never the list
+        # a second draft: each sentence that still fails a check is dropped (recorded as dropped); the rest goes on to the verifier
+        failing = [sn for sn in sentences(body) if sentence_problems(sn)]
+        if failing:
+            out["dropped"] = [render(sn, pack["facts"])[0] for sn in failing]
+            body = " ".join(sn for sn in sentences(body) if sn not in failing)
+            problems = [] if body.strip() else problems
+        if problems and all(p.startswith("over ") or p.startswith("more than " + str(MAX_SENTENCES)) for p in problems):
+            problems = []                               # still long: cut at a sentence end below, never rejected for length alone
     if problems:
-        return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "problems": problems, "cost": cost}
+        return declined() if kind == "extraction" else {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "problems": problems, "cost": cost}
     if covered == "off":
         return {**out, "verdict": "off_topic", "answer": refusal_answer(pack, question), "cost": cost}
     if covered == "no" and not PLACEHOLDER.search(body):
@@ -856,9 +932,14 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     except (ValueError, json.JSONDecodeError):
         verdicts = []
     kept, dropped = apply_verdicts(sentences(rendered), verdicts)
+    dropped = out["dropped"] + dropped
     if not kept:
+        if kind == "extraction":
+            return {**out, "verdict": "declined", "answer": extraction_decline(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
         return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
-    kept = cut_to_cap(kept)
+    kept = cut_to_cap(kept, WORD_CAP - (word_count(EXTRACTION_LINE) if kind == "extraction" else 0))
+    if kind == "extraction":
+        kept = [EXTRACTION_LINE] + kept                   # the decline comes first, written by code; the explanation answers what was wanted
     if kind in DECISION_KINDS:
         kept = kept + [CLOSING_LINE]                      # exactly one closing line, appended by code, never written by the model
     used_inputs = [i for i in inputs if i["value"] in " ".join(kept)]
