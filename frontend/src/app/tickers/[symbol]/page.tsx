@@ -52,6 +52,7 @@ import { Briefing } from "@/components/Briefing";
 import { QuestionStrip } from "@/components/QuestionStrip";
 import { IvyMark } from "@/components/IvyMark";
 import { hasBriefing, type BriefingResponse } from "@/lib/briefing";
+import { activeSection } from "@/lib/sectionSpy";
 import StructuredNoteView from "@/components/StructuredNoteView";
 
 // Extracted components
@@ -1243,20 +1244,19 @@ const BASE_SECTIONS = [
 function SectionNav({ sections }: { sections: readonly { id: string; label: string }[] }) {
   const [active, setActive] = useState<string>("overview");
   const clickLockRef = useRef<string | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    // Threshold: header (52px) + nav (~44px) + buffer to clear scroll-mt-28 (112px)
-    const THRESHOLD = 116;
-
     function computeActive() {
       if (clickLockRef.current) return;         // locked during smooth scroll
-      let current: string = sections[0].id;
-      for (const s of sections) {
+      const tops = sections.flatMap((s) => {
         const el = document.getElementById(s.id);
-        if (el && el.getBoundingClientRect().top <= THRESHOLD) {
-          current = s.id;
-        }
-      }
+        return el ? [{ id: s.id, top: el.getBoundingClientRect().top }] : [];
+      });
+      const navBottom = navRef.current?.getBoundingClientRect().bottom ?? 0;
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      const current = activeSection(tops, navBottom, window.innerHeight, atBottom);
+      if (!current) return;
       setActive(current);
     }
 
@@ -1304,7 +1304,7 @@ function SectionNav({ sections }: { sections: readonly { id: string; label: stri
   }, [sections]);
 
   return (
-    <nav className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-4 px-4 sm:-mx-8 sm:px-8">
+    <nav ref={navRef} className="sticky top-[3.25rem] z-30 bg-background/95 backdrop-blur border-b -mx-4 px-4 sm:-mx-8 sm:px-8">
       <div className="max-w-6xl mx-auto flex flex-wrap gap-x-4 gap-y-1.5 sm:gap-6 py-3">
         {sections.map((s) => (
           <a
