@@ -19,18 +19,18 @@ describe("freshness wording", () => {
     const cadence = { nightly: { per_day: 1, local_time: "02:30", clock: "America/New_York" },
                       options: { per_day: 1, captured_local: "16:05", clock: "America/New_York", fresh_sessions: 2 },
                       quotes: { source: "Finnhub", delay_statement: null, delay_checked: "2026-10-05", dated_by: "each quote's own last-trade time" } };
-    expect(priceSourceLine(cadence)).toBe("Prices each dated by its last trade");
+    expect(priceSourceLine(cadence)).toBe("Prices dated by their last trade");
     expect(priceSourceLine({ ...cadence, quotes: { ...cadence.quotes, delay_statement: "delayed 15 minutes" } })).toBe("Prices delayed 15 minutes");
-    expect(priceSourceLine(null)).toBe("Prices each dated by its last trade");
+    expect(priceSourceLine(null)).toBe("Prices dated by their last trade");
     expect(nightlyWord(cadence)).toBe("nightly");
     expect(nightlyWord({ ...cadence, nightly: { ...cadence.nightly, per_day: 2 } })).toBe("2 times a day");
     expect(nightlyWord(null)).toBeNull();
     expect(optionsCadencePhrase(cadence)).toBe("updated once a day");
     expect(optionsDataPhrase("2026-10-01", cadence)).toBe("options data as of 2026-10-01, updated once a day");
     expect(optionsDataPhrase("2026-10-01")).toBe("options data as of 2026-10-01");           // no record: no cadence claim
-    expect(freshnessLine("Earnings history as of 5h ago", cadence)).toBe("Prices each dated by its last trade · Earnings history as of 5h ago");
-    expect(freshnessLine(null, cadence)).toBe("Prices each dated by its last trade · Research data refreshed nightly");
-    expect(freshnessLine(null)).toBe("Prices each dated by its last trade · Research data from the stored refresh steps");
+    expect(freshnessLine("Earnings history as of 5h ago", cadence)).toBe("Prices dated by their last trade · Earnings history as of 5h ago");
+    expect(freshnessLine(null, cadence)).toBe("Prices dated by their last trade · Research data refreshed nightly");
+    expect(freshnessLine(null)).toBe("Prices dated by their last trade · Research data from the stored refresh steps");
     expect(fmtQuoteDateTime(1759694400)).toBe("Oct 5, 4:00 PM ET");                            // 2026-10-05 20:00Z
     expect(fmtIsoDateTime("2026-10-05T20:00:00+00:00")).toBe("Oct 5, 4:00 PM ET");
     expect(fmtQuoteDateTime(null)).toBeNull();

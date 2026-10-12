@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text
 
@@ -1522,6 +1523,44 @@ async def check_news_headline_guard(session) -> CheckResult:
     if share is not None and share > GUARD_WARN_SHARE:
         return CheckResult("news_headline_guard", WARN, f"{len(suppressed)} headline(s) suppressed against {shown} shown (more than {GUARD_WARN_SHARE:.0%})", rows)
     return CheckResult("news_headline_guard", PASS, f"{len(suppressed)} headline(s) suppressed against {shown} shown", rows)
+
+
+CHAINS_START_SLACK_MINUTES = 45     # the Intrinio chains step may start this long after its 03:05 New York schedule before validate warns
+
+
+def chains_start_delay_minutes(started_iso: str | None) -> float | None:
+    """Pure: minutes from the step's scheduled start (03:05 New York on the day it ran) to its actual start; None without a start."""
+    from zoneinfo import ZoneInfo
+    from app.services.chain_shadow import SCHEDULE_CLOCK, SCHEDULED_LOCAL
+    if not started_iso:
+        return None
+    try:
+        started = datetime.fromisoformat(started_iso)
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    local = started.astimezone(ZoneInfo(SCHEDULE_CLOCK))
+    scheduled = local.replace(hour=SCHEDULED_LOCAL.hour, minute=SCHEDULED_LOCAL.minute, second=0, microsecond=0)
+    return round((local - scheduled).total_seconds() / 60, 1)
+
+
+async def check_chains_step_start(session) -> CheckResult:
+    """WARN when the Intrinio chains step started more than CHAINS_START_SLACK_MINUTES after 03:05 New York (the steps before it
+    overran: on 2026-10-12 it started at 03:37). The start comes from the run's timing record, else the step's own clock fields."""
+    import json as _json
+    from app.services.system_metadata_service import get_value
+    label = "Options chains (Intrinio)"
+    outcomes = _json.loads(await get_value(session, "step_outcomes") or "{}")
+    started = ((outcomes.get("Nightly run") or {}).get("steps") or {}).get(label, {}).get("started_at") or (outcomes.get(label) or {}).get("started_local")
+    delay = chains_start_delay_minutes(started)
+    if delay is None:
+        return CheckResult("chains_step_start", WARN, f"No start time recorded for {label}")
+    at = datetime.fromisoformat(started).astimezone(ZoneInfo("America/New_York")).strftime("%H:%M") if started else "?"
+    if delay > CHAINS_START_SLACK_MINUTES:
+        return CheckResult("chains_step_start", WARN, f"{label} started at {at} New York, {delay:.0f} minutes after its 03:05 schedule (limit {CHAINS_START_SLACK_MINUTES}): "
+                           "the steps before it overran; see the run's step timings in /health")
+    return CheckResult("chains_step_start", PASS, f"{label} started at {at} New York, {delay:.0f} minutes after its 03:05 schedule")
 
 
 async def check_chain_quality(session) -> CheckResult:
@@ -3302,6 +3341,7 @@ CHECKS = [
     check_ivy_sentences,
     check_ai_api,
     check_chain_quality,
+    check_chains_step_start,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import create_engine
@@ -210,6 +210,7 @@ def _run_step(label: str, cmd: list[str]) -> bool:
     print(f"  STEP: {label}")
     print(f"{'─' * 60}")
     t0 = time.monotonic()
+    started_at = datetime.now(timezone.utc)
     stderr_head: str | None = None
     stderr_tail: str | None = None
     try:
@@ -229,6 +230,7 @@ def _run_step(label: str, cmd: list[str]) -> bool:
             stderr_head, stderr_tail = _stderr_excerpt(exc.stderr.decode(errors="replace"))
         _record_step_outcome(label, exit_code=-1, seconds=elapsed,
                              stderr_head=stderr_head, stderr_tail=stderr_tail)
+        _record_step_timing(label, started_at, elapsed, False)
         _alert_step_failure(label, -1, elapsed, stderr_tail or stderr_head)
         return False
     elapsed = time.monotonic() - t0
@@ -237,6 +239,7 @@ def _run_step(label: str, cmd: list[str]) -> bool:
     print(f"\n  [{status}] {label} (exit {result.returncode}, {elapsed:.0f}s)")
     _record_step_outcome(label, exit_code=result.returncode, seconds=elapsed,
                          stderr_head=stderr_head, stderr_tail=stderr_tail)
+    _record_step_timing(label, started_at, elapsed, ok)
     if ok:
         _record_step_success(label)
     else:
@@ -252,6 +255,51 @@ def _alert_step_failure(label: str, exit_code: int, seconds: float, tail: str | 
         notify_sync(title, body, PRIORITY_HIGH, ("warning",))
     except Exception as exc:
         print(f"  [WARN] could not send the step-failure alert: {redact(exc)}")
+
+
+TIMINGS_KEY = "nightly_timings"       # the last TIMINGS_KEEP runs: slot, start, finish and every step's start, duration and end
+TIMINGS_KEEP = 30
+
+
+def step_timing(started_at: datetime, seconds: float, ok: bool) -> dict:
+    """Pure: one step's record in the run: when it started, how long it ran, when it ended."""
+    return {"started_at": started_at.isoformat(), "seconds": round(seconds, 1), "finished_at": (started_at + timedelta(seconds=seconds)).isoformat(), "ok": ok}
+
+
+def _record_step_timing(label: str, started_at: datetime, seconds: float, ok: bool) -> None:
+    """Add the step's start, duration and end to the run's record (step_outcomes[RUN_LABEL]["steps"])."""
+    try:
+        raw = _db_get("step_outcomes")
+        outcomes = json.loads(raw) if raw else {}
+        entry = dict(outcomes.get(RUN_LABEL) or {})
+        steps = dict(entry.get("steps") or {})
+        steps[label] = step_timing(started_at, seconds, ok)
+        entry["steps"] = steps
+        outcomes[RUN_LABEL] = entry
+        _db_upsert("step_outcomes", json.dumps(outcomes))
+    except Exception as exc:
+        print(f"  [WARN] could not record the timing of {label}: {redact(exc)}")
+
+
+def timings_history(raw: str | None, run: dict, keep: int = TIMINGS_KEEP) -> list[dict]:
+    """Pure: the stored history with this run added (replacing an entry for the same slot), newest last, at most `keep` runs."""
+    try:
+        history = [h for h in (json.loads(raw) if raw else []) if isinstance(h, dict)]
+    except (TypeError, ValueError):
+        history = []
+    history = [h for h in history if h.get("slot") != run.get("slot")] + [run]
+    return history[-keep:]
+
+
+def _record_timings_history() -> None:
+    """Append the finished run (its steps' timings included) to nightly_timings, so a drift shows across nights."""
+    try:
+        outcomes = json.loads(_db_get("step_outcomes") or "{}")
+        entry = outcomes.get(RUN_LABEL) or {}
+        run = {k: entry.get(k) for k in ("slot", "started_at", "finished_at", "all_passed", "interrupted", "steps")}
+        _db_upsert(TIMINGS_KEY, json.dumps(timings_history(_db_get(TIMINGS_KEY), run)))
+    except Exception as exc:
+        print(f"  [WARN] could not record the run's timings: {redact(exc)}")
 
 
 def _record_run(fields: dict) -> None:
@@ -339,6 +387,12 @@ def main(slot: str | None = None) -> int:
         run_fields.update({"interrupted": True, "resumed_at": run_fields["started_at"], "resumed_from": todo[0][0] if todo else None,
                            "note": "a process restart (a deploy, or a crash) cut the previous run; resumed from the first incomplete step"})
         print(f"  Resuming slot {slot}: {len(done)} step(s) already done, resuming from {todo[0][0] if todo else 'nothing'}")
+    run_fields["steps"] = {}                 # a fresh run forgets the previous night's step timings; a resumed one keeps the slot's
+    if slot and done:
+        try:
+            run_fields["steps"] = (json.loads(_db_get("step_outcomes") or "{}").get(RUN_LABEL) or {}).get("steps") or {}
+        except (TypeError, ValueError):
+            pass
     _record_run(run_fields)
     for label, cmd in todo:
         ok = _run_step(label, cmd)
@@ -385,6 +439,7 @@ def main(slot: str | None = None) -> int:
         print(f"  [WARN] could not send the digest: {redact(exc)}")
 
     _record_run({"finished_at": datetime.now(timezone.utc).isoformat(), "all_passed": all_passed, "interrupted": False})
+    _record_timings_history()
     if all_passed:
         print("\n  Refresh complete.\n")
         return 0

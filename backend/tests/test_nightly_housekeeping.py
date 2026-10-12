@@ -68,3 +68,28 @@ async def test_a_recorded_corporate_action_explains_an_iv_price_drift():
             await s.execute(text("DELETE FROM iv_history WHERE symbol = :s"), {"s": sym})
             await s.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": sym})
             await s.commit()
+
+
+# ── the run's timing record and the chains step's start (2026-10-12) ──
+
+def test_each_step_records_its_start_duration_and_end_and_the_history_keeps_thirty_runs():
+    from datetime import datetime, timezone
+    import json
+    t = datetime(2026, 10, 12, 7, 37, 31, tzinfo=timezone.utc)
+    assert refresh.step_timing(t, 606.4, True) == {"started_at": "2026-10-12T07:37:31+00:00", "seconds": 606.4, "finished_at": "2026-10-12T07:47:37.400000+00:00", "ok": True}
+    runs = [{"slot": f"2026-09-{d:02d}", "steps": {}} for d in range(1, 31)]
+    out = refresh.timings_history(json.dumps(runs), {"slot": "2026-10-12", "steps": {"Validate data": {"seconds": 22.9}}})
+    assert len(out) == 30 and out[-1]["slot"] == "2026-10-12" and out[0]["slot"] == "2026-09-02"
+    assert [r["slot"] for r in refresh.timings_history(json.dumps(out), {"slot": "2026-10-12", "steps": {}})].count("2026-10-12") == 1   # a resumed run replaces its slot
+    assert refresh.timings_history("not json", {"slot": "x"}) == [{"slot": "x"}]
+    assert refresh.TIMINGS_KEY == "nightly_timings"
+
+
+def test_the_chains_step_warns_when_it_starts_more_than_45_minutes_after_its_schedule():
+    from app.scripts.validate_data import CHAINS_START_SLACK_MINUTES, CHECKS, chains_start_delay_minutes, check_chains_step_start
+    assert check_chains_step_start in CHECKS and CHAINS_START_SLACK_MINUTES == 45
+    assert chains_start_delay_minutes("2026-10-12T07:37:31+00:00") == 32.5          # 03:37:31 EDT on 2026-10-12
+    assert chains_start_delay_minutes("2026-10-12T03:37:31-04:00") == 32.5          # the step's own started_local
+    assert chains_start_delay_minutes("2026-10-12T08:00:00+00:00") == 55.0 > CHAINS_START_SLACK_MINUTES
+    assert chains_start_delay_minutes("2026-12-10T08:05:00+00:00") == 0.0            # EST: 03:05 New York is 08:05 UTC
+    assert chains_start_delay_minutes(None) is None and chains_start_delay_minutes("garbage") is None
