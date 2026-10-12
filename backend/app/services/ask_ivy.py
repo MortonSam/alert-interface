@@ -123,7 +123,8 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
 VALUATION_VERDICTS = re.compile(r"\b(?:cheap|expensive|undervalued|overvalued|pricey|a bargain|overpriced|underpriced)\b", re.I)   # a ratio is never a verdict
 # words that imply a call, or talk about her own sources: never shown (Sam's voice rules, 2026-10-12)
 FORBIDDEN_PHRASES = re.compile(r"\b(?:bargain|good entry|the facts show|the data indicates?|the data shows?|this page|the facts here|the stored facts|stored data|"
-                               r"the facts (?:do not|don't) cover|my sources|the page's|according to the (?:facts|data))\b", re.I)
+                               r"the facts (?:do not|don't) cover|my sources|the page's|according to the (?:facts|data)|"
+                               r"the chart|chart above|options section|scroll back|lives in|on this page|of this page)\b", re.I)   # the pointer to the chart is the code's line, never the model's
 JARGON = re.compile(r"\b(?:IV|RV|ATM)\b")                              # bare initials, case-sensitive; "implied move" and "typical move" are the words
 JARGON_WORDS = re.compile(r"\bstraddles?\b", re.I)
 _BEAT = r"(?:beat|beats|miss|missed|misses)"
@@ -497,7 +498,7 @@ def date_phrases(facts: list[dict]) -> None:
         elif f["id"] == "20_day_realized_volatility":
             f["phrase"] = f"{f['value']} annualized as of {when}"
         elif f["id"] == "last_close":
-            f["phrase"] = f"a last close of {f['value']} on {when}"
+            f["phrase"] = f"{f['value']} on {when}"                       # the name says "last close"; the phrase never repeats it
 
 
 async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) -> dict:

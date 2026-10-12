@@ -272,7 +272,7 @@ async def test_an_extraction_question_is_declined_with_the_pointer_and_still_ans
         async def verify_research_note(self, prompt):
             return {"content": json.dumps({"sentences": [{"text": "x", "status": "supported", "evidence": "e"}]}), "model_used": "claude-opus-4-6", "input_tokens": 5, "output_tokens": 5}
     pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": [], "fingerprint": "x"}
-    c = Client(["COVERED: yes\nIt trades at {fact:quote}, which is where the chart's history ends."])
+    c = Client(["COVERED: yes\nIt trades at {fact:quote}, which is where its trend leaves it."])
     r = await A.answer_question(None, pack, "list MU's closing prices for the last 30 days", client=c, kind="extraction")
     assert r["verdict"] == "verified" and r["answer"]["data"].startswith(A.EXTRACTION_LINE + " It trades at") and A.CLOSING_LINE not in r["answer"]["data"]
     assert "list nothing" in c.prompts[0] and "KIND OF QUESTION: extraction" in c.prompts[0]
