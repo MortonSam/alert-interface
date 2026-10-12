@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo
 from app.services import price_bars
 from app.services.trading_calendar import is_half_day
 
-TRADE_BASIS, CLOSE_BASIS = "last_trade", "close"
-BASIS_LABELS = {TRADE_BASIS: "last trade", CLOSE_BASIS: "close"}      # mirrored by frontend/src/lib/freshness.ts quoteBasisLabel
+TRADE_BASIS, CLOSE_BASIS, DELAYED_BASIS = "last_trade", "close", "delayed"
+BASIS_LABELS = {TRADE_BASIS: "last trade", CLOSE_BASIS: "close", DELAYED_BASIS: "delayed"}      # mirrored by frontend/src/lib/freshness.ts QUOTE_BASIS_LABELS
 LOOKBACK_DAYS = 15
 NY = ZoneInfo("America/New_York")
 

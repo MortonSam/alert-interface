@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from app.auth import get_draft_caller, is_admin, require_admin, _get_admin_token
 from app.config import settings
+from app.services import live_data
 from app.database import get_db
 from app.models.event import Event
 from app.models.iv_history import COURIER_SOURCE, IVHistory
@@ -255,14 +256,20 @@ async def create_ticker(payload: TickerCreate, db: AsyncSession = Depends(get_db
 
 
 @router.get("/quote/{symbol}", response_model=TickerQuoteRead)
-async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
-    """Real-time quote (Finnhub, shared 60s cache) + 30-day daily sparkline from the stored shadow bars."""
+async def get_ticker_quote(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> TickerQuoteRead:
+    """Quote (Finnhub, shared 60s cache; the live layer's delayed quote or stored close for the flag or the admin token, services/live_data)
+    + 30-day daily sparkline from the stored shadow bars."""
     sym = symbol.upper()
     loop = asyncio.get_event_loop()
 
-    # Check shared quote cache first; fetch from Finnhub on miss
-    cached = quote_cache.get(sym)
-    if cached is not None:
+    # Check shared quote cache first; fetch from Finnhub on miss. The live layer's quote is never put in the shared cache:
+    # it is served only to readers the flag (or the admin token) admits.
+    live_quote = await live_data.served_quote(db, sym, admin)
+    cached = None if live_quote is not None else quote_cache.get(sym)
+    if live_quote is not None:
+        candles = await loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo")
+        quote_data = _quote_data_from(live_quote)
+    elif cached is not None:
         quote_data = cached
         candles = await loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo")
     else:
@@ -277,20 +284,7 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         finally:
             await finnhub.close()
 
-        def _f(val: object) -> float | None:
-            return float(val) if val is not None else None
-
-        quote_data = {
-            "price": _f(raw_quote.get("c")) or None,
-            "change": _f(raw_quote.get("d")),
-            "change_pct": _f(raw_quote.get("dp")),
-            "high": _f(raw_quote.get("h")) or None,
-            "low": _f(raw_quote.get("l")) or None,
-            "open": _f(raw_quote.get("o")) or None,
-            "prev_close": _f(raw_quote.get("pc")) or None,
-            "timestamp": int(raw_quote["t"]) if raw_quote.get("t") else None,
-            "basis": raw_quote.get("basis", "last_trade"),
-        }
+        quote_data = _quote_data_from(raw_quote)
         quote_cache.set(sym, quote_data)
 
     # The quote is withheld when its last trade is not recent, and the sparkline
@@ -320,6 +314,7 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         prev_close=quote_data.get("prev_close") if live else None,
         timestamp=ts,
         quote_basis=quote_data.get("basis", "last_trade"),
+        delay_minutes=quote_data.get("delay_minutes"),
         sparkline=[SparklinePoint(date=c["date"], close=c["close"]) for c in candles] if hist.ok else [],
         quote_state=quote_state,
         quote_reason=quote_reason,
@@ -327,6 +322,24 @@ async def get_ticker_quote(symbol: str) -> TickerQuoteRead:
         history_reason=hist.reason,
         last_bar_date=hist.last_bar_date.isoformat() if hist.last_bar_date else None,
     )
+
+
+def _quote_data_from(raw_quote: dict) -> dict:
+    """A Finnhub-shaped quote (c, d, dp, h, l, o, pc, t, basis) to the cached shape, keeping the live layer's delay figure."""
+    def _f(val: object) -> float | None:
+        return float(val) if val is not None else None
+    return {
+        "price": _f(raw_quote.get("c")) or None,
+        "change": _f(raw_quote.get("d")),
+        "change_pct": _f(raw_quote.get("dp")),
+        "high": _f(raw_quote.get("h")) or None,
+        "low": _f(raw_quote.get("l")) or None,
+        "open": _f(raw_quote.get("o")) or None,
+        "prev_close": _f(raw_quote.get("pc")) or None,
+        "timestamp": int(raw_quote["t"]) if raw_quote.get("t") else None,
+        "basis": raw_quote.get("basis", "last_trade"),
+        "delay_minutes": raw_quote.get("delay_minutes"),
+    }
 
 
 def _served_quote(data: dict) -> dict:
@@ -343,14 +356,16 @@ def _served_quote(data: dict) -> dict:
         "change_pct": data.get("change_pct") if live else None,
         "timestamp": data.get("timestamp"),
         "quote_basis": data.get("basis", "last_trade"),
+        "delay_minutes": data.get("delay_minutes"),
         "quote_state": q.state,
         "quote_reason": q.reason,
     }
 
 
 @router.get("/quotes", response_model=list[BatchQuoteRead])
-async def get_batch_quotes(symbols: str = Query(..., description="Comma-separated symbols")) -> list[BatchQuoteRead]:
-    """Batch real-time quotes for the home grid, with 60s per-symbol cache."""
+async def get_batch_quotes(symbols: str = Query(..., description="Comma-separated symbols"), db: AsyncSession = Depends(get_db),
+                           admin: bool = Depends(is_admin)) -> list[BatchQuoteRead]:
+    """Batch quotes for the home grid, with 60s per-symbol cache; the live layer's quotes for the flag or the admin token."""
     raw = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     syms = list(dict.fromkeys(raw))[:50]  # dedupe, cap at 50
 
@@ -358,6 +373,10 @@ async def get_batch_quotes(symbols: str = Query(..., description="Comma-separate
     results: dict[str, BatchQuoteRead] = {}
     to_fetch: list[str] = []
     for sym in syms:
+        live_quote = await live_data.served_quote(db, sym, admin)
+        if live_quote is not None:
+            results[sym] = BatchQuoteRead(symbol=sym, **_served_quote(_quote_data_from(live_quote)))
+            continue
         cached = quote_cache.get(sym)
         if cached is not None:
             results[sym] = BatchQuoteRead(symbol=sym, **_served_quote(cached))
@@ -602,14 +621,23 @@ async def get_ticker_chart(
     symbol: str,
     period: str = "1y",
     db: AsyncSession = Depends(get_db),
-) -> TickerChartRead:
+    admin: bool = Depends(is_admin)) -> TickerChartRead:
     """Daily (or intraday) price history + earnings markers for the interactive chart."""
     sym = symbol.upper()
 
     loop = asyncio.get_event_loop()
-    # Intraday periods come from yfinance (the accepted exception); every daily period from the stored shadow bars.
-    if period in price_bars.INTRADAY_PERIODS:
-        chart_result: dict = await loop.run_in_executor(None, YFinanceClient.get_chart_history, sym, period)
+    # Intraday periods come from yfinance (the accepted exception); every daily period from the stored shadow bars. With the live
+    # layer on (or the admin token), the 1-day view reads Intrinio's 5-minute bars for the latest session, each bar with its own time.
+    live_bars: dict | None = None
+    if period == "1d" and live_data.serving_enabled(admin):
+        session = live_data.latest_session(dt_datetime.now(tz=timezone.utc))
+        prev = await loop.run_in_executor(None, price_bars.raw_closes_sync, sym, session - timedelta(days=10))
+        prev_close = next((float(c) for d, c, *_ in reversed(prev) if d < session), None)
+        live_bars = await live_data.intraday_chart(sym, session, prev_close)
+    if live_bars and live_bars["history"]:
+        chart_result: dict = live_bars
+    elif period in price_bars.INTRADAY_PERIODS:
+        chart_result = await loop.run_in_executor(None, YFinanceClient.get_chart_history, sym, period)
     else:
         chart_result = await loop.run_in_executor(None, price_bars.chart_history_daily_sync, sym, period)
     history_raw: list[dict] = chart_result["history"]
@@ -682,17 +710,24 @@ async def get_ticker_chart(
         history_state=hist.state,
         history_reason=hist.reason,
         last_bar_date=hist.last_bar_date.isoformat() if hist.last_bar_date else None,
+        bars_basis=live_data.DELAYED_BASIS if live_bars and live_bars["history"] else None,
+        bars_through=live_bars.get("bars_through") if live_bars and live_bars["history"] else None,
+        delay_minutes=live_data.DELAY_MINUTES if live_bars and live_bars["history"] else None,
     )
 
 
 
-async def _guarded_price(sym: str) -> QuoteState:
+async def _guarded_price(sym: str, db: AsyncSession | None = None, admin: bool = False) -> QuoteState:
     """The quote for a price-derived figure, behind the same freshness test the quote endpoint uses.
 
-    Reads the shared quote cache first. The returned state's `price` is None
+    Reads the live layer (for the flag or the admin token), then the shared quote cache. The returned state's `price` is None
     unless the last trade is recent, so nothing derived from a stale quote is
     computed; `traded_on_ts` is set whatever the state, for the page to date it.
     """
+    if db is not None:
+        live_quote = await live_data.served_quote(db, sym, admin)
+        if live_quote is not None:
+            return assess_quote(float(live_quote.get("c") or 0) or None, int(live_quote["t"]) if live_quote.get("t") else None)
     cached = quote_cache.get(sym)
     if cached is not None:
         return assess_quote(cached.get("price"), cached.get("timestamp"))
@@ -718,13 +753,13 @@ def _quote_fields(q: QuoteState) -> dict:
 
 
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
-async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db)) -> ExpectedMoveRead:
+async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> ExpectedMoveRead:
     sym = symbol.upper()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
     today = date.today()
 
     # The price behind every derived figure, withheld unless its last trade is recent
-    q = await _guarded_price(sym)
+    q = await _guarded_price(sym, db, admin)
     current_price = q.price
 
     # Look up ticker + next earnings
@@ -856,12 +891,12 @@ async def get_options_chain(
     symbol: str,
     expiration: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
-) -> OptionsChainRead:
+    admin: bool = Depends(is_admin)) -> OptionsChainRead:
     sym = symbol.upper()
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
     # The price behind every derived figure, withheld unless its last trade is recent
-    q = await _guarded_price(sym)
+    q = await _guarded_price(sym, db, admin)
     current_price = q.price
 
     available = await chain_store.get_ingested_expirations(db, sym)
@@ -924,7 +959,7 @@ async def get_strategy_data(
     symbol: str,
     expiration: str | None = Query(None, description="YYYY-MM-DD: use this expiration's chain instead of the earnings-relevant one"),
     db: AsyncSession = Depends(get_db),
-) -> StrategyDataRead:
+    admin: bool = Depends(is_admin)) -> StrategyDataRead:
     """Strike-level call/put mid-prices for the earnings-relevant expiration.
     Only returns contracts that pass all quality filters (no wide spread, no_market, etc.)
     so the frontend always works with real, trustworthy premiums.
@@ -933,7 +968,7 @@ async def get_strategy_data(
     as_of = dt_datetime.now(tz=timezone.utc).isoformat()
 
     # The price behind every derived figure, withheld unless its last trade is recent
-    q = await _guarded_price(sym)
+    q = await _guarded_price(sym, db, admin)
     current_price = q.price
     if not current_price:
         return StrategyDataRead(
@@ -1055,7 +1090,7 @@ async def get_strategy_data(
 
 
 @router.get("/options-bundle/{symbol}", response_model=OptionsBundleRead)
-async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) -> OptionsBundleRead:
+async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> OptionsBundleRead:
     """Consolidated expected-move + strategy-data + chain in a single request.
 
     Sources chain exclusively from ingested courier data. Returns null options
@@ -1066,7 +1101,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db)) ->
     today = date.today()
 
     # The price behind every derived figure, withheld unless its last trade is recent
-    q = await _guarded_price(sym)
+    q = await _guarded_price(sym, db, admin)
     current_price = q.price
 
     # ── Ticker + next earnings ────────────────────────────────────────────────

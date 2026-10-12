@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { datasetAgeLine, datasetsStale, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, nightlyWord, optionsCadencePhrase, optionsDataPhrase, premiumSourcePhrase, priceSourceLine, priceStateLine, priceAsOfPhrase } from "../freshness";
+import { QUOTE_BASIS_LABELS, datasetAgeLine, datasetsStale, delayPhrase, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, intradayBarsLine, nightlyWord, optionsCadencePhrase, optionsDataPhrase, premiumSourcePhrase, priceSourceLine, priceStateLine, priceAsOfPhrase, quoteAsOf } from "../freshness";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -134,5 +134,22 @@ describe("priced from the options data, the stock now from its quote (audit item
     expect(ticker).toContain("oneDayHistoryLine(hist)");
     expect(ticker).toContain("impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date)");
     expect(read("lib/api.ts")).not.toMatch(/above_expected|below_expected/);
+  });
+});
+
+describe("the live layer's delayed quotes", () => {
+  it("names a delayed quote by its own time and the record's delay figure, never a typed one", () => {
+    const t = Math.floor(new Date("2026-10-12T17:02:00Z").getTime() / 1000);       // 1:02 PM New York
+    expect(quoteAsOf(t, "delayed", 15)).toBe("Oct 12, 1:02 PM ET, delayed 15 min");
+    expect(quoteAsOf(t, "delayed", 20)).toBe("Oct 12, 1:02 PM ET, delayed 20 min");
+    expect(quoteAsOf(t, "delayed", null)).toBe("Oct 12, 1:02 PM ET, delayed");
+    expect(quoteAsOf(t, "close")).toBe("Oct 12, 1:02 PM ET close");
+    expect(quoteAsOf(t, "last_trade", 15)).toBe("Oct 12, 1:02 PM ET");
+    expect(delayPhrase(0)).toBeNull();
+    expect(Object.keys(QUOTE_BASIS_LABELS).sort()).toEqual(["close", "delayed", "last_trade"]);   // backend quote_fallback.BASIS_LABELS
+    expect(intradayBarsLine("delayed", "2026-10-12T12:45:00.000-04:00", 15)).toBe("Bars through 12:45 PM ET, delayed 15 min");
+    expect(intradayBarsLine(null, "2026-10-12T12:45:00.000-04:00", 15)).toBeNull();
+    const src = readFileSync(join(__dirname, "..", "freshness.ts"), "utf8");
+    expect(src).not.toMatch(/15 min|delayed 15/);                                       // the figure comes from the record
   });
 });

@@ -154,6 +154,9 @@ export interface ReactionSummary {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
+  bars_through?: string | null;       // the newest bar's own time (ISO with offset)
+  delay_minutes?: number | null;      // the source's stated delay, rendered by the page
 }
 
 export interface SectorPeerItem {
@@ -398,6 +401,9 @@ export interface TickerChart {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
+  bars_through?: string | null;       // the newest bar's own time (ISO with offset)
+  delay_minutes?: number | null;      // the source's stated delay, rendered by the page
 }
 
 export interface BatchQuote {
@@ -406,7 +412,8 @@ export interface BatchQuote {
   change: number | null;
   change_pct: number | null;
   timestamp: number | null;
-  quote_basis?: "last_trade" | "close";
+  quote_basis?: "last_trade" | "close" | "delayed";
+  delay_minutes?: number | null;              // the source's stated delay when quote_basis is delayed (rendered, never typed)
   quote_state?: "ok" | "stale" | "no_data";   // price fields are null unless ok
   quote_reason?: string | null;
 }
@@ -433,7 +440,8 @@ export interface TickerQuote {
   open: number | null;
   prev_close: number | null;
   timestamp: number | null;
-  quote_basis?: "last_trade" | "close";
+  quote_basis?: "last_trade" | "close" | "delayed";
+  delay_minutes?: number | null;
   sparkline: SparklinePoint[];
   quote_state?: "ok" | "stale";
   quote_reason?: string | null;

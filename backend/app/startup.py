@@ -214,6 +214,28 @@ async def _news_loop() -> None:
             _log(f"News loop iteration failed ({exc}); will retry next cycle.")
 
 
+LIVE_LOOP_SECONDS = 15
+
+
+async def _live_quote_loop() -> None:
+    """The live layer's collector (services/live_data): a bulk delayed-quote refresh every QUOTE_REFRESH_SECONDS inside market hours,
+    only while LIVE_DATA_COLLECT_ENABLED is on and an Intrinio key is set. Never raises; each run records its figures."""
+    from app.services import live_data
+    last_run: datetime | None = None
+    while True:
+        await asyncio.sleep(LIVE_LOOP_SECONDS)
+        try:
+            now = datetime.now(timezone.utc)
+            if not live_data.collecting() or not live_data.refresh_due(now, last_run):
+                continue
+            last_run = now
+            status = await live_data.refresh_quotes(now)
+            if status.get("error"):
+                _log(f"[live] quote refresh failed: {status['error']}")
+        except Exception as exc:
+            _log(f"[live] loop error: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     """Check staleness on startup; fire one background refresh if needed.
@@ -315,10 +337,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     # ── Start the permanent refresh loop, then yield (app serves requests) ────
     loop_task = asyncio.create_task(_refresh_loop())
     news_task = asyncio.create_task(_news_loop())
+    live_task = asyncio.create_task(_live_quote_loop())
     try:
         yield
     finally:
-        for task in (loop_task, news_task):
+        for task in (loop_task, news_task, live_task):
             task.cancel()
             try:
                 await task

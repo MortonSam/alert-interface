@@ -30,10 +30,20 @@ def nightly_local_time(now_utc: datetime | None = None) -> str:
     return slot_local_label()
 
 
+def quote_cadence(live: bool | None = None) -> dict:
+    """The quote record: Finnhub, dated by each quote's last trade, or, with LIVE_DATA_ENABLED on, the delayed Intrinio feed with
+    its stated delay (services/live_data.DELAY_MINUTES, from the vendor's spec), still dated by each quote's last trade."""
+    from app.config import settings
+    from app.services import live_data
+    if settings.live_data_enabled if live is None else live:
+        return {"source": "Intrinio", "delay_statement": f"delayed {live_data.DELAY_MINUTES} min", "delay_checked": QUOTE_DELAY_CHECKED, "dated_by": QUOTE_DATED_BY}
+    return {"source": QUOTE_SOURCE, "delay_statement": QUOTE_DELAY_STATEMENT, "delay_checked": QUOTE_DELAY_CHECKED, "dated_by": QUOTE_DATED_BY}
+
+
 def cadence(now_utc: datetime | None = None) -> dict:
     return {
         "nightly": {"per_day": NIGHTLY_RUNS_PER_DAY, "local_time": nightly_local_time(now_utc), "clock": NIGHTLY_CLOCK, "utc_today": slot_utc_today(now_utc)},
         "options": {"per_day": OPTIONS_CAPTURES_PER_DAY, "captured_local": COURIER_CAPTURE_LOCAL, "clock": MARKET_CLOCK,
                     "fresh_sessions": chain_store.CHAIN_FRESH_TRADING_DAYS},
-        "quotes": {"source": QUOTE_SOURCE, "delay_statement": QUOTE_DELAY_STATEMENT, "delay_checked": QUOTE_DELAY_CHECKED, "dated_by": QUOTE_DATED_BY},
+        "quotes": quote_cadence(),
     }

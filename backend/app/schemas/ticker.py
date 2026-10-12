@@ -67,6 +67,9 @@ class TickerChartRead(BaseModel):
     last_bar_date: str | None = None     # date of the newest bar the source returned
     price_history_excluded: bool = False # earnings_markers are [] because the ticker is on the RV exclusion list
     exclusion_reason: str | None = None
+    bars_basis: str | None = None        # "delayed" when the 1-day bars came from the live layer; the page labels them from this
+    bars_through: str | None = None      # the newest bar's own time (ISO with offset) when bars_basis is set
+    delay_minutes: int | None = None
 
 
 # ── Quote response (Finnhub) ──────────────────────────────────────────────────
@@ -86,7 +89,8 @@ class TickerQuoteRead(BaseModel):
     open: float | None          # day open
     prev_close: float | None
     timestamp: int | None       # Unix UTC
-    quote_basis: str = "last_trade"      # last_trade | close (the stored close served when Finnhub had no answer in time)
+    quote_basis: str = "last_trade"      # last_trade | close (the stored close served when Finnhub had no answer in time) | delayed (the live layer)
+    delay_minutes: int | None = None     # the source's stated delay when quote_basis is delayed; the page renders it
     sparkline: list[SparklinePoint]  # daily closes, chronological; [] unless history_state is ok
     quote_state: str = "ok"              # ok | stale; price fields are null when stale
     quote_reason: str | None = None
@@ -101,7 +105,8 @@ class BatchQuoteRead(BaseModel):
     change: float | None
     change_pct: float | None
     timestamp: int | None = None  # Unix UTC (exchange last-trade time, or the session's close when quote_basis is close)
-    quote_basis: str = "last_trade"   # last_trade | close
+    quote_basis: str = "last_trade"   # last_trade | close | delayed
+    delay_minutes: int | None = None  # the source's stated delay when quote_basis is delayed
     quote_state: str = "ok"           # ok | stale | no_data; price fields are null unless ok
     quote_reason: str | None = None   # plain language, shown in place of the price
 

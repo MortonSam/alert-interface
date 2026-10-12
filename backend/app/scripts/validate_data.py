@@ -1563,6 +1563,85 @@ async def check_chains_step_start(session) -> CheckResult:
     return CheckResult("chains_step_start", PASS, f"{label} started at {at} New York, {delay:.0f} minutes after its 03:05 schedule")
 
 
+LIVE_SANITY_PCT = 20.0            # a delayed quote this far from the last stored close, with no corporate action since, is wrong
+LIVE_ACTION_LOOKBACK_DAYS = 7
+
+
+def live_quote_stale(status_at: datetime | None, now: datetime) -> bool:
+    """Pure: in market hours the collector's last run is older than QUOTE_MAX_AGE_MINUTES (the feed stalled)."""
+    from app.services.live_data import QUOTE_MAX_AGE_MINUTES, market_open
+    if not market_open(now):
+        return False
+    return status_at is None or (now - status_at).total_seconds() > QUOTE_MAX_AGE_MINUTES * 60
+
+
+def live_price_outliers(quotes: dict[str, dict], closes: dict[str, float], acted: set[str], pct: float = LIVE_SANITY_PCT) -> list[str]:
+    """Pure: symbols whose delayed price sits more than `pct` from the last stored close with no recorded corporate action."""
+    out = []
+    for sym, rec in sorted(quotes.items()):
+        c, px = closes.get(sym), rec.get("c")
+        if c and px and sym not in acted and abs(px - c) / c * 100 > pct:
+            out.append(f"{sym}: delayed {px:.2f} against the last close {c:.2f} ({(px - c) / c * 100:+.0f}%)")
+    return out
+
+
+async def _live_status(session):
+    from app.services.live_data import STATUS_KEY, parse_status
+    from app.services.system_metadata_service import get_value
+    return parse_status(await get_value(session, STATUS_KEY))
+
+
+async def check_live_quote_age(session) -> CheckResult:
+    """ERROR when, in market hours, the live layer's collector has not stored quotes for QUOTE_MAX_AGE_MINUTES (the delayed feed
+    stalled: pages serve the stored close with its date meanwhile); WARN when the collector is on but has never run or last
+    failed. PASS, saying so, while collection is off."""
+    from app.services import live_data
+    if not live_data.collecting():
+        return CheckResult("live_quote_age", PASS, "The live layer's collector is off (LIVE_DATA_COLLECT_ENABLED or no Intrinio key)")
+    st = await _live_status(session)
+    now = datetime.now(timezone.utc)
+    if st is None:
+        return CheckResult("live_quote_age", WARN, "The live collector is on but has recorded no run yet")
+    if live_quote_stale(st.last_run_at, now):
+        return CheckResult("live_quote_age", ERROR, f"The delayed quote feed stalled: last stored at {st.last_run_at.isoformat() if st.last_run_at else 'never'}, "
+                           f"more than {live_data.QUOTE_MAX_AGE_MINUTES} minutes ago in market hours; pages serve the stored close with its date")
+    if st.error:
+        return CheckResult("live_quote_age", WARN, f"The live collector's last run failed: {st.error}")
+    return CheckResult("live_quote_age", PASS, f"Delayed quotes last stored at {st.last_run_at.isoformat() if st.last_run_at else 'never'} ({st.quotes_stored} tickers)")
+
+
+async def check_live_quote_sanity(session) -> CheckResult:
+    """ERROR when a stored delayed quote sits more than LIVE_SANITY_PCT from the ticker's last stored close with no corporate action
+    (a split, spin-off or merger on its events) in the last LIVE_ACTION_LOOKBACK_DAYS: a wrong price, never shown as right."""
+    import json as _json
+    from app.services.live_data import QUOTES_KEY
+    from app.services.system_metadata_service import get_value
+    raw = await get_value(session, QUOTES_KEY)
+    quotes = (_json.loads(raw) if raw else {}).get("quotes") or {}
+    if not quotes:
+        return CheckResult("live_quote_sanity", PASS, "No delayed quotes stored")
+    closes = {r.symbol: float(r.close) for r in (await session.execute(text(
+        "SELECT DISTINCT ON (symbol) symbol, close FROM price_bars_shadow WHERE close IS NOT NULL ORDER BY symbol, date DESC"))).all()}
+    acted = set((await session.execute(text("""SELECT t.symbol FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE (e.event_type = 'split' OR e.metadata ? 'corporate_action') AND e.event_date >= CURRENT_DATE - :d"""), {"d": LIVE_ACTION_LOOKBACK_DAYS})).scalars().all())
+    bad = live_price_outliers(quotes, closes, acted)
+    if bad:
+        return CheckResult("live_quote_sanity", ERROR, f"{len(bad)} delayed quote(s) more than {LIVE_SANITY_PCT:.0f}% from the last stored close with no corporate action", bad[:20])
+    return CheckResult("live_quote_sanity", PASS, f"{len(quotes)} delayed quotes within {LIVE_SANITY_PCT:.0f}% of their last stored close")
+
+
+async def check_live_api_budget(session) -> CheckResult:
+    """WARN when the live layer's calls at full load would use more than BUDGET_WARN_SHARE of Intrinio's per-minute limit."""
+    from app.services import live_data
+    n = (await session.execute(text("SELECT count(*) FROM tickers WHERE is_active"))).scalar() or 0
+    b = live_data.calls_per_hour_full_load(int(n))
+    msg = (f"{b['total']} calls an hour at full load ({b['quote_calls']} quote pages, {b['chart_calls']} chart bars), {b['per_minute']} a minute "
+           f"against {b['limit_per_minute']} a minute: {b['share_of_limit']:.0%} of the limit")
+    if b["share_of_limit"] > live_data.BUDGET_WARN_SHARE:
+        return CheckResult("live_api_budget", WARN, msg + f", above {live_data.BUDGET_WARN_SHARE:.0%}")
+    return CheckResult("live_api_budget", PASS, msg, figures={"live_calls_per_minute_full_load": b["per_minute"]})
+
+
 async def check_chain_quality(session) -> CheckResult:
     """ERROR if any stored chain (either source) holds a contract services/chain_quality would have removed: an adjusted root, implied
     volatility above MAX_SANE_IV, a call priced at or above the stock or a put at or above its strike, or two contracts at the same
@@ -3342,6 +3421,9 @@ CHECKS = [
     check_ai_api,
     check_chain_quality,
     check_chains_step_start,
+    check_live_quote_age,
+    check_live_quote_sanity,
+    check_live_api_budget,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

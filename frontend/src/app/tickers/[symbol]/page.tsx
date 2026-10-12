@@ -7,7 +7,7 @@ import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, intradayBarsLine, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
@@ -1209,6 +1209,9 @@ function PriceChart({
             />
           </LineChart>
         </ResponsiveContainer>
+      {intradayBarsLine(chartData.bars_basis, chartData.bars_through, chartData.delay_minutes) && (
+        <p className="text-xs text-muted-foreground mt-1">{intradayBarsLine(chartData.bars_basis, chartData.bars_through, chartData.delay_minutes)}</p>
+      )}
         {!isIntraday && (earningsMarkers.length > 0 || (impliedRangeLow != null && impliedRangeHigh != null) || chartLastBar) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[10px] text-muted-foreground px-1">
             {chartLastBar && <span>Last bar {chartLastBar}</span>}
@@ -1965,13 +1968,13 @@ export default function TickerPage() {
                 <span className="text-xs text-muted-foreground ml-auto">
                   H&nbsp;{quote.high.toFixed(2)} · L&nbsp;{quote.low.toFixed(2)}
                   {quote.timestamp != null && (
-                    <span className="text-muted-foreground/50 ml-2">as of {quoteAsOf(quote.timestamp, quote.quote_basis)}</span>
+                    <span className="text-muted-foreground/50 ml-2">as of {quoteAsOf(quote.timestamp, quote.quote_basis, quote.delay_minutes)}</span>
                   )}
                 </span>
               )}
               {(quote.high == null || quote.low == null) && quote.timestamp != null && (
                 <span className="text-xs text-muted-foreground/50 ml-auto">
-                  as of {quoteAsOf(quote.timestamp, quote.quote_basis)}
+                  as of {quoteAsOf(quote.timestamp, quote.quote_basis, quote.delay_minutes)}
                 </span>
               )}
             </div>

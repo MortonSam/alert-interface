@@ -229,7 +229,7 @@ export default function DiscoverPage() {
               <DiscoverRow
                 symbol={latestPick.symbol}
                 price={quotes.get(latestPick.symbol)?.price != null ? fmtPrice(quotes.get(latestPick.symbol)!.price) : undefined}
-                priceAsOf={quoteAsOf(quotes.get(latestPick.symbol)?.timestamp, quotes.get(latestPick.symbol)?.quote_basis)}
+                priceAsOf={quoteAsOf(quotes.get(latestPick.symbol)?.timestamp, quotes.get(latestPick.symbol)?.quote_basis, quotes.get(latestPick.symbol)?.delay_minutes)}
                 sentence={latestPickSentence(latestPick)}
               />
             </DiscoverRows>
@@ -257,7 +257,7 @@ export default function DiscoverPage() {
                     symbol={item.symbol}
                     name={item.name}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis, quotes.get(item.symbol)?.delay_minutes)}
                     sentence={reportingSoonSentence(item)}
                     detail={<MoveComparisonLine item={item} />}
                   />
@@ -283,7 +283,7 @@ export default function DiscoverPage() {
                   symbol={item.symbol}
                   name={item.name}
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis, quotes.get(item.symbol)?.delay_minutes)}
                   sentence={justReportedSentence(item)}
                 />
               ))}
@@ -312,7 +312,7 @@ export default function DiscoverPage() {
                     symbol={item.symbol}
                     name={item.name}
                     price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis, quotes.get(item.symbol)?.delay_minutes)}
                     sentence={suggestionSentence(item)}
                   />
                 ))}
@@ -339,7 +339,7 @@ export default function DiscoverPage() {
                   symbol={item.symbol}
                   name={item.name}
                   price={quotes.get(item.symbol)?.price != null ? fmtPrice(quotes.get(item.symbol)!.price) : undefined}
-                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis)}
+                    priceAsOf={quoteAsOf(quotes.get(item.symbol)?.timestamp, quotes.get(item.symbol)?.quote_basis, quotes.get(item.symbol)?.delay_minutes)}
                   sentence={unusuallyActiveSentence(item)}
                   title={tapeReceipt(item)}
                 />
