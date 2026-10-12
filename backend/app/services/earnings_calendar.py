@@ -241,6 +241,27 @@ def beyond_calendar_reach(stored: StoredDate, reaction_dates: list[date], actual
     return None
 
 
+COMPANY_NOTE_PREFIXES = ("confirmed: 8-k", "confirmed: press release", "confirmed: events feed via ir", "confirmed: company announcement")
+VENDOR_SOURCES = ("finnhub", "yfinance")
+
+
+def company_confirmed(is_confirmed: bool, note: str | None) -> bool:
+    """Pure: the date was confirmed by the company's own words (an 8-K exhibit, a press release, its IR feed), never by two
+    vendor calendars agreeing (AGREEMENT_NOTE) or by one vendor's estimate."""
+    return bool(is_confirmed) and (note or "").strip().lower().startswith(COMPANY_NOTE_PREFIXES)
+
+
+def shown_level(is_confirmed: bool, note: str | None, unresolved_since: date | None, licensed_only: bool | None = None) -> str | None:
+    """The level a page may show. With LICENSED_DATES_ONLY (settings.licensed_dates_only) a vendor's date is never shown: the level is
+    "confirmed" for a company-confirmed date and None (no date) for anything else; otherwise level_of."""
+    if licensed_only is None:
+        from app.config import settings
+        licensed_only = settings.licensed_dates_only
+    if not licensed_only:
+        return level_of(is_confirmed, unresolved_since)
+    return "confirmed" if company_confirmed(is_confirmed, note) else None
+
+
 def level_of(is_confirmed: bool, unresolved_since: date | None) -> str:
     """The level a page shows: 'confirmed', 'estimated' or 'expected_unconfirmed'."""
     if unresolved_since is not None:

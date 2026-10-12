@@ -62,6 +62,8 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
     # the companies' own words: every new 8-K exhibit and ingested release read for a results date; writes only with CONFIRMATION_READER_WRITE=true
     ("Report date confirmations (reader)", ["python", "-m", "app.scripts.confirm_report_dates", "--write"]),
+    # a window from the company's own past report dates in SEC filings, for every name no announcement confirmed (services/report_windows)
+    ("Expected report windows (SEC filings)", ["python", "-m", "app.scripts.expected_report_windows"]),
     ("EPS actuals (Finnhub)",          ["python", "-m", "app.scripts.seed_eps_actuals"]),
     # GAAP diluted EPS from the earnings release for quarters XBRL does not hold yet, then checked against XBRL once filed
     ("Release EPS (8-K exhibits)",     ["python", "-m", "app.scripts.seed_release_eps", "--due", "--write"]),
@@ -116,6 +118,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
     "Report date confirmations (reader)": 1800,   # the window's 8-K exhibits per active ticker (EDGAR cached within the run), stored releases, IR feeds
+    "Expected report windows (SEC filings)": 1500,  # BUDGET_SECONDS 1200 of EDGAR reads (each filing judged once, the verdict kept) plus slack
     "Analyst recommendations (Finnhub)": 300,
     "Discover news (Finnhub)": 1800,                # two Finnhub calls per ticker at 40 a minute, about 25 minutes
     "Historical reactions (--all)": 1800,

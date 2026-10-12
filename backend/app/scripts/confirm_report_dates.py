@@ -34,6 +34,7 @@ from app.services import report_date_reader as R
 from app.services.earnings_calendar import SAME_REPORT_DAYS
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
+from app.services.report_announcements import names_issuer
 from app.services.step_outcomes import record_step_fields
 from app.services.system_metadata_service import set_value
 
@@ -81,7 +82,8 @@ async def finnhub_news(finnhub, symbol: str, since: date, today: date) -> list[d
     out = []
     for it in items or []:
         published = date.fromtimestamp(it["datetime"]).isoformat() if it.get("datetime") else "?"
-        out.append({"kind": "press release", "reference": it.get("url") or "", "published": published, "text": f"{it.get('headline', '')}. {it.get('summary', '')}"})
+        out.append({"kind": "press release", "reference": it.get("url") or "", "published": published, "headline": str(it.get("headline", "")),
+                    "text": f"{it.get('headline', '')}. {it.get('summary', '')}"})
     return out
 
 
@@ -194,7 +196,7 @@ async def main(argv: list[str]) -> int:
             try:
                 docs = await asyncio.wait_for(edgar_texts(edgar, sym, since, today), TICKER_TIMEOUT_S)    # one slow filer never stalls the run
                 docs += [{"kind": "press release", "reference": n["url"], "published": n["published_at"].date().isoformat() if n.get("published_at") else "?",
-                          "text": f"{n['headline']}. {n.get('summary') or ''}"} for n in await stored_news(sym, since)]
+                          "headline": n["headline"], "text": f"{n['headline']}. {n.get('summary') or ''}"} for n in await stored_news(sym, since)]
                 if finnhub is not None:
                     try:
                         docs += await finnhub_news(finnhub, sym, since, today)
@@ -209,6 +211,10 @@ async def main(argv: list[str]) -> int:
                         for s in R.screen(d["text"], today):
                             print(f"  screen {sym} {d['kind']} {d['published']}: {s[:220]}", flush=True)
                 for d in docs:
+                    # a press release counts only when its headline names the issuer: Ares Capital's release is not Ares Management's,
+                    # Goldman Sachs BDC's is not Goldman Sachs', and an article about PNC confirms nothing for the banks it mentions
+                    if d["kind"] == "press release" and not names_issuer(d.get("headline") or d["text"], t.get("name") or sym):
+                        continue
                     hit = R.read_report_date(d["text"], today)
                     if hit is None or hit.day in seen_days:
                         continue

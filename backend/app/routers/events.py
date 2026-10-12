@@ -45,7 +45,17 @@ async def upcoming_events(
         q = q.where(Event.event_type == event_type)
 
     result = await db.execute(q)
-    return list(result.scalars().all())
+    return licensed_dates(list(result.scalars().all()))
+
+
+def licensed_dates(events: list[Event]) -> list[Event]:
+    """With LICENSED_DATES_ONLY (vendor calendars are personal-use only), an earnings event a vendor estimated, or two vendors
+    agreed on, is not shown; the Catalysts row shows the expected window from SEC filings instead (next_earnings)."""
+    from app.config import settings
+    from app.services.earnings_calendar import company_confirmed
+    if not settings.licensed_dates_only:
+        return events
+    return [e for e in events if e.event_type != EventType.EARNINGS or company_confirmed(e.is_confirmed, e.confirmation_note)]
 
 
 @router.get("", response_model=list[EventRead])

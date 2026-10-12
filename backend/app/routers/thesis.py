@@ -1265,12 +1265,13 @@ async def _compute_alert_pick_v2(
     all_features = all_result.scalars().all()
 
     # The report date behind the features, with its confirmation as every page reads it (services.earnings_calendar.level_of)
-    from app.services.earnings_calendar import level_of
+    from app.services.earnings_calendar import shown_level
     ev = (await db.execute(
         select(Event).join(Ticker, Ticker.id == Event.ticker_id)
         .where(Ticker.symbol == sym, Event.event_type == EventType.EARNINGS, Event.event_date == live_features.event_date)
     )).scalars().first()
-    event_confirmation = level_of(ev.is_confirmed, ev.unresolved_since) if ev is not None else "estimated"
+    # with LICENSED_DATES_ONLY, "confirmed" means the company's own words; two vendor calendars agreeing no longer counts for Ivy
+    event_confirmation = (shown_level(ev.is_confirmed, ev.confirmation_note, ev.unresolved_since) or "estimated") if ev is not None else "estimated"
     event_source = getattr(ev.source, "value", ev.source) if ev is not None and ev.source is not None else None
 
     # AI client for narration (template fallback on failure)

@@ -47,6 +47,11 @@ class TickerRead(TickerBase):
     next_earnings_checked_at: datetime | None = None  # tickers.earnings_checked_at: when Finnhub was last asked
     next_earnings_confirmation: str | None = None    # "confirmed" | "estimated" | "expected_unconfirmed"
     next_earnings_note: str | None = None            # why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
+    # with LICENSED_DATES_ONLY and no company-confirmed date: the expected window from the company's past report dates in SEC filings
+    next_earnings_window_start: date | None = None
+    next_earnings_window_end: date | None = None
+    next_earnings_window_source: str | None = None
+    next_earnings_window_computed_at: str | None = None
     deal_note: str | None = None                     # a pending cash deal (services/pending_deals): the visitor note; the page shows plain price facts below it
     exit: TickerExit | None = None                   # set by /by-symbol when the stock no longer trades and its kind has an approved line
     created_at: datetime

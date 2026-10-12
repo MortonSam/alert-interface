@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # no writes, no admin endpoints, and it is never attributed to admin-local (see app.auth).
     reviewer_tokens: str = ""
     refresh_enabled: bool = True  # startup + loop refresh pipeline
+    # Intrinio's terms (2026-10-12): Yahoo and Finnhub calendars are personal-use only. When true, a page shows an earnings date
+    # only when the company's own words confirmed it (services/report_date_reader, the announcement paths); every other name
+    # shows an expected window from its past report dates in SEC filings (services/report_windows). Ivy already picks confirmed only.
+    licensed_dates_only: bool = False         # LICENSED_DATES_ONLY
     # The free-text question box under the question strip (services/ask_ivy). Off in production until launched; on locally.
     ask_ivy_enabled: bool = False
     live_data_enabled: bool = False           # LIVE_DATA_ENABLED: delayed Intrinio quotes and intraday chart bars shown to visitors (services/live_data)

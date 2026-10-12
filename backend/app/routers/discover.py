@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.discover_blurbs import MIN_QUARTERS, earnings_blurb, reaction_blurb, volatility_blurb
 from app.services.pnl_math import pnl_percent
 from app.auth import may_read_ledger
-from app.services.earnings_calendar import level_of
+from app.services.earnings_calendar import level_of, shown_level
 from app.services.next_earnings import batch_next_earnings
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.thresholds import (
@@ -776,6 +776,8 @@ async def reporting_soon(
 
     # Sort: primary by event_date ASC, secondary by avg_abs_1d DESC
     raw_items.sort(key=lambda x: (x[0].event_date, -x[3]))
+    # with LICENSED_DATES_ONLY a vendor's date is not a date: only company-confirmed reports are listed as reporting soon
+    raw_items = [x for x in raw_items if shown_level(x[0].is_confirmed, x[0].confirmation_note, x[0].unresolved_since) is not None]
 
     items = [
         ReportingSoonItem(
@@ -786,7 +788,7 @@ async def reporting_soon(
             earnings_date=r.event_date.isoformat(),
             source=getattr(r.source, "value", r.source) if r.source is not None else None,
             checked_at=r.earnings_checked_at.isoformat() if r.earnings_checked_at else None,
-            confirmation=level_of(r.is_confirmed, r.unresolved_since),
+            confirmation=shown_level(r.is_confirmed, r.confirmation_note, r.unresolved_since),
             confirmation_note=r.confirmation_note,
             is_confirmed=r.is_confirmed,
             insight=_reporting_soon_insight(cond, r.symbol),
@@ -1237,12 +1239,12 @@ async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today
     MIN_REPORTS stored reports, and the one-sentence comparison. A symbol missing either side gets no comparison."""
     from app.services import price_bars, quote_cache
     from app.services.briefing_build import _implied
-    from app.services.earnings_calendar import level_of
+    from app.services.earnings_calendar import shown_level
     from app.services.implied_move import implied_move_allowed
     from app.services.move_comparison import MIN_REPORTS, compare_moves, comparison_sentence
     out: dict[str, dict] = {}
     for r in rows:
-        if not implied_move_allowed(level_of(r.is_confirmed, getattr(r, "unresolved_since", None))):
+        if not implied_move_allowed(shown_level(r.is_confirmed, getattr(r, "confirmation_note", None), getattr(r, "unresolved_since", None))):
             continue            # an estimated date is never priced
         cond = cond_stats.get(r.symbol)
         if not cond or (cond.get("total") or 0) < MIN_REPORTS or not cond.get("avg_abs_1d"):
