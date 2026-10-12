@@ -111,4 +111,4 @@ def test_all_four_endpoints_read_the_price_through_the_guard():
     end = src.index('@router.get("/options-read/{symbol}"')
     region = src[start:end]
     assert "finnhub.get_quote(" not in region
-    assert region.count("await _guarded_price(sym)") == 4
+    assert region.count("await _guarded_price(sym, db, admin)") == 4      # the live layer (flag or admin token) feeds the same guard
