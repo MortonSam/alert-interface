@@ -37,6 +37,7 @@ FEATURES = {
     "generate_thesis_draft": "Build a Trade drafts",
     "generate_thesis_draft_alternative": "Build a Trade alternative structure",
     "read_release_eps": "earnings release reader",
+    "read_report_date": "report date reader",
     "generate_answer": "Ask Ivy and Ivy's Discover sentences",
     "classify_question": "Ask Ivy's question classifier",
     "key_check": "nightly key check",

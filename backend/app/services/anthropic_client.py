@@ -162,6 +162,22 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
+    async def read_report_date(self, prompt: str) -> dict:
+        """The second reader of a company's results-date sentence (services/report_date_reader): Sonnet returns JSON with the
+        date, the timing and the verbatim sentence; the caller verifies the sentence and confirms only on agreement with the
+        pattern reader."""
+        msg = await self._create("read_report_date",
+            model=GENERATION_MODEL,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {
+            "content":       _extract_text(msg).strip(),
+            "model_used":    GENERATION_MODEL,
+            "input_tokens":  msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
+
     async def generate_answer(self, prompt: str, max_tokens: int = 400) -> dict:
         """Ask Ivy (services/ask_ivy): a short answer written from a fact pack. Sonnet; the caller forbids any typed number
         and inserts every value itself, so the output is prose with placeholders only."""

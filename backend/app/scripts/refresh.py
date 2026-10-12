@@ -60,6 +60,8 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Security records (Intrinio)",           ["python", "-m", "app.scripts.build_security_records", "--write"]),
     ("Price bars shadow (Intrinio)",          ["python", "-m", "app.scripts.shadow_price_bars"]),
     ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
+    # the companies' own words: every new 8-K exhibit and ingested release read for a results date; writes only with CONFIRMATION_READER_WRITE=true
+    ("Report date confirmations (reader)", ["python", "-m", "app.scripts.confirm_report_dates", "--write"]),
     ("EPS actuals (Finnhub)",          ["python", "-m", "app.scripts.seed_eps_actuals"]),
     # GAAP diluted EPS from the earnings release for quarters XBRL does not hold yet, then checked against XBRL once filed
     ("Release EPS (8-K exhibits)",     ["python", "-m", "app.scripts.seed_release_eps", "--due", "--write"]),
@@ -113,6 +115,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
+    "Report date confirmations (reader)": 1800,   # the window's 8-K exhibits per active ticker (EDGAR cached within the run), stored releases, IR feeds
     "Analyst recommendations (Finnhub)": 300,
     "Discover news (Finnhub)": 1800,                # two Finnhub calls per ticker at 40 a minute, about 25 minutes
     "Historical reactions (--all)": 1800,
