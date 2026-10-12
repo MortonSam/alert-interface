@@ -563,10 +563,14 @@ async def _add_to_daily_spend(db: AsyncSession, cost: float | None, now: datetim
         key = f"research_gen:unpriced:{now.strftime('%Y-%m-%d')}"
         raw = await get_value(db, key)
         await set_value(db, key, str((int(raw) if raw else 0) + 1))
+        from app.services import ai_spend
+        await ai_spend.add(db, None, now, commit=False)
         return
     key = f"research_gen:spend:{now.strftime('%Y-%m-%d')}"
     raw = await get_value(db, key)
     await set_value(db, key, f"{(float(raw) if raw else 0.0) + cost:.4f}")
+    from app.services import ai_spend
+    await ai_spend.add(db, cost, now, commit=False)          # the site-wide cap counts every feature's spend
 
 
 # ── Generate (two-phase: immediate upsert + background work) ─────────────────

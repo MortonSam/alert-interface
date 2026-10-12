@@ -24,7 +24,7 @@ from app.services.price_bars_shadow import adjusted_frame
 
 HISTORY_PAD_BEFORE_DAYS = 30     # the seeders' window: lookback less this, through today plus HISTORY_PAD_AFTER_DAYS
 HISTORY_PAD_AFTER_DAYS = 2
-INTRADAY_PERIODS = ("1d", "7d")  # chart periods that stay on yfinance intraday bars
+INTRADAY_PERIODS = ("1d", "7d")  # chart periods served from Intrinio's intraday bars (services/live_data.intraday_chart), not the stored daily bars
 PERIOD_DAYS = {"5d": 7, "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}
 
 _SQL = "SELECT date, open, high, low, close, volume, factor, split_ratio FROM price_bars_shadow WHERE symbol = :s{more} ORDER BY date"
@@ -139,9 +139,40 @@ def daily_closes_sync(symbol: str, period: str = "1mo", today: date | None = Non
 def chart_history_daily_sync(symbol: str, period: str, today: date | None = None) -> dict:
     """The chart's daily series: {"history": [{date, close}], "start_price": first close or None}. Intraday periods are not served here."""
     if period in INTRADAY_PERIODS:
-        raise ValueError(f"{period} is an intraday period: yfinance serves it")
+        raise ValueError(f"{period} is an intraday period: Intrinio's bars serve it")
     history = daily_closes_sync(symbol, period, today)
     return {"history": history, "start_price": history[0]["close"] if history else None}
+
+
+RV_HISTORY_DAYS = 3 * 366        # the realized-volatility context reads three years of stored bars (the rank needs a year of 20-day windows)
+
+
+def realized_vol_sync(symbol: str, rv_window: int = 20, action_dates=None, today: date | None = None) -> dict:
+    """The realized-volatility context from the stored (adjusted) bars: the same figures YFinanceClient.get_realized_vol_data once
+    fetched from Yahoo for Build a Trade: {current_rv, rv_series, sample_days, rv_rank, rv_percentile, rv_min, rv_max, status, pct_change_20d}."""
+    import numpy as np
+    from app.services.rv_math import compute_rv_metrics
+    today = today or date.today()
+    df = bars_sync(symbol, today - timedelta(days=RV_HISTORY_DAYS), today)
+    if df is None or df.empty:
+        return {"current_rv": None, "rv_series": [], "sample_days": 0, "rv_rank": None, "rv_percentile": None, "status": "no_data", "pct_change_20d": None}
+    closes = df["Close"].dropna()
+    volumes = df["Volume"].reindex(closes.index) if "Volume" in df else None
+    metrics = compute_rv_metrics(closes, rv_window=rv_window, volumes=volumes, action_dates=action_dates)
+    rv_series: list[float] = []
+    if len(closes) >= rv_window + 2:
+        rolling = (np.log(closes / closes.shift(1)).dropna().rolling(window=rv_window).std() * np.sqrt(252)).dropna()
+        rv_series = [float(v) for v in rolling.iloc[-252:]]
+    pct_change_20d = round(((closes.iloc[-1] / closes.iloc[-21]) - 1) * 100, 2) if len(closes) >= 21 else None
+    return {"current_rv": metrics["rv_20d"], "rv_series": rv_series, "sample_days": metrics["sample_days"], "rv_rank": metrics["rv_rank"],
+            "rv_percentile": metrics["rv_percentile"], "rv_min": metrics["rv_min"], "rv_max": metrics["rv_max"], "status": metrics["status"],
+            "pct_change_20d": pct_change_20d}
+
+
+def last_close_sync(symbol: str, today: date | None = None) -> float | None:
+    """The newest stored raw close (the price a chain's strikes are quoted against)."""
+    rows = raw_closes_sync(symbol, (today or date.today()) - timedelta(days=14))
+    return rows[-1][1] if rows else None
 
 
 def first_bar_dates_sync(symbols: list[str]) -> dict[str, date]:

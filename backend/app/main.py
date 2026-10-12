@@ -208,6 +208,11 @@ async def health_check():
                 result["status"] = "degraded"
 
             try:
+                from app.services import ai_spend
+                result["ai_spend"] = await ai_spend.summary(session)       # the site-wide daily cap across notes, drafts and Ask Ivy
+            except Exception:
+                result["ai_spend"] = None
+            try:
                 from app.routers.research_notes import public_generation_enabled
                 from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, global_count_today
                 from app.services.research_cost import PRICES_AS_OF

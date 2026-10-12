@@ -2223,6 +2223,29 @@ async def check_magnitude_trend_avg_range(session) -> CheckResult:
 
 # ── Put/call ratio snapshots ────────────────────────────────────────────────
 
+async def check_put_call_fresh(session) -> CheckResult:
+    """ERROR when fewer than PUT_CALL_COVERAGE_MIN of the active tickers with an Intrinio chain dated the newest chain date have a put/call
+    row for that date at the current computation version (the nightly compute_put_call step); WARN when no Intrinio chain is stored."""
+    from app.scripts.compute_put_call import PUT_CALL_COMPUTATION_VERSION
+    newest = (await session.execute(text("SELECT max(value::json->>'chain_last_trade') FROM system_metadata WHERE key LIKE 'intrinio_chain:%'"))).scalar()
+    if not newest:
+        return CheckResult("put_call_fresh", WARN, "No Intrinio chain stored: nothing to judge the put/call ratio against")
+    with_chain = (await session.execute(text("""SELECT count(DISTINCT split_part(key, ':', 2)) FROM system_metadata m JOIN tickers t ON t.symbol = split_part(m.key, ':', 2)
+        WHERE m.key LIKE 'intrinio_chain:%' AND t.is_active AND m.value::json->>'chain_last_trade' = :d"""), {"d": newest})).scalar() or 0
+    rows = (await session.execute(text("""SELECT count(*) FROM put_call_snapshots p JOIN tickers t ON t.symbol = p.symbol
+        WHERE t.is_active AND p.snapshot_date = :d AND p.computation_version = :v"""), {"d": newest[:10], "v": PUT_CALL_COMPUTATION_VERSION})).scalar() or 0
+    if with_chain == 0:
+        return CheckResult("put_call_fresh", WARN, f"No active ticker has an Intrinio chain dated {newest}")
+    share = rows / with_chain
+    msg = f"{rows}/{with_chain} active tickers with an Intrinio chain dated {newest} have a version-{PUT_CALL_COMPUTATION_VERSION} put/call row for it ({share:.0%})"
+    if share < PUT_CALL_COVERAGE_MIN:
+        return CheckResult("put_call_fresh", ERROR, msg + f" (below {PUT_CALL_COVERAGE_MIN:.0%}): the nightly put/call step did not cover the chain date")
+    return CheckResult("put_call_fresh", PASS, msg)
+
+
+PUT_CALL_COVERAGE_MIN = 0.90
+
+
 async def check_put_call_ratio_range(session) -> CheckResult:
     """Multi-tier put/call ratio validation.
 
@@ -3454,6 +3477,7 @@ CHECKS = [
     check_magnitude_trend_avg_range,
     # Put/call ratio (stored snapshots)
     check_put_call_ratio_range,
+    check_put_call_fresh,
     check_put_call_per_side_guard,
     # Options-read coverage
     check_options_read_coverage,

@@ -1248,8 +1248,8 @@ export const api = {
 
   researchNotes: {
     latestVerified: () => request<LatestVerifiedNote>("/research-notes/latest-verified"),
-    get: (symbol: string) =>
-      request<ResearchNote>(`/research-notes?symbol=${encodeURIComponent(symbol)}`),
+    get: (symbol: string): Promise<ResearchNote | null> =>
+      request<ResearchNote | undefined>(`/research-notes?symbol=${encodeURIComponent(symbol)}`).then((n) => n ?? null),   // 204: no note yet
     generate: (symbol: string, opts?: { force?: boolean }) =>
       request<ResearchNote>(`/research-notes/generate${opts?.force ? "?force=true" : ""}`, {
         method: "POST",

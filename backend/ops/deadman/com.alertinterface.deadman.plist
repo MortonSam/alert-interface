@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Dead-man alert for the nightly digest (backend/ops/deadman/check_digest.py). The script judges on the New York clock; these
+       fire times are the Mac's own clock (Mountain), 02:30 to 04:00 every 30 minutes, which is 04:30 to 06:00 New York while both
+       zones observe daylight saving together. Install: cp to ~/Library/LaunchAgents/ and launchctl load it. -->
+  <key>Label</key><string>com.alertinterface.deadman</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/sammorton/projects/alert-interface/backend/ops/deadman/check_digest.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>/Users/sammorton/.alert-interface/deadman.log</string>
+  <key>StandardErrorPath</key><string>/Users/sammorton/.alert-interface/deadman.log</string>
+</dict>
+</plist>

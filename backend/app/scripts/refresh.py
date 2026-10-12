@@ -98,6 +98,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("ATM IV (solver)",                ["python", "-m", "app.scripts.solve_atm_iv"]),
     # every ticker's newest chain from each source against the official close (services/options_source); before the warmed reads
     ("Chain parity (both sources)",    ["python", "-m", "app.scripts.check_chain_parity"]),
+    ("Put/call ratio (Intrinio)",      ["python", "-m", "app.scripts.compute_put_call"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),

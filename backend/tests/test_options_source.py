@@ -47,14 +47,14 @@ def test_the_source_order_the_fallback_and_hidden_by_check():
     good = {"chain_date": "2026-10-08", "fresh": True, "ok": True}
     bad = {"chain_date": "2026-10-08", "fresh": True, "ok": False, "reason": "outside the band"}
     stale = {"chain_date": "2026-10-05", "fresh": False, "ok": True}
-    assert O.order("courier") == ["courier"] and O.order("intrinio") == ["intrinio", "courier"]
+    assert O.order("courier") == ["intrinio"] and O.order("intrinio") == ["intrinio"]      # the courier is a shadow, never a page source (2026-10-12)
     assert O.choose("intrinio", {"intrinio": good, "courier": good}).source == "intrinio"
     fb = O.choose("intrinio", {"intrinio": bad, "courier": good})
-    assert fb.source == "courier" and fb.reason.startswith("fallback: the Intrinio chain of 2026-10-08 fails the put-call band check")
+    assert fb.source is None and fb.hidden_by_check is True      # no courier fallback since 2026-10-12: a failed Intrinio check hides the figures
     gone = O.choose("intrinio", {"intrinio": None, "courier": stale})
     assert gone.source is None and gone.hidden_by_check is False                       # missing or stale is not a failed check
     assert O.choose("intrinio", {"intrinio": bad, "courier": stale}).hidden_by_check is True
-    assert O.choose("courier", {"courier": bad, "intrinio": good}).source is None       # no Intrinio fallback in courier mode
+    assert O.choose("courier", {"courier": bad, "intrinio": good}).source == "intrinio"  # a courier primary reads Intrinio too
 
 
 def test_the_visitor_sentence_is_exact_and_names_no_vendor_check_or_percentage():
@@ -89,8 +89,8 @@ async def test_unnamed_chain_reads_follow_the_serving_source(monkeypatch):
     try:
         async with ScriptSessionLocal() as s:
             monkeypatch.setattr(settings, "options_primary_source", "courier")
-            assert await chain_store.get_chain(s, sym, exp) is None                         # the courier's chain fails: hidden
-            assert await O.no_options_note(s, sym) == O.PAUSED_NOTE
+            assert (await chain_store.get_chain(s, sym, exp))[0]["chain_source"] == "intrinio"   # the courier's failing chain is never a page's: Intrinio serves either way
+            O.clear_caches()
             monkeypatch.setattr(settings, "options_primary_source", "intrinio")
             got = await chain_store.get_chain(s, sym, exp)
             assert got and got[0]["chain_source"] == "intrinio"

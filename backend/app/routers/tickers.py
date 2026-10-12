@@ -53,7 +53,6 @@ def _to_options_lr(lv: object) -> OptionsLabelRule | None:
         return None
     return OptionsLabelRule(label=lv.label, rule=lv.rule)  # type: ignore[union-attr]
 from app.services import price_bars
-from app.services.yfinance_client import YFinanceClient
 
 # ── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -626,20 +625,21 @@ async def get_ticker_chart(
     sym = symbol.upper()
 
     loop = asyncio.get_event_loop()
-    # Intraday periods come from yfinance (the accepted exception); every daily period from the stored shadow bars. With the live
-    # layer on (or the admin token), the 1-day view reads Intrinio's 5-minute bars for the latest session, each bar with its own time.
-    live_bars: dict | None = None
-    if period == "1d" and live_data.serving_enabled(admin):
+    # The intraday periods (1d, 7d) come from Intrinio's bars for every visitor (since 2026-10-12; yfinance served them before), each
+    # bar with its own time; every daily period from the stored shadow bars. A failed bars call returns an empty history, never a
+    # stale series: the page says the chart is unavailable.
+    if period in price_bars.INTRADAY_PERIODS:
         session = live_data.latest_session(dt_datetime.now(tz=timezone.utc))
         prev = await loop.run_in_executor(None, price_bars.raw_closes_sync, sym, session - timedelta(days=10))
         prev_close = next((float(c) for d, c, *_ in reversed(prev) if d < session), None)
-        live_bars = await live_data.intraday_chart(sym, session, prev_close)
-    if live_bars and live_bars["history"]:
-        chart_result: dict = live_bars
-    elif period in price_bars.INTRADAY_PERIODS:
-        chart_result = await loop.run_in_executor(None, YFinanceClient.get_chart_history, sym, period)
+        if period == "1d":
+            bars = await live_data.intraday_chart(sym, session, prev_close)
+        else:
+            bars = await live_data.intraday_chart(sym, session, prev_close, start=session - timedelta(days=live_data.WEEK_SPAN_DAYS), interval=live_data.WEEK_INTERVAL)
+        chart_result: dict = bars if bars else {"history": [], "start_price": prev_close}
     else:
         chart_result = await loop.run_in_executor(None, price_bars.chart_history_daily_sync, sym, period)
+    live_bars: dict | None = chart_result if period in price_bars.INTRADAY_PERIODS and chart_result.get("history") else None   # the bars' own delay and last time
     history_raw: list[dict] = chart_result["history"]
     start_price: float | None = chart_result["start_price"]
 
@@ -2097,7 +2097,8 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
         await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=bool(hit.get("inputs")), verdict="cached", answer=hit,
                              model=None, input_tokens=None, output_tokens=None, cost=None, cached=True, ip_hash=A.ip_hash(ip))
         return {"symbol": pack["symbol"], "name": pack["name"], "answer": {**hit, "question": question}, "cached": True}
-    if await A.spend_today(db) >= settings.ask_ivy_daily_cap_usd:
+    from app.services import ai_spend
+    if await A.spend_today(db) >= settings.ask_ivy_daily_cap_usd or await ai_spend.cap_reached(db):
         raise HTTPException(status_code=429, detail="Ivy has reached today's budget and is paused until tomorrow.")
     await check_limit(db, A.ASK_POLICY, caller_id, ip)
     await check_limit(db, A.ASK_TICKER_POLICY, caller_id, f"{ip}|{pack['symbol']}")

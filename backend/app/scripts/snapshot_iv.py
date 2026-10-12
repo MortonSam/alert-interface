@@ -36,7 +36,6 @@ import sqlalchemy as sa
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
 from app.services.rv_store import get_latest_rv
-from app.services.yfinance_client import YFinanceClient
 
 # Sanity band — reject ATM IV outside this range
 _IV_MIN = 0.05
@@ -59,17 +58,13 @@ def _last_trading_day(d: date | None = None) -> date:
 
 
 def _get_current_price(symbol: str) -> float | None:
-    """Current price from yfinance daily history (reliable from any IP)."""
+    """The newest stored close (price_bars_shadow, Intrinio), the price the chain's strikes are quoted against; Yahoo until 2026-10-12."""
     try:
-        hist = YFinanceClient.get_price_history(symbol, period="2d")
-        if hist is not None and not hist.empty:
-            price = float(hist["Close"].iloc[-1])
-            if math.isnan(price):
-                return None
-            return price
+        from app.services import price_bars
+        price = price_bars.last_close_sync(symbol)
+        return None if price is None or math.isnan(price) else float(price)
     except Exception:
-        pass
-    return None
+        return None
 
 
 def stale_chain_reason(chain_date: str | None, today: date) -> str | None:

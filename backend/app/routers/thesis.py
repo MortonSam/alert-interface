@@ -60,7 +60,6 @@ from app.models.system_metadata import SystemMetadata
 from app.services.draft_limiter import check_draft_limit, get_client_ip, record_draft
 from app.services.system_metadata_service import get_value
 from app.services import price_bars
-from app.services.yfinance_client import YFinanceClient
 
 router = APIRouter(prefix="/theses", tags=["theses"])
 
@@ -355,7 +354,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         quote, rv_raw = await asyncio.gather(
             finnhub.get_quote(sym),
             loop.run_in_executor(
-                None, lambda: YFinanceClient.get_realized_vol_data(sym, action_dates=action_dates),
+                None, lambda: price_bars.realized_vol_sync(sym, action_dates=action_dates),      # the stored Intrinio bars, not Yahoo (2026-10-12)
             ),
         )
     except Exception as exc:
@@ -577,6 +576,18 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "chain_from_ingested": chain_from_ingested,
         "draft_spot": draft_spot,
     }
+
+
+async def _record_draft_spend(gen: dict) -> None:
+    """Add the draft's estimated cost to the site-wide AI spend (services/ai_spend); never fails the draft."""
+    try:
+        from app.database import ScriptSessionLocal
+        from app.services import ai_spend
+        from app.services.research_cost import estimate_cost_usd
+        async with ScriptSessionLocal() as s:
+            await ai_spend.add(s, estimate_cost_usd(gen.get("model_used"), gen.get("input_tokens"), gen.get("output_tokens")))
+    except Exception as exc:
+        print(f"[thesis-draft] spend not recorded: {redact(exc)[:120]}", flush=True)
 
 
 async def _run_draft_generation(
@@ -974,6 +985,7 @@ Return ONLY this JSON object (no other text):
             raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
         print(f"[thesis-draft] {sym} attempt={attempt}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
+        await _record_draft_spend(gen)
 
         # ── 11. Parse + validate ──────────────────────────────────────────────
         try:
@@ -1102,6 +1114,10 @@ async def draft_thesis(
     if deal:                                            # a pending cash deal: no draft, and no draft slot spent
         raise HTTPException(status_code=409, detail=note_for(deal))
     client_ip = get_client_ip(request)
+    from app.services import ai_spend
+    from app.services.draft_limiter import DRAFT_POLICY
+    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
+        raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
     data = await _gather_draft_data(payload.symbol.upper(), db)
     from app.services.ivy_v2 import options_premium_check
