@@ -86,8 +86,8 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
      {"implied_vs_typical": "less than usual", "last_move_vs_typical": "less than usual"}),
     (re.compile(r"\babout (?:as |the same as )?usual\b|\bin line with (?:its |the )?(?:usual|typical)\b|\babout what it usually\b|\bclose to (?:its |the )?(?:usual|typical)\b", re.I),
      {"implied_vs_typical": "about usual", "last_move_vs_typical": "about usual"}),
-    (re.compile(r"\bbelow (?:its|the|a) (?:52-week|year|yearly|one-year|twelve-month) high\b|\boff (?:its|the) high\b|\bunder its (?:52-week|year) high\b", re.I), {"price_vs_52w_high": "below"}),
-    (re.compile(r"\b(?:at|near) (?:its|a|the) (?:52-week|year|yearly|one-year|twelve-month|new) high\b", re.I), {"price_vs_52w_high": "near"}),
+    (re.compile(r"\bbelow (?:its|the|a) (?:52-week|year|yearly|one-year|twelve-month) high\b|\boff (?:its|the) high\b|\bunder its (?:52-week|year) high\b", re.I), {"price_vs_52_week_high": "below"}),
+    (re.compile(r"\b(?:at|near) (?:its|a|the) (?:52-week|year|yearly|one-year|twelve-month|new) high\b", re.I), {"price_vs_52_week_high": "near"}),
     (re.compile(r"\belevated\b|\bmore volatile than usual\b|\bmore active than usual\b|\bunusually volatile\b", re.I), {"volatility_vs_year": "elevated"}),
     (re.compile(r"\bquiet(?:er)?\b|\bless volatile than usual\b|\bcalmer than usual\b|\bunusually calm\b", re.I), {"volatility_vs_year": "quiet"}),
     (re.compile(r"\bvolatility (?:is|looks|sits) (?:about )?(?:normal|typical|ordinary)\b|\bin its normal range\b|\bnot unusually volatile\b", re.I), {"volatility_vs_year": "normal"}),
@@ -329,8 +329,9 @@ def word_facts(raw: dict) -> list[dict]:
     price = quote if quote is not None else bars.get("last_close")
     if price is not None and bars.get("high_52w"):
         below = (bars["high_52w"] - price) / bars["high_52w"] * 100
-        out.append(_fact("price_vs_52w_high", "price against the 52-week high", "near" if below < B.NEAR_HIGH_PCT else "below", bars.get("high_52w_date"),
-                         f"within {B.NEAR_HIGH_PCT}% of the highest stored close is near", "word"))
+        near = below < B.NEAR_HIGH_PCT
+        out.append(_fact("price_vs_52_week_high", "price against the 52-week high", "near" if near else "below", bars.get("high_52w_date"),
+                         f"within {B.NEAR_HIGH_PCT}% of the highest stored close is near", "word", phrase="near its 52-week high" if near else "below its 52-week high"))
         if bars.get("high_52w_date"):
             out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "stored daily closes, the day of the highest close"))
     rv = raw.get("rv")
@@ -447,7 +448,7 @@ def date_phrases(facts: list[dict]) -> None:
         except ValueError:
             continue
         if f["id"] in ("typical_move", "typical_move_after_a_report"):
-            f["phrase"] = f"{f['value']} on a typical report, through its {when} report"
+            f["phrase"] = f"{f['value']} on a typical report as of its {when} report"
         elif f["id"] in ("largest_up_move", "largest_down_move"):
             f["phrase"] = f"{f['phrase']} on {when}"
         elif f["id"] == "20_day_realized_volatility":
@@ -479,7 +480,7 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
 
 KIND_GUIDANCE = {
     "timing": "The visitor is deciding whether to act now. Lead with the next report and how many days away it is, then what the options are pricing against the stock's typical earnings move, where the price sits against its 52-week high and its three-month trend, and whether it is moving more or less than usual.",
-    "direction": "The visitor wants to know what the stock will do after the event. Lead with how it has moved after its past reports: how often it rose, the typical size, the largest move each way; then what the options are pricing now. Never predict.",
+    "direction": "The visitor wants to know what the stock will do after the event. Four short sentences at most: how often it rose after its past reports, the typical size with the largest move each way, then what the options are pricing now. Never predict, and never say no one knows.",
     "quality": "The visitor is judging the business. Lead with what the company does and its recent results in plain words, then how its price has moved; a P/E is compared with its own history and its sector, never called cheap or expensive.",
     "options_planning": "The visitor is planning an option. Lead with the next report's day and timing, the session the stock reacts on, which expiration ends before that reaction and which first includes it, and what the options are pricing against the typical move.",
     "covered_other": "Answer the question asked, with the figure that settles it and one clause on why it matters.",
@@ -513,9 +514,9 @@ THE VOICE (an example of the target, for "I'm looking to buy a call on Tesla, ar
 
 RULES
 1. First line: COVERED: yes, partly, no or off. "yes" when the facts answer the question; "partly" when they bear on it but do not answer it; "no" when the question is about this company or its stock but nothing above bears on it; "off" when the question is not about this company's stock at all.
-2. Then the answer: under {WORD_CAP} words, at most {MAX_SENTENCES} short sentences, plain English a beginner follows. Answer the decision behind the question the way an analyst explains it. Facts first. Every figure comes with one clause on why it matters.
+2. Then the answer: under {WORD_CAP} words (aim for about sixty), at most {MAX_SENTENCES} short sentences, plain English a beginner follows. Answer the decision behind the question the way an analyst explains it. Facts first. Every figure comes with one clause on why it matters.
 3. Never type a number. No digits, no currency signs, no percent signs, no number words (one, two ... twenty, twice, double, triple, half, a quarter of, dozen). Every quantity, date, price, percentage or count is written as its placeholder, exactly {{fact:id}}, and the system inserts the value with its date. Describe time windows in words ("the next session", "the trailing month") rather than with numbers.
-3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase and do not repeat words the phrase already carries.
+3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase and do not repeat words the phrase already carries: a phrase that already names the sample ("on a typical report as of its ... report") or the comparison ("below its 52-week high") is complete; add nothing about the same quantity after it.
 4. State a comparison (more than usual, below its 52-week high, quiet, elevated, confirmed, estimated, after the close) only when a [word] fact above says exactly that; the comparison words come from the same thresholds the page uses.
 5. Correct tense: a report that has not happened "reports"; a past one "reported". Never mention your own sources or the page: no "the facts show", "the data indicates", "this page", "the facts here", "stored". When something relevant is not covered (news, product events, guidance), say it in one plain sentence in your own words ("Ivy doesn't track product events or news, so check those before you choose"), never as a list of what is missing.
 6. Never give a recommendation, a target, or an opinion about value, and never use words that imply a call: cheap, a bargain, expensive, overpriced, a good entry. The system adds the one closing line about calls itself; do not write it. Do not mention earnings beats or misses in a decision question.
@@ -645,7 +646,9 @@ def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
             inputs.append({"name": f["name"], "value": f["value"], "as_of": f["as_of"], "source": f["source"]})
     used: set[str] = set()
     def sub(m: re.Match) -> str:
-        f = by_id[m.group(1)]
+        f = by_id.get(m.group(1))
+        if f is None:
+            return m.group(0)                      # an id the model invented: check_output rejects the draft; nothing to render here
         used.add(f["id"])
         add_input(f)
         for cid in f.get("companions", []):          # a denominator carried in the phrase gets its receipt too
@@ -677,10 +680,11 @@ ANSWER:
 {rendered}
 
 RULES
-- "supported": every factual claim in the sentence is confirmed by the facts, or the sentence states that the facts do not cover something and indeed no fact covers it, or the sentence explains an idea in general terms with no factual claim about this company.
+- "supported": every factual claim in the sentence is confirmed by the facts, or the sentence says what Ivy does not track (news, product events, a visitor's own situation) and indeed no fact covers it, or the sentence explains an idea in general terms with no factual claim about this company. A clause that only says why a confirmed figure matters ("so the next session carries uncertainty", "which matters because options price that move") does not make a supported sentence unsupported.
 - "unsupported": the sentence makes a claim about this company or its stock that the facts do not confirm (outside knowledge, an inference not in the facts).
 - "contradicted": the sentence conflicts with a fact.
-- Bias toward "unsupported" when in doubt. Use no outside knowledge.
+- A comparison between two figures the facts confirm ("close to", "about the same as", "more than", "wider than") is supported when the arithmetic holds; a sentence that strings several confirmed figures together is supported.
+- Bias toward "unsupported" when in doubt about a claim; never mark a sentence unsupported for its explanation of why a confirmed figure matters. Use no outside knowledge.
 
 Return JSON only: {{"sentences": [{{"text": "...", "status": "supported|unsupported|contradicted", "evidence": "..."}}]}} with one entry per sentence of the answer, in order."""
 

@@ -14,7 +14,7 @@ FACTS = [
     {"id": "typical_move", "name": "typical move", "value": "±7.0%", "as_of": "2026-06-24", "source": "stored earnings reactions", "kind": "number"},
     {"id": "report_date", "name": "report date", "value": "Sep 30, 2026", "as_of": "2026-09-30", "source": "events", "kind": "number"},
     {"id": "implied_vs_typical", "name": "implied move against the typical move", "value": "more than usual", "as_of": "2026-10-05", "source": "x", "kind": "word"},
-    {"id": "price_vs_52w_high", "name": "price against the 52-week high", "value": "below", "as_of": "2026-06-25", "source": "x", "kind": "word"},
+    {"id": "price_vs_52_week_high", "name": "price against the 52-week high", "value": "below", "as_of": "2026-06-25", "source": "x", "kind": "word"},
     {"id": "volatility_vs_year", "name": "volatility against its year", "value": "quiet", "as_of": "2026-10-05", "source": "x", "kind": "word"},
     {"id": "dividend_status", "name": "next dividend", "value": "estimated", "as_of": "2026-10-14", "source": "x", "kind": "word"},
 ]
@@ -64,7 +64,7 @@ def test_comparisons_are_checked_against_word_facts():
 
 
 def test_render_substitutes_values_and_collects_receipts_once():
-    text, inputs = A.render("At {fact:quote}, after its {fact:report_date} report; again {fact:quote}. It is {fact:price_vs_52w_high} its high.", FACTS)
+    text, inputs = A.render("At {fact:quote}, after its {fact:report_date} report; again {fact:quote}. It is {fact:price_vs_52_week_high} its high.", FACTS)
     assert text == "At $1,045.56, after its Sep 30, 2026 report; again $1,045.56. It is below its high."
     assert [i["name"] for i in inputs] == ["quote", "report date"]                                                   # word facts carry no receipt; a value once
     assert inputs[0]["as_of"] == "Oct 6, 4:00 PM ET" and inputs[1]["source"] == "events"
@@ -97,7 +97,7 @@ def test_word_facts_come_from_the_strips_numbers_with_the_shared_thresholds():
            "dividend": {"ex_date": date(2026, 10, 14), "declared_on": date(2026, 9, 30)}}
     w = {f["id"]: f["value"] for f in A.word_facts(raw)}
     assert w["implied_vs_typical"] == "more than usual" and w["last_move_vs_typical"] == "less than usual"           # 9 over 7 and 3 over 7, services/move_comparison
-    assert w["price_vs_52w_high"] == "below" and w["52_week_high_date"] == "Jun 25, 2026"
+    assert w["price_vs_52_week_high"] == "below" and w["52_week_high_date"] == "Jun 25, 2026"
     assert w["volatility_vs_year"] == "quiet" and A.volatility_word(80) == "elevated" and A.volatility_word(50) == "normal"
     assert w["last_report_outcome"] == "beat" and w["last_report_direction"] == "rose" and w["last_report_timing"] == "after the close"
     assert w["next_report_status"] == "estimated" and w["next_report_timing"] == "after the close" and w["dividend_status"] == "declared"
