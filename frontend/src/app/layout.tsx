@@ -23,6 +23,8 @@ const fontMono = localFont({
 const fontBrand = localFont({ src: "../fonts/playfair-display-latin.woff2", weight: "400 900", variable: "--font-brand", display: "swap" });   // the wordmark only
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://alertinterface.com"),
+  alternates: { canonical: "./" },                       // each page's own path, resolved against metadataBase
   title: "Alert Interface | Teaches you what Wall Street knows",
   description: "One workspace for the retail investor, starting with the S&P 500. Every number explained, by an AI analyst who shows her work.",
   icons: {
@@ -30,7 +32,7 @@ export const metadata: Metadata = {
     apple: [{ url: BRAND.appleTouchIcon, sizes: "180x180" }],
   },
   manifest: BRAND.manifest,
-  openGraph: { title: "Alert Interface | Teaches you what Wall Street knows", images: [{ url: BRAND.ogImage, width: 1200, height: 630, alt: "Alert Interface" }] },
+  openGraph: { title: "Alert Interface | Teaches you what Wall Street knows", url: "./", images: [{ url: BRAND.ogImage, width: 1200, height: 630, alt: "Alert Interface" }] },
   twitter: { card: "summary_large_image", images: [BRAND.ogImage] },
 };
 

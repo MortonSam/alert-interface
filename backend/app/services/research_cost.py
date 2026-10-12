@@ -10,8 +10,10 @@ from __future__ import annotations
 PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {   # model: (input, output)
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-opus-4-6": (5.0, 25.0),
+    "claude-fable-5": (10.0, 50.0),        # DRAFT_MODEL (Build a Trade): $10 in, $50 out per MTok, platform.claude.com pricing page
+    "claude-fable-5-1": (10.0, 50.0),
 }
-PRICES_AS_OF = "2026-09-28"
+PRICES_AS_OF = "2026-10-12"
 
 
 def estimate_cost_usd(model: str | None, input_tokens: int | None, output_tokens: int | None) -> float | None:

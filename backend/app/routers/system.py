@@ -86,7 +86,7 @@ async def latest_night_contracts(db: AsyncSession) -> tuple[int, str | None]:
         WITH c AS (
             SELECT substring(value from '"chain_last_trade": ?"([0-9]{4}-[0-9]{2}-[0-9]{2})') AS d,
                    (length(value) - length(replace(value, '"strike"', ''))) / length('"strike"') AS n
-            FROM system_metadata WHERE key LIKE 'chain:%' AND key NOT LIKE 'chain:%:%:%')
+            FROM system_metadata WHERE key LIKE 'intrinio_chain:%' AND key NOT LIKE 'intrinio_chain:%:%:%')
         SELECT d, sum(n) FROM c WHERE d IS NOT NULL AND d = (SELECT max(d) FROM c) GROUP BY d"""))).first()
     value = (int(row[1] or 0), row[0]) if row else (0, None)
     _CONTRACTS_CACHE.update(at=now, value=value)

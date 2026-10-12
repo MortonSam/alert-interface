@@ -204,12 +204,14 @@ function AnalystDetailTable({ detail }: { detail: AnalystDetailRead }) {
 
   return (
     <div className="mt-3 pt-3 border-t">
+      {detail.total_all > 0 && (
       <button
         onClick={() => setExpanded(e => !e)}
         className="tap text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
       >
         {expanded ? "Hide actions ▴" : `Show all ${detail.total_all} actions ▾`}
       </button>
+      )}
       {expanded && (
         <div className="mt-2 overflow-x-auto">
           <table className="w-full text-xs">
@@ -1706,6 +1708,7 @@ export default function TickerPage() {
     api.researchNotes
       .get(upperSymbol)
       .then((n) => {
+        if (!n) { setNoteStatus("empty"); return; }
         setNote(n); setNoteStatus("done");
         if (n.status === "complete") capture("note_rendered", { symbol: upperSymbol });
       })
@@ -1744,6 +1747,7 @@ export default function TickerPage() {
       api.researchNotes
         .get(upperSymbol)
         .then((n) => {
+          if (!n) return;
           setNote(n); setNoteStatus("done");
           if (n.status === "complete") capture("note_rendered", { symbol: upperSymbol });
         })

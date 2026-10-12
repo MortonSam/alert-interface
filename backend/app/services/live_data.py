@@ -228,23 +228,31 @@ def bars_to_history(intervals: list[dict]) -> list[dict]:
     return sorted(pts, key=lambda p: p["date"])
 
 
-async def intraday_chart(symbol: str, on: date, prev_close: float | None) -> dict | None:
-    """The 1-day chart from Intrinio's 5-minute bars for `on`, cached CHART_CACHE_SECONDS; None when the call fails."""
-    key = f"{symbol}:{on.isoformat()}"
+WEEK_INTERVAL = "30m"          # the 7-day chart's bars (the 1-day chart reads CHART_INTERVAL)
+WEEK_SPAN_DAYS = 9             # calendar days back for the 7-day view: seven sessions and a weekend
+
+
+async def intraday_chart(symbol: str, on: date, prev_close: float | None, start: date | None = None, interval: str = CHART_INTERVAL) -> dict | None:
+    """The intraday chart from Intrinio's bars (5-minute for one session, 30-minute over a week) from `start` (default `on`) through
+    `on`, cached CHART_CACHE_SECONDS; None when the call fails. Every bar carries its own time. Serves every visitor since 2026-10-12
+    (the chart's intraday periods left yfinance); the live flag only governs quotes."""
+    start = start or on
+    key = f"{symbol}:{start.isoformat()}:{on.isoformat()}:{interval}"
     hit = _chart_cache.get(key)
     if hit and time.monotonic() - hit[0] < CHART_CACHE_SECONDS:
         return hit[1]
     from app.services.intrinio_client import IntrinioClient
     client = IntrinioClient()
     try:
-        body = await client._get(f"/securities/{symbol}/prices/intervals", {"interval_size": CHART_INTERVAL, "start_date": on.isoformat(), "end_date": on.isoformat(),
-                                                                          "timezone": "America/New_York", "page_size": 500})
+        body = await client._get(f"/securities/{symbol}/prices/intervals", {"interval_size": interval, "start_date": start.isoformat(), "end_date": on.isoformat(),
+                                                                          "timezone": "America/New_York", "page_size": 1000})
     except Exception:
         return None
     finally:
         await client.close()
     history = bars_to_history(body.get("intervals") or [])
-    out = {"history": history, "start_price": prev_close, "bars_source": body.get("source"), "bars_through": history[-1]["date"] if history else None}
+    out = {"history": history, "start_price": prev_close if start == on else (history[0]["close"] if history else None),
+           "bars_source": body.get("source"), "bars_through": history[-1]["date"] if history else None}
     _chart_cache[key] = (time.monotonic(), out)
     return out
 

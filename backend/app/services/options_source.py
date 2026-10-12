@@ -24,9 +24,10 @@ IV_SOURCE = {COURIER: "courier", INTRINIO: "intrinio_mid"}       # iv_history.iv
 
 
 def order(primary: str) -> list[str]:
-    """The sources a ticker's pages may read, in turn. With the courier primary (the default until the switch) there is no fallback:
-    pages read the courier's chain as before, now behind the parity check. With Intrinio primary, the courier is the fallback."""
-    return [INTRINIO, COURIER] if primary == INTRINIO else [COURIER]
+    """The sources a ticker's pages may read, in turn: Intrinio alone since 2026-10-12. The courier on Sam's Mac is retired from
+    customer-facing data; its chains are still stored for the shadow comparison and the parity record (check_chain_parity names its
+    source), never read by a page. `primary` is kept for the setting's sake; a courier primary reads Intrinio too."""
+    return [INTRINIO]
 
 
 def _quote(q: dict) -> tuple[float, float] | None:

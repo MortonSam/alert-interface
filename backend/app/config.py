@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Ivy v3's pricing desk and the card on ticker pages (services/pricing_desk). Off in production; the admin token sees it.
     ivy_desk_v3_enabled: bool = False
     ask_ivy_daily_cap_usd: float = 15.0   # site-wide estimated spend per UTC day at which the box pauses
+    ai_daily_spend_cap_usd: float = 20.0  # AI_DAILY_SPEND_CAP_USD: one cap across notes, drafts and Ask Ivy per New York day (services/ai_spend)
     # Trailing P/E (pe_snapshots): strip question 9 and the P/E facts Ask Ivy may cite. Off in production until Sam approves the
     # figures; on locally. The nightly still computes the snapshots either way; the flag only gates what the pages serve.
     pe_enabled: bool = False

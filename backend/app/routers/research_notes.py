@@ -109,6 +109,9 @@ async def generate(
         return await note_for_reader(db, existing, admin)
 
     client_ip = get_client_ip(request)
+    from app.services import ai_spend
+    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
+        raise HTTPException(status_code=429, detail=RESEARCH_GENERATION_POLICY.global_message.format(noun=RESEARCH_GENERATION_POLICY.noun, n=RESEARCH_GENERATION_POLICY.global_day))
     await check_limit(db, RESEARCH_GENERATION_POLICY, caller, client_ip)
     note = await start_research_note_generation(db, ticker.id, None)
     charged_at = await record_use(db, RESEARCH_GENERATION_POLICY, caller, client_ip, ticker.symbol)
@@ -208,8 +211,8 @@ async def get_note(
     if symbol is None and ticker_id is None:
         raise HTTPException(status_code=422, detail="Either symbol or ticker_id is required")
     note = await get_research_note(db, ticker_id, symbol)
-    if note is None:
-        raise HTTPException(status_code=404, detail="No research note found for this ticker")
+    if note is None or (not admin and verification_failed(note)):
+        return Response(status_code=204)              # nothing to show is not an error: a 404 logged a console error on every such ticker page
     return await note_for_reader(db, note, admin)
 
 

@@ -599,6 +599,8 @@ async def add_spend(db: AsyncSession, cost: float | None, now: datetime | None =
         return
     now = now or datetime.now(timezone.utc)
     await set_value(db, f"{SPEND_KEY}:{now.strftime('%Y-%m-%d')}", f"{await spend_today(db, now) + cost:.5f}")
+    from app.services import ai_spend
+    await ai_spend.add(db, cost, now, commit=False)          # the site-wide cap counts every feature's spend
     await db.commit()
 
 

@@ -157,6 +157,8 @@ def short_name(name: str | None, symbol: str | None = None) -> str | None:
         words.pop(0)
     while len(words) > 1 and words[-1].lower() in TRAILING_WORDS:
         words.pop()
+    while len(words) > 1 and words[-1] in ("&", "and"):       # "JPMorgan Chase & Co." loses "Co." above and must not keep the "&"
+        words.pop()
     return " ".join(words)
 
 
