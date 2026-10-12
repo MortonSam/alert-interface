@@ -15,7 +15,8 @@ import type {
   SuggestionItem,
   UnusuallyActiveItem,
 } from "@/lib/api";
-import { CALENDAR_SOURCE, checkedPhrase, earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
+import { CONFIRMED_KIND, checkedPhrase, confirmedKind, earningsSourceNote, fmtEarningsDate } from "@/lib/earningsSource";
+export { CONFIRMED_KIND, confirmedKind };
 import { volRegime } from "@/lib/encodings/volRegime";
 import { TAPE_CHOPPIEST_RANK, TAPE_ONE_OF_CHOPPIEST_RANK, TAPE_OPTIONS_BAND_PP } from "@/lib/thresholds";
 
@@ -48,26 +49,7 @@ export function ivClause(regime: string | null | undefined, note?: string | null
   return v ? v.label.replace(/^IV (\w+)/, (_, w: string) => `IV ${w.toLowerCase()}`) : null;
 }
 
-/**
- * What kind of source confirmed a date, from the type prefix the calendar refresh writes into the note
- * (backend report_announcements / earnings_calendar). Never the headline or the filing date that follow it.
- */
-export const CONFIRMED_KIND = {
-  pressRelease: "company press release",   // "confirmed: press release via Finnhub news <date>: <headline>"
-  secFiling: "SEC filing",                 // "confirmed: 8-K Item 7.01 filed <date>"
-  calendars: "Finnhub and Yahoo Finance agree",   // AGREEMENT_NOTE: two calendars on the same day
-  company: "company announcement",         // a company confirmation with no recorded evidence, or a note of no known type
-} as const;
-
-export function confirmedKind(note: string | null | undefined): string {
-  const body = (note ?? "").replace(/^confirmed:\s*/i, "").trim();
-  if (/^press release\b/i.test(body)) return CONFIRMED_KIND.pressRelease;
-  if (/^8-K\b/i.test(body)) return CONFIRMED_KIND.secFiling;
-  if (/^Finnhub and Yahoo Finance agree$/i.test(body)) return CONFIRMED_KIND.calendars;
-  return CONFIRMED_KIND.company;
-}
-
-/** The level and its evidence: "confirmed, company press release", "estimated, Finnhub, checked today". */
+/** The level and its evidence: "confirmed, company press release", "estimated, checked today". */
 function levelNote(
   confirmation: string | null | undefined,
   note: string | null | undefined,
@@ -80,11 +62,9 @@ function levelNote(
   return `${level}, ${earningsSourceNote(source, checkedAt, now)}`;
 }
 
-/** A ticker the calendar left without a date: "No confirmed date yet (Finnhub, checked today)". */
+/** A ticker the calendar left without a date: "No confirmed date yet (checked today)". */
 export function noDateClause(checkedAt: string | null | undefined, now: Date = new Date()): string {
-  return checkedAt
-    ? `No confirmed date yet (${CALENDAR_SOURCE}, ${checkedPhrase(checkedAt, now)})`
-    : "No confirmed date yet (not yet checked)";
+  return checkedAt ? `No confirmed date yet (${checkedPhrase(checkedAt, now)})` : "No confirmed date yet (not yet checked)";
 }
 
 /** The next-earnings clause for a section whose reason is not the calendar. */

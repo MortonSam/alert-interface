@@ -43,7 +43,7 @@ DISPLAY_NAMES = {"BNY": "BNY", "SO": "Southern Company", "AIG": "AIG", "PEG": "P
 TRAILING_WORDS = ("group", "companies")   # dropped from the end of a shortened name when a word remains: "Cigna Group" reads "Cigna"
 NAME_SUFFIXES = ("incorporated", "inc", "corporation", "corp", "company", "co", "plc", "ltd", "limited", "holdings")   # stripped from the end of a company name
 TIMING_PHRASE = {"bmo": "before the open", "amc": "after the close"}
-SOURCE_NAMES = {"yfinance": "Yahoo Finance", "finnhub": "Finnhub", "company": "the company", "edgar": "EDGAR"}   # reader-facing names; receipts keep the technical ones
+SOURCE_NAMES = {"yfinance": "earnings calendar", "finnhub": "earnings calendar", "company": "the company", "edgar": "SEC filing"}   # reader-facing names; receipts keep the technical ones
 ABBREVIATIONS = {"inc", "corp", "co", "ltd", "plc", "llc", "lp", "sa", "nv", "ag", "mr", "ms", "dr", "st", "no", "vs", "u.s", "e.g", "i.e"}
 BOILERPLATE = ("was incorporated", "is incorporated", "was formerly known", "changed its name", "formerly known as")   # investor-relations sentences dropped
 
@@ -167,7 +167,7 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
     desc = description_text(short_description)
     if not desc:
         return None
-    inputs = [_input("description", desc, profile_as_of, f"{profile_source} company profile, short description")]
+    inputs = [_input("description", desc, profile_as_of, "company profile, short description")]
     dates: list[date] = [d for d in (profile_as_of,) if d]
     if name:
         inputs.append(_input("company name", short_name(name, symbol), profile_as_of, f"company name on file, read as {name!r} with its corporate suffix dropped"))
@@ -186,13 +186,13 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
         bits.append(f"worth about {mv}")
         t = fmt_quote_time(quote_ts)
         inputs += [_input("market cap", mv, t, "latest quote times shares outstanding"), _input("quote", fmt_money(quote_price), t, "quote cache, dated by its last trade"),
-                   _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "Finnhub company profile")]
+                   _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "company profile")]
         dates += [datetime.fromtimestamp(int(quote_ts), NY).date(), shares_as_of]
     text = desc + (f" It's {', '.join(bits)}." if bits else "")
     rule = (f"The first sentence of the company's description as stored by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
             f"{SECOND_SENTENCE_IF_FIRST_UNDER} characters and when it is not a list of segments, products or brands; incorporation and renaming boilerplate removed; "
             f"{DESCRIPTION_CAP} characters at most, whole sentences only). Sector and sub-industry are GICS from the S&P 500 constituent list, never the profile vendor's "
-            "categories; membership from the nightly list. The market value is the latest quote times the shares outstanding from the Finnhub profile, in round words, "
+            "categories; membership from the nightly list. The market value is the latest quote times the shares outstanding from the company profile, in round words, "
             "one decimal at most, each dated.")
     return _sentence("profile", text, rule, max(dates) if dates else None, inputs)
 
@@ -230,7 +230,22 @@ def stock_sentence(symbol: str, *, quote_price: float | None, quote_ts: int | No
 
 # ── block 2, sentence B: one thing to know now ──────────────────────────────
 
+_VENDOR_NOTES = ((re.compile(r"Finnhub and Yahoo Finance agree", re.I), "two calendars agree"), (re.compile(r"press release via Finnhub news", re.I), "press release"),
+                 (re.compile(r"estimated \((?:Finnhub|Yahoo Finance)\)", re.I), "estimated"), (re.compile(r"\b(?:Finnhub|Yahoo Finance) says\b", re.I), "another calendar says"),
+                 (re.compile(r"not confirmed by Finnhub, Yahoo Finance or EDGAR", re.I), "not confirmed by any calendar or filing"))
+
+
+def reader_note(note: str | None) -> str | None:
+    """Pure: a calendar note as a visitor reads it: what kind of evidence, never which vendor supplied it."""
+    if not note:
+        return None
+    for pat, plain in _VENDOR_NOTES:
+        note = pat.sub(plain, note)
+    return note
+
+
 def evidence_phrase(note: str | None) -> str | None:
+    note = reader_note(note)
     if not note:
         return None
     body = note.split(":", 1)[1].strip() if note.lower().startswith("confirmed:") else note.strip()
@@ -272,7 +287,7 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
     if eps_actual is not None and eps_estimate is not None:
         word = {"beat": "a beat", "miss": "a miss", "meet": "a match"}.get(outcome or "", None)
         clauses.append(f"EPS {fmt_money(eps_actual)} against a {fmt_money(eps_estimate)} estimate" + (f", {word}" if word else ""))
-        inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "reported EPS (Finnhub, else Yahoo Finance), the night of the report"),
+        inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "reported EPS, the night of the report"),
                    _input("EPS estimate", fmt_money(eps_estimate), event_date, "analyst consensus EPS estimate"), _input("outcome", outcome or "unknown", event_date, "actual above estimate is a beat")]
     base_date, after_date = move_dates(event_date, timing)
     when = "that session" if timing == "bmo" else "the next session"
@@ -331,7 +346,7 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     text = f"Reports {fmt_date(next_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "") + ", " + ("today" if days == 0 else plural(days, "day away", "days away"))
     text += f" ({conf})" if conf else ""
     inputs = [_input("next earnings date", fmt_date(next_date), next_date, source_name(source) or source), _input("days away", days, today),
-              _input("report timing", timing or "unknown", next_date, "earnings calendar, report timing"), _input("confidence", confirmation or "none", next_date, note)]
+              _input("report timing", timing or "unknown", next_date, "earnings calendar, report timing"), _input("confidence", confirmation or "none", next_date, reader_note(note))]
     ev = evidence_phrase(note) if confirmation == "confirmed" else None
     if ev:
         inputs.append(_input("evidence", ev, next_date, "earnings calendar note"))

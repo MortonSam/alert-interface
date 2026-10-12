@@ -22,7 +22,7 @@ export function optionsCadencePhrase(cadence: Cadence | null | undefined): strin
 export function priceSourceLine(cadence: Cadence | null | undefined): string {
   const source = cadence?.quotes.source ?? "the quote source";
   const delay = cadence?.quotes.delay_statement;
-  return delay ? `Prices from ${source}, ${delay}` : `Prices from ${source}, each dated by its last trade`;
+  return delay ? `Prices ${delay}` : "Prices each dated by its last trade";     // the quote vendor is never named to a visitor
 }
 
 /** A quote's own time, always with its date, on the market clock: "Oct 5, 4:00 PM ET". */

@@ -18,21 +18,27 @@ CODE_PATTERNS = [
     ("identifier", re.compile(r"\b[a-z]+[A-Z][A-Za-z0-9]+\b")),
 ]
 ALLOWED = {"iPhone", "iPad", "eBay"}
+VENDORS = re.compile(r"\b(?:Finnhub|Yahoo Finance|yfinance|Intrinio|EDGAR)\b")    # a visitor reads what a thing is, never which vendor supplied it (2026-10-12)
+# stored record fields the page translates before showing (a source enum, a calendar note read through confirmedKind): data, not copy
+VENDOR_DATA_KEYS = {"source", "confirmation_note", "earnings_note", "next_earnings_source", "next_earnings_note", "iv_source", "price_source", "basis", "sources_checked", "reclassified_reason"}
 SKIP = ("/admin", "/quote", "/quotes", "/news", "/chart/", "/explain/", "/options-read/", "/batch-enrich", "/system/status", "/health")
 PROSE_KEYS = {"source", "rule", "how", "note", "reason", "text", "data", "idea", "message", "summary", "label", "detail", "caption"}
 SYMBOLS = ("AAPL", "PANW", "JPM")
 
 
-def code_names(text: str) -> list[str]:
-    """The code names a piece of prose carries, as 'kind: match'."""
+def code_names(text: str, key: str | None = None) -> list[str]:
+    """The code names (and, outside a translated data field, the vendor names) a piece of prose carries, as 'kind: match'."""
     hits = []
     for kind, pat in CODE_PATTERNS:
         hits += [f"{kind}: {m.group(0)}" for m in pat.finditer(text) if m.group(0) not in ALLOWED]
+    if key not in VENDOR_DATA_KEYS:
+        hits += [f"vendor: {m.group(0)}" for m in VENDORS.finditer(text)]
     return hits
 
 
 def test_the_rule_catches_code_and_passes_prose():
     assert code_names("Cutoffs come from lib/thresholds.ts.") and code_names("see compute_expected_move()") and code_names("the iv_rank field")
+    assert code_names("Next earnings Oct 29, estimated (Finnhub, checked today)") == ["vendor: Finnhub"]
     assert not code_names("The options on PANW are expensive right now, about 14.1% against a usual 9.4%.")
     assert not code_names("Put/call ratio above 1.2 reads put-heavy; U.S. markets close at 4:00 p.m. ET.")
 
@@ -76,6 +82,7 @@ async def test_no_visitor_response_names_code():
                 continue
             served += 1
             for where, text in prose(resp.json(), path):
-                found += [f"{where}: {h} in {text[:120]!r}" for h in code_names(text)]
+                key = where.rsplit(".", 1)[-1].split("[")[0]
+                found += [f"{where}: {h} in {text[:120]!r}" for h in code_names(text, key)]
     assert served >= 20, served
     assert not found, "\n".join(found[:40])

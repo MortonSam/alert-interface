@@ -149,7 +149,7 @@ def q_ex_dividend(*, name: str, symbol: str, ex_date: date, amount: float | None
     inputs = [_input("ex-dividend date", fmt_date(ex_date), knew, "dividend calendar")]
     if amount:
         inputs.append(_input("dividend per share", fmt_money(amount), knew, (f"declared in the 8-K filed {fmt_date(declared_on)}" + (f" ({accession})" if accession else "")) if declared_on
-                             else "the last per-payment amount (Intrinio's bars, else yfinance's last declared payment)"))
+                             else "the last per-payment amount on record"))
     return _q("ex_dividend", f"What happens to {name}'s price on the ex-dividend date?", data, idea, inputs, knew,
               f"Asked when a stored ex-dividend date is within {EX_DIV_DAYS} days; dated by the declaration when held, else by the refresh that stored the amount.",
               as_of_kind="declared" if declared_on else "estimated")

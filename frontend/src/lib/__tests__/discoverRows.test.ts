@@ -76,10 +76,10 @@ describe("row sentences", () => {
       "Reports tomorrow (confirmed, company press release); beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat");     // no IV rich/cheap on the calendar
 
     const estimated = { ...item, earnings_date: "2026-10-02", confirmation: "estimated", confirmation_note: null, insight: null, vol_regime: null };
-    expect(reportingSoonSentence(estimated, NOW)).toBe("Reports in 3 days (estimated, Finnhub, checked today)");
+    expect(reportingSoonSentence(estimated, NOW)).toBe("Reports in 3 days (estimated, checked today)");
 
     const today = { ...estimated, earnings_date: "2026-09-29", confirmation: "expected_unconfirmed", source: "yfinance", vol_regime: "iv_fair" };
-    expect(reportingSoonSentence(today, NOW)).toBe("Expected to report today (not confirmed, Yahoo Finance, checked today)");
+    expect(reportingSoonSentence(today, NOW)).toBe("Expected to report today (not confirmed, checked today)");
   });
 
   it("a confirmed date names its source type, never the headline or the announcement date", () => {
@@ -105,20 +105,20 @@ describe("row sentences", () => {
     expect(earningsClause("2026-10-21", "edgar", TODAY_CHECK, "confirmed", headline, NOW)).toBe("reports Oct 21 (confirmed, company press release)");
     // estimated dates keep the source and when it was checked
     expect(reportingSoonSentence({ ...item, confirmation: "estimated", source: "yfinance", is_confirmed: false }, NOW)).toBe(
-      "Reports in 2 days (estimated, Yahoo Finance, checked today)");
+      "Reports in 2 days (estimated, checked today)");
   });
 
   it("a ticker with no confirmed date says so and when the calendar was checked", () => {
-    expect(noDateClause(TODAY_CHECK, NOW)).toBe("No confirmed date yet (Finnhub, checked today)");
+    expect(noDateClause(TODAY_CHECK, NOW)).toBe("No confirmed date yet (checked today)");
     expect(noDateClause(null, NOW)).toBe("No confirmed date yet (not yet checked)");
     const s: SuggestionItem = {
       ...base, symbol: "NODT", score: 3, reports_in_days: null, recent_move_pct: null, recent_move_5d: null,
       recent_outcome: null, event_date: null, insight: null, vol_regime: null,
       earnings_date: null, earnings_source: null, earnings_checked_at: TODAY_CHECK, earnings_confirmation: null, earnings_note: null,
     };
-    expect(suggestionSentence(s, NOW)).toBe("No confirmed date yet (Finnhub, checked today)");
+    expect(suggestionSentence(s, NOW)).toBe("No confirmed date yet (checked today)");
     expect(suggestionSentence({ ...s, insight: "Averages a ±8.2% earnings move, 2.1x the index median" }, NOW)).toBe(
-      "Averages a ±8.2% earnings move, 2.1x the index median; no confirmed date yet (Finnhub, checked today)");
+      "Averages a ±8.2% earnings move, 2.1x the index median; no confirmed date yet (checked today)");
   });
 
   it("worth a look: the stored stat, then the next date at its level", () => {
@@ -129,7 +129,7 @@ describe("row sentences", () => {
       earnings_confirmation: "estimated", earnings_note: null,
     };
     expect(suggestionSentence(s, NOW)).toBe(
-      "Beats estimates 90% of the time, versus 72% across the S&P; reports around Oct 7 (estimated, Finnhub, checked today)");     // no IV cheap on worth a look
+      "Beats estimates 90% of the time, versus 72% across the S&P; reports around Oct 7 (estimated, checked today)");     // no IV cheap on worth a look
   });
 
   it("the tape: words only, the volatility tier, the options clause, then the report date at its level", () => {

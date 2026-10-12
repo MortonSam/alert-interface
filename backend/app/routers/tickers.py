@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
-from app.auth import get_draft_caller, require_admin, _get_admin_token
+from app.auth import get_draft_caller, is_admin, require_admin, _get_admin_token
 from app.config import settings
 from app.database import get_db
 from app.models.event import Event
@@ -2017,12 +2017,13 @@ async def get_briefing(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
 
 
 @router.get("/{symbol}/questions")
-async def get_questions(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
+async def get_questions(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict:
     """The question strip: up to four questions this stock's data raises, each answered from stored rows (services/questions).
-    ask_enabled follows the ASK_IVY_ENABLED flag: the free-text box renders only when it is true."""
+    ask_enabled follows the ASK_IVY_ENABLED flag, or the admin token (a browser with preview on) while the flag is off, as
+    DISCOVER_NEWS_ENABLED does: the free-text box renders only when it is true."""
     from app.config import settings
     from app.services.briefing_build import build_questions
-    return {**(await build_questions(db, symbol)), "ask_enabled": bool(settings.ask_ivy_enabled)}
+    return {**(await build_questions(db, symbol)), "ask_enabled": bool(settings.ask_ivy_enabled or admin)}
 
 
 class AskRequest(BaseModel):
@@ -2030,7 +2031,8 @@ class AskRequest(BaseModel):
 
 
 @router.post("/{symbol}/ask")
-async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSession = Depends(get_db), caller_id: str = Depends(get_draft_caller)) -> dict:
+async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSession = Depends(get_db), caller_id: str = Depends(get_draft_caller),
+                  admin: bool = Depends(is_admin)) -> dict:
     """Ask Ivy (services/ask_ivy): a free-text question answered only from this stock's stored facts. 404 while the flag is off.
     Served from the question log when the same normalized question was answered against an unchanged fact pack; otherwise
     rate-limited per IP and per IP and stock, paused for the day at the spend cap, charged before the model runs and refunded
@@ -2038,7 +2040,7 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     from app.config import settings
     from app.services import ask_ivy as A
     from app.services.draft_limiter import check_limit, get_client_ip, record_use, refund_use
-    if not settings.ask_ivy_enabled:
+    if not (settings.ask_ivy_enabled or admin):
         raise HTTPException(status_code=404, detail="Not found")
     question = " ".join(body.question.split())
     if not question or len(question) > A.MAX_QUESTION_CHARS:

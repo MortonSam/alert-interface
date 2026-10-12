@@ -125,9 +125,14 @@ async def test_the_route_is_absent_behind_the_flag_and_serves_a_checked_answer_w
     from app.config import settings
     from app.main import app
     monkeypatch.setattr(settings, "ask_ivy_enabled", False)
+    monkeypatch.setattr(settings, "admin_token", "preview-token-for-this-test")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.post("/api/v1/tickers/MU/ask", json={"question": "Is it expensive?"})).status_code == 404
         assert (await c.get("/api/v1/tickers/MU/questions")).json()["ask_enabled"] is False
+        # a browser with preview on (the admin token) sees the box while the flag is off, as Discover news does
+        h = {"X-Admin-Token": "preview-token-for-this-test"}
+        assert (await c.get("/api/v1/tickers/MU/questions", headers=h)).json()["ask_enabled"] is True
+        assert (await c.post("/api/v1/tickers/MU/ask", json={"question": "x" * 400}, headers=h)).status_code == 422   # past the gate: the length check answers
     monkeypatch.setattr(settings, "ask_ivy_enabled", True)
     canned = {"verdict": "verified", "covered": "yes", "model": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5, "cost": 0.001, "problems": [], "dropped": [],
               "answer": {"key": "ask", "question": "q", "data": "MU is at $1,045.56.", "idea": "", "inputs": [FACTS[0]], "as_of": None, "as_of_kind": "observed", "rule": A.RULE}}

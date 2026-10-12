@@ -1,21 +1,39 @@
 /**
- * The next-earnings line: the date, where it came from, and when that source was last asked.
+ * The next-earnings line: the date, whether it is confirmed or estimated, and when the calendar was last asked.
  *
- * "Next earnings Oct 29 (Finnhub, checked today)". Every part is rendered from
- * API fields (next_earnings_date, next_earnings_source, next_earnings_checked_at
- * on a ticker; earnings_date, source, checked_at on a Discover card). A ticker
- * with no date still says when it was checked, so "none" is a finding, not a gap.
+ * "Next earnings Oct 29, estimated (checked today)". Every part is rendered from API fields (next_earnings_date,
+ * next_earnings_source, next_earnings_checked_at on a ticker; earnings_date, source, checked_at on a Discover card). A ticker
+ * with no date still says when it was checked, so "none" is a finding, not a gap. No line names the calendar vendor: a visitor
+ * reads "Estimated" or "Confirmed", as the Browse cards do (2026-10-12).
  */
 const SOURCE_LABELS: Record<string, string> = {
-  finnhub: "Finnhub",
-  yfinance: "Yahoo Finance",
-  edgar: "EDGAR",
+  edgar: "SEC filing",
   manual: "entered by hand",
 };
 
+/** The source a visitor may be told about: a filing or a hand entry; a calendar vendor is never named. */
 export function sourceLabel(source: string | null | undefined): string | null {
   if (!source) return null;
-  return SOURCE_LABELS[source] ?? source;
+  return SOURCE_LABELS[source] ?? null;
+}
+
+/**
+ * What kind of source confirmed a date, from the type prefix the calendar refresh writes into the note
+ * (backend report_announcements / earnings_calendar). Never the headline, the filing date or a vendor that follow it.
+ */
+export const CONFIRMED_KIND = {
+  pressRelease: "company press release",   // "confirmed: press release via <news feed> <date>: <headline>"
+  secFiling: "SEC filing",                 // "confirmed: 8-K Item 7.01 filed <date>"
+  calendars: "two calendars agree",        // AGREEMENT_NOTE: two calendar sources on the same day
+  company: "company announcement",         // a company confirmation with no recorded evidence, or a note of no known type
+} as const;
+
+export function confirmedKind(note: string | null | undefined): string {
+  const body = (note ?? "").replace(/^confirmed:\s*/i, "").trim();
+  if (/^press release\b/i.test(body)) return CONFIRMED_KIND.pressRelease;
+  if (/^8-K\b/i.test(body)) return CONFIRMED_KIND.secFiling;
+  if (/^Finnhub and Yahoo Finance agree$/i.test(body)) return CONFIRMED_KIND.calendars;
+  return CONFIRMED_KIND.company;
 }
 
 /** "checked today", "checked yesterday", "checked 3 days ago", or "not yet checked". Calendar days in the viewer's zone. */
@@ -44,21 +62,16 @@ export function checkedOn(checkedAt: string | null | undefined): string {
   return `checked ${t.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
-/**
- * The line for a ticker the calendar left without a future date. The calendar refresh is the only
- * writer of earnings_checked_at and it asks Finnhub, so the source it names is Finnhub.
- */
-export const CALENDAR_SOURCE = "Finnhub";
+/** The line for a ticker the calendar left without a future date: when the calendar was last asked. */
 export function noDateLine(checkedAt: string | null | undefined): string {
-  return checkedAt ? `No confirmed date yet (${CALENDAR_SOURCE}, ${checkedOn(checkedAt)})` : "No confirmed date yet (not yet checked)";
+  return checkedAt ? `No confirmed date yet (${checkedOn(checkedAt)})` : "No confirmed date yet (not yet checked)";
 }
 
 export type Confirmation = "confirmed" | "estimated" | "expected_unconfirmed";
 
-/** The evidence phrase after "confirmed": from the API note, e.g. "confirmed: Finnhub and Yahoo Finance agree". */
+/** The evidence phrase after "confirmed": the kind of source the API note records ("two calendars agree", "company press release"). */
 function confirmedBy(note: string | null | undefined, source: string | null | undefined): string {
-  const stripped = (note ?? "").replace(/^confirmed:\s*/i, "").split(";")[0].trim();
-  return stripped || sourceLabel(source) || "company";
+  return note ? confirmedKind(note) : sourceLabel(source) || CONFIRMED_KIND.company;
 }
 
 /**
@@ -81,11 +94,10 @@ export function nextEarningsLine(
   if (confirmation === "confirmed") {
     return `Next earnings ${fmtEarningsDate(date)}, confirmed (${confirmedBy(note, source)}; ${checked})`;
   }
-  const src = sourceLabel(source);
-  return `Next earnings ${fmtEarningsDate(date)}, estimated (${src ? `${src}, ` : ""}${checked})`;
+  return `Next earnings ${fmtEarningsDate(date)}, estimated (${checked})`;
 }
 
-/** The badge on an event: "Confirmed", "Estimated (Finnhub)", or "Expected, date not confirmed". Never "Past" without a report. */
+/** The badge on an event: "Confirmed", "Estimated", or "Expected, date not confirmed". Never "Past" without a report, never a vendor. */
 export function eventConfirmationBadge(ev: {
   is_confirmed: boolean;
   unresolved_since?: string | null;
@@ -93,8 +105,7 @@ export function eventConfirmationBadge(ev: {
 }): string {
   if (ev.unresolved_since) return "Expected, date not confirmed";
   if (ev.is_confirmed) return "Confirmed";
-  const src = sourceLabel(ev.source);
-  return src ? `Estimated (${src})` : "Estimated";
+  return "Estimated";
 }
 
 /** The whole card note: the dated line, or the no-date line, never blank. */
@@ -112,15 +123,13 @@ export function cardEarningsNote(
   return `Earnings ${fmtEarningsDate(date)}, estimated \u00B7 ${earningsSourceNote(source, checkedAt, now)}`;
 }
 
-/** The short form under a Discover card: "Finnhub, checked today". */
+/** The short form under a Discover card: "checked today" (the calendar vendor is never named). */
 export function earningsSourceNote(
   source: string | null | undefined,
   checkedAt: string | null | undefined,
   now: Date = new Date(),
 ): string {
-  const src = sourceLabel(source);
-  const checked = checkedPhrase(checkedAt, now);
-  return src ? `${src}, ${checked}` : checked;
+  return checkedPhrase(checkedAt, now);
 }
 
 

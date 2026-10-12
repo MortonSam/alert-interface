@@ -16,9 +16,15 @@ const CODE_PATTERNS: [string, RegExp][] = [
   ["identifier", /\b[a-z]+[A-Z][A-Za-z0-9]+\b/g],
 ];
 const ALLOWED = new Set(["iPhone", "iPad", "eBay"]);
+// a visitor reads what a thing is, never which vendor supplied it (2026-10-12); the one exception is the home page's licence
+// credit for the price history, which names its licensor on purpose
+const VENDORS = /\b(?:Finnhub|Yahoo Finance|yfinance|Intrinio|EDGAR)\b/g;
+const LICENCE_CREDIT = "Five years of daily prices for every S&P 500 stock, licensed from Intrinio";
 
 export function codeNames(text: string): string[] {
-  return CODE_PATTERNS.flatMap(([kind, re]) => [...text.matchAll(re)].map((m) => m[0]).filter((m) => !ALLOWED.has(m)).map((m) => `${kind}: ${m}`));
+  const code = CODE_PATTERNS.flatMap(([kind, re]) => [...text.matchAll(re)].map((m) => m[0]).filter((m) => !ALLOWED.has(m)).map((m) => `${kind}: ${m}`));
+  const vendors = text === LICENCE_CREDIT ? [] : [...text.matchAll(VENDORS)].map((m) => `vendor: ${m[0]}`);
+  return [...code, ...vendors];
 }
 
 const SRC = join(__dirname, "..", "..");
@@ -55,6 +61,8 @@ describe("customer-facing text names no code", () => {
     expect(codeNames("Cutoffs come from lib/thresholds.ts.")).not.toEqual([]);
     expect(codeNames("see computeExpectedMove() and iv_rank")).toHaveLength(3);
     expect(codeNames("Put/call ratio above 1.2 reads put-heavy; U.S. markets close at 4:00 p.m. ET.")).toEqual([]);
+    expect(codeNames("Reports in 3 days (estimated, Finnhub, checked today)")).toEqual(["vendor: Finnhub"]);
+    expect(codeNames(LICENCE_CREDIT)).toEqual([]);
   });
 
   it("the glossary names no code", () => {
