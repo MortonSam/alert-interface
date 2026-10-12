@@ -62,7 +62,7 @@ ROWS_SQL = text("""
     FROM historical_reactions hr
     JOIN tickers t ON t.id = hr.ticker_id
     LEFT JOIN eps_basis_checks c ON c.ticker_id = hr.ticker_id AND c.event_date = hr.event_date
-    WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL
+    WHERE hr.event_type = 'earnings' AND hr.eps_actual IS NOT NULL AND t.is_active
     ORDER BY t.symbol, hr.event_date
 """)
 

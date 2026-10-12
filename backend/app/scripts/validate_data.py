@@ -1608,7 +1608,9 @@ async def check_alerting_configured(session) -> CheckResult:
 
 
 async def check_iv_history_price_drift(session) -> CheckResult:
-    """WARN if any iv_history row from the last 7 days drifts >20% from prior row's close (within 5 days)."""
+    """WARN if any iv_history row from the last 7 days drifts >20% from prior row's close (within 5 days), unless a recorded split or
+    corporate action (a spin-off, merger or share-exchange acquisition stored on the ticker's events) falls between the two rows: CTVA's
+    close fell from $77.65 to $11.92 across its 2026-10-01 spin-off of Vylor, a change in the share, not a corrupt snapshot."""
     cutoff = date.today() - timedelta(days=7)
     rows = (await session.execute(text("""
         WITH recent AS (
@@ -1630,7 +1632,8 @@ async def check_iv_history_price_drift(session) -> CheckResult:
           AND NOT EXISTS (
               SELECT 1 FROM events e
               JOIN tickers t ON t.id = e.ticker_id
-              WHERE t.symbol = recent.symbol AND e.event_type = 'split' AND e.event_date = recent.date
+              WHERE t.symbol = recent.symbol AND (e.event_type = 'split' OR e.metadata ? 'corporate_action')
+                AND e.event_date > recent.prev_date AND e.event_date <= recent.date
           )
         ORDER BY date DESC, symbol
         LIMIT 50
@@ -2753,7 +2756,10 @@ async def check_pending_repairs(session) -> CheckResult:
         fn = by_name.get(name)
         if fn is None:
             continue
-        r = (await run_checks([fn]))[0]
+        try:
+            r = await fn(session)                   # the same database this run judges, never the default one
+        except Exception as exc:
+            r = CheckResult(name, ERROR, f"Check raised an exception: {redact(exc)}")
         if r.level in levels:
             pending.append(f"{command}  ({name}: {r.message[:100]})")
     if pending:
@@ -3412,6 +3418,24 @@ async def run_checks(checks, session_factory=None) -> list[CheckResult]:
 VALIDATE_STEP_LABEL = "Validate data"     # the label in refresh.STEPS
 
 
+def new_warnings(tonight: list[str], previous: list[str] | None) -> list[str]:
+    """Pure: the WARN checks that did not warn the night before (every one on the first night with a record)."""
+    return sorted(set(tonight) - set(previous or []))
+
+
+async def previous_warn_names() -> list[str] | None:
+    """The last run's warn_names from step_outcomes, or None when no run has recorded them."""
+    import json as _json
+    from app.services.system_metadata_service import get_value
+    try:
+        async with AsyncSessionLocal() as session:
+            raw = await get_value(session, "step_outcomes")
+        prev = (_json.loads(raw) if raw else {}).get(VALIDATE_STEP_LABEL) or {}
+        return prev.get("warn_names")
+    except Exception:
+        return None
+
+
 async def write_holds(results: list[CheckResult], session_factory=None) -> list[dict]:
     """Fail closed: the per-ticker facts the ERROR checks judged wrong, replaced into fact_holds (services/fact_holds)."""
     from app.services.fact_holds import holds_from_results, replace_holds
@@ -3436,6 +3460,7 @@ def outcome_fields(results: list[CheckResult], holds: list[dict] | None = None) 
     return {
         "pass_count": sum(1 for r in results if r.level == PASS),
         "warn_count": sum(1 for r in results if r.level == WARN),
+        "warn_names": sorted(r.name for r in results if r.level == WARN),
         "error_count": len(errors),
         "errors": [{"check": r.name, "message": r.message} for r in errors[:OUTCOME_ERROR_CAP]],
         "figures": figures,
@@ -3465,7 +3490,9 @@ async def main() -> int:
 
     results = await run_checks(CHECKS)
     holds = await write_holds(results)
-    await record_step_fields(VALIDATE_STEP_LABEL, outcome_fields(results, holds))
+    fields = outcome_fields(results, holds)
+    fields["new_warnings"] = new_warnings(fields["warn_names"], await previous_warn_names())    # named in the digest, so no warning starts unseen
+    await record_step_fields(VALIDATE_STEP_LABEL, fields)
     await alert_errors(results)
     if holds:
         print(f"\n  fail closed: {len(holds)} fact(s) hidden until their check passes")

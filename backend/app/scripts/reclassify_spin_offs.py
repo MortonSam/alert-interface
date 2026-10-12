@@ -32,7 +32,7 @@ async def plan() -> list[dict]:
     async with ScriptSessionLocal() as s:
         stored = [{"id": r.id, "symbol": r.symbol, "date": r.event_date, "split_ratio": r.split_ratio, "title": r.title} for r in (await s.execute(text("""
             select e.id, t.symbol, e.event_date, e.metadata->>'split_ratio' as split_ratio, e.title from events e join tickers t on t.id = e.ticker_id
-            where e.event_type = 'split' and e.event_date >= :start order by t.symbol, e.event_date"""), {"start": STORED_START})).all()]
+            where e.event_type = 'split' and e.event_date >= :start and t.is_active order by t.symbol, e.event_date"""), {"start": STORED_START})).all()]
         bar_rows = (await s.execute(text("select symbol, date, split_ratio, factor, dividend from price_bars_shadow where split_ratio <> 1 or (factor <> 1 and dividend = 0)"))).all()
     bar_splits = [{"symbol": r.symbol, **sp} for r in bar_rows for sp in splits_from_adjustments([r])]
     sessions = _build_date_cache(price_bars.history_sync(REFERENCE_SYMBOL, STORED_START))

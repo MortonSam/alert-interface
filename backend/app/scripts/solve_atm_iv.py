@@ -45,10 +45,12 @@ async def chain_index(only: set[str] | None) -> dict[str, dict[str, str]]:
     one query, no chain bodies transferred."""
     async with ScriptSessionLocal() as s:
         rows = (await s.execute(text("SELECT key, value::json->>'chain_last_trade' FROM system_metadata WHERE key LIKE 'intrinio_chain:%'"))).all()
+        active = set((await s.execute(text("SELECT symbol FROM tickers WHERE is_active"))).scalars().all())
     out: dict[str, dict[str, str]] = {}
     for key, d in rows:
         parts = key.split(":")
-        if len(parts) == 3 and d and (not only or parts[1] in only):
+        # a deactivated ticker's chains stay stored until they expire; the solver never reads them (its skipped_stale list named seven leavers)
+        if len(parts) == 3 and d and parts[1] in active and (not only or parts[1] in only):
             out.setdefault(parts[1], {})[parts[2]] = str(d)[:10]
     return out
 

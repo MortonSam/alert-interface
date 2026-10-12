@@ -667,6 +667,7 @@ async def build_process_list(session) -> dict[str, str]:
         .where(
             HistoricalReaction.event_type == EventType.EARNINGS,
             HistoricalReaction.computation_version < COMPUTATION_VERSION,
+            Ticker.is_active.is_(True),
         )
         .group_by(Ticker.id, Ticker.symbol)
     )).scalars().all())
@@ -692,6 +693,7 @@ async def build_process_list(session) -> dict[str, str]:
         .where(
             Event.event_type == EventType.EARNINGS,
             Event.is_confirmed.is_(True),
+            Ticker.is_active.is_(True),
             Event.event_date <= age_cutoff,
             # event_date > max_reaction_date (or ticker has no reactions yet)
             (max_reaction.c.max_date.is_(None))

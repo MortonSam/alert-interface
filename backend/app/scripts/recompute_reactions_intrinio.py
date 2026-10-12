@@ -138,7 +138,7 @@ async def run(argv: list[str]) -> int:
         rows = (await s.execute(text(f"""
             select hr.id, t.symbol, hr.event_type::text as event_type, hr.event_date, hr.report_timing, hr.close_before, hr.open_after, hr.close_after,
                    hr.pct_change_1d, hr.pct_change_3d, hr.pct_change_5d, hr.computation_version, hr.price_source
-            from historical_reactions hr join tickers t on t.id = hr.ticker_id {where} order by t.symbol, hr.event_type, hr.event_date"""),
+            from historical_reactions hr join tickers t on t.id = hr.ticker_id {where} {'AND' if where else 'WHERE'} t.is_active order by t.symbol, hr.event_type, hr.event_date"""),
                                  nightly_params() if nightly else {})).mappings().all()
     if nightly and not rows:
         print(f"{STEP_LABEL} (nightly): nothing to recompute: every row has a price source and no corrected window is pending")

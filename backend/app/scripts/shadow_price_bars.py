@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.database import ScriptSessionLocal
 from app.models.price_bar_shadow import PriceBarShadow
 from app.models.security_record import SecurityRecord
+from app.models.ticker import Ticker
 from app.services.intrinio_client import IntrinioAuthError, IntrinioClient
 from app.services.price_bars_shadow import Fetch, plan_fetches
 from app.services.security_records import Record
@@ -63,7 +64,8 @@ async def _upsert(rows: list[dict]) -> int:
 
 async def load_plan(today: date) -> tuple[list[Fetch], dict]:
     async with ScriptSessionLocal() as s:
-        recs = (await s.execute(select(SecurityRecord))).scalars().all()
+        active = select(Ticker.symbol).where(Ticker.is_active.is_(True))
+        recs = (await s.execute(select(SecurityRecord).where(SecurityRecord.symbol.in_(active)))).scalars().all()    # a deactivated ticker's bars stop
         last = dict((await s.execute(select(PriceBarShadow.symbol, func.max(PriceBarShadow.date)).group_by(PriceBarShadow.symbol))).all())
     by: dict[str, list[Record]] = {}
     ids: dict[tuple[str, date], object] = {}

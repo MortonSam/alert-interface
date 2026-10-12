@@ -190,7 +190,7 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
         result = await session.execute(
             select(HistoricalReaction, Ticker.symbol)
             .join(Ticker, HistoricalReaction.ticker_id == Ticker.id)
-            .where(HistoricalReaction.event_type == "earnings")
+            .where(HistoricalReaction.event_type == "earnings", Ticker.is_active.is_(True))
             .order_by(HistoricalReaction.ticker_id, HistoricalReaction.event_date)
         )
         rows = result.all()
