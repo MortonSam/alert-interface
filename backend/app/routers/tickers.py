@@ -2102,12 +2102,6 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     if not pack["active"]:
         raise HTTPException(status_code=404, detail="No stored data for this stock")
     ip = get_client_ip(request)
-    kind = A.classify_question(question, pack["symbol"], pack["name"])
-    if kind != "normal":       # advice and off-topic questions get a fixed sentence: no model call, no limit charged, still logged
-        fixed = A.fixed_answer(kind, pack, question)
-        await A.log_question(db, symbol=pack["symbol"], question=question, normalized=A.normalize_question(question, pack["symbol"], pack["name"]), key="", covered=False,
-                             verdict=kind, answer=fixed, model=None, input_tokens=None, output_tokens=None, cost=None, cached=False, ip_hash=A.ip_hash(ip))
-        return {"symbol": pack["symbol"], "name": pack["name"], "answer": fixed, "cached": False}
     normalized = A.normalize_question(question, pack["symbol"], pack["name"])
     key = A.cache_key(pack["symbol"], normalized, pack["fingerprint"])
     hit = await A.cached_answer(db, key)
@@ -2118,12 +2112,26 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     from app.services import ai_spend
     if await A.spend_today(db) >= settings.ask_ivy_daily_cap_usd or await ai_spend.cap_reached(db):
         raise HTTPException(status_code=429, detail="Ivy has reached today's budget and is paused until tomorrow.")
+    # the model classifies the question (one small call, no keyword list); only a question with nothing to do with this stock is refused
+    from app.services.anthropic_client import AnthropicClient
+    try:
+        klass = await A.classify_question(AnthropicClient(), question, pack["symbol"], pack["name"])
+    except Exception:
+        klass = {"kind": "covered_other", "cost": 0.0}      # a classifier that fails never blocks an answer; the answer path checks every fact anyway
+    kind = klass["kind"]
+    if kind == "off_topic":
+        fixed = A.refusal_answer(pack, question)
+        await A.add_spend(db, klass.get("cost"))
+        await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=False, verdict="off_topic", answer=fixed,
+                             model=klass.get("model"), input_tokens=klass.get("input_tokens"), output_tokens=klass.get("output_tokens"), cost=klass.get("cost"), cached=False, ip_hash=A.ip_hash(ip))
+        return {"symbol": pack["symbol"], "name": pack["name"], "answer": fixed, "cached": False}
     await check_limit(db, A.ASK_POLICY, caller_id, ip)
     await check_limit(db, A.ASK_TICKER_POLICY, caller_id, f"{ip}|{pack['symbol']}")
     charged = await record_use(db, A.ASK_POLICY, caller_id, ip, label=pack["symbol"])
     charged_t = await record_use(db, A.ASK_TICKER_POLICY, caller_id, f"{ip}|{pack['symbol']}", label=pack["symbol"])
     try:
-        result = await A.answer_question(db, pack, question)
+        result = await A.answer_question(db, pack, question, kind=kind)
+        result["cost"] = (result.get("cost") or 0.0) + (klass.get("cost") or 0.0)
     except Exception as exc:
         await refund_use(db, A.ASK_POLICY, ip, charged)
         await refund_use(db, A.ASK_TICKER_POLICY, f"{ip}|{pack['symbol']}", charged_t)

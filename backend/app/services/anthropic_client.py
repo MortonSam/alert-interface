@@ -8,6 +8,7 @@ from app.config import settings
 
 GENERATION_MODEL   = "claude-sonnet-4-6"
 VERIFICATION_MODEL = "claude-opus-4-6"
+CLASSIFIER_MODEL   = "claude-haiku-4-5-20251001"    # Ask Ivy's question classifier: one small call per question
 DRAFT_MODEL        = "claude-fable-5"
 
 
@@ -165,6 +166,20 @@ class AnthropicClient:
         return {
             "content":       _extract_text(msg).strip(),
             "model_used":    GENERATION_MODEL,
+            "input_tokens":  msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+        }
+
+    async def classify_question(self, prompt: str) -> dict:
+        """Ask Ivy's classifier (services/ask_ivy.classify_question): the kind of question, as JSON, from the small model."""
+        msg = await self._create("classify_question",
+            model=CLASSIFIER_MODEL,
+            max_tokens=40,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {
+            "content":       _extract_text(msg).strip(),
+            "model_used":    CLASSIFIER_MODEL,
             "input_tokens":  msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
         }

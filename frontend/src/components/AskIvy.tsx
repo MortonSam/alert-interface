@@ -41,10 +41,9 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
   return (
     <form onSubmit={submit} className="mt-6">
       <label htmlFor="ask-ivy" className="font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground inline-flex items-center gap-1.5"><IvyMark />Ask Ivy about {name}</label>
-      <p className="text-xs text-muted-foreground mt-1">She answers only from this page&apos;s stored data and says when it doesn&apos;t cover a question. No recommendations.</p>
       <div className="mt-2 flex gap-2">
         <input
-          id="ask-ivy" value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={300} disabled={busy}
+          id="ask-ivy" value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={300} disabled={busy} autoComplete="off"
           placeholder="Is it more volatile than usual?"
           className="flex-1 min-h-[44px] sm:min-h-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
         />
@@ -66,7 +65,9 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
               ),
             )}
           </p>
-          <p className="font-mono text-[11px] text-muted-foreground/70 mt-2" title={answer.rule}>{asOf ? `${asOf} · ` : ""}Checked against this page&apos;s stored facts</p>
+          {answer.inputs.length > 0 && (
+            <p className="font-mono text-[11px] text-muted-foreground/70 mt-2" title={answer.rule}>{asOf ? `${asOf} · ` : ""}Checked against this page&apos;s stored facts</p>
+          )}
         </div>
       )}
     </form>

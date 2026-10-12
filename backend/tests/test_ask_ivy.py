@@ -136,9 +136,12 @@ async def test_the_route_is_absent_behind_the_flag_and_serves_a_checked_answer_w
     monkeypatch.setattr(settings, "ask_ivy_enabled", True)
     canned = {"verdict": "verified", "covered": "yes", "model": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5, "cost": 0.001, "problems": [], "dropped": [],
               "answer": {"key": "ask", "question": "q", "data": "MU is at $1,045.56.", "idea": "", "inputs": [FACTS[0]], "as_of": None, "as_of_kind": "observed", "rule": A.RULE}}
-    async def fake(db, pack, question, *, client=None):
+    async def fake(db, pack, question, *, client=None, kind="covered_other"):
         return canned
     monkeypatch.setattr(A, "answer_question", fake)
+    async def fake_kind(client, question, symbol, name):            # the classifier is the model; here it is not called
+        return {"kind": "covered_other", "model": "claude-haiku-4-5-20251001", "input_tokens": 10, "output_tokens": 5, "cost": 0.0}
+    monkeypatch.setattr(A, "classify_question", fake_kind)
     # the cache test, not the fingerprint test: the page's facts carry a live price and the shared fact holds, which other
     # workers and the clock can change between the two requests below
     monkeypatch.setattr(A, "fingerprint", lambda facts: "fixed-for-the-cache-test")
@@ -193,27 +196,53 @@ async def test_a_rejected_draft_is_rewritten_once_and_a_second_failure_is_never_
     assert r["verdict"] == "rejected" and r["answer"]["inputs"] == [] and "passed the checks" in r["answer"]["data"]
 
 
-@pytest.mark.parametrize("q", [
-    "Should I buy Micron before the dividend?", "should i sell MU now", "Is it a good time to buy?", "Is now a good time to get in?",
-    "Is Micron worth buying?", "Is it worth it?", "Would you buy this stock?", "Is MU a buy?", "Buy or sell?", "Is this a good investment?",
-    "What should I do with my shares?", "Do you recommend Micron?", "Should I hold or take profits?", "Is it the right time to sell?",
-])
-def test_advice_questions_are_classified_without_a_model(q):
-    assert A.classify_question(q, "MU", "Micron Technology") == "advice"
+def test_the_model_classifies_the_question_and_only_off_topic_is_refused():
+    """No keyword list: the kind comes from the classifier's JSON; anything unreadable is covered_other and still answered from the facts."""
+    assert A.parse_kind('{"kind": "timing"}') == "timing" and A.parse_kind('Sure: {"kind":"OPTIONS_PLANNING"}') == "options_planning"
+    assert A.parse_kind('{"kind": "weather"}') == "covered_other" and A.parse_kind("") == "covered_other" and A.parse_kind("not json") == "covered_other"
+    assert "advice" not in A.KINDS and not hasattr(A, "ADVICE_ANSWER")                           # the bare refusal path is gone
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": [], "fingerprint": "x"}
+    ref = A.refusal_answer(pack, "who won the Padres game")["data"]
+    assert ref.startswith("That isn't about Micron Technology; Ivy can answer about ") and ref.endswith(".") and ref.count(".") == 1
+    nc = A.not_covered_answer(pack, "any lawsuits?")["data"]
+    assert nc.startswith("Ivy doesn't track that for Micron Technology") and "cover" not in nc and "this page" not in nc.lower()
+    assert "(" not in A.build_classifier_prompt("should I buy?", "MU", "Micron Technology").split("QUESTION:")[1]
+    assert A.CLOSING_LINE == "Ivy doesn't make buy or sell calls." and set(A.DECISION_KINDS) <= set(A.KINDS)
 
 
-@pytest.mark.parametrize("q", ["Will Micron go up after earnings?", "Where will the stock be next year?", "Is it more volatile than usual?",
-                               "How did it react to the last report?", "What happens on the ex-dividend date?", "Is Micron expensive right now?", "Why did it fall?"])
-def test_predictions_and_data_questions_go_to_the_model(q):
-    assert A.classify_question(q, "MU", "Micron Technology") == "normal"
+def test_the_voice_checks_reject_calls_sources_jargon_and_beats_and_the_cap_cuts_at_a_sentence():
+    ids = {"quote"}
+    assert any("implies a call" in p for p in A.check_output("The facts show it is a good entry at {fact:quote}.", ids))
+    assert any("unexplained term" in p for p in A.check_output("The ATM straddle costs {fact:quote}.", ids))
+    assert any("unexplained term" in p for p in A.check_output("IV is high at {fact:quote}.", ids))
+    assert A.check_output("Implied move and typical move at {fact:quote}; the options cost more because they price in the report.", ids) == []
+    assert A.word_count("Tesla reports after the close on Wednesday, Oct 21, so the stock reacts Thursday.") == 14
+    kept = A.cut_to_cap(["one " * 50, "two " * 50, "three"], cap=90)
+    assert kept == ["one " * 50]                                                                    # the first sentence always stands; the cap cuts at a sentence end
+    assert A.cut_to_cap(["a b c", "d e"], cap=90) == ["a b c", "d e"]
 
 
-@pytest.mark.parametrize("q", ["hello", "What's the weather in Boise?", "Tell me a joke", "Who are you?", "What is the capital of France?", "best pizza recipe"])
-def test_off_topic_questions_get_the_fixed_sentence(q):
-    assert A.classify_question(q, "MU", "Micron Technology") == "off_topic"
-    pack = {"symbol": "MU", "name": "Micron Technology", "facts": [], "context": [], "fingerprint": "x"}
-    assert A.fixed_answer("off_topic", pack, q)["data"] == "Ivy only answers questions about Micron Technology's stock."
-    assert A.fixed_answer("advice", pack, q)["data"] == "Ivy cannot give investment advice."
+@pytest.mark.asyncio
+async def test_a_decision_answer_closes_with_exactly_one_line_added_by_code_and_hides_beats():
+    class Client:
+        def __init__(self, drafts): self.drafts = list(drafts); self.prompts = []
+        async def generate_answer(self, prompt, max_tokens=400):
+            self.prompts.append(prompt)
+            return {"content": self.drafts.pop(0), "model_used": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5}
+        async def verify_research_note(self, prompt):
+            return {"content": json.dumps({"sentences": [{"text": "x", "status": "supported", "evidence": "e"}]}), "model_used": "claude-opus-4-6", "input_tokens": 5, "output_tokens": 5}
+    beat = {"id": "beats", "name": "beats", "value": "10", "as_of": "2026-07-22", "source": "s", "kind": "number", "phrase": "its last 10 beats"}
+    pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS + [beat], "context": [], "fingerprint": "x"}
+    c = Client(["COVERED: yes\nIt trades at {fact:quote}, which matters because that is where the next move starts."])
+    r = await A.answer_question(None, pack, "is now a good time to buy", client=c, kind="timing")
+    assert r["verdict"] == "verified" and r["answer"]["data"].endswith(" " + A.CLOSING_LINE) and r["answer"]["data"].count(A.CLOSING_LINE) == 1
+    assert "{fact:beats}" not in c.prompts[0] and "KIND OF QUESTION: timing" in c.prompts[0]
+    r = await A.answer_question(None, pack, "what does it do", client=Client(["COVERED: yes\nIt trades at {fact:quote}."]), kind="covered_other")
+    assert A.CLOSING_LINE not in r["answer"]["data"]
+    r = await A.answer_question(None, pack, "x", client=Client(["COVERED: yes\nIt beat and trades at {fact:quote}.", "COVERED: yes\nIt beat again at {fact:quote}."]), kind="direction")
+    assert r["verdict"] == "rejected" and any("beat or miss" in p for p in r["problems"])
+    r = await A.answer_question(None, pack, "who won the game", client=Client([]), kind="off_topic")
+    assert r["verdict"] == "off_topic" and r["answer"]["data"].startswith("That isn't about")
 
 
 def test_fact_phrases_are_noun_phrases_and_repeated_phrases_are_rejected():
@@ -238,9 +267,9 @@ async def test_a_covered_no_draft_shows_only_the_fixed_sentence_and_a_repeat_is_
             return {"content": json.dumps({"sentences": [{"text": "x", "status": "supported", "evidence": "e"}]}), "model_used": "claude-opus-4-6", "input_tokens": 5, "output_tokens": 5}
     pack = {"symbol": "MU", "name": "Micron Technology", "facts": FACTS, "context": [], "fingerprint": "x"}
     r = await A.answer_question(None, pack, "q", client=Client(["COVERED: off\n\nI can tell you about the weather instead: {fact:quote}."]))
-    assert r["verdict"] == "off_topic" and r["answer"]["data"] == "Ivy only answers questions about Micron Technology's stock." and r["answer"]["inputs"] == []
-    r = await A.answer_question(None, pack, "q", client=Client(["COVERED: no\n\nThis page's data does not cover valuation."]))
-    assert r["verdict"] == "not_covered" and "doesn't cover" in r["answer"]["data"] and r["answer"]["inputs"] == []
+    assert r["verdict"] == "off_topic" and r["answer"]["data"].startswith("That isn't about Micron Technology; Ivy can answer about") and r["answer"]["inputs"] == []
+    r = await A.answer_question(None, pack, "q", client=Client(["COVERED: no\n\nIvy doesn't track lawsuits."]))
+    assert r["verdict"] == "not_covered" and "doesn't track" in r["answer"]["data"] and r["answer"]["inputs"] == []
     r = await A.answer_question(None, pack, "q", client=Client(["COVERED: yes\nIt moved on a typical report on a typical report day to {fact:quote}.",
                                                                 "COVERED: yes\nIt moved on a typical report day to {fact:quote} again on a typical report day."]))
     assert r["verdict"] == "rejected" and any("repeats the phrase" in p for p in r["problems"])

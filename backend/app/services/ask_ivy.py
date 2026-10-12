@@ -1,6 +1,12 @@
 """Ask Ivy: the free-text question box under the question strip (flag ASK_IVY_ENABLED, off in production).
 
-Ivy answers only from this stock's stored facts and says plainly when they do not cover the question. The model (Sonnet)
+Ivy answers the decision behind the question the way an analyst explains it to a beginner, from this stock's stored facts, and
+never dead-ends: a question the facts cannot reach gets one plain sentence saying what she does not track, and only a question
+with nothing to do with this stock gets a refusal that names what she can answer. The model classifies each question (one small
+call, services/anthropic_client.classify_question: timing, direction, quality, options planning, another covered question, not
+covered, off topic); a decision question is answered facts first and closes with exactly one line, CLOSING_LINE, appended by code.
+Answers stay under WORD_CAP words with no unexplained terms, every figure that is not today's carries its date through its fact's
+phrase, and words that imply a call (FORBIDDEN_PHRASES, VALUATION_VERDICTS) or a beat or miss figure never pass. The model (Sonnet)
 sees the fact pack, names and values, so it can reason over them, but it may not type a number: its output must refer
 to every quantity by a {fact:id} placeholder. The output check (check_output) rejects any digit, currency sign or percent
 outside a placeholder, number words (one through twenty, twice, double, triple, half, a quarter as a fraction, dozen),
@@ -32,8 +38,14 @@ from app.services.move_comparison import compare_moves
 from app.services.research_cost import estimate_cost_usd
 from app.services.system_metadata_service import get_value, set_value
 
-MAX_SENTENCES = 3
+MAX_SENTENCES = 6
+WORD_CAP = 90                               # an answer longer than this is rewritten once, then cut at a sentence end
 MAX_QUESTION_CHARS = 300
+CACHE_VERSION = 2                           # 2 (2026-10-12): the analyst's voice; every answer cached before it is never served again
+KINDS = ("timing", "direction", "quality", "options_planning", "covered_other", "not_covered", "off_topic")
+DECISION_KINDS = ("timing", "direction", "quality", "options_planning")     # a buy, sell or trade decision: facts first, then CLOSING_LINE
+CLOSING_LINE = "Ivy doesn't make buy or sell calls."
+BEAT_FACTS = {"beats", "beats_followed_by_a_fall", "share", "last_report_outcome"}   # beat or miss figures never enter a decision answer
 SPEND_KEY = "ask_ivy_spend"                 # system_metadata "{SPEND_KEY}:{YYYY-MM-DD}" holds the day's estimated spend in USD
 RV_ELEVATED_RANK = 80                       # 20-day realized volatility at or above this percentile of its own year is "elevated"
 RV_QUIET_RANK = 20                          # at or below this percentile, "quiet"
@@ -95,47 +107,79 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
     (re.compile(r"\bin line with (?:its |the )?(?:sector|peer|peers'|industry) median\b|\bin line with its peers\b|\b(?:at|matches|equal to) (?:its |the )?(?:sector|peer) median\b", re.I), {"pe_vs_sector": "in line with"}),
 ]
 VALUATION_VERDICTS = re.compile(r"\b(?:cheap|expensive|undervalued|overvalued|pricey|a bargain|overpriced|underpriced)\b", re.I)   # a ratio is never a verdict
+# words that imply a call, or talk about her own sources: never shown (Sam's voice rules, 2026-10-12)
+FORBIDDEN_PHRASES = re.compile(r"\b(?:bargain|good entry|the facts show|the data indicates?|the data shows?|this page|the facts here|the stored facts|stored data|"
+                               r"the facts (?:do not|don't) cover|my sources|the page's|according to the (?:facts|data))\b", re.I)
+JARGON = re.compile(r"\b(?:IV|RV|ATM)\b")                              # bare initials, case-sensitive; "implied move" and "typical move" are the words
+JARGON_WORDS = re.compile(r"\bstraddles?\b", re.I)
+BEAT_WORDS = re.compile(r"\b(?:beat|beats|miss|missed|misses)\b", re.I)
 
 
-# ── deterministic classifiers: advice and off-topic questions never reach the model ──────────────────────────────
+# ── the question's kind: the model decides, no keyword list ──────────────────────────────────────────────────────
 
-ADVICE_ANSWER = "Ivy cannot give investment advice."
-OFF_TOPIC_ANSWER = "Ivy only answers questions about {name}'s stock."
-# whether to buy, sell or hold; whether it is a good time; whether it is worth it (any phrasing of the person's own decision)
-ADVICE = re.compile(
-    r"\b(?:should|shall|do|could|would|can|ought)\s+(?:i|we|you|one|someone|a person|an investor)\b[^?.]{0,40}\b(?:buy|sell|hold|short|invest|get in|get out|add|trim|dump|load up|take profits?|cash out|keep holding|stay in|enter|exit)\b"
-    r"|\b(?:is|was|would|will|does) (?:it|this|that|now|today|[A-Za-z.&' ]{1,40}) (?:a )?(?:good|bad|smart|wise|right|great|terrible|poor|best|worst|ok|okay|safe) (?:time|moment|idea|bet|buy|sell|investment|stock to buy|stock to own|entry|exit|point)\b"
-    r"|\b(?:good|bad|smart|wise|right|great|best|worst|safe) (?:time|moment|idea|entry|exit) to (?:buy|sell|hold|invest|short|enter|exit|add|trim)\b"
-    r"|\bworth (?:it|buying|selling|holding|owning|investing|a buy|the risk|getting into|picking up|adding)\b"
-    r"|\b(?:is|was) (?:it|this|[A-Za-z.&' ]{1,40}) (?:a |an )?(?:buy|sell|hold|strong buy|strong sell|screaming buy|good buy|good investment|bad investment|safe investment|good stock to buy)\b"
-    r"|\bbuy or sell\b|\bbuy,? sell,? or hold\b|\bbuy now\b|\bsell now\b|\btime to (?:buy|sell)\b|\bwhat should i do\b|\bwhat would you do\b|\brecommend(?:ation)?\b|\badvice\b"
-    r"|\bshould i (?:be )?(?:buying|selling|holding|worried|concerned)\b|\bget in now\b|\bget out now\b|\bjump in\b|\bbail\b",
-    re.I)
-# clearly off this stock: chit-chat, other subjects, questions about Ivy herself; everything else is judged by the fact pack
-OFF_TOPIC = re.compile(
-    r"^\s*(?:hi|hello|hey|yo|thanks?|thank you|ok|okay|test|testing)\b[\s!.?]*$"
-    r"|\b(?:weather|recipe|joke|poem|song|lyrics|movie|football|soccer|basketball|baseball|election|president|bitcoin|ethereum|crypto|gold price|oil price|mortgage rate|homework|translate|capital of|who are you|what are you|are you (?:an ai|a bot|human|chatgpt|claude)|what model|how do you work|who made you|meaning of life)\b",
-    re.I)
-STOCK_WORDS = re.compile(r"\b(?:stock|share|shares|price|earnings|report|dividend|move|moved|volatil|eps|estimate|high|low|quarter|results|sector|market|value|cap|trade|trading|options?|implied|beat|miss|upgrade|downgrade|analyst|ex-dividend|rally|drop|fall|rise|gain|loss|return|chart|history|typical|usual|react|outlook|forecast|predict|expect|guidance|revenue|growth|profit|valuation|cheap|expensive|rich|p/e|pe ratio|multiple)\b", re.I)
+CLASSIFIER_PROMPT = """Classify a visitor's question typed on the stock page of {name} ({symbol}). Return JSON only: {{"kind": "<one of the kinds>"}}.
+
+Kinds:
+- timing: whether now is a good time to buy or sell, whether to get in or out before or after an event ("is now a good time to buy", "should I sell", "should I get in before earnings").
+- direction: what the stock will do after an event or in general ("will it go up after earnings", "will it rally", "is it going to drop").
+- quality: whether it is a good stock, a good company, worth it, risky, expensive or cheap as an investment.
+- options_planning: expirations, strikes, timing around events, what the options are pricing, implied moves.
+- covered_other: any other question about this company or its stock (what it does, when it reports, how it has moved, recent drops, dividends, valuation ratios, volatility).
+- not_covered: about this company but about something the page does not hold: news, product launches, lawsuits, management, guidance details, competitors.
+- off_topic: not about this company or its stock at all (sports, weather, another company, chit-chat, questions about Ivy herself).
+
+QUESTION: {question}"""
 
 
-def classify_question(question: str, symbol: str, name: str | None) -> str:
-    """Pure: "advice" (buy, sell, hold, good time, worth it), "off_topic" (chit-chat, another subject, nothing about a stock),
-    else "normal" (predictions and everything else go to the model, which may still find the facts do not cover it)."""
-    q = " ".join(question.split())
-    if ADVICE.search(q):
-        return "advice"
-    if OFF_TOPIC.search(q):
-        return "off_topic"
-    mentions = symbol.lower() in q.lower() or bool(name and any(w.lower() in q.lower() for w in re.findall(r"[A-Za-z]{4,}", name)))
-    if not STOCK_WORDS.search(q) and not mentions and not re.search(r"\b(?:it|its|it's|they|their|the company|this|that)\b", q, re.I):
-        return "off_topic"
-    return "normal"
+def build_classifier_prompt(question: str, symbol: str, name: str | None) -> str:
+    return CLASSIFIER_PROMPT.format(name=name or symbol, symbol=symbol, question=" ".join(question.split())[:MAX_QUESTION_CHARS])
+
+
+def parse_kind(content: str) -> str:
+    """Pure: the kind in the classifier's JSON; anything unreadable is covered_other (the answer path still checks every fact)."""
+    m = re.search(r"\{.*\}", content or "", re.S)
+    try:
+        kind = str(json.loads(m.group(0)).get("kind", "")).strip().lower() if m else ""
+    except ValueError:
+        kind = ""
+    return kind if kind in KINDS else "covered_other"
+
+
+async def classify_question(client, question: str, symbol: str, name: str | None) -> dict:
+    """The model's kind for the question: {kind, model, input_tokens, output_tokens, cost}."""
+    out = await client.classify_question(build_classifier_prompt(question, symbol, name))
+    return {"kind": parse_kind(out["content"]), "model": out["model_used"], "input_tokens": out["input_tokens"], "output_tokens": out["output_tokens"],
+            "cost": estimate_cost_usd(out["model_used"], out["input_tokens"], out["output_tokens"]) or 0.0}
+
+
+def can_answer_clause(pack: dict) -> str:
+    """What Ivy can answer about this stock, from what the pack holds."""
+    ids = {f["id"] for f in pack.get("facts", [])}
+    parts = []
+    if "next_earnings_date" in ids or "next_report_day" in ids:
+        parts.append("its next report")
+    if "typical_move" in ids or "reports_up" in ids:
+        parts.append("how it has moved after past reports")
+    if any(i.startswith("implied_move") for i in ids):
+        parts.append("what the options are pricing")
+    if "quote" in ids or "last_close" in ids:
+        parts.append("where its price sits in its range")
+    if "description" in ids:
+        parts.append("what the company does")
+    if not parts:
+        return "its stored figures"
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def refusal_answer(pack: dict, question: str) -> dict:
+    """The one allowed refusal: nothing relevant to this stock, and what she can answer about it."""
+    text_ = f"That isn't about {pack['name']}; Ivy can answer about {can_answer_clause(pack)}."
+    return {"key": "ask", "question": question, "data": text_, "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
 
 
 def fixed_answer(kind: str, pack: dict, question: str) -> dict:
-    text_ = ADVICE_ANSWER if kind == "advice" else OFF_TOPIC_ANSWER.format(name=pack["name"])
-    return {"key": "ask", "question": question, "data": text_, "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
+    """Off topic is the refusal; anything else is the not-covered sentence."""
+    return refusal_answer(pack, question) if kind == "off_topic" else not_covered_answer(pack, question)
 
 
 def repeated_phrase(sentence: str, words: int = 4) -> str | None:
@@ -334,15 +378,94 @@ def fingerprint(facts: list[dict]) -> str:
     return hashlib.sha256(json.dumps(sorted((f["id"], f["value"], f["as_of"] or "") for f in facts)).encode()).hexdigest()[:16]
 
 
+def day_phrase(d: date) -> str:
+    """"Wednesday, Oct 21": the weekday a visitor plans around."""
+    return d.strftime("%A, ") + B.fmt_date(d).rsplit(",", 1)[0]
+
+
+def close_phrase(chain_date: date, today: date) -> str:
+    """"as of Friday's close" within the week, else "as of the Oct 9 close"."""
+    days = (today - chain_date).days
+    return f"as of {chain_date.strftime('%A')}'s close" if 0 <= days <= 6 else f"as of the {B.fmt_date(chain_date).rsplit(',', 1)[0]} close"
+
+
+async def event_facts(db: AsyncSession, symbol: str, raw: dict, today: date) -> list[dict]:
+    """The dates a visitor plans around: the next report's day and timing, the session the stock reacts on, the expirations before
+    and after it from the serving chain, the implied move by the first expiration after the report (dated by its chain), and how
+    often the stock rose after its last reports."""
+    from app.scripts.ivy_v3_pull import next_session
+    from app.services import chain_store
+    from app.services.chain_shadow import counts_for_report
+    from app.services.implied_move import straddle_implied_move
+    out: list[dict] = []
+    nxt = raw.get("next_report") or {}
+    d = nxt.get("date")
+    if d and d >= today:
+        timing = (nxt.get("timing") or "").lower()
+        out.append(_fact("next_report_day", "next report day", day_phrase(d), d, "earnings calendar", phrase=day_phrase(d)))
+        react = d if timing == "bmo" else next_session(d)
+        out.append(_fact("reaction_session", "session the stock reacts on", day_phrase(react), react,
+                         "the report day for a before-open report, the next session for an after-close one", phrase=day_phrase(react)))
+        exps = [e for e in await chain_store.get_ingested_expirations(db, symbol) if e >= today.isoformat()]
+        chain_date = await chain_store.get_latest_chain_date(db, symbol) if exps else None
+        before = [e for e in exps if not counts_for_report(e, d.isoformat(), timing or None)]
+        after = [e for e in exps if counts_for_report(e, d.isoformat(), timing or None)]
+        if before:
+            e = date.fromisoformat(before[-1])
+            out.append(_fact("last_expiration_before_report", "last expiration before the report", B.fmt_date(e).rsplit(",", 1)[0], chain_date,
+                             "options chain, the expirations listed", phrase=day_phrase(e)))
+        if after:
+            e = date.fromisoformat(after[0])
+            out.append(_fact("first_expiration_after_report", "first expiration after the report", B.fmt_date(e).rsplit(",", 1)[0], chain_date,
+                             "options chain, the expirations listed", phrase=day_phrase(e)))
+            got = await chain_store.get_chain(db, symbol, after[0])
+            if got and got[1] and chain_store.is_fresh(got[1], today=today):
+                chain, cd = got[0], date.fromisoformat(str(got[1])[:10])
+                spot = chain.get("underlying_price") or raw.get("quote_price")
+                im = straddle_implied_move(chain.get("calls") or [], chain.get("puts") or [], spot)
+                if im is not None:
+                    pct = f"{im.pct * 100:.1f}%"
+                    out.append(_fact("implied_move_by_first_expiration_after_report", "implied move by the first expiration after the report", f"±{pct}", cd,
+                                     "at-the-money straddle over the stock price, the stored chain for that expiration",
+                                     phrase=f"about {pct} by {B.fmt_date(e).rsplit(',', 1)[0]} {close_phrase(cd, today)}"))
+    rows = (await db.execute(text("""SELECT hr.event_date, hr.pct_change_1d FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE t.symbol = :s AND hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL ORDER BY hr.event_date DESC LIMIT 20"""), {"s": symbol})).all()
+    if rows:
+        ups = sum(1 for _, m in rows if float(m) > 0)
+        out.append(_fact("reports_up", "reports followed by a rise", str(ups), rows[0][0], "stored earnings reactions, the 1-day move after each report",
+                         phrase=f"up after {ups} of its last {len(rows)} reports"))
+    return out
+
+
+def date_phrases(facts: list[dict]) -> None:
+    """Every figure that is not today's carries its date: the phrases of the dated facts the strip hands over."""
+    for f in facts:
+        if not f.get("as_of") or len(f["as_of"]) < 10:
+            continue
+        try:
+            when = B.fmt_date(date.fromisoformat(f["as_of"][:10]))
+        except ValueError:
+            continue
+        if f["id"] in ("typical_move", "typical_move_after_a_report"):
+            f["phrase"] = f"{f['value']} on a typical report, through its {when} report"
+        elif f["id"] in ("largest_up_move", "largest_down_move"):
+            f["phrase"] = f"{f['phrase']} on {when}"
+        elif f["id"] == "20_day_realized_volatility":
+            f["phrase"] = f"{f['value']} annualized as of {when}"
+        elif f["id"] == "last_close":
+            f["phrase"] = f"a last close of {f['value']} on {when}"
+
+
 async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
     """{symbol, name, facts, context, fingerprint}: the receipts behind the Overview and every qualifying strip question,
-    plus the word-valued comparisons, and the sentences the page already shows as context."""
+    plus the word-valued comparisons, the event facts (event_facts), and the sentences the page already shows as context."""
     from app.services.briefing_build import build_briefing, build_questions
     today = today or date.today()
     raw: dict = {}
     brief = await build_briefing(db, symbol, today)
     qs = await build_questions(db, symbol, today, raw=raw, all_candidates=True)
-    facts = with_denominators(number_facts(brief["sentences"], qs["questions"])) + word_facts(raw)
+    facts = with_denominators(number_facts(brief["sentences"], qs["questions"])) + word_facts(raw) + await event_facts(db, symbol, raw, today)
+    date_phrases(facts)
     last = raw.get("last_report") or {}
     for f in facts:
         if f["id"] == "move_session" and last.get("timing") == "bmo":
@@ -354,12 +477,27 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
 
 # ── the prompt ───────────────────────────────────────────────────────────────
 
-def build_prompt(pack: dict, question: str) -> str:
+KIND_GUIDANCE = {
+    "timing": "The visitor is deciding whether to act now. Lead with the next report and how many days away it is, then what the options are pricing against the stock's typical earnings move, where the price sits against its 52-week high and its three-month trend, and whether it is moving more or less than usual.",
+    "direction": "The visitor wants to know what the stock will do after the event. Lead with how it has moved after its past reports: how often it rose, the typical size, the largest move each way; then what the options are pricing now. Never predict.",
+    "quality": "The visitor is judging the business. Lead with what the company does and its recent results in plain words, then how its price has moved; a P/E is compared with its own history and its sector, never called cheap or expensive.",
+    "options_planning": "The visitor is planning an option. Lead with the next report's day and timing, the session the stock reacts on, which expiration ends before that reaction and which first includes it, and what the options are pricing against the typical move.",
+    "covered_other": "Answer the question asked, with the figure that settles it and one clause on why it matters.",
+    "not_covered": "The facts do not hold what was asked. In one plain sentence say what Ivy does not track, then give the closest thing she does hold.",
+}
+
+TARGET_EXAMPLE = ("Tesla reports after the close on Wednesday, Oct 21, so the stock reacts Thursday, Oct 22. An option that expires on or before Oct 21 "
+                  "ends before that reaction. Friday, Oct 23 is the nearest expiration that includes it. Options covering the report cost more because "
+                  "they price in the earnings move, about 7.5% by Oct 23 as of Friday's close, and Tesla has moved about 8.6% on a typical report.")
+
+
+def build_prompt(pack: dict, question: str, kind: str = "covered_other") -> str:
+    hidden = BEAT_FACTS if kind in DECISION_KINDS else set()
     lines = [f"{{fact:{f['id']}}} = {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "")
              + (" [word]" if f["kind"] == "word" else "") + (f' → reads "{f["phrase"]}"' if f.get("phrase") and f["phrase"] != f["value"] else "")
-             for f in pack["facts"] if not f.get("hidden")]
+             for f in pack["facts"] if not f.get("hidden") and f["id"] not in hidden]
     context = "\n".join(f"- {c}" for c in pack["context"]) or "- (nothing shown yet)"
-    return f"""You are Ivy, answering a visitor's question about {pack['name']} ({pack['symbol']}) on a stock page. You may use ONLY the stored facts below. Nothing else you know about the company, its products, its valuation or the market may enter the answer.
+    return f"""You are Ivy, an analyst explaining {pack['name']} ({pack['symbol']}) to someone new to investing who typed a question on the stock's page. You may use ONLY the stored facts below. Nothing else you know about the company, its products, its valuation or the market may enter the answer.
 
 FACTS (each has an id; a [word] fact is a precomputed comparison you may state in those words):
 {chr(10).join(lines) or '(no facts stored)'}
@@ -368,17 +506,22 @@ WHAT THE PAGE ALREADY SAYS (for context; the numbers in it are the facts above):
 {context}
 
 QUESTION: {question}
+KIND OF QUESTION: {kind}. {KIND_GUIDANCE.get(kind, KIND_GUIDANCE['covered_other'])}
+
+THE VOICE (an example of the target, for "I'm looking to buy a call on Tesla, are there dates that matter for my expiration?"):
+"{TARGET_EXAMPLE}"
 
 RULES
 1. First line: COVERED: yes, partly, no or off. "yes" when the facts answer the question; "partly" when they bear on it but do not answer it; "no" when the question is about this company or its stock but nothing above bears on it; "off" when the question is not about this company's stock at all.
-2. Then the answer: at most {MAX_SENTENCES} short sentences, plain words, for someone new to investing.
-3. Never type a number. No digits, no currency signs, no percent signs, no number words (one, two ... twenty, twice, double, triple, half, a quarter of, dozen). Every quantity, date, price, percentage or count is written as its placeholder, exactly {{fact:id}}, and the system will insert the value. Describe time windows in words ("the next session", "the trailing month") rather than with numbers.
-3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase: "{{fact:quote}}, {{fact:distance_below_52_week_high}}" becomes "<price>, <share> below its 52-week high". Do not repeat words the phrase already carries.
-4. State a comparison (more than usual, below its 52-week high, elevated, beat the estimate, confirmed, declared, after the close) only when a [word] fact above says exactly that.
-5. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: say plainly in the first sentence that this page's data does not cover it, then what the facts do hold that is closest, with placeholders. Partly: say what they show and what they do not.
-6. Never give a recommendation, a target, or an opinion about value; describe what the data shows and the idea behind it. Never call the stock cheap, expensive, undervalued or overvalued; a P/E is compared with the company's own history and its sector, nothing more.
-6a. A placeholder's phrase is a complete clause ending: follow it with punctuation or a conjunction, never with more words about the same quantity ("{{fact:sessions_below_today_s_p_e}}." not "{{fact:sessions_below_today_s_p_e}} of the sessions tracked"). Do not repeat words a placeholder's phrase already carries: "{{fact:beats_followed_by_a_fall}}" reads "<count> of its last <count> beats", so write "fell after {{fact:beats_followed_by_a_fall}}". A move placeholder reads "a <signed percentage> move", so write "the stock had {{fact:1_day_move}} the next session", never "rose {{fact:1_day_move}}".
-7. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
+2. Then the answer: under {WORD_CAP} words, at most {MAX_SENTENCES} short sentences, plain English a beginner follows. Answer the decision behind the question the way an analyst explains it. Facts first. Every figure comes with one clause on why it matters.
+3. Never type a number. No digits, no currency signs, no percent signs, no number words (one, two ... twenty, twice, double, triple, half, a quarter of, dozen). Every quantity, date, price, percentage or count is written as its placeholder, exactly {{fact:id}}, and the system inserts the value with its date. Describe time windows in words ("the next session", "the trailing month") rather than with numbers.
+3a. A fact's "as of" date is not a fact: cite a date only through a fact whose value is that date. Each placeholder expands to the quoted "reads" phrase when one is given (otherwise to the bare value), so write the sentence around that phrase and do not repeat words the phrase already carries.
+4. State a comparison (more than usual, below its 52-week high, quiet, elevated, confirmed, estimated, after the close) only when a [word] fact above says exactly that; the comparison words come from the same thresholds the page uses.
+5. Correct tense: a report that has not happened "reports"; a past one "reported". Never mention your own sources or the page: no "the facts show", "the data indicates", "this page", "the facts here", "stored". When something relevant is not covered (news, product events, guidance), say it in one plain sentence in your own words ("Ivy doesn't track product events or news, so check those before you choose"), never as a list of what is missing.
+6. Never give a recommendation, a target, or an opinion about value, and never use words that imply a call: cheap, a bargain, expensive, overpriced, a good entry. The system adds the one closing line about calls itself; do not write it. Do not mention earnings beats or misses in a decision question.
+7. No unexplained terms: never "IV", "RV", "ATM", "straddle"; say "implied move", "typical move", "an at-the-money option".
+8. COVERED: off: write no answer text; the system shows a fixed sentence. COVERED: no: one plain sentence on what Ivy does not track, then the closest thing the facts hold, with placeholders.
+9. No greetings, no preamble, no bullet points, no markdown, no hedging about being an AI.
 
 Answer:"""
 
@@ -412,6 +555,12 @@ def check_output(text_: str, fact_ids: set[str], note_ids: set[str] | None = Non
     m = VALUATION_VERDICTS.search(stripped)
     if m:
         problems.append(f"valuation verdict: {m.group(0)}")
+    m = FORBIDDEN_PHRASES.search(stripped)
+    if m:
+        problems.append(f"a phrase that implies a call or names her sources: {m.group(0)}")
+    m = JARGON.search(stripped) or JARGON_WORDS.search(stripped)
+    if m:
+        problems.append(f"an unexplained term: {m.group(0)}")
     if len(sentences(text_)) > MAX_SENTENCES:
         problems.append(f"more than {MAX_SENTENCES} sentences")
     if "{" in PLACEHOLDER.sub("", text_) or "}" in PLACEHOLDER.sub("", text_):
@@ -571,7 +720,7 @@ def normalize_question(question: str, symbol: str, name: str | None) -> str:
 
 
 def cache_key(symbol: str, normalized: str, fp: str) -> str:
-    return hashlib.sha256(f"{symbol}|{normalized}|{fp}".encode()).hexdigest()[:32]
+    return hashlib.sha256(f"v{CACHE_VERSION}|{symbol}|{normalized}|{fp}".encode()).hexdigest()[:32]
 
 
 async def cached_answer(db: AsyncSession, key: str) -> dict | None:
@@ -612,8 +761,23 @@ RULE = ("Ivy wrote the words from this stock's stored facts and typed no number:
 
 
 def not_covered_answer(pack: dict, question: str) -> dict:
-    return {"key": "ask", "question": question, "data": f"This page's stored data for {pack['name']} doesn't cover that question.", "idea": "", "inputs": [],
-            "as_of": None, "as_of_kind": "observed", "rule": RULE}
+    """One plain sentence, never a list of what is missing."""
+    return {"key": "ask", "question": question, "data": f"Ivy doesn't track that for {pack['name']}, so check it elsewhere before you choose; she can answer about {can_answer_clause(pack)}.",
+            "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
+
+
+def word_count(text_: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9$%.,+±-]+", text_))
+
+
+def cut_to_cap(kept: list[str], cap: int = WORD_CAP) -> list[str]:
+    """Pure: the longest run of leading sentences within the cap (at least the first)."""
+    out: list[str] = []
+    for sn in kept:
+        if out and word_count(" ".join(out + [sn])) > cap:
+            break
+        out.append(sn)
+    return out
 
 
 def unchecked_answer(pack: dict, question: str) -> dict:
@@ -629,12 +793,16 @@ def answer_payload(question: str, kept: list[str], inputs: list[dict], pack: dic
             "as_of": (as_of[:10] if as_of and as_of[:10] <= today else None), "as_of_kind": "observed", "rule": RULE}
 
 
-async def answer_question(db: AsyncSession, pack: dict, question: str, *, client=None) -> dict:
+async def answer_question(db: AsyncSession, pack: dict, question: str, *, client=None, kind: str = "covered_other") -> dict:
     """Run the model, the output check, the comparison check, substitution and the verifier for one question against a fact pack.
     Returns {verdict, covered, answer, model, input_tokens, output_tokens, cost, problems, dropped, raw}. Charges and logs nothing."""
     from app.services.anthropic_client import AnthropicClient
     client = client or AnthropicClient()
-    prompt = build_prompt(pack, question)
+    if kind == "off_topic":
+        return {"covered": "off", "verdict": "off_topic", "answer": refusal_answer(pack, question), "model": None, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
+                "problems": [], "dropped": [], "raw": "", "retried": False, "kind": kind}
+    pack = {**pack, "facts": [f for f in pack["facts"] if not (kind in DECISION_KINDS and f["id"] in BEAT_FACTS)]}
+    prompt = build_prompt(pack, question, kind)
     gen = await client.generate_answer(prompt)
     covered, body = parse_model_output(gen["content"])
     body = absorb_literals(body, pack["facts"])
@@ -644,8 +812,13 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     def all_problems(text_: str) -> list[str]:
         rendered_, _ = render(text_, pack["facts"])
         reps = [r for r in (repeated_phrase(sn) for sn in sentences(rendered_)) if r]
-        return (check_output(text_, {f["id"] for f in pack["facts"]}, {f["id"] for f in pack["facts"] if f["kind"] == "note"}) + verify_comparisons(text_, pack["facts"])
+        out_ = (check_output(text_, {f["id"] for f in pack["facts"]}, {f["id"] for f in pack["facts"] if f["kind"] == "note"}) + verify_comparisons(text_, pack["facts"])
                 + [f'a sentence repeats the phrase "{r}"' for r in reps])
+        if kind in DECISION_KINDS and BEAT_WORDS.search(PLACEHOLDER.sub(" ", text_)):
+            out_.append("a beat or miss in a decision answer")
+        if word_count(rendered_) > WORD_CAP:
+            out_.append(f"over {WORD_CAP} words ({word_count(rendered_)})")
+        return out_
     problems = all_problems(body)
     if problems:
         # one rewrite with the check's reasons; a draft that fails twice is never shown
@@ -658,10 +831,12 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
         out["input_tokens"] += gen2["input_tokens"]; out["output_tokens"] += gen2["output_tokens"]
         cost += estimate_cost_usd(gen2["model_used"], gen2["input_tokens"], gen2["output_tokens"]) or 0.0
         problems = all_problems(body)
+    if problems and all(p.startswith("over ") for p in problems):
+        problems = []                                   # a second draft still long is cut at a sentence end below, never rejected for length alone
     if problems:
         return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "problems": problems, "cost": cost}
     if covered == "off":
-        return {**out, "verdict": "off_topic", "answer": fixed_answer("off_topic", pack, question), "cost": cost}
+        return {**out, "verdict": "off_topic", "answer": refusal_answer(pack, question), "cost": cost}
     if covered == "no" and not PLACEHOLDER.search(body):
         return {**out, "verdict": "not_covered", "answer": not_covered_answer(pack, question), "cost": cost}
     rendered, inputs = render(body, pack["facts"])
@@ -679,9 +854,12 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     kept, dropped = apply_verdicts(sentences(rendered), verdicts)
     if not kept:
         return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
+    kept = cut_to_cap(kept)
+    if kind in DECISION_KINDS:
+        kept = kept + [CLOSING_LINE]                      # exactly one closing line, appended by code, never written by the model
     used_inputs = [i for i in inputs if i["value"] in " ".join(kept)]
     return {**out, "verdict": "verified" if not dropped else "partly_dropped", "answer": answer_payload(question, kept, used_inputs, pack), "dropped": dropped, "cost": cost + vcost,
-            "verifier": verdicts}
+            "verifier": verdicts, "kind": kind}
 
 
 def ip_hash(ip: str) -> str:
