@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PC_CALL_HEAVY, PC_PUT_HEAVY } from "@/lib/thresholds";
+import { ANALYST_SIGNAL_MIN_MEDIAN_PCT, ANALYST_SIGNAL_MIN_SESSIONS, PC_CALL_HEAVY, PC_PUT_HEAVY } from "@/lib/thresholds";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -17,6 +17,12 @@ describe("tooltips describe what the code does (audit item 11)", () => {
     const backend = readFileSync(join(BACKEND, "thresholds.py"), "utf8");
     expect(backend).toContain("if ratio > PC_PUT_HEAVY:");
     expect(backend).toContain("if ratio < PC_CALL_HEAVY:");
+  });
+
+  it("the Street Pulse verdict thresholds are the backend's (lib/thresholds mirrors app/thresholds.py)", () => {
+    const backend = readFileSync(join(BACKEND, "thresholds.py"), "utf8");
+    expect(backend).toContain(`ANALYST_SIGNAL_MIN_SESSIONS = ${ANALYST_SIGNAL_MIN_SESSIONS}`);
+    expect(backend).toContain(`ANALYST_SIGNAL_MIN_MEDIAN_PCT = ${ANALYST_SIGNAL_MIN_MEDIAN_PCT.toFixed(1)}`);
   });
 
   it("the peer average says the company is included, which is how the nightly computes it", async () => {
