@@ -19,6 +19,7 @@ export const REACTION_CHART_ENCODING = {
     miss: "miss",
     meet: "meet",
     unknown: "meet",
+    no_reported_figure: "meet",      // drawn as neither beat nor miss, like unknown: there is no figure to judge it by
   } satisfies Record<EarningsOutcome, "beat" | "miss" | "meet">,
   noData: { fill: "hsl(var(--muted))", stroke: "hsl(var(--muted-foreground))", fillOpacity: 0.3 },
   missStrokeWidth: 1.5,

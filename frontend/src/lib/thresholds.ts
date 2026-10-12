@@ -42,6 +42,10 @@ export const DISCOVER_ELEVATED_RV = 85;
 // ── Expected-move caveat ───────────────────────────────────────────
 export const EXPIRY_CAVEAT_DAYS = 7;   // an expiry more than this many days after earnings carries the full-period caveat
 
+// Street Pulse verdict phrases ("Downgrades tend to hit") may be said only past these; below them the number is reported plainly
+export const ANALYST_SIGNAL_MIN_SESSIONS = 5;        // distinct action sessions behind the median
+export const ANALYST_SIGNAL_MIN_MEDIAN_PCT = 1.0;    // |median 1-day move| at or above this, in percent
+
 // ── Discover tape words ────────────────────────────────────────────
 export const TAPE_CHOPPIEST_RANK = 99;
 export const TAPE_ONE_OF_CHOPPIEST_RANK = 95;

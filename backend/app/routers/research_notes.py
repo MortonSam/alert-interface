@@ -12,6 +12,7 @@ from app.models.research_note import ResearchNote
 from app.models.ticker import Ticker
 from app.schemas.research_note import LatestVerifiedNoteRead
 from app.services.note_currency import report_since
+from app.services.verification_verdicts import normalize_verification
 from sqlalchemy import select
 from app.schemas.research_note import (
     ResearchNoteGenerateRequest,
@@ -141,7 +142,12 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     Admins get everything, with verification_failed set so the page can say so.
     """
     failed = verification_failed(note)
-    read = ResearchNoteRead.model_validate(note)
+    from app.config import settings
+    # one verdict per claim is the truth: the stored verification is served normalized, its summary recounted from the claims
+    data = {name: getattr(note, name) for name in ResearchNoteRead.model_fields if hasattr(note, name)}
+    data["verification"] = normalize_verification(getattr(note, "verification", None))
+    data["valuation_shown"] = bool(settings.pe_enabled)
+    read = ResearchNoteRead.model_validate(data)
     if admin:
         return read.model_copy(update={"verification_failed": failed})
     if failed:
@@ -197,7 +203,7 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     return LatestVerifiedNoteRead(
         symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
         rating=sc.get("rating"), stats=sc.get("stats"), highlights=list(sc.get("highlights") or [])[:2],
-        verification_summary=(note.verification or {}).get("summary"),
+        verification_summary=(normalize_verification(note.verification) or {}).get("summary"),    # counted from the claims, never the stored totals
     )
 
 

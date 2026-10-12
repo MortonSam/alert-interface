@@ -105,6 +105,7 @@ export const OUTCOME_LEAD: Record<EarningsOutcome, string> = {
   miss: "Missed estimates",
   meet: "Met estimates",
   unknown: "Reported; beat or miss not recorded",
+  no_reported_figure: "Reported; beat or miss not recorded",     // a beat or miss needs a stored EPS actual (backend services/beat_counts)
 };
 
 export function fmtMove(pct: number): string {

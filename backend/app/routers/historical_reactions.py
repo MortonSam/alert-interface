@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, basis_mismatch_dates, excluded_note
+from app.services.beat_counts import coverage, has_data, served_outcome
 from app.services.pending_deals import deal_for, note_for
 from app.services.price_history_exclusion import exclusion_reason, is_excluded
 from app.thresholds import eps_surprise
@@ -48,9 +49,10 @@ def _to_lr(lv: object) -> LabelRule | None:
 def _enrich(r: HistoricalReaction, basis_unclear: set | None = None) -> HistoricalReactionRead:
     """Convert ORM row to read schema, adding computed fields."""
     read = HistoricalReactionRead.model_validate(r)
+    read.outcome = served_outcome(r.outcome, r.eps_actual)       # a beat or miss needs a stored EPS actual (services/beat_counts)
     if basis_unclear and r.event_date in basis_unclear:
         read.basis_mismatch = True
-        read.outcome = EarningsOutcome.UNKNOWN
+        read.outcome = EarningsOutcome.UNKNOWN.value
         read.outcome_reason = BASIS_UNCLEAR_REASON
 
     # EPS surprise: dollars under the floor, capped percent above it (thresholds.eps_surprise)
@@ -139,9 +141,10 @@ async def get_reaction_summary(
             deal_note=note_for(deal) if deal else None,
         )
 
-    beats  = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
-    misses = [r for r in rows if r.outcome == EarningsOutcome.MISS]
-    meets  = [r for r in rows if r.outcome == EarningsOutcome.MEET]
+    # a beat, miss or meet counts only in a quarter with both an estimate and an actual stored (services/beat_counts)
+    beats  = [r for r in rows if r.outcome == EarningsOutcome.BEAT and has_data(r)]
+    misses = [r for r in rows if r.outcome == EarningsOutcome.MISS and has_data(r)]
+    meets  = [r for r in rows if r.outcome == EarningsOutcome.MEET and has_data(r)]
 
     beat_dropped = [r for r in beats if float(r.pct_change_1d) < 0]
 
@@ -176,10 +179,13 @@ async def get_reaction_summary(
         .limit(1)
     ))
 
+    cov = coverage(rows)
     return ReactionSummaryRead(
         symbol=sym,
         sector=ticker.sector,
         total_quarters=total,
+        quarters_with_data=cov["with_data"],
+        quarters_without_data=cov["without_data"],
         beat_count=len(beats),
         miss_count=len(misses),
         meet_count=len(meets),
@@ -380,16 +386,18 @@ async def get_conditional_earnings(
     total = len(rows)
     sufficient = total >= MIN_QUARTERS
 
-    beats = [r for r in rows if r.outcome == EarningsOutcome.BEAT]
-    misses = [r for r in rows if r.outcome == EarningsOutcome.MISS]
-    meets = [r for r in rows if r.outcome == EarningsOutcome.MEET]
-    unknowns = [r for r in rows if r.outcome not in (EarningsOutcome.BEAT, EarningsOutcome.MISS, EarningsOutcome.MEET)]
+    beats = [r for r in rows if r.outcome == EarningsOutcome.BEAT and has_data(r)]
+    misses = [r for r in rows if r.outcome == EarningsOutcome.MISS and has_data(r)]
+    meets = [r for r in rows if r.outcome == EarningsOutcome.MEET and has_data(r)]
+    unknowns = [r for r in rows if r not in beats and r not in misses and r not in meets]     # includes quarters with no reported figure
 
     # Insufficient history — return skeleton with counts only
+    cov = coverage(rows)
     if not sufficient:
         return ConditionalEarningsRead(
             symbol=sym,
             total_quarters=total,
+            quarters_with_data=cov["with_data"], quarters_without_data=cov["without_data"],
             has_sufficient_history=False,
             beat_count=len(beats), miss_count=len(misses),
             meet_count=len(meets), unknown_count=len(unknowns),
@@ -438,6 +446,7 @@ async def get_conditional_earnings(
     return ConditionalEarningsRead(
         symbol=sym,
         total_quarters=total,
+        quarters_with_data=cov["with_data"], quarters_without_data=cov["without_data"],
         has_sufficient_history=sufficient,
         beat_count=len(beats),
         miss_count=len(misses),

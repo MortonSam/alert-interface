@@ -13,7 +13,10 @@ class SourceFiling(BaseModel):
 
 
 class VerificationClaim(BaseModel):
+    """One final verdict per claim (services/verification_verdicts); status and evidence mirror verdict and reason for older readers."""
     claim: str
+    verdict: Literal["supported", "unsupported", "contradicted"]
+    reason: str
     status: Literal["supported", "unsupported", "contradicted"]
     evidence: str
 
@@ -42,6 +45,7 @@ class ResearchNoteRead(BaseModel):
     output_tokens: int
     structured_content: dict | None = None
     verification: VerificationResult | None = None
+    valuation_shown: bool = False           # a note's valuation figures (P/E, multiples) follow the site's P/E hold: the PE_ENABLED flag
     verified_at: datetime | None = None
     verification_model: str | None = None
     status: str

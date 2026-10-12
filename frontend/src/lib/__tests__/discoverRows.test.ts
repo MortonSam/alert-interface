@@ -225,7 +225,7 @@ describe("row sentences", () => {
   });
 
   it("every outcome the API sends has words", () => {
-    const outcomes: EarningsOutcome[] = ["beat", "miss", "meet", "unknown"];
+    const outcomes: EarningsOutcome[] = ["beat", "miss", "meet", "unknown", "no_reported_figure"];
     for (const o of outcomes) expect(OUTCOME_LEAD[o]).toBeTruthy();
     expect(Object.keys(OUTCOME_LEAD).sort()).toEqual([...outcomes].sort());
   });
