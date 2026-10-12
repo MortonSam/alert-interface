@@ -12,6 +12,7 @@ PICKED, REFUSED, PASSED, HOLDING, ERROR = "picked", "refused", "passed", "holdin
 
 IVY_OUTCOMES: dict[str, dict[str, str]] = {
     "picked":               {"category": PICKED,  "label": "Picked"},
+    "paused":               {"category": REFUSED, "label": "Paused: the setup was there, but picks are paused while the rule is under review"},
     "vol_gate":             {"category": REFUSED, "label": "Refused: options too expensive for the edge"},
     "no_fresh_chain":       {"category": REFUSED, "label": "Refused: no current options data"},
     "structure_failed":     {"category": REFUSED, "label": "Refused: could not build the spread from the available strikes"},

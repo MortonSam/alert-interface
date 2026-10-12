@@ -31,6 +31,8 @@ from app.services import chain_store
 # folds. Current per-fold numbers are not quoted here: backtest_v2.py stores
 # them in ivy_backtest_runs on every run, and /ivy renders from that table.
 
+PICKS_PAUSED = True                                              # 2026-10-12: no new ledger picks (ops/ivy_v3_research.md); every name is still evaluated nightly
+PICKS_PAUSED_REASON = "picks paused: the rule failed its 2024-2026 test"
 MOMENTUM_CUTOFF = -0.10       # 20d return ≤ -10% qualifies (momentum reversal signal)
 MOMENTUM_LOOKBACK_DAYS = 20   # trading days the momentum is measured over
 MOMENTUM_HISTORY_DAYS = 60     # two months of bars: 21 sessions before the event plus slack

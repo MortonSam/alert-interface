@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     ask_ivy_enabled: bool = False
     live_data_enabled: bool = False           # LIVE_DATA_ENABLED: delayed Intrinio quotes and intraday chart bars shown to visitors (services/live_data)
     live_data_collect_enabled: bool = True    # LIVE_DATA_COLLECT_ENABLED: the delayed-quote collector runs in market hours (preview needs its records)
+    # Ivy v3's pricing desk and the card on ticker pages (services/pricing_desk). Off in production; the admin token sees it.
+    ivy_desk_v3_enabled: bool = False
     ask_ivy_daily_cap_usd: float = 15.0   # site-wide estimated spend per UTC day at which the box pauses
     # Trailing P/E (pe_snapshots): strip question 9 and the P/E facts Ask Ivy may cite. Off in production until Sam approves the
     # figures; on locally. The nightly still computes the snapshots either way; the flag only gates what the pages serve.

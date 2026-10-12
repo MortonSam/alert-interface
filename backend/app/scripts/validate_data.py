@@ -1545,6 +1545,43 @@ def chains_start_delay_minutes(started_iso: str | None) -> float | None:
     return round((local - scheduled).total_seconds() / 60, 1)
 
 
+async def check_pricing_cards(session) -> CheckResult:
+    """Ivy v3's pricing cards (services/pricing_desk): ERROR when a stored card breaks a band (band_problems) or carries an old computation
+    version; WARN when a stock with a report inside the window and a serving chain has no card from last night."""
+    import json as _json
+    from app.services.options_source import resolve
+    from app.services.pricing_desk import PRICING_COMPUTATION_VERSION, REPORT_WINDOW_DAYS, band_problems
+    rows = (await session.execute(text("SELECT key, value FROM system_metadata WHERE key LIKE 'pricing_card:%'"))).all()
+    cards = {}
+    for key, raw in rows:
+        try:
+            cards[key.split(":")[1]] = _json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+    errors = []
+    for sym, card in sorted(cards.items()):
+        if card.get("computation_version") != PRICING_COMPUTATION_VERSION:
+            errors.append(f"{sym}: computed by version {card.get('computation_version')}, current is {PRICING_COMPUTATION_VERSION}")
+        errors += [f"{sym}: {p}" for p in band_problems(card)]
+    if errors:
+        return CheckResult("pricing_cards", ERROR, f"{len(errors)} pricing card figure(s) outside their bands or on an old version", errors[:30])
+    today = date.today()
+    due = (await session.execute(text("""SELECT DISTINCT t.symbol FROM tickers t JOIN events e ON e.ticker_id = t.id WHERE t.is_active AND e.event_type = 'earnings'
+        AND e.unresolved_since IS NULL AND e.event_date BETWEEN :a AND :b ORDER BY 1"""), {"a": today, "b": today + timedelta(days=REPORT_WINDOW_DAYS)})).scalars().all()
+    fresh_since = datetime.now(timezone.utc) - timedelta(hours=30)
+    missing = []
+    for sym in due:
+        card = cards.get(sym)
+        if card and datetime.fromisoformat(card["computed_at"]) >= fresh_since:
+            continue
+        if (await resolve(session, sym)).source is None:
+            continue                                  # no serving chain: nothing to price, not a missing card
+        missing.append(f"{sym}: " + ("card from " + card["computed_at"][:16] if card else "no card") + " with a serving chain")
+    if missing:
+        return CheckResult("pricing_cards", WARN, f"{len(missing)} stock(s) reporting within {REPORT_WINDOW_DAYS} days have no card from last night", missing[:30])
+    return CheckResult("pricing_cards", PASS, f"{len(cards)} pricing card(s), every figure inside its band, version {PRICING_COMPUTATION_VERSION}; {len(due)} report(s) due")
+
+
 async def check_chains_step_start(session) -> CheckResult:
     """WARN when the Intrinio chains step started more than CHAINS_START_SLACK_MINUTES after 03:05 New York (the steps before it
     overran: on 2026-10-12 it started at 03:37). The start comes from the run's timing record, else the step's own clock fields."""
@@ -3421,6 +3458,7 @@ CHECKS = [
     check_ai_api,
     check_chain_quality,
     check_chains_step_start,
+    check_pricing_cards,
     check_live_quote_age,
     check_live_quote_sanity,
     check_live_api_budget,

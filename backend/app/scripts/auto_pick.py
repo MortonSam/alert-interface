@@ -42,6 +42,8 @@ from app.services.ivy_v2 import (
     MAX_OPEN_TOTAL,
     MIN_PRIOR_N,
     MOMENTUM_CUTOFF,
+    PICKS_PAUSED,
+    PICKS_PAUSED_REASON,
 )
 MAX_DRAFT_ATTEMPTS = 6
 
@@ -338,6 +340,7 @@ async def _run(dry_run: bool = False, only: set[str] | None = None) -> int:
         print(f"[auto-pick] {len(candidates)} candidates, {open_count} open v2 picks, dry_run={dry_run}")
 
         new_picks = 0
+        would_have_picked = 0       # setups the rule would have picked while picks are paused (recorded as "paused", no pick written)
         draft_attempts = 0
         failures: list[dict] = []   # every candidate that raised; the run finishes the others, then exits 1
         for row in candidates:
@@ -369,12 +372,17 @@ async def _run(dry_run: bool = False, only: set[str] | None = None) -> int:
             try:
                 result = await compute_alert_pick(
                     sym, session, source="nightly",
-                    dry_run=dry_run or cap_hit,
+                    dry_run=dry_run or cap_hit or PICKS_PAUSED,
                 )
                 outcome = result["outcome"]
                 leans = result["leans"]
                 pick_id = result.get("pick_id")
                 note = result.get("note")
+
+                # Picks paused: the setup is recorded, nothing is written to the ledger
+                if PICKS_PAUSED and outcome == "picked":
+                    outcome, pick_id, note = "paused", None, PICKS_PAUSED_REASON
+                    would_have_picked += 1
 
                 # If cap blocked a would-be pick, record it as cap_reached
                 if cap_hit and outcome == "picked":
@@ -448,10 +456,10 @@ async def _run(dry_run: bool = False, only: set[str] | None = None) -> int:
             f"{draft_attempts} draft attempts, "
             f"{len(failures)} raised."
         )
-    return await finish(failures, dry_run)
+    return await finish(failures, dry_run, would_have_picked)
 
 
-async def finish(failures: list[dict], dry_run: bool = False) -> int:
+async def finish(failures: list[dict], dry_run: bool = False, would_have_picked: int = 0) -> int:
     """Exit 1 when any candidate raised, after the others were evaluated.
 
     The tracebacks go to stderr so refresh.py keeps them in the step outcome's
@@ -460,7 +468,8 @@ async def finish(failures: list[dict], dry_run: bool = False) -> int:
     """
     if not failures:
         if not dry_run:
-            await record_step_fields(AUTO_PICK_STEP, {"failed_symbols": [], "failed_count": 0, "failed_errors": {}})
+            await record_step_fields(AUTO_PICK_STEP, {"failed_symbols": [], "failed_count": 0, "failed_errors": {},
+                                                      "picks_paused": PICKS_PAUSED_REASON if PICKS_PAUSED else None, "would_have_picked": would_have_picked})
         return 0
     symbols = [f["symbol"] for f in failures]
     print(f"[auto-pick] {len(failures)} candidate(s) raised: {', '.join(symbols)}", file=sys.stderr, flush=True)
@@ -471,6 +480,7 @@ async def finish(failures: list[dict], dry_run: bool = False) -> int:
     print(f"{last['error']} [{last['symbol']}]", file=sys.stderr, flush=True)
     if not dry_run:
         await record_step_fields(AUTO_PICK_STEP, {
+            "picks_paused": PICKS_PAUSED_REASON if PICKS_PAUSED else None, "would_have_picked": would_have_picked,
             "failed_symbols": symbols, "failed_count": len(failures),
             "failed_errors": {f["symbol"]: f["error"][:200] for f in failures},
         })

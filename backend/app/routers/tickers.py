@@ -2051,6 +2051,24 @@ async def get_briefing(symbol: str, db: AsyncSession = Depends(get_db)) -> dict:
     return out
 
 
+@router.get("/{symbol}/pricing-card")
+async def pricing_card(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict | None:
+    """Ivy v3's card for this stock (services/pricing_desk), or null: while IVY_DESK_V3 is off only the admin token sees it."""
+    import json as _json
+    from app.config import settings
+    from app.schemas.pricing_desk import PricingCardRead
+    from app.services.pricing_desk import card_key
+    if not (settings.ivy_desk_v3_enabled or admin):
+        return None
+    raw = await _get_meta(db, card_key(symbol.upper()))
+    if not raw:
+        return None
+    try:
+        return PricingCardRead.model_validate(_json.loads(raw)).model_dump()
+    except (TypeError, ValueError):
+        return None
+
+
 @router.get("/{symbol}/questions")
 async def get_questions(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict:
     """The question strip: up to four questions this stock's data raises, each answered from stored rows (services/questions).

@@ -24,7 +24,9 @@ from tests.route_scan import api_routes, dependency_calls
 ADMIN_TOKEN, REVIEWER_A, REVIEWER_B = "test-admin-token", "reviewer-key-a", "reviewer-key-b"
 ADMIN, REVIEWER, ANON = {"X-Admin-Token": ADMIN_TOKEN}, {"X-Admin-Token": REVIEWER_A}, {}
 MISSING = str(uuid.uuid4())
-LEDGER_READS = ["/api/v1/theses/ivy-activity", "/api/v1/theses/alert-picks", "/api/v1/discover/latest-pick"]
+LEDGER_READS = ["/api/v1/theses/ivy-activity", "/api/v1/theses/alert-picks", "/api/v1/discover/latest-pick",
+    "/api/v1/ivy/verdicts",     # Ivy v3's verdict ledger (routers/ivy_desk): the same gate as the picks
+]
 
 
 @pytest.fixture

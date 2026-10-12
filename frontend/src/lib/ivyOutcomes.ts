@@ -4,6 +4,7 @@
 
 export const IVY_OUTCOME_LABELS: Record<string, string> = {
   picked: "Picked",
+  paused: "Paused: the setup was there, but picks are paused while the rule is under review",
   vol_gate: "Refused: options too expensive for the edge",
   no_fresh_chain: "Refused: no current options data",
   structure_failed: "Refused: could not build the spread from the available strikes",
