@@ -41,6 +41,7 @@ STEP_LABEL = "Report date confirmations (reader)"
 DAYS = 45
 WRITE_VAR = "CONFIRMATION_READER_WRITE"
 MAX_FILINGS_PER_TICKER = 6
+TICKER_TIMEOUT_S = 120            # a ticker's filings, its feed, or one model read, before the run moves on (the 2026-10-12 dry run stalled at one filer)
 MAX_FEED_PAGES = 4
 EVIDENCE_KEY = "report_confirmation:{sym}:{day}"
 
@@ -191,7 +192,7 @@ async def main(argv: list[str]) -> int:
         for i, t in enumerate(tickers):
             sym = t["symbol"]
             try:
-                docs = await edgar_texts(edgar, sym, since, today)
+                docs = await asyncio.wait_for(edgar_texts(edgar, sym, since, today), TICKER_TIMEOUT_S)    # one slow filer never stalls the run
                 docs += [{"kind": "press release", "reference": n["url"], "published": n["published_at"].date().isoformat() if n.get("published_at") else "?",
                           "text": f"{n['headline']}. {n.get('summary') or ''}"} for n in await stored_news(sym, since)]
                 if finnhub is not None:
@@ -200,7 +201,7 @@ async def main(argv: list[str]) -> int:
                     except Exception as exc:
                         errors.append(f"{sym}: Finnhub news: {redact(exc)[:100]}")
                 if t.get("feed_url"):
-                    docs += await feed_texts(http, t["feed_url"], t.get("name"), sym, today)
+                    docs += await asyncio.wait_for(feed_texts(http, t["feed_url"], t.get("name"), sym, today), TICKER_TIMEOUT_S)
                 docs_read += len(docs)
                 seen_days: set[date] = set()
                 if "--screen" in argv:                    # diagnosis: every results sentence with a future date, accepted or not
@@ -215,7 +216,7 @@ async def main(argv: list[str]) -> int:
                     model = None
                     if client is not None:
                         try:
-                            model = await R.model_read(client, R.passage(d["text"], hit.sentence), today)
+                            model = await asyncio.wait_for(R.model_read(client, R.passage(d["text"], hit.sentence), today), TICKER_TIMEOUT_S)
                             model_reads += 1
                             cost += model.get("cost_usd") or 0.0
                         except Exception as exc:
