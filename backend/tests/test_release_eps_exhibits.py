@@ -1,6 +1,7 @@
 """The release parser against the full exhibit text it sees in production: the 25 reads from the 2026-10-07 production dry run
 (stored under tests/fixtures/releases with their report dates and accessions in INDEX.txt) read to their exact GAAP diluted EPS,
-and HPE stays unread. A snippet can hide what a whole exhibit shows (GIS's net earnings in millions once read as EPS)."""
+plus the nine releases the 2026-10-11 run left unread while the model read them (BE, CARR, EIX, HPE, HSY, PEP, PPG, STE, VMC);
+ED stays unread, since its release states basic EPS only. A snippet can hide what a whole exhibit shows (GIS's net earnings in millions once read as EPS)."""
 from datetime import date
 from pathlib import Path
 
@@ -24,8 +25,9 @@ def test_full_exhibit_reads_its_gaap_diluted_eps(sym, report_date, accession, na
 def test_the_fixture_set_is_the_production_runs():
     """The 2026-10-07 dry run's 25 reads and HPE unread, plus the four misreads of the second dry run (CRL, SMCI, CAH, FRT),
     Dominion, whose release states a continuing-operations row beside the total row, and Ford, whose tables list the prior year's
-    column first ("Second Quarter 2025 2026 Change"): the quarter's loss is the second number, -0.33, not the prior year's -0.01."""
-    assert len(ROWS) == 32 and sum(1 for r in ROWS if r[4] == "") == 1
+    column first ("Second Quarter 2025 2026 Change"): the quarter's loss is the second number, -0.33, not the prior year's -0.01.
+    Then the nine of 2026-10-11 and ED, whose release states "Reported earnings per share (basic)" and nothing diluted."""
+    assert len(ROWS) == 41 and [r[0] for r in ROWS if r[4] == ""] == ["ED"]
 
 
 def test_the_four_misreads_and_the_rules_behind_them():

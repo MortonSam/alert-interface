@@ -6,7 +6,8 @@ Message formats (title / body), all plain text:
   Validate error "Validate ERROR: {check}"           / the check's message, then up to 3 of its rows
   Courier        "Courier did not run"               / sent inside the digest, not on its own
   Digest         "Nightly {date}: {passed}/{total} steps passed" /
-                 "failed: a, b | validate: E errors, W warnings | chain coverage P% | courier ran 16:07 ET, 421 tickers (91 failed)"
+                 "failed: a, b | validate: E errors, W warnings (new: x, y) | chain coverage P% | courier ran 16:07 ET, 421 tickers (91 failed)"
+                 A list in the digest (reader disagreements) shows its count and DIGEST_EXAMPLES examples; the step outcome holds the full list.
 """
 from __future__ import annotations
 
@@ -92,12 +93,22 @@ def feed_confirmation_lines(confirmations: list[dict]) -> str:
     return "; ".join(f"{c.get('symbol')} {c.get('date')}" + (f" {c['link']}" if c.get("link") else "") for c in confirmations)
 
 
+DIGEST_EXAMPLES = 3   # a list in the digest shows this many examples after its count; the full list is in the step outcome (/health)
+
+
+def capped_list(label: str, items: list[str], each: int = 160) -> str:
+    """Pure: "label (N): a; b; c, and 7 more in the step outcome"."""
+    shown = "; ".join(d[:each] for d in items[:DIGEST_EXAMPLES])
+    more = len(items) - DIGEST_EXAMPLES
+    return f"{label} ({len(items)}): {shown}" + (f", and {more} more in the step outcome" if more > 0 else "")
+
+
 def digest_message(run_date: str, passed: int, total: int, failed: list[str], validate: dict | None, chain_coverage_pct: float | None,
                    courier: dict | None, auto_voided: list[str] | None = None, feed_confirmations: list[dict] | None = None,
                    release_warnings: list[str] | None = None, hidden: list[str] | None = None, release_disagreements: list[str] | None = None) -> tuple[str, str]:
     parts = [f"failed: {', '.join(failed)}" if failed else "all steps passed"]
     if release_disagreements:
-        parts.append(f"release EPS readers disagree ({len(release_disagreements)}), left unread: " + "; ".join(d[:160] for d in release_disagreements[:10]))
+        parts.append(capped_list("release EPS readers disagree, left unread", release_disagreements))
     if hidden:
         parts.append(f"hidden until validate passes ({len(hidden)}): " + "; ".join(hidden[:40]) + (" ..." if len(hidden) > 40 else ""))
     if release_warnings:
@@ -108,7 +119,9 @@ def digest_message(run_date: str, passed: int, total: int, failed: list[str], va
     if feed_confirmations:
         parts.append(f"IR-feed confirmations to spot-check ({len(feed_confirmations)}): " + feed_confirmation_lines(feed_confirmations))
     if validate:
-        parts.append(f"validate: {validate.get('error_count', 0)} errors, {validate.get('warn_count', 0)} warnings")
+        new = validate.get("new_warnings") or []
+        parts.append(f"validate: {validate.get('error_count', 0)} errors, {validate.get('warn_count', 0)} warnings"
+                     + (f" (new: {', '.join(new)})" if new else ""))
     parts.append(f"chain coverage {chain_coverage_pct:.0f}%" if chain_coverage_pct is not None else "chain coverage unknown")
     if courier and courier.get("ran"):
         parts.append(f"courier ran {courier.get('at_local', '?')}, {courier.get('tickers', 0)} tickers ({courier.get('failures', 0)} failed)")

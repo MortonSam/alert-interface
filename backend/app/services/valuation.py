@@ -41,22 +41,29 @@ _MONEY = r"\$?\s?\(?-?\d{1,4}(?:,\d{3})*(?:\.\d{1,2})?\)?"
 # "GAAP net income of $37.70 billion, or $32.87 per diluted share" (the quarter's highlight comes before the year's)
 _PROSE = re.compile(rf"GAAP\s+(?:net\s+)?(?:income|earnings|loss)\b.{{0,80}}?,\s*or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?(\(?\$\s?\(?-?\d{{1,4}}(?:,\d{{3}})*(?:\.\d{{1,2}})?\)?)\s+per\s+(?:basic\s+and\s+)?diluted\s+share", re.I)
 # "GAAP diluted earnings per share $ 32.87 $ 24.67 ..." / "Diluted earnings per share 32.87 24.67 ..." (first column is the current quarter)
-_ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:potential\s+)?(?:common\s+)?share(?:\s*\(\d\)|\s+\d)?\s*(?:attributable[^$\d]{{0,80}})?(?:\s+(?:of|was|were))?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
-_ROW2 = re.compile(rf"earnings\s+per\s+share[^A-Za-z]{{0,20}}basic[^A-Za-z]{{0,40}}diluted\s*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
+_ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|income|loss)\s+per\s+(?:potential\s+)?(?:common\s+)?share(?:\s*\(\d\)|\s+\d)?\s*(?:(?:attributable|available)[^$\d]{{0,80}})?(?:\s+(?:of|was|were))?[:\s]*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
+_ROW2 = re.compile(rf"earnings\s+per\s+(?:ordinary\s+|common\s+)?share(?:\s*\(EPS\))?[^A-Za-z]{{0,20}}basic[^A-Za-z]{{0,40}}diluted\s*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 # a figure whose own clause carries one of these is never GAAP EPS (CRL's "non-GAAP earnings per share of $3.02", FRT's "Nareit FFO ... $1.88 per diluted share")
 _NON_GAAP_NEAR = re.compile(r"non-?\s?gaap|adjusted|pro\s?forma|excluding|\bcore\b|operating (?:income|earnings|eps)|underlying|normali[sz]ed|\bffo\b|funds from operations"
                             r"|comparable (?:eps|earnings|net income|diluted|income)", re.I)
 # a figure labelled as the year's is never the quarter's (SMCI's "for fiscal year 2026 was $2.5 billion, or $3.63 per diluted share", CAH's "GAAP diluted EPS was $7.23"
 # in the fiscal-year paragraph); a clause that also names a quarter is left to the other rules
-_ANNUAL_LABEL = re.compile(r"fiscal[- ]year|full[- ]year|year[- ]ended|twelve[- ]months|12[- ]months|year[- ]to[- ]date|\bannual\b", re.I)
+_ANNUAL_LABEL = re.compile(r"fiscal[- ]year|full[- ]year|year[- ]ended|twelve[- ]months|12[- ]months|year[- ]to[- ]date|\bannual\b|six[- ]months|nine[- ]months|first[- ]half|half[- ]year", re.I)
 _QUARTER_WORD = re.compile(r"quarter|\bQ[1-4]\b|three months|\d{1,2} weeks", re.I)
 _NUM = r"(\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"
 _DNUM = r"(\(?\$\s?\(?-?\d{1,4}(?:,\d{3})*\.\d{1,2}\)?)"      # with the dollar sign, a loss written "($0.35)" or "$(0.35)"
+# rows the 2026-10-11 production run left unread while the model read them: HPE's "GAAP Net EPS Basic $ 1.13 $ 0.45 $ 0.21 Diluted $ 1.06",
+# BE's "GAAP EPS, Diluted $ 0.62", HSY's reconciliation row "Reported EPS - Diluted $ 2.26" (the guidance table's "Reported EPS – Diluted $7.89 - $8.17"
+# is a range, never read), PEP's summary table "EPS $2.23 $1.90 17% ... Core EPS $2.34" (the bare EPS row beside a core or adjusted row is the GAAP one)
+_GAAP_NET_EPS_ROW = re.compile(rf"(?<![A-Za-z-])GAAP\s+net\s+EPS\s+basic[^A-Za-z]{{0,60}}diluted\s*\$?\s?{_NUM}", re.I)
+_GAAP_EPS_DILUTED_ROW = re.compile(rf"(?<![A-Za-z-])GAAP\s+EPS,?\s+diluted\s*\$?\s?{_NUM}", re.I)
+_REPORTED_EPS_DILUTED_ROW = re.compile(rf"(?<![A-Za-z-])reported\s+EPS\s*[—–-]+\s*diluted\s*\$?\s?{_NUM}", re.I)
+_EPS_BESIDE_CORE_ROW = re.compile(rf"(?<![A-Za-z-])EPS\s+\$?\s?{_NUM}(?:\s+(?:\$?\s?\(?-?[\d,]+\.\d{{2}}\)?|\(?-?\d+(?:\.\d+)?\)?\s?%|[—–-]|n/?m)){{0,10}}(?=\s+(?:core|adjusted|non-?GAAP)\s+EPS\b)", re.I)
 # "Diluted earnings per share on a GAAP basis was $5.16" (MSFT); "earnings of $4.2 billion, or $1.00 per share assuming dilution" (XOM)
 _GAAP_BASIS_WAS = re.compile(rf"diluted\s+(?:net\s+)?earnings\s+per\s+share\s+on\s+a\s+GAAP\s+basis\s+(?:was|were)\s+{_DNUM}", re.I)
 _ASSUMING_DILUTION = re.compile(rf"\b(?:net\s+income|earnings|income|net\s+loss|loss)\b[^;]{{0,120}}?,?\s+or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?{_DNUM}\s+per\s+(?:common\s+)?share\s+assuming\s+dilution", re.I)
 # the table row: "Earnings per common share - assuming dilution (U.S. dollars) 3.48 1.64" (XOM)
-_ROW_ASSUMING_DILUTION = re.compile(rf"(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share\s*[—–-]+\s*assuming\s+dilution(?:\s*\([^)]{{0,20}}\))?\s*\$?\s?{_NUM}", re.I)
+_ROW_ASSUMING_DILUTION = re.compile(rf"(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share(?:\s*\([^)]{{0,40}}\))?\s*[—–-]+\s*assuming\s+dilution(?:\s*\([^)]{{0,20}}\))?\s*\$?\s?{_NUM}", re.I)
 _DOLLAR_TOTAL_AFTER = re.compile(r"^\s*(?:billion|million|thousand|bn\b|mn\b)", re.I)     # "$7.6 billion" is a total, never a per-share figure
 # other phrasings, tried after _PROSE and _ROW, in this order
 _PROSE_ANY = re.compile(rf"\b(?:net\s+(?:income|earnings|loss)|earnings|income)\b[^;]{{0,120}}?,?\s+or\s+(?:a\s+(?:loss|net loss)\s+of\s+)?{_DNUM}\s+per\s+(?:basic\s+and\s+)?diluted\s+(?:common\s+)?share", re.I)
@@ -76,10 +83,14 @@ _ROW_DASH = re.compile(rf"(?:reported\s+)?(?:net\s+)?(?:earnings|income)(?:\s*/?
 _EPS_DILUTED_PAREN = re.compile(rf"\bEPS\s+\(diluted\)\s*\$?\s?{_NUM}", re.I)
 _DILUTED_EPS_GAAP_COL = re.compile(rf"diluted\s+earnings\s+per\s+share(?:\s+\(EPS\))?[^$]{{0,120}}?\bGAAP\s+\$?\s?{_NUM}", re.I)
 _PER_SHARE_NUM = r"(\(?-?\d{1,3}\.\d{2}\)?)"      # a per-share amount: two decimals, under 1,000; never "397.0" (millions) or "429.7"
+_NUMTOK = r"\(?-?\d{1,3}\.\d{2}\s?\)?"             # one amount in a block's row; a loss may close its parenthesis after a space ("$ (0.01 )", VMC)
 _DILUTED_BLOCK_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)(?:\s*\(loss\))?\s+per\s+(?:common\s+)?share(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?:?\s*"
-                                rf"(?:(?:earnings|income|loss|net earnings|net income)?\s*(?:\(loss\)\s+)?(?:from\s+)?)?continuing\s+operations\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?(?:\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?)*"
-                                rf"(?:\s+(?:losses?|earnings|income)?\s*(?:\(loss\)\s+)?(?:from\s+)?discontinued\s+operations\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?(?:\s+[—-]|\s+\$?\s?\(?-?\d{{1,3}}\.\d{{2}}\)?)*)?"
+                                rf"(?:(?:earnings|income|loss|net earnings|net income)?\s*(?:\(loss\)\s+)?(?:from\s+)?)?continuing\s+operations\s+\$?\s?{_NUMTOK}(?:\s+\$?\s?{_NUMTOK})*"
+                                rf"(?:\s+(?:losses?|earnings|income)?\s*(?:\(loss\)\s+)?(?:from\s+)?discontinued\s+operations\s+\$?\s?{_NUMTOK}(?:\s+[—-]|\s+\$?\s?{_NUMTOK})*)?"
                                 rf"\s+(?:discontinued\s+operations\s+[^$]{{0,40}})?net\s+(?:earnings|income)(?:\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?)?\s+\$?\s?{_PER_SHARE_NUM}", re.I)
+# "Diluted: Continuing operations $ 0.60 $ 0.70 ... Discontinued operations — (0.02) — (0.02) Net earnings (loss) $ 0.60" (CARR): the block under a "Diluted:" label
+_DILUTED_COLON_BLOCK = re.compile(rf"diluted:\s*continuing\s+operations\s+\$?\s?{_NUMTOK}(?:\s+\$?\s?{_NUMTOK}|\s+[—–-])*"
+                                  rf"\s+discontinued\s+operations(?:\s+\$?\s?{_NUMTOK}|\s+[—–-])*\s+net\s+(?:earnings|income)(?:\s*\(loss\))?\s+\$?\s?{_PER_SHARE_NUM}", re.I)
 # a per-share block whose header is followed straight by the attributable line ("Diluted earnings per common share … Net income attributable to PFG $1.84"):
 # the amount must look like a per-share figure (two decimals, under 1,000), which a net income in millions ("$ 397.0", "$ 1,204.2") never does
 _DILUTED_HEADER_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share(?![^$]{{0,120}}continuing)[^$]{{0,120}}?\bnet\s+(?:income|earnings)(?:\s*\(loss\))?\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?\s+\$?\s?{_PER_SHARE_NUM}(?![\d,])", re.I)
@@ -275,7 +286,8 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
         if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end(), hit.start(1)):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
-    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0),
+    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_COLON_BLOCK, "diluted EPS block (colon), net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0),
+                (_GAAP_NET_EPS_ROW, "GAAP net EPS row, basic then diluted", 12), (_GAAP_EPS_DILUTED_ROW, "GAAP EPS, diluted row", 12), (_REPORTED_EPS_DILUTED_ROW, "reported EPS, dash diluted row", 12),
                 (_GAAP_BASIS_WAS, "diluted EPS on a GAAP basis sentence", 12), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
                 (_LABELLED, "labelled GAAP EPS", 40), (_GAAP_EPS_WAS, "GAAP EPS sentence", 12), (_EPS_GAAP_BASIS, "EPS on a GAAP basis", 12), (_REPORTED_EPS_GAAP, "reported EPS, GAAP named", 12),
                 (_AS_REPORTED, "as-reported EPS", 12), (_DILUTED_EPS_GAAP_COL, "diluted EPS, GAAP column", 12), (_ROW_DASH, "EPS row, dash diluted", 12), (_EPS_DILUTED_PAREN, "EPS (Diluted) row", 12),
@@ -283,7 +295,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 (_GAAP_MILLION_PER_SHARE, "GAAP earnings, or per share", 12), (_GAAP_PAREN_PER_SHARE, "reported earnings (GAAP) per share", 12), (_GAAP_EPS_CHANGE, "GAAP EPS change sentence", 12),
                 (_ROW_FOOTNOTE, "diluted net income per share row (footnote)", 12), (_ROW_POTENTIAL, "GAAP diluted per potential common share", 12), (_ROW_PER_DILUTED, "per diluted share row", 12),
                 (_REPORTED_VS_NONGAAP, "reported EPS against a non-GAAP measure", 12), (_BASIC_AND_DILUTED_BASIS, "basic and diluted basis sentence", 12), (_EPS_WERE, "EPS were sentence", 12),
-                (_PER_DILUTED, "per diluted share", 80), (_PER_SHARE, "per share net income sentence", 12))
+                (_PER_DILUTED, "per diluted share", 80), (_EPS_BESIDE_CORE_ROW, "EPS row beside a core EPS row", 12), (_PER_SHARE, "per share net income sentence", 12))
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
             if _DOLLAR_TOTAL_AFTER.match(flat[hit.end(1):hit.end(1) + 12]):
@@ -297,9 +309,10 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
             if how in ("net income sentence", "per diluted share", "per share net income sentence", "labelled GAAP EPS", "GAAP EPS sentence", "EPS on a GAAP basis", "reported EPS, GAAP named",
                        "as-reported EPS", "diluted EPS were sentence", "GAAP net income per share") and _disqualified(flat, hit.start(), hit.end()):
                 continue
-            if "continuing operations" in _sentence_around(flat, hit.start(), hit.end())[1].lower() and how not in ("diluted EPS block, net earnings line",) and "dash" not in how:
+            assuming_total = how == "EPS assuming dilution row" and "continuing" not in hit.group(0).lower()   # PPG's total row under its parts
+            if "continuing operations" in _sentence_around(flat, hit.start(), hit.end())[1].lower() and "block" not in how and "dash" not in how and not assuming_total:
                 continue        # a continuing-operations figure is not the whole GAAP diluted EPS; the net-earnings line of a diluted block is
-            if how not in ("diluted EPS block, net earnings line", "diluted EPS block, attributable line") and _CONTINUING_TABLE.search(flat):
+            if "block" not in how and not assuming_total and _CONTINUING_TABLE.search(flat):
                 continue        # the release splits EPS into continuing and discontinued operations: only a stated total counts
             figure, how = _current_column(flat, hit, how)
             return {"eps": _num(figure), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}

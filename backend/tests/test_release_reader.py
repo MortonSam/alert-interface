@@ -40,7 +40,12 @@ def test_store_only_on_agreement_to_the_cent_and_the_notes_carry_both_readings()
     figure, note = R.decide(pattern, None, EXHIBIT)
     assert figure is None and "no model reading" in note
     body = digest_message("2026-10-08", 30, 30, [], None, 90.0, None, release_disagreements=["CRL 2026-08-05: pattern +3.02 (GAAP EPS sentence); model -0.03; readers disagree"])[1]
-    assert "release EPS readers disagree (1), left unread: CRL 2026-08-05: pattern +3.02" in body
+    assert "release EPS readers disagree, left unread (1): CRL 2026-08-05: pattern +3.02" in body
+    many = [f"T{i} 2026-10-0{i % 9 + 1}: pattern read nothing; model +1.0{i}; readers disagree" for i in range(10)]
+    body = digest_message("2026-10-12", 37, 37, [], None, 90.0, None, release_disagreements=many)[1]
+    assert "release EPS readers disagree, left unread (10): T0 2026-10-01" in body and "T2 2026-10-03" in body and "T3" not in body and ", and 7 more in the step outcome" in body   # a phone reads the count and three examples; the step outcome holds all ten
+    body = digest_message("2026-10-12", 37, 37, [], {"error_count": 0, "warn_count": 20, "new_warnings": ["courier_delivered", "chain_quality"]}, 90.0, None)[1]
+    assert "validate: 0 errors, 20 warnings (new: courier_delivered, chain_quality)" in body
 
 
 def test_the_prompt_names_every_rule_and_the_model_json_is_parsed():

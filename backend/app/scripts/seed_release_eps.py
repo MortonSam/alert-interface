@@ -11,7 +11,8 @@ for the latest report of any ticker whose P/E is missing because XBRL lags it.
 
 Two readers. The pattern parser (valuation.parse_release_eps) and the model (services/release_reader, Sonnet, with its verbatim quote
 verified by code) read every exhibit; a figure is stored only when both agree to the cent. A disagreement, a rejected quote or a
-reader that read nothing records the report as unread with both readings, and the morning digest lists it.
+reader that read nothing records the report as unread with both readings; the step outcome lists every one and the morning digest
+the count with three examples (services/notify.DIGEST_EXAMPLES).
 """
 from __future__ import annotations
 
@@ -205,7 +206,7 @@ async def run(argv: list[str]) -> int:
         print(f"    disagreement: {d[:300]}")
     if write and due:
         await record_step_fields(STEP_LABEL, {"reports": len(rows), "read": parsed, "stored": stored, "unread": unread, "rows": results[:50], "yoy_warnings": yoy_warnings[:20],
-                                              "disagreements": disagreements[:30], "model_reads": len(model_costs), "model_cost_usd": total_cost, "error": None})
+                                              "disagreements": disagreements, "model_reads": len(model_costs), "model_cost_usd": total_cost, "error": None})
     return await WRITES.finish(0)
 
 
