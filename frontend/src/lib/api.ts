@@ -92,7 +92,7 @@ export interface Event {
   updated_at: string;
 }
 
-export type EarningsOutcome = "beat" | "miss" | "meet" | "unknown";
+export type EarningsOutcome = "beat" | "miss" | "meet" | "unknown" | "no_reported_figure";   // no_reported_figure: a beat or miss needs a stored EPS actual
 
 export interface HistoricalReaction {
   id: string;
@@ -134,6 +134,8 @@ export interface ReactionSummary {
   symbol: string;
   sector: string | null;
   total_quarters: number;
+  quarters_with_data?: number;      // quarters with both an EPS estimate and an actual: the only ones a beat or miss counts in
+  quarters_without_data?: number;   // the rest: "19 quarters have no estimate data"
   beat_count: number;
   miss_count: number;
   meet_count: number;
@@ -194,6 +196,8 @@ export interface AnalystDetailRead {
 export interface ConditionalEarningsRead {
   symbol: string;
   total_quarters: number;
+  quarters_with_data?: number;
+  quarters_without_data?: number;
   has_sufficient_history: boolean;
   beat_count: number;
   miss_count: number;
@@ -264,6 +268,8 @@ export interface SourceFiling {
 
 export interface VerificationClaim {
   claim: string;
+  verdict: "supported" | "unsupported" | "contradicted";   // the one final verdict (lib/verification reads it; status and evidence mirror it)
+  reason: string;                                          // one sentence, never the checker's deliberation
   status: "supported" | "unsupported" | "contradicted";
   evidence: string;
 }
@@ -300,6 +306,8 @@ export interface StructuredNoteStats {
   revenue_beat_pct: number | null;
   beat_count: number | null;
   total_quarters: number | null;
+  quarters_with_data?: number | null;
+  quarters_without_data?: number | null;
   basis_excluded?: number | null;
   latest_move_1d: string | null;
   latest_outcome: "beat" | "miss" | "meet" | null;
@@ -363,6 +371,7 @@ export interface ResearchNote {
   output_tokens: number;
   structured_content: StructuredNote | null;
   verification: VerificationResult | null;
+  valuation_shown?: boolean;       // a note's valuation figures follow the site's P/E hold (PE_ENABLED); false hides them
   verified_at: string | null;
   verification_model: string | null;
   status: "generating" | "verifying" | "complete" | "failed" | "verification_failed";
@@ -713,6 +722,7 @@ export interface LatestPickResponse {
 
 export interface UnusuallyActiveResponse {
   items: UnusuallyActiveItem[];
+  shared_dominant_session?: { date: string; rows: number; symbols: string[]; up: number; down: number } | null;   // most rows owe their month to one session
 }
 
 export interface BatchEnrichItem {

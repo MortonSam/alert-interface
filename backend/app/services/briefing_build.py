@@ -190,7 +190,8 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     held = await holds_for(db, sym)                      # fail closed (services/fact_holds): a held fact qualifies no question and reaches no Ask Ivy fact
     mismatch = await basis_mismatch_dates(db, ticker.id)
     rows = (await db.execute(text("""
-        SELECT event_date, pct_change_1d, outcome::text AS outcome, report_timing FROM historical_reactions
+        SELECT event_date, pct_change_1d, outcome::text AS outcome, report_timing,
+               (eps_actual IS NOT NULL AND eps_estimate IS NOT NULL) AS has_eps FROM historical_reactions
         WHERE ticker_id = :t AND event_type = 'earnings' ORDER BY event_date"""), {"t": ticker.id})).mappings().all()
     sample = [] if excluded or "typical_move" in held else [r for r in rows if r["pct_change_1d"] is not None and r["event_date"] not in mismatch]
     moves = [float(r["pct_change_1d"]) for r in sample]
@@ -228,7 +229,7 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
             cands.append(Q.q_implied_big(name=name, symbol=sym, implied_pct=implied["implied_pct"], chain_date=implied["chain_date"], next_date=ne.date,
                                          typical_abs=typical_abs, n_reports=len(sample), sample_as_of=sample_as_of))
     # 3. beats followed by a fall
-    beats = [r for r in sample if r["outcome"] == "beat"]
+    beats = [r for r in sample if r["outcome"] == "beat" and r["has_eps"]]      # a beat needs both figures (services/beat_counts)
     cands.append(Q.q_beat_fell(name=name, symbol=sym, beats=len(beats), fell=sum(1 for r in beats if float(r["pct_change_1d"]) < 0), as_of=sample_as_of))
     # 4. a big non-earnings move
     exclude = set()

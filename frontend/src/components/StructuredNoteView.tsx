@@ -449,6 +449,7 @@ interface StructuredNoteViewProps {
   companyName?: string | null;
   sector?: string | null;
   industry?: string | null;
+  valuationShown?: boolean;      // the API's valuation_shown: the note's P/E and multiples follow the site's P/E hold (PE_ENABLED)
 }
 
 export default function StructuredNoteView({
@@ -457,6 +458,7 @@ export default function StructuredNoteView({
   companyName,
   sector,
   industry,
+  valuationShown = false,
 }: StructuredNoteViewProps) {
   const { stats } = note;
   const financials = note.financials ?? null;
@@ -598,7 +600,7 @@ export default function StructuredNoteView({
           </SectionBlock>
         )}
 
-        {financials && <ValuationBlock f={financials} />}
+        {financials && valuationShown && <ValuationBlock f={financials} />}
         {financials && <FinancialsQualityBlock f={financials} />}
 
         {note.highlights.length > 0 && (

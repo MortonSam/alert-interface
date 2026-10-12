@@ -172,6 +172,11 @@ TAPE_OPTIONS_BAND_PP = 5
 # The expected-move caveat: an expiry more than this many days after the earnings date carries the "covers the full period" note.
 EXPIRY_CAVEAT_DAYS = 7
 
+# ── Street Pulse verdict phrases ─────────────────────────────────────────────
+# "Downgrades tend to hit" / "Upgrades tend to lift" may be said only past these; below them the sentence reports the number plainly
+ANALYST_SIGNAL_MIN_SESSIONS = 5          # distinct action sessions behind the median
+ANALYST_SIGNAL_MIN_MEDIAN_PCT = 1.0      # |median 1-day move| at or above this, in percent
+
 
 def discover_rv_tier(rv_rank: float) -> LabeledValue:
     if rv_rank >= DISCOVER_EXTREME_RV:

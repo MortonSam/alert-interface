@@ -8,6 +8,7 @@ export const EARNINGS_MARKER_ENCODING = {
   miss:    { label: "EPS miss",        color: "#ef4444" },
   meet:    { label: "EPS met",         color: "#9ca3af" },
   unknown: { label: "no EPS data",     color: "#9ca3af" },
+  no_reported_figure: { label: "no EPS data", color: "#9ca3af" },   // the same mark as unknown: a report with no figure to judge it by
 } as const satisfies Record<EarningsOutcome, { label: string; color: string }>;
 
 export const EARNINGS_MARKER_DASH = "3 3";

@@ -1670,6 +1670,46 @@ async def check_chain_quality(session) -> CheckResult:
     return CheckResult("chain_quality", PASS, f"{checked} stored chain(s), every contract standard and every strike listed once per side")
 
 
+async def check_note_verdicts(session) -> CheckResult:
+    """ERROR when a stored research note's verification is not self-consistent: a claim without one of the three verdicts, a reason
+    that corrects itself, or a stored summary that differs from the claims' count (services/verification_verdicts). The API serves
+    the recount either way; this names the notes whose stored record disagrees with itself."""
+    from app.services.verification_verdicts import problems
+    rows = (await session.execute(text("""SELECT t.symbol, r.verification FROM research_notes r JOIN tickers t ON t.id = r.ticker_id
+        WHERE r.verification IS NOT NULL ORDER BY t.symbol"""))).all()
+    bad = []
+    for sym, ver in rows:
+        ps = problems(ver if isinstance(ver, dict) else None)
+        if ps:
+            bad.append(f"{sym}: " + "; ".join(ps[:3]) + (f" (+{len(ps) - 3} more)" if len(ps) > 3 else ""))
+    if bad:
+        return CheckResult("note_verdicts", ERROR, f"{len(bad)} of {len(rows)} stored note(s) disagree with themselves (badges vs totals, or a self-correcting reason)", bad[:40])
+    return CheckResult("note_verdicts", PASS, f"{len(rows)} stored note(s): one verdict per claim, totals equal to the claims")
+
+
+async def check_outcome_requires_actual(session) -> CheckResult:
+    """ERROR when an earnings reaction row is labelled beat, miss or meet with no stored EPS actual: the API serves such a row as
+    'no reported figure' (services/beat_counts.served_outcome), and the stored label should be corrected."""
+    rows = (await session.execute(text("""SELECT t.symbol, hr.event_date, hr.outcome::text FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
+        WHERE hr.event_type = 'earnings' AND hr.outcome::text IN ('beat', 'miss', 'meet') AND hr.eps_actual IS NULL ORDER BY 1, 2"""))).all()
+    if rows:
+        return CheckResult("outcome_requires_actual", ERROR, f"{len(rows)} earnings row(s) carry a beat, miss or meet label with no EPS actual",
+                           [f"{s} {d}: {o}" for s, d, o in rows[:40]])
+    return CheckResult("outcome_requires_actual", PASS, "Every beat, miss or meet label rests on a stored EPS actual")
+
+
+async def check_beat_count_coverage(session) -> CheckResult:
+    """WARN naming active tickers whose earnings rows lack an estimate or an actual in some quarters: every 'X of N' count on their
+    pages states that coverage (quarters_with_data / quarters_without_data from services/beat_counts) rather than reading '0 of 20'."""
+    rows = (await session.execute(text("""SELECT t.symbol, count(*) total, count(*) FILTER (WHERE hr.eps_actual IS NULL OR hr.eps_estimate IS NULL) missing
+        FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id WHERE hr.event_type = 'earnings' AND t.is_active
+        GROUP BY t.symbol HAVING count(*) FILTER (WHERE hr.eps_actual IS NULL OR hr.eps_estimate IS NULL) > 0 ORDER BY 3 DESC, 1"""))).all()
+    if rows:
+        return CheckResult("beat_count_coverage", WARN, f"{len(rows)} active ticker(s) have quarters with no estimate or no actual; their counts state the coverage",
+                           [f"{s}: {m} of {n} quarters without both figures" for s, n, m in rows[:40]])
+    return CheckResult("beat_count_coverage", PASS, "Every active ticker's earnings quarters carry both an estimate and an actual")
+
+
 async def check_ai_api(session) -> CheckResult:
     """ERROR when the latest nightly key check failed or an Anthropic call failed for billing, credit or authentication within
     ai_health.RECENT_HOURS (every AI feature fails closed then, so visitors see no note, read or draft); WARN when the key check
@@ -3421,6 +3461,9 @@ CHECKS = [
     check_ai_api,
     check_chain_quality,
     check_chains_step_start,
+    check_note_verdicts,
+    check_outcome_requires_actual,
+    check_beat_count_coverage,
     check_live_quote_age,
     check_live_quote_sanity,
     check_live_api_budget,

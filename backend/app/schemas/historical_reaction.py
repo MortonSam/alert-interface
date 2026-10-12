@@ -37,6 +37,7 @@ class HistoricalReactionRead(HistoricalReactionBase):
 
     id: uuid.UUID
     created_at: datetime
+    outcome: str = EarningsOutcome.UNKNOWN.value    # served: beat | miss | meet | unknown | no_reported_figure (a beat or miss needs a stored EPS actual)
 
     # Computed enrichment field -- not stored in DB; populated by the router
     eps_surprise_pct: float | None = None   # uncapped (eps_actual - eps_estimate) / |eps_estimate| x 100; None when |estimate| < EPS_SURPRISE_DOLLAR_FLOOR
@@ -62,6 +63,8 @@ class ReactionSummaryRead(BaseModel):
     symbol: str
     sector: str | None
     total_quarters: int
+    quarters_with_data: int = 0             # quarters with both an EPS estimate and an actual: the only ones a beat or miss can count in
+    quarters_without_data: int = 0          # the rest: "19 quarters have no estimate data" (services/beat_counts)
     beat_count: int
     miss_count: int
     meet_count: int
@@ -88,6 +91,8 @@ class ConditionalEarningsRead(BaseModel):
     """Conditional earnings intelligence: how does this ticker move on beats vs misses?"""
     symbol: str
     total_quarters: int
+    quarters_with_data: int = 0              # quarters with both an EPS estimate and an actual (services/beat_counts)
+    quarters_without_data: int = 0
     has_sufficient_history: bool             # total_quarters >= MIN_QUARTERS (8)
 
     # ── Outcome breakdown (beat + miss + meet + unknown == total_quarters) ───

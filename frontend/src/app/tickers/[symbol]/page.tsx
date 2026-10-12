@@ -3,6 +3,7 @@
 import Explained from "@/components/Explained";
 import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
+import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
@@ -145,6 +146,7 @@ const OUTCOME_STYLES: Record<EarningsOutcome, { label: string; cls: string }> = 
   miss:    { label: "Miss",    cls: "bg-destructive/10 text-destructive" },
   meet:    { label: "Meet",    cls: "bg-secondary text-muted-foreground" },
   unknown: { label: "—",       cls: "bg-muted text-muted-foreground" },
+  no_reported_figure: { label: "—", cls: "bg-muted text-muted-foreground" },   // a beat or miss needs a stored EPS actual (backend services/beat_counts)
 };
 
 function OutcomeBadge({ outcome, reason }: { outcome: EarningsOutcome; reason?: string | null }) {
@@ -858,7 +860,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
 
 // ── Verification panel ────────────────────────────────────────────────────────
 
-const CLAIM_STYLES: Record<VerificationClaim["status"], { dot: string; badge: string; label: string }> = {
+const CLAIM_STYLES: Record<VerificationClaim["verdict"], { dot: string; badge: string; label: string }> = {
   supported:    { dot: "bg-success",      badge: "bg-success/10 text-success",           label: "Supported" },
   unsupported:  { dot: "bg-amber-500",    badge: "bg-amber-500/10 text-amber-500",      label: "Unsupported" },
   contradicted: { dot: "bg-destructive",  badge: "bg-destructive/10 text-destructive",  label: "Contradicted" },
@@ -877,7 +879,8 @@ function VerificationPanel({
   open: boolean;
   onToggle: () => void;
 }) {
-  const { supported, unsupported, contradicted } = verification.summary;
+  // the totals are counted from the claims' verdicts, the same field each badge reads (lib/verification), never from a stored summary
+  const { supported, unsupported, contradicted } = verdictTotals(verification.claims);
   const total = supported + unsupported + contradicted;
 
   return (
@@ -903,7 +906,7 @@ function VerificationPanel({
       {open && (
         <div className="px-6 pb-5 space-y-2">
           {verification.claims.map((c, i) => {
-            const style = CLAIM_STYLES[c.status];
+            const style = CLAIM_STYLES[claimVerdict(c)];
             return (
               <div key={i} className="flex gap-3 text-sm">
                 <div className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${style.dot}`} />
@@ -914,7 +917,7 @@ function VerificationPanel({
                     </span>
                     <span className="text-foreground/90">{c.claim}</span>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{c.evidence}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{claimReason(c)}</p>
                 </div>
               </div>
             );
@@ -2926,6 +2929,7 @@ export default function TickerPage() {
                   companyName={ticker?.name}
                   sector={ticker?.sector}
                   industry={ticker?.industry}
+                  valuationShown={note.valuation_shown === true}
                 />
               ) : (
                 <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
@@ -3023,6 +3027,7 @@ export default function TickerPage() {
                   companyName={ticker?.name}
                   sector={ticker?.sector}
                   industry={ticker?.industry}
+                  valuationShown={note.valuation_shown === true}
                 />
               ) : (
                 <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none

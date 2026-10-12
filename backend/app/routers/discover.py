@@ -163,6 +163,7 @@ class UnusuallyActiveItem(BaseModel):
 
 class UnusuallyActiveResponse(BaseModel):
     items: list[UnusuallyActiveItem]
+    shared_dominant_session: dict | None = None    # {date, rows, symbols, up, down} when most rows owe their month to one session (shared_dominant_session)
 
 
 class InsightResponse(BaseModel):
@@ -222,6 +223,8 @@ async def _batch_conditional_stats(
             HistoricalReaction.pct_change_1d,
             HistoricalReaction.event_date,
             EpsBasisCheck.basis_mismatch,
+            HistoricalReaction.eps_actual,
+            HistoricalReaction.eps_estimate,
         )
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
         .outerjoin(EpsBasisCheck, (EpsBasisCheck.ticker_id == HistoricalReaction.ticker_id)
@@ -245,17 +248,19 @@ async def _batch_conditional_stats(
         if r.basis_mismatch:
             excluded[r.symbol] = excluded.get(r.symbol, 0) + 1
             continue
-        by_sym.setdefault(r.symbol, []).append((r.outcome, float(r.pct_change_1d)))
+        # a beat or miss counts only in a quarter with both an estimate and an actual (services/beat_counts)
+        by_sym.setdefault(r.symbol, []).append((r.outcome, float(r.pct_change_1d), r.eps_actual is not None and r.eps_estimate is not None))
         if r.symbol not in newest or r.event_date > newest[r.symbol]:
             newest[r.symbol] = r.event_date
 
     out: dict[str, dict] = {}
     for sym, quarters in by_sym.items():
         total = len(quarters)
-        beat_moves = [m for o, m in quarters if o and o.value == "beat"]
-        miss_moves = [m for o, m in quarters if o and o.value == "miss"]
+        beat_moves = [m for o, m, ok in quarters if ok and o and o.value == "beat"]
+        miss_moves = [m for o, m, ok in quarters if ok and o and o.value == "miss"]
         beat_count = len(beat_moves)
         miss_count = len(miss_moves)
+        with_data = sum(1 for _, _, ok in quarters if ok)
 
         avg_1d_on_beat = round(sum(beat_moves) / beat_count, 2) if beat_count else None
         avg_1d_on_miss = round(sum(miss_moves) / miss_count, 2) if miss_count else None
@@ -263,12 +268,14 @@ async def _batch_conditional_stats(
         # "Beat-but-dropped" count
         bbd = sum(1 for m in beat_moves if m < 0)
 
-        all_abs = [abs(m) for _, m in quarters]
+        all_abs = [abs(m) for _, m, _ok in quarters]
         avg_abs_1d = round(sum(all_abs) / len(all_abs), 2) if all_abs else None
 
         out[sym] = {
             "as_of": newest[sym].isoformat(),
             "total": total,
+            "quarters_with_data": with_data,
+            "quarters_without_data": total - with_data,
             "beat_count": beat_count,
             "miss_count": miss_count,
             "bbd_count": bbd,
@@ -1058,7 +1065,8 @@ async def unusually_active(
     symbols = [row.symbol for row in rows]
     vol_data = await _batch_vol_regime(db, symbols)
     next_earnings = await _batch_next_earnings(db, symbols)
-    # a held rank stays on the tape, worded as the action that holds it ("Spun off Vylor on Oct 1, so its past year doesn't compare yet")
+    # a ticker whose past year cannot be compared (a merger, a spin-off, a new listing: its rank is held) is not on the tape (2026-10-12)
+    rows = [row for row in rows if not vol_data.get(row.symbol, {}).get("rank_hold_phrase")]
 
     items = [
         UnusuallyActiveItem(
@@ -1084,7 +1092,26 @@ async def unusually_active(
         for row in rows
     ]
 
-    return UnusuallyActiveResponse(items=items)
+    return UnusuallyActiveResponse(items=items, shared_dominant_session=shared_dominant_session(items))
+
+
+SHARED_SESSION_MIN_ROWS = 3        # a session is "shared" when at least this many rows and more than half of them owe their month to it
+
+
+def shared_dominant_session(items: list) -> dict | None:
+    """Pure: when more than half the listed rows (and at least SHARED_SESSION_MIN_ROWS) have the same dominant session, that session:
+    {date, rows, symbols, up, down}. The page then says so once above the rows instead of once per row."""
+    by_date: dict[str, list] = {}
+    for it in items:
+        if it.dominant_date:
+            by_date.setdefault(it.dominant_date, []).append(it)
+    if not by_date or not items:
+        return None
+    day, rows = max(by_date.items(), key=lambda kv: len(kv[1]))
+    if len(rows) < SHARED_SESSION_MIN_ROWS or len(rows) * 2 <= len(items):
+        return None
+    return {"date": day, "rows": len(rows), "symbols": [it.symbol for it in rows],
+            "up": sum(1 for it in rows if (it.dominant_move_pct or 0) > 0), "down": sum(1 for it in rows if (it.dominant_move_pct or 0) < 0)}
 
 
 @router.get("/latest-pick", response_model=LatestPickResponse)

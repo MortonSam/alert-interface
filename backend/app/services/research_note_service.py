@@ -48,9 +48,9 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     if total == 0:
         return {"available": False, "basis_excluded": basis_excluded}   # unavailable_reason added by callers with a symbol
 
-    beat  = sum(1 for r in reactions if r.outcome.value == "beat")
-    miss  = sum(1 for r in reactions if r.outcome.value == "miss")
-    meet  = sum(1 for r in reactions if r.outcome.value == "meet")
+    from app.services.beat_counts import coverage
+    cov = coverage(reactions)            # a beat, miss or meet counts only in a quarter with both an estimate and an actual
+    beat, miss, meet = cov["beats"], cov["misses"], cov["meets"]
 
     def _stats(vals: list[float]) -> dict:
         if not vals:
@@ -81,6 +81,8 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     return {
         "available":      True,
         "total":          total,
+        "quarters_with_data":    cov["with_data"],
+        "quarters_without_data": cov["without_data"],
         "beat":           beat,
         "miss":           miss,
         "meet":           meet,
@@ -163,6 +165,8 @@ def _build_stats_object(
     precomputed = _precompute_stats(reactions)
     stats["beat_count"] = precomputed.get("beat")
     stats["total_quarters"] = precomputed.get("total")
+    stats["quarters_with_data"] = precomputed.get("quarters_with_data")
+    stats["quarters_without_data"] = precomputed.get("quarters_without_data")
     stats["basis_excluded"] = precomputed.get("basis_excluded", 0)
 
     latest = reactions[0]
@@ -457,9 +461,9 @@ NOTE TO VERIFY:
 {note_content}
 
 CLASSIFICATION RULES:
-- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, or ticker metadata. Quote the specific supporting text in "evidence".
-- "unsupported": The claim is plausible but cannot be confirmed from the provided sources (e.g. drawn from general knowledge, an estimate, or an inference not in the sources). Explain why in "evidence".
-- "contradicted": The claim directly conflicts with the filing text, precomputed stats, or ticker metadata. Quote the contradiction in "evidence".
+- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, or ticker metadata. Quote the specific supporting text in "reason".
+- "unsupported": The claim is plausible but cannot be confirmed from the provided sources (e.g. drawn from general knowledge, an estimate, or an inference not in the sources). Say why in "reason".
+- "contradicted": The claim directly conflicts with the filing text, precomputed stats, or ticker metadata. Quote the contradiction in "reason".
 
 STRICT RULES:
 - Bias toward "unsupported" when in doubt. Do NOT use outside knowledge to mark something "supported".
@@ -467,10 +471,12 @@ STRICT RULES:
 - Ticker metadata (symbol, name, sector, industry, market cap) is ground truth for those fields.
 - Check every specific number, statistic, date, product name, and factual assertion.
 - Skip purely subjective or stylistic phrases that contain no verifiable facts.
-- The summary counts must exactly equal the number of claims in the claims array.
+- Decide each verdict before you write it. "reason" is ONE sentence stating the basis of the settled verdict: never your
+  deliberation, never a change of mind ("re-evaluating", "actually"), never a second verdict. A claim whose reason reads as
+  deliberation is sent back once and otherwise counted as unsupported.
 
 Output ONLY valid JSON, no preamble, no markdown fences, no explanation outside the JSON:
-{{"claims": [{{"claim": "...", "status": "supported|unsupported|contradicted", "evidence": "..."}}], "summary": {{"supported": N, "unsupported": N, "contradicted": N}}}}\
+{{"claims": [{{"claim": "...", "verdict": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}\
 """
 
 
@@ -535,25 +541,58 @@ async def _run_verification(
             response_text = response_text[4:]
         response_text = response_text.strip()
 
-    verification = json.loads(response_text)
+    from app.services.verification_verdicts import UNSETTLED_REASON, normalize_claim, self_corrected, summary_of
+    parsed = json.loads(response_text)
+    claims = [normalize_claim(c) for c in (parsed.get("claims") or []) if isinstance(c, dict)]
+    in_tokens, out_tokens = raw["input_tokens"], raw["output_tokens"]
+    # a claim whose reason reads as deliberation is verified once more on its own; a second such answer counts as unsupported
+    for i, c in enumerate(claims):
+        if not self_corrected(c["reason"], c["verdict"]):
+            continue
+        again = await _reverify_claim(client, c["claim"], filing, sections, reactions, ticker)
+        in_tokens += again["input_tokens"]
+        out_tokens += again["output_tokens"]
+        if again["claim"] is not None and not self_corrected(again["claim"]["reason"], again["claim"]["verdict"]):
+            claims[i] = {**c, "verdict": again["claim"]["verdict"], "reason": again["claim"]["reason"]}
+        else:
+            claims[i] = {**c, "verdict": "unsupported", "reason": UNSETTLED_REASON}
+    verification = {"claims": claims, "summary": summary_of(claims)}      # the summary is counted from the verdicts, never the model's
 
     print(
         f"Verification complete: "
         f"{verification['summary']['supported']} supported, "
         f"{verification['summary']['unsupported']} unsupported, "
         f"{verification['summary']['contradicted']} contradicted "
-        f"| {raw['input_tokens']} in / {raw['output_tokens']} out tokens",
+        f"| {in_tokens} in / {out_tokens} out tokens",
         flush=True,
     )
 
-    contradicted = [c for c in verification["claims"] if c["status"] == "contradicted"]
+    contradicted = [c for c in verification["claims"] if c["verdict"] == "contradicted"]
     if contradicted:
         print(f"  ⚠ CONTRADICTED CLAIMS ({len(contradicted)}):", flush=True)
         for c in contradicted:
             print(f"    • {c['claim'][:120]}", flush=True)
-            print(f"      Evidence: {c['evidence'][:160]}", flush=True)
+            print(f"      Reason: {c['reason'][:160]}", flush=True)
 
-    return verification, model_used, raw["input_tokens"], raw["output_tokens"]
+    return verification, model_used, in_tokens, out_tokens
+
+
+async def _reverify_claim(client, claim: str, filing, sections, reactions, ticker) -> dict:
+    """One claim verified on its own against the same sources (the "note" is the claim). Returns {claim: {claim, verdict, reason} | None,
+    input_tokens, output_tokens}."""
+    from app.services.verification_verdicts import normalize_claim
+    raw = await client.verify_research_note(_build_verification_prompt(claim, filing, sections, reactions, ticker))
+    text = raw["content"].strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    try:
+        rows = [normalize_claim(c) for c in (json.loads(text).get("claims") or []) if isinstance(c, dict)]
+    except (ValueError, AttributeError):
+        rows = []
+    return {"claim": rows[0] if rows else None, "input_tokens": raw["input_tokens"], "output_tokens": raw["output_tokens"]}
 
 
 async def _add_to_daily_spend(db: AsyncSession, cost: float | None, now: datetime) -> None:
