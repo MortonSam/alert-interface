@@ -469,7 +469,7 @@ function DraftDisplay({
         <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no stored quarters with an EPS outcome")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
         <span><Explained text="ATM IV:" /> <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
         <span><Explained text="Realized-vol rank: " />{fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
-        <span><Explained text="IV\u2212RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
+        <span><Explained text="IV−RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
         {draft.vol_regime && (
           <span>
             <Explained text="Vol regime:" />{" "}
@@ -487,7 +487,7 @@ function DraftDisplay({
       {draft.suggested_strike != null && (
         <div className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <Explained text="Position cost & risk \u00b7 per contract" />
+            <Explained text="Position cost & risk · per contract" />
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="border border-border/60 bg-transparent rounded-md p-5">
@@ -519,7 +519,7 @@ function DraftDisplay({
           </div>
           {isSpread && netDebit != null && spreadWidth != null && (
             <p className="text-xs text-muted-foreground">
-              <Explained text="Net debit $" />{netDebit.toFixed(2)}<Explained text=" \u00b7 spread width $" />{spreadWidth.toFixed(0)}
+              <Explained text="Net debit $" />{netDebit.toFixed(2)}<Explained text=" · spread width $" />{spreadWidth.toFixed(0)}
             </p>
           )}
           {leg1Mid == null && (

@@ -363,7 +363,7 @@ function HistoryInsightsPanel({
       )}
       {showMagnitude && (
         <p className="text-xs text-muted-foreground">
-          <Explained text="Recent prints moving \u00b1" />{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
+          <Explained text="Recent prints moving ±" />{ce!.recent_avg_abs_1d!.toFixed(1)}% vs ±{ce!.prior_avg_abs_1d!.toFixed(1)}% prior
           {" "}, reactions{" "}
           <span className="font-medium">
             <ExplainTip term="magnitude trend">{ce!.magnitude_trend_labeled?.label ?? ce!.magnitude_trend ?? "stable"}</ExplainTip>
@@ -2234,7 +2234,7 @@ export default function TickerPage() {
                     <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
                       <span>▲ <ExplainTip term="upgrade">upgrade</ExplainTip></span>
                       <span>▼ <ExplainTip term="downgrade">downgrade</ExplainTip></span>
-                      <span><Explained text="\u2192 initiate or reiterate" /></span>
+                      <span><Explained text="→ initiate or reiterate" /></span>
                     </div>
                   )}
                 </div>
@@ -2541,7 +2541,7 @@ export default function TickerPage() {
                   </span>
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {ivVal != null
-                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1"><Explained text="(ATM, nearest expiry \u22657d out" />{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
+                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1"><Explained text="(ATM, nearest expiry ≥7d out" />{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
                       : <span className="text-muted-foreground" title={ivUnavailableReason(shown, realizedVol, rvStatus)}>
                           <Explained text="IV unavailable" /><span className="block text-xs font-sans font-normal">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
