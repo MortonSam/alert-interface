@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 
-WINDOW_VERSION = 3            # 3: a report two years after a report on the same date is on cadence (2: submissions index; 1 read every filing)
+WINDOW_VERSION = 4            # 4: the spread is symmetric about the centre; 3: a report two years after a report on the same date is on cadence (2: submissions index; 1 read every filing)
 WINDOW_REPORTS = 8            # the last eight reports' year-over-year shifts set the window
 MIN_PAIRS = 3                 # fewer year-over-year pairs than this: no window
 YEAR_DAYS = 364               # a year forward on the same weekday
@@ -137,7 +137,8 @@ def expected_window(symbol: str, report_dates: list[date], today: date, now: dat
     if not open_:
         return None
     center = open_[0]
-    return Window(symbol, center, center + timedelta(days=min(shifts) - FILING_LAG_DAYS), center + timedelta(days=max(shifts)),
+    spread = max(abs(x) for x in shifts)                     # a company that moved a week later one year can move a week earlier the next (AON, VZ)
+    return Window(symbol, center, center - timedelta(days=spread + FILING_LAG_DAYS), center + timedelta(days=spread),
                   [d.isoformat() for d in ds[:WINDOW_REPORTS + 4]], len(pairs), SOURCE,
                   (now or datetime.now()).isoformat(), WINDOW_VERSION)
 
