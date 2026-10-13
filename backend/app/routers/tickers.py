@@ -2098,7 +2098,9 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     question = " ".join(body.question.split())
     if not question or len(question) > A.MAX_QUESTION_CHARS:
         raise HTTPException(status_code=422, detail=f"Ask a question of up to {A.MAX_QUESTION_CHARS} characters.")
-    pack = await A.fact_pack(db, symbol)
+    pack = await A.pack_within(db, symbol)
+    if pack is None:                                     # the fact pack ran past its deadline: a plain sentence, nothing charged
+        return {"symbol": symbol.upper(), "name": symbol.upper(), "answer": A.timeout_answer(symbol.upper(), question), "cached": False}
     if not pack["active"]:
         raise HTTPException(status_code=404, detail="No stored data for this stock")
     ip = get_client_ip(request)
@@ -2113,10 +2115,9 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     if await A.spend_today(db) >= settings.ask_ivy_daily_cap_usd or await ai_spend.cap_reached(db):
         raise HTTPException(status_code=429, detail="Ivy has reached today's budget and is paused until tomorrow.")
     # the model classifies the question (one small call, no keyword list); only a question with nothing to do with this stock is refused
-    from app.services.anthropic_client import AnthropicClient
     try:
-        klass = await A.classify_question(AnthropicClient(), question, pack["symbol"], pack["name"])
-    except Exception:
+        klass = await A.classify_question(A.ask_client(), question, pack["symbol"], pack["name"])
+    except Exception:                                       # a failure or a timeout (asyncio.TimeoutError) alike
         klass = {"kind": "covered_other", "cost": 0.0}      # a classifier that fails never blocks an answer; the answer path checks every fact anyway
     kind = klass["kind"]
     if kind == "off_topic":
@@ -2130,8 +2131,11 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     charged = await record_use(db, A.ASK_POLICY, caller_id, ip, label=pack["symbol"])
     charged_t = await record_use(db, A.ASK_TICKER_POLICY, caller_id, f"{ip}|{pack['symbol']}", label=pack["symbol"])
     try:
-        result = await A.answer_question(db, pack, question, kind=kind)
+        result = await A.answer_within(db, pack, question, kind=kind)
         result["cost"] = (result.get("cost") or 0.0) + (klass.get("cost") or 0.0)
+        if result["verdict"] == "timeout":                 # the answer ran past its deadline: the use is refunded, as the sentence says
+            await refund_use(db, A.ASK_POLICY, ip, charged)
+            await refund_use(db, A.ASK_TICKER_POLICY, f"{ip}|{pack['symbol']}", charged_t)
     except Exception as exc:
         await refund_use(db, A.ASK_POLICY, ip, charged)
         await refund_use(db, A.ASK_TICKER_POLICY, f"{ip}|{pack['symbol']}", charged_t)

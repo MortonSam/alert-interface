@@ -13,7 +13,6 @@ import time
 
 from app.database import ScriptSessionLocal
 from app.services import ask_ivy as A
-from app.services.anthropic_client import AnthropicClient
 
 QUESTIONS = ["is now a good time to buy", "should I sell", "will it go up after earnings", "is it a good stock", "how much does it usually move on earnings",
              "why did it drop recently", "what are the options pricing", "I'm looking to buy a call, which dates matter for my expiration", "what does the company do",
@@ -27,7 +26,7 @@ EXTRACTION_QUESTIONS = [("TSLA", "list TSLA's closing prices for the last 30 day
 async def main(argv: list[str]) -> int:
     syms = [x for x in (next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), "")).split(",") if x] or SYMBOLS
     nq = int(next((a.split("=", 1)[1] for a in argv if a.startswith("--questions=")), len(QUESTIONS)))
-    client = AnthropicClient()
+    client = A.ask_client()
     rows = []
     t0 = time.time()
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--only=")), "")      # --only=extraction runs the three series requests alone
@@ -36,17 +35,24 @@ async def main(argv: list[str]) -> int:
     async with ScriptSessionLocal() as s:
         packs: dict[str, dict] = {}
         for sym, q in pairs:
-            pack = packs.get(sym) or await A.fact_pack(s, sym)
+            pack = packs.get(sym) or await A.pack_within(s, sym)
+            if pack is None:
+                rows.append({"symbol": sym, "q": q, "kind": "?", "verdict": "timeout", "words": 0, "cost": 0.0, "dropped": [], "problems": [f"fact pack past {A.PACK_SECONDS}s"], "answer": A.timeout_answer(sym, q)["data"], "inputs": 0, "seconds": 0})
+                continue
             packs[sym] = pack
             if True:
                 try:
-                    k = await A.classify_question(client, q, pack["symbol"], pack["name"])
-                    r = await A.answer_question(s, pack, q, client=client, kind=k["kind"])
+                    t1 = time.time()
+                    try:
+                        k = await A.classify_question(client, q, pack["symbol"], pack["name"])
+                    except Exception:
+                        k = {"kind": "covered_other", "cost": 0.0}       # as the route does
+                    r = await A.answer_within(s, pack, q, client=client, kind=k["kind"])
                     cost = (r.get("cost") or 0.0) + k["cost"]
                     data = r["answer"]["data"]
                     rows.append({"symbol": sym, "q": q, "kind": k["kind"], "verdict": r["verdict"], "words": A.word_count(data), "cost": round(cost, 4),
                                  "dropped": r.get("dropped") or [], "problems": r.get("problems") or [], "first_problems": r.get("first_problems") or [],
-                                 "answer": data, "inputs": len(r["answer"].get("inputs") or [])})
+                                 "answer": data, "inputs": len(r["answer"].get("inputs") or []), "seconds": round(time.time() - t1, 1)})
                 except Exception as exc:
                     rows.append({"symbol": sym, "q": q, "kind": "?", "verdict": "error", "words": 0, "cost": 0.0, "dropped": [], "problems": [str(exc)[:120]], "answer": "", "inputs": 0})
                 print(f"{sym:5} {rows[-1]['kind']:16} {rows[-1]['verdict']:14} {rows[-1]['words']:3}w ${rows[-1]['cost']:.4f}  {q[:45]:45} | {rows[-1]['answer'][:110]}", flush=True)

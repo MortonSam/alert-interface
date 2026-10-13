@@ -33,8 +33,15 @@ def _scrub_dashes(text: str) -> str:
 
 
 class AnthropicClient:
-    def __init__(self) -> None:
-        self._client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    def __init__(self, timeout: float | None = None, max_retries: int | None = None) -> None:
+        """`timeout` (seconds per attempt) and `max_retries` bound a caller that must answer a visitor (Ask Ivy); left out, the SDK's
+        defaults apply (ten minutes, two retries), which the nightly's long generations need."""
+        kwargs = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if max_retries is not None:
+            kwargs["max_retries"] = max_retries
+        self._client = AsyncAnthropic(api_key=settings.anthropic_api_key, **kwargs)
 
     async def _create(self, method: str, **kwargs):
         """Every call: a failure is recorded with its feature (services/ai_health) before it propagates to the caller."""

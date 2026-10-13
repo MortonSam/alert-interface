@@ -23,6 +23,7 @@ pauses for the day once the site's estimated spend reaches settings.ask_ivy_dail
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -41,6 +42,12 @@ from app.services.system_metadata_service import get_value, set_value
 MAX_SENTENCES = 6
 WORD_CAP = 90                               # an answer longer than this is rewritten once, then cut at a sentence end
 MAX_QUESTION_CHARS = 300
+# A question never hangs (2026-10-13: a test run stalled for hours inside a model call, since the SDK's default allows ten minutes
+# and two retries per call). Every model call is bounded, each stage has a deadline, and a stage that runs out returns timeout_answer.
+MODEL_CALL_SECONDS = 20                    # one attempt of one model call (the SDK's own timeout), one retry
+PACK_SECONDS = 10                          # the fact pack: database reads only
+CLASSIFY_SECONDS = 8                       # the classifier, one small call
+ANSWER_SECONDS = 45                        # the whole answer: the draft, at most one rewrite and the verification
 CACHE_VERSION = 2                           # 2 (2026-10-12): the analyst's voice; every answer cached before it is never served again
 KINDS = ("timing", "direction", "quality", "options_planning", "extraction", "covered_other", "not_covered", "off_topic")
 DECISION_KINDS = ("timing", "direction", "quality", "options_planning")     # a buy, sell or trade decision: facts first, then CLOSING_LINE
@@ -164,9 +171,16 @@ def parse_kind(content: str) -> str:
     return kind if kind in KINDS else "covered_other"
 
 
+def ask_client():
+    """The model client for Ask Ivy: each attempt bounded at MODEL_CALL_SECONDS, one retry."""
+    from app.services.anthropic_client import AnthropicClient
+    return AnthropicClient(timeout=MODEL_CALL_SECONDS, max_retries=1)
+
+
 async def classify_question(client, question: str, symbol: str, name: str | None) -> dict:
-    """The model's kind for the question: {kind, model, input_tokens, output_tokens, cost}."""
-    out = await client.classify_question(build_classifier_prompt(question, symbol, name))
+    """The model's kind for the question: {kind, model, input_tokens, output_tokens, cost}; raises asyncio.TimeoutError past
+    CLASSIFY_SECONDS (the caller answers as covered_other)."""
+    out = await asyncio.wait_for(client.classify_question(build_classifier_prompt(question, symbol, name)), CLASSIFY_SECONDS)
     return {"kind": parse_kind(out["content"]), "model": out["model_used"], "input_tokens": out["input_tokens"], "output_tokens": out["output_tokens"],
             "cost": estimate_cost_usd(out["model_used"], out["input_tokens"], out["output_tokens"]) or 0.0}
 
@@ -844,6 +858,33 @@ def cut_to_cap(kept: list[str], cap: int = WORD_CAP) -> list[str]:
     return out
 
 
+TIMEOUT_LINE = "Ivy couldn't finish an answer about {name} in time. Try again in a minute; nothing was charged to your limit."
+
+
+def timeout_answer(name: str, question: str) -> dict:
+    """What a visitor sees when a stage ran past its deadline: a plain sentence, no partial answer."""
+    return {"key": "ask", "question": question, "data": TIMEOUT_LINE.format(name=name), "idea": "", "inputs": [], "as_of": None,
+            "as_of_kind": "observed", "rule": RULE}
+
+
+async def pack_within(db: AsyncSession, symbol: str) -> dict | None:
+    """The fact pack, or None past PACK_SECONDS."""
+    try:
+        return await asyncio.wait_for(fact_pack(db, symbol), PACK_SECONDS)
+    except asyncio.TimeoutError:
+        return None
+
+
+async def answer_within(db: AsyncSession, pack: dict, question: str, *, client=None, kind: str = "covered_other") -> dict:
+    """answer_question within ANSWER_SECONDS; past it, verdict "timeout" with timeout_answer and no cost recorded (a call cut off
+    mid-flight reports no usage)."""
+    try:
+        return await asyncio.wait_for(answer_question(db, pack, question, client=client, kind=kind), ANSWER_SECONDS)
+    except asyncio.TimeoutError:
+        return {"covered": "no", "verdict": "timeout", "answer": timeout_answer(pack["name"], question), "model": None, "input_tokens": None,
+                "output_tokens": None, "cost": 0.0, "problems": [f"no answer within {ANSWER_SECONDS}s"]}
+
+
 def unchecked_answer(pack: dict, question: str) -> dict:
     """What a visitor sees when no draft passed the checks: a plain sentence, no guess."""
     return {"key": "ask", "question": question, "data": f"Ivy couldn't produce an answer about {pack['name']} that passed the checks for that question.", "idea": "",
@@ -860,8 +901,7 @@ def answer_payload(question: str, kept: list[str], inputs: list[dict], pack: dic
 async def answer_question(db: AsyncSession, pack: dict, question: str, *, client=None, kind: str = "covered_other") -> dict:
     """Run the model, the output check, the comparison check, substitution and the verifier for one question against a fact pack.
     Returns {verdict, covered, answer, model, input_tokens, output_tokens, cost, problems, dropped, raw}. Charges and logs nothing."""
-    from app.services.anthropic_client import AnthropicClient
-    client = client or AnthropicClient()
+    client = client or ask_client()
     if kind == "off_topic":
         return {"covered": "off", "verdict": "off_topic", "answer": refusal_answer(pack, question), "model": None, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
                 "problems": [], "dropped": [], "raw": "", "retried": False, "kind": kind}
