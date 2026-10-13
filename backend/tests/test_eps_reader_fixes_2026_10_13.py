@@ -98,3 +98,14 @@ async def test_a_basic_row_stores_with_its_basis_and_the_table_refuses_a_basic_f
         await s.rollback()
         await s.execute(text("DELETE FROM release_eps WHERE symbol = 'ZZED'"))
         await s.commit()
+
+
+def test_a_decimal_point_or_per_diluted_share_never_hides_a_diluted_figure():
+    # COST: "Basic $ 6.76 Diluted $ 6.75" (a decimal point between "per share" and "Diluted" is not a sentence end)
+    assert states_diluted_eps("NET INCOME PER COMMON SHARE ATTRIBUTABLE TO COSTCO: Basic $ 6.76 $ 6.01 Diluted $ 6.75 $ 5.99")
+    # UDR, FE, C: "per diluted share" alone
+    assert states_diluted_eps("Net income attributable to common stockholders was $0.21 per diluted share")
+    assert states_diluted_eps("GAAP earnings of $0.50 per basic and diluted share")
+    # a sentence end still separates "diluted" from an unrelated "per share"
+    assert not states_diluted_eps("Shares were diluted by the offering. The dividend was $0.85 per share")
+    assert not states_diluted_eps(ED)

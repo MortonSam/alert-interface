@@ -122,8 +122,10 @@ _CONTINUING_TABLE = re.compile(r"(?:diluted\s+)?(?:earnings|income|EPS)[^.]{0,60
 # Basic versus diluted (2026-10-13). A release that states diluted EPS anywhere has a diluted row, and a figure from a row labelled basic
 # alone is never its diluted EPS (states_diluted_eps, basic_only_label). A release with no diluted figure at all (ED's "Reported earnings per
 # share (basic)") is read by parse_release_basic_eps, and its figure is stored with its basis recorded as basic, never as diluted.
-_DILUTED_EPS = re.compile(r"\bdiluted\b[^.;]{0,80}?(?:per\s+(?:potential\s+)?(?:common\s+|ordinary\s+)?share|\bEPS\b)|(?:per\s+(?:common\s+|ordinary\s+)?share|\bEPS\b)[^.;]{0,80}?\bdiluted\b"
-                          r"|assuming\s+dilution", re.I)
+_CLAUSE = r"(?:(?!\.\s)[^;]){0,80}?"          # within one clause: a decimal point ("$6.76") is not a sentence end, ". " is
+_DILUTED_EPS = re.compile(rf"per\s+(?:basic\s+and\s+)?diluted\s+(?:common\s+|ordinary\s+)?share|assuming\s+dilution"
+                          rf"|\bdiluted\b{_CLAUSE}(?:per\s+(?:potential\s+)?(?:common\s+|ordinary\s+)?share|\bEPS\b|earnings|income|loss)"
+                          rf"|(?:per\s+(?:common\s+|ordinary\s+)?share|\bEPS\b){_CLAUSE}\bdiluted\b", re.I)
 _BASIC_WORD = re.compile(r"\bbasic\b", re.I)
 _DILUTED_WORD = re.compile(r"\bdiluted\b|dilution", re.I)
 _BASIC_ROWS = (
