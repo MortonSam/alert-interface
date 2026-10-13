@@ -36,7 +36,7 @@ def test_every_nightly_step_reads_active_tickers_only():
 
 def test_new_warnings_are_the_ones_the_previous_night_lacked():
     assert new_warnings(["b", "a", "c"], ["a"]) == ["b", "c"]
-    assert new_warnings(["a"], None) == ["a"]
+    assert new_warnings(["a"], None) is None      # no previous list is not "all new"
     assert new_warnings([], ["a"]) == []
 
 

@@ -212,6 +212,42 @@ async def check_ticker_events_null_ticker(session) -> CheckResult:
     )
 
 
+async def _bars_unconfirmed(session, rows, first: str, second: str) -> list:
+    """The flagged rows whose equality the stored daily bars do not confirm. Each row's moves are recomputed from price_bars_shadow
+    (services/price_bars, adjusted as every reader adjusts them) with the code that stored them: earnings rows through
+    seed_historical_reactions._compute_v3 at the row's own timing, FOMC rows through _compute, with SPY's stored bars as the session
+    calendar. A row is confirmed when both recomputed moves equal its stored values; one that cannot be recomputed (no bars, an event
+    type without a recompute, unknown timing) is unconfirmed."""
+    import numpy as np
+    from app.scripts.seed_historical_reactions import _build_date_cache, _compute, _compute_v3
+    from app.services.price_bars import bars
+    if not rows:
+        return []
+    lo = min(r.event_date for r in rows) - timedelta(days=20)
+    hi = max(r.event_date for r in rows) + timedelta(days=20)
+    spy = await bars(session, "SPY", lo, hi)
+    sessions = np.array(sorted(_build_date_cache(spy))) if not spy.empty else np.array([])
+    by_symbol: dict[str, list] = {}
+    for r in rows:
+        by_symbol.setdefault(r.symbol, []).append(r)
+    out = []
+    for sym, rs in by_symbol.items():
+        hist = await bars(session, sym, min(r.event_date for r in rs) - timedelta(days=20), max(r.event_date for r in rs) + timedelta(days=20))
+        dates = _build_date_cache(hist) if not hist.empty else None
+        for r in rs:
+            kind = r.event_type.value if hasattr(r.event_type, "value") else str(r.event_type)
+            data = None
+            if dates is not None and len(sessions):
+                if kind == "earnings" and r.report_timing in ("bmo", "amc"):
+                    data = _compute_v3(hist, dates, r.event_date, r.report_timing, sessions)
+                elif kind == "fomc":
+                    data = _compute(hist, dates, r.event_date, sessions)
+            a, b = getattr(r, first), getattr(r, second)
+            if not data or data.get(first) is None or data.get(second) is None or Decimal(data[first]) != Decimal(a) or Decimal(data[second]) != Decimal(b):
+                out.append(r)
+    return out
+
+
 async def check_reactions_3d_equals_5d(session) -> CheckResult:
     total = await session.scalar(
         select(func.count(HistoricalReaction.id)).where(
@@ -226,6 +262,7 @@ async def check_reactions_3d_equals_5d(session) -> CheckResult:
             HistoricalReaction.event_type,
             HistoricalReaction.pct_change_3d,
             HistoricalReaction.pct_change_5d,
+            HistoricalReaction.report_timing,
         )
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
         .where(
@@ -239,17 +276,20 @@ async def check_reactions_3d_equals_5d(session) -> CheckResult:
     if not rows:
         return CheckResult("reactions_3d_equals_5d", PASS, "No rows where pct_change_3d = pct_change_5d (rollforward bug absent)")
 
+    # an equal pair is often a real price coincidence (the close two sessions apart was the same): only rows the bars do not confirm warn
+    unconfirmed = await _bars_unconfirmed(session, rows, "pct_change_3d", "pct_change_5d")
+    if not unconfirmed:
+        return CheckResult("reactions_3d_equals_5d", PASS, f"{len(rows)} row(s) with identical pct_change_3d and pct_change_5d, every one confirmed by the stored daily bars")
     details = [
-        f"{r.symbol}  {r.event_date}  [{r.event_type}]  3d={r.pct_change_3d}  5d={r.pct_change_5d}"
-        for r in rows
+        f"{r.symbol}  {r.event_date}  [{r.event_type}]  3d={r.pct_change_3d}  5d={r.pct_change_5d}  (not confirmed by the stored bars)"
+        for r in unconfirmed
     ]
-    rate = len(rows) / total * 100 if total else 0
+    rate = len(unconfirmed) / total * 100 if total else 0
     level = ERROR if rate > 1.0 else WARN
     return CheckResult(
         "reactions_3d_equals_5d", level,
-        f"{len(rows)} row(s) ({rate:.2f}%) with identical pct_change_3d and pct_change_5d"
-        + (" (coincidental price equality)" if level == WARN
-           else " (rollforward bug — >1% of rows affected)"),
+        f"{len(unconfirmed)} row(s) ({rate:.2f}%) with identical pct_change_3d and pct_change_5d that the stored daily bars do not confirm"
+        f" (of {len(rows)} equal pairs)" + ("" if level == WARN else " (rollforward bug: >1% of rows affected)"),
         details,
     )
 
@@ -268,6 +308,7 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
             HistoricalReaction.event_type,
             HistoricalReaction.pct_change_1d,
             HistoricalReaction.pct_change_3d,
+            HistoricalReaction.report_timing,
         )
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
         .where(
@@ -281,17 +322,20 @@ async def check_reactions_1d_equals_3d(session) -> CheckResult:
     if not rows:
         return CheckResult("reactions_1d_equals_3d", PASS, "No rows where pct_change_1d = pct_change_3d")
 
+    # an equal pair is often a real price coincidence (the close two sessions apart was the same): only rows the bars do not confirm warn
+    unconfirmed = await _bars_unconfirmed(session, rows, "pct_change_1d", "pct_change_3d")
+    if not unconfirmed:
+        return CheckResult("reactions_1d_equals_3d", PASS, f"{len(rows)} row(s) with identical pct_change_1d and pct_change_3d, every one confirmed by the stored daily bars")
     details = [
-        f"{r.symbol}  {r.event_date}  [{r.event_type}]  1d={r.pct_change_1d}  3d={r.pct_change_3d}"
-        for r in rows
+        f"{r.symbol}  {r.event_date}  [{r.event_type}]  1d={r.pct_change_1d}  3d={r.pct_change_3d}  (not confirmed by the stored bars)"
+        for r in unconfirmed
     ]
-    rate = len(rows) / total * 100 if total else 0
+    rate = len(unconfirmed) / total * 100 if total else 0
     level = ERROR if rate > 1.0 else WARN
     return CheckResult(
         "reactions_1d_equals_3d", level,
-        f"{len(rows)} row(s) ({rate:.2f}%) with identical pct_change_1d and pct_change_3d"
-        + (" (coincidental price equality)" if level == WARN
-           else " (>1% of rows affected — possible stale price data)"),
+        f"{len(unconfirmed)} row(s) ({rate:.2f}%) with identical pct_change_1d and pct_change_3d that the stored daily bars do not confirm"
+        f" (of {len(rows)} equal pairs)" + ("" if level == WARN else " (possible stale price data: >1% of rows affected)"),
         details,
     )
 
@@ -3645,22 +3689,28 @@ async def run_checks(checks, session_factory=None) -> list[CheckResult]:
 VALIDATE_STEP_LABEL = "Validate data"     # the label in refresh.STEPS
 
 
-def new_warnings(tonight: list[str], previous: list[str] | None) -> list[str]:
-    """Pure: the WARN checks that did not warn the night before (every one on the first night with a record)."""
-    return sorted(set(tonight) - set(previous or []))
+def new_warnings(tonight: list[str], previous: list[str] | None) -> list[str] | None:
+    """Pure: the WARN checks that did not warn on the previous run; None when that run stored no list (no baseline is not "all new")."""
+    return None if previous is None else sorted(set(tonight) - set(previous))
 
 
-async def previous_warn_names() -> list[str] | None:
-    """The last run's warn_names from step_outcomes, or None when no run has recorded them."""
+def cleared_warnings(tonight: list[str], previous: list[str] | None) -> list[str] | None:
+    """Pure: the WARN checks that warned on the previous run and not tonight; None with no previous list."""
+    return None if previous is None else sorted(set(previous) - set(tonight))
+
+
+async def previous_warn_list() -> tuple[list[str] | None, str | None]:
+    """The last run's (warn_names, warn_names_at) from step_outcomes; (None, None) when no run has stored a list."""
     import json as _json
     from app.services.system_metadata_service import get_value
     try:
         async with AsyncSessionLocal() as session:
             raw = await get_value(session, "step_outcomes")
         prev = (_json.loads(raw) if raw else {}).get(VALIDATE_STEP_LABEL) or {}
-        return prev.get("warn_names")
+        names = prev.get("warn_names")
+        return (names, prev.get("warn_names_at")) if names is not None else (None, None)
     except Exception:
-        return None
+        return None, None
 
 
 async def write_holds(results: list[CheckResult], session_factory=None) -> list[dict]:
@@ -3718,7 +3768,11 @@ async def main() -> int:
     results = await run_checks(CHECKS)
     holds = await write_holds(results)
     fields = outcome_fields(results, holds)
-    fields["new_warnings"] = new_warnings(fields["warn_names"], await previous_warn_names())    # named in the digest, so no warning starts unseen
+    prev_names, prev_at = await previous_warn_list()
+    fields["new_warnings"] = new_warnings(fields["warn_names"], prev_names)        # named in the digest, so no warning starts unseen
+    fields["cleared_warnings"] = cleared_warnings(fields["warn_names"], prev_names)
+    fields["warn_baseline_at"] = prev_at                                            # when the compared list was stored; None = no list
+    fields["warn_names_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")   # when tonight's list is stored
     await record_step_fields(VALIDATE_STEP_LABEL, fields)
     await alert_errors(results)
     if holds:

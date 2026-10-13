@@ -103,6 +103,15 @@ def capped_list(label: str, items: list[str], each: int = 160) -> str:
     return f"{label} ({len(items)}): {shown}" + (f", and {more} more in the step outcome" if more > 0 else "")
 
 
+def warnings_tail(validate: dict) -> str:
+    """Pure: after the warning count, "(no previous list to compare)" when the previous run stored no list, "(none new)", or
+    "(new: a, b)", then "cleared: c, d" for warnings the previous list had and tonight's does not."""
+    new = validate.get("new_warnings")
+    tail = "(no previous list to compare)" if new is None else (f"(new: {', '.join(new)})" if new else "(none new)")
+    cleared = validate.get("cleared_warnings") or []
+    return tail + (f", cleared: {', '.join(cleared)}" if cleared else "")
+
+
 def digest_message(run_date: str, passed: int, total: int, failed: list[str], validate: dict | None, chain_coverage_pct: float | None,
                    courier: dict | None, auto_voided: list[str] | None = None, feed_confirmations: list[dict] | None = None,
                    release_warnings: list[str] | None = None, hidden: list[str] | None = None, release_disagreements: list[str] | None = None) -> tuple[str, str]:
@@ -119,9 +128,7 @@ def digest_message(run_date: str, passed: int, total: int, failed: list[str], va
     if feed_confirmations:
         parts.append(f"IR-feed confirmations to spot-check ({len(feed_confirmations)}): " + feed_confirmation_lines(feed_confirmations))
     if validate:
-        new = validate.get("new_warnings") or []
-        parts.append(f"validate: {validate.get('error_count', 0)} errors, {validate.get('warn_count', 0)} warnings"
-                     + (f" (new: {', '.join(new)})" if new else ""))
+        parts.append(f"validate: {validate.get('error_count', 0)} errors, {validate.get('warn_count', 0)} warnings " + warnings_tail(validate))
     parts.append(f"chain coverage {chain_coverage_pct:.0f}%" if chain_coverage_pct is not None else "chain coverage unknown")
     if courier and courier.get("ran"):
         parts.append(f"courier ran {courier.get('at_local', '?')}, {courier.get('tickers', 0)} tickers ({courier.get('failures', 0)} failed)")

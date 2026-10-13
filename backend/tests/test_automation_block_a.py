@@ -125,7 +125,7 @@ def test_the_message_formats():
     title, body = notify.digest_message("2026-10-06", 26, 27, ["ATM IV (solver)"], {"error_count": 2, "warn_count": 13}, 97.5,
                                         {"ran": True, "at_local": "16:07 ET", "tickers": 421, "failures": 91})
     assert title == "Nightly 2026-10-06: 26/27 steps passed"
-    assert body == "failed: ATM IV (solver) | validate: 2 errors, 13 warnings | chain coverage 98% | courier ran 16:07 ET, 421 tickers (91 failed)"
+    assert body == "failed: ATM IV (solver) | validate: 2 errors, 13 warnings (no previous list to compare) | chain coverage 98% | courier ran 16:07 ET, 421 tickers (91 failed)"
     _, body = notify.digest_message("2026-10-06", 27, 27, [], None, None, {"ran": False})
     assert body == "all steps passed | chain coverage unknown | courier did not run"
 
