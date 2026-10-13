@@ -43,17 +43,16 @@ describe("the counters row never overlaps", () => {
     const page = read("app/page.tsx");
     expect(page).toContain(`font-size: ${STAT_NUMBER_CLAMP};`);
     const section = page.match(/<section className="([^"]*)">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
-    expect(section).not.toContain("screen-section");                                   // only the opening fills a screen; the counters take their height
-    expect(section).toContain("home-break");                                         // the one section break (globals.css), not padding of its own
-    expect(section).not.toMatch(/(^| )(sm:)?py-/);
-    expect(section).not.toMatch(/100vh|min-h-/);                                      // no height of its own
+    expect(section).toContain("screen-section");                                       // one screen minus the header from 640px up (globals.css)
+    expect(section).toContain("flex items-center justify-center");                    // the row centered vertically on that screen
+    expect(section).toContain("py-12");
+    expect(section).not.toMatch(/100vh|min-h-/);                                      // the height comes from the one snap rule
     const layout = read("app/layout.tsx");
     expect(layout).toContain("min-h-[3.25rem]");                                      // the header height the calc subtracts
     expect(layout).toMatch(/<header className="[^"]*border-b[^"]*sticky top-0/);      // and its one-pixel border
     const challenge = page.slice(page.indexOf("4. The Challenge"), page.indexOf("The challenge"));
     expect(challenge).not.toContain("min-h-[100svh]");                              // normal section spacing after the counters
-    expect(challenge).toContain("home-break");                                       // the one section break; the content's height from 640px up
-    expect(challenge).not.toContain("screen-section");
+    expect(challenge).toContain("py-12 sm:py-0");                                    // phone spacing (gaps near 96px), a full screen from 640px up
     expect(numberWidth("117,310", 60)).toBeCloseTo((6 * 0.631 + 0.241) * 60, 5);
   });
 });

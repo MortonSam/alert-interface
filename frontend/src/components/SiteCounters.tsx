@@ -26,11 +26,11 @@ export function SiteCounters({ initial = null }: { initial?: SiteStats | null })
   const stale = picked.source === "stored" ? " (last values this browser received)" : "";
   if (!rows.length) return <CountersUnavailable />;
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-7 sm:gap-y-12 max-w-6xl w-full mx-auto text-center">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-12 max-w-6xl w-full mx-auto text-center">
       {rows.map((row) => (
         <div key={row.key} className="min-w-0">
           <CountUp value={row.value} title={row.title ? row.title + stale : undefined} className="stat-number font-display font-bold text-primary tabular-nums block whitespace-nowrap" />
-          <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-2 sm:mt-3 ${row.key === "contracts" ? "lg:whitespace-nowrap" : "whitespace-nowrap"}`}>{row.label}</p>
+          <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-3 ${row.key === "contracts" ? "lg:whitespace-nowrap" : "whitespace-nowrap"}`}>{row.label}</p>
         </div>
       ))}
     </div>
@@ -40,11 +40,11 @@ export function SiteCounters({ initial = null }: { initial?: SiteStats | null })
 /** The row with no count to show: the four labels in place, a dash for each number, the reason on hover. Never an empty section. */
 export function CountersUnavailable() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-7 sm:gap-y-12 max-w-6xl w-full mx-auto text-center" data-counters="unavailable">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-12 max-w-6xl w-full mx-auto text-center" data-counters="unavailable">
       {COUNTER_LABELS.map((row) => (
         <div key={row.key} className="min-w-0">
           <span title={UNAVAILABLE_TITLE} className="stat-number font-display font-bold text-primary tabular-nums block whitespace-nowrap">—</span>
-          <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-2 sm:mt-3 ${row.key === "contracts" ? "lg:whitespace-nowrap" : "whitespace-nowrap"}`}>{row.label}</p>
+          <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-3 ${row.key === "contracts" ? "lg:whitespace-nowrap" : "whitespace-nowrap"}`}>{row.label}</p>
         </div>
       ))}
     </div>
