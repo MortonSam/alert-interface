@@ -10,6 +10,9 @@ from app.scripts.list_release_eps import format_rows, xbrl_status
 from app.scripts.seed_dividends import CORRECTIONS, rebase_from_bars
 from app.scripts.validate_data import ERROR, WARN, check_eps_quarter_outliers, check_pe_sanity, run_checks
 
+# ZZRB is an active ticker while its test runs: the index membership test (shared_rows) clears every active ticker it does not list
+pytestmark = pytest.mark.xdist_group(name="shared_rows")
+
 
 @pytest.mark.asyncio
 async def test_a_quarter_far_below_its_neighbours_is_listed_once():
