@@ -10,13 +10,15 @@ import re
 from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
-from app.services.valuation import header_order
+from app.services.valuation import basic_only_label, header_order, states_diluted_eps
 
 MODEL = "claude-sonnet-4-6"
 MAX_CHARS = 120_000                 # an exhibit beyond this is cut (the figure sits in the first pages); the cut is noted
 DISQUALIFIERS = re.compile(r"non-?\s?gaap|adjusted|\bcore\b|operating\s+eps|\bffo\b|funds\s+from\s+operations|normali[sz]ed|comparable"
                            r"|fiscal[- ]year|full[- ]year|year[- ]ended|twelve[- ]months|year[- ]to[- ]date", re.I)
 CONTINUING = re.compile(r"continuing\s+operations", re.I)
+HEADING_NOT_VERBATIM = "the heading is not verbatim in the exhibit"
+BASIC_ROW = "a row labelled basic, and the release states diluted EPS"
 TOTAL_NEAR_CONTINUING = re.compile(r"per\s+(?:common\s+)?share\s*[—–-]+\s*diluted|diluted\s+(?:net\s+)?(?:earnings|income)\s+per", re.I)
 
 PROMPT = """You are reading the text of an earnings press release filed with the SEC (an 8-K exhibit). Return JSON only, no prose:
@@ -117,17 +119,24 @@ def verify_quote(exhibit_text: str, quote: str | None, eps: float | None, column
     table and its label from the heading above it: CLX's "Diluted net earnings per share $ 1.34 $ 2.68 (50) %" against the exhibit's
     "Diluted earnings per share ... As reported (GAAP) $ 1.34 $ 2.68 (50) %"); then the exhibit's own label on that row of numbers may
     carry no disqualifying word either. A row with two or more per-share numbers needs `column` (the position of the figure), the
-    number there must be the figure, and when `columns` (the heading, verbatim) lists the prior year first the column cannot be 1."""
+    number there must be the figure, and the column must follow the heading's order. The order is taken from the exhibit itself, from
+    the heading nearest before the row (valuation.header_order, as the pattern parser reads it), and from the model's `columns` only when
+    the exhibit has no such heading; `columns` not verbatim in the exhibit is still a problem (decide() may turn it into a note). A quote
+    from a row labelled basic alone is refused when the release states diluted EPS anywhere."""
     problems = []
     if not quote:
         return ["no quote"]
     flat, idx = _norm_map(exhibit_text)
     q = re.sub(r"\s+", " ", quote).strip()
-    if _norm(q) not in flat:
+    row_at = None                                         # where the row sits in the exhibit (original index), for the heading above it
+    if _norm(q) in flat:
+        row_at = idx[flat.find(_norm(q))] if _norm(q) else None
+    else:
         label, numbers = _label_and_numbers(q)
         nl, nn = _norm(label), _norm(numbers)
         if nl and nn and nl in flat and nn in flat:
             at = flat.find(nn)
+            row_at = idx[at]
             row_label = re.split(r"\d", exhibit_text[max(0, idx[at] - 160):idx[at]])[-1]      # the exhibit's own label after the previous number
             bad = sorted({m.group(0).lower() for m in DISQUALIFIERS.finditer(row_label)})
             if bad:
@@ -143,16 +152,18 @@ def verify_quote(exhibit_text: str, quote: str | None, eps: float | None, column
         problems.append("disqualifying word(s): " + ", ".join(bad))
     if CONTINUING.search(q) and not TOTAL_NEAR_CONTINUING.search(q.split("continuing")[0]):
         problems.append("continuing operations without a total")
+    if basic_only_label(_label_and_numbers(q)[0]) and states_diluted_eps(exhibit_text):
+        problems.append(BASIC_ROW)
     figures = _PER_SHARE_FIGURE.findall(_label_and_numbers(q)[1])
     if eps is not None and len(figures) >= 2:
         if column is None:
             problems.append("a row of several figures without the column read")
         elif not 1 <= column <= len(figures) or abs(_amount(figures[column - 1]) - abs(eps)) > 0.005:
             problems.append(f"column {column} does not hold {eps:+.2f}")
-        if columns:
-            if _norm(columns) not in flat:
-                problems.append("the heading is not verbatim in the exhibit")
-            order = header_order(columns)
+        if columns and _norm(columns) not in flat:
+            problems.append(HEADING_NOT_VERBATIM)
+        order = (header_order(exhibit_text[:row_at]) if row_at is not None else None) or (header_order(columns) if columns else None)
+        if order:
             if order == "prior-first" and column == 1:
                 problems.append("the heading lists the prior year first but column 1 was read")
             if order == "current-first" and column == 2:
@@ -162,6 +173,12 @@ def verify_quote(exhibit_text: str, quote: str | None, eps: float | None, column
 
 def _amount(s: str) -> float:
     return abs(float(s.replace(",", "").strip("()-")))
+
+
+def diluted_row(quote: str | None) -> bool:
+    """Pure: the quoted row or sentence names diluted EPS in its own label ("Diluted earnings per common share", "per diluted share")."""
+    q = re.sub(r"\s+", " ", quote or "")
+    return bool(re.search(r"\bdiluted\b|assuming\s+dilution", _label_and_numbers(q)[0], re.I)) or bool(re.search(r"per\s+diluted\s+share", q, re.I))
 
 
 def agree(pattern_eps: float | None, model_eps: float | None) -> bool:
@@ -180,10 +197,15 @@ def decide(pattern: dict | None, model: dict | None, exhibit_text: str) -> tuple
     problems = verify_quote(exhibit_text, (model or {}).get("quote"), m, (model or {}).get("columns"), (model or {}).get("column")) if model and model.get("eps") is not None else (["model read nothing"] if model else ["no model reading"])
     p_text = f"pattern {p:+.2f} ({pattern['how']})" if pattern else "pattern read nothing"
     m_text = (f"model {m:+.2f}" if m is not None else "model read nothing") + (f' "{(model or {}).get("quote") or ""}"'[:120] if model and model.get("quote") else "")
+    heading_note = ""
+    if problems == [HEADING_NOT_VERBATIM] and p is not None and m is not None and p == m and diluted_row(model.get("quote")):
+        # the column order came from the exhibit's own heading, both readers read the same figure exactly, and the row is diluted EPS:
+        # the model's paraphrased heading alone is a note, not a rejection (EIX 2026-07-30)
+        problems, heading_note = [], "; note: the model's heading is not verbatim in the exhibit (column order read from the exhibit)"
     if problems and model and model.get("eps") is not None:
         return None, f"{p_text}; {m_text}; model quote rejected: {'; '.join(problems)}"
     if agree(p, m):
-        return p, f"both readers {p:+.2f}"
+        return p, f"both readers {p:+.2f}{heading_note}"
     return None, f"{p_text}; {m_text}; readers disagree"
 
 

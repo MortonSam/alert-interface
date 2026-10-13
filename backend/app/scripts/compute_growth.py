@@ -70,7 +70,7 @@ async def run(argv: list[str]) -> int:
         # release EPS already stored by seed_release_eps, where its two readers (the pattern parser and the model) agreed: for a fiscal
         # fourth quarter it replaces the year total less three quarters, which drifts by cents as share counts change
         stored_release = {r[0]: (float(r[1]), r[2]) for r in (await s.execute(text(
-            "SELECT accession, diluted_eps_gaap, report_date FROM release_eps WHERE symbol = ANY(:s)"), {"s": symbols})).all()}
+            "SELECT accession, diluted_eps_gaap, report_date FROM release_eps WHERE symbol = ANY(:s) AND eps_basis = 'diluted'"), {"s": symbols})).all()}
     edgar = EdgarClient()
     tags_by_sector: dict[str, dict[str, int]] = {}
     rows_out: list[dict] = []

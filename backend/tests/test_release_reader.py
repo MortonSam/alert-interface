@@ -87,9 +87,12 @@ def test_a_row_of_several_figures_needs_the_column_read_and_it_must_follow_the_h
     assert R.verify_quote(ford, "EPS (Diluted) $ (0.01) $ (0.33) $ (0.32) $ 0.11 $ 0.30 $ 0.19", -0.01, "Second Quarter First Half 2025 2026 Change", 1) == [
         "the heading lists the prior year first but column 1 was read"]
     assert R.verify_quote(ford, "EPS (Diluted) $ (0.01) $ (0.33) $ (0.32) $ 0.11 $ 0.30 $ 0.19", -0.33, None, None) == ["a row of several figures without the column read"]
-    assert R.verify_quote(ford, "EPS (Diluted) $ (0.01) $ (0.33) $ (0.32) $ 0.11 $ 0.30 $ 0.19", -0.33, None, 1) == ["column 1 does not hold -0.33"]
+    assert R.verify_quote(ford, "EPS (Diluted) $ (0.01) $ (0.33) $ (0.32) $ 0.11 $ 0.30 $ 0.19", -0.33, None, 1) == ["column 1 does not hold -0.33", "the heading lists the prior year first but column 1 was read"]   # the exhibit's own heading
+    # the column order is the exhibit's own heading (prior-first here), not the model's paraphrase of it: column 2 is right
     assert R.verify_quote(ford, "EPS (Diluted) $ (0.01) $ (0.33)", -0.33, "Three Months Ended 2026 2025", 2) == [
-        "the heading is not verbatim in the exhibit", "the heading lists the current period first but column 2 was read"]
+        "the heading is not verbatim in the exhibit"]
+    assert R.verify_quote(ford, "EPS (Diluted) $ (0.01) $ (0.33)", -0.01, "Three Months Ended 2026 2025", 1) == [
+        "the heading is not verbatim in the exhibit", "the heading lists the prior year first but column 1 was read"]
     # a sentence with one figure needs no column
     assert R.verify_quote(EXHIBIT, "GAAP diluted earnings per share (EPS) increased 70% to $1.70.", 1.70) == []
     parsed = R.parse_model_json('{"eps": -0.33, "period_end": "2026-06-30", "quote": "EPS (Diluted) $ (0.01) $ (0.33)", "columns": "2025 2026", "column": "2"}')

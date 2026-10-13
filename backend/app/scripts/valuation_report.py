@@ -55,7 +55,7 @@ async def load_context(symbols: list[str], today: date) -> dict:
                 UNION ALL
                 SELECT t.symbol, hr.event_date FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
                 WHERE t.symbol = ANY(:s) AND hr.event_type = 'earnings' AND hr.event_date <= :t) x GROUP BY symbol"""), {"s": every, "t": today})).all())
-        rel_rows = (await s.execute(text("SELECT symbol, report_date, period_end, diluted_eps_gaap, accession, how FROM release_eps WHERE symbol = ANY(:s) ORDER BY report_date"), {"s": every})).all()
+        rel_rows = (await s.execute(text("SELECT symbol, report_date, period_end, diluted_eps_gaap, accession, how FROM release_eps WHERE symbol = ANY(:s) AND eps_basis = 'diluted' ORDER BY report_date"), {"s": every})).all()
         releases = {r[0]: {"report_date": r[1], "period_end": r[2], "eps": float(r[3]), "accession": r[4], "how": r[5]} for r in rel_rows}
         bars = {}
         for sym in symbols:

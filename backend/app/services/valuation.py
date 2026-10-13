@@ -118,6 +118,31 @@ _ITEM_NEAR = re.compile(r"related to|impact of|impacts? from|charges?\s+of|appro
 # a figure introduced by a comparison is the prior period's (introduced_by_comparison)
 _RANGE_AFTER = re.compile(r"^\s*(?:to|[–—-]|±)\s*\$?\s?\d", re.I)
 _CONTINUING_TABLE = re.compile(r"(?:diluted\s+)?(?:earnings|income|EPS)[^.]{0,60}?\(a\)\s+from\s+continuing\s+operations|per\s+share:?\s+continuing\s+operations\s+\$|\(a\)\s+from\s+continuing\s+operations", re.I)
+
+# Basic versus diluted (2026-10-13). A release that states diluted EPS anywhere has a diluted row, and a figure from a row labelled basic
+# alone is never its diluted EPS (states_diluted_eps, basic_only_label). A release with no diluted figure at all (ED's "Reported earnings per
+# share (basic)") is read by parse_release_basic_eps, and its figure is stored with its basis recorded as basic, never as diluted.
+_DILUTED_EPS = re.compile(r"\bdiluted\b[^.;]{0,80}?(?:per\s+(?:potential\s+)?(?:common\s+|ordinary\s+)?share|\bEPS\b)|(?:per\s+(?:common\s+|ordinary\s+)?share|\bEPS\b)[^.;]{0,80}?\bdiluted\b"
+                          r"|assuming\s+dilution", re.I)
+_BASIC_WORD = re.compile(r"\bbasic\b", re.I)
+_DILUTED_WORD = re.compile(r"\bdiluted\b|dilution", re.I)
+_BASIC_ROWS = (
+    re.compile(rf"(?:earnings|net\s+income|income)(?:\s+\(loss\))?\s+per\s+(?:common\s+)?share\s*\(basic\)[^$]{{0,120}}?\$\s?{_NUM}", re.I),     # ED's Attachment A
+    re.compile(rf"(?<![A-Za-z-])basic\s+(?:net\s+)?(?:earnings|income|loss)(?:\s+\(loss\))?\s+per\s+(?:common\s+)?share[^$\d]{{0,60}}?\$?\s?{_NUM}", re.I),
+    re.compile(rf"(?:earnings|net\s+income|income)(?:\s+\(loss\))?\s+per\s+(?:common\s+)?share\s*[—–:-]+\s*basic\s*\$?\s?{_NUM}", re.I),
+)
+
+
+def states_diluted_eps(text: str) -> bool:
+    """Pure: the release states a diluted per-share figure somewhere ("diluted" within one clause of "per share" or "EPS", or "assuming
+    dilution"). "Dilutive effect of issuance of common shares" (ED) is not one."""
+    return bool(_DILUTED_EPS.search(re.sub(r"\s+", " ", text or "")))
+
+
+def basic_only_label(label: str) -> bool:
+    """Pure: a row or sentence label that names basic and not diluted ("Reported earnings per share (basic)"; "Basic and diluted" is
+    both, so not basic alone)."""
+    return bool(_BASIC_WORD.search(label or "")) and not _DILUTED_WORD.search(label or "")
 _PERIOD_END = re.compile(rf"(?:(?:three|3)\s+months|\d{{1,2}}\s+weeks|quarter|qtr\.?|fiscal\s+quarter|quarterly\s+period)\s+ended\s+({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
 _QTR_HEADER = re.compile(rf"(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4])[^A-Za-z]{{0,40}}(?:[1-4](?:st|nd|rd|th)\s+Qtr\.?|Q[1-4]|Year\s+Ended|Twelve\s+Months)?[^A-Za-z]{{0,40}}(?:Year\s+Ended\s+)?({_MONTHS})\s+(\d{{1,2}}),\s+(\d{{4}})", re.I)
 
@@ -280,6 +305,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
         if d and (report_date is None or 0 <= (report_date - d).days <= PERIOD_END_MAX_DAYS):
             period_end = d
             break
+    has_diluted = states_diluted_eps(flat)
     for hit in _PROSE.finditer(flat):
         if _NON_GAAP_NEAR.search(_same_clause(flat, hit.start(), 12) + hit.group(0)):      # "Non-GAAP net income ... , or $3.63 per diluted share" (SMCI)
             continue
@@ -314,8 +340,38 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 continue        # a continuing-operations figure is not the whole GAAP diluted EPS; the net-earnings line of a diluted block is
             if "block" not in how and not assuming_total and _CONTINUING_TABLE.search(flat):
                 continue        # the release splits EPS into continuing and discontinued operations: only a stated total counts
+            if has_diluted and basic_only_label(_same_clause(flat, hit.start(), 12) + flat[hit.start():hit.start(1)]):
+                continue        # a row labelled basic alone, in a release that states diluted EPS, is never the diluted figure
             figure, how = _current_column(flat, hit, how)
             return {"eps": _num(figure), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end}
+    return None
+
+
+def parse_release_basic_eps(text: str, report_date: date | None = None) -> dict | None:
+    """Pure: the quarter's GAAP basic EPS from a release that states no diluted EPS at all (states_diluted_eps is false), read from a row
+    labelled basic ("Reported earnings per share (basic) ... (GAAP basis) $0.83 $0.68", ED 2026-08-06) with the same refusals as
+    parse_release_eps (non-GAAP, guidance, annual, continuing operations) and the column the heading names. Returns {eps, how, evidence,
+    period_end, basis: "basic"}, or None; always None when the release states diluted EPS."""
+    if not text or states_diluted_eps(text):
+        return None
+    flat = re.sub(r"\s+", " ", text)
+    period_end = None
+    for m in list(_PERIOD_END.finditer(flat)) + list(_QTR_HEADER.finditer(flat)):
+        d = _to_date(m)
+        if d and (report_date is None or 0 <= (report_date - d).days <= PERIOD_END_MAX_DAYS):
+            period_end = d
+            break
+    for pattern in _BASIC_ROWS:
+        for hit in pattern.finditer(flat):
+            # the label before the figure, joined: "(GAAP basis)" names GAAP, so only the non-GAAP words refuse it
+            if _NON_GAAP_NEAR.search(_same_clause(flat, hit.start(), 12) + flat[hit.start():hit.start(1)]):
+                continue
+            if _guidance_near(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end(), hit.start(1)):
+                continue
+            if "continuing operations" in flat[hit.start():hit.start(1)].lower() or _CONTINUING_TABLE.search(flat):
+                continue
+            figure, how = _current_column(flat, hit, "basic EPS row")
+            return {"eps": _num(figure), "how": how, "evidence": flat[max(0, hit.start() - 20):hit.end() + 40].strip(), "period_end": period_end, "basis": "basic"}
     return None
 
 

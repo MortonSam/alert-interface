@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 
-COLUMNS = "symbol, report_date, period_end, diluted_eps_gaap, how, accession, xbrl_eps, xbrl_form, difference, flagged, xbrl_note, evidence"
+COLUMNS = "symbol, report_date, period_end, diluted_eps_gaap, basic_eps_gaap, eps_basis, how, accession, xbrl_eps, xbrl_form, difference, flagged, xbrl_note, evidence"
 
 
 def xbrl_status(r) -> str:
@@ -28,11 +28,18 @@ def xbrl_status(r) -> str:
     return "awaiting XBRL"
 
 
+def eps_line(r) -> str:
+    """Pure: the figure with its basis: a basic figure (a release that states no diluted EPS) is never called diluted."""
+    if r.get("eps_basis") == "basic":
+        return f"GAAP basic EPS {float(r['basic_eps_gaap']):+.2f} (the release states no diluted EPS)"
+    return f"GAAP diluted EPS {float(r['diluted_eps_gaap']):+.2f}"
+
+
 def format_rows(rows) -> list[str]:
     """Pure: one line per row: ticker, report date, quarter end, figure, how, accession, XBRL status, then the evidence indented."""
     out = []
     for r in rows:
-        out.append(f"{r['symbol']:<6} {r['report_date']}  quarter ended {r['period_end'] or '?'}  GAAP diluted EPS {float(r['diluted_eps_gaap']):+.2f}  ({r['how']}; 8-K {r['accession']})  {xbrl_status(r)}")
+        out.append(f"{r['symbol']:<6} {r['report_date']}  quarter ended {r['period_end'] or '?'}  {eps_line(r)}  ({r['how']}; 8-K {r['accession']})  {xbrl_status(r)}")
         out.append(f"       evidence: {' '.join(str(r['evidence']).split())[:220]}")
     return out
 

@@ -29,7 +29,7 @@ from app.services.redact import redact
 from app.services.write_failures import WriteFailures
 from app.services.write_failures import WriteFailures
 from app.services.step_outcomes import record_step_fields
-from app.services.valuation import implausible, parse_release_eps, year_over_year_note
+from app.services.valuation import implausible, parse_release_basic_eps, parse_release_eps, states_diluted_eps, year_over_year_note
 from app.services import release_reader as R
 
 STEP_LABEL = "Release EPS (8-K exhibits)"
@@ -136,7 +136,8 @@ async def run(argv: list[str]) -> int:
                 for rec in recs:                              # a company may file more than one Item 2.02 8-K that week (DTE Gas beside DTE Energy)
                     texts = await edgar.filing_texts(cik, rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""))
                     for cand in exhibit_candidates(texts):   # a subsidiary's release may sit beside the issuer's; the first that reads wins
-                        hit = parse_release_eps(cand[1], report_date)
+                        # a release that states no diluted EPS at all is read for its basic figure, stored as basic (eps_basis)
+                        hit = parse_release_eps(cand[1], report_date) or parse_release_basic_eps(cand[1], report_date)
                         if hit:
                             ex = cand
                             break
@@ -175,19 +176,21 @@ async def run(argv: list[str]) -> int:
                     yoy_warnings.append(f"{sym} {report_date}: {yoy}")
                     print(f"  {sym} {report_date}: year-over-year warning: {yoy}")
                 parsed += 1
+                basis = "diluted" if states_diluted_eps(ex[1]) else "basic"     # no diluted figure anywhere in the release: never stored as diluted
                 cost = f"; model ${model['cost_usd']:.4f}, {model['input_tokens']} in / {model['output_tokens']} out" if model and model.get("cost_usd") is not None else ""
-                print(f"  {sym} {report_date}: GAAP diluted EPS {hit['eps']:+.2f} ({hit['how']}; quarter ended {hit['period_end']}) from {rec['accession']} {ex[0]}; {note}{cost}")
+                print(f"  {sym} {report_date}: GAAP {basis} EPS {hit['eps']:+.2f} ({hit['how']}; quarter ended {hit['period_end']}) from {rec['accession']} {ex[0]}; {note}{cost}")
                 print(f"      evidence: {hit['evidence'][:200]}")
-                results.append({"symbol": sym, "report_date": report_date.isoformat(), "eps": hit["eps"], "period_end": hit["period_end"].isoformat() if hit["period_end"] else None, "accession": rec["accession"]})
+                results.append({"symbol": sym, "report_date": report_date.isoformat(), "eps": hit["eps"], "basis": basis, "period_end": hit["period_end"].isoformat() if hit["period_end"] else None, "accession": rec["accession"]})
                 if write and model_client is not None:
                     try:
                         async with ScriptSessionLocal() as s:
                             await s.execute(text("""
-                                INSERT INTO release_eps (symbol, report_date, period_end, diluted_eps_gaap, how, evidence, accession, exhibit, filed_on)
-                                VALUES (:s, :d, :pe, :eps, :how, :ev, :acc, :ex, :filed)
+                                INSERT INTO release_eps (symbol, report_date, period_end, diluted_eps_gaap, basic_eps_gaap, eps_basis, how, evidence, accession, exhibit, filed_on)
+                                VALUES (:s, :d, :pe, :dil, :bas, :basis, :how, :ev, :acc, :ex, :filed)
                                 ON CONFLICT (symbol, report_date) DO UPDATE SET period_end = EXCLUDED.period_end, diluted_eps_gaap = EXCLUDED.diluted_eps_gaap,
+                                    basic_eps_gaap = EXCLUDED.basic_eps_gaap, eps_basis = EXCLUDED.eps_basis,
                                     how = EXCLUDED.how, evidence = EXCLUDED.evidence, accession = EXCLUDED.accession, exhibit = EXCLUDED.exhibit, filed_on = EXCLUDED.filed_on, parsed_at = now()"""),
-                                {"s": sym, "d": report_date, "pe": hit["period_end"], "eps": hit["eps"], "how": hit["how"][:64], "ev": hit["evidence"][:2000], "acc": rec["accession"], "ex": ex[0][:120],
+                                {"s": sym, "d": report_date, "pe": hit["period_end"], "dil": hit["eps"] if basis == "diluted" else None, "bas": hit["eps"] if basis == "basic" else None, "basis": basis, "how": hit["how"][:64], "ev": hit["evidence"][:2000], "acc": rec["accession"], "ex": ex[0][:120],
                                  "filed": date.fromisoformat(rec["filing_date"])})
                             await s.commit()
                         stored += 1

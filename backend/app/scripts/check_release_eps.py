@@ -59,7 +59,7 @@ async def run(recheck_flagged: bool = False) -> int:
     where = "flagged" if recheck_flagged else "(xbrl_checked_at IS NULL OR flagged)"
     async with ScriptSessionLocal() as s:
         rows = (await s.execute(text(f"""SELECT r.id, r.symbol, r.report_date, r.period_end, r.diluted_eps_gaap FROM release_eps r
-            JOIN tickers t ON t.symbol = r.symbol WHERE t.is_active AND ({where}) ORDER BY r.symbol"""))).all()   # a leaver's rows wait with the ticker
+            JOIN tickers t ON t.symbol = r.symbol WHERE t.is_active AND r.eps_basis = 'diluted' AND ({where}) ORDER BY r.symbol"""))).all()   # a leaver's rows wait with the ticker
     print(f"{STEP_LABEL}: {len(rows)} release figure(s) {'flagged, re-judged' if recheck_flagged else 'awaiting XBRL or flagged'}", flush=True)
     edgar = EdgarClient()
     checked = flagged = pending = not_comparable = 0

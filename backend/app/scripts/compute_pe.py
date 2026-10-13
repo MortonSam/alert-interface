@@ -76,7 +76,7 @@ async def run(argv: list[str]) -> int:
                 SELECT t.symbol, hr.event_date FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
                 WHERE t.symbol = ANY(:s) AND hr.event_type = 'earnings' AND hr.event_date <= :t) x GROUP BY symbol"""), {"s": symbols, "t": today})).all())
         releases = {r[0]: {"report_date": r[1], "period_end": r[2], "eps": float(r[3]), "accession": r[4]} for r in
-                    (await s.execute(text("SELECT DISTINCT ON (symbol) symbol, report_date, period_end, diluted_eps_gaap, accession FROM release_eps WHERE symbol = ANY(:s) ORDER BY symbol, report_date DESC"), {"s": symbols})).all()}
+                    (await s.execute(text("SELECT DISTINCT ON (symbol) symbol, report_date, period_end, diluted_eps_gaap, accession FROM release_eps WHERE symbol = ANY(:s) AND eps_basis = 'diluted' ORDER BY symbol, report_date DESC"), {"s": symbols})).all()}
         # recorded corporate actions: spin-offs (events.spin_off), actions recorded by record_corporate_action (events.other with
         # metadata.corporate_action) and rename-merges (ticker_aliases)
         # recorded splits, [(effective date, new-for-old ratio, recorded at)]: quarters and closes are restated across them (valuation.split_factor)
