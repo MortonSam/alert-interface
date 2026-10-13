@@ -3,6 +3,8 @@
 
     python3 scripts/push_window.py              # checks, then pushes origin main
     python3 scripts/push_window.py --check-only # the courier-window check alone, no tests, no push
+    python3 scripts/push_window.py --no-push    # every step, then stop before git push (the result to show before a go)
+    python3 scripts/push_window.py --ref=SHA    # push that commit of HEAD's history to main (git push origin SHA:main): an earlier deploy
 
 In order, each read by its exit code directly (never through a pipe): the no-push window (16:00 to 16:45 America/New_York on
 weekdays, when the chain courier is loading production), the full backend suite in the backend container, the full frontend
@@ -60,6 +62,11 @@ PUSH = ["git", "push", "origin", "main"]
 
 def push_command(argv: list[str]) -> list[str]:
     """Pure: `git push origin main`, or with --branch=NAME the current HEAD to origin NAME (a preview branch, never main)."""
+    ref = next((a.split("=", 1)[1] for a in argv if a.startswith("--ref=")), None)
+    if ref:
+        if not (7 <= len(ref) <= 40 and all(c in "0123456789abcdef" for c in ref)):
+            raise SystemExit(f"--ref={ref}: a commit SHA")
+        return ["git", "push", "origin", f"{ref}:main"]
     name = next((a.split("=", 1)[1] for a in argv if a.startswith("--branch=")), None)
     if not name:
         return PUSH
@@ -255,6 +262,9 @@ def main(argv: list[str]) -> int:
     if why:
         print(why, file=sys.stderr)
         return 1
+    if "--no-push" in argv:
+        print("--no-push: every step passed; nothing pushed")
+        return 0
     return _run(push_command(argv), ROOT)
 
 

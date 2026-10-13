@@ -67,6 +67,12 @@ class LaneTests(unittest.TestCase):
         self.assertEqual([name for name, _, _ in steps_for("frontend")], ["frontend tests", "frontend build"])
         self.assertEqual(steps_for("full"), STEPS)
 
+    def test_a_ref_pushes_that_commit_to_main_and_nothing_else(self):
+        self.assertEqual(push_command(["--ref=d03b2b7"]), ["git", "push", "origin", "d03b2b7:main"])
+        for bad in ("--ref=HEAD~4", "--ref=main", "--ref=abc", "--ref=d03b2b7;rm"):
+            with self.assertRaises(SystemExit):
+                push_command([bad])
+
     def test_a_preview_branch_pushes_head_to_that_branch_and_never_to_main(self):
         self.assertEqual(push_command([]), ["git", "push", "origin", "main"])
         self.assertEqual(push_command(["--branch=brand"]), ["git", "push", "origin", "HEAD:refs/heads/brand"])
