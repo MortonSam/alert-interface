@@ -77,7 +77,7 @@ def test_item_202_marks_earnings_unless_a_company_files_it_more_than_about_four_
     out = W.verdicts(tesla, stored, True, {"q244": True, "d244": False})
     assert out["d241"]["earnings"] is False and out["q244"] == {"filed": "2024-04-20", "earnings": True, "basis": "document"}
     assert "q247" not in out and len(out) == 4                                 # unread tonight: no verdict stored, no date used
-    assert W.WINDOW_VERSION == 4                                               # 3: two-year cadence; 4: symmetric spread
+    assert W.WINDOW_VERSION == 3                                               # 3: two-year cadence
 
 
 def test_the_window_stays_until_its_end_passes():
