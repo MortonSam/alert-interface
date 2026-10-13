@@ -60,11 +60,12 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Security records (Intrinio)",           ["python", "-m", "app.scripts.build_security_records", "--write"]),
     ("Price bars shadow (Intrinio)",          ["python", "-m", "app.scripts.shadow_price_bars"]),
     ("Refresh earnings calendar (Finnhub)",   ["python", "-m", "app.scripts.refresh_earnings_calendar"]),
-    # the companies' own words: every new 8-K exhibit and ingested release read for a results date; writes only with CONFIRMATION_READER_WRITE=true
+    ("EPS actuals (Finnhub)",          ["python", "-m", "app.scripts.seed_eps_actuals"]),
+    # after the calendar (its dates are what the reader confirms or contradicts) and after EPS actuals, which reads only past
+    # events and keeps its place right after the calendar; the companies' own words: every new 8-K exhibit and ingested release read for a results date; writes only with CONFIRMATION_READER_WRITE=true
     ("Report date confirmations (reader)", ["python", "-m", "app.scripts.confirm_report_dates", "--write"]),
     # a window from the company's own past report dates in SEC filings, for every name no announcement confirmed (services/report_windows)
     ("Expected report windows (SEC filings)", ["python", "-m", "app.scripts.expected_report_windows"]),
-    ("EPS actuals (Finnhub)",          ["python", "-m", "app.scripts.seed_eps_actuals"]),
     # GAAP diluted EPS from the earnings release for quarters XBRL does not hold yet, then checked against XBRL once filed
     ("Release EPS (8-K exhibits)",     ["python", "-m", "app.scripts.seed_release_eps", "--due", "--write"]),
     ("Release EPS vs XBRL",            ["python", "-m", "app.scripts.check_release_eps"]),

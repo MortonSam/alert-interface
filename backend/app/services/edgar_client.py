@@ -201,6 +201,37 @@ class EdgarClient:
             await asyncio.sleep(0.12)
         return records
 
+    async def get_8k_records_since(self, cik: str, since: str) -> tuple[list[dict], str | None]:
+        """The 8-Ks filed on or after `since` (ISO date) as get_all_8k_records shapes them, and the earliest filing date the
+        pages read reach. One submissions request; an older page is read only while the pages so far stop short of `since`, so
+        a company whose recent block already reaches back that far costs one request (paced like every SEC read)."""
+        subs = await self.get_submissions(cik)
+        filings = subs.get("filings", {})
+        blocks = [filings.get("recent", {})]
+        reach = min(blocks[0]["filingDate"]) if blocks[0].get("filingDate") else None
+        for file_ref in filings.get("files", []):
+            if reach is not None and reach <= since:
+                break
+            name = file_ref.get("name", "")
+            if not name or (file_ref.get("filingTo") or "9999") < since:
+                continue
+            resp = await self._paced_get(self._client, f"/submissions/{name}")
+            resp.raise_for_status()
+            page = resp.json()
+            blocks.append(page)
+            dates = page.get("filingDate") or []
+            if dates:
+                reach = min(reach, min(dates)) if reach else min(dates)
+        records = []
+        for b in blocks:
+            forms = b.get("form", [])
+            n = len(forms)
+            for form, fd, at, it, acc, doc in zip(forms, b.get("filingDate", []), b.get("acceptanceDateTime", []), b.get("items") or [""] * n,
+                                                  b.get("accessionNumber") or [""] * n, b.get("primaryDocument") or [""] * n):
+                if form == "8-K" and fd >= since:
+                    records.append({"filing_date": fd, "acceptance": at, "items": it or "", "accession": acc or "", "primary_document": doc or ""})
+        return records, reach
+
     async def get_all_8k_filings(self, cik: str) -> list[tuple[str, str, str]]:
         """Every 8-K for a CIK as (filing_date, acceptanceDateTime, items)."""
         return [(r["filing_date"], r["acceptance"], r["items"]) for r in await self.get_all_8k_records(cik)]

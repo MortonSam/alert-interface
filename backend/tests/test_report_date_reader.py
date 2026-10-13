@@ -84,4 +84,5 @@ def test_the_calendar_note_reads_as_the_page_expects_and_the_write_is_double_gat
     assert classify(date(2027, 4, 28), stored)[0] == "new"
     from app.scripts import refresh
     labels = [l for l, _ in refresh.STEPS]
-    assert STEP_LABEL in labels and labels.index(STEP_LABEL) == labels.index("Refresh earnings calendar (Finnhub)") + 1
+    # after the calendar whose dates it confirms; EPS actuals keeps the slot right after the calendar (test_eps_actuals)
+    assert STEP_LABEL in labels and labels.index(STEP_LABEL) > labels.index("Refresh earnings calendar (Finnhub)")

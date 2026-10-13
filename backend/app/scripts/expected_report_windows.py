@@ -1,9 +1,12 @@
 """Nightly: an expected report window per active ticker from its own past report dates in SEC filings (services/report_windows).
 
-For each active ticker: the 8-K Item 2.02 filings of the last three years (EdgarClient, cached submissions), each judged once by
-the per-share rule (services/earnings_release.is_earnings_release; the verdict is kept under release_filing_verdict:{accession} so
-a filing is read from EDGAR once), then the window. Stored under expected_report_window:{SYM}. Tickers are visited soonest-expected
-first and the run stops at BUDGET_SECONDS; the next night continues. --dry-run computes and prints, writing nothing.
+For each active ticker: its 8-K Item 2.02 filings of the last three years from the SEC submissions index (one request; older
+index pages only until three years are covered). A company filing about four a year is taken at the item's word; one filing
+more than AMBIGUOUS_PER_YEAR has each filing's documents read for per-share results. Every filing's verdict is stored per company
+(release_filing_verdicts:{SYM}), so a night reads documents only for filings it has not judged. Stored under
+expected_report_window:{SYM}. Tickers are visited soonest-expected first, each under TICKER_TIMEOUT_S, and the run stops at
+BUDGET_SECONDS; the next night continues. SEC reads are paced at 8 a second (edgar_client). --dry-run computes and prints,
+writing nothing.
 
     python -m app.scripts.expected_report_windows --dry-run --symbols=TSLA,JPM
     python -m app.scripts.expected_report_windows                  # the nightly step
@@ -15,7 +18,7 @@ import json
 import os
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import text
 
@@ -29,7 +32,7 @@ from app.services.system_metadata_service import get_value, set_value
 
 STEP_LABEL = "Expected report windows (SEC filings)"
 BUDGET_SECONDS = 1200
-VERDICT_KEY = "release_filing_verdict:{accession}"
+TICKER_TIMEOUT_S = 120          # one company's index pages and document reads, before the run moves on
 
 
 def _arg(argv: list[str], name: str) -> str | None:
@@ -45,32 +48,37 @@ async def order(only: set[str] | None) -> list[str]:
     return [r[0] for r in rows if not only or r[0] in only]
 
 
-async def verdict(edgar: EdgarClient, cik: str, accession: str, cache: dict, write: bool) -> bool:
-    key = VERDICT_KEY.format(accession=accession)
-    if key in cache:
-        return cache[key]
-    async with ScriptSessionLocal() as s:
-        raw = await get_value(s, key)
-    if raw in ("true", "false"):
-        cache[key] = raw == "true"
-        return cache[key]
-    ok = await is_earnings_release(edgar, cik, accession)
-    cache[key] = ok
-    if write:
-        async with ScriptSessionLocal() as s:
-            await set_value(s, key, "true" if ok else "false")
-            await s.commit()
-    return ok
-
-
-async def window_for(edgar: EdgarClient, sym: str, today: date, cache: dict, write: bool) -> tuple[W.Window | None, str]:
+async def window_for(edgar: EdgarClient, sym: str, today: date, write: bool, stats: dict) -> tuple[W.Window | None, str]:
     cik = await edgar.get_cik(sym)
     if not cik:
         return None, "no CIK"
-    filings = W.release_filing_dates(await edgar.get_all_8k_records(cik), today)
-    dates = [date.fromisoformat(f["filing_date"]) for f in filings if f["accession"] and await verdict(edgar, cik, f["accession"], cache, write)]
+    since = (today - timedelta(days=W.HISTORY_DAYS)).isoformat()
+    records, reach = await edgar.get_8k_records_since(cik, since)
+    filings = W.release_filing_dates(records, today)
+    async with ScriptSessionLocal() as s:
+        raw = await get_value(s, W.VERDICTS_KEY.format(sym=sym))
+    try:
+        stored = json.loads(raw) if raw else {}
+    except ValueError:
+        stored = {}
+    ambiguous = W.is_ambiguous(filings, reach, today)
+    read: dict[str, bool] = {}
+    for f in W.to_read(filings, stored, ambiguous):
+        try:
+            read[f["accession"]] = await is_earnings_release(edgar, cik, f["accession"])
+        except Exception as exc:
+            stats["read_errors"] += 1
+            print(f"  {sym}: {f['accession']} unread ({redact(exc)[:80]}); judged the next night", flush=True)
+    stats["documents_judged"] += len(read)
+    judged = W.verdicts(filings, stored, ambiguous, read)
+    if write and judged != stored:
+        async with ScriptSessionLocal() as s:
+            await set_value(s, W.VERDICTS_KEY.format(sym=sym), json.dumps(judged, sort_keys=True))
+            await s.commit()
+    dates = [date.fromisoformat(v["filed"]) for v in judged.values() if v["earnings"]]
     w = W.expected_window(sym, dates, today, datetime.now(timezone.utc))
-    return w, f"{len(filings)} Item 2.02 filing(s), {len(dates)} with per-share results"
+    how = f"{len(filings)} Item 2.02 filing(s) since {reach or '?'}, " + (f"ambiguous: {len(dates)} with per-share results ({len(read)} read tonight)" if ambiguous else "taken at the item")
+    return w, how
 
 
 async def main(argv: list[str]) -> int:
@@ -80,7 +88,7 @@ async def main(argv: list[str]) -> int:
     today = date.today()
     symbols = await order(only)
     edgar = EdgarClient()
-    cache: dict = {}
+    stats = {"documents_judged": 0, "read_errors": 0}
     done, windows, none, errors = 0, {}, {}, []
     t0 = time.time()
     try:
@@ -89,14 +97,18 @@ async def main(argv: list[str]) -> int:
                 print(f"  budget of {budget:.0f}s reached after {done} ticker(s); the rest wait for the next night", flush=True)
                 break
             try:
-                w, how = await window_for(edgar, sym, today, cache, not dry)
-            except Exception as exc:
-                errors.append(f"{sym}: {redact(exc)[:120]}")
+                w, how = await asyncio.wait_for(window_for(edgar, sym, today, not dry, stats), TICKER_TIMEOUT_S)
+            except Exception as exc:          # a timeout included: the ticker waits for the next night
+                errors.append(f"{sym}: {type(exc).__name__} {redact(exc)[:120]}")
                 continue
             done += 1
             if w is None:
                 none[sym] = how
                 print(f"  {sym}: no window ({how})", flush=True)
+                if not dry:              # a window an earlier night stored no longer holds: absent, never a stale projection
+                    async with ScriptSessionLocal() as s:
+                        await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": W.KEY.format(sym=sym)})
+                        await s.commit()
                 continue
             windows[sym] = w.as_record()
             print(f"  {sym}: expected {w.start} to {w.end} (centre {w.center}, {w.pairs} pairs; {how})", flush=True)
@@ -106,7 +118,7 @@ async def main(argv: list[str]) -> int:
                     await s.commit()
     finally:
         await edgar.close()
-    summary = {"tickers": len(symbols), "computed": done, "windows": len(windows), "no_window": len(none), "errors": len(errors), "seconds": round(time.time() - t0),
+    summary = {"tickers": len(symbols), "computed": done, "windows": len(windows), "no_window": len(none), "errors": len(errors), **stats, "seconds": round(time.time() - t0),
                "version": W.WINDOW_VERSION, "dry_run": dry}
     print(json.dumps(summary))
     if not dry:
