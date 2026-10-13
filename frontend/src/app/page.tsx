@@ -20,14 +20,14 @@ export default async function Home() {
     <main>
       <style>{`
         .open-h1 {
-          font-size: clamp(26px, 7.4vw, 44px);    /* the three sentences wrap; under the heron on a phone */
+          font-size: clamp(30px, 9.2vw, 52px);    /* the one sentence in two or three lines under the heron on a phone */
           text-wrap: balance;
           line-height: 1.1;
           letter-spacing: -.01em;
         }
         .open-heron { width: min(58vw, 260px); height: auto; }
         @media (min-width: 1024px) {
-          .open-h1 { font-size: clamp(34px, min(3.5vw, 6.2svh), 66px); }   /* beside the heron: the full headline, subhead and buttons fit the screen */
+          .open-h1 { font-size: clamp(40px, min(4.6vw, 7.6svh), 84px); }   /* beside the heron: the headline, subhead and buttons fit the screen */
           .open-heron { width: 100%; max-width: 760px; max-height: 70svh; object-fit: contain; }
         }
         /* the entrance: the heron settles first, then the headline reveals, then the rest */
@@ -63,9 +63,8 @@ export default async function Home() {
             <img src={BRAND.heron} alt="" aria-hidden="true" className="open-heron" />
           </div>
           <div className="text-left">
-            <h1 className="open-h1 open-line font-display font-semibold text-foreground">
-              Trading apps teach you to tap. Pro tools assume you know.{" "}
-              <span className="text-primary">Alert Interface teaches you what Wall Street knows.</span>
+            <h1 className="open-h1 open-line font-display font-semibold text-primary">
+              Alert Interface teaches you what Wall Street knows.
             </h1>
             <div className="open-rest">
               <p className="text-foreground/70 text-lg mt-6 max-w-[34em]">
@@ -93,7 +92,22 @@ export default async function Home() {
         <SiteCounters initial={initial} />
       </section>
 
-        {/* ── 3. The Challenge ── */}
+        {/* ── 3. The gap: no label, styled as The Challenge ── */}
+        <section className="screen-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
+          <div className="text-center">
+            <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
+              Trading apps throw you confetti. Terminals hand you a $30,000 bill.
+            </h2>
+            <p className="text-sm text-muted-foreground mt-6 max-w-2xl mx-auto">
+              Most trading apps are built to keep you trading, with confetti for every order and a buy
+              button on every screen. The terminals professionals use show you everything, but
+              they&#39;re priced for firms and assume you already know how to read them. Everyone in
+              between is left to piece it together on their own.
+            </p>
+          </div>
+        </section>
+
+        {/* ── 4. The Challenge ── */}
         <section className="screen-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
@@ -103,15 +117,16 @@ export default async function Home() {
               Six tabs. No answers.
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-2xl mx-auto">
-              Most people research the way there&#39;s always been to research: Yahoo for the
-              numbers, Reddit for opinions they can&#39;t trust, YouTube to learn
-              what a P/E is, their broker for options they don&#39;t understand, and
-              a chatbot that makes things up because nothing checks it.
+              Most investors still research across six tabs, with Yahoo for the numbers, Reddit for
+              opinions they can&#39;t trust, YouTube to learn what a P/E is, the news to find out why a
+              stock moved, their broker for options they don&#39;t understand, and a chatbot that makes
+              things up because nothing checks it. None of them talk to each other, and none of them
+              check each other&#39;s work.
             </p>
           </div>
         </section>
 
-        {/* ── 4. The Solution ──────────────────────────────────── */}
+        {/* ── 5. The Solution ──────────────────────────────────── */}
         <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
@@ -156,7 +171,7 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* ── 5. The Analyst ───────────────────────────────────── */}
+        {/* ── 6. The Analyst ───────────────────────────────────── */}
         <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <IvyMark size={48} className="mb-5" />
@@ -185,10 +200,10 @@ export default async function Home() {
             </div>
           </div>
         </section>
-      {/* ── 6. See it in action: the latest verified note (the component renders nothing when none is current) ── */}
+      {/* ── 7. See it in action: the latest verified note (the component renders nothing when none is current) ── */}
       <LatestVerifiedNote className="screen-section flex flex-col justify-center" />
 
-        {/* ── 7. Market grid ───────────────────────────────────── */}
+        {/* ── 8. Market grid ───────────────────────────────────── */}
           <section id="market" className="screen-section max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
@@ -204,7 +219,7 @@ export default async function Home() {
             <TickerGrid />
           </section>
 
-        {/* ── 8. Closing CTA ───────────────────────────────────── */}
+        {/* ── 9. Closing CTA ───────────────────────────────────── */}
           <section className="screen-section flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 py-12 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point

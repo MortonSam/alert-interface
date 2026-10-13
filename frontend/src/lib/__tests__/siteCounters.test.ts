@@ -50,7 +50,7 @@ describe("the counters row never overlaps", () => {
     const layout = read("app/layout.tsx");
     expect(layout).toContain("min-h-[3.25rem]");                                      // the header height the calc subtracts
     expect(layout).toMatch(/<header className="[^"]*border-b[^"]*sticky top-0/);      // and its one-pixel border
-    const challenge = page.slice(page.indexOf("3. The Challenge"), page.indexOf("The challenge"));
+    const challenge = page.slice(page.indexOf("4. The Challenge"), page.indexOf("The challenge"));
     expect(challenge).not.toContain("min-h-[100svh]");                              // normal section spacing after the counters
     expect(challenge).toContain("py-12 sm:py-0");                                    // phone spacing (gaps near 96px), a full screen from 640px up
     expect(numberWidth("117,310", 60)).toBeCloseTo((6 * 0.631 + 0.241) * 60, 5);
