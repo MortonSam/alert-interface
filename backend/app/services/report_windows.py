@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 
-WINDOW_VERSION = 2            # 2: report dates from the submissions index, documents read only for ambiguous companies (1 read every filing)
+WINDOW_VERSION = 3            # 3: a report two years after a report on the same date is on cadence (2: submissions index; 1 read every filing)
 WINDOW_REPORTS = 8            # the last eight reports' year-over-year shifts set the window
 MIN_PAIRS = 3                 # fewer year-over-year pairs than this: no window
 YEAR_DAYS = 364               # a year forward on the same weekday
@@ -128,7 +128,9 @@ def expected_window(symbol: str, report_dates: list[date], today: date, now: dat
         return None
     shifts = [(d - e).days - YEAR_DAYS for d, e in pairs]
     succeeded = {e for _, e in yoy_pairs(ds)}
-    on_cadence = {d for d, _ in regular}                       # only a report with a regular year-earlier pair projects the next one
+    # only a report on the cadence projects the next one: a regular year-earlier pair, or a report two years earlier on the same
+    # date when the year-earlier one is missing or stray (HAL's Q3 2024 release went unfiled under 2.02; KIM's Oct 2024 likewise)
+    on_cadence = {d for d, _ in regular} | {d for d in ds if any(abs((d - e).days - 2 * YEAR_DAYS) <= REGULAR_SHIFT_DAYS for e in ds)}
     ds = [e for e in ds if e in on_cadence]
     grace = min(max(shifts), OPEN_AFTER_CENTRE_DAYS)          # a stray filing a year ago never holds a window open for weeks
     open_ = sorted(e + timedelta(days=YEAR_DAYS) for e in ds if e not in succeeded and e + timedelta(days=YEAR_DAYS + grace) >= today)
