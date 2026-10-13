@@ -1660,7 +1660,7 @@ async def check_live_quote_sanity(session) -> CheckResult:
     closes = {r.symbol: float(r.close) for r in (await session.execute(text(
         "SELECT DISTINCT ON (symbol) symbol, close FROM price_bars_shadow WHERE close IS NOT NULL ORDER BY symbol, date DESC"))).all()}
     acted = set((await session.execute(text("""SELECT t.symbol FROM events e JOIN tickers t ON t.id = e.ticker_id
-        WHERE (e.event_type = 'split' OR e.metadata ? 'corporate_action') AND e.event_date >= CURRENT_DATE - :d"""), {"d": LIVE_ACTION_LOOKBACK_DAYS})).scalars().all())
+        WHERE (e.event_type = 'split' OR e.metadata ? 'corporate_action') AND e.event_date >= CURRENT_DATE - CAST(:d AS integer)"""), {"d": int(LIVE_ACTION_LOOKBACK_DAYS)})).scalars().all())
     bad = live_price_outliers(quotes, closes, acted)
     if bad:
         return CheckResult("live_quote_sanity", ERROR, f"{len(bad)} delayed quote(s) more than {LIVE_SANITY_PCT:.0f}% from the last stored close with no corporate action", bad[:20])
@@ -2310,7 +2310,7 @@ async def check_put_call_fresh(session) -> CheckResult:
     with_chain = (await session.execute(text("""SELECT count(DISTINCT split_part(key, ':', 2)) FROM system_metadata m JOIN tickers t ON t.symbol = split_part(m.key, ':', 2)
         WHERE m.key LIKE 'intrinio_chain:%' AND t.is_active AND m.value::json->>'chain_last_trade' = :d"""), {"d": newest})).scalar() or 0
     rows = (await session.execute(text("""SELECT count(*) FROM put_call_snapshots p JOIN tickers t ON t.symbol = p.symbol
-        WHERE t.is_active AND p.snapshot_date = :d AND p.computation_version = :v"""), {"d": newest[:10], "v": PUT_CALL_COMPUTATION_VERSION})).scalar() or 0
+        WHERE t.is_active AND p.snapshot_date = :d AND p.computation_version = :v"""), {"d": date.fromisoformat(newest[:10]), "v": PUT_CALL_COMPUTATION_VERSION})).scalar() or 0
     if with_chain == 0:
         return CheckResult("put_call_fresh", WARN, f"No active ticker has an Intrinio chain dated {newest}")
     share = rows / with_chain
