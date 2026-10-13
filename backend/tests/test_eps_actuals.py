@@ -46,17 +46,29 @@ def test_the_lookback_and_the_stale_rule_count_sessions():
     assert labels.index("EPS actuals (Finnhub)") == labels.index("Refresh earnings calendar (Finnhub)") + 1
 
 
+FROZEN_TODAY = date(2021, 6, 15)       # before the first stored earnings event (2021-10-26), so the check's 40-row list holds only the seeded one
+SEEDED_REPORT = date(2021, 6, 4)       # seven sessions before FROZEN_TODAY: stale
+
+
+class _FrozenDate(date):
+    @classmethod
+    def today(cls):
+        return FROZEN_TODAY
+
+
 @pytest.mark.asyncio
-async def test_validate_warns_on_a_reported_event_without_its_eps():
+async def test_validate_warns_on_a_reported_event_without_its_eps(monkeypatch):
+    import app.scripts.validate_data as vd
+    monkeypatch.setattr(vd, "date", _FrozenDate)
     sym = "ZZEPS"
     try:
         async with ScriptSessionLocal() as s:
             await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active) VALUES (gen_random_uuid(), :s, 'EPS test', true)"), {"s": sym})
             await s.execute(text("""INSERT INTO events (id, ticker_id, event_type, event_date, title, source, is_confirmed, metadata, created_at, updated_at)
-                                    SELECT gen_random_uuid(), id, 'earnings', CURRENT_DATE - 10, 'x', 'finnhub', true, '{}', now(), now() FROM tickers WHERE symbol = :s"""), {"s": sym})
+                                    SELECT gen_random_uuid(), id, 'earnings', :d, 'x', 'finnhub', true, '{}', now(), now() FROM tickers WHERE symbol = :s"""), {"s": sym, "d": SEEDED_REPORT})
             await s.commit()
         r = (await run_checks([check_eps_actuals_fresh]))[0]
-        assert r.level == WARN and any(row.startswith(f"{sym} reported ") for row in r.rows)
+        assert r.level == WARN and f"{sym} reported {SEEDED_REPORT.isoformat()}" in r.rows
         async with ScriptSessionLocal() as s:
             await s.execute(text("UPDATE events SET eps_actual = 1.0, eps_estimate = 0.9, eps_source = 'finnhub', eps_fetched_at = now() WHERE ticker_id = (SELECT id FROM tickers WHERE symbol = :s)"), {"s": sym})
             await s.commit()
