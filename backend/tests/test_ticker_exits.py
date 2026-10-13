@@ -52,7 +52,8 @@ def test_the_exits_plan_sets_membership_and_reason_and_holds_what_no_filing_date
     assert plans["EA"]["alias"] is None and plans["EA"]["set"]["inactive_since"] == date(2026, 8, 4) and plans["EA"]["held"] == []
     assert plans["EA"]["line"] == "Electronic Arts was taken private on August 4, 2026, and its stock no longer trades."
     assert plans["AVB"]["alias"]["symbol"] == "VMRK" and plans["AVB"]["alias"]["renamed_on"] == date(2026, 8, 17) and plans["AVB"]["line"] is None
-    assert plans["SATS"]["alias"] is None and plans["SATS"]["set"]["inactive_since"] is None and len(plans["SATS"]["held"]) == 2
+    assert plans["SATS"]["alias"]["symbol"] == "ECHO" and plans["SATS"]["alias"]["renamed_on"] == date(2026, 6, 25) and plans["SATS"]["held"] == []
+    assert plans["SATS"]["set"]["inactive_since"] == date(2026, 6, 25) and "0001415404-26-000030" in plans["SATS"]["set"]["inactive_reason"]
     # a successor that is not stored, or not active, gets no alias
     gone = record_ticker_exits.plan_rows(stored, {})
     assert all(p["alias"] is None for p in gone) and any("not an active stored ticker" in h for p in gone for h in p["held"])

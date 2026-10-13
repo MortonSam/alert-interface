@@ -2,8 +2,8 @@
 when a successor ticker is stored (the old symbol then redirects to it). Dry run by default, in a READ ONLY transaction; --write applies.
 
 EXITS holds only what the filings state, each fact with its accession number. A date no filing states stays None and is reported
-as held: EchoStar's 8-K covers read SATS on 2026-06-18 and ECHO from 2026-06-25, but no filing names the day the symbol changed,
-so SATS gets no inactive_since and no alias (ticker_aliases.renamed_on is required) until the date is settled.
+as held. No EchoStar filing names the day SATS became ECHO; SATS is dated 2026-06-25, the first filing listing ECHO (Sam's rule,
+2026-10-13), and its reason says so.
 
     python -m app.scripts.record_ticker_exits [--url postgresql+asyncpg://...]
     python -m app.scripts.record_ticker_exits --write
@@ -31,9 +31,10 @@ EXITS = [
     {"symbol": "AVB", "since": date(2026, 8, 17), "successor": "VMRK",
      "reason": "merged into VMRK on 2026-08-17: each AvalonBay share became 2.793 shares of Vivmark Residential (formerly Equity Residential); "
                "NYSE halted trading before the open on 2026-08-17 (8-K 0001104659-26-097833; Form 25 0000876661-26-000689)"},
-    {"symbol": "SATS", "since": None, "successor": "ECHO",
-     "reason": "ticker changed to ECHO: EchoStar Corporation (CIK 1415404) still trades on Nasdaq; its 8-K covers list SATS on 2026-06-18 "
-               "(0001415404-26-000027) and ECHO from 2026-06-25 (0001415404-26-000030); no Form 25 or Form 15 was filed"},
+    {"symbol": "SATS", "since": date(2026, 6, 25), "successor": "ECHO",
+     "reason": "ticker changed to ECHO: EchoStar Corporation (CIK 1415404) still trades on Nasdaq; dated 2026-06-25, the first SEC filing "
+               "listing ECHO (8-K 0001415404-26-000030), as no filing names the day of the change (the 8-K of 2026-06-18, "
+               "0001415404-26-000027, still lists SATS); no Form 25 or Form 15 was filed"},
 ]
 
 
