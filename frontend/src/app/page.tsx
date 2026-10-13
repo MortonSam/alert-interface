@@ -57,7 +57,7 @@ export default async function Home() {
       {/* ── 1. The opening: the heron large on the left facing the words, the headline, subhead and buttons on its right; on a
              phone the heron sits above the headline, left-aligned. Nothing else on the screen but a quiet scroll cue. ── */}
       <section className="screen-section relative flex flex-col bg-background">
-        <div className="flex-1 grid items-center max-w-[88rem] w-full mx-auto px-4 sm:px-8 pt-8 pb-16 lg:py-0 gap-y-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-x-14">
+        <div className="flex-1 grid items-center max-w-[88rem] w-full mx-auto px-4 sm:px-8 pt-8 pb-24 lg:py-0 gap-y-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-x-14">
           <div className="flex justify-start lg:justify-end">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={BRAND.heron} alt="" aria-hidden="true" className="open-heron" />
@@ -82,18 +82,18 @@ export default async function Home() {
             </div>
           </div>
         </div>
-        <p className="open-cue absolute inset-x-0 bottom-0 text-center pb-6 sm:pb-8 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
+        <p className="open-cue absolute inset-x-0 bottom-0 text-center pb-12 sm:pb-20 font-mono text-[11px] uppercase tracking-[.16em] text-muted-foreground">
           scroll to explore ↓
         </p>
       </section>
 
-      {/* ── 2. The counts: four live numbers from stored tables, on their own screen. ── */}
-      <section className="screen-section px-4 sm:px-6 py-12 sm:py-0 flex items-center justify-center">
+      {/* ── 2. The counts: four live numbers from stored tables. ── */}
+      <section className="home-break px-4 sm:px-6 flex items-center justify-center">
         <SiteCounters initial={initial} />
       </section>
 
         {/* ── 3. The gap: no label, styled as The Challenge ── */}
-        <section className="screen-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
+        <section className="home-break flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
               Trading apps throw you confetti. Terminals hand you a $30,000 bill.
@@ -108,7 +108,7 @@ export default async function Home() {
         </section>
 
         {/* ── 4. The Challenge ── */}
-        <section className="screen-section flex items-center justify-center px-4 sm:px-8 py-12 sm:py-0">
+        <section className="home-break flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The challenge
@@ -127,7 +127,7 @@ export default async function Home() {
         </section>
 
         {/* ── 5. The Solution ──────────────────────────────────── */}
-        <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
+        <section className="home-break flex items-center justify-center px-4 sm:px-8">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
@@ -157,7 +157,7 @@ export default async function Home() {
                   company, not a generic textbook definition.
                 </p>
               </div>
-              <div className="border-t border-border pt-4 pb-5">
+              <div className="border-t border-border pt-4">
                 <h3 className="font-display text-[15px] font-bold text-foreground">
                   Claims you can verify
                 </h3>
@@ -172,9 +172,9 @@ export default async function Home() {
         </section>
 
         {/* ── 6. The Analyst ───────────────────────────────────── */}
-        <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
+        <section className="home-break flex items-center justify-center px-4 sm:px-8">
           <div className="text-center">
-            <IvyMark size={48} className="mb-5" />
+            <div className="flex justify-center mb-5"><IvyMark size={48} /></div>
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
             </p>
@@ -201,10 +201,10 @@ export default async function Home() {
           </div>
         </section>
       {/* ── 7. See it in action: the latest verified note (the component renders nothing when none is current) ── */}
-      <LatestVerifiedNote className="screen-section flex flex-col justify-center" />
+      <LatestVerifiedNote className="home-break" />
 
         {/* ── 8. Market grid ───────────────────────────────────── */}
-          <section id="market" className="screen-section max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
+          <section id="market" className="home-break max-w-7xl mx-auto px-4 sm:px-8">
             <div className="text-center mb-12">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Start anywhere
@@ -220,7 +220,7 @@ export default async function Home() {
           </section>
 
         {/* ── 9. Closing CTA ───────────────────────────────────── */}
-          <section className="screen-section flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 py-12 text-center">
+          <section className="home-break flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-8 text-center">
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The point
             </p>

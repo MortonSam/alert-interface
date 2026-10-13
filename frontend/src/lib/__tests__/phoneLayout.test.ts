@@ -15,6 +15,22 @@ describe("the home page on a phone", () => {
       expect(s, s).not.toMatch(/(^|[" ])py-(2[0-9]|1[3-9])\b/);         // phone padding at most py-12 (48px a side)
     }
   });
+  it("every section break is one gap: the sections after the opening, the counters included, carry .home-break and no padding of their own", () => {
+    const home = read("app/page.tsx");
+    const sections = home.match(/<section [^>]*className="[^"]*"/g) ?? [];
+    for (const s of sections.slice(1)) {
+      expect(s, s).toContain("home-break");
+      expect(s, s).not.toMatch(/(^|[" ])(sm:|lg:)?py-/);
+    }
+    expect(home.match(/screen-section/g)).toHaveLength(1);                            // only the opening fills a screen from 640px up
+    expect(home).toContain("pb-12 sm:pb-20 font-mono");                                // the scroll cue: half a break (48px, 80px) above the opening's bottom
+    expect(home).toContain('<LatestVerifiedNote className="home-break" />');
+    expect(read("components/LatestVerifiedNote.tsx")).not.toMatch(/<section className=\{`[^`]*py-/);
+    const css = read("app/globals.css");
+    expect(css).toContain(":root { --home-break: 96px; }");
+    expect(css).toContain("@media (min-width: 640px) { :root { --home-break: 160px; } }");
+    expect(css).toContain("main .home-break { padding-block: calc(var(--home-break) / 2); }");
+  });
   it("the opening: the heron first (above the headline on a phone, on the left from 1024px), one section per screen from 640px up", () => {
     const home = read("app/page.tsx");
     expect(home).toContain('<section className="screen-section relative flex flex-col bg-background">');
