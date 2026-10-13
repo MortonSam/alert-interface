@@ -17,6 +17,7 @@ import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from 
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, notFound } from "next/navigation";
+import { NoLongerTrades } from "@/components/ticker/NoLongerTrades";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
@@ -1862,6 +1863,8 @@ export default function TickerPage() {
   }
 
   if (!ticker) return null;
+
+  if (ticker.exit) return <NoLongerTrades ticker={ticker} exit={ticker.exit} />;
 
   return (
     <main className="min-h-screen p-4 sm:p-8">

@@ -8,7 +8,7 @@ from statistics import mean
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
@@ -2167,7 +2167,22 @@ async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) 
     from app.services.pending_deals import deal_for, note_for
     deal = await deal_for(db, sym)
     r.deal_note = note_for(deal) if deal else None
+    if not ticker.is_active:
+        r.exit = await ticker_exit(db, ticker)
     return r
+
+
+async def ticker_exit(db: AsyncSession, ticker: Ticker):
+    """The "no longer trades" facts for an inactive ticker whose stored reason has an approved line (services/ticker_exits); None otherwise."""
+    from app.schemas.ticker import TickerExit
+    from app.services.ticker_exits import exit_kind, exit_line
+    line = exit_line(ticker.name, ticker.inactive_reason, ticker.inactive_since)
+    if line is None:
+        return None
+    last = (await db.execute(text("SELECT date, close FROM price_bars_shadow WHERE symbol = :s AND close IS NOT NULL ORDER BY date DESC LIMIT 1"),
+                             {"s": ticker.symbol})).first()
+    return TickerExit(kind=exit_kind(ticker.inactive_reason), line=line, since=ticker.inactive_since,
+                      last_close=float(last.close) if last else None, last_close_date=last.date if last else None)
 
 
 @router.get("/{ticker_id}", response_model=TickerRead)

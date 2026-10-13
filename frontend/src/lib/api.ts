@@ -58,6 +58,7 @@ export interface Ticker {
   symbol: string;
   name: string | null;
   deal_note?: string | null;       // a pending cash deal (backend services/pending_deals): the page shows plain price facts below it
+  exit?: TickerExit | null;        // a stock that no longer trades with no successor (backend services/ticker_exits): the page shows only this
   sector: string | null;
   industry: string | null;
   exchange: string | null;
@@ -71,6 +72,14 @@ export interface Ticker {
   next_earnings_note?: string | null;        // why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
   created_at: string;
   updated_at: string;
+}
+
+export interface TickerExit {
+  kind: string;                    // backend services/ticker_exits kind ("taken_private")
+  line: string;                    // "Electronic Arts was taken private on August 4, 2026, and its stock no longer trades."
+  since: string;
+  last_close: number | null;       // the last stored daily close; null when none is stored
+  last_close_date: string | null;
 }
 
 export interface Event {

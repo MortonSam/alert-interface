@@ -29,6 +29,15 @@ class TickerUpdate(BaseModel):
     index_member: bool | None = None
 
 
+class TickerExit(BaseModel):
+    """A stock that no longer trades (services/ticker_exits): the page shows this line and the last stored close instead of trading facts."""
+    kind: str                           # services/ticker_exits kind ("taken_private")
+    line: str                           # "Electronic Arts was taken private on August 4, 2026, and its stock no longer trades."
+    since: date
+    last_close: float | None = None     # the last stored daily close (price_bars_shadow); None when none is stored
+    last_close_date: date | None = None
+
+
 class TickerRead(TickerBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -39,6 +48,7 @@ class TickerRead(TickerBase):
     next_earnings_confirmation: str | None = None    # "confirmed" | "estimated" | "expected_unconfirmed"
     next_earnings_note: str | None = None            # why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
     deal_note: str | None = None                     # a pending cash deal (services/pending_deals): the visitor note; the page shows plain price facts below it
+    exit: TickerExit | None = None                   # set by /by-symbol when the stock no longer trades and its kind has an approved line
     created_at: datetime
     updated_at: datetime
 

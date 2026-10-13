@@ -58,7 +58,11 @@ async def run(argv: list[str]) -> int:
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     async with ScriptSessionLocal() as s:
-        aliases = (await s.execute(text("SELECT old_symbol, symbol, renamed_on FROM ticker_aliases ORDER BY renamed_on"))).all()
+        # a merger's alias (AVB -> VMRK) names another company: its EPS history is not the successor's
+        from app.services.ticker_exits import MERGED, REASON_PREFIXES
+        aliases = (await s.execute(text("""SELECT old_symbol, symbol, renamed_on FROM ticker_aliases a WHERE NOT EXISTS
+            (SELECT 1 FROM tickers t WHERE t.symbol = a.old_symbol AND t.inactive_reason LIKE :merged) ORDER BY renamed_on"""),
+            {"merged": REASON_PREFIXES[MERGED] + "%"})).all()
         targets = [(o, n) for o, n, _ in aliases if not only or n in only]
         if not targets:
             print("no renamed ticker to reattach"); return 0

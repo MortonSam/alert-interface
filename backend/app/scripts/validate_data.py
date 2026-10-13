@@ -125,6 +125,23 @@ async def check_ticker_duplicate_symbols(session) -> CheckResult:
     )
 
 
+async def check_inactive_ticker_state(session) -> CheckResult:
+    """ERROR when an inactive ticker is still an index member, has no inactive_reason, or has a reason no writer spells
+    (services/ticker_exits.REASON_PREFIXES, which the ticker page reads to decide whether the stock still trades)."""
+    from app.services.ticker_exits import exit_kind
+    rows = (await session.execute(text(
+        "SELECT symbol, index_member, inactive_reason FROM tickers WHERE NOT is_active ORDER BY symbol"))).all()
+    bad = []
+    for r in rows:
+        why = [w for w, hit in (("still index_member", r.index_member), ("no inactive_reason", not (r.inactive_reason or "").strip()),
+                                ("reason in no known wording", bool((r.inactive_reason or "").strip()) and exit_kind(r.inactive_reason) is None)) if hit]
+        if why:
+            bad.append(f"{r.symbol}: {', '.join(why)}")
+    if bad:
+        return CheckResult("inactive_ticker_state", ERROR, f"{len(bad)} inactive ticker(s) with a membership or reason fault", bad)
+    return CheckResult("inactive_ticker_state", PASS, f"Every inactive ticker ({len(rows)}) is out of the index with a reason in known wording")
+
+
 async def check_events_stale_past(session) -> CheckResult:
     cutoff = date.today() - timedelta(days=14)
     rows = (await session.execute(
@@ -3543,6 +3560,7 @@ CHECKS = [
     check_ticker_missing_metadata,
     check_ticker_market_cap,
     check_ticker_duplicate_symbols,
+    check_inactive_ticker_state,
     check_frozen_price_history,
     check_price_history_stale,
     check_duplicate_future_earnings,

@@ -24,11 +24,14 @@ MATCH_DAYS = 1
 
 
 async def cik_for(edgar: EdgarClient, session, symbol: str) -> str | None:
-    """The CIK by the symbol, else by an old symbol the ticker was renamed from."""
+    """The CIK by the symbol, else by an old symbol the ticker was renamed from (never a merged company's: that CIK is another issuer)."""
+    from app.services.ticker_exits import MERGED, REASON_PREFIXES
     cik = await edgar.get_cik(symbol)
     if cik:
         return cik
-    for old in (await session.execute(text("SELECT old_symbol FROM ticker_aliases WHERE symbol = :s"), {"s": symbol})).scalars().all():
+    for old in (await session.execute(text("""SELECT old_symbol FROM ticker_aliases a WHERE symbol = :s AND NOT EXISTS
+            (SELECT 1 FROM tickers t WHERE t.symbol = a.old_symbol AND t.inactive_reason LIKE :merged)"""),
+            {"s": symbol, "merged": REASON_PREFIXES[MERGED] + "%"})).scalars().all():
         cik = await edgar.get_cik(old)
         if cik:
             return cik
