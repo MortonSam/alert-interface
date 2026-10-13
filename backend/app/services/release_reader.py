@@ -181,6 +181,11 @@ def diluted_row(quote: str | None) -> bool:
     return bool(re.search(r"\bdiluted\b|assuming\s+dilution", _label_and_numbers(q)[0], re.I)) or bool(re.search(r"per\s+diluted\s+share", q, re.I))
 
 
+def basic_row(quote: str | None) -> bool:
+    """Pure: the quoted row's own label names basic EPS and not diluted ("Reported earnings per share (basic)")."""
+    return basic_only_label(_label_and_numbers(re.sub(r"\s+", " ", quote or ""))[0])
+
+
 def agree(pattern_eps: float | None, model_eps: float | None) -> bool:
     """Pure: both readers read a figure and agree to the cent."""
     return pattern_eps is not None and model_eps is not None and round(pattern_eps, 2) == round(model_eps, 2)
@@ -198,9 +203,11 @@ def decide(pattern: dict | None, model: dict | None, exhibit_text: str) -> tuple
     p_text = f"pattern {p:+.2f} ({pattern['how']})" if pattern else "pattern read nothing"
     m_text = (f"model {m:+.2f}" if m is not None else "model read nothing") + (f' "{(model or {}).get("quote") or ""}"'[:120] if model and model.get("quote") else "")
     heading_note = ""
-    if problems == [HEADING_NOT_VERBATIM] and p is not None and m is not None and p == m and diluted_row(model.get("quote")):
-        # the column order came from the exhibit's own heading, both readers read the same figure exactly, and the row is diluted EPS:
-        # the model's paraphrased heading alone is a note, not a rejection (EIX 2026-07-30)
+    eps_row = diluted_row(model.get("quote")) or (basic_row(model.get("quote")) and not states_diluted_eps(exhibit_text))
+    if problems == [HEADING_NOT_VERBATIM] and p is not None and m is not None and p == m and eps_row:
+        # the column order came from the exhibit's own heading, both readers read the same figure exactly, and the row is diluted EPS,
+        # or basic EPS in a release that states no diluted EPS anywhere: the model's paraphrased heading alone is a note, not a
+        # rejection (EIX 2026-07-30 diluted, ED 2026-08-06 basic)
         problems, heading_note = [], "; note: the model's heading is not verbatim in the exhibit (column order read from the exhibit)"
     if problems and model and model.get("eps") is not None:
         return None, f"{p_text}; {m_text}; model quote rejected: {'; '.join(problems)}"

@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.services import release_reader as R
-from app.services.valuation import basic_only_label, parse_release_basic_eps, parse_release_eps, states_diluted_eps
+from app.services.valuation import basic_only_label, parse_release_basic_eps, parse_release_eps, release_period_end, states_diluted_eps
 
 pytestmark = pytest.mark.xdist_group(name="shared_rows")
 
@@ -49,9 +49,15 @@ def test_the_heading_note_needs_exact_agreement_a_diluted_row_and_no_other_probl
     # no pattern reading: rejected
     figure, note = R.decide(None, model, EIX)
     assert figure is None and "model quote rejected" in note
-    # a basic row (ED, where basic is allowed because no diluted figure exists) with a paraphrased heading: still rejected
-    figure, note = R.decide({"eps": 0.83, "how": "basic EPS row"}, {"eps": 0.83, "quote": ED_QUOTE, "columns": "Three Months Ended 2026 2025", "column": 1}, ED)
-    assert figure is None and "model quote rejected: the heading is not verbatim in the exhibit" in note
+    # a basic row in a release that states no diluted EPS (ED), both readers exact: the paraphrased heading is a note
+    ed_model = {"eps": 0.83, "quote": ED_QUOTE, "columns": "Three Months Ended 2026 2025", "column": 1}
+    figure, note = R.decide({"eps": 0.83, "how": "basic EPS row"}, ed_model, ED)
+    assert figure == 0.83 and note.endswith("note: the model's heading is not verbatim in the exhibit (column order read from the exhibit)")
+    # the same basic row where the release states diluted EPS: refused (the basic-row rule), and readers that differ: rejected
+    figure, note = R.decide({"eps": 0.83, "how": "basic EPS row"}, ed_model, ED + " Diluted earnings per share $0.82")
+    assert figure is None and R.BASIC_ROW in note
+    figure, note = R.decide({"eps": 0.82, "how": "basic EPS row"}, ed_model, ED)
+    assert figure is None and "the heading is not verbatim in the exhibit" in note
     # another problem beside the heading: rejected
     figure, note = R.decide({"eps": 1.38, "how": "diluted EPS row"}, {**model, "column": None}, EIX)
     assert figure is None and "without the column read" in note
@@ -109,3 +115,32 @@ def test_a_decimal_point_or_per_diluted_share_never_hides_a_diluted_figure():
     # a sentence end still separates "diluted" from an unrelated "per share"
     assert not states_diluted_eps("Shares were diluted by the offering. The dividend was $0.85 per share")
     assert not states_diluted_eps(ED)
+
+
+def test_the_quarter_end_is_the_releases_own_never_a_prior_filings():
+    # JPM 3Q26 (reported 2026-10-13): the narrative names only the prior 10-Q's quarter; that date is not this release's quarter
+    jpm = ("For further information see pages 52-58 of the Firm's Quarterly Report on Form 10-Q for the quarterly period ended June 30, 2026. "
+           "JPMorgan Chase reported third-quarter 2026 net income of $15.2 billion. Earnings per share - diluted $ 5.57 $ 7.70 $ 5.07")
+    assert release_period_end(jpm, date(2026, 10, 13)) is None
+    assert parse_release_eps(jpm, date(2026, 10, 13))["period_end"] is None
+    # the supplement states it; the latest stated quarter end wins over a comparison period stated first
+    supp = "Three months ended June 30, 2026 compared with three months ended September 30, 2026 and September 30, 2025"
+    assert release_period_end(supp, date(2026, 10, 13)) == date(2026, 9, 30)
+    from app.scripts.seed_release_eps import filing_period_end
+    assert filing_period_end([("narrative.htm", jpm), ("supplement.htm", supp)], date(2026, 10, 13)) == date(2026, 9, 30)
+    assert filing_period_end([("narrative.htm", jpm)], date(2026, 10, 13)) is None
+    # an annual report reference is skipped too
+    assert release_period_end("our Annual Report on Form 10-K for the quarter ended December 31, 2025", date(2026, 2, 1)) is None
+
+
+def test_the_relabel_refuses_unless_the_release_states_no_diluted_eps_and_still_reads_the_figure():
+    from app.scripts.relabel_release_eps_basis import UPDATE, refusal
+    aep = "AEP reported second-quarter 2026 GAAP earnings of $702 million, or $1.31 per share, compared with $1.25 per share a year ago."
+    row = {"eps_basis": "diluted", "diluted_eps_gaap": 1.31}
+    assert refusal(None, aep, date(2026, 7, 30)) == "no stored row"
+    assert refusal({**row, "eps_basis": "basic"}, aep, date(2026, 7, 30)) == "already stored as basic"
+    assert refusal(row, None, date(2026, 7, 30)) == "the stored exhibit could not be read"
+    assert refusal(row, aep + " Diluted earnings per share were $1.30.", date(2026, 7, 30)) == "the release states diluted EPS: the stored figure stays diluted"
+    assert refusal({**row, "diluted_eps_gaap": 1.30}, aep, date(2026, 7, 30)).startswith("the release no longer reads as the stored figure")
+    assert refusal(row, aep, date(2026, 7, 30)) is None
+    assert "eps_basis = 'diluted'" in UPDATE and "basic_eps_gaap = diluted_eps_gaap, diluted_eps_gaap = NULL, eps_basis = 'basic'" in UPDATE

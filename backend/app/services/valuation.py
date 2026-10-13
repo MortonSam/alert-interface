@@ -135,6 +135,27 @@ _BASIC_ROWS = (
 )
 
 
+# a date that names another filing ("Form 10-Q for the quarterly period ended June 30, 2026", JPM's 3Q26 release) is not this release's quarter
+_OTHER_FILING = re.compile(r"(?:Form\s+10-?[QK]|Quarterly\s+Report|Annual\s+Report)\b[^.;]{0,60}$", re.I)
+
+
+def release_period_end(text: str, report_date: date | None = None) -> date | None:
+    """Pure: the end of the quarter a release reports: the latest stated period end ("three months ended September 30, 2026", a
+    "Q3 ... September 30, 2026" header) within PERIOD_END_MAX_DAYS before the report, never a date that names another filing (the
+    prior 10-Q or 10-K). None when the text states none; never a guess. Without a report date, the first stated one."""
+    flat = re.sub(r"\s+", " ", text or "")
+    found = []
+    for m in list(_PERIOD_END.finditer(flat)) + list(_QTR_HEADER.finditer(flat)):
+        d = _to_date(m)
+        if not d or _OTHER_FILING.search(flat[max(0, m.start() - 80):m.start()]):
+            continue
+        if report_date is None:
+            return d
+        if 0 <= (report_date - d).days <= PERIOD_END_MAX_DAYS:      # an older date is a comparison period
+            found.append(d)
+    return max(found) if found else None
+
+
 def states_diluted_eps(text: str) -> bool:
     """Pure: the release states a diluted per-share figure somewhere ("diluted" within one clause of "per share" or "EPS", or "assuming
     dilution"). "Dilutive effect of issuance of common shares" (ED) is not one."""
@@ -300,13 +321,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
     if not text:
         return None
     flat = re.sub(r"\s+", " ", text)
-    period_end = None
-    for m in list(_PERIOD_END.finditer(flat)) + list(_QTR_HEADER.finditer(flat)):
-        d = _to_date(m)
-        # the quarter a release reports ended within PERIOD_END_MAX_DAYS before the report; an older date is a comparison period
-        if d and (report_date is None or 0 <= (report_date - d).days <= PERIOD_END_MAX_DAYS):
-            period_end = d
-            break
+    period_end = release_period_end(flat, report_date)
     has_diluted = states_diluted_eps(flat)
     for hit in _PROSE.finditer(flat):
         if _NON_GAAP_NEAR.search(_same_clause(flat, hit.start(), 12) + hit.group(0)):      # "Non-GAAP net income ... , or $3.63 per diluted share" (SMCI)
@@ -357,12 +372,7 @@ def parse_release_basic_eps(text: str, report_date: date | None = None) -> dict 
     if not text or states_diluted_eps(text):
         return None
     flat = re.sub(r"\s+", " ", text)
-    period_end = None
-    for m in list(_PERIOD_END.finditer(flat)) + list(_QTR_HEADER.finditer(flat)):
-        d = _to_date(m)
-        if d and (report_date is None or 0 <= (report_date - d).days <= PERIOD_END_MAX_DAYS):
-            period_end = d
-            break
+    period_end = release_period_end(flat, report_date)
     for pattern in _BASIC_ROWS:
         for hit in pattern.finditer(flat):
             # the label before the figure, joined: "(GAAP basis)" names GAAP, so only the non-GAAP words refuse it

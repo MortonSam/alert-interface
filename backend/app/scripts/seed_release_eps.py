@@ -29,7 +29,7 @@ from app.services.redact import redact
 from app.services.write_failures import WriteFailures
 from app.services.write_failures import WriteFailures
 from app.services.step_outcomes import record_step_fields
-from app.services.valuation import implausible, parse_release_basic_eps, parse_release_eps, states_diluted_eps, year_over_year_note
+from app.services.valuation import implausible, parse_release_basic_eps, parse_release_eps, release_period_end, states_diluted_eps, year_over_year_note
 from app.services import release_reader as R
 
 STEP_LABEL = "Release EPS (8-K exhibits)"
@@ -58,6 +58,12 @@ def exhibit_text(texts: list[tuple[str, str]]) -> tuple[str, str] | None:
     """Pure: the first press-release exhibit (compatibility: callers that want one document)."""
     cands = exhibit_candidates(texts)
     return cands[0] if cands else None
+
+
+def filing_period_end(texts: list[tuple[str, str]], report_date: date) -> date | None:
+    """Pure: the latest quarter end any document of the filing states (valuation.release_period_end), or None."""
+    ends = [d for _, t in texts if (d := release_period_end(t, report_date))]
+    return max(ends) if ends else None
 
 
 async def run(argv: list[str]) -> int:
@@ -143,6 +149,10 @@ async def run(argv: list[str]) -> int:
                             break
                     if hit:
                         break
+                if hit and hit.get("period_end") is None:
+                    # the exhibit read states no quarter end of its own (JPM's 3Q26 narrative names only the prior 10-Q's): the filing's
+                    # other documents (its financial supplement) do; none stated stays None, never a guess
+                    hit["period_end"] = filing_period_end(texts, report_date)
                 # the second reader: the model reads the same exhibit the pattern parser read (or the first press exhibit when it read none)
                 model = None
                 exhibit_for_model = ex[1] if ex else ""
