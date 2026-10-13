@@ -31,9 +31,15 @@ DEV_PORT = 3000
 TEST_DB = "alertdb_test"
 TEST_DB_ASYNC = f"postgresql+asyncpg://alert:alert@db:5432/{TEST_DB}"
 TEST_DB_SYNC = f"postgresql://alert:alert@db:5432/{TEST_DB}"
+VALIDATE_DB = "alertdb_validate"
+VALIDATE_DB_ASYNC = f"postgresql+asyncpg://alert:alert@db:5432/{VALIDATE_DB}"
+VALIDATE_FIXTURE = "backend/tests/fixtures/validate_fixture.sql"      # written by app.scripts.build_validate_fixture
 STEPS: list[tuple[str, list[str], Path]] = [
     ("backend tests", ["docker", "compose", "exec", "-T", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",
                        "backend", "python", "-m", "pytest", "tests", "-q", "-n", "auto", "--dist", "loadgroup"], ROOT),
+    # every validate check once, read only, on alertdb_validate (the schema with a small fixture loaded): a check whose query Postgres
+    # cannot run fails here instead of in the nightly (app/scripts/validate_smoke)
+    ("validate smoke", ["docker", "compose", "exec", "-T", "backend", "python", "-m", "app.scripts.validate_smoke", "--url", VALIDATE_DB_ASYNC], ROOT),
     # host-side tests (the gate's own, and the courier wrapper under the Mac's /bin/bash 3.2, which the container's bash cannot stand in for)
     ("host tests", [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"], ROOT),
     ("frontend tests", ["npx", "vitest", "run"], FRONTEND),
@@ -42,6 +48,12 @@ STEPS: list[tuple[str, list[str], Path]] = [
 REBUILD_TEST_DB = ["docker", "compose", "exec", "-T", "db", "sh", "-c",
                    f"set -o pipefail; psql -q -U alert -d postgres -c 'drop database if exists {TEST_DB}' && psql -q -U alert -d postgres -c 'create database {TEST_DB}' "
                    f"&& pg_dump -U alert alertdb | psql -q -U alert {TEST_DB}"]
+# the schema of the fresh test copy, then the fixture's rows (data only; the file sets session_replication_role so load order is free)
+REBUILD_VALIDATE_DB = ["sh", "-c",
+                       f"docker compose exec -T db sh -c \"set -o pipefail; psql -q -U alert -d postgres -c 'drop database if exists {VALIDATE_DB}' "
+                       f"&& psql -q -U alert -d postgres -c 'create database {VALIDATE_DB}' "
+                       f"&& pg_dump -U alert --schema-only {TEST_DB} | psql -q -v ON_ERROR_STOP=1 -U alert {VALIDATE_DB}\" "
+                       f"&& docker compose exec -T db psql -q -v ON_ERROR_STOP=1 -U alert {VALIDATE_DB} < {VALIDATE_FIXTURE} > /dev/null"]
 BACKEND_LOG = Path("/tmp/push_backend_tests.log")
 PUSH = ["git", "push", "origin", "main"]
 
@@ -201,6 +213,11 @@ def main(argv: list[str]) -> int:
         code = _run(REBUILD_TEST_DB, ROOT)
         timings.append(("rebuild test db", clock.monotonic() - t0))
         results.append(("rebuild test db", code))
+        if code == 0:
+            t0 = clock.monotonic()
+            code = _run(REBUILD_VALIDATE_DB, ROOT)
+            timings.append(("rebuild validate db", clock.monotonic() - t0))
+            results.append(("rebuild validate db", code))
         if code == 0:
             cmd = next(c for n, c, _ in STEPS if n == "backend tests")
             print(f"\n$ {' '.join(cmd)}   (in ., background, output to {BACKEND_LOG})", flush=True)

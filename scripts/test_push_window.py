@@ -1,11 +1,12 @@
 """The no-push window across its boundaries, a weekend, a DST date and a UTC clock, and the gate that refuses to push on any failed
 step. Run: python3 -m unittest scripts/test_push_window.py"""
 import unittest
+from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import push_window
-from push_window import REBUILD_TEST_DB, STEPS, TEST_DB, foreground_steps, push_command, gate, in_window, lane_for, steps_for
+from push_window import REBUILD_TEST_DB, REBUILD_VALIDATE_DB, STEPS, TEST_DB, VALIDATE_DB, VALIDATE_FIXTURE, foreground_steps, push_command, gate, in_window, lane_for, steps_for
 
 NY = ZoneInfo("America/New_York")
 
@@ -48,7 +49,7 @@ class Gate(unittest.TestCase):
         self.assertFalse(gate([("backend tests", 2)])[0])
 
     def test_the_steps_are_the_two_suites_and_the_build(self):
-        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "host tests", "frontend tests", "frontend build"])
+        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "validate smoke", "host tests", "frontend tests", "frontend build"])
         for _, cmd, _ in STEPS:
             self.assertNotIn("|", " ".join(cmd))                  # exit codes are read directly, never through a pipe
 
@@ -73,7 +74,7 @@ class LaneTests(unittest.TestCase):
             push_command(["--branch=main"])
 
     def test_the_full_lane_runs_the_host_tests_beside_the_backend_suite(self):
-        self.assertEqual([n for n, _, _ in foreground_steps("full")], ["host tests", "frontend tests", "frontend build"])
+        self.assertEqual([n for n, _, _ in foreground_steps("full")], ["validate smoke", "host tests", "frontend tests", "frontend build"])
         self.assertEqual([n for n, _, _ in foreground_steps("frontend")], ["frontend tests", "frontend build"])
         host = next(c for n, c, _ in STEPS if n == "host tests")
         self.assertEqual(host[1:], ["-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])   # picks up test_courier_wrapper.py
@@ -86,6 +87,15 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(TEST_DB, "alertdb_test")
         self.assertIn(f"pg_dump -U alert alertdb | psql -q -U alert {TEST_DB}", REBUILD_TEST_DB[-1])
         self.assertIn("set -o pipefail", REBUILD_TEST_DB[-1])
+
+    def test_every_validate_check_runs_read_only_on_its_own_database_from_the_fixture(self):
+        cmd = next(c for n, c, _ in STEPS if n == "validate smoke")
+        self.assertEqual(cmd[-3:], ["app.scripts.validate_smoke", "--url", f"postgresql+asyncpg://alert:alert@db:5432/{VALIDATE_DB}"])
+        self.assertNotIn(VALIDATE_DB, (TEST_DB, "alertdb"))
+        self.assertIn(f"pg_dump -U alert --schema-only {TEST_DB} | psql -q -v ON_ERROR_STOP=1 -U alert {VALIDATE_DB}", REBUILD_VALIDATE_DB[-1])
+        self.assertIn(f"< {VALIDATE_FIXTURE}", REBUILD_VALIDATE_DB[-1])
+        self.assertIn("set -o pipefail", REBUILD_VALIDATE_DB[-1])
+        self.assertTrue((Path(__file__).resolve().parents[1] / VALIDATE_FIXTURE).is_file())
 
     def test_the_clock_used_for_timings_is_the_monotonic_one(self):
         """`time` in the module is datetime.time (the window bounds); timings read push_window.clock.monotonic."""
