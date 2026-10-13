@@ -90,9 +90,10 @@
   .tap::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
 
-/* The home page: each section one screen under the sticky header from 640px up (phones keep content heights). The page
-   scrolls natively: no snapping, and nothing on it intercepts wheel, trackpad, keyboard or touch input. */
-@media (min-width: 640px) { main .screen-section { min-height: calc(100svh - 3.25rem - 1px); } }
+/* The home page: each section one screen under the sticky header at every width, a phone included (svh, so the address bar
+   showing or hiding never resizes a section). The page scrolls natively: no snapping, and nothing on it intercepts wheel,
+   trackpad, keyboard or touch input. */
+main .screen-section { min-height: calc(100svh - 3.25rem - 1px); }
 
 /* Headings are Newsreader (self-hosted; app/layout.tsx). Large and section headlines at 600; smaller headings a step heavier so
    they hold at small sizes; a serif's tracking (-0.01em) whatever tracking utility a heading carries. */

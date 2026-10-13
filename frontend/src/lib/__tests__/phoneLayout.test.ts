@@ -6,22 +6,23 @@ const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 
 describe("the home page on a phone", () => {
-  it("no section is a full screen below 640px, and the padding keeps gaps near 96px", () => {
+  it("no section sets its own full-screen height (the one rule in globals.css does), and phone padding stays at most py-12", () => {
     const home = read("app/page.tsx") + read("components/LatestVerifiedNote.tsx");
     const sections = home.match(/<section className="[^"]*"/g) ?? [];
     expect(sections.length).toBeGreaterThanOrEqual(6);                  // plus Browse the market (id first) and the note (a template class)
     for (const s of sections.slice(1)) {
-      expect(s, s).not.toMatch(/(^|[" ])min-h-\[100svh\]/);           // a full screen only from sm up
+      expect(s, s).not.toMatch(/(^|[" ])min-h-\[100svh\]/);           // the height comes from the one .screen-section rule
       expect(s, s).not.toMatch(/(^|[" ])py-(2[0-9]|1[3-9])\b/);         // phone padding at most py-12 (48px a side)
     }
   });
-  it("the opening: the heron first (above the headline on a phone, on the left from 1024px), one section per screen from 640px up", () => {
+  it("the opening: the heron first (above the headline on a phone, on the left from 1024px), one section per screen at every width", () => {
     const home = read("app/page.tsx");
     expect(home).toContain('<section className="screen-section relative flex flex-col bg-background">');
     expect(home.indexOf("BRAND.heron")).toBeLessThan(home.indexOf("Alert Interface teaches you what Wall Street knows."));
     expect(home).not.toMatch(/ProofCards|StoryFlow/);
     const css = read("app/globals.css");
-    expect(css).toMatch(/@media \(min-width: 640px\) \{ main \.screen-section \{ min-height: calc\(100svh - 3\.25rem - 1px\); \} \}/);
+    expect(css).toMatch(/^main \.screen-section \{ min-height: calc\(100svh - 3\.25rem - 1px\); \}$/m);   // every width, a phone included
+    expect(css).not.toMatch(/min-width: 640px\) \{ main \.screen-section/);
     expect(css).not.toMatch(/scroll-snap/);                                          // the page scrolls natively
     expect(home).not.toMatch(/HomeSnap|preventDefault|addEventListener\("wheel"/);
   });
