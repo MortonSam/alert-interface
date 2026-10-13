@@ -1,6 +1,6 @@
 """Nightly: Intrinio daily bars into price_bars_shadow, by security record id, incrementally.
 
-For every symbol in security_records (the active tickers and the SPY benchmark), each Intrinio record is fetched
+For every symbol in security_records (the active tickers and the SPY benchmark, which has no ticker row), each Intrinio record is fetched
 for the days it still lacks (services/price_bars_shadow.plan_fetches): the whole stored window on the first run,
 then from a few days before the last stored bar. Rows upsert on (symbol, date). The step outcome records
 requests, symbols, bars written and errors; the refresh runner records the exit.
@@ -8,7 +8,8 @@ requests, symbols, bars written and errors; the refresh runner records the exit.
 Usage
 -----
     python -m app.scripts.shadow_price_bars            # the nightly step
-    python -m app.scripts.shadow_price_bars --plan     # print the fetch plan, no requests, no writes
+    python -m app.scripts.shadow_price_bars --plan     # print the fetch plan, no requests, no writes (a READ ONLY transaction)
+    python -m app.scripts.shadow_price_bars --symbols=SPY [--plan]   # only these symbols (a backfill)
 """
 from __future__ import annotations
 from app.services.redact import redact
@@ -17,7 +18,7 @@ import asyncio
 import sys
 from datetime import date, datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import ScriptSessionLocal
@@ -25,7 +26,7 @@ from app.models.price_bar_shadow import PriceBarShadow
 from app.models.security_record import SecurityRecord
 from app.models.ticker import Ticker
 from app.services.intrinio_client import IntrinioAuthError, IntrinioClient
-from app.services.price_bars_shadow import Fetch, plan_fetches
+from app.services.price_bars_shadow import BENCHMARKS, Fetch, plan_fetches
 from app.services.security_records import Record
 from app.services.step_outcomes import record_step_fields
 
@@ -62,27 +63,35 @@ async def _upsert(rows: list[dict]) -> int:
     return len(rows)
 
 
-async def load_plan(today: date) -> tuple[list[Fetch], dict]:
-    async with ScriptSessionLocal() as s:
+async def load_plan(today: date, factory=ScriptSessionLocal, only: set[str] | None = None) -> tuple[list[Fetch], dict]:
+    async with factory() as s:
         active = select(Ticker.symbol).where(Ticker.is_active.is_(True))
-        recs = (await s.execute(select(SecurityRecord).where(SecurityRecord.symbol.in_(active)))).scalars().all()    # a deactivated ticker's bars stop
+        # a deactivated ticker's bars stop; a benchmark has no ticker row and never stops (SPY is every seeder's session calendar:
+        # filtering it out with the inactive tickers left it a session behind the index on 2026-10-13)
+        recs = (await s.execute(select(SecurityRecord).where(or_(SecurityRecord.symbol.in_(active), SecurityRecord.symbol.in_(BENCHMARKS))))).scalars().all()
         last = dict((await s.execute(select(PriceBarShadow.symbol, func.max(PriceBarShadow.date)).group_by(PriceBarShadow.symbol))).all())
-    by: dict[str, list[Record]] = {}
-    ids: dict[tuple[str, date], object] = {}
-    for r in recs:
-        by.setdefault(r.symbol, []).append(Record(r.symbol, r.intrinio_security_id, r.figi, r.composite_figi, r.name, r.valid_from, r.valid_to, r.role, r.source))
-        ids[(r.symbol, r.valid_from)] = r.id
+        by: dict[str, list[Record]] = {}
+        ids: dict[tuple[str, date], object] = {}
+        for r in recs:          # read inside the session: the read-only factory rolls back on exit, which expires the rows
+            if only and r.symbol not in only:
+                continue
+            by.setdefault(r.symbol, []).append(Record(r.symbol, r.intrinio_security_id, r.figi, r.composite_figi, r.name, r.valid_from, r.valid_to, r.role, r.source))
+            ids[(r.symbol, r.valid_from)] = r.id
     return plan_fetches(by, last, today), ids
 
 
 async def main(argv: list[str]) -> int:
     today = date.today()
-    fetches, ids = await load_plan(today)
+    only = next(({x.strip().upper() for x in a.split("=", 1)[1].split(",") if x.strip()} for a in argv if a.startswith("--symbols=")), None)
     if "--plan" in argv:
+        from app.config import settings
+        from app.scripts.validate_smoke import read_only_factory
+        fetches, ids = await load_plan(today, read_only_factory(settings.database_url), only)
         for f in fetches:
             print(f"  {f.symbol:6} {f.record.role:12} {f.record.intrinio_security_id:12} {f.start}..{f.end}")
         print(f"\n{len(fetches)} fetch(es) over {len({f.symbol for f in fetches})} symbol(s)")
         return 0
+    fetches, ids = await load_plan(today, only=only)
     client = IntrinioClient()
     now = datetime.now(timezone.utc)
     written = 0
@@ -108,8 +117,9 @@ async def main(argv: list[str]) -> int:
     print(f"{STEP_LABEL}: {len(fetches)} fetch(es), {client.request_count} request(s), {written} bar(s) over {len(symbols)} symbol(s), {len(errors)} error(s)")
     for e in errors[:20]:
         print("   ", e)
-    await record_step_fields(STEP_LABEL, {"fetches": len(fetches), "requests": client.request_count, "retries": client.log.retries, "bars": written,
-                                          "symbols": len(symbols), "errors": errors[:50], "error": None})
+    if not only:            # a --symbols backfill is not the nightly step: its outcome stays the night's
+        await record_step_fields(STEP_LABEL, {"fetches": len(fetches), "requests": client.request_count, "retries": client.log.retries, "bars": written,
+                                              "symbols": len(symbols), "errors": errors[:50], "error": None})
     return 0 if not errors else 1
 
 

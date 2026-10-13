@@ -18,6 +18,7 @@ from app.services.redact import redact
 
 import asyncio
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -3157,6 +3158,35 @@ async def check_calendar_matches_spy_bars(session) -> CheckResult:
     return CheckResult("calendar_matches_spy_bars", PASS, f"The trading calendar matches SPY's bars on every day {rows[0]}..{rows[-1]} ({len(rows)} sessions)")
 
 
+def benchmark_lag(benchmark_last: date | None, member_last: list[date]) -> str | None:
+    """Pure: why the benchmark's last bar disagrees with the index members' (the date most of them last have a bar on); None when it matches."""
+    if not member_last:
+        return None
+    index_last = Counter(member_last).most_common(1)[0][0]
+    if benchmark_last is None:
+        return f"no SPY bar stored; {sum(1 for d in member_last if d == index_last)} of {len(member_last)} index names last have a bar on {index_last.isoformat()}"
+    if benchmark_last != index_last:
+        return (f"SPY's last bar is {benchmark_last.isoformat()}; {sum(1 for d in member_last if d == index_last)} of {len(member_last)} "
+                f"index names last have a bar on {index_last.isoformat()}")
+    return None
+
+
+async def check_spy_bar_current(session) -> CheckResult:
+    """ERROR when SPY's last stored bar is not the index names' last bar (the date most active index members last have a bar on).
+    SPY is the session calendar of every reaction window, split match and spin-off reclassification: a calendar a session short
+    leaves the newest windows uncomputed, and one with a session missing in the middle would misplace them."""
+    spy_last = await session.scalar(text("SELECT max(date) FROM price_bars_shadow WHERE symbol = 'SPY'"))
+    member_last = list((await session.execute(text("""
+        SELECT max(b.date) FROM price_bars_shadow b JOIN tickers t ON t.symbol = b.symbol
+        WHERE t.is_active AND t.index_member GROUP BY b.symbol"""))).scalars().all())
+    if not member_last:
+        return CheckResult("spy_bar_current", WARN, "No index member has a stored bar: SPY's last bar cannot be compared")
+    lag = benchmark_lag(spy_last, member_last)
+    if lag:
+        return CheckResult("spy_bar_current", ERROR, lag)
+    return CheckResult("spy_bar_current", PASS, f"SPY's last bar ({spy_last.isoformat()}) is the index names' last bar")
+
+
 # ── Duplicate reaction detection ─────────────────────────────────────────────
 
 async def check_duplicate_earnings_reactions(session) -> CheckResult:
@@ -3654,6 +3684,7 @@ CHECKS = [
     check_fomc_before_first_bar,
     # The trading calendar agrees with the stored sessions
     check_calendar_matches_spy_bars,
+    check_spy_bar_current,
     # v3 reaction checks
     check_no_mixed_computation_version,
     check_report_timing_unknown_share,
