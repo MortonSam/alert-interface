@@ -2143,7 +2143,7 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
                              model=None, input_tokens=None, output_tokens=None, cost=None, cached=False, ip_hash=A.ip_hash(ip))
         raise HTTPException(status_code=503, detail="Ivy couldn't answer just now; nothing was charged to your limit.") from exc
     await A.add_spend(db, result.get("cost"))
-    await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=result["covered"] != "no" and result["verdict"] in ("verified", "partly_dropped"),
+    await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=result["covered"] != "no" and result["verdict"] in ("verified", "partly_dropped", "fallback"),
                          verdict=result["verdict"], answer=result["answer"], model=result["model"], input_tokens=result["input_tokens"], output_tokens=result["output_tokens"],
                          cost=result.get("cost"), cached=False, ip_hash=A.ip_hash(ip))
     return {"symbol": pack["symbol"], "name": pack["name"], "answer": result["answer"], "cached": False}

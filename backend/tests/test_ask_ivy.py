@@ -193,7 +193,7 @@ async def test_a_rejected_draft_is_rewritten_once_and_a_second_failure_is_never_
     assert c.calls == 2 and r["retried"] and r["verdict"] == "verified" and r["answer"]["data"] == "It moved to $1,045.56."
     c = Client(["COVERED: yes\nIt moved twice.", "COVERED: yes\nIt moved 3% again."])
     r = await A.answer_question(None, pack, "q", client=c)
-    assert r["verdict"] == "rejected" and r["answer"]["inputs"] == [] and "passed the checks" in r["answer"]["data"]
+    assert r["verdict"] == "fallback" and "passed the checks" not in r["answer"]["data"] and "3%" not in r["answer"]["data"]   # never a dead end, never the failed draft
 
 
 def test_the_model_classifies_the_question_and_only_off_topic_is_refused():
@@ -240,7 +240,8 @@ async def test_a_decision_answer_closes_with_exactly_one_line_added_by_code_and_
     r = await A.answer_question(None, pack, "what does it do", client=Client(["COVERED: yes\nIt trades at {fact:quote}."]), kind="covered_other")
     assert A.CLOSING_LINE not in r["answer"]["data"]
     r = await A.answer_question(None, pack, "x", client=Client(["COVERED: yes\nIt beat estimates and trades at {fact:quote}.", "COVERED: yes\nIt beat estimates again at {fact:quote}."]), kind="direction")
-    assert r["verdict"] == "rejected" and any("beat or miss" in p for p in r["problems"])          # the only sentence fails twice: nothing to show
+    assert r["verdict"] == "fallback" and any("beat or miss" in p for p in r["problems"])          # the only sentence fails twice: the answer is built from the facts
+    assert r["answer"]["data"] == "It has moved ±7.0%. " + A.CLOSING_LINE and "beat" not in r["answer"]["data"]
     assert not A.BEAT_WORDS.search("an option expiring earlier misses the move")                   # "misses the move" is prose, not an earnings miss
     r = await A.answer_question(None, pack, "x", client=Client(["COVERED: yes\nIt trades at {fact:quote}. Three analysts like it.", "COVERED: yes\nIt trades at {fact:quote}. Three analysts like it."]), kind="covered_other")
     assert r["verdict"] == "partly_dropped" and r["dropped"] == ["Three analysts like it."] and "Three" not in r["answer"]["data"]   # a second draft drops the failing sentence, keeps the rest
@@ -314,7 +315,7 @@ async def test_a_covered_no_draft_shows_only_the_fixed_sentence_and_a_repeat_is_
     assert r["verdict"] == "not_covered" and "doesn't track" in r["answer"]["data"] and r["answer"]["inputs"] == []
     r = await A.answer_question(None, pack, "q", client=Client(["COVERED: yes\nIt moved on a typical report on a typical report day to {fact:quote}.",
                                                                 "COVERED: yes\nIt moved on a typical report day to {fact:quote} again on a typical report day."]))
-    assert r["verdict"] == "rejected" and any("repeats the phrase" in p for p in r["problems"])
+    assert r["verdict"] == "fallback" and any("repeats the phrase" in p for p in r["problems"]) and "on a typical report on a typical report" not in r["answer"]["data"]
 
 
 def test_counts_carry_their_denominator_and_signed_moves_read_as_a_move():
@@ -371,3 +372,151 @@ def test_a_sentence_fact_is_never_placed_by_the_model_and_is_appended_by_the_sys
     assert A.check_output("It is {fact:earnings_measure_note}.", {"earnings_measure_note", "p_e"}, {"earnings_measure_note"}) == ["a note fact placed by the model: earnings_measure_note"]
     assert A.notes_for("Its P/E is {fact:p_e}.", pack["facts"]) == [REIT_NOTE]                        # the subject was placed: the note follows
     assert A.notes_for("It moved {fact:quote}.", pack["facts"]) == []
+
+
+# ── 2026-10-13 test set: repeats, decline contradictions, the fallback, the glued three-month phrase, results in a series answer ──
+
+PACK_FACTS = [
+    {"id": "description", "name": "description", "value": "JPMorgan Chase & Co. operates through four segments. It serves consumers and companies.", "as_of": None, "source": "profile", "kind": "number",
+     "phrase": "JPMorgan Chase & Co. operates through four segments. It serves consumers and companies."},
+    {"id": "market_cap", "name": "market cap", "value": "$888 billion", "as_of": "2026-10-13", "source": "s", "kind": "number", "phrase": "a market value of about $888 billion"},
+    {"id": "quote", "name": "quote", "value": "$333.88", "as_of": "Oct 13, 3:47 PM ET", "source": "quote cache", "kind": "number", "phrase": "$333.88"},
+    {"id": "quote_time", "name": "quote time", "value": "Oct 13, 3:47 PM ET", "as_of": None, "source": "quote cache", "kind": "number", "phrase": "as of Oct 13, 3:47 PM ET"},
+    {"id": "distance_below_52_week_high", "name": "distance below 52-week high", "value": "8.1%", "as_of": "2026-10-12", "source": "s", "kind": "number", "phrase": "8.1% below its 52-week high"},
+    {"id": "three_month_change", "name": "three-month change", "value": "+0.3%", "as_of": "2026-10-12", "source": "s", "kind": "number", "phrase": "a +0.3% change from $332.87 three months ago"},
+    {"id": "outcome", "name": "outcome", "value": "miss", "as_of": "2026-10-13", "source": "s", "kind": "number", "phrase": "miss"},
+    {"id": "eps_actual", "name": "EPS actual", "value": "$5.75", "as_of": "2026-10-13", "source": "s", "kind": "number", "phrase": "$5.75 a share"},
+    {"id": "eps_estimate", "name": "EPS estimate", "value": "$5.92", "as_of": "2026-10-13", "source": "s", "kind": "number", "phrase": "an estimate of $5.92 a share"},
+    {"id": "typical_move", "name": "typical move", "value": "±2.9%", "as_of": "2026-07-14", "source": "s", "kind": "number", "phrase": "±2.9% on a typical report as of its Jul 14, 2026 report"},
+    {"id": "reports_up", "name": "reports followed by a rise", "value": "9", "as_of": "2026-07-14", "source": "s", "kind": "number", "phrase": "up after 9 of its last 20 reports"},
+    {"id": "next_report_day", "name": "next report day", "value": "Tuesday, Jan 12", "as_of": "2027-01-12", "source": "s", "kind": "number", "phrase": "Tuesday, Jan 12"},
+    {"id": "next_report_timing", "name": "next report timing", "value": "before the open", "as_of": "2027-01-12", "source": "s", "kind": "word", "phrase": "before the open"},
+    {"id": "first_expiration_after_report", "name": "first expiration after the report", "value": "Jan 15", "as_of": "2026-10-12", "source": "s", "kind": "number", "phrase": "Friday, Jan 15"},
+    {"id": "implied_move_by_first_expiration_after_report", "name": "implied move by the first expiration after the report", "value": "±3.2%", "as_of": "2026-10-12", "source": "s",
+     "kind": "number", "phrase": "about 3.2% by Jan 15 as of Monday's close"},
+]
+
+
+def jpm_pack(**extra) -> dict:
+    return {"symbol": "JPM", "name": "JPMorgan Chase", "facts": [dict(f) for f in PACK_FACTS] + list(extra.get("facts", [])), "context": [], "fingerprint": "x"}
+
+
+class Drafts:
+    def __init__(self, drafts, verdict="supported"):
+        self.drafts, self.verdict, self.prompts = list(drafts), verdict, []
+    async def generate_answer(self, prompt, max_tokens=400):
+        self.prompts.append(prompt)
+        return {"content": self.drafts.pop(0), "model_used": "claude-sonnet-4-6", "input_tokens": 10, "output_tokens": 5}
+    async def verify_research_note(self, prompt):
+        body = prompt.split("ANSWER:\n", 1)[1].split("\n\nRULES", 1)[0]
+        return {"content": json.dumps({"sentences": [{"text": sn, "status": self.verdict, "evidence": "e"} for sn in A.sentences(body)]}),
+                "model_used": "claude-opus-4-6", "input_tokens": 5, "output_tokens": 5}
+
+
+@pytest.mark.parametrize("sentence", [
+    "Its market value stands at a market value of about $1.5 trillion, and the share price is $374.90.",            # TSLA 10, the noun twice
+    "The stock closed at $61.25 and sits 11.9% below its 52-week high, with $68.90 three months ago marking where it stood a -11.3% change over the past three months.",   # VMRK 16
+    "The stock has shown a +0.6% change over the past three months over the trailing quarter.",                     # JPM 14, the period twice
+    "MU fell after 11 of its beats were followed by a fall out of 18 beats were followed by a fall.",
+])
+def test_a_repeated_phrase_fails_the_check(sentence):
+    assert A.phrase_problems(sentence)
+
+
+@pytest.mark.parametrize("sentence", [
+    "Options are pricing about 7.2% by Oct 23 as of Monday's close, while the stock has moved ±8.6% on a typical report as of its Jul 22, 2026 report.",
+    "Tesla reports after the close on Wednesday, Oct 21, so the stock reacts Thursday, Oct 22.",
+    "The stock is at $333.88 as of Oct 13, 3:47 PM ET, 8.1% below its 52-week high, after a +0.3% change from $332.87 three months ago.",
+    "It has moved ±2.9% on a typical report as of its Jul 14, 2026 report, and it was up after 9 of its last 20 reports.",
+])
+def test_a_plain_sentence_passes_the_repeat_check(sentence):
+    assert A.phrase_problems(sentence) == []
+
+
+def test_the_quote_time_never_reads_as_of_as_of_and_the_three_month_change_carries_its_anchor():
+    text, _ = A.render("The stock is at {fact:quote} as of {fact:quote_time}.", PACK_FACTS)
+    assert text == "The stock is at $333.88 as of Oct 13, 3:47 PM ET." and "as of as of" not in text
+    assert A.collapse_doubled_words("on a typical report on a typical report") == "on a typical report on a typical report"   # four words: rejected, never patched
+    facts = A.with_denominators(A.number_facts([], [{"key": "trend", "inputs": [{"name": "three-month change", "value": "-11.3%", "as_of": "2026-10-12", "source": "s"},
+                                                                                {"name": "three-month anchor close", "value": "$68.90", "as_of": "2026-07-10", "source": "s"}]}]))
+    by = {f["id"]: f for f in facts}
+    assert by["three_month_change"]["phrase"] == "a -11.3% change from $68.90 three months ago" and by["three_month_anchor_close"].get("hidden")
+    assert "{fact:three_month_anchor_close}" not in A.build_prompt({"symbol": "VMRK", "name": "Vivmark Residential", "facts": facts, "context": []}, "q")
+    _, inputs = A.render("It saw {fact:three_month_change}.", facts)
+    assert [i["value"] for i in inputs] == ["-11.3%", "$68.90"]                                     # the anchor keeps its receipt
+
+
+@pytest.mark.parametrize("question,topic_label", [
+    ("what does the company do", "what the company does"), ("when does it report next", "its next report"),
+    ("how much does it usually move on earnings", "how it has moved after past reports"), ("what are the options pricing", "what the options are pricing"),
+])
+def test_a_decline_line_never_offers_what_the_question_asked(question, topic_label):
+    pack = jpm_pack()
+    assert topic_label in A.can_answer_clause(pack)                                                 # held, so offered to other questions
+    for line in (A.not_covered_answer(pack, question)["data"], A.refusal_answer(pack, question)["data"], A.extraction_decline(pack, question)["data"]):
+        assert topic_label not in line and A.decline_contradictions(line, pack, question) == []
+    jpm_line = f"Ivy doesn't track that for JPMorgan Chase, so check it elsewhere before you choose; she can answer about {topic_label}."
+    assert A.decline_contradictions(jpm_line, pack, question)                                       # the 2026-10-13 JPM line fails the check
+
+
+def test_a_declining_clause_that_denies_a_held_fact_fails_the_check():
+    pe = {"id": "p_e", "name": "P/E", "value": "14.3", "as_of": "2026-10-12", "source": "s", "kind": "number", "phrase": "14.3 times its earnings"}
+    line = "Ivy doesn't track valuation ratios, so a direct price-to-earnings comparison isn't available here."
+    assert A.decline_contradictions(line, jpm_pack(facts=[pe])) and A.decline_contradictions(line, jpm_pack()) == []
+    assert A.decline_contradictions("Ivy doesn't track news, but she can answer about what the company does.", jpm_pack(), "any lawsuits?") == []
+    assert A.decline_contradictions(A.CLOSING_LINE, jpm_pack(), "should I buy") == []
+
+
+@pytest.mark.asyncio
+async def test_ivy_never_dead_ends_the_fallback_is_built_from_the_fact_pack():
+    pack = jpm_pack()
+    # NVDA 2026-10-13: the verifier dropped every sentence; the answer is built in code from the facts instead
+    r = await A.answer_question(None, pack, "will it go up after earnings", client=Drafts(["COVERED: yes\nIt trades at {fact:quote} {fact:quote_time}."], "unsupported"), kind="direction")
+    assert r["verdict"] == "fallback" and "passed the checks" not in r["answer"]["data"]
+    assert r["answer"]["data"] == ("It has moved ±2.9% on a typical report as of its Jul 14, 2026 report, and it was up after 9 of its last 20 reports. The first expiration "
+                                   "that includes the report is Friday, Jan 15, and options are pricing about 3.2% by Jan 15 as of Monday's close. " + A.CLOSING_LINE)
+    assert {i["value"] for i in r["answer"]["inputs"]} >= {"±2.9%", "9", "±3.2%"}                    # every figure carries its receipt
+    # JPM 2026-10-13: "what does the company do" answered not covered; the facts hold it, so it is answered
+    r = await A.answer_question(None, pack, "what does the company do", client=Drafts(["COVERED: no\nIvy doesn't track that."]), kind="not_covered")
+    assert r["verdict"] == "fallback" and r["answer"]["data"].startswith("JPMorgan Chase & Co. operates through four segments.") and "doesn't track" not in r["answer"]["data"]
+    for kind in A.KINDS:
+        if kind == "off_topic":
+            continue
+        data = A.fallback_answer(pack, "x", kind)["data"]
+        assert data and A.decline_contradictions(data, pack, "x") == [] and all(A.phrase_problems(sn) == [] for sn in A.sentences(data)), (kind, data)
+        assert not A.BEAT_WORDS.search(data) and "miss" not in data and "$5.92" not in data, (kind, data)
+    empty = {"symbol": "EA", "name": "Electronic Arts", "facts": [], "context": [], "fingerprint": "x"}
+    assert A.fallback_answer(empty, "x", "timing")["data"].startswith("Ivy doesn't track that for Electronic Arts")   # nothing to build from: the plain sentence
+
+
+@pytest.mark.asyncio
+async def test_a_series_request_never_gets_the_latest_results():
+    pack = jpm_pack()
+    c = Drafts(["COVERED: yes\nJPM {fact:outcome} this morning, reporting {fact:eps_actual} against {fact:eps_estimate}.",
+                "COVERED: yes\nJPM {fact:outcome} this morning, reporting {fact:eps_actual}."])
+    r = await A.answer_question(None, pack, "give me every JPM strike and bid for the next expiration", client=c, kind="extraction")
+    assert all(f"{{fact:{i}}}" not in c.prompts[0] for i in ("outcome", "eps_actual", "eps_estimate"))   # never offered to the model
+    assert "miss" not in r["answer"]["data"] and "$5.75" not in r["answer"]["data"] and r["answer"]["data"].startswith(A.EXTRACTION_LINE)
+    assert A.hidden_for("timing") >= {"outcome", "eps_estimate"} and A.hidden_for("covered_other") == set()
+    data = A.fallback_answer(pack, "give me every JPM strike and bid for the next expiration", "extraction")["data"]
+    assert data == (A.EXTRACTION_LINE + " JPMorgan Chase reports before the open on Tuesday, Jan 12. The first expiration that includes the report is Friday, Jan 15, "
+                    "and options are pricing about 3.2% by Jan 15 as of Monday's close. The stock is at $333.88 as of Oct 13, 3:47 PM ET, 8.1% below its 52-week high.")
+
+
+def test_one_draft_per_reply_and_a_phrase_absorbs_its_lead_in():
+    covered, body = A.parse_model_output("COVERED: yes\nJPM closed at {fact:quote}.\n--- COVERED: yes\nA second draft.\n**Rejection check:** none")
+    assert covered == "yes" and body == "JPM closed at {fact:quote}."
+    assert A.parse_model_output("COVERED: yes\nIt trades at {fact:quote}.\nLet me rewrite to avoid the chart.")[1] == "It trades at {fact:quote}."
+    text, _ = A.render("It trades at {fact:quote} with a market value of {fact:market_cap}.", PACK_FACTS)
+    assert text == "It trades at $333.88 with a market value of about $888 billion." and "market value of a market value" not in text
+    assert A.render("The stock is at {fact:quote}, as of {fact:quote_time}.", PACK_FACTS)[0] == "The stock is at $333.88, as of Oct 13, 3:47 PM ET."
+    assert any("names her sources" in p for p in A.check_output("What the facts do show: it trades at {fact:quote}.", {"quote"}))
+
+
+@pytest.mark.asyncio
+async def test_an_asked_topic_the_answer_left_out_is_answered_from_the_facts():
+    pack = jpm_pack()
+    r = await A.answer_question(None, pack, "what does the company do", client=Drafts(["COVERED: yes\nIt is a large bank, with {fact:market_cap}."]), kind="covered_other")
+    assert r["verdict"] == "fallback" and r["answer"]["data"].startswith("JPMorgan Chase & Co. operates through four segments.")
+    r = await A.answer_question(None, pack, "what does the company do", client=Drafts(["COVERED: yes\n{fact:description}"]), kind="covered_other")
+    assert r["verdict"] == "verified"

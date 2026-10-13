@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 
-SERVED = ("verified", "partly_dropped", "not_covered", "off_topic", "advice", "declined")
+SERVED = ("verified", "partly_dropped", "fallback", "not_covered", "off_topic", "advice", "declined")
 
 
 async def run(argv: list[str]) -> int:

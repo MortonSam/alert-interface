@@ -48,11 +48,14 @@ MODEL_CALL_SECONDS = 20                    # one attempt of one model call (the 
 PACK_SECONDS = 10                          # the fact pack: database reads only
 CLASSIFY_SECONDS = 8                       # the classifier, one small call
 ANSWER_SECONDS = 45                        # the whole answer: the draft, at most one rewrite and the verification
-CACHE_VERSION = 2                           # 2 (2026-10-12): the analyst's voice; every answer cached before it is never served again
+CACHE_VERSION = 3                           # 3 (2026-10-13): repeats, decline contradictions and the fallback; every answer cached before it is never served again
 KINDS = ("timing", "direction", "quality", "options_planning", "extraction", "covered_other", "not_covered", "off_topic")
 DECISION_KINDS = ("timing", "direction", "quality", "options_planning")     # a buy, sell or trade decision: facts first, then CLOSING_LINE
 CLOSING_LINE = "Ivy doesn't make buy or sell calls."
-BEAT_FACTS = {"beats", "beats_followed_by_a_fall", "share", "last_report_outcome"}   # beat or miss figures never enter a decision answer
+# beat or miss figures never enter a decision answer: the counts, the outcome word (the strip's "outcome", the comparison's
+# "last_report_outcome") and the estimate, which beside the actual is a beat or miss (JPM 2026-10-13: "JPM miss this morning")
+BEAT_FACTS = {"beats", "beats_followed_by_a_fall", "share", "last_report_outcome", "outcome", "eps_estimate"}
+RESULT_FACTS = BEAT_FACTS | {"eps_actual"}   # a request for a series or chain is never answered with the latest results
 # Intrinio's terms (2026-10-12): a figure may be cited inside an explanation; a raw series or table (daily closes, a chain, OHLC bars,
 # strike-by-strike bids, a CSV) never leaves through Ivy. FIGURE_CAP is the most distinct prices, moves or option quotes one answer
 # may carry: the test set's served answers carried at most six (most three or four), and a ninety-word answer with a why clause
@@ -129,7 +132,7 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
 ]
 VALUATION_VERDICTS = re.compile(r"\b(?:cheap|expensive|undervalued|overvalued|pricey|a bargain|overpriced|underpriced)\b", re.I)   # a ratio is never a verdict
 # words that imply a call, or talk about her own sources: never shown (Sam's voice rules, 2026-10-12)
-FORBIDDEN_PHRASES = re.compile(r"\b(?:bargain|good entry|the facts show|the data indicates?|the data shows?|this page|the facts here|the stored facts|stored data|"
+FORBIDDEN_PHRASES = re.compile(r"\b(?:bargain|good entry|the facts (?:do )?show|what (?:the facts|they) (?:do )?show|the data indicates?|the data shows?|this page|the facts here|the stored facts|stored data|"
                                r"the facts (?:do not|don't) cover|my sources|the page's|according to the (?:facts|data)|"
                                r"the chart|chart above|options section|scroll back|lives in|on this page|of this page)\b", re.I)   # the pointer to the chart is the code's line, never the model's
 JARGON = re.compile(r"\b(?:IV|RV|ATM)\b")                              # bare initials, case-sensitive; "implied move" and "typical move" are the words
@@ -185,34 +188,83 @@ async def classify_question(client, question: str, symbol: str, name: str | None
             "cost": estimate_cost_usd(out["model_used"], out["input_tokens"], out["output_tokens"]) or 0.0}
 
 
-def can_answer_clause(pack: dict) -> str:
-    """What Ivy can answer about this stock, from what the pack holds."""
+# What Ivy can answer, topic by topic: (key, the words that offer it, the fact ids that hold it, a question asking for it, a
+# decline that denies it). One table serves the offer in a decline line, the fallback answer, and the check that no sentence
+# declines what the facts hold (JPM 2026-10-13: "Ivy doesn't track that ... she can answer about ... what the company does",
+# to "what does the company do").
+TOPICS: list[tuple[str, str, tuple[str, ...], re.Pattern, re.Pattern]] = [
+    ("next_report", "its next report", ("next_report_day", "next_earnings_date"),
+     re.compile(r"\b(?:when|next)\b[^?]*\b(?:report|reports|earnings|results)\b|\breports? next\b", re.I),
+     re.compile(r"\b(?:its |the )?(?:next )?(?:report|earnings) date\b|\bnext report\b|\bwhen (?:it|the company) reports\b", re.I)),
+    ("past_moves", "how it has moved after past reports", ("typical_move", "typical_move_after_a_report", "reports_up"),
+     re.compile(r"\b(?:move|moves|moved|react|reacts|reacted|go up|go down)\b[^?]*\b(?:earnings|report|reports)\b", re.I),
+     re.compile(r"\b(?:moves?|reactions?) after (?:past |its )?reports\b|\btypical (?:earnings )?move\b", re.I)),
+    ("options", "what the options are pricing", ("implied_move_by_first_expiration_after_report", "implied_move"),
+     re.compile(r"\boptions?\b|\bimplied\b|\bstrikes?\b|\bexpirations?\b|\bcalls?\b|\bputs?\b", re.I),
+     re.compile(r"\boptions? (?:are )?(?:pricing|prices|market)\b|\bimplied moves?\b", re.I)),
+    ("price_range", "where its price sits in its range", ("quote", "last_close"),
+     re.compile(r"\bprices?\b|\btrading at\b|\b52-week\b|\bclos(?:e|es|ing)\b|\bdrop(?:ped)?\b|\bOHLC\b", re.I),
+     re.compile(r"\b(?:its |the )?(?:share |stock )price\b|\bwhere (?:its|the) price sits\b|\bprice range\b", re.I)),
+    ("description", "what the company does", ("description",),
+     re.compile(r"\bwhat (?:does|do) (?:it|they|the company|[A-Z][\w&.]*) (?:do|make|sell)\b|\bwhat (?:is|are) (?:the company|its business)\b|\bbusiness\b", re.I),
+     re.compile(r"\bwhat (?:the company|it) does\b|\bits business\b|\bthe company's description\b|\bwhat (?:the company|it) makes\b", re.I)),
+    ("valuation", "how its P/E compares", ("p_e",),
+     re.compile(r"\bexpensive\b|\bcheap\b|\bvaluation\b|\bP/?E\b|\bovervalued\b|\bundervalued\b", re.I),
+     re.compile(r"\bvaluation ratios?\b|\bprice-to-earnings\b|\bP/E\b", re.I)),
+]
+DECLINE = re.compile(r"\b(?:doesn't|does not|don't|can't|cannot) (?:track|hold|have|cover|answer)\b|\bisn't available\b|\bnot available\b|\bno (?:information|data) (?:on|about)\b", re.I)
+
+
+def held_topics(pack: dict) -> list[tuple]:
+    """The topics whose facts the pack holds, in TOPICS order."""
     ids = {f["id"] for f in pack.get("facts", [])}
-    parts = []
-    if "next_earnings_date" in ids or "next_report_day" in ids:
-        parts.append("its next report")
-    if "typical_move" in ids or "reports_up" in ids:
-        parts.append("how it has moved after past reports")
-    if any(i.startswith("implied_move") for i in ids):
-        parts.append("what the options are pricing")
-    if "quote" in ids or "last_close" in ids:
-        parts.append("where its price sits in its range")
-    if "description" in ids:
-        parts.append("what the company does")
+    return [t for t in TOPICS if any(i in ids for i in t[2])]
+
+
+def asked_topics(pack: dict, question: str) -> list[tuple]:
+    """Pure: the held topics the question asks about."""
+    return [t for t in held_topics(pack) if t[3].search(question or "")]
+
+
+def can_answer_clause(pack: dict, question: str | None = None) -> str:
+    """What Ivy can answer about this stock, from what the pack holds; never the topic the question asked (a line that declines
+    a question cannot offer the same thing)."""
+    asked = {t[0] for t in asked_topics(pack, question)} if question else set()
+    parts = [t[1] for t in held_topics(pack) if t[0] not in asked]
     if not parts:
         return "its stored figures"
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
+_CLAUSE_BREAK = re.compile(r"[;:]|\b(?:but|so|though|although|while|instead|she can|ivy can|what (?:she|ivy) (?:does|can))\b", re.I)
+
+
+def decline_contradictions(text_: str, pack: dict, question: str | None = None) -> list[str]:
+    """Pure: every way an answer that declines contradicts itself: a declining clause denies a topic the facts hold ("Ivy doesn't
+    track valuation ratios" beside a stored P/E), or the answer declines and offers the very topic the question asked (JPM
+    2026-10-13: "Ivy doesn't track that ... she can answer about ... what the company does" to "what does the company do")."""
+    out = []
+    held = held_topics(pack)
+    asked = {t[0] for t in asked_topics(pack, question)} if question else set()
+    for sn in sentences(text_):
+        if not DECLINE.search(sn):
+            continue
+        for clause in _CLAUSE_BREAK.split(sn):
+            if DECLINE.search(clause):
+                out += [f"a sentence declines {key.replace('_', ' ')}, which the facts hold" for key, _, _, _, denies in held if denies.search(clause)]
+        out += [f"a declining sentence offers {label}, which the question asked" for key, label, *_ in held if key in asked and label in sn]
+    return out
+
+
 def refusal_answer(pack: dict, question: str) -> dict:
     """The one allowed refusal: nothing relevant to this stock, and what she can answer about it."""
-    text_ = f"That isn't about {pack['name']}; Ivy can answer about {can_answer_clause(pack)}."
+    text_ = f"That isn't about {pack['name']}; Ivy can answer about {can_answer_clause(pack, question)}."
     return {"key": "ask", "question": question, "data": text_, "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
 
 
 def extraction_decline(pack: dict, question: str) -> dict:
     """The helpful decline when a series was asked for and no explanation passed: where the series lives, and what she can answer."""
-    return {"key": "ask", "question": question, "data": f"{EXTRACTION_LINE} She can answer about {can_answer_clause(pack)}.", "idea": "", "inputs": [],
+    return {"key": "ask", "question": question, "data": f"{EXTRACTION_LINE} She can answer about {can_answer_clause(pack, question)}.", "idea": "", "inputs": [],
             "as_of": None, "as_of_kind": "observed", "rule": RULE}
 
 
@@ -238,6 +290,40 @@ def series_problems(draft: str, rendered: str, raw: str = "") -> list[str]:
 def fixed_answer(kind: str, pack: dict, question: str) -> dict:
     """Off topic is the refusal; anything else is the not-covered sentence."""
     return refusal_answer(pack, question) if kind == "off_topic" else not_covered_answer(pack, question)
+
+
+CONTENT_STOP = STOPWORDS | {"a", "an", "as", "by", "after", "before", "than", "more", "less", "over", "past", "last", "next", "per", "from", "into", "since", "each",
+                            "which", "who", "so", "but", "not", "no", "also", "then", "there", "their", "they", "her", "she", "ivy"}
+PERIODS = re.compile(r"\b(?:over|in|during|across) (?:the )?(?:past|trailing|last) (?:three months|quarter|three-month period)\b|\bthree months ago\b|\btrailing quarter\b", re.I)
+
+
+def repeated_term(sentence: str) -> str | None:
+    """Pure: a pair of content words written twice in one sentence ("Its market value stands at a market value of about ..."),
+    else None. Function words, digits and dates never form a pair."""
+    toks = [t for t in re.findall(r"[a-z][a-z'-]*|\d[\d,.]*", sentence.lower())]
+    seen: set[tuple[str, str]] = set()
+    for a, b in zip(toks, toks[1:]):
+        if a in CONTENT_STOP or b in CONTENT_STOP or a[0].isdigit() or b[0].isdigit() or len(a) < 3 or len(b) < 3:
+            continue
+        if (a, b) in seen:
+            return f"{a} {b}"
+        seen.add((a, b))
+    return None
+
+
+def phrase_problems(sentence: str) -> list[str]:
+    """Pure: every way a rendered sentence repeats itself: a run of four words twice, a pair of content words twice, or the same
+    period named twice ("a -11.3% change over the past three months ... three months ago", "over the trailing quarter")."""
+    out = []
+    r = repeated_phrase(sentence)
+    if r:
+        out.append(f'a sentence repeats the phrase "{r}"')
+    t = repeated_term(sentence)
+    if t and not (r and t in r):
+        out.append(f'a sentence repeats the phrase "{t}"')
+    if len(PERIODS.findall(sentence)) > 1:
+        out.append("a sentence names the same period twice")
+    return out
 
 
 def repeated_phrase(sentence: str, words: int = 4) -> str | None:
@@ -304,6 +390,8 @@ DENOMINATORS: list[tuple[str, str, str]] = [
     ("reports moving more", "reports in the sample", "{value} of its last {denominator} reports"),
     ("beats followed by a fall", "reports in the sample", "{value} of its beats in its last {denominator} reports"),
     ("sessions below today's P/E", "sessions compared", "{value} of its {denominator} sessions over the past five years"),
+    # the change and the close it is measured from read as one phrase (VMRK 2026-10-13: "with $68.90 three months ago marking where it stood a -11.3% change")
+    ("three-month change", "three-month anchor close", "a {value} change from {denominator} three months ago"),
 ]
 
 
@@ -552,7 +640,7 @@ TARGET_EXAMPLE = ("Tesla reports after the close on Wednesday, Oct 21, so the st
 
 
 def build_prompt(pack: dict, question: str, kind: str = "covered_other") -> str:
-    hidden = BEAT_FACTS if kind in DECISION_KINDS else set()
+    hidden = hidden_for(kind)
     lines = [f"{{fact:{f['id']}}} = {f['name']}: {f['value']}" + (f" (as of {f['as_of']})" if f["as_of"] else "")
              + (" [word]" if f["kind"] == "word" else "") + (f' → reads "{f["phrase"]}"' if f.get("phrase") and f["phrase"] != f["value"] else "")
              for f in pack["facts"] if not f.get("hidden") and f["id"] not in hidden]
@@ -661,6 +749,9 @@ def sentences(text_: str) -> list[str]:
     return out
 
 
+DRAFT_END = re.compile(r"^(?:-{3,}|\*{3,}|COVERED:|\*\*?Rejection|\(?\*?Rewrit|Let me |Note:|Check:)", re.I)
+
+
 def parse_model_output(content: str) -> tuple[str, str]:
     """Pure: (covered, answer) from the model's output; covered defaults to "partly" when the first line is missing."""
     lines = content.strip().splitlines()
@@ -668,6 +759,12 @@ def parse_model_output(content: str) -> tuple[str, str]:
     if lines and lines[0].strip().upper().startswith("COVERED:"):
         covered = lines[0].split(":", 1)[1].strip().lower().rstrip(".") or "partly"
         lines = lines[1:]
+    # one draft per reply: a second COVERED line, a "---" rule or the model's own commentary ends the answer (JPM 2026-10-13
+    # showed "--- COVERE" after a reply that held two drafts)
+    for i, l in enumerate(lines):
+        if DRAFT_END.match(l.strip()):
+            lines = lines[:i]
+            break
     if covered not in ("yes", "partly", "no", "off"):
         covered = "partly"
     return covered, " ".join(l.strip() for l in lines if l.strip())
@@ -699,12 +796,12 @@ def absorb_literals(text_: str, facts: list[dict]) -> str:
     return text_
 
 
-_DOUBLED = re.compile(r"\b([A-Za-z]+) \1\b", re.I)
+_DOUBLED = re.compile(r"\b([A-Za-z]+(?: [A-Za-z]+)?) \1\b", re.I)
 
 
 def collapse_doubled_words(text_: str) -> str:
-    """Pure: one identical word written twice in a row ("after after the close", when the model's word meets the fact's) appears
-    once. Only a single doubled word; a repeated phrase of four or more words is rejected, never patched (repeated_phrase)."""
+    """Pure: one or two words written twice in a row ("after after the close", "as of as of Oct 13", where the model's words meet
+    the fact's phrase) appear once. A repeated phrase of four or more words is rejected, never patched (phrase_problems)."""
     return _DOUBLED.sub(r"\1", text_)
 
 
@@ -728,8 +825,25 @@ def render(text_: str, facts: list[dict]) -> tuple[str, list[dict]]:
                 add_input(by_id[cid])
         return f.get("phrase") or f["value"]
     from app.services.anthropic_client import _scrub_dashes
+    text_ = absorb_lead_in(text_, by_id)
     rendered = collapse_doubled_words(_scrub_dashes(PLACEHOLDER.sub(sub, text_)))
     return rendered, inputs
+
+
+def absorb_lead_in(text_: str, by_id: dict) -> str:
+    """Pure: words the model wrote just before a placeholder that its phrase begins with are the phrase's own ("a market value of
+    {fact:market_cap}" where the phrase is "a market value of about $888 billion"; "as of {fact:quote_time}"): written once."""
+    def fix(m: re.Match) -> str:
+        f = by_id.get(m.group(2))
+        phrase = (f or {}).get("phrase") or ""
+        lead = m.group(1)
+        words = phrase.split()
+        for k in range(min(5, len(words)), 0, -1):
+            head = " ".join(words[:k])
+            if re.search(r"(?:^|\s)" + re.escape(head) + r"\s+$", lead, re.I) and not re.search(r"\d", head):
+                return lead[: len(lead.rstrip()) - len(head)].rstrip() + " " + m.group(0)[len(lead):]
+        return m.group(0)
+    return re.sub(r"((?:\S+\s+){1,5})(?=\{fact:)\{fact:([a-z0-9_]+)\}", fix, text_)
 
 
 def notes_for(text_: str, facts: list[dict]) -> list[str]:
@@ -802,7 +916,7 @@ def cache_key(symbol: str, normalized: str, fp: str) -> str:
 
 
 async def cached_answer(db: AsyncSession, key: str) -> dict | None:
-    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'not_covered', 'off_topic', 'declined') "
+    row = (await db.execute(text("SELECT answer FROM ask_log WHERE cache_key = :k AND answer IS NOT NULL AND verdict IN ('verified', 'partly_dropped', 'fallback', 'not_covered', 'off_topic', 'declined') "
                                  "ORDER BY created_at DESC LIMIT 1"), {"k": key})).first()
     return row[0] if row else None
 
@@ -840,7 +954,7 @@ RULE = ("Ivy wrote the words from this stock's stored facts and typed no number:
 
 def not_covered_answer(pack: dict, question: str) -> dict:
     """One plain sentence, never a list of what is missing."""
-    return {"key": "ask", "question": question, "data": f"Ivy doesn't track that for {pack['name']}, so check it elsewhere before you choose; she can answer about {can_answer_clause(pack)}.",
+    return {"key": "ask", "question": question, "data": f"Ivy doesn't track that for {pack['name']}, so check it elsewhere before you choose; she can answer about {can_answer_clause(pack, question)}.",
             "idea": "", "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
 
 
@@ -885,10 +999,86 @@ async def answer_within(db: AsyncSession, pack: dict, question: str, *, client=N
                 "output_tokens": None, "cost": 0.0, "problems": [f"no answer within {ANSWER_SECONDS}s"]}
 
 
-def unchecked_answer(pack: dict, question: str) -> dict:
-    """What a visitor sees when no draft passed the checks: a plain sentence, no guess."""
-    return {"key": "ask", "question": question, "data": f"Ivy couldn't produce an answer about {pack['name']} that passed the checks for that question.", "idea": "",
-            "inputs": [], "as_of": None, "as_of_kind": "observed", "rule": RULE}
+# The fallback: when no drafted sentence survives the checks or the verifier, Ivy never dead-ends (NVDA 2026-10-13: "couldn't produce
+# an answer that passed the checks"). She answers in code from the fact pack: each topic's sentence is a template over fact
+# placeholders, rendered like any draft, so every figure is a stored value with its receipt and no word is the model's.
+FALLBACK_TEMPLATES: dict[str, list[tuple[tuple[str, ...], str]]] = {
+    # topic: [(the fact ids the sentence needs, the sentence)], first matching variant per topic
+    "next_report": [(("next_report_day", "next_report_timing"), "{name} reports {fact:next_report_timing} on {fact:next_report_day}."),
+                    (("next_report_day",), "{name} reports on {fact:next_report_day}.")],
+    "past_moves": [(("typical_move", "reports_up"), "It has moved {fact:typical_move}, and it was {fact:reports_up}."),
+                   (("typical_move_after_a_report", "reports_up"), "It has moved {fact:typical_move_after_a_report}, and it was {fact:reports_up}."),
+                   (("typical_move",), "It has moved {fact:typical_move}."), (("reports_up",), "It was {fact:reports_up}.")],
+    "options": [(("first_expiration_after_report", "implied_move_by_first_expiration_after_report"),
+                 "The first expiration that includes the report is {fact:first_expiration_after_report}, and options are pricing {fact:implied_move_by_first_expiration_after_report}."),
+                (("implied_move_by_first_expiration_after_report",), "Options are pricing {fact:implied_move_by_first_expiration_after_report}.")],
+    "price_range": [(("quote", "quote_time", "distance_below_52_week_high"), "The stock is at {fact:quote} {fact:quote_time}, {fact:distance_below_52_week_high}."),
+                    (("last_close", "distance_below_52_week_high"), "The stock closed at {fact:last_close}, {fact:distance_below_52_week_high}."),
+                    (("quote", "quote_time"), "The stock is at {fact:quote} {fact:quote_time}."), (("last_close",), "The stock closed at {fact:last_close}.")],
+    "trend": [(("three_month_change",), "That follows {fact:three_month_change}.")],
+    "description": [(("description",), "{fact:description}")],
+}
+# the topics a fallback answers by kind when the question names none, in order (at most FALLBACK_SENTENCES sentences)
+FALLBACK_BY_KIND = {"timing": ("next_report", "options", "price_range"), "options_planning": ("next_report", "options"),
+                    "direction": ("past_moves", "options"), "quality": ("description", "price_range", "trend"),
+                    "extraction": ("price_range", "trend"), "covered_other": ("price_range", "trend"), "not_covered": ("price_range", "trend")}
+FALLBACK_SENTENCES = 3
+
+
+def fallback_sentences(pack: dict, question: str, kind: str) -> list[str]:
+    """Pure: the fallback's sentences, with placeholders: the topics the question asks first, then the kind's own, each topic once."""
+    ids = {f["id"] for f in pack["facts"]} - hidden_for(kind)
+    asked = [t[0] for t in asked_topics(pack, question)]
+    if kind == "extraction" and asked and asked[0] == "options":
+        asked = ["next_report", "options"]                  # a chain or strikes request: the dates that matter and what the options price
+    out = []
+    for topic in dict.fromkeys(asked + list(FALLBACK_BY_KIND.get(kind, FALLBACK_BY_KIND["covered_other"]))):
+        for need, template in FALLBACK_TEMPLATES.get(topic, []):
+            if all(i in ids for i in need):
+                sn = template.replace("{name}", pack["name"])
+                if topic == "description":
+                    sn = first_sentence_fact(pack, sn)
+                if sn:
+                    out.append(sn)
+                break
+        if len(out) >= FALLBACK_SENTENCES:
+            break
+    return out
+
+
+def first_sentence_fact(pack: dict, sn: str) -> str | None:
+    """The description reads as its first sentence only (the stored text runs to a paragraph): a fact of its own, with the same receipt."""
+    d = next((f for f in pack["facts"] if f["id"] == "description"), None)
+    if d is None:
+        return None
+    first = sentences(d["value"])[0] if d["value"].strip() else ""
+    if not first:
+        return None
+    if first != d["value"]:
+        pack["facts"].append({**d, "id": "description_first_sentence", "value": first, "phrase": first, "hidden": True})
+        return "{fact:description_first_sentence}"
+    return sn
+
+
+def fallback_answer(pack: dict, question: str, kind: str) -> dict:
+    """A short answer built in code from the fact pack, for when no drafted sentence survived; the not-covered sentence when the pack
+    holds nothing it could say."""
+    pack = {**pack, "facts": list(pack["facts"])}
+    body = " ".join(fallback_sentences(pack, question, kind))
+    if not body:
+        return not_covered_answer(pack, question)
+    rendered, inputs = render(body, pack["facts"])
+    kept = sentences(rendered)
+    if kind == "extraction":
+        kept = [EXTRACTION_LINE] + kept
+    if kind in DECISION_KINDS:
+        kept = kept + [CLOSING_LINE]
+    return answer_payload(question, kept, inputs, pack)
+
+
+def hidden_for(kind: str) -> set[str]:
+    """The facts a kind of answer never sees: beat or miss figures in a decision, the latest results in a request for a series."""
+    return set(RESULT_FACTS) if kind == "extraction" else set(BEAT_FACTS) if kind in DECISION_KINDS else set()
 
 
 def answer_payload(question: str, kept: list[str], inputs: list[dict], pack: dict) -> dict:
@@ -905,7 +1095,7 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     if kind == "off_topic":
         return {"covered": "off", "verdict": "off_topic", "answer": refusal_answer(pack, question), "model": None, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
                 "problems": [], "dropped": [], "raw": "", "retried": False, "kind": kind}
-    pack = {**pack, "facts": [f for f in pack["facts"] if not (kind in DECISION_KINDS and f["id"] in BEAT_FACTS)]}
+    pack = {**pack, "facts": [f for f in pack["facts"] if f["id"] not in hidden_for(kind)]}
     prompt = build_prompt(pack, question, kind)
     gen = await client.generate_answer(prompt)
     covered, body = parse_model_output(gen["content"])
@@ -916,11 +1106,11 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     ids, note_ids = {f["id"] for f in pack["facts"]}, {f["id"] for f in pack["facts"] if f["kind"] == "note"}
     def sentence_problems(text_: str) -> list[str]:
         rendered_, _ = render(text_, pack["facts"])
-        reps = [r for r in (repeated_phrase(sn) for sn in sentences(rendered_)) if r]
+        unquoted, _ = render(text_.replace("{fact:description}", "the description"), pack["facts"])   # the company's own paragraph is quoted, never judged for repeats
         out_ = ([p for p in check_output(text_, ids, note_ids) if not p.startswith("more than")] + verify_comparisons(text_, pack["facts"])
-                + [f'a sentence repeats the phrase "{r}"' for r in reps])
-        if kind in DECISION_KINDS and BEAT_WORDS.search(PLACEHOLDER.sub(" ", text_)):
-            out_.append("a beat or miss in a decision answer")
+                + [p for sn in sentences(unquoted) for p in phrase_problems(sn)] + decline_contradictions(rendered_, pack, question))
+        if (kind in DECISION_KINDS or kind == "extraction") and BEAT_WORDS.search(PLACEHOLDER.sub(" ", text_)):
+            out_.append("a beat or miss in a decision answer" if kind in DECISION_KINDS else "a beat or miss in an answer to a request for a series")
         return out_
     def all_problems(text_: str, raw: str) -> list[str]:
         rendered_, _ = render(text_, pack["facts"])
@@ -955,10 +1145,12 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
         if problems and all(p.startswith("over ") or p.startswith("more than " + str(MAX_SENTENCES)) for p in problems):
             problems = []                               # still long: cut at a sentence end below, never rejected for length alone
     if problems:
-        return declined() if kind == "extraction" else {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "problems": problems, "cost": cost}
+        return declined() if kind == "extraction" else {**out, "verdict": "fallback", "answer": fallback_answer(pack, question, kind), "problems": problems, "cost": cost}
     if covered == "off":
         return {**out, "verdict": "off_topic", "answer": refusal_answer(pack, question), "cost": cost}
     if covered == "no" and not PLACEHOLDER.search(body):
+        if asked_topics(pack, question):          # the model says no, but the facts hold what was asked: answer it, never decline it
+            return {**out, "verdict": "fallback", "answer": fallback_answer(pack, question, kind), "problems": ["covered: no, for a topic the facts hold"], "cost": cost}
         return {**out, "verdict": "not_covered", "answer": not_covered_answer(pack, question), "cost": cost}
     rendered, inputs = render(body, pack["facts"])
     notes = notes_for(body, pack["facts"])
@@ -977,13 +1169,19 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
     if not kept:
         if kind == "extraction":
             return {**out, "verdict": "declined", "answer": extraction_decline(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
-        return {**out, "verdict": "rejected", "answer": unchecked_answer(pack, question), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
+        return {**out, "verdict": "fallback", "answer": fallback_answer(pack, question, kind), "dropped": dropped, "cost": cost + vcost, "problems": ["no sentence survived verification"]}
     kept = cut_to_cap(kept, WORD_CAP - (word_count(EXTRACTION_LINE) if kind == "extraction" else 0))
     if kind == "extraction":
         kept = [EXTRACTION_LINE] + kept                   # the decline comes first, written by code; the explanation answers what was wanted
     if kind in DECISION_KINDS:
         kept = kept + [CLOSING_LINE]                      # exactly one closing line, appended by code, never written by the model
     used_inputs = [i for i in inputs if i["value"] in " ".join(kept)]
+    by_name = {f["name"]: f["id"] for f in pack["facts"]}
+    used_ids = {by_name.get(i["name"]) for i in used_inputs}
+    missed = [t for t in asked_topics(pack, question) if not used_ids & set(t[2])]
+    if missed and kind != "extraction":           # the question asked what the facts hold and no kept sentence says it (O 2026-10-13, "what does the company do")
+        return {**out, "verdict": "fallback", "answer": fallback_answer(pack, question, kind), "dropped": dropped, "cost": cost + vcost,
+                "problems": [f"the answer left out {t[0].replace('_', ' ')}, which the question asked" for t in missed]}
     return {**out, "verdict": "verified" if not dropped else "partly_dropped", "answer": answer_payload(question, kept, used_inputs, pack), "dropped": dropped, "cost": cost + vcost,
             "verifier": verdicts, "kind": kind}
 
