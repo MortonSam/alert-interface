@@ -38,7 +38,11 @@ async def test_strip_overview_and_ask_ivy_price_only_a_confirmed_date(monkeypatc
 @pytest.mark.asyncio
 async def test_discover_comparison_skips_an_estimated_date(monkeypatch):
     from app.routers.discover import _batch_move_comparison
-    monkeypatch.setattr(BB, "_implied", _fake_implied())
+    from app.services import report_move as RM
+    async def fake(db, sym, report_date, today=None):
+        return RM.ReportMove(RM.OK, pct=0.035, e=0.035 / 0.8, t2_years=0.05, before=RM.Leg("2026-10-16", today.isoformat(), 1.0, 0.3),
+                             after=RM.Leg("2026-10-23", today.isoformat(), 1.0, 0.5), report_date=str(report_date))
+    monkeypatch.setattr(RM, "report_move", fake)
     today = date.today()
     cond = {"MU": {"total": 20, "avg_abs_1d": 5.0}}
     est = [SimpleNamespace(symbol="MU", event_date=today + timedelta(days=5), is_confirmed=False, unresolved_since=None)]
@@ -46,4 +50,4 @@ async def test_discover_comparison_skips_an_estimated_date(monkeypatch):
     async with ScriptSessionLocal() as db:
         assert await _batch_move_comparison(db, est, cond, today) == {}
         got = await _batch_move_comparison(db, con, cond, today)
-    assert got["MU"]["implied_move_pct"] == 3.5 and got["MU"]["typical_move_pct"] == 5.0
+    assert got["MU"]["report_move_pct"] == 3.5 and got["MU"]["typical_move_pct"] == 5.0

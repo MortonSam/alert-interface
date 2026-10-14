@@ -165,6 +165,8 @@ export interface ReactionSummary {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  held?: boolean;                     // backend services/fact_holds: the typical move is held, so nothing compares with avg_abs_1d
+  held_facts?: string[];
   bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
   bars_through?: string | null;       // the newest bar's own time (ISO with offset)
   delay_minutes?: number | null;      // the source's stated delay, rendered by the page
@@ -233,6 +235,8 @@ export interface ConditionalEarningsRead {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  held?: boolean;                     // backend services/fact_holds: the typical move is held, so nothing compares with avg_abs_1d
+  held_facts?: string[];
 }
 
 export interface AnalystReactionStatsRead {
@@ -258,6 +262,8 @@ export interface AnalystReactionStatsRead {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  held?: boolean;                     // backend services/fact_holds: the typical move is held, so nothing compares with avg_abs_1d
+  held_facts?: string[];
 }
 
 export interface WatchlistTicker {
@@ -419,6 +425,8 @@ export interface TickerChart {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  held?: boolean;                     // backend services/fact_holds: the typical move is held, so nothing compares with avg_abs_1d
+  held_facts?: string[];
   bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
   bars_through?: string | null;       // the newest bar's own time (ISO with offset)
   delay_minutes?: number | null;      // the source's stated delay, rendered by the page
@@ -503,6 +511,23 @@ export interface ExpectedMove {
   quote_state?: "ok" | "stale" | "no_data";   // current_price and everything derived from it are null unless ok
   quote_reason?: string | null;
   price_as_of?: string | null;                 // ISO last-trade time of the quote, set whatever the state
+  // the report-only expected move and its comparison: the figure and sentence Discover states for the same ticker
+  report_move_state?: string | null;
+  report_move_pct?: number | null;             // 0-1 decimal
+  report_move?: ReportMove | null;
+  typical_move_pct?: number | null;            // percent
+  typical_n?: number | null;
+  move_comparison?: string | null;
+  comparison?: string | null;
+  held?: boolean;                              // backend services/fact_holds: a fact this read uses is held
+  held_facts?: string[];
+}
+
+/** backend services/report_move.ReportMove: s1 is `before`'s ATM IV, s2 `after`'s, the move 0.80 x sqrt(T2 x (s2^2 - s1^2)). */
+export interface ReportMoveLeg { expiration: string; chain_date: string; atm_strike: number | null; atm_iv: number | null }
+export interface ReportMove {
+  state: string; pct: number | null; e: number | null; t2_years: number | null;
+  before: ReportMoveLeg | null; after: ReportMoveLeg | null; report_date: string | null; version: number;
 }
 
 export interface StrikeData {
@@ -589,8 +614,10 @@ export interface ReportingSoonItem {
   confirmation_note?: string | null;
   insight: string | null;
   vol_regime: string | null;
-  implied_move_pct?: number | null;    // the freshest chain's ATM straddle over spot, percent
-  chain_date?: string | null;          // that chain's date: the implied move's receipt
+  report_move_pct?: number | null;     // the report-only expected move (backend services/report_move), percent
+  report_move_state?: string | null;   // services/report_move STATES; "ok" when report_move_pct is set
+  report_move?: ReportMove | null;     // its receipts
+  chain_date?: string | null;          // the chain's date: the report move's receipt
   typical_move_pct?: number | null;    // mean absolute 1-day move over at least 8 stored reports
   typical_n?: number | null;
   move_comparison?: string | null;     // "more than usual" | "less than usual" | "about its usual"

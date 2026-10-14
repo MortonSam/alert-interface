@@ -2470,6 +2470,11 @@ export default function TickerPage() {
               },
               nextReport: ticker.next_earnings_date,
               confirmation: ticker.next_earnings_confirmation,
+              report: expectedMove ? {
+                state: expectedMove.report_move_state, move: expectedMove.report_move, comparison: expectedMove.comparison,
+                moveComparison: expectedMove.move_comparison, typicalPct: expectedMove.typical_move_pct, typicalN: expectedMove.typical_n,
+                heldFacts: expectedMove.held_facts,
+              } : null,
               typical: storedTypical(reactionSummary),
               quote: quote && quote.price != null && quote.timestamp != null
                 ? { price: quote.price, asOf: `${quote.quote_basis === "close" ? "close" : "last trade"} on ${fmtDayUnix(quote.timestamp)}` }

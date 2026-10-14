@@ -9,7 +9,7 @@ from app.database import ScriptSessionLocal
 from app.scripts.cleanup_prelisting_reactions import SELECT_SQL
 from app.scripts.seed_report_history import HISTORY_YEARS, report_dates, timing_from_acceptance
 from app.services.dividend_declarations import parse_declaration
-from app.services.move_comparison import LESS_RATIO, MIN_REPORTS, MORE_RATIO, compare_moves, comparison_sentence
+from app.services.move_comparison import LESS_RATIO, MIN_REPORTS, MORE_RATIO, compare_moves
 
 MU_RELEASE = ("Micron Technology, Inc. (Nasdaq: MU) today announced results for its fourth quarter and full year of fiscal 2026. "
               "The Board of Directors declared a quarterly dividend of $0.15 per share, payable in cash on October 29, 2026, to shareholders "
@@ -20,7 +20,6 @@ def test_compare_moves_thresholds_and_the_sentence():
     assert (MORE_RATIO, LESS_RATIO, MIN_REPORTS) == (1.2, 0.8, 8)
     assert compare_moves(6.0, 4.0) == "more than usual" and compare_moves(4.7, 4.0) == "about its usual" and compare_moves(3.1, 4.0) == "less than usual"
     assert compare_moves(4.8, 4.0) == "about its usual" and compare_moves(3.2, 4.0) == "about its usual"        # the edges stay usual
-    assert comparison_sentence(6.0, 4.0, date(2026, 10, 5)) == "Options price a ±6.0% move; it has moved ±4.0% on a typical report, more than usual (chain Oct 5, 2026)."
 
 
 def test_micron_declaration_parses_amount_payable_record_and_filing_date():
@@ -76,9 +75,9 @@ async def test_the_calendar_rows_carry_the_comparison_fields_or_none():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         body = (await c.get("/api/v1/discover/reporting-soon?days=14&limit=10")).json()
     for item in body["items"]:
-        assert set(item) >= {"implied_move_pct", "chain_date", "typical_move_pct", "typical_n", "move_comparison", "comparison"}
-        if item["comparison"]:
-            assert item["typical_n"] >= MIN_REPORTS and item["chain_date"] and item["move_comparison"] in item["comparison"]
-            assert f"±{item['implied_move_pct']:.1f}% move" in item["comparison"]
+        assert set(item) >= {"report_move_pct", "report_move_state", "report_move", "chain_date", "typical_move_pct", "typical_n", "move_comparison", "comparison"}
+        if item["move_comparison"]:
+            assert item["typical_n"] >= MIN_REPORTS and item["chain_date"] and item["report_move_state"] == "ok"
+            assert f"a move of about {item['report_move_pct']:.1f}% from the report itself" in item["comparison"]
         else:
-            assert item["move_comparison"] is None
+            assert item["report_move_pct"] is None or item["typical_n"] is None or item["typical_n"] < MIN_REPORTS

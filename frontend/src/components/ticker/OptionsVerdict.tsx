@@ -37,8 +37,8 @@ export function OptionsVerdictView({ verdict }: { verdict: Verdict }) {
   if (verdict.kind === "absent") {
     return <p className="text-base text-muted-foreground max-w-2xl" data-testid="options-verdict-absent"><Explained text={verdict.line} /></p>;
   }
-  if (!VERDICT_SENTENCE_SHOWN) {
-    // the range alone, by the expiration, with its receipt; no comparison until the report-only implied move ships
+  if (!VERDICT_SENTENCE_SHOWN || !verdict.sentence) {
+    // the range alone, by the expiration, with its receipt: the switch is off, or the API sent no report move
     if (!verdict.band) return <p className="text-base text-muted-foreground max-w-2xl" data-testid="options-verdict-absent"><Explained text="No implied range is stored for this expiration." /></p>;
     return (
       <div data-testid="options-range-only">
@@ -51,8 +51,13 @@ export function OptionsVerdictView({ verdict }: { verdict: Verdict }) {
     <div data-testid="options-verdict">
       <p className="text-xl sm:text-2xl font-medium leading-snug text-foreground max-w-2xl" data-testid="options-verdict-sentence"><Explained text={verdict.sentence} /></p>
       {verdict.why && <p className="mt-2 text-sm text-muted-foreground max-w-2xl"><Explained text={verdict.why} /></p>}
-      <p className="mt-2 text-xs text-muted-foreground max-w-2xl"><Explained text={verdict.receipt} /></p>
-      {verdict.band && <div className="mt-6"><RangeBandView band={verdict.band} /></div>}
+      {verdict.receipt && <p className="mt-2 text-xs text-muted-foreground max-w-2xl"><Explained text={verdict.receipt} /></p>}
+      {verdict.band && (
+        <div className="mt-6">
+          <RangeBandView band={verdict.band} />
+          <p className="mt-2 text-xs text-muted-foreground max-w-2xl"><Explained text={verdict.rangeReceipt} /></p>
+        </div>
+      )}
     </div>
   );
 }

@@ -99,6 +99,8 @@ export const TERMS: GlossaryTerm[] = [
     match: ["Realism flag"] },
   { key: "implied-move", term: "Implied move", explanation: "The size of move, up or down, that option prices expect by a given date: the cost of buying both the rise-paying and fall-paying contracts nearest today's price, divided by the stock price.",
     match: ["implied move"] },
+  { key: "report-move", term: "Report move", explanation: "The part of the swing option prices expect that comes from the earnings report alone. It weighs the contracts that end just before the report against those that end just after it and keeps only the extra swing the report adds.",
+    match: ["move from the report itself", "report move"] },
   { key: "expected-move", term: "Expected move", explanation: "On a stock page, the move size option prices expect by a given date. On Ivy's receipts, it is instead the stock's average five-day move after its past reports, ignoring direction.",
     match: ["expected move"] },
   { key: "implied-range", term: "Implied range", explanation: "The price band the options market expects the stock to end within by that date: today's price minus and plus the move that option prices suggest.",

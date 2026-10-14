@@ -752,6 +752,39 @@ def _quote_fields(q: QuoteState) -> dict:
     return {"quote_state": q.state, "quote_reason": q.reason, "price_as_of": _price_as_of(q)}
 
 
+async def _report_move_fields(db: AsyncSession, sym: str, today: date, held_facts: list[str]) -> dict:
+    """The report-only expected move for the ticker's next report and its comparison, the same figure and sentence Discover's
+    reporting-soon line states (routers/discover._batch_move_comparison). Only a confirmed date is priced; a held implied move or
+    typical move drops what it feeds (services/fact_holds), and `held` says so."""
+    from app.routers.discover import _batch_conditional_stats
+    from app.services.earnings_calendar import level_of
+    from app.services.implied_move import implied_move_allowed
+    from app.services.move_comparison import REPORT_MOVE_ABSENT, report_sentence, report_verdict
+    from app.services.report_move import OK, report_move
+    held = {"held": bool({"implied_move", "typical_move", "report_date"} & set(held_facts)), "held_facts": held_facts}
+    if {"implied_move", "report_date"} & set(held_facts):
+        return held
+    ev = (await db.execute(
+        select(Event.event_date, Event.is_confirmed, Event.unresolved_since).join(Ticker, Ticker.id == Event.ticker_id)
+        .where(Ticker.symbol == sym, Event.event_type == "earnings", Event.event_date >= today)
+        .order_by(Event.event_date).limit(1)
+    )).first()
+    if ev is None or not implied_move_allowed(level_of(ev.is_confirmed, ev.unresolved_since)):
+        return held
+    rm = await report_move(db, sym, ev.event_date, today)
+    out = {**held, "report_move_state": rm.state, "report_move": rm.as_dict()}
+    if rm.state != OK:                  # the page says why (Discover shows only the two the options themselves cause)
+        return {**out, "comparison": REPORT_MOVE_ABSENT[rm.state]}
+    rep = round(rm.pct * 100, 1)
+    out["report_move_pct"] = rm.pct
+    cond = None if "typical_move" in held_facts else (await _batch_conditional_stats(db, [sym])).get(sym)
+    typ = round(float(cond["avg_abs_1d"]), 1) if cond and cond.get("avg_abs_1d") else None
+    n = int(cond.get("total") or 0) if cond else 0
+    verdict = report_verdict(rep, typ, n)
+    return {**out, "typical_move_pct": typ, "typical_n": n or None, "move_comparison": verdict,
+            "comparison": report_sentence(rep, typ if verdict else None, verdict, date.fromisoformat(rm.after.chain_date))}
+
+
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
 async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> ExpectedMoveRead:
     sym = symbol.upper()
@@ -761,6 +794,9 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), adm
     # The price behind every derived figure, withheld unless its last trade is recent
     q = await _guarded_price(sym, db, admin)
     current_price = q.price
+
+    from app.services.fact_holds import holds_for
+    rmf = await _report_move_fields(db, sym, today, sorted(await holds_for(db, sym)))
 
     # Look up ticker + next earnings
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
@@ -785,6 +821,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), adm
     if not chosen_exp:
         return ExpectedMoveRead(
             **_quote_fields(q),
+            **rmf,
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -808,6 +845,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), adm
     if not chain_result or not chain_store.is_fresh(chain_result[1]):
         return ExpectedMoveRead(
             **_quote_fields(q),
+            **rmf,
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -866,6 +904,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), adm
 
     return ExpectedMoveRead(
             **_quote_fields(q),
+            **rmf,
         symbol=sym,
         current_price=current_price,
         expected_move_pct=expected_move_pct,

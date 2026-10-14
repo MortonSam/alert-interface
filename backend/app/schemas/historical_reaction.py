@@ -85,6 +85,8 @@ class ReactionSummaryRead(BaseModel):
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
     deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
+    held: bool = False                      # services/fact_holds: the typical move is held, so no comparison may use avg_abs_1d
+    held_facts: list[str] = []              # every fact held for this ticker
 
 
 class ConditionalEarningsRead(BaseModel):
@@ -105,6 +107,8 @@ class ConditionalEarningsRead(BaseModel):
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
     deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
+    held: bool = False                      # services/fact_holds: the typical move is held, so no comparison may use avg_abs_1d
+    held_facts: list[str] = []              # every fact held for this ticker
 
     # ── Conditional 1d moves ─────────────────────────────────────────────────
     avg_1d_on_beat: float | None
@@ -164,6 +168,8 @@ class AnalystDetailRead(BaseModel):
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
     deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
+    held: bool = False                      # services/fact_holds: the typical move is held, so no comparison may use avg_abs_1d
+    held_facts: list[str] = []              # every fact held for this ticker
 
 
 class AnalystReactionStatsRead(BaseModel):
@@ -196,3 +202,5 @@ class AnalystReactionStatsRead(BaseModel):
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
     deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
+    held: bool = False                      # services/fact_holds: the typical move is held, so no comparison may use avg_abs_1d
+    held_facts: list[str] = []              # every fact held for this ticker
