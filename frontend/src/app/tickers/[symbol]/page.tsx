@@ -38,7 +38,7 @@ import {
   type Thesis, type ThesisMarkRead, type ThesisStockMarkRead,
   type Watchlist, type LabelRule, type NoteStaleness,
   type HealthStatus,
-  type GenerationPolicy,
+  type GenerationPolicy, type MarketSession,
 } from "@/lib/api";
 import { OWNER_REGENERATES, isSignedIn } from "@/lib/session";
 import { cn, fmtMarketCap } from "@/lib/utils";
@@ -64,7 +64,7 @@ import { storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
-import { fmtDay, fmtDayUnix } from "@/lib/tickerDates";
+import { fmtDay, fmtDayUnix, nyClock } from "@/lib/tickerDates";
 
 // Extracted components
 import ExplainTip from "@/components/ticker/ExplainTip";
@@ -1449,6 +1449,15 @@ export default function TickerPage() {
     const id = setInterval(() => setClockMs(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
+  // the exchange's session for the New York day (backend NYSE calendar), read again when the day changes; none on a failed read,
+  // and then the time line makes no claim about the market
+  const nyDay = nyClock(clockMs).date;
+  const [marketSession, setMarketSession] = useState<MarketSession | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.system.marketSession().then((s) => { if (!cancelled) setMarketSession(s); }).catch(() => { if (!cancelled) setMarketSession(null); });
+    return () => { cancelled = true; };
+  }, [nyDay]);
   useEffect(() => {
     setChartPeriod(null); setOpeningChart(null); setEmptyPeriods([]); setShownChart(null);
     let cancelled = false;
@@ -1974,7 +1983,7 @@ export default function TickerPage() {
           {quote && quote.price != null && chartPeriod && (() => {
             const change = periodChange(chartPeriod, quote, shownChart);
             const style = DIRECTION_STYLE[change?.direction ?? "flat"];
-            const timeLine = quoteTimeLine(quote, clockMs);
+            const timeLine = quoteTimeLine(quote, clockMs, marketSession);
             return (
               <div className="mt-6" data-testid="price-header">
                 <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap">

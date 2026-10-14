@@ -1114,6 +1114,14 @@ export interface Cadence {
   quotes: { source: string; delay_statement: string | null; delay_checked: string; dated_by: string };
 }
 
+/** backend services/market_status: one New York session from the NYSE calendar (holidays, announced closures, 1 p.m. closes). */
+export interface MarketSessionDay {
+  date: string; is_trading_day: boolean; half_day: boolean;
+  reason: "regular" | "half_day" | "weekend" | "holiday" | "special_closure";
+  open_at: string | null; close_at: string | null;      // ISO with the New York offset
+}
+export interface MarketSession { as_of: string; is_open: boolean; today: MarketSessionDay; next: MarketSessionDay | null }
+
 /** One dataset's age from /health or /system/status: the oldest last success among the nightly steps that produce it. */
 export interface DatasetAge {
   at: string | null;        // ISO; null when a producing step has never succeeded
@@ -1320,6 +1328,7 @@ export const api = {
 
   system: {
     status: () => request<SystemStatus>("/system/status"),
+    marketSession: () => request<MarketSession>("/system/market-session"),
     health: () => request<HealthStatus>("/health"),
     stats: () => request<SiteStats>("/system/stats"),
   },

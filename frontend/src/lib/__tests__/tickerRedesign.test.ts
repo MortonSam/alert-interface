@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { HistoricalReaction, TickerChart, TickerQuote } from "@/lib/api";
-import { fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, DIRECTION_STYLE, SESSION_OPEN_MIN, SESSION_CLOSE_MIN } from "@/lib/priceHeader";
+import { fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, sessionOn, DIRECTION_STYLE } from "@/lib/priceHeader";
+import type { MarketSession, MarketSessionDay } from "@/lib/api";
 import { epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
 import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type ReportMoveFacts, type VerdictInput } from "@/lib/optionsVerdict";
 import { comparisonParts } from "@/lib/moveComparison";
@@ -68,31 +69,55 @@ describe("header change matches the API values it comes from", () => {
   });
 });
 
-describe("the quote's time line is honest at every hour", () => {
+// Sessions as backend services/market_status serves them (backend tests/test_market_status.py pins the calendar itself)
+const day = (date: string, close: string | null, reason: MarketSessionDay["reason"] = "regular", off = "-04:00"): MarketSessionDay => ({
+  date, is_trading_day: close != null, half_day: reason === "half_day", reason,
+  open_at: close ? `${date}T09:30:00${off}` : null, close_at: close ? `${date}T${close}:00${off}` : null });
+const SESSION = (today: MarketSessionDay, next: MarketSessionDay | null = null): MarketSession => ({ as_of: "", is_open: false, today, next });
+const OCT13 = SESSION(day("2026-10-13", "16:00"), day("2026-10-14", "16:00"));
+const OCT14 = SESSION(day("2026-10-14", "16:00"), day("2026-10-15", "16:00"));
+const OCT17 = SESSION(day("2026-10-17", null, "weekend"), day("2026-10-19", "16:00"));
+
+describe("the quote's time line follows the exchange calendar at every hour", () => {
   const delayed = { timestamp: Math.floor(NY("13:02") / 1000), quote_basis: "delayed" as const, delay_minutes: 15 };
   it("in session with a delayed quote from today it states the delay and the time", () => {
-    expect(quoteTimeLine(delayed, NY("13:20"))).toEqual({ state: "delayed_session", text: "Delayed 15 minutes. Last trade at 1:02 PM ET on Oct 13, 2026." });
+    expect(quoteTimeLine(delayed, NY("13:20"), OCT13)).toEqual({ state: "delayed_session", text: "Delayed 15 minutes. Last trade at 1:02 PM ET on Oct 13, 2026." });
   });
   it("after the close, overnight and on a weekend it says the market is closed and names the close it shows", () => {
-    expect(quoteTimeLine(TSLA_QUOTE, NY("20:11"))?.text).toBe("Market closed. Showing the last trade at 4:00 PM ET on Oct 13, 2026.");
+    expect(quoteTimeLine(TSLA_QUOTE, NY("20:11"), OCT13)?.text).toBe("Market closed. Showing the last trade at 4:00 PM ET on Oct 13, 2026.");
     const close = { ...TSLA_QUOTE, quote_basis: "close" as const };
-    expect(quoteTimeLine(close, NY("08:00", "2026-10-14"))?.text).toBe("Market closed. Showing the close at 4:00 PM ET on Oct 13, 2026.");
-    expect(quoteTimeLine(close, NY("12:00", "2026-10-17"))?.state).toBe("closed");   // a Saturday
+    expect(quoteTimeLine(close, NY("08:00", "2026-10-14"), OCT14)?.text).toBe("Market closed. Showing the close at 4:00 PM ET on Oct 13, 2026.");
+    expect(quoteTimeLine(close, NY("12:00", "2026-10-17"), OCT17)?.state).toBe("closed");   // a Saturday
   });
-  it("in session hours without a delayed quote from today it makes no claim about the market", () => {
+  it("a holiday is closed all day and a half day closes at 1 PM", () => {
+    const close = { ...TSLA_QUOTE, quote_basis: "close" as const };
+    const thanksgiving = SESSION(day("2026-11-26", null, "holiday", "-05:00"), day("2026-11-27", "13:00", "half_day", "-05:00"));
+    expect(quoteTimeLine(close, NY("11:00", "2026-11-26").valueOf() + 3_600_000, thanksgiving)?.state).toBe("closed");
+    const half = SESSION(day("2026-11-27", "13:00", "half_day", "-05:00"));
+    const at = (hhmm: string) => Date.parse(`2026-11-27T${hhmm}:00-05:00`);
+    const live = (ms: number) => ({ ...delayed, timestamp: Math.floor(ms / 1000) - 900 });
+    expect(quoteTimeLine(live(at("12:59")), at("12:59"), half)?.state).toBe("delayed_session");
+    expect(quoteTimeLine(live(at("13:30")), at("13:30"), half)?.state).toBe("closed");
+  });
+  it("in session without a delayed quote from today, or with no session answer for today, it makes no claim about the market", () => {
     const yesterday = { ...TSLA_QUOTE, quote_basis: "close" as const, timestamp: Math.floor(NY("16:00", "2026-10-12") / 1000) };
-    const line = quoteTimeLine(yesterday, NY("11:00"))!;
+    const line = quoteTimeLine(yesterday, NY("11:00"), OCT13)!;
     expect(line.state).toBe("session_no_live");
     expect(line.text).not.toMatch(/closed|open|live|now|today/i);
-    expect(quoteTimeLine({ ...delayed, timestamp: Math.floor(NY("15:59", "2026-10-12") / 1000) }, NY("11:00"))!.text).not.toMatch(/Delayed/);
+    expect(quoteTimeLine({ ...delayed, timestamp: Math.floor(NY("15:59", "2026-10-12") / 1000) }, NY("11:00"), OCT13)!.text).not.toMatch(/Delayed/);
+    for (const s of [null, SESSION(day("2026-10-09", "16:00"))]) {
+      expect(quoteTimeLine(TSLA_QUOTE, NY("20:11"), s)!.state).toBe("session_no_live");
+      expect(quoteTimeLine(delayed, NY("13:20"), s)!.text).not.toMatch(/closed|Delayed/);
+    }
+    expect(sessionOn(OCT13, NY("08:00", "2026-10-14"))?.date).toBe("2026-10-14");      // read the day before: the next session covers today
   });
   it("never says closed inside the session window, never says delayed outside it", () => {
     for (let m = 0; m < 24 * 60; m += 15) {
       const hh = String(Math.floor(m / 60)).padStart(2, "0"), mm = String(m % 60).padStart(2, "0");
-      const inSession = m >= SESSION_OPEN_MIN && m < SESSION_CLOSE_MIN;
+      const inSession = m >= 9 * 60 + 30 && m < 16 * 60;
       const now = NY(`${hh}:${mm}`);
-      expect(/Market closed/.test(quoteTimeLine(TSLA_QUOTE, now)!.text)).toBe(!inSession);
-      expect(/Delayed/.test(quoteTimeLine({ ...delayed, timestamp: Math.floor(now / 1000) - 900 }, now)!.text)).toBe(inSession);
+      expect(/Market closed/.test(quoteTimeLine(TSLA_QUOTE, now, OCT13)!.text)).toBe(!inSession);
+      expect(/Delayed/.test(quoteTimeLine({ ...delayed, timestamp: Math.floor(now / 1000) - 900 }, now, OCT13)!.text)).toBe(inSession);
     }
   });
 });
