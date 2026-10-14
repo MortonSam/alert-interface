@@ -1,4 +1,4 @@
-import type { RangeBand, Verdict } from "@/lib/optionsVerdict";
+import { VERDICT_SENTENCE_SHOWN, type RangeBand, type Verdict } from "@/lib/optionsVerdict";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import Explained from "@/components/Explained";
 
@@ -8,8 +8,8 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 export function RangeBandView({ band }: { band: RangeBand }) {
   const clampLeft = (pos: number) => `clamp(3.25rem, ${pos}%, calc(100% - 3.25rem))`;
   return (
-    <figure className="mt-6 max-w-xl" data-testid="range-band">
-      <figcaption className="text-xs text-muted-foreground"><ExplainTip term="implied range">Implied range</ExplainTip> by {band.by}</figcaption>
+    <figure className="max-w-xl" data-testid="range-band">
+      <figcaption className="text-base font-medium text-foreground"><ExplainTip term="implied range">Implied range</ExplainTip> by {band.by}</figcaption>
       <div className="relative mt-9 h-2 rounded-full bg-muted">
         <div
           className="absolute inset-y-0 rounded-full bg-primary/30 border-x-2 border-primary"
@@ -37,12 +37,22 @@ export function OptionsVerdictView({ verdict }: { verdict: Verdict }) {
   if (verdict.kind === "absent") {
     return <p className="text-base text-muted-foreground max-w-2xl" data-testid="options-verdict-absent"><Explained text={verdict.line} /></p>;
   }
+  if (!VERDICT_SENTENCE_SHOWN) {
+    // the range alone, by the expiration, with its receipt; no comparison until the report-only implied move ships
+    if (!verdict.band) return <p className="text-base text-muted-foreground max-w-2xl" data-testid="options-verdict-absent"><Explained text="No implied range is stored for this expiration." /></p>;
+    return (
+      <div data-testid="options-range-only">
+        <RangeBandView band={verdict.band} />
+        <p className="mt-2 text-xs text-muted-foreground max-w-2xl"><Explained text={verdict.rangeReceipt} /></p>
+      </div>
+    );
+  }
   return (
     <div data-testid="options-verdict">
       <p className="text-xl sm:text-2xl font-medium leading-snug text-foreground max-w-2xl" data-testid="options-verdict-sentence"><Explained text={verdict.sentence} /></p>
       {verdict.why && <p className="mt-2 text-sm text-muted-foreground max-w-2xl"><Explained text={verdict.why} /></p>}
       <p className="mt-2 text-xs text-muted-foreground max-w-2xl"><Explained text={verdict.receipt} /></p>
-      {verdict.band && <RangeBandView band={verdict.band} />}
+      {verdict.band && <div className="mt-6"><RangeBandView band={verdict.band} /></div>}
     </div>
   );
 }
