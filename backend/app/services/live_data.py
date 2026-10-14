@@ -244,7 +244,8 @@ async def intraday_chart(symbol: str, on: date, prev_close: float | None, start:
     from app.services.intrinio_client import IntrinioClient
     client = IntrinioClient()
     try:
-        body = await client._get(f"/securities/{symbol}/prices/intervals", {"interval_size": interval, "start_date": start.isoformat(), "end_date": on.isoformat(),
+        # Intrinio's end_date is exclusive (start = end returns no bars): the day after `on`, so the session's own bars come back
+        body = await client._get(f"/securities/{symbol}/prices/intervals", {"interval_size": interval, "start_date": start.isoformat(), "end_date": (on + timedelta(days=1)).isoformat(),
                                                                           "timezone": "America/New_York", "page_size": 1000})
     except Exception:
         return None
