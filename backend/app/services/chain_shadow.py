@@ -143,9 +143,31 @@ def earnings_expirations(expirations: list[str], chain_date: str, earnings: list
     return out
 
 
-def wanted_expirations(expirations: list[str], chain_date: str, courier_exps: list[str], earnings: list[tuple[str, str | None]], cap: int) -> list[str]:
+DRAFT_DAYS_AHEAD = 5     # calendar days after the chain date that a Build a Trade draft may still read this night's chain
+
+
+def draft_expirations(expirations: list[str], chain_date: str, reports: list[str]) -> list[str]:
+    """Pure: the expiries a Build a Trade draft reads from this night's chain (services/draft_chain): for each draft day from the
+    day after the chain date through DRAFT_DAYS_AHEAD days later, the first listed expiry at least DRAFT_DAYS_AFTER_REPORT after
+    the next report on or after that day (DRAFT_DAYS_WITHOUT_REPORT after the day with none). Usually one expiry, two when a
+    report or a weekly expiry falls inside the window."""
+    from app.services.draft_chain import draft_min_expiration, draft_target_expiration
+    listed = sorted(e for e in expirations if e > chain_date)
+    start = date.fromisoformat(chain_date)
+    out: list[str] = []
+    for k in range(1, DRAFT_DAYS_AHEAD + 1):
+        day = start + timedelta(days=k)
+        nxt = next((date.fromisoformat(r) for r in sorted(reports) if r >= day.isoformat()), None)
+        target = draft_target_expiration(listed, draft_min_expiration(nxt, day))
+        if target and target not in out:
+            out.append(target)
+    return out
+
+
+def wanted_expirations(expirations: list[str], chain_date: str, courier_exps: list[str], earnings: list[tuple[str, str | None]], cap: int,
+                       draft: list[str] = ()) -> list[str]:
     """Pure: the expiries the Intrinio step stores. The front expiry and the earnings expiries always; then the courier's
-    expiries Intrinio also lists, up to `cap` chains in all."""
+    expiries Intrinio also lists, up to `cap` chains in all; then the draft's expiries (draft_expirations), exempt from the cap."""
     front = front_expiration(expirations, chain_date)
     keep: list[str] = []
     for e in ([front] if front else []) + earnings_expirations(expirations, chain_date, earnings):
@@ -153,7 +175,8 @@ def wanted_expirations(expirations: list[str], chain_date: str, courier_exps: li
             keep.append(e)
     listed = set(expirations)
     rest = [e for e in sorted(set(courier_exps)) if e in listed and e > chain_date and e not in keep]
-    return sorted(keep + rest[:max(0, cap - len(keep))])
+    capped = keep + rest[:max(0, cap - len(keep))]
+    return sorted(set(capped) | {e for e in draft if e in listed and e > chain_date})
 
 
 def _mids(side: list[dict]) -> dict[float, float]:

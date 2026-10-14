@@ -446,22 +446,18 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         select(AnalystReactionStats).where(AnalystReactionStats.symbol == sym)
     )
 
-    # ── 3. Choose expiration from ingested chains ──────────────────────────
-    if earnings_str:
-        min_exp = (date.fromisoformat(earnings_str) + timedelta(days=14)).isoformat()
-    else:
-        min_exp = (today + timedelta(days=7)).isoformat()
-
-    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
+    # ── 3. Choose expiration from ingested chains: the first fresh one at least DRAFT_DAYS_AFTER_REPORT after the report ──
+    from app.services.draft_chain import draft_min_expiration, pick_draft_chain
+    min_exp = draft_min_expiration(date.fromisoformat(earnings_str) if earnings_str else None, today)
+    picked = await pick_draft_chain(db, sym, min_exp)
+    chosen_exp = picked.expiration
     chain_from_ingested: bool = False
 
     # ── 4. Options chain from ingested store ──────────────────────────────────
     chain: dict = {"calls": [], "puts": []}
-    if chosen_exp:
-        chain_result = await chain_store.get_chain(db, sym, chosen_exp)
-        if chain_result:
-            chain = chain_result[0]
-            chain_from_ingested = True
+    if picked.chain is not None:
+        chain = picked.chain
+        chain_from_ingested = True
 
     calls_raw: list[dict] = chain.get("calls", [])
     puts_raw:  list[dict] = chain.get("puts",  [])
@@ -640,26 +636,11 @@ async def _run_draft_generation(
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
     # ── Options-age guard (primary) ──────────────────────────────────────
-    # Refuse the draft when the most-recent trade in the chain is > 2
-    # trading days old — the quotes are stale regardless of strike count.
-    if chain_last_trade:
-        trade_date = date.fromisoformat(chain_last_trade)
-        today = date.today()
-        trading_days = 0
-        d = trade_date
-        while d < today:
-            d += timedelta(days=1)
-            if d.weekday() < 5:
-                trading_days += 1
-        if trading_days > 2:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Ivy won't draft {sym} on stale options data "
-                    f"(as of {chain_last_trade}). "
-                    f"Options data is updated once a day."
-                ),
-            )
+    # The draft's chain is older than CHAIN_FRESH_TRADING_DAYS sessions (services/draft_chain, shared with validate's draft_path_fresh)
+    from app.services.draft_chain import options_age_refusal
+    refusal = options_age_refusal(sym, chain_last_trade)
+    if refusal:
+        raise HTTPException(status_code=422, detail=refusal)
     options_as_of = chain_last_trade          # a draft is refused above without a fresh chain
     price_as_of = data.get("price_as_of")     # the quote's own last-trade time
 
