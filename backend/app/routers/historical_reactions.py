@@ -128,9 +128,14 @@ async def get_reaction_summary(
     rows = [r for r in all_rows if r.event_date not in basis_unclear]
     basis_excluded = len(all_rows) - len(rows)
 
+    from app.services.fact_holds import holds_for
+    held_facts = sorted(await holds_for(db, sym))
+    held = {"held": "typical_move" in held_facts, "held_facts": held_facts}
+
     total = len(rows)
     if total == 0:
         return ReactionSummaryRead(
+            **held,
             symbol=sym, sector=ticker.sector, total_quarters=0,
             beat_count=0, miss_count=0, meet_count=0, beat_rate_pct=0.0,
             beat_but_dropped_count=0, beat_but_dropped_rate_pct=None,
@@ -181,6 +186,7 @@ async def get_reaction_summary(
 
     cov = coverage(rows)
     return ReactionSummaryRead(
+        **held,
         symbol=sym,
         sector=ticker.sector,
         total_quarters=total,

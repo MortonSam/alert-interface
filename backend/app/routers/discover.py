@@ -56,12 +56,14 @@ class ReportingSoonItem(BaseModel):
     insight: str | None = None  # e.g. "Beat 18 of 20 — beats largely priced in"
     vol_regime: str | None = None  # "iv_rich" | "iv_cheap" | None
     iv_rv_note: str | None = None  # "one session dominates the 20-day window: Oct 5, 2026 (+33.5%)" in place of the comparison
-    implied_move_pct: float | None = None   # the freshest chain's ATM straddle over spot, percent
-    chain_date: str | None = None           # that chain's date: the implied move's receipt
+    report_move_pct: float | None = None    # the report-only expected move (services/report_move), percent
+    report_move_state: str | None = None    # services/report_move STATES; "ok" when report_move_pct is set
+    report_move: dict | None = None         # its receipts: both expirations, both ATM IVs, the chain date, T2, the version
+    chain_date: str | None = None           # the chain's date: the report move's receipt
     typical_move_pct: float | None = None   # mean absolute 1-day move over at least 8 stored reports
     typical_n: int | None = None
     move_comparison: str | None = None      # "more than usual" | "less than usual" | "about its usual"
-    comparison: str | None = None           # the one sentence, services/move_comparison
+    comparison: str | None = None           # the one sentence, services/move_comparison (or why the options give no report move)
 
 
 class ReportingSoonResponse(BaseModel):
@@ -1235,31 +1237,35 @@ async def latest_pick(
 
 
 async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today: date) -> dict[str, dict]:
-    """Per symbol: the implied move from the freshest chain (its date the receipt) against the typical 1-day move over at least
-    MIN_REPORTS stored reports, and the one-sentence comparison. A symbol missing either side gets no comparison."""
-    from app.services import price_bars, quote_cache
-    from app.services.briefing_build import _implied
+    """Per symbol: the report-only expected move (services/report_move, the chain date its receipt) against the typical 1-day
+    move over at least MIN_REPORTS stored reports, and the one sentence the ticker page's verdict also says. When the options
+    do not separate a report move (no expiration before it, or the later expiration priced no higher), the sentence says so.
+    Any other missing side gets no line."""
     from app.services.earnings_calendar import shown_level
     from app.services.implied_move import implied_move_allowed
-    from app.services.move_comparison import MIN_REPORTS, compare_moves, comparison_sentence
+    from app.services.move_comparison import REPORT_MOVE_ABSENT, report_sentence, report_verdict
+    from app.services.report_move import NO_PRE_EXPIRATION, NOT_SEPARATED, OK, report_move
     out: dict[str, dict] = {}
     for r in rows:
         if not implied_move_allowed(shown_level(r.is_confirmed, getattr(r, "confirmation_note", None), getattr(r, "unresolved_since", None))):
             continue            # an estimated date is never priced
         cond = cond_stats.get(r.symbol)
-        if not cond or (cond.get("total") or 0) < MIN_REPORTS or not cond.get("avg_abs_1d"):
+        if not cond or not cond.get("avg_abs_1d"):
             continue
-        cached = quote_cache.get(r.symbol)
-        spot = cached.get("price") if cached else None
-        if spot is None:
-            closes = await price_bars.bars(db, r.symbol, today - timedelta(days=14))
-            spot = float(closes["Close"].iloc[-1]) if closes is not None and not closes.empty else None
-        implied = await _implied(db, r.symbol, spot, r.event_date, today)
-        if not implied:
+        rm = await report_move(db, r.symbol, r.event_date, today)
+        if rm.state in (NO_PRE_EXPIRATION, NOT_SEPARATED):
+            out[r.symbol] = {"report_move_state": rm.state, "report_move": rm.as_dict(), "comparison": REPORT_MOVE_ABSENT[rm.state]}
             continue
-        imp, typ = round(implied["implied_pct"] * 100, 1), round(float(cond["avg_abs_1d"]), 1)
-        out[r.symbol] = {"implied_move_pct": imp, "chain_date": implied["chain_date"].isoformat(), "typical_move_pct": typ, "typical_n": int(cond["total"]),
-                         "move_comparison": compare_moves(imp, typ), "comparison": comparison_sentence(imp, typ, implied["chain_date"])}
+        if rm.state != OK:
+            continue
+        typ, n = round(float(cond["avg_abs_1d"]), 1), int(cond.get("total") or 0)
+        verdict = report_verdict(rm.pct * 100, typ, n)
+        if verdict is None:
+            continue
+        rep = round(rm.pct * 100, 1)
+        chain_day = date.fromisoformat(rm.after.chain_date)
+        out[r.symbol] = {"report_move_pct": rep, "report_move_state": OK, "report_move": rm.as_dict(), "chain_date": rm.after.chain_date,
+                         "typical_move_pct": typ, "typical_n": n, "move_comparison": verdict, "comparison": report_sentence(rep, typ, verdict, chain_day)}
     return out
 
 

@@ -57,6 +57,16 @@ class ExpectedMoveRead(BaseModel):
     quote_state: str = "ok"          # ok | stale | no_data: current_price and everything derived from it are null unless ok
     quote_reason: str | None = None  # plain language, shown in place of the price-derived figures
     price_as_of: str | None = None   # ISO UTC last-trade time of the quote, set whatever the state
+    # the report-only expected move (services/report_move) and its comparison, the sentence Discover shows for the same ticker
+    report_move_state: str | None = None   # services/report_move STATES
+    report_move_pct: float | None = None   # 0-1 decimal
+    report_move: dict | None = None        # receipts: both expirations, both ATM IVs, their chain date, T2 in years, the version
+    typical_move_pct: float | None = None  # percent: the mean absolute first-day move Discover compares with
+    typical_n: int | None = None
+    move_comparison: str | None = None     # "more than usual" | "less than usual" | "about its usual", only past the move ratios
+    comparison: str | None = None          # the one sentence, or why the options give no report move
+    held: bool = False                     # services/fact_holds: a fact this read uses is held, and its figures are dropped
+    held_facts: list[str] = []
 
 
 # ── Strategy explainer data ────────────────────────────────────────────────────

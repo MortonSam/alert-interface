@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 import type { HistoricalReaction, TickerChart, TickerQuote } from "@/lib/api";
 import { fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, DIRECTION_STYLE, SESSION_OPEN_MIN, SESSION_CLOSE_MIN } from "@/lib/priceHeader";
 import { epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
-import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type VerdictInput } from "@/lib/optionsVerdict";
-import { EXPIRY_CAVEAT_DAYS } from "@/lib/thresholds";
+import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type ReportMoveFacts, type VerdictInput } from "@/lib/optionsVerdict";
+import { comparisonParts } from "@/lib/moveComparison";
 import { EARNINGS_MARKER_ENCODING, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -132,58 +132,73 @@ describe("report cards match the stored rows", () => {
   });
 });
 
+const NVDA_SENTENCE = "Options price a move of about 6.9% from the report itself, about the same as the 6.5% it has moved on a typical report (options from Oct 12, 2026).";
+const NVDA_REPORT: ReportMoveFacts = {
+  state: "ok", comparison: NVDA_SENTENCE, moveComparison: "about its usual", typicalPct: 6.5, typicalN: 21, heldFacts: [],
+  move: { state: "ok", pct: 0.0690, e: 0.08625, t2_years: 39 / 365, report_date: "2026-11-17", version: 1,
+          before: { expiration: "2026-11-13", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.431 },
+          after: { expiration: "2026-11-20", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.512 } },
+};
 const NVDA_VERDICT: VerdictInput = {
   symbol: "NVDA",
   facts: { expected_move_pct: 0.09278897136797455, implied_range_low: 205.32, implied_range_high: 247.32, expiration_used: "2026-11-20",
     next_earnings_date: "2026-11-17", chain_date: "2026-10-12", current_price: 226.32, price_as_of: "2026-10-12T20:00:00+00:00" },
   nextReport: "2026-11-17", confirmation: "confirmed",
+  report: NVDA_REPORT,
   typical: { pct: 6.46, reports: 21, through: "2026-08-26" },
   quote: { price: 228.52, asOf: "last trade on Oct 13, 2026" },
 };
 
-describe("the options verdict and band match the API and never overstate", () => {
-  it("states the API's implied move, expiration and typical move", () => {
+describe("the options verdict states the API's report move and never overstates", () => {
+  it("says the API's sentence, with both expirations and their IVs as the receipt, and the range band", () => {
     const v = optionsVerdict(NVDA_VERDICT);
     if (v.kind !== "verdict") throw new Error("expected a verdict");
-    expect(v.sentence).toBe("Options are pricing a move of about 9.3% by Nov 20, 2026, more than its typical 6.5% move after a report.");
-    expect(v.receipt).toBe("From the Oct 12, 2026 options data, for the report on Nov 17, 2026. Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
+    expect(v.sentence).toBe(NVDA_SENTENCE);
+    expect(v.comparison).toBe("about its usual");
+    expect(v.reportPct).toBe(6.9);
+    expect(v.receipt).toBe("From the Oct 12, 2026 options data, the Nov 13, 2026 expiration at 43.1% and the Nov 20, 2026 expiration at 51.2% implied volatility, for the report on Nov 17, 2026. Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
     expect(v.band!.low).toBe(205.32);
     expect(v.band!.high).toBe(247.32);
     expect(v.band!.marker).toBe(228.52);
     expect(v.band!.lowPos).toBeLessThan(v.band!.markerPos);
     expect(v.band!.markerPos).toBeLessThan(v.band!.highPos);
   });
-  it("the comparison word always follows the ratio of the two numbers printed", () => {
-    for (let imp = 0.5; imp <= 20; imp += 0.7) {
-      for (let typ = 0.5; typ <= 15; typ += 0.9) {
-        const v = optionsVerdict({ ...NVDA_VERDICT, facts: { ...NVDA_VERDICT.facts, expected_move_pct: imp / 100 }, typical: { ...NVDA_VERDICT.typical!, pct: typ } });
-        if (v.kind !== "verdict") throw new Error("expected a verdict");
-        const m = v.sentence.match(/about ([\d.]+)% by .*?, (more than|less than|about the same as) its typical ([\d.]+)% move/)!;
-        const ratio = Math.round((Number(m[1]) / Number(m[3])) * 10_000) / 10_000;
-        const want = ratio > MOVE_MORE_RATIO ? "more than" : ratio < MOVE_LESS_RATIO ? "less than" : "about the same as";
-        expect(m[2], v.sentence).toBe(want);
-      }
-    }
+  it("the ticker verdict and Discover's line are the same sentence with the same figures", () => {
+    const v = optionsVerdict(NVDA_VERDICT);
+    const discover = { comparison: NVDA_SENTENCE, report_move_pct: 6.9, typical_move_pct: 6.5 };     // the reporting-soon item the API sends for NVDA
+    const parts = comparisonParts(discover)!;
+    expect(v.kind === "verdict" && v.sentence).toBe(parts.map((p) => p.text).join(""));
+    expect(v.kind === "verdict" && [v.reportPct, v.typicalPct]).toEqual([discover.report_move_pct, discover.typical_move_pct]);
   });
-  it("no comparison when the expiration runs well past the report, or the typical move is thin or missing", () => {
-    const far = optionsVerdict({ ...NVDA_VERDICT, facts: { ...NVDA_VERDICT.facts, expiration_used: "2026-12-18" } });
-    expect(far.kind === "verdict" && far.comparison).toBe(null);
-    expect(far.kind === "verdict" && far.sentence).toBe("Options are pricing a move of about 9.3% by Dec 18, 2026.");
-    expect(far.kind === "verdict" && far.why).toMatch(/31 days after the Nov 17, 2026 report/);
-    const edge = optionsVerdict({ ...NVDA_VERDICT, facts: { ...NVDA_VERDICT.facts, expiration_used: "2026-11-24" } });   // exactly EXPIRY_CAVEAT_DAYS
-    expect(EXPIRY_CAVEAT_DAYS).toBe(7);
-    expect(edge.kind === "verdict" && edge.comparison).not.toBe(null);
-    const thin = optionsVerdict({ ...NVDA_VERDICT, typical: { pct: 6.46, reports: MOVE_MIN_REPORTS - 1, through: null } });
-    expect(thin.kind === "verdict" && thin.sentence).not.toMatch(/typical/);
-    const none = optionsVerdict({ ...NVDA_VERDICT, typical: null });
-    expect(none.kind === "verdict" && none.sentence).not.toMatch(/typical|more|less|same/);
+  it("says plainly when the options don't separate a report move, with no comparison", () => {
+    const text = "The options don't separate a report move, because the expiration after the report is priced no higher than the one before it.";
+    const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, state: "not_separated", comparison: text, moveComparison: null,
+      move: { ...NVDA_REPORT.move!, state: "not_separated", pct: null, e: null } } });
+    expect(v.kind === "verdict" && [v.sentence, v.comparison, v.reportPct]).toEqual([text, null, null]);
+    const none = optionsVerdict({ ...NVDA_VERDICT, report: { state: "no_pre_expiration", comparison: "The options don't separate a report move, because no expiration ends before the report.", move: null, heldFacts: [] } });
+    expect(none.kind === "verdict" && none.sentence).toMatch(/^The options don't separate a report move/);
+    expect(none.kind === "verdict" && none.receipt).toBe("From the Oct 12, 2026 options data, for the report on Nov 17, 2026.");
   });
-  it("gives way to one plain line without options data, a report date, a confirmed date or a matching chain", () => {
+  it("no comparison words without a typical move over enough reports, and a held fact drops the verdict", () => {
+    const thin = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, moveComparison: null, typicalN: MOVE_MIN_REPORTS - 1,
+      comparison: "Options price a move of about 6.9% from the report itself (options from Oct 12, 2026)." } });
+    expect(thin.kind === "verdict" && thin.sentence).not.toMatch(/typical|more|less|same/);
+    expect(thin.kind === "verdict" && thin.why).toMatch(/fewer than the 8/);
+    const heldTypical = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, moveComparison: null, typicalPct: null, heldFacts: ["typical_move"],
+      comparison: "Options price a move of about 6.9% from the report itself (options from Oct 12, 2026)." } });
+    expect(heldTypical.kind === "verdict" && heldTypical.why).toMatch(/paused/);
+    const heldImplied = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, heldFacts: ["implied_move"] } });
+    expect(heldImplied.kind).toBe("absent");
+    expect(storedTypical({ ...NVDA_SUMMARY, held: true })).toBeNull();      // the cards compare with nothing while it is held
+  });
+  it("gives way to one plain line without a report date or a confirmed date; an older API shows the range alone", () => {
     const line = (o: Partial<VerdictInput>) => { const v = optionsVerdict({ ...NVDA_VERDICT, ...o }); return v.kind === "absent" ? v.line : null; };
     expect(line({ nextReport: null })).toBe("No upcoming report date is stored for NVDA, so there is no options verdict.");
     expect(line({ confirmation: "estimated" })).toBe("NVDA has not confirmed its next report date, so options are not read against it yet.");
-    expect(line({ facts: { ...NVDA_VERDICT.facts, expected_move_pct: null } })).toBe("No usable options prices are stored for NVDA, so there is no options verdict.");
-    expect(line({ nextReport: "2026-11-18" })).toBe("The stored options data was priced for a different report date, so there is no options verdict.");
+    const old = optionsVerdict({ ...NVDA_VERDICT, report: null });
+    expect(old.kind === "verdict" && [old.sentence, old.band?.high]).toEqual([null, 247.32]);
+    expect(line({ report: null, facts: { ...NVDA_VERDICT.facts, expected_move_pct: null } })).toBe("No usable options prices are stored for NVDA, so there is no options verdict.");
+    expect(line({ report: null, nextReport: "2026-11-18" })).toBe("The stored options data was priced for a different report date, so there is no options verdict.");
   });
   it("without a quote the band marks the price the range was computed from, with its date", () => {
     const v = optionsVerdict({ ...NVDA_VERDICT, quote: null });
@@ -200,6 +215,11 @@ describe("mirrors and legends", () => {
     expect(MOVE_LESS_RATIO).toBe(val("LESS_RATIO"));
     expect(MOVE_MIN_REPORTS).toBe(val("MIN_REPORTS"));
   });
+  it("the phrases Discover links are the ones the backend sentence says", () => {
+    const py = readFileSync(join(__dirname, "../../../../backend/app/services/move_comparison.py"), "utf8");
+    expect(py).toContain('Options price a move of about {report_pct:.1f}% from the report itself');
+    expect(py).toContain('the "\n            f"{typical_pct:.1f}% it has moved on a typical report');
+  });
   it("the price chart legend names each entry once", () => {
     for (const item of earningsMarkerLegend()) {
       const labels = item.label.split(" / ");
@@ -208,12 +228,14 @@ describe("mirrors and legends", () => {
   });
 });
 
-describe("preview state (2026-10-13): range only, price uncolored, met has its own marker", () => {
-  it("the Options opening shows the API's range by the expiration and no comparison", () => {
-    expect(VERDICT_SENTENCE_SHOWN).toBe(false);
+describe("preview state (2026-10-14): the report-move verdict, price uncolored, met has its own marker", () => {
+  it("the Options opening shows the API's sentence, its receipt and the range by the expiration", () => {
+    expect(VERDICT_SENTENCE_SHOWN).toBe(true);
     const html = renderToStaticMarkup(createElement(OptionsVerdictView, { verdict: optionsVerdict(NVDA_VERDICT) }));
-    for (const want of ["$205.32", "$247.32", "$228.52", "Nov 20, 2026", "From the Oct 12, 2026 options data, for the report on Nov 17, 2026."]) expect(html).toContain(want);
-    expect(html).not.toMatch(/typical|more than|less than|same as|pricing a move/);
+    for (const want of ["$205.32", "$247.32", "$228.52", "Nov 20, 2026", "from the report itself", "From the Oct 12, 2026 options data, for the report on Nov 17, 2026."]) expect(html).toContain(want);
+    const older = renderToStaticMarkup(createElement(OptionsVerdictView, { verdict: optionsVerdict({ ...NVDA_VERDICT, report: null }) }));
+    expect(older).toContain("$247.32");
+    expect(older).not.toMatch(/typical|more than|less than|same as|from the report itself/);
   });
   it("only the change and the chart line take the direction color", () => {
     const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");

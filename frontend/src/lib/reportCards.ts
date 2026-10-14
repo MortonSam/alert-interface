@@ -88,11 +88,12 @@ export function fmtMove(v: number): string {
  * stored reports (the rule Discover's comparison uses). */
 export interface TypicalMove { pct: number; reports: number; through: string | null }
 
-type SummaryLike = Pick<ReactionSummary, "avg_abs_1d" | "total_quarters" | "last_event_date"> & { exclusion_reason?: string | null; deal_note?: string | null };
+type SummaryLike = Pick<ReactionSummary, "avg_abs_1d" | "total_quarters" | "last_event_date"> & { exclusion_reason?: string | null; deal_note?: string | null; held?: boolean };
 
-/** The summary's typical move as stored, whatever its sample size; null when none is stored or the ticker's figures are withheld. */
+/** The summary's typical move as stored, whatever its sample size; null when none is stored, the ticker's figures are withheld,
+ * or the typical move is held (backend services/fact_holds), so neither the cards nor the verdict compare with it. */
 export function storedTypical(s: SummaryLike | null | undefined): TypicalMove | null {
-  if (!s || s.exclusion_reason || s.deal_note || s.avg_abs_1d == null || s.avg_abs_1d <= 0) return null;
+  if (!s || s.exclusion_reason || s.deal_note || s.held || s.avg_abs_1d == null || s.avg_abs_1d <= 0) return null;
   return { pct: s.avg_abs_1d, reports: s.total_quarters, through: s.last_event_date };
 }
 
