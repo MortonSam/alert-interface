@@ -10,6 +10,7 @@ import type { MarketSession, MarketSessionDay } from "@/lib/api";
 import { epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
 import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type ReportMoveFacts, type VerdictInput } from "@/lib/optionsVerdict";
 import { comparisonParts } from "@/lib/moveComparison";
+import { EVIDENCE_VIEWS } from "@/lib/evidenceViews";
 import { EARNINGS_MARKER_ENCODING, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -271,5 +272,15 @@ describe("preview state (2026-10-14): the report-move verdict, price uncolored, 
     expect(EARNINGS_MARKER_ENCODING.meet.color).not.toBe(EARNINGS_MARKER_ENCODING.unknown.color);
     const met = earningsMarkerLegend().find((l) => l.label.includes("EPS met"))!;
     expect(met.label).toBe("EPS met");
+  });
+});
+
+describe("the Evidence switch", () => {
+  it("has two views, Reports first and the default, and no fold left behind", () => {
+    expect(EVIDENCE_VIEWS.map((v) => v.label)).toEqual(["Reports", "Chart"]);
+    const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(page).toContain("useState<EvidenceView>(EVIDENCE_VIEWS[0].key)");
+    expect(page).not.toContain("Distribution and peer comparison");
+    expect(page).toContain('data-testid="evidence-switch"');
   });
 });

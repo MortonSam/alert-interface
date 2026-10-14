@@ -62,6 +62,7 @@ import { storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
+import { EVIDENCE_VIEWS, type EvidenceView } from "@/lib/evidenceViews";
 import { fmtDay, fmtDayUnix, nyClock } from "@/lib/tickerDates";
 
 // Extracted components
@@ -1423,6 +1424,7 @@ export default function TickerPage() {
   const [sectorPeers, setSectorPeers] = useState<SectorPeersRead | null>(null);
 
   const [historyView, setHistoryView] = useState<"earnings" | "fed">("earnings");
+  const [evidenceView, setEvidenceView] = useState<EvidenceView>(EVIDENCE_VIEWS[0].key);
   const [fomcReactions, setFomcReactions] = useState<HistoricalReaction[]>([]);
   const [fomcStatus, setFomcStatus] = useState<SectionStatus>("loading");
 
@@ -2420,15 +2422,36 @@ export default function TickerPage() {
           {/* Earnings view */}
           {reactionStatus === "done" && reactions.length > 0 && historyView === "earnings" && (
             <>
-              {/* Tap-a-report cards come first, newest first; the chart, distribution and peers sit folded below */}
-              <ReportCards reactions={reactions} typical={typicalMove(reactionSummary)} />
-              <Fold label="Distribution and peer comparison" testId="evidence-fold">
-                <ReactionChart reactions={reactions} />
-                {reactionSummary && reactionSummary.total_quarters >= 3 && (
-                  <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} sectorPeers={sectorPeers} />
-                )}
-                <ReactionsTable reactions={reactions} />
-              </Fold>
+              {/* A two-way switch at the top: Reports (the tap-a-report cards, newest first, the default) or Chart (the
+                  reaction chart, distribution, peers and the table) */}
+              <div className="mb-6 inline-flex rounded-full bg-muted p-1" role="group" aria-label="Evidence view" data-testid="evidence-switch">
+                {EVIDENCE_VIEWS.map((v) => (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => setEvidenceView(v.key)}
+                    aria-pressed={evidenceView === v.key}
+                    data-testid={`evidence-switch-${v.key}`}
+                    className={cn(
+                      "tap rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+                      evidenceView === v.key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              {evidenceView === "reports" ? (
+                <ReportCards reactions={reactions} typical={typicalMove(reactionSummary)} />
+              ) : (
+                <div data-testid="evidence-chart">
+                  <ReactionChart reactions={reactions} />
+                  {reactionSummary && reactionSummary.total_quarters >= 3 && (
+                    <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} sectorPeers={sectorPeers} />
+                  )}
+                  <ReactionsTable reactions={reactions} />
+                </div>
+              )}
             </>
           )}
 
