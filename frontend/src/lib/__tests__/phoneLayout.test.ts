@@ -43,7 +43,7 @@ describe("tap targets and short pages on a phone", () => {
   it("the .tap overlay gives 44px below 640px and the small controls carry it", () => {
     const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
     expect(css).toMatch(/@media \(max-width: 639px\) \{\s*\.tap \{ position: relative; \}\s*\.tap::before \{[^}]*width: max\(100%, 44px\); height: max\(100%, 44px\)/);
-    expect(readFileSync(join(SRC, "app/layout.tsx"), "utf8").match(/className="tap /g)?.length).toBe(2);       // logo and Disclosures
+    expect(readFileSync(join(SRC, "app/layout.tsx"), "utf8").match(/className="tap /g)?.length).toBe(3);       // logo, Disclosures, the market-data credit
     expect(readFileSync(join(SRC, "components/NavLinks.tsx"), "utf8")).toContain('className="tap p-1.5');
     const ticker = readFileSync(join(SRC, "app/tickers/[symbol]/page.tsx"), "utf8");
     expect(ticker.match(/"tap /g)?.length).toBeGreaterThanOrEqual(12);

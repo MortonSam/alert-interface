@@ -20,10 +20,11 @@ const ALLOWED = new Set(["iPhone", "iPad", "eBay"]);
 // credit for the price history, which names its licensor on purpose
 const VENDORS = /\b(?:Finnhub|Yahoo Finance|yfinance|Intrinio|EDGAR)\b/g;
 const LICENCE_CREDIT = "Five years of daily prices for every S&P 500 stock, licensed from Intrinio";
+const MARKET_DATA_CREDIT = "Market data from Intrinio";   // the sitewide footer credit (lib/brand.ts): a credit names its vendor on purpose
 
 export function codeNames(text: string): string[] {
   const code = CODE_PATTERNS.flatMap(([kind, re]) => [...text.matchAll(re)].map((m) => m[0]).filter((m) => !ALLOWED.has(m)).map((m) => `${kind}: ${m}`));
-  const vendors = text === LICENCE_CREDIT ? [] : [...text.matchAll(VENDORS)].map((m) => `vendor: ${m[0]}`);
+  const vendors = text === LICENCE_CREDIT || text === MARKET_DATA_CREDIT ? [] : [...text.matchAll(VENDORS)].map((m) => `vendor: ${m[0]}`);
   return [...code, ...vendors];
 }
 

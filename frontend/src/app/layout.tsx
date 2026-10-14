@@ -4,7 +4,7 @@ import Link from "next/link";
 import NavLinks from "@/components/NavLinks";
 import { HeaderTickerSearch } from "@/components/TickerSearch";
 import PostHogProvider from "@/components/PostHogProvider";
-import { BRAND } from "@/lib/brand";
+import { BRAND, MARKET_DATA_CREDIT } from "@/lib/brand";
 import "./globals.css";
 
 // Every face is self-hosted from src/fonts (the Latin subsets, each with its OFL licence): no build or page load fetches from
@@ -56,6 +56,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <footer className="text-[11px] text-muted-foreground/70 text-center py-6">
             Alert Interface is an educational research tool. Nothing here is investment advice. Options involve substantial risk.
             {" "}<Link href="/disclosures" className="tap underline hover:text-muted-foreground">Disclosures</Link>
+            <span className="block mt-1" data-testid="market-data-credit">
+              <a href={MARKET_DATA_CREDIT.href} rel={MARKET_DATA_CREDIT.rel} className="tap underline hover:text-muted-foreground">{MARKET_DATA_CREDIT.text}</a>
+            </span>
           </footer>
         </PostHogProvider>
       </body>
