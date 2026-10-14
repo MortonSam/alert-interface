@@ -122,3 +122,10 @@ async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
         "analyst_reactions_measured": analyst_n,
         "analyst_reactions_as_of": analyst_as_of,
     }
+
+
+@router.get("/market-session")
+async def get_market_session() -> dict:
+    """Today's New York session from the NYSE calendar (services/market_status), whether it is open now, and the next one."""
+    from app.services.market_status import market_session
+    return market_session()
