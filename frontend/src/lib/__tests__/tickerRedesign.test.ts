@@ -1,0 +1,205 @@
+// The ticker page's header change, report cards, options verdict and range band each match the API values they are built from,
+// and the verdict never states a comparison the stored numbers do not support. Fixtures are trimmed copies of production
+// answers from 2026-10-13 (TSLA quote and 7d chart, NVDA and VMRK reactions, NVDA options read).
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import type { HistoricalReaction, TickerChart, TickerQuote } from "@/lib/api";
+import { fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, DIRECTION_STYLE, SESSION_OPEN_MIN, SESSION_CLOSE_MIN } from "@/lib/priceHeader";
+import { epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
+import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type VerdictInput } from "@/lib/optionsVerdict";
+import { EXPIRY_CAVEAT_DAYS } from "@/lib/thresholds";
+import { earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
+
+const TSLA_QUOTE = { symbol: "TSLA", price: 375.23, change: -2.8, change_pct: -0.7407, high: 377.05, low: 371.3, open: 372.325, prev_close: 378.03,
+  timestamp: 1791921600, quote_basis: "last_trade", delay_minutes: null, sparkline: [], quote_state: "ok" } as unknown as TickerQuote;
+const TSLA_7D = { symbol: "TSLA", period: "7d", start_price: 376.31, history_state: "ok", earnings_markers: [],
+  history: [{ date: "2026-10-05T09:30:00.000-04:00", close: 376.31 }, { date: "2026-10-12T15:30:00.000-04:00", close: 378.08 }] } as unknown as TickerChart;
+
+const row = (o: Partial<HistoricalReaction>): HistoricalReaction => ({
+  id: o.event_date ?? "x", ticker_id: "t", event_id: null, event_type: "earnings", event_date: "2026-01-01", close_before: null, open_after: null, close_after: null,
+  pct_change_1d: null, pct_change_3d: null, pct_change_5d: null, volume_before: null, volume_after: null, notes: null, eps_estimate: null, eps_actual: null,
+  revenue_estimate: null, revenue_actual: null, outcome: "unknown", created_at: "", eps_surprise_pct: null, report_timing: null, ...o,
+} as HistoricalReaction);
+
+const NVDA_ROWS = [
+  row({ event_date: "2026-05-20", report_timing: "amc", outcome: "beat", eps_actual: "1.8700", eps_estimate: "1.7700", eps_surprise_pct: 5.6, eps_surprise_display_pct: 5.6, eps_surprise_dollars: 0.1, pct_change_1d: "-1.7720", pct_change_3d: "-3.8529", pct_change_5d: "-4.1258" }),
+  row({ event_date: "2026-08-26", report_timing: "amc", outcome: "beat", eps_actual: "2.2200", eps_estimate: "2.0900", eps_surprise_pct: 6.2, eps_surprise_display_pct: 6.2, eps_surprise_dollars: 0.13, pct_change_1d: "8.7380", pct_change_3d: "5.3038", pct_change_5d: "7.0352" }),
+];
+const VMRK_ROW = row({ event_date: "2026-07-22", report_timing: "amc", outcome: "no_reported_figure", eps_estimate: "0.3600", pct_change_1d: "-0.0146", pct_change_3d: "-1.5376", pct_change_5d: "0.8200" });
+const NVDA_SUMMARY = { avg_abs_1d: 6.46, total_quarters: 21, last_event_date: "2026-08-26" };
+
+// 2026-10-13 is a Tuesday; New York is UTC-4.
+const NY = (hhmm: string, day = "2026-10-13") => Date.parse(`${day}T${hhmm}:00-04:00`);
+
+describe("header change matches the API values it comes from", () => {
+  it("1D is the quote's own change and percent against the previous close", () => {
+    const c = periodChange("1d", TSLA_QUOTE, null)!;
+    expect(c.change).toBe(TSLA_QUOTE.change);
+    expect(c.pct).toBe(TSLA_QUOTE.change_pct);
+    expect(c.since).toBe("since the previous close");
+    expect(fmtChange(c)).toBe("-2.80 (-0.74%)");
+    expect(c.direction).toBe("down");
+  });
+  it("other periods are the quote's price against the chart's start_price, dated by the first bar", () => {
+    const c = periodChange("7d", TSLA_QUOTE, TSLA_7D)!;
+    expect(c.change).toBeCloseTo(375.23 - 376.31, 10);
+    expect(c.pct).toBeCloseTo(((375.23 - 376.31) / 376.31) * 100, 10);
+    expect(c.since).toBe("since Oct 5, 2026");
+    expect(fmtChange(c)).toBe("-1.08 (-0.29%)");
+  });
+  it("no change without both sides, and the color follows the sign as printed", () => {
+    expect(periodChange("7d", TSLA_QUOTE, { ...TSLA_7D, start_price: null })).toBeNull();
+    expect(periodChange("1d", { ...TSLA_QUOTE, change: null }, null)).toBeNull();
+    expect(periodChange("1d", { ...TSLA_QUOTE, change: 0.004, change_pct: 0.001 }, null)!.direction).toBe("flat");
+    expect(DIRECTION_STYLE.up.stroke).not.toBe(DIRECTION_STYLE.down.stroke);
+  });
+  it("opens on 1D when it has bars, else the shortest period that does", async () => {
+    const empty = { history: [], history_state: "no_data" } as unknown as TickerChart;
+    const got = await openingPeriod(async (p) => (p === "1d" ? empty : { ...TSLA_7D, period: p }));
+    expect(got?.period).toBe("7d");
+    expect(got?.skipped).toEqual(["1d"]);
+    expect(hasBars(empty)).toBe(false);
+    expect((await openingPeriod(async (p) => ({ ...TSLA_7D, period: p })))?.period).toBe("1d");
+  });
+});
+
+describe("the quote's time line is honest at every hour", () => {
+  const delayed = { timestamp: Math.floor(NY("13:02") / 1000), quote_basis: "delayed" as const, delay_minutes: 15 };
+  it("in session with a delayed quote from today it states the delay and the time", () => {
+    expect(quoteTimeLine(delayed, NY("13:20"))).toEqual({ state: "delayed_session", text: "Delayed 15 minutes. Last trade at 1:02 PM ET on Oct 13, 2026." });
+  });
+  it("after the close, overnight and on a weekend it says the market is closed and names the close it shows", () => {
+    expect(quoteTimeLine(TSLA_QUOTE, NY("20:11"))?.text).toBe("Market closed. Showing the last trade at 4:00 PM ET on Oct 13, 2026.");
+    const close = { ...TSLA_QUOTE, quote_basis: "close" as const };
+    expect(quoteTimeLine(close, NY("08:00", "2026-10-14"))?.text).toBe("Market closed. Showing the close at 4:00 PM ET on Oct 13, 2026.");
+    expect(quoteTimeLine(close, NY("12:00", "2026-10-17"))?.state).toBe("closed");   // a Saturday
+  });
+  it("in session hours without a delayed quote from today it makes no claim about the market", () => {
+    const yesterday = { ...TSLA_QUOTE, quote_basis: "close" as const, timestamp: Math.floor(NY("16:00", "2026-10-12") / 1000) };
+    const line = quoteTimeLine(yesterday, NY("11:00"))!;
+    expect(line.state).toBe("session_no_live");
+    expect(line.text).not.toMatch(/closed|open|live|now|today/i);
+    expect(quoteTimeLine({ ...delayed, timestamp: Math.floor(NY("15:59", "2026-10-12") / 1000) }, NY("11:00"))!.text).not.toMatch(/Delayed/);
+  });
+  it("never says closed inside the session window, never says delayed outside it", () => {
+    for (let m = 0; m < 24 * 60; m += 15) {
+      const hh = String(Math.floor(m / 60)).padStart(2, "0"), mm = String(m % 60).padStart(2, "0");
+      const inSession = m >= SESSION_OPEN_MIN && m < SESSION_CLOSE_MIN;
+      const now = NY(`${hh}:${mm}`);
+      expect(/Market closed/.test(quoteTimeLine(TSLA_QUOTE, now)!.text)).toBe(!inSession);
+      expect(/Delayed/.test(quoteTimeLine({ ...delayed, timestamp: Math.floor(now / 1000) - 900 }, now)!.text)).toBe(inSession);
+    }
+  });
+});
+
+describe("report cards match the stored rows", () => {
+  it("newest first, each figure the API's value", () => {
+    const cards = reportCards(NVDA_ROWS);
+    expect(cards.map((c) => c.eventDate)).toEqual(["2026-08-26", "2026-05-20"]);
+    const c = cards[0];
+    expect(c.date).toBe("Aug 26, 2026");
+    expect(c.timing).toBe("After the close");
+    expect(c.eps).toBe("EPS $2.22 against a $2.09 estimate, a 6.2% beat");
+    expect(c.moves.map((m) => m.value)).toEqual([8.738, 5.3038, 7.0352]);
+    expect(c.moves.map((m) => fmtMove(m.value!))).toEqual(["+8.7%", "+5.3%", "+7.0%"]);
+  });
+  it("a report without a judged EPS figure shows the absence, never a beat or miss", () => {
+    const c = reportCards([VMRK_ROW])[0];
+    expect(c.eps).toBeNull();
+    expect(c.epsAbsent).toBe("No EPS figure is stored for this report.");
+    expect(epsLine(row({ outcome: "beat", eps_actual: "1", eps_estimate: "0.9", outcome_reason: "EPS basis unclear" })).epsAbsent).toBe("EPS basis unclear");
+  });
+  it("the tapped line uses only stored facts and leaves missing parts out", () => {
+    const typical = typicalMove(NVDA_SUMMARY)!;
+    const w = whyItMoved(NVDA_ROWS[1], typical)!;
+    expect(w.text).toBe("EPS beat the estimate by 6.2%. The stock rose 8.7% over the first trading day after the report, more than its typical 6.5% move.");
+    expect(w.comparison).toBe(compareMoves(8.7, 6.5));
+    expect(w.receipt).toBe("Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
+    expect(whyItMoved(VMRK_ROW, null)!.text).toBe("The stock was unchanged over the first trading day after the report.");
+    expect(whyItMoved(row({ outcome: "miss", eps_actual: "1", eps_estimate: "1.2", eps_surprise_pct: -16.7 }), typical)!.text).toBe("EPS missed the estimate by 16.7%.");
+    expect(whyItMoved(row({}), typical)).toBeNull();
+  });
+  it("a typical move needs the minimum sample before any card compares with it", () => {
+    expect(typicalMove({ ...NVDA_SUMMARY, total_quarters: MOVE_MIN_REPORTS - 1 })).toBeNull();
+    expect(storedTypical({ ...NVDA_SUMMARY, total_quarters: 3 })?.reports).toBe(3);
+    expect(storedTypical({ ...NVDA_SUMMARY, exclusion_reason: "excluded" })).toBeNull();
+    expect(whyItMoved(NVDA_ROWS[1], null)!.comparison).toBeNull();
+  });
+});
+
+const NVDA_VERDICT: VerdictInput = {
+  symbol: "NVDA",
+  facts: { expected_move_pct: 0.09278897136797455, implied_range_low: 205.32, implied_range_high: 247.32, expiration_used: "2026-11-20",
+    next_earnings_date: "2026-11-17", chain_date: "2026-10-12", current_price: 226.32, price_as_of: "2026-10-12T20:00:00+00:00" },
+  nextReport: "2026-11-17", confirmation: "confirmed",
+  typical: { pct: 6.46, reports: 21, through: "2026-08-26" },
+  quote: { price: 228.52, asOf: "last trade on Oct 13, 2026" },
+};
+
+describe("the options verdict and band match the API and never overstate", () => {
+  it("states the API's implied move, expiration and typical move", () => {
+    const v = optionsVerdict(NVDA_VERDICT);
+    if (v.kind !== "verdict") throw new Error("expected a verdict");
+    expect(v.sentence).toBe("Options are pricing a move of about 9.3% by Nov 20, 2026, more than its typical 6.5% move after a report.");
+    expect(v.receipt).toBe("From the Oct 12, 2026 options data, for the report on Nov 17, 2026. Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
+    expect(v.band!.low).toBe(205.32);
+    expect(v.band!.high).toBe(247.32);
+    expect(v.band!.marker).toBe(228.52);
+    expect(v.band!.lowPos).toBeLessThan(v.band!.markerPos);
+    expect(v.band!.markerPos).toBeLessThan(v.band!.highPos);
+  });
+  it("the comparison word always follows the ratio of the two numbers printed", () => {
+    for (let imp = 0.5; imp <= 20; imp += 0.7) {
+      for (let typ = 0.5; typ <= 15; typ += 0.9) {
+        const v = optionsVerdict({ ...NVDA_VERDICT, facts: { ...NVDA_VERDICT.facts, expected_move_pct: imp / 100 }, typical: { ...NVDA_VERDICT.typical!, pct: typ } });
+        if (v.kind !== "verdict") throw new Error("expected a verdict");
+        const m = v.sentence.match(/about ([\d.]+)% by .*?, (more than|less than|about the same as) its typical ([\d.]+)% move/)!;
+        const ratio = Math.round((Number(m[1]) / Number(m[3])) * 10_000) / 10_000;
+        const want = ratio > MOVE_MORE_RATIO ? "more than" : ratio < MOVE_LESS_RATIO ? "less than" : "about the same as";
+        expect(m[2], v.sentence).toBe(want);
+      }
+    }
+  });
+  it("no comparison when the expiration runs well past the report, or the typical move is thin or missing", () => {
+    const far = optionsVerdict({ ...NVDA_VERDICT, facts: { ...NVDA_VERDICT.facts, expiration_used: "2026-12-18" } });
+    expect(far.kind === "verdict" && far.comparison).toBe(null);
+    expect(far.kind === "verdict" && far.sentence).toBe("Options are pricing a move of about 9.3% by Dec 18, 2026.");
+    expect(far.kind === "verdict" && far.why).toMatch(/31 days after the Nov 17, 2026 report/);
+    const edge = optionsVerdict({ ...NVDA_VERDICT, facts: { ...NVDA_VERDICT.facts, expiration_used: "2026-11-24" } });   // exactly EXPIRY_CAVEAT_DAYS
+    expect(EXPIRY_CAVEAT_DAYS).toBe(7);
+    expect(edge.kind === "verdict" && edge.comparison).not.toBe(null);
+    const thin = optionsVerdict({ ...NVDA_VERDICT, typical: { pct: 6.46, reports: MOVE_MIN_REPORTS - 1, through: null } });
+    expect(thin.kind === "verdict" && thin.sentence).not.toMatch(/typical/);
+    const none = optionsVerdict({ ...NVDA_VERDICT, typical: null });
+    expect(none.kind === "verdict" && none.sentence).not.toMatch(/typical|more|less|same/);
+  });
+  it("gives way to one plain line without options data, a report date, a confirmed date or a matching chain", () => {
+    const line = (o: Partial<VerdictInput>) => { const v = optionsVerdict({ ...NVDA_VERDICT, ...o }); return v.kind === "absent" ? v.line : null; };
+    expect(line({ nextReport: null })).toBe("No upcoming report date is stored for NVDA, so there is no options verdict.");
+    expect(line({ confirmation: "estimated" })).toBe("NVDA has not confirmed its next report date, so options are not read against it yet.");
+    expect(line({ facts: { ...NVDA_VERDICT.facts, expected_move_pct: null } })).toBe("No usable options prices are stored for NVDA, so there is no options verdict.");
+    expect(line({ nextReport: "2026-11-18" })).toBe("The stored options data was priced for a different report date, so there is no options verdict.");
+  });
+  it("without a quote the band marks the price the range was computed from, with its date", () => {
+    const v = optionsVerdict({ ...NVDA_VERDICT, quote: null });
+    expect(v.kind === "verdict" && v.band?.marker).toBe(226.32);
+    expect(v.kind === "verdict" && v.band?.markerLabel).toBe("price on Oct 12, 2026");
+  });
+});
+
+describe("mirrors and legends", () => {
+  it("the comparison constants match backend services/move_comparison", () => {
+    const py = readFileSync(join(__dirname, "../../../../backend/app/services/move_comparison.py"), "utf8");
+    const val = (name: string) => Number(py.match(new RegExp(`^${name} = ([\\d.]+)`, "m"))![1]);
+    expect(MOVE_MORE_RATIO).toBe(val("MORE_RATIO"));
+    expect(MOVE_LESS_RATIO).toBe(val("LESS_RATIO"));
+    expect(MOVE_MIN_REPORTS).toBe(val("MIN_REPORTS"));
+  });
+  it("the price chart legend names each entry once", () => {
+    for (const item of earningsMarkerLegend()) {
+      const labels = item.label.split(" / ");
+      expect(new Set(labels).size, item.label).toBe(labels.length);
+    }
+  });
+});

@@ -17,11 +17,14 @@ export function earningsMarkerColor(outcome: EarningsOutcome | string): string {
   return (EARNINGS_MARKER_ENCODING as Record<string, { color: string }>)[outcome]?.color ?? EARNINGS_MARKER_ENCODING.unknown.color;
 }
 
-/** One swatch per distinct look: meet and unknown share gray, so they share an entry. */
+/** One swatch per distinct look: meet and unknown share gray, so they share an entry, and each label is named once in it
+ * (unknown and no_reported_figure carry the same words). */
 export function earningsMarkerLegend(): LegendItem[] {
   const byColor = new Map<string, string[]>();
   for (const [, v] of Object.entries(EARNINGS_MARKER_ENCODING)) {
-    byColor.set(v.color, [...(byColor.get(v.color) ?? []), v.label]);
+    const labels = byColor.get(v.color) ?? [];
+    if (!labels.includes(v.label)) labels.push(v.label);
+    byColor.set(v.color, labels);
   }
   return [...byColor.entries()].map(([color, labels]) => ({
     key: color, label: labels.join(" / "), swatch: { kind: "line", color, dashed: true },
