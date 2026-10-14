@@ -58,6 +58,13 @@ import { IvyMark } from "@/components/IvyMark";
 import { hasBriefing, type BriefingResponse } from "@/lib/briefing";
 import { activeSection } from "@/lib/sectionSpy";
 import StructuredNoteView from "@/components/StructuredNoteView";
+import { CHART_PERIODS, DIRECTION_STYLE, PERIOD_LABELS, fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, type ChartPeriod } from "@/lib/priceHeader";
+import { ReportCards } from "@/components/ticker/ReportCards";
+import { storedTypical, typicalMove } from "@/lib/reportCards";
+import { optionsVerdict } from "@/lib/optionsVerdict";
+import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
+import { Fold } from "@/components/ticker/Fold";
+import { fmtDay, fmtDayUnix } from "@/lib/tickerDates";
 
 // Extracted components
 import ExplainTip from "@/components/ticker/ExplainTip";
@@ -958,23 +965,6 @@ function SourceFilingsRow({ filings }: { filings: ResearchNote["source_filings"]
 
 // ── Price chart ───────────────────────────────────────────────────────────────
 
-const CHART_PERIODS = ["1d", "7d", "1mo", "3mo", "6mo", "1y", "5y"] as const;
-type ChartPeriod = (typeof CHART_PERIODS)[number];
-
-const PERIOD_LABELS: Record<ChartPeriod, string> = {
-  "1d": "1D", "7d": "1W", "1mo": "1M", "3mo": "3M", "6mo": "6M", "1y": "1Y", "5y": "5Y",
-};
-
-const PERIOD_WINDOW_LABEL: Record<ChartPeriod, string> = {
-  "1d": "since prior close",
-  "7d": "past 1w",
-  "1mo": "past month",
-  "3mo": "past 3 months",
-  "6mo": "past 6 months",
-  "1y": "past year",
-  "5y": "past 5 years",
-};
-
 function formatTooltipDate(date: string, period: ChartPeriod): string {
   if (date.length > 10) {
     const d = new Date(date);
@@ -1031,6 +1021,9 @@ function PriceChart({
   period,
   onPeriodChange,
   onChartLoad,
+  preloaded,
+  emptyPeriods,
+  lineStroke,
   impliedRangeLow,
   impliedRangeHigh,
   impliedExpiration,
@@ -1039,24 +1032,29 @@ function PriceChart({
   symbol: string;
   period: ChartPeriod;
   onPeriodChange: (p: ChartPeriod) => void;
-  onChartLoad: (startPrice: number | null) => void;
+  onChartLoad: (chart: TickerChart | null) => void;
+  preloaded?: TickerChart | null;          // the opening period's answer, already fetched while choosing it
+  emptyPeriods?: ChartPeriod[];            // periods that answered with no bars: their buttons are disabled
+  lineStroke: string;                      // the period's direction color, the same one the headline change uses
   impliedRangeLow?: number | null;
   impliedRangeHigh?: number | null;
   impliedExpiration?: string | null;   // the expiration the implied range is for
   impliedChainDate?: string | null;    // the options data's own date: the band is labelled by it, never "today"
 }) {
-  const [chartData, setChartData] = useState<TickerChart | null>(null);
+  const [chartData, setChartData] = useState<TickerChart | null>(preloaded ?? null);
   const tapAway = useTapAway();
 
   useEffect(() => {
+    if (preloaded && preloaded.period === period) { setChartData(preloaded); onChartLoad(preloaded); return; }
     setChartData(null);
+    onChartLoad(null);
     api.tickers
       .chart(symbol, period)
       .then((data) => {
         setChartData(data);
-        onChartLoad(data.start_price);
+        onChartLoad(data);
       })
-      .catch(() => setChartData(null));
+      .catch(() => { setChartData(null); onChartLoad(null); });
   }, [symbol, period]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const earningsMap = useMemo(() => {
@@ -1068,7 +1066,7 @@ function PriceChart({
   }, [chartData]);
 
   const isIntraday = period === "1d" || period === "7d";
-  const chartLastBar = !isIntraday && chartData?.history?.length ? chartData.history[chartData.history.length - 1].date : null;
+  const chartLastBar = !isIntraday && chartData?.history?.length ? fmtDay(chartData.history[chartData.history.length - 1].date) : null;
 
   const lineData = useMemo(() => {
     if (!chartData) return [];
@@ -1090,18 +1088,49 @@ function PriceChart({
     return [mn - pad, mx + pad];
   }, [lineData]);
 
+  const selector = (
+    <div className="flex gap-1 mb-3" role="group" aria-label="Chart period">
+      {CHART_PERIODS.map((p) => {
+        const empty = emptyPeriods?.includes(p) ?? false;
+        return (
+          <button
+            key={p}
+            onClick={() => onPeriodChange(p)}
+            disabled={empty}
+            aria-pressed={p === period}
+            title={empty ? "No bars stored for this period" : undefined}
+            className={cn(
+              "tap px-2.5 py-1 rounded text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
+              p === period
+                ? "bg-primary text-primary-foreground"
+                : empty ? "text-muted-foreground/40 cursor-not-allowed" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   if (chartData && chartData.history_state && chartData.history_state !== "ok") {
     return (
-      <div className="mt-6 rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground">
-        Price chart unavailable. {chartData.history_reason}
+      <div className="mt-6">
+        {selector}
+        <div className="rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground">
+          Price chart unavailable. {chartData.history_reason}
+        </div>
       </div>
     );
   }
 
   if (!chartData || lineData.length === 0) {
     return (
-      <div className="mt-6 rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground animate-pulse">
-        Loading chart…
+      <div className="mt-6">
+        {selector}
+        <div className="rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground animate-pulse">
+          Loading chart…
+        </div>
       </div>
     );
   }
@@ -1115,23 +1144,7 @@ function PriceChart({
 
   return (
     <div className="mt-6">
-      {/* Period selector */}
-      <div className="flex gap-1 mb-3">
-        {CHART_PERIODS.map((p) => (
-          <button
-            key={p}
-            onClick={() => onPeriodChange(p)}
-            className={cn(
-              "tap px-2 py-1 rounded text-xs font-medium transition-colors",
-              p === period
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {PERIOD_LABELS[p]}
-          </button>
-        ))}
-      </div>
+      {selector}
 
       {/* Chart */}
       <div className="rounded-lg border bg-card px-2 py-3" ref={tapAway.ref}>
@@ -1153,7 +1166,7 @@ function PriceChart({
                     const d = new Date(pt.date);
                     return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
                   }
-                  return pt.date.slice(5, 10);
+                  return new Date(pt.date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
                 }
                 if (period === "5y") return yearLabel(val as number);
                 return new Date(val as number).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -1166,7 +1179,7 @@ function PriceChart({
             />
             <YAxis
               domain={yDomain}
-              tickFormatter={(v) => `$${v.toFixed(0)}`}
+              tickFormatter={(v) => `$${v.toFixed(yDomain[1] - yDomain[0] < 10 ? 2 : 0)}`}
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               axisLine={false}
               tickLine={false}
@@ -1215,7 +1228,7 @@ function PriceChart({
             <Line
               type="monotone"
               dataKey="close"
-              stroke="hsl(var(--foreground))"
+              stroke={lineStroke}
               strokeWidth={1.5}
               dot={false}
               activeDot={{ r: 3 }}
@@ -1231,7 +1244,7 @@ function PriceChart({
             {impliedRangeLow != null && impliedRangeHigh != null && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
-                Shaded band: range implied by {impliedChainDate ? `the ${impliedChainDate} options data` : "the stored options data"}{impliedExpiration ? ` for options expiring ${impliedExpiration}` : ""}
+                Shaded band: range implied by {impliedChainDate ? `the ${fmtDay(impliedChainDate)} options data` : "the stored options data"}{impliedExpiration ? ` for options expiring ${fmtDay(impliedExpiration)}` : ""}
               </span>
             )}
             {earningsMarkers.length > 0 && (
@@ -1422,11 +1435,30 @@ export default function TickerPage() {
 
   const [health, setHealth]             = useState<HealthStatus | null>(null);
   const [quote, setQuote]               = useState<TickerQuote | null>(null);
-  const [chartPeriod, setChartPeriod]   = useState<ChartPeriod>("1y");
-  const [chartStartPrice, setChartStartPrice] = useState<number | null>(null);
-  const handleChartLoad = useCallback((startPrice: number | null) => {
-    setChartStartPrice(startPrice);
+  // The header opens on 1D when it has intraday bars, otherwise on the shortest period that has bars (lib/priceHeader.openingPeriod)
+  const [chartPeriod, setChartPeriod]   = useState<ChartPeriod | null>(null);
+  const [openingChart, setOpeningChart] = useState<TickerChart | null>(null);
+  const [emptyPeriods, setEmptyPeriods] = useState<ChartPeriod[]>([]);
+  const [shownChart, setShownChart]     = useState<TickerChart | null>(null);
+  const handleChartLoad = useCallback((chart: TickerChart | null) => {
+    setShownChart(chart);
   }, []);
+  // the clock the quote's time line is read against (market closed or a delayed quote in session), re-read each minute
+  const [clockMs, setClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setClockMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    setChartPeriod(null); setOpeningChart(null); setEmptyPeriods([]); setShownChart(null);
+    let cancelled = false;
+    openingPeriod((p) => api.tickers.chart(upperSymbol, p)).then((res) => {
+      if (cancelled) return;
+      if (!res) { setEmptyPeriods([...CHART_PERIODS]); setChartPeriod("1d"); return; }
+      setEmptyPeriods(res.skipped); setOpeningChart(res.chart); setChartPeriod(res.period);
+    });
+    return () => { cancelled = true; };
+  }, [upperSymbol]);
 
   const [realizedVol, setRealizedVol]     = useState<RealizedVol | null>(null);
   const [rvStatus, setRvStatus]           = useState<"loading" | "done" | "empty" | "error">("loading");
@@ -1862,24 +1894,33 @@ export default function TickerPage() {
           ← All tickers
         </Link>
 
-        {/* Header */}
-          <div id="overview" className="mt-6 flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
-              {ticker.name && (
-                <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
-              )}
-              {!ticker.index_member && (
-                <div className="mt-1.5">
-                  <ExplainTip term="index-removal">
-                    <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
-                      No longer in the S&amp;P 500
-                    </span>
-                  </ExplainTip>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-2 shrink-0 self-center">
+        {/* Header: name, sector line, then the trade button, always in that order and spacing */}
+          <div id="overview" className="mt-6">
+            <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
+            {ticker.name && (
+              <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
+            )}
+            {!ticker.index_member && (
+              <div className="mt-1.5">
+                <ExplainTip term="index-removal">
+                  <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
+                    No longer in the S&amp;P 500
+                  </span>
+                </ExplainTip>
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-2" data-testid="sector-line">
+              {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
+              {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
+              {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
+            </p>
+            <div className="mt-5 flex items-center gap-2" data-testid="build-trade-row">
+              <Link
+                href={`/build?ticker=${ticker.symbol}`}
+                className="rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                Build a trade on {ticker.symbol} →
+              </Link>
               {watched !== null && watchlistId && (
                 <button
                   onClick={async () => {
@@ -1907,22 +1948,10 @@ export default function TickerPage() {
                   {watched ? "★" : "☆"}
                 </button>
               )}
-              <Link
-                href={`/build?ticker=${ticker.symbol}`}
-                className="rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors"
-              >
-                Build a trade on {ticker.symbol} →
-              </Link>
             </div>
           </div>
 
-          <p className="font-mono text-xs text-muted-foreground mb-4">
-            {ticker.sector}{ticker.sector && ticker.industry ? " \u00B7 " : ""}{ticker.industry}
-            {(ticker.sector || ticker.industry) && ticker.exchange ? " \u00B7 " : ""}{ticker.exchange}
-            {ticker.market_cap != null ? ` \u00B7 ${formatMarketCap(ticker.market_cap)}` : ""}
-          </p>
-
-          <p className="font-mono text-xs text-muted-foreground mb-2" data-testid="next-earnings-line">
+          <p className="text-sm text-muted-foreground mt-5" data-testid="next-earnings-line">
             {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note)}
           </p>
 
@@ -1930,7 +1959,7 @@ export default function TickerPage() {
           <WhyNowStrip events={events} />
 
           {!dealNote && datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo) && (
-            <p className="text-[11px] font-mono text-muted-foreground/60 mt-2">
+            <p className="text-xs text-muted-foreground mt-1">
               {datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo)}
             </p>
           )}
@@ -1941,55 +1970,56 @@ export default function TickerPage() {
             </p>
           )}
 
-          {/* Live price header */}
-          {quote && quote.price != null && (
-            <div className="mt-5 flex items-center gap-5 flex-wrap">
-              <div className="flex items-baseline gap-2.5">
-                <span className="text-3xl font-bold tabular-nums tracking-tight">
-                  ${quote.price.toFixed(2)}
-                </span>
-                {chartStartPrice != null && (() => {
-                  const chg    = quote.price! - chartStartPrice;
-                  const chgPct = (chg / chartStartPrice) * 100;
-                  return (
-                    <span className={cn(
-                      "text-sm font-medium tabular-nums",
-                      chg >= 0 ? "text-success" : "text-destructive",
-                    )}>
-                      {chg >= 0 ? "+" : ""}{chg.toFixed(2)}{" "}
-                      ({chgPct >= 0 ? "+" : ""}{chgPct.toFixed(2)}%){" "}
-                      <span className="font-normal opacity-60">{PERIOD_WINDOW_LABEL[chartPeriod]}</span>
+          {/* Price header: the price and the selected period's change, colored by that change, with the quote's own time */}
+          {quote && quote.price != null && chartPeriod && (() => {
+            const change = periodChange(chartPeriod, quote, shownChart);
+            const style = DIRECTION_STYLE[change?.direction ?? "flat"];
+            const timeLine = quoteTimeLine(quote, clockMs);
+            return (
+              <div className="mt-6" data-testid="price-header">
+                <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap">
+                  <span className={cn("text-4xl font-bold tabular-nums tracking-tight", style.text)} data-testid="header-price">
+                    ${quote.price.toFixed(2)}
+                  </span>
+                  {change && (
+                    <span className="text-base">
+                      <span className={cn("font-semibold tabular-nums", style.text)} data-testid="header-change">{fmtChange(change)}</span>{" "}
+                      <span className="text-muted-foreground" data-testid="header-change-since">{change.since}</span>
                     </span>
-                  );
-                })()}
-              </div>
-              {quote.high != null && quote.low != null && (
-                <span className="text-xs text-muted-foreground ml-auto">
-                  H&nbsp;{quote.high.toFixed(2)} · L&nbsp;{quote.low.toFixed(2)}
-                  {quote.timestamp != null && (
-                    <span className="text-muted-foreground/50 ml-2">as of {quoteAsOf(quote.timestamp, quote.quote_basis, quote.delay_minutes)}</span>
                   )}
-                </span>
-              )}
-              {(quote.high == null || quote.low == null) && quote.timestamp != null && (
-                <span className="text-xs text-muted-foreground/50 ml-auto">
-                  as of {quoteAsOf(quote.timestamp, quote.quote_basis, quote.delay_minutes)}
-                </span>
-              )}
-            </div>
-          )}
+                </div>
+                {timeLine && (
+                  <p className="mt-1.5 text-sm text-muted-foreground" data-testid="quote-time-line">{timeLine.text}</p>
+                )}
+                {quote.high != null && quote.low != null && (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    H&nbsp;<span className="tabular-nums">{quote.high.toFixed(2)}</span> · L&nbsp;<span className="tabular-nums">{quote.low.toFixed(2)}</span> on {fmtDayUnix(quote.timestamp)}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Interactive price chart with implied range overlay */}
-          <PriceChart
-            symbol={upperSymbol}
-            period={chartPeriod}
-            onPeriodChange={setChartPeriod}
-            onChartLoad={handleChartLoad}
-            impliedRangeLow={shownOptionFacts.implied_range_low}
-            impliedRangeHigh={shownOptionFacts.implied_range_high}
-            impliedExpiration={shownOptionFacts.expiration_used}
-            impliedChainDate={shownOptionFacts.chain_date}
-          />
+          {chartPeriod ? (
+            <PriceChart
+              symbol={upperSymbol}
+              period={chartPeriod}
+              onPeriodChange={setChartPeriod}
+              onChartLoad={handleChartLoad}
+              preloaded={openingChart}
+              emptyPeriods={emptyPeriods}
+              lineStroke={DIRECTION_STYLE[(quote && periodChange(chartPeriod, quote, shownChart)?.direction) || "flat"].stroke}
+              impliedRangeLow={shownOptionFacts.implied_range_low}
+              impliedRangeHigh={shownOptionFacts.implied_range_high}
+              impliedExpiration={shownOptionFacts.expiration_used}
+              impliedChainDate={shownOptionFacts.chain_date}
+            />
+          ) : (
+            <div className="mt-6 rounded-lg border bg-card px-4 py-20 text-center text-sm text-muted-foreground animate-pulse">
+              Loading chart…
+            </div>
+          )}
 
         {/* Section nav */}
         <SectionNav sections={sections} />
@@ -2003,7 +2033,7 @@ export default function TickerPage() {
         </div>
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
-        <section id="catalysts" className="border-t pt-16 pb-24 scroll-mt-28">
+        <section id="catalysts" className="border-t pt-16 pb-10 sm:pb-24 scroll-mt-28">
           <SectionKicker index="02" label="Catalysts" />
 
           {/* 1. HERO — Next Catalyst */}
@@ -2299,7 +2329,7 @@ export default function TickerPage() {
         </section>
 
         {/* ── EVIDENCE ─────────────────────────────────────────────────── */}
-        <section id="evidence" className="border-t pt-16 pb-24 scroll-mt-28">
+        <section id="evidence" className="sm:border-t pt-2 sm:pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="03" label="Evidence" />
 
           {dealNote ? (
@@ -2324,7 +2354,7 @@ export default function TickerPage() {
                 className={cn(
                   "tap inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
                   historyView === "earnings"
-                    ? "bg-cool/10 text-cool"
+                    ? "bg-primary/15 text-primary"
                     : "bg-muted text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -2335,7 +2365,7 @@ export default function TickerPage() {
                 className={cn(
                   "tap inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
                   historyView === "fed"
-                    ? "bg-violet/10 text-violet"
+                    ? "bg-primary/15 text-primary"
                     : "bg-muted text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -2370,11 +2400,15 @@ export default function TickerPage() {
           {/* Earnings view */}
           {reactionStatus === "done" && reactions.length > 0 && historyView === "earnings" && (
             <>
-              <ReactionChart reactions={reactions} />
-              {reactionSummary && reactionSummary.total_quarters >= 3 && (
-                <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} sectorPeers={sectorPeers} />
-              )}
-              <ReactionsTable reactions={reactions} />
+              {/* Tap-a-report cards come first, newest first; the chart, distribution and peers sit folded below */}
+              <ReportCards reactions={reactions} typical={typicalMove(reactionSummary)} />
+              <Fold label="Distribution and peer comparison" testId="evidence-fold">
+                <ReactionChart reactions={reactions} />
+                {reactionSummary && reactionSummary.total_quarters >= 3 && (
+                  <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} sectorPeers={sectorPeers} />
+                )}
+                <ReactionsTable reactions={reactions} />
+              </Fold>
             </>
           )}
 
@@ -2404,7 +2438,7 @@ export default function TickerPage() {
         <section id="options" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index="04" label="Options" />
 
-          {/* Implied move lead display */}
+          {/* Loading and failure stay outside the fold */}
           {bundleStatus === "loading" && (
             <div className="animate-pulse space-y-3 mb-6">
               <div className="h-8 bg-muted rounded w-40" />
@@ -2414,6 +2448,27 @@ export default function TickerPage() {
           {bundleStatus === "error" && (
             <p className="text-sm text-muted-foreground mb-6">Could not load options data.</p>
           )}
+          {/* The verdict and its range band from stored values (lib/optionsVerdict), or one plain line saying why there is none */}
+          {(bundleStatus === "done" || bundleStatus === "empty") && orStatus !== "loading" && (
+            <OptionsVerdictView verdict={optionsVerdict({
+              symbol: upperSymbol,
+              facts: {
+                ...shownOptionFacts,
+                chain_date: shownOptionFacts.chain_date ?? expectedMove?.chain_date ?? null,
+                price_as_of: shownOptionFacts.price_as_of ?? expectedMove?.price_as_of ?? null,
+              },
+              nextReport: ticker.next_earnings_date,
+              confirmation: ticker.next_earnings_confirmation,
+              typical: storedTypical(reactionSummary),
+              quote: quote && quote.price != null && quote.timestamp != null
+                ? { price: quote.price, asOf: `${quote.quote_basis === "close" ? "close" : "last trade"} on ${fmtDayUnix(quote.timestamp)}` }
+                : null,
+            })} />
+          )}
+
+          <Fold label="Details" testId="options-details">
+
+          {/* Implied move lead display */}
           {bundleStatus === "empty" && (
             <p className="text-sm text-muted-foreground mb-6">{expectedMove?.data_quality_note ?? `No options data available for ${upperSymbol}.`}</p>
           )}
@@ -2646,6 +2701,7 @@ export default function TickerPage() {
             </div>
           )}
 
+          </Fold>
         </section>
 
         {/* ── POSITIONS ──────────────────────────────────────────────── */}
