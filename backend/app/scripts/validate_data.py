@@ -3204,6 +3204,39 @@ async def check_spy_bar_current(session) -> CheckResult:
     return CheckResult("spy_bar_current", PASS, f"SPY's last bar ({spy_last.isoformat()}) is the index names' last bar")
 
 
+async def check_draft_path_fresh(session, today: date | None = None) -> CheckResult:
+    """ERROR when Build a Trade would refuse a ticker as stale while its newest serving chain is fresh: the draft path's own
+    chain choice (services/draft_chain.pick_draft_chain at draft_min_expiration) and its options-age guard (options_age_refusal),
+    the functions the router calls, for every active ticker. WARN when no expiration is stored far enough out for a draft (a
+    ticker under a pending cash deal serves no chain and is skipped). Read-only: no AI and no vendor call."""
+    from app.services.draft_chain import draft_min_expiration, options_age_refusal, pick_draft_chain
+    from app.services.pending_deals import deal_for
+    today = today or date.today()
+    syms = list((await session.execute(text("SELECT symbol FROM tickers WHERE is_active ORDER BY symbol"))).scalars().all())
+    nxt = dict((await session.execute(text("""SELECT t.symbol, min(e.event_date) FROM events e JOIN tickers t ON t.id = e.ticker_id
+        WHERE t.is_active AND e.event_type = 'earnings' AND e.event_date >= :d GROUP BY t.symbol"""), {"d": today})).all())
+    refused, short = [], []
+    for sym in syms:
+        min_exp = draft_min_expiration(nxt.get(sym), today)
+        picked = await pick_draft_chain(session, sym, min_exp, today=today)
+        if picked.chain is None:
+            if await deal_for(session, sym) is None:
+                short.append(f"{sym}: no stored expiration on or after {min_exp}")
+            continue
+        if options_age_refusal(sym, picked.chain_last_trade, today):
+            newest = await chain_store.get_latest_chain_date(session, sym)
+            if chain_store.is_fresh(newest, today=today):
+                refused.append(f"{sym}: picks {picked.expiration} dated {picked.chain_last_trade}; newest chain {newest}")
+    figures = {"draft_refused_fresh": len(refused), "draft_no_expiration": len(short), "tickers": len(syms)}
+    if refused:
+        return CheckResult("draft_path_fresh", ERROR, f"{len(refused)} of {len(syms)} active tickers: Build a Trade refuses a stale chain "
+                           f"while a fresh one is stored", refused, figures)
+    if short:
+        return CheckResult("draft_path_fresh", WARN, f"{len(short)} of {len(syms)} active tickers have no expiration stored far enough out "
+                           f"for a draft", short, figures)
+    return CheckResult("draft_path_fresh", PASS, f"Build a Trade's chain is fresh for all {len(syms)} active tickers", figures=figures)
+
+
 # ── Duplicate reaction detection ─────────────────────────────────────────────
 
 async def check_duplicate_earnings_reactions(session) -> CheckResult:
@@ -3703,6 +3736,8 @@ CHECKS = [
     # The trading calendar agrees with the stored sessions
     check_calendar_matches_spy_bars,
     check_spy_bar_current,
+    # Build a Trade reads a fresh chain whenever one is stored
+    check_draft_path_fresh,
     # v3 reaction checks
     check_no_mixed_computation_version,
     check_report_timing_unknown_share,
