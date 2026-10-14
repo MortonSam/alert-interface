@@ -9,7 +9,11 @@ import { fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, DIRECTI
 import { epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
 import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type VerdictInput } from "@/lib/optionsVerdict";
 import { EXPIRY_CAVEAT_DAYS } from "@/lib/thresholds";
-import { earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
+import { EARNINGS_MARKER_ENCODING, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
+import { VERDICT_SENTENCE_SHOWN } from "@/lib/optionsVerdict";
 
 const TSLA_QUOTE = { symbol: "TSLA", price: 375.23, change: -2.8, change_pct: -0.7407, high: 377.05, low: 371.3, open: 372.325, prev_close: 378.03,
   timestamp: 1791921600, quote_basis: "last_trade", delay_minutes: null, sparkline: [], quote_state: "ok" } as unknown as TickerQuote;
@@ -201,5 +205,24 @@ describe("mirrors and legends", () => {
       const labels = item.label.split(" / ");
       expect(new Set(labels).size, item.label).toBe(labels.length);
     }
+  });
+});
+
+describe("preview state (2026-10-13): range only, price uncolored, met has its own marker", () => {
+  it("the Options opening shows the API's range by the expiration and no comparison", () => {
+    expect(VERDICT_SENTENCE_SHOWN).toBe(false);
+    const html = renderToStaticMarkup(createElement(OptionsVerdictView, { verdict: optionsVerdict(NVDA_VERDICT) }));
+    for (const want of ["$205.32", "$247.32", "$228.52", "Nov 20, 2026", "From the Oct 12, 2026 options data, for the report on Nov 17, 2026."]) expect(html).toContain(want);
+    expect(html).not.toMatch(/typical|more than|less than|same as|pricing a move/);
+  });
+  it("only the change and the chart line take the direction color", () => {
+    const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(page).toContain('"text-4xl font-bold tabular-nums tracking-tight text-foreground" data-testid="header-price"');
+    expect(page).toContain("data-testid=\"header-change\"");
+  });
+  it("met is a different mark from no EPS data", () => {
+    expect(EARNINGS_MARKER_ENCODING.meet.color).not.toBe(EARNINGS_MARKER_ENCODING.unknown.color);
+    const met = earningsMarkerLegend().find((l) => l.label.includes("EPS met"))!;
+    expect(met.label).toBe("EPS met");
   });
 });

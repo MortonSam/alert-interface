@@ -11,6 +11,10 @@ export const MOVE_MORE_RATIO = 1.2;
 export const MOVE_LESS_RATIO = 0.8;
 export const MOVE_MIN_REPORTS = 8;
 
+// The comparison sentence waits for the report-only implied move (backend, held for Sam's go). Until then the section shows the
+// implied range by the expiration and its receipt, with no comparison of any kind.
+export const VERDICT_SENTENCE_SHOWN = false;
+
 export type MoveComparison = "more than usual" | "less than usual" | "about its usual";
 
 /** services/move_comparison.compare_moves, percent units in. */
@@ -50,7 +54,7 @@ export interface RangeBand {
 }
 
 export type Verdict =
-  | { kind: "verdict"; sentence: string; comparison: MoveComparison | null; impliedPct: number; typicalPct: number | null; why: string | null; receipt: string; band: RangeBand | null }
+  | { kind: "verdict"; sentence: string; comparison: MoveComparison | null; impliedPct: number; typicalPct: number | null; why: string | null; receipt: string; rangeReceipt: string; band: RangeBand | null }
   | { kind: "absent"; line: string };
 
 /** The band's geometry: low and high with a margin, the marker clamped inside the bar. */
@@ -110,5 +114,6 @@ export function optionsVerdict(v: VerdictInput): Verdict {
     const label = useQuote ? v.quote!.asOf! : (fmtDay(f.price_as_of) ? `price on ${fmtDay(f.price_as_of)}` : null);
     if (marker != null && label) band = rangeBand(f.implied_range_low, f.implied_range_high, marker, label, by);
   }
-  return { kind: "verdict", sentence, comparison, impliedPct: imp, typicalPct: typ, why, receipt, band };
+  const rangeReceipt = `From the ${fmtDay(f.chain_date)} options data, for the report on ${report}.`;
+  return { kind: "verdict", sentence, comparison, impliedPct: imp, typicalPct: typ, why, receipt, rangeReceipt, band };
 }

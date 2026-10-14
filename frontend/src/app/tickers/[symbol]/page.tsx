@@ -1978,7 +1978,7 @@ export default function TickerPage() {
             return (
               <div className="mt-6" data-testid="price-header">
                 <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap">
-                  <span className={cn("text-4xl font-bold tabular-nums tracking-tight", style.text)} data-testid="header-price">
+                  <span className="text-4xl font-bold tabular-nums tracking-tight text-foreground" data-testid="header-price">
                     ${quote.price.toFixed(2)}
                   </span>
                   {change && (
