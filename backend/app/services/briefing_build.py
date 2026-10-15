@@ -110,13 +110,19 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     quote_ts = q.traded_on_ts if q else None
 
     # block 1: what it is (description from the stored Intrinio profile; sector and sub-industry are GICS from the constituent list)
-    prof = (await db.execute(text("SELECT short_description, source, fetched_at FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
+    prof = (await db.execute(text("SELECT short_description, source, fetched_at, latest_filing_date FROM company_profiles WHERE symbol = :s"), {"s": sym})).mappings().first()
+    from app.services.ticker_exits import MERGED, REASON_PREFIXES
+    # a company merged into this one (its exit record: ticker_aliases from a ticker marked merged): the latest such merger
+    merger = (await db.execute(text("""SELECT o.name, a.renamed_on FROM ticker_aliases a JOIN tickers o ON o.symbol = a.old_symbol
+        WHERE a.symbol = :s AND o.inactive_reason LIKE :m ORDER BY a.renamed_on DESC LIMIT 1"""), {"s": sym, "m": REASON_PREFIXES[MERGED] + "%"})).first()
     if prof:
         s1 = B.profile_sentence(name=ticker.name, symbol=sym, short_description=prof["short_description"], profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
                                 profile_source=(prof["source"] or "intrinio").capitalize(), gics_sector=ticker.sector, gics_sub_industry=ticker.industry,
                                 gics_as_of=ticker.updated_at.date() if ticker.updated_at else None, index_member=bool(ticker.index_member),
                                 quote_price=quote_price, quote_ts=quote_ts, shares_outstanding=_f(ticker.shares_outstanding),
-                                shares_as_of=ticker.shares_as_of.date() if ticker.shares_as_of else None)
+                                shares_as_of=ticker.shares_as_of.date() if ticker.shares_as_of else None,
+                                profile_filed=prof["latest_filing_date"], merged_name=merger.name if merger else None,
+                                merged_on=merger.renamed_on if merger else None, market_cap=_f(ticker.market_cap))
         if s1:
             sentences.append(s1)
 

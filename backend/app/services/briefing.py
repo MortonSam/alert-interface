@@ -45,6 +45,8 @@ NAME_SUFFIXES = ("incorporated", "inc", "corporation", "corp", "company", "co", 
 TIMING_PHRASE = {"bmo": "before the open", "amc": "after the close"}
 SOURCE_NAMES = {"yfinance": "earnings calendar", "finnhub": "earnings calendar", "company": "the company", "edgar": "SEC filing"}   # reader-facing names; receipts keep the technical ones
 ABBREVIATIONS = {"inc", "corp", "co", "ltd", "plc", "llc", "lp", "sa", "nv", "ag", "mr", "ms", "dr", "st", "no", "vs", "u.s", "e.g", "i.e"}
+MARKET_VALUE_AGREEMENT = 0.25  # quote x shares shown only within this share of the dated market cap on file; past it the share count is
+                               # stale (VMRK on 2026-10-15: a pre-merger 374.9M shares gave $23B against a $47B market cap), so no value
 BOILERPLATE = ("was incorporated", "is incorporated", "was formerly known", "changed its name", "formerly known as")   # investor-relations sentences dropped
 
 
@@ -162,14 +164,42 @@ def short_name(name: str | None, symbol: str | None = None) -> str | None:
     return " ".join(words)
 
 
+def merger_text(name: str | None, symbol: str | None, merged_name: str | None, merged_on: date | None) -> str | None:
+    """Pure: the description of a company that took in another after its profile was written (2026-10-15, VMRK): the merger from
+    its record, and that the profile on file predates it. None without both names and the date."""
+    me, other = short_name(name, symbol), short_name(merged_name)
+    if not (me and other and merged_on):
+        return None
+    return (f"{me} combined with {other} in a merger completed {fmt_date(merged_on)}. "
+            f"Its company description on file predates the merger, so it is not shown.")
+
+
+def market_value_agrees(quote_price: float | None, shares_outstanding: float | None, market_cap: float | None) -> bool:
+    """Pure: quote x shares is within MARKET_VALUE_AGREEMENT of the dated market cap on file (True when there is no market cap to
+    compare, so a ticker without one keeps its value)."""
+    if not (quote_price and shares_outstanding):
+        return False
+    if not market_cap:
+        return True
+    return abs(quote_price * shares_outstanding / market_cap - 1) <= MARKET_VALUE_AGREEMENT
+
+
 def profile_sentence(*, name: str | None = None, symbol: str | None = None, short_description: str | None = None, profile_as_of: date | None = None, profile_source: str | None = "Intrinio",
                      gics_sector: str | None = None, gics_sub_industry: str | None = None, gics_as_of: date | None = None, index_member: bool = False,
-                     quote_price: float | None = None, quote_ts: int | None = None, shares_outstanding: float | None = None, shares_as_of: date | None = None) -> dict | None:
-    """The description, then "It's part of the S&P 500's <GICS sector> sector (<sub-industry>), worth about <quote x shares>." None without a profile."""
+                     quote_price: float | None = None, quote_ts: int | None = None, shares_outstanding: float | None = None, shares_as_of: date | None = None,
+                     profile_filed: date | None = None, merged_name: str | None = None, merged_on: date | None = None,
+                     market_cap: float | None = None) -> dict | None:
+    """The description, then "It's part of the S&P 500's <GICS sector> sector (<sub-industry>), worth about <quote x shares>." None without a profile.
+    A merger into this company after the profile's latest filing replaces the description with the merger (merger_text); a market
+    value that disagrees with the dated market cap on file is left out (market_value_agrees)."""
     desc = description_text(short_description)
     if not desc:
         return None
-    inputs = [_input("description", desc, profile_as_of, "company profile, short description")]
+    merged = merged_on is not None and (profile_filed is None or merged_on > profile_filed)
+    if merged:
+        desc = merger_text(name, symbol, merged_name, merged_on) or desc
+    inputs = [_input("description", desc, merged_on if merged else profile_as_of,
+                     "the merger on file (ticker exits), the profile's own description left out because it predates it" if merged else "company profile, short description")]
     dates: list[date] = [d for d in (profile_as_of,) if d]
     if name:
         inputs.append(_input("company name", short_name(name, symbol), profile_as_of, f"company name on file, read as {name!r} with its corporate suffix dropped"))
@@ -183,7 +213,7 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
             inputs.append(_input("index membership", "S&P 500", gics_as_of, "the nightly S&P 500 constituent list"))
         if gics_as_of:
             dates.append(gics_as_of)
-    mv = market_value_words(quote_price * shares_outstanding) if quote_price and shares_outstanding else None
+    mv = market_value_words(quote_price * shares_outstanding) if market_value_agrees(quote_price, shares_outstanding, market_cap) else None
     if mv and quote_ts and shares_as_of:
         bits.append(f"worth about {mv}")
         t = fmt_quote_time(quote_ts)
@@ -195,7 +225,9 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
             f"{SECOND_SENTENCE_IF_FIRST_UNDER} characters and when it is not a list of segments, products or brands; incorporation and renaming boilerplate removed; "
             f"{DESCRIPTION_CAP} characters at most, whole sentences only). Sector and sub-industry are GICS from the S&P 500 constituent list, never the profile vendor's "
             "categories; membership from the nightly list. The market value is the latest quote times the shares outstanding from the company profile, in round words, "
-            "one decimal at most, each dated.")
+            "one decimal at most, each dated, and shown only within "
+            f"{MARKET_VALUE_AGREEMENT:.0%} of the dated market cap on file. A merger into the company completed after its profile's latest filing replaces "
+            "the description with the merger and the date it completed.")
     return _sentence("profile", text, rule, max(dates) if dates else None, inputs)
 
 

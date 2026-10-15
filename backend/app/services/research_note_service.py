@@ -241,11 +241,26 @@ async def _fetch_financials(symbol: str) -> dict | None:
     return extracted
 
 
+async def merger_context(db: AsyncSession, symbol: str) -> str | None:
+    """The merger into this company on file (its exit record), for the note to describe the combined company: VMRK's 10-Q predates
+    its merger with AvalonBay, and a note written from it alone described Equity Residential (2026-10-15)."""
+    from sqlalchemy import text as _text
+    from app.services.ticker_exits import MERGED, REASON_PREFIXES
+    row = (await db.execute(_text("""SELECT o.name, a.renamed_on, o.inactive_reason FROM ticker_aliases a JOIN tickers o ON o.symbol = a.old_symbol
+        WHERE a.symbol = :s AND o.inactive_reason LIKE :m ORDER BY a.renamed_on DESC LIMIT 1"""), {"s": symbol, "m": REASON_PREFIXES[MERGED] + "%"})).first()
+    if row is None:
+        return None
+    return (f"CORPORATE EVENT: {row.name} merged into {symbol} on {row.renamed_on.isoformat()} ({row.inactive_reason}). Describe the combined "
+            "company as it is now. A filing dated before that day describes the company before the merger: say so wherever you use it, "
+            "and never present its pre-merger figures (property counts, share counts, revenue) as the combined company's.\n")
+
+
 def _build_generation_prompt(
     ticker: Ticker,
     filing: dict | None,
     sections: dict | None,
     reactions: list[HistoricalReaction],
+    corporate_events: str | None = None,
 ) -> str:
     name       = ticker.name or ticker.symbol
     sector     = ticker.sector or "N/A"
@@ -292,7 +307,7 @@ You are a financial research analyst producing a STRUCTURED research note for {t
 COMPANY: {ticker.symbol}, {name}
 SECTOR: {sector} | INDUSTRY: {industry}
 MARKET CAP: {market_cap}
-
+{corporate_events or ""}
 {filing_block}
 
 {stats_block}
@@ -690,7 +705,7 @@ async def run_research_note_background(
             filing, sections, reactions = await _fetch_context(db, ticker)
 
             # ── Phase 1: Sonnet generation (structured JSON) ─────────────
-            prompt = _build_generation_prompt(ticker, filing, sections, reactions)
+            prompt = _build_generation_prompt(ticker, filing, sections, reactions, await merger_context(db, ticker.symbol))
             client = AnthropicClient()
             gen = await client.generate_research_note(prompt)
 
