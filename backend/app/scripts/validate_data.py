@@ -1729,6 +1729,32 @@ async def check_live_quote_sanity(session) -> CheckResult:
     return CheckResult("live_quote_sanity", PASS, f"{len(quotes)} delayed quotes within {LIVE_SANITY_PCT:.0f}% of their last stored close")
 
 
+SPY_DAILY_MOVE_BAND_PCT = 12.0         # SPY's largest one-day move since 1993 is about 11%: a stored move past this is a bad close
+USUAL_MOVE_BAND_PCT = (0.1, 10.0)      # a stock's median absolute daily move inside this band; outside it is a bad history
+
+
+async def check_market_beside_bands(session) -> CheckResult:
+    """ERROR when a figure Discover and Street Pulse print beside a stock's move leaves its band (2026-10-15): SPY's move on any
+    session of the last 30 days (services/market_day, as traded) past SPY_DAILY_MOVE_BAND_PCT, or a sample of tickers' median
+    absolute daily move (routers/historical_reactions.usual_daily_move) outside USUAL_MOVE_BAND_PCT."""
+    from datetime import date as _date, timedelta as _td
+    from app.routers.historical_reactions import usual_daily_move
+    from app.services.market_day import spy_moves
+    days = {_date.today() - _td(days=i) for i in range(30)}
+    spy = await spy_moves(session, days)
+    bad = [f"SPY {d}: {m:+.2f}%" for d, m in sorted(spy.items()) if abs(m) > SPY_DAILY_MOVE_BAND_PCT]
+    sample = list((await session.execute(text("SELECT symbol FROM tickers WHERE is_active ORDER BY symbol LIMIT 25"))).scalars().all())
+    lo, hi = USUAL_MOVE_BAND_PCT
+    for sym in sample:
+        usual, _n = await usual_daily_move(session, sym)
+        if usual is not None and not lo <= usual <= hi:
+            bad.append(f"{sym} usual daily move {usual}%")
+    if bad:
+        return CheckResult("market_beside_bands", ERROR, f"{len(bad)} figure(s) beside a move outside their band", bad[:20])
+    return CheckResult("market_beside_bands", PASS, f"SPY's {len(spy)} stored session moves within {SPY_DAILY_MOVE_BAND_PCT:.0f}%; "
+                       f"{len(sample)} tickers' usual daily moves within {lo}% to {hi}%")
+
+
 async def check_live_api_budget(session) -> CheckResult:
     """WARN when the live layer's calls at full load would use more than BUDGET_WARN_SHARE of Intrinio's per-minute limit."""
     from app.services import live_data
@@ -3654,6 +3680,7 @@ CHECKS = [
     check_live_quote_age,
     check_live_quote_sanity,
     check_live_api_budget,
+    check_market_beside_bands,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard
