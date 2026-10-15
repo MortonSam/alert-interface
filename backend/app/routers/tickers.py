@@ -302,13 +302,17 @@ async def get_ticker_quote(symbol: str, db: AsyncSession = Depends(get_db), admi
     if not live or not hist.ok:
         print(f"[quote] {sym}: quote={q.state} traded_on={q.traded_on} history={hist.state} ({hist.detail})", flush=True)
 
+    # the day's high and low come from the session's own bars, never the quote vendor's h/l (services/session_range)
+    from app.services.session_range import session_range
+    day = await session_range(sym, ts, quote_data.get("price")) if live else None
+
     return TickerQuoteRead(
         symbol=sym,
         price=quote_data.get("price") if live else None,
         change=quote_data.get("change") if live else None,
         change_pct=quote_data.get("change_pct") if live else None,
-        high=quote_data.get("high") if live else None,
-        low=quote_data.get("low") if live else None,
+        high=day.high if day else None,
+        low=day.low if day else None,
         open=quote_data.get("open") if live else None,
         prev_close=quote_data.get("prev_close") if live else None,
         timestamp=ts,

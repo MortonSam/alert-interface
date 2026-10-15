@@ -251,9 +251,13 @@ async def intraday_chart(symbol: str, on: date, prev_close: float | None, start:
         return None
     finally:
         await client.close()
-    history = bars_to_history(body.get("intervals") or [])
+    intervals = body.get("intervals") or []
+    history = bars_to_history(intervals)
+    # the session's own highs and lows (the ticker header's day range, services/session_range); bars of `on` only
+    on_bars = [b for b in intervals if str(b.get("time") or "")[:10] == on.isoformat()]
     out = {"history": history, "start_price": prev_close if start == on else (history[0]["close"] if history else None),
-           "bars_source": body.get("source"), "bars_through": history[-1]["date"] if history else None}
+           "bars_source": body.get("source"), "bars_through": history[-1]["date"] if history else None,
+           "highs": [b.get("high") for b in on_bars], "lows": [b.get("low") for b in on_bars]}
     _chart_cache[key] = (time.monotonic(), out)
     return out
 
