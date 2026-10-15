@@ -52,6 +52,17 @@ async def _fetch(client: FinnhubClient, symbols: list[str], quotes: bool) -> tup
                               "quote_time": datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None}
             except Exception as exc:
                 failed.append(f"{sym} quote: {redact(exc)[:60]}")
+    if quotes:
+        # SPY's quote beside the movers (services/market_day): stored like the others, never listed (the movers join active tickers)
+        from app.services.market_day import BENCHMARK
+        try:
+            q = await client.get_quote(BENCHMARK)
+            ts = int(q["t"]) if q.get("t") else None
+            snaps[BENCHMARK] = {"price": float(q["c"]) if q.get("c") else None, "change_pct": float(q["dp"]) if q.get("dp") is not None else None,
+                                "prev_close": float(q["pc"]) if q.get("pc") else None,
+                                "quote_time": datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None}
+        except Exception as exc:
+            failed.append(f"{BENCHMARK} quote: {redact(exc)[:60]}")
     return raw, snaps, failed
 
 

@@ -192,6 +192,10 @@ class AnalystReactionStatsRead(BaseModel):
     downgrade_5d_sample: int
     sample_count: int = 0                  # total actions (upgrade + downgrade)
     session_count: int = 0                 # total distinct sessions (upgrade + downgrade)
+    # the stock's median absolute daily move over the same five years (stored bars): a median on analyst actions is called a reaction
+    # only past it (thresholds, 2026-10-15); None without enough bars
+    median_abs_daily_move_pct: float | None = None
+    daily_move_sessions: int = 0
     last_event_date: str | None = None     # ISO date of most recent analyst action
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None

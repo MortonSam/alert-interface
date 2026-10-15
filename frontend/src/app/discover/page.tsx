@@ -3,7 +3,7 @@
 import Explained from "@/components/Explained";
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { MoveComparisonLine } from "@/components/MoveComparisonLine";
-import { datasetAgeLine, fmtQuoteDateTime, freshnessLine, quoteAsOf } from "@/lib/freshness";
+import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, quoteAsOf } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
@@ -13,6 +13,7 @@ import {
   justReportedSentence,
   latestPickSentence,
   reportingSoonSentence,
+  sharedSessionLine,
   suggestionSentence,
   tapeReceipt,
   unusuallyActiveSentence,
@@ -24,6 +25,7 @@ import {
   type JustReportedItem,
   type SuggestionItem,
   type UnusuallyActiveItem,
+  type UnusuallyActiveResponse,
   NewsSectionsResponse,
   type BatchQuote,
   type LatestPickItem,
@@ -33,16 +35,9 @@ import { capture } from "@/lib/analytics";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  return `${days}d ago`;
+// one timestamp format across Discover (2026-10-15): "Oct 15, 4:00 PM ET", the format every quote and headline on it uses
+function asOfTime(iso: string): string {
+  return fmtIsoDateTime(iso) ?? "";
 }
 
 
@@ -99,6 +94,7 @@ export default function DiscoverPage() {
   } | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [unusuallyActive, setUnusuallyActive] = useState<UnusuallyActiveItem[] | null>(null);
+  const [tapeShared, setTapeShared] = useState<UnusuallyActiveResponse["shared_dominant_session"]>(null);
   const [latestPick, setLatestPick] = useState<LatestPickItem | null | undefined>(undefined);
   const [news, setNews] = useState<NewsSectionsResponse | null>(null);   // behind DISCOVER_NEWS_ENABLED; the admin token sees it
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
@@ -130,6 +126,7 @@ export default function DiscoverPage() {
       setJustReported(jr);
       setSuggestions(sg.items);
       setUnusuallyActive(ua.items);
+      setTapeShared(ua.shared_dominant_session ?? null);
       setLatestPick(lp.pick);
       setLoading(false);
       capture("discover_viewed");
@@ -186,10 +183,10 @@ export default function DiscoverPage() {
           <p className="text-sm text-muted-foreground mt-1">
             What&apos;s worth researching across the S&amp;P 500 right now.
           </p>
-          {(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) || quotes.size > 0) && (
+          {(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime) || quotes.size > 0) && (
             <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">
-              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && <>{freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo), health?.cadence)}</>}
-              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo) && quotes.size > 0 && " · "}
+              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime) && <>{freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime), health?.cadence)}</>}
+              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime) && quotes.size > 0 && " · "}
               {quotes.size > 0 && (() => {
                 const ts = [...quotes.values()].map(q => q.timestamp).filter(Boolean);
                 const latest = ts.length > 0 ? Math.max(...(ts as number[])) : null;
@@ -331,6 +328,9 @@ export default function DiscoverPage() {
             <p className="text-sm text-muted-foreground mt-1 mb-6">
               Stocks more <ExplainTip term="realized volatility">volatile</ExplainTip> than usual, each compared with its own past year.
             </p>
+            {sharedSessionLine(tapeShared, unusuallyActive.length) && (
+              <p className="text-sm text-foreground/80 -mt-3 mb-6" data-testid="tape-shared-session">{sharedSessionLine(tapeShared, unusuallyActive.length)}</p>
+            )}
 
             <DiscoverRows>
               {unusuallyActive.map((item) => (

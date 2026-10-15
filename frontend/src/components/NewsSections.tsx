@@ -8,6 +8,7 @@ import type { IvyLine, MoverItem, NewsHeadline, NewsSectionsResponse } from "@/l
 import { IvyMark } from "@/components/IvyMark";
 import { SectionKicker } from "@/components/SectionKicker";
 import { fmtIsoDateTime } from "@/lib/freshness";
+import { moversMarketLine } from "@/lib/discoverSentences";
 import {
   MOVERS_SUBTITLE, MOVERS_TITLE, STORIES_SUBTITLE, STORIES_TITLE, fmtMovePct, headlineByline, moreStoriesLabel, moveTone,
 } from "@/lib/newsSections";
@@ -88,6 +89,9 @@ export default function NewsSections({ data, indexes }: { data: NewsSectionsResp
           <SectionKicker index={indexes.movers ?? ""} label="Today" />
           <h2 className="font-display text-xl font-bold text-foreground">{MOVERS_TITLE}</h2>
           <p className="text-sm text-muted-foreground mt-1 mb-6">{MOVERS_SUBTITLE}</p>
+          {moversMarketLine(data.spy_change_pct, data.market_day) && (
+            <p className="text-sm text-foreground/80 -mt-3 mb-6" data-testid="movers-market">{moversMarketLine(data.spy_change_pct, data.market_day)}</p>
+          )}
           <div className="grid gap-x-10 gap-y-6 lg:grid-cols-2">
             {[{ title: "Up the most", rows: data.up }, { title: "Down the most", rows: data.down }].map((side) => (
               <div key={side.title}>

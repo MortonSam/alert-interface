@@ -508,7 +508,31 @@ async def get_analyst_reaction_stats(
     out = AnalystReactionStatsRead.model_validate(row)
     out.sample_count = row.upgrade_count + row.downgrade_count
     out.session_count = row.upgrade_sessions + row.downgrade_sessions
+    out.median_abs_daily_move_pct, out.daily_move_sessions = await usual_daily_move(db, sym)
     return out
+
+
+USUAL_MOVE_YEARS = 5            # the same five years the analyst statistics cover
+USUAL_MOVE_MIN_SESSIONS = 60    # fewer sessions than this: no usual move, so no "reaction" claim either way
+
+
+def median_abs_daily_move(closes: list[float]) -> tuple[float | None, int]:
+    """Pure: (the median absolute close-to-close move in percent, the sessions behind it); None under USUAL_MOVE_MIN_SESSIONS."""
+    moves = sorted(abs(b / a - 1) * 100 for a, b in zip(closes, closes[1:]) if a and b)
+    if len(moves) < USUAL_MOVE_MIN_SESSIONS:
+        return None, len(moves)
+    n = len(moves)
+    mid = moves[n // 2] if n % 2 else (moves[n // 2 - 1] + moves[n // 2]) / 2
+    return round(mid, 2), n
+
+
+async def usual_daily_move(db: AsyncSession, sym: str) -> tuple[float | None, int]:
+    from datetime import date, timedelta
+    from app.services import price_bars
+    df = await price_bars.bars(db, sym, date.today() - timedelta(days=365 * USUAL_MOVE_YEARS))
+    if df is None or df.empty:
+        return None, 0
+    return median_abs_daily_move([float(c) for c in df["Close"].tolist() if c is not None])
 
 
 @router.get("", response_model=list[HistoricalReactionRead])

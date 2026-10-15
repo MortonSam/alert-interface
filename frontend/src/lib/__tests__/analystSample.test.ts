@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib/analystSample";
+import { analystSampleLabel, analystSampleFooter, hasAnalystSignal, streetPulseLine } from "@/lib/analystSample";
 
 describe("analyst sample wording", () => {
   it("names both counts when actions and sessions differ", () => {
@@ -18,5 +18,21 @@ describe("analyst sample wording", () => {
     expect(hasAnalystSignal(-4.05, 0)).toBe(false);
     expect(hasAnalystSignal(-4.05, 3)).toBe(true);
     expect(hasAnalystSignal(null, 3)).toBe(false);
+  });
+});
+
+describe("Street Pulse calls a move a reaction only past the stock's usual daily move", () => {
+  const pct = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+  const base = { median_1d_upgrade: 0.4, median_1d_downgrade: -2.6, upgrade_sessions: 9, downgrade_sessions: 12,
+    upgrade_5d_continuation_pct: 55, downgrade_5d_continuation_pct: 64, median_abs_daily_move_pct: 1.1 };
+  it("a median past the usual move is a reaction", () => {
+    expect(streetPulseLine(base, pct, "five sessions later")).toBe("Downgrades tend to hit, median -2.6% on the day, still lower five sessions later 64% of the time.");
+  });
+  it("a median inside the usual move is no clear reaction", () => {
+    expect(streetPulseLine({ ...base, median_1d_downgrade: -0.6 }, pct, "five sessions later"))
+      .toBe("Downgrades have brought no clear reaction, a median -0.6% on the day against a usual daily move of ±1.1%.");
+  });
+  it("without the usual move there is no claim either way", () => {
+    expect(streetPulseLine({ ...base, median_abs_daily_move_pct: null }, pct, "x")).toBeNull();
   });
 });

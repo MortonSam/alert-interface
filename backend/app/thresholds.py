@@ -176,6 +176,14 @@ EXPIRY_CAVEAT_DAYS = 7
 # "Downgrades tend to hit" / "Upgrades tend to lift" may be said only past these; below them the sentence reports the number plainly
 ANALYST_SIGNAL_MIN_SESSIONS = 5          # distinct action sessions behind the median
 ANALYST_SIGNAL_MIN_MEDIAN_PCT = 1.0      # |median 1-day move| at or above this, in percent
+# A median move on analyst actions is called a reaction only when it is larger than the stock's own median absolute daily move over the
+# same years; otherwise the line says there was no clear reaction (2026-10-15).
+
+# ── Moves beside the market (Discover, 2026-10-15) ────────────────────────────
+# A session "moved with the market" when SPY moved at least MARKET_DAY_MIN_SPY_PCT and at least MARKET_DAY_MIN_SHARE of the stocks
+# in question moved the same way; Discover then says so once above its list.
+MARKET_DAY_MIN_SPY_PCT = 1.0
+MARKET_DAY_MIN_SHARE = 0.7
 
 
 def discover_rv_tier(rv_rank: float) -> LabeledValue:

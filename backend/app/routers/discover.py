@@ -152,6 +152,7 @@ class UnusuallyActiveItem(BaseModel):
     iv_date: str | None = None                 # the chain's date
     dominant_date: str | None = None           # the session that dominates the 20-day window, when one does
     dominant_move_pct: float | None = None
+    spy_move_pct: float | None = None          # SPY's move on the dominant session, as traded (services/market_day); None without both closes
     rank_hold_phrase: str | None = None        # "Spun off Vylor on Oct 1": the action that holds the rank
     rank_hold_reason: str | None = None
     earnings_date: str | None = None
@@ -163,7 +164,7 @@ class UnusuallyActiveItem(BaseModel):
 
 class UnusuallyActiveResponse(BaseModel):
     items: list[UnusuallyActiveItem]
-    shared_dominant_session: dict | None = None    # {date, rows, symbols, up, down} when most rows owe their month to one session (shared_dominant_session)
+    shared_dominant_session: dict | None = None    # {date, rows, symbols, up, down, spy_move_pct, with_market} when most rows owe their month to one session
 
 
 class InsightResponse(BaseModel):
@@ -1092,6 +1093,11 @@ async def unusually_active(
         for row in rows
     ]
 
+    # each row's big session beside SPY's move that session (services/market_day)
+    from app.services.market_day import spy_moves
+    spy = await spy_moves(db, {date.fromisoformat(it.dominant_date) for it in items if it.dominant_date})
+    for it in items:
+        it.spy_move_pct = spy.get(it.dominant_date) if it.dominant_date else None
     return UnusuallyActiveResponse(items=items, shared_dominant_session=shared_dominant_session(items))
 
 
@@ -1110,8 +1116,11 @@ def shared_dominant_session(items: list) -> dict | None:
     day, rows = max(by_date.items(), key=lambda kv: len(kv[1]))
     if len(rows) < SHARED_SESSION_MIN_ROWS or len(rows) * 2 <= len(items):
         return None
+    from app.services.market_day import with_market
+    spy = rows[0].spy_move_pct
     return {"date": day, "rows": len(rows), "symbols": [it.symbol for it in rows],
-            "up": sum(1 for it in rows if (it.dominant_move_pct or 0) > 0), "down": sum(1 for it in rows if (it.dominant_move_pct or 0) < 0)}
+            "up": sum(1 for it in rows if (it.dominant_move_pct or 0) > 0), "down": sum(1 for it in rows if (it.dominant_move_pct or 0) < 0),
+            "spy_move_pct": spy, "with_market": with_market([it.dominant_move_pct for it in rows], spy) is not None}
 
 
 @router.get("/latest-pick", response_model=LatestPickResponse)

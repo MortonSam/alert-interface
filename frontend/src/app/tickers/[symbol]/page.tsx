@@ -12,7 +12,7 @@ import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, in
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
-import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib/analystSample";
+import { analystSampleLabel, analystSampleFooter, hasAnalystSignal, streetPulseLine } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1550,39 +1550,21 @@ export default function TickerPage() {
   }, [events, eventStatus]);
 
   // Derived: Street Pulse insight line
-  const analystInsight = useMemo(() => {
-    if (!analystStats) return null;
-    const { median_1d_upgrade, median_1d_downgrade,
-      upgrade_5d_continuation_pct, downgrade_5d_continuation_pct,
-      upgrade_sessions, downgrade_sessions } = analystStats;
-    // A median is stored only on enough distinct sessions; 0 sessions means not yet recomputed.
-    const upSignal = hasAnalystSignal(median_1d_upgrade, upgrade_sessions);
-    const dnSignal = hasAnalystSignal(median_1d_downgrade, downgrade_sessions);
-    if (!upSignal && !dnSignal) return null;
-    if (dnSignal && (!upSignal || downgrade_sessions >= upgrade_sessions)) {
-      let line = `Downgrades tend to hit, median ${fmtPct(median_1d_downgrade!)} on the day`;
-      if (downgrade_5d_continuation_pct != null) {
-        line += `, still lower ${ANALYST_WINDOW_TEXT.later} ${downgrade_5d_continuation_pct.toFixed(0)}% of the time`;
-      }
-      return line + ".";
-    } else {
-      let line = `Upgrades tend to lift, median ${fmtPct(median_1d_upgrade!)} on the day`;
-      if (upgrade_5d_continuation_pct != null) {
-        line += `, still higher ${ANALYST_WINDOW_TEXT.later} ${upgrade_5d_continuation_pct.toFixed(0)}% of the time`;
-      }
-      return line + ".";
-    }
-  }, [analystStats]);
+  const analystInsight = useMemo(() => (analystStats ? streetPulseLine(analystStats, fmtPct, ANALYST_WINDOW_TEXT.later) : null), [analystStats]);
 
   const analystInsightRule = useMemo(() => {
     if (!analystInsight || !analystStats) return null;
     const { median_1d_upgrade, median_1d_downgrade, upgrade_sessions, downgrade_sessions } = analystStats;
     const upSignal = hasAnalystSignal(median_1d_upgrade, upgrade_sessions);
     const dnSignal = hasAnalystSignal(median_1d_downgrade, downgrade_sessions);
+    const usual = analystStats.median_abs_daily_move_pct;
+    const against = usual != null && analystStats.daily_move_sessions
+      ? `, called a reaction only when larger than the stock's median absolute daily move over the same years (\u00B1${usual.toFixed(1)}% across ${analystStats.daily_move_sessions.toLocaleString("en-US")} sessions)`
+      : "";
     if (dnSignal && (!upSignal || downgrade_sessions >= upgrade_sessions)) {
-      return `Median event-day move on downgrades across ${downgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still lower ${ANALYST_WINDOW_TEXT.later}`;
+      return `Median event-day move on downgrades across ${downgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still lower ${ANALYST_WINDOW_TEXT.later}${against}`;
     }
-    return `Median event-day move on upgrades across ${upgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still higher ${ANALYST_WINDOW_TEXT.later}`;
+    return `Median event-day move on upgrades across ${upgrade_sessions} sessions, one observation per session (close on the day vs the prior close), with the share still higher ${ANALYST_WINDOW_TEXT.later}${against}`;
   }, [analystInsight, analystStats]);
 
   // Past-event fallback: only fetch if no upcoming hero-eligible event

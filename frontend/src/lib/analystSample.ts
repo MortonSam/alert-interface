@@ -27,3 +27,31 @@ export function analystSampleFooter(actions: number, sessions: number): string {
 export function hasAnalystSignal(median: number | null | undefined, sessions: number): median is number {
   return median != null && sessions > 0;
 }
+
+/**
+ * Street Pulse's line (2026-10-15). A median move on analyst actions is called a reaction only when it is larger than the stock's
+ * own median absolute daily move over the same years (the API's median_abs_daily_move_pct); at or inside it the line says there
+ * was no clear reaction, and without that figure there is no line. The side with more sessions speaks (downgrades on a tie).
+ */
+export function streetPulseLine(
+  stats: {
+    median_1d_upgrade: number | null; median_1d_downgrade: number | null; upgrade_sessions: number; downgrade_sessions: number;
+    upgrade_5d_continuation_pct: number | null; downgrade_5d_continuation_pct: number | null; median_abs_daily_move_pct?: number | null;
+  },
+  fmtPct: (n: number) => string,
+  later: string,
+): string | null {
+  const up = hasAnalystSignal(stats.median_1d_upgrade, stats.upgrade_sessions);
+  const dn = hasAnalystSignal(stats.median_1d_downgrade, stats.downgrade_sessions);
+  if (!up && !dn) return null;
+  const usual = stats.median_abs_daily_move_pct ?? null;
+  if (usual == null) return null;
+  const down = dn && (!up || stats.downgrade_sessions >= stats.upgrade_sessions);
+  const med = (down ? stats.median_1d_downgrade : stats.median_1d_upgrade) as number;
+  const kind = down ? "Downgrades" : "Upgrades";
+  if (Math.abs(med) <= usual) return `${kind} have brought no clear reaction, a median ${fmtPct(med)} on the day against a usual daily move of ±${usual.toFixed(1)}%.`;
+  let line = `${kind} tend to ${med < 0 ? "hit" : "lift"}, median ${fmtPct(med)} on the day`;
+  const cont = down ? stats.downgrade_5d_continuation_pct : stats.upgrade_5d_continuation_pct;
+  if (cont != null) line += `, still ${down ? "lower" : "higher"} ${later} ${cont.toFixed(0)}% of the time`;
+  return line + ".";
+}

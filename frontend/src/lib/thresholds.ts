@@ -46,6 +46,11 @@ export const EXPIRY_CAVEAT_DAYS = 7;   // an expiry more than this many days aft
 export const ANALYST_SIGNAL_MIN_SESSIONS = 5;        // distinct action sessions behind the median
 export const ANALYST_SIGNAL_MIN_MEDIAN_PCT = 1.0;    // |median 1-day move| at or above this, in percent
 
+// ── Moves beside the market (Discover) ─────────────────────────────
+// SPY moved at least this much, and at least this share of the stocks moved the same way: the session moved with the market
+export const MARKET_DAY_MIN_SPY_PCT = 1.0;
+export const MARKET_DAY_MIN_SHARE = 0.7;
+
 // ── Discover tape words ────────────────────────────────────────────
 export const TAPE_CHOPPIEST_RANK = 99;
 export const TAPE_ONE_OF_CHOPPIEST_RANK = 95;

@@ -60,6 +60,8 @@ class NewsSectionsResponse(BaseModel):
     up: list[MoverItem] = []
     down: list[MoverItem] = []
     stories: list[NewsStoryItem] = []
+    spy_change_pct: float | None = None       # SPY's move the movers' session, from its stored quote; None when that quote is another day's
+    market_day: dict | None = None            # {spy_move_pct, same_way, total, direction} when the session moved with the market
 
 
 @router.get("/news", response_model=NewsSectionsResponse)
@@ -91,13 +93,29 @@ async def discover_news(db: AsyncSession = Depends(get_db), admin: bool = Depend
             m.ivy = IvyLine(sentence=CANNOT_CONFIRM, result="unconfirmed")
     for x in suppressed.values():          # every suppression, with both numbers, in the logs
         _log.info("headline suppressed: %s %r (%s; stated %s, ours %s)", x["symbol"], x["headline"], x["reason"], x["stated_pct"], x["move_pct"])
+    spy_pct, market = await market_beside(db, session)
     return NewsSectionsResponse(
         visible=True, quotes_as_of=max((q["quote_time"] for q in session), default=None),
-        up=up_items, down=down_items,
+        up=up_items, down=down_items, spy_change_pct=spy_pct, market_day=market,
         stories=[NewsStoryItem(symbol=r["symbol"], change_pct=change[r["symbol"]], headline=r["headline"], url=r.get("link") or r["url"], source=publisher(r.get("link"), r["source"]),
                                published_at=r["published_at"], ivy=lines.get(r["symbol"])) for r in ranked],
     )
 
+
+
+async def market_beside(db, session: list[dict]) -> tuple[float | None, dict | None]:
+    """SPY's stored quote for the movers' session (absent when it is from another day), and whether the session's stocks moved with
+    it (services/market_day.with_market over every stock priced that session)."""
+    from app.services import news as N
+    from app.services.market_day import BENCHMARK, with_market
+    if not session:
+        return None, None
+    row = (await db.execute(sa.text("SELECT change_pct, quote_time FROM quote_snapshots WHERE symbol = :s"), {"s": BENCHMARK})).first()
+    day = max(q["quote_time"] for q in session).astimezone(N.NEW_YORK).date()
+    if row is None or row.change_pct is None or row.quote_time is None or row.quote_time.astimezone(N.NEW_YORK).date() != day:
+        return None, None
+    spy = round(float(row.change_pct), 2)
+    return spy, with_market([q["change_pct"] for q in session], spy)
 
 
 async def build_sections(db, now: datetime, extra: dict | None = None):

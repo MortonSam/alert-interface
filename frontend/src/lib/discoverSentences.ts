@@ -49,7 +49,36 @@ export function ivClause(regime: string | null | undefined, note?: string | null
   return v ? v.label.replace(/^IV (\w+)/, (_, w: string) => `IV ${w.toLowerCase()}`) : null;
 }
 
-/** The level and its evidence: "confirmed, company press release", "estimated, checked today". */
+/** The one way Discover says confirmed (2026-10-15): "confirmed by the company" for a press release, an SEC filing or a company
+ *  announcement, and "confirmed by two calendars" when only two calendars agree, which is not the company's word. */
+export function confirmedPhrase(note: string | null | undefined): string {
+  return confirmedKind(note) === CONFIRMED_KIND.calendars ? "confirmed by two calendars" : "confirmed by the company";
+}
+
+/** SPY's move beside a stock's, in the tape's words: "a day SPY moved -1.2%". */
+export function spyBeside(spyPct: number | null | undefined): string | null {
+  return spyPct == null ? null : `a day SPY moved ${fmtMove(spyPct)}`;
+}
+
+/** Above the tape, once, when most rows owe their month to one session: whether that session moved with the market. */
+export function sharedSessionLine(shared: { date: string; rows: number; spy_move_pct?: number | null; with_market?: boolean } | null | undefined, total: number): string | null {
+  if (!shared) return null;
+  const when = fmtEarningsDate(shared.date);
+  if (shared.with_market && shared.spy_move_pct != null)
+    return `${shared.rows} of these ${total} stocks owe their choppy month mostly to ${when}, a day they moved with the market (SPY ${shared.spy_move_pct < 0 ? "fell" : "rose"} ${Math.abs(shared.spy_move_pct).toFixed(1)}%).`;
+  const spy = shared.spy_move_pct != null ? ` SPY moved ${fmtMove(shared.spy_move_pct)} that day.` : "";
+  return `${shared.rows} of these ${total} stocks owe their choppy month mostly to ${when}.${spy}`;
+}
+
+/** Above the movers, once: SPY's move that session, and whether most stocks moved with it. */
+export function moversMarketLine(spyPct: number | null | undefined, market: { same_way: number; total: number; direction: "up" | "down" } | null | undefined): string | null {
+  if (spyPct == null) return null;
+  const spy = `SPY moved ${fmtMove(spyPct)} the same session.`;
+  if (!market) return spy;
+  return `${spy} Most stocks moved with the market, ${market.same_way} of ${market.total} ${market.direction === "up" ? "rising" : "falling"}.`;
+}
+
+/** The level and its evidence: "confirmed by the company", "estimated, checked today". */
 function levelNote(
   confirmation: string | null | undefined,
   note: string | null | undefined,
@@ -57,7 +86,7 @@ function levelNote(
   checkedAt: string | null | undefined,
   now: Date,
 ): string {
-  if (confirmation === "confirmed") return `confirmed, ${confirmedKind(note)}`;
+  if (confirmation === "confirmed") return confirmedPhrase(note);
   const level = confirmation === "expected_unconfirmed" ? "not confirmed" : "estimated";
   return `${level}, ${earningsSourceNote(source, checkedAt, now)}`;
 }
@@ -88,7 +117,7 @@ function whenPhrase(days: number): string {
   return d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`;
 }
 
-/** The calendar: "Reports tomorrow (confirmed, company press release); beat 7 of 8, averaging +3.1% ...". */
+/** The calendar: "Reports tomorrow (confirmed by the company); beat 7 of 8, averaging +3.1% ...". */
 export function reportingSoonSentence(item: ReportingSoonItem, now: Date = new Date()): string {
   const days = daysUntil(item.earnings_date, now);
   const lvl = levelNote(item.confirmation, item.confirmation_note, item.source, item.checked_at, now);
@@ -149,9 +178,7 @@ export function tapeReportClause(item: UnusuallyActiveItem): string | null {
   if (!item.earnings_date) return null;
   const when = fmtEarningsDate(item.earnings_date);
   if (item.earnings_confirmation === "confirmed") {
-    return confirmedKind(item.earnings_note) === CONFIRMED_KIND.calendars
-      ? `Reports ${when} (confirmed by two calendars).`              // two calendars agreeing is not the company's word
-      : `Reports ${when} (confirmed by the company).`;
+    return `Reports ${when} (${confirmedPhrase(item.earnings_note)}).`;
   }
   if (item.earnings_confirmation === "expected_unconfirmed") return `Expected to report around ${when} (not confirmed).`;
   return `Reports around ${when} (estimated).`;
@@ -163,7 +190,8 @@ export function unusuallyActiveSentence(item: UnusuallyActiveItem, _now: Date = 
     parts.push(`${item.rank_hold_phrase}, so its past year doesn't compare yet.`);
   } else if (item.dominant_date) {
     const kind = (item.dominant_move_pct ?? 0) < 0 ? "drop" : "jump";
-    parts.push(`Its last month looks choppy mostly because of one big ${kind} on ${fmtEarningsDate(item.dominant_date)}.`);
+    const spy = spyBeside(item.spy_move_pct);
+    parts.push(`Its last month looks choppy mostly because of one big ${kind} on ${fmtEarningsDate(item.dominant_date)}${spy ? `, ${spy}` : ""}.`);
   } else {
     parts.push(tapeVolatilityClause(item.rv_rank));
     if (item.iv_rv_spread_pp != null && item.iv_date) parts.push(tapeOptionsClause(item.iv_rv_spread_pp));

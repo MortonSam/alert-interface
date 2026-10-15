@@ -254,6 +254,8 @@ export interface AnalystReactionStatsRead {
   downgrade_5d_sample: number;
   sample_count: number;           // total actions
   session_count: number;          // total distinct sessions
+  median_abs_daily_move_pct?: number | null;   // the stock's median absolute daily move over the same five years; a median on actions is a reaction only past it
+  daily_move_sessions?: number;
   last_event_date: string | null;
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
@@ -659,6 +661,7 @@ export interface UnusuallyActiveItem {
   iv_date?: string | null;         // the chain's date
   dominant_date?: string | null;   // the session that dominates the 20-day window
   dominant_move_pct?: number | null;
+  spy_move_pct?: number | null;      // SPY's move on the dominant session, as traded; absent without both closes
   rank_hold_phrase?: string | null; // "Spun off Vylor on Oct 1": the action that holds the rank
   rank_hold_reason?: string | null;
   earnings_date?: string | null;
@@ -706,7 +709,11 @@ export interface NewsSectionsResponse {
   up: MoverItem[];
   down: MoverItem[];
   stories: NewsStoryItem[];
+  spy_change_pct?: number | null;   // SPY's move the movers' session, from its own quote; absent when that quote is another day's
+  market_day?: MarketDay | null;    // the session moved with the market (backend services/market_day)
 }
+
+export interface MarketDay { spy_move_pct: number; same_way: number; total: number; direction: "up" | "down" }
 
 export interface LatestPickItem {
   id: string;
@@ -731,7 +738,7 @@ export interface LatestPickResponse {
 
 export interface UnusuallyActiveResponse {
   items: UnusuallyActiveItem[];
-  shared_dominant_session?: { date: string; rows: number; symbols: string[]; up: number; down: number } | null;   // most rows owe their month to one session
+  shared_dominant_session?: { date: string; rows: number; symbols: string[]; up: number; down: number; spy_move_pct?: number | null; with_market?: boolean } | null;   // most rows owe their month to one session
 }
 
 export interface BatchEnrichItem {

@@ -6,6 +6,10 @@ import {
   CONFIRMED_KIND,
   OUTCOME_LEAD,
   confirmedKind,
+  confirmedPhrase,
+  moversMarketLine,
+  sharedSessionLine,
+  spyBeside,
   earningsClause,
   justReportedSentence,
   latestPickSentence,
@@ -57,7 +61,8 @@ describe("Discover is a list of rows, not a card grid", () => {
   });
 
   it("keeps the freshness line and numbers sections as they render", () => {
-    expect(page).toContain("freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, timeAgo), health?.cadence)");
+    expect(page).toContain("freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime), health?.cadence)");
+    expect(page).not.toMatch(/timeAgo|\bago\b/);                       // one timestamp format on Discover: "Oct 15, 4:00 PM ET"
     expect(page).not.toContain("health.last_refreshed_at");            // the global stamp dates nothing a visitor sees
     expect(page.match(/index=\{nextIndex\(\)\}/g)?.length).toBe(5);
     expect(page).toContain('<div className="max-w-6xl mx-auto">');
@@ -73,7 +78,7 @@ describe("row sentences", () => {
       insight: "Beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat", vol_regime: "iv_rich",
     };
     expect(reportingSoonSentence(item, NOW)).toBe(
-      "Reports tomorrow (confirmed, company press release); beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat");     // no IV rich/cheap on the calendar
+      "Reports tomorrow (confirmed by the company); beat 7 of 8, averaging +3.1% on the 1-day reaction to a beat");     // no IV rich/cheap on the calendar
 
     const estimated = { ...item, earnings_date: "2026-10-02", confirmation: "estimated", confirmation_note: null, insight: null, vol_regime: null };
     expect(reportingSoonSentence(estimated, NOW)).toBe("Reports in 3 days (estimated, checked today)");
@@ -100,9 +105,9 @@ describe("row sentences", () => {
       const s = reportingSoonSentence({ ...item, confirmation_note: note }, NOW);
       expect(s).not.toMatch(/2026|Announce|Item|Finnhub news|filed/);
     }
-    expect(reportingSoonSentence(item, NOW)).toBe("Reports in 2 days (confirmed, company press release)");
-    expect(reportingSoonSentence({ ...item, confirmation_note: filing }, NOW)).toBe("Reports in 2 days (confirmed, SEC filing)");
-    expect(earningsClause("2026-10-21", "edgar", TODAY_CHECK, "confirmed", headline, NOW)).toBe("reports Oct 21 (confirmed, company press release)");
+    expect(reportingSoonSentence(item, NOW)).toBe("Reports in 2 days (confirmed by the company)");
+    expect(reportingSoonSentence({ ...item, confirmation_note: filing }, NOW)).toBe("Reports in 2 days (confirmed by the company)");
+    expect(earningsClause("2026-10-21", "edgar", TODAY_CHECK, "confirmed", headline, NOW)).toBe("reports Oct 21 (confirmed by the company)");
     // estimated dates keep the source and when it was checked
     expect(reportingSoonSentence({ ...item, confirmation: "estimated", source: "yfinance", is_confirmed: false }, NOW)).toBe(
       "Reports in 2 days (estimated, checked today)");
@@ -155,7 +160,7 @@ describe("row sentences", () => {
     const receipt = tapeReceipt(u, NOW);
     expect(receipt).toContain("RV rank 99 of 100 against its own past year; 20-day realized volatility 62.0%");
     expect(receipt).toContain("Implied volatility 54.8% from the Sep 28 chain, 7.2 points below realized");
-    expect(receipt).toContain("Reports Oct 21 (confirmed, SEC filing)");
+    expect(receipt).toContain("Reports Oct 21 (confirmed by the company)");
   });
 
   it("one dominating session or a held rank replaces both clauses", () => {
@@ -247,5 +252,31 @@ describe("row sentences", () => {
       earningsClause(null, null, null, null, null, NOW),
     ];
     for (const s of all) expect(s).not.toMatch(/(…|\.\.\.)$/);
+  });
+});
+
+describe("Discover beside the market (2026-10-15)", () => {
+  it("says confirmed one way: by the company, or by two calendars", () => {
+    expect(confirmedPhrase("confirmed: press release via Business Wire 2026-10-01: X")).toBe("confirmed by the company");
+    expect(confirmedPhrase("confirmed: 8-K Item 7.01 filed 2026-10-01")).toBe("confirmed by the company");
+    expect(confirmedPhrase("confirmed: Finnhub and Yahoo Finance agree")).toBe("confirmed by two calendars");
+    expect(confirmedPhrase(null)).toBe("confirmed by the company");
+  });
+  it("puts SPY's move beside a tape row's big session, and nothing when SPY's closes are missing", () => {
+    expect(spyBeside(-1.24)).toBe("a day SPY moved -1.2%");
+    expect(spyBeside(null)).toBeNull();
+  });
+  it("says once when most of the tape moved with the market", () => {
+    expect(sharedSessionLine({ date: "2026-10-09", rows: 7, spy_move_pct: -2.1, with_market: true }, 12))
+      .toBe("7 of these 12 stocks owe their choppy month mostly to Oct 9, a day they moved with the market (SPY fell 2.1%).");
+    expect(sharedSessionLine({ date: "2026-10-09", rows: 7, spy_move_pct: -0.3, with_market: false }, 12))
+      .toBe("7 of these 12 stocks owe their choppy month mostly to Oct 9. SPY moved -0.3% that day.");
+    expect(sharedSessionLine(null, 12)).toBeNull();
+  });
+  it("puts SPY above the movers, and says when most stocks moved with it", () => {
+    expect(moversMarketLine(1.62, { same_way: 401, total: 500, direction: "up" }))
+      .toBe("SPY moved +1.6% the same session. Most stocks moved with the market, 401 of 500 rising.");
+    expect(moversMarketLine(0.2, null)).toBe("SPY moved +0.2% the same session.");
+    expect(moversMarketLine(null, null)).toBeNull();
   });
 });

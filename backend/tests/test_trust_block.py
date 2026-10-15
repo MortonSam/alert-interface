@@ -119,7 +119,8 @@ def _item(sym, dominant=None, move=None, hold=None):
 
 def test_the_tape_names_a_shared_session_once_and_only_when_most_rows_share_it():
     items = [_item("A", "2026-10-05", 20.0), _item("B", "2026-10-05", -8.0), _item("C", "2026-10-05", 5.0), _item("D"), _item("E", "2026-09-30", 4.0)]
-    assert shared_dominant_session(items) == {"date": "2026-10-05", "rows": 3, "symbols": ["A", "B", "C"], "up": 2, "down": 1}
+    assert shared_dominant_session(items) == {"date": "2026-10-05", "rows": 3, "symbols": ["A", "B", "C"], "up": 2, "down": 1,
+                                              "spy_move_pct": None, "with_market": False}
     assert shared_dominant_session(items + [_item("F"), _item("G")]) is None          # three of seven is not most
     assert shared_dominant_session([_item("A", "2026-10-05", 1.0), _item("B", "2026-10-05", 1.0)]) is None and SHARED_SESSION_MIN_ROWS == 3
     assert shared_dominant_session([]) is None
