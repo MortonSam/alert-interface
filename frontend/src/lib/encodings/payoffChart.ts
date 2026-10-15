@@ -4,8 +4,9 @@ import type { LegendItem } from "./types";
 export const PAYOFF_CHART_ENCODING = {
   profit:   { label: "Simulated profit at that stock price", color: "hsl(var(--success))",          dash: "",    width: 2.5, opacity: 1 },
   loss:     { label: "Simulated loss at that stock price",   color: "hsl(var(--destructive))",      dash: "",    width: 2.5, opacity: 1 },
+  expiry:   { label: "Profit or loss at expiration at that stock price", color: "hsl(var(--foreground))", dash: "8 3", width: 2,   opacity: 0.9 },
   current:  { label: "Stock price when this was priced",     color: "hsl(var(--muted-foreground))", dash: "3 5", width: 1,   opacity: 0.6 },
-  scrubber: { label: "The stock price you are inspecting",   color: "hsl(var(--cool))",             dash: "",    width: 1.5, opacity: 0.7 },
+  scrubber: { label: "The stock price you are inspecting (drag along the chart)",   color: "hsl(var(--cool))",             dash: "",    width: 1.5, opacity: 0.7 },
   zero:     { label: "$0: no gain or loss",                  color: "hsl(var(--border))",           dash: "",    width: 1,   opacity: 1 },
 } as const;
 
