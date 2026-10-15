@@ -10,9 +10,9 @@ import { DESK_FAILED, visitorMessage } from "@/lib/errors";
 import { api, type IvyActivity, type IvyWorksheetRow } from "@/lib/api";
 import { capture } from "@/lib/analytics";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 function fmtDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtOneDate(iso.slice(0, 10)) ?? iso;
 }
 
 /* ── v2 cell renderers ─────────────────────────────────────────────── */
@@ -180,7 +180,7 @@ export default function IvyDeskPage() {
                 <td className="px-3 py-2.5">
                   <Link
                     href={`/tickers/${row.symbol}`}
-                    className="font-sans font-semibold text-foreground hover:underline"
+                    className="font-sans font-semibold text-foreground"
                   >
                     {row.symbol}
                   </Link>

@@ -15,11 +15,11 @@ def row(period, fetched_days_ago, strong_buy=10, buy=10, hold=8, sell=1, strong_
 
 def test_the_lean_names_the_day_the_trend_was_checked_and_a_stale_trend_is_neutral():
     rows = [row(date(2026, 10, 1), 2), row(date(2026, 7, 1), 2, strong_buy=5, buy=10)]
-    assert R.analyst_lean(rows, NOW) == ("bullish", "Buy share 67% of 30 analysts, up from 60% three months ago (Finnhub, checked Oct 6)")
-    assert R.analyst_lean([row(date(2026, 10, 1), 2)], NOW) == ("neutral", "Buy share 67% of 30 analysts, but no earlier period for comparison (Finnhub, checked Oct 6)")
-    assert R.analyst_lean([row(date(2026, 10, 1), 2, 1, 1, 1, 0, 0)], NOW) == ("neutral", "Fewer than 5 analysts covering (3) (Finnhub, checked Oct 6)")
+    assert R.analyst_lean(rows, NOW) == ("bullish", "Buy share 67% of 30 analysts, up from 60% three months ago (Finnhub, checked Oct 6, 2026)")
+    assert R.analyst_lean([row(date(2026, 10, 1), 2)], NOW) == ("neutral", "Buy share 67% of 30 analysts, but no earlier period for comparison (Finnhub, checked Oct 6, 2026)")
+    assert R.analyst_lean([row(date(2026, 10, 1), 2, 1, 1, 1, 0, 0)], NOW) == ("neutral", "Fewer than 5 analysts covering (3) (Finnhub, checked Oct 6, 2026)")
     stale = [row(date(2026, 9, 1), 21), row(date(2026, 6, 1), 21, strong_buy=5, buy=10)]
-    assert R.analyst_lean(stale, NOW) == ("neutral", "Recommendation data is 21 days old (last checked Sep 17); not used")
+    assert R.analyst_lean(stale, NOW) == ("neutral", "Recommendation data is 21 days old (last checked Sep 17, 2026); not used")
     assert R.analyst_lean([], NOW) == ("neutral", "No recommendation data yet")
     assert R.is_stale(NOW - timedelta(days=R.MAX_AGE_DAYS), NOW) is False and R.is_stale(NOW - timedelta(days=R.MAX_AGE_DAYS + 1), NOW) is True
     assert R.is_stale(None, NOW) is True
@@ -28,8 +28,8 @@ def test_the_lean_names_the_day_the_trend_was_checked_and_a_stale_trend_is_neutr
 def test_discover_drops_a_stale_or_thin_trend_and_dates_a_usable_one():
     rows = [row(date(2026, 10, 1), 2), row(date(2026, 7, 1), 2, strong_buy=5, buy=10)]
     buy = R.buy_share_delta(rows, NOW)
-    assert buy == {"buy_share": 20 / 30, "delta": 20 / 30 - 15 / 25, "total": 30, "as_of": "2026-10-01", "checked": "checked Oct 6"}
-    assert R.buy_share_line(buy) == "Buy share 67% of 30 analysts, up 7 points in 3 months (checked Oct 6)"
+    assert buy == {"buy_share": 20 / 30, "delta": 20 / 30 - 15 / 25, "total": 30, "as_of": "2026-10-01", "checked": "checked Oct 6, 2026"}
+    assert R.buy_share_line(buy) == "Buy share 67% of 30 analysts, up 7 points in 3 months (checked Oct 6, 2026)"
     assert R.buy_share_delta([row(date(2026, 9, 1), 21), row(date(2026, 6, 1), 21)], NOW) is None       # stale: left out
     assert R.buy_share_delta([row(date(2026, 10, 1), 2)], NOW) is None                                    # no earlier period
     assert R.buy_share_delta([row(date(2026, 10, 1), 2, 1, 1, 1, 0, 0), row(date(2026, 7, 1), 2)], NOW) is None   # too few analysts

@@ -15,7 +15,7 @@ export function MoveComparisonLine({ item }: { item: ReportingSoonItem }) {
       {parts.map((p, i) =>
         p.term ? (
           <ExplainTip key={i} term={p.term}>
-            <span className="underline decoration-dotted underline-offset-4 cursor-help" onClick={(e) => e.preventDefault()}>{p.text}</span>
+            <span className="explain-term" onClick={(e) => e.preventDefault()}>{p.text}</span>
           </ExplainTip>
         ) : (
           <span key={i}><Explained text={p.text} /></span>

@@ -26,13 +26,13 @@ describe("freshness wording", () => {
     expect(nightlyWord({ ...cadence, nightly: { ...cadence.nightly, per_day: 2 } })).toBe("2 times a day");
     expect(nightlyWord(null)).toBeNull();
     expect(optionsCadencePhrase(cadence)).toBe("updated once a day");
-    expect(optionsDataPhrase("2026-10-01", cadence)).toBe("options data as of 2026-10-01, updated once a day");
-    expect(optionsDataPhrase("2026-10-01")).toBe("options data as of 2026-10-01");           // no record: no cadence claim
+    expect(optionsDataPhrase("2026-10-01", cadence)).toBe("options data as of Oct 1, 2026, updated once a day");
+    expect(optionsDataPhrase("2026-10-01")).toBe("options data as of Oct 1, 2026");           // no record: no cadence claim
     expect(freshnessLine("Earnings history as of 5h ago", cadence)).toBe("Prices dated by their last trade · Earnings history as of 5h ago");
     expect(freshnessLine(null, cadence)).toBe("Prices dated by their last trade · Research data refreshed nightly");
     expect(freshnessLine(null)).toBe("Prices dated by their last trade · Research data from the refresh steps");
-    expect(fmtQuoteDateTime(1759694400)).toBe("Oct 5, 4:00 PM ET");                            // 2026-10-05 20:00Z
-    expect(fmtIsoDateTime("2026-10-05T20:00:00+00:00")).toBe("Oct 5, 4:00 PM ET");
+    expect(fmtQuoteDateTime(1759694400)).toBe("Oct 5, 2025, 4:00 PM ET");                            // 2026-10-05 20:00Z
+    expect(fmtIsoDateTime("2026-10-05T20:00:00+00:00")).toBe("Oct 5, 2026, 4:00 PM ET");
     expect(fmtQuoteDateTime(null)).toBeNull();
     // each page dates its line by the oldest dataset it shows, never by the global stamp
     const ago = (iso: string) => (iso.startsWith("2026-10-05") ? "2h ago" : "30h ago");
@@ -54,8 +54,8 @@ describe("freshness wording", () => {
 
   it("names options data by its own date and never by today", () => {
     const today = new Date().toISOString().slice(0, 10);
-    expect(optionsDataPhrase("2026-09-18")).toContain("2026-09-18");
-    expect(premiumSourcePhrase("2026-09-18")).toContain("2026-09-18");
+    expect(optionsDataPhrase("2026-09-18")).toContain("Sep 18, 2026");
+    expect(premiumSourcePhrase("2026-09-18")).toContain("Sep 18, 2026");
     for (const text of [optionsDataPhrase(null), optionsDataPhrase(undefined), premiumSourcePhrase(null)]) {
       expect(text).not.toContain(today);
       expect(text.toLowerCase()).not.toContain("live");
@@ -100,7 +100,7 @@ describe("withheld price wording", () => {
   it("dates the price from its own last-trade time, never today", () => {
     expect(priceAsOfPhrase("2026-09-10T19:59:00+00:00")).toBe("price as of 2026-09-10");
     expect(priceAsOfPhrase(null)).toBeNull();
-    expect(priceAsOfPhrase("chain as of 2026-09-18")).toBeNull();
+    expect(priceAsOfPhrase("chain as of Sep 18, 2026")).toBeNull();
   });
 });
 
@@ -108,14 +108,14 @@ describe("priced from the options data, the stock now from its quote (audit item
   it("the Build price line names both prices by their own dates", async () => {
     const { pricedAtLine, impliedSpanPhrase, oneDayHistoryLine } = await import("@/lib/freshness");
     const fb = { current_price: 339.85, options_as_of: "2026-09-28", quote_price: 332.35, price_as_of: "2026-09-29T13:31:00+00:00" };
-    expect(pricedAtLine(fb, () => "09:31:00")).toBe("priced at $339.85 from the 2026-09-28 options data; the stock is now $332.35 (last trade 09:31:00)");
-    expect(pricedAtLine(fb, () => null)).toBe("priced at $339.85 from the 2026-09-28 options data; the stock is now $332.35");
-    expect(pricedAtLine({ current_price: 339.85, options_as_of: "2026-09-28" }, () => "09:31:00")).toBe("priced at $339.85 from the 2026-09-28 options data");
+    expect(pricedAtLine(fb, () => "09:31:00")).toBe("priced at $339.85 from the Sep 28, 2026 options data; the stock is now $332.35 (last trade 09:31:00)");
+    expect(pricedAtLine(fb, () => null)).toBe("priced at $339.85 from the Sep 28, 2026 options data; the stock is now $332.35");
+    expect(pricedAtLine({ current_price: 339.85, options_as_of: "2026-09-28" }, () => "09:31:00")).toBe("priced at $339.85 from the Sep 28, 2026 options data");
     expect(pricedAtLine({ current_price: 339.85 }, () => null)).not.toMatch(/\d{4}-\d{2}-\d{2}/);   // no date it does not have
     // item 7: the implied move is labelled with its span, from the data; history is one-day and never counted against it
-    expect(impliedSpanPhrase("2026-11-20", 53, "2026-09-28")).toBe("through 2026-11-20, 53 days from the 2026-09-28 options data");
-    expect(impliedSpanPhrase("2026-11-20", 1, "2026-11-19")).toBe("through 2026-11-20, 1 day from the 2026-11-19 options data");
-    expect(impliedSpanPhrase("2026-11-20", null, null)).toBe("through 2026-11-20");
+    expect(impliedSpanPhrase("2026-11-20", 53, "2026-09-28")).toBe("through Nov 20, 2026, 53 days from the Sep 28, 2026 options data");
+    expect(impliedSpanPhrase("2026-11-20", 1, "2026-11-19")).toBe("through Nov 20, 2026, 1 day from the Nov 19, 2026 options data");
+    expect(impliedSpanPhrase("2026-11-20", null, null)).toBe("through Nov 20, 2026");
     expect(impliedSpanPhrase(null, 53, "2026-09-28")).toBeNull();
     expect(oneDayHistoryLine({ avg_abs_move_pct: 0.052, max_abs_move_pct: 0.11, sample_size: 12 })).toBe("One-day earnings moves: avg ±5.2%, max ±11.0% over 12 prints");
     expect(oneDayHistoryLine({ avg_abs_move_pct: 0.052, max_abs_move_pct: 0.11, sample_size: 2 })).toBeNull();
@@ -140,14 +140,14 @@ describe("priced from the options data, the stock now from its quote (audit item
 describe("the live layer's delayed quotes", () => {
   it("names a delayed quote by its own time and the record's delay figure, never a typed one", () => {
     const t = Math.floor(new Date("2026-10-12T17:02:00Z").getTime() / 1000);       // 1:02 PM New York
-    expect(quoteAsOf(t, "delayed", 15)).toBe("Oct 12, 1:02 PM ET, delayed 15 min");
-    expect(quoteAsOf(t, "delayed", 20)).toBe("Oct 12, 1:02 PM ET, delayed 20 min");
-    expect(quoteAsOf(t, "delayed", null)).toBe("Oct 12, 1:02 PM ET, delayed");
-    expect(quoteAsOf(t, "close")).toBe("Oct 12, 1:02 PM ET close");
-    expect(quoteAsOf(t, "last_trade", 15)).toBe("Oct 12, 1:02 PM ET");
+    expect(quoteAsOf(t, "delayed", 15)).toBe("Oct 12, 2026, 1:02 PM ET, delayed 15 min");
+    expect(quoteAsOf(t, "delayed", 20)).toBe("Oct 12, 2026, 1:02 PM ET, delayed 20 min");
+    expect(quoteAsOf(t, "delayed", null)).toBe("Oct 12, 2026, 1:02 PM ET, delayed");
+    expect(quoteAsOf(t, "close")).toBe("Oct 12, 2026, 1:02 PM ET close");
+    expect(quoteAsOf(t, "last_trade", 15)).toBe("Oct 12, 2026, 1:02 PM ET");
     expect(delayPhrase(0)).toBeNull();
     expect(Object.keys(QUOTE_BASIS_LABELS).sort()).toEqual(["close", "delayed", "last_trade"]);   // backend quote_fallback.BASIS_LABELS
-    expect(intradayBarsLine("delayed", "2026-10-12T12:45:00.000-04:00", 15)).toBe("Bars through 12:45 PM ET, delayed 15 min");
+    expect(intradayBarsLine("delayed", "2026-10-12T12:45:00.000-04:00", 15)).toBe("Bars through Oct 12, 2026, 12:45 PM ET, delayed 15 min");
     expect(intradayBarsLine(null, "2026-10-12T12:45:00.000-04:00", 15)).toBeNull();
     const src = readFileSync(join(__dirname, "..", "freshness.ts"), "utf8");
     expect(src).not.toMatch(/15 min|delayed 15/);                                       // the figure comes from the record

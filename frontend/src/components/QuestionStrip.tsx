@@ -40,7 +40,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
           const asOf = asOfLabel(q.as_of, q.as_of_kind);
           return (
             <li key={q.key}>
-              <button type="button" onClick={() => toggle(q.key)} aria-expanded={isOpen} className="w-full text-left py-3 flex items-baseline justify-between gap-4 hover:text-primary transition-colors">
+              <button type="button" onClick={() => toggle(q.key)} aria-expanded={isOpen} className="w-full text-left py-3 flex items-baseline justify-between gap-4 hover:opacity-80 transition-colors">
                 <span className="text-base text-foreground/90">{q.question}</span>
                 <span aria-hidden className="font-mono text-xs text-muted-foreground">{isOpen ? "−" : "+"}</span>
               </button>
@@ -49,9 +49,9 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
                   <p className="text-foreground/90">
                     {answerParts(q.data, q.inputs).map((part, j) =>
                       part.receipt !== undefined ? (
-                        <span key={j} data-quantity title={part.receipt ?? undefined} className="font-semibold underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                        <span key={j} data-quantity title={part.receipt ?? undefined} className="font-semibold explain-term">{part.text}</span>
                       ) : part.term ? (
-                        <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
+                        <ExplainTip key={j} term={part.term}><span className="explain-term">{part.text}</span></ExplainTip>
                       ) : (
                         <span key={j}><Explained text={part.text} /></span>
                       ),
@@ -60,7 +60,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
                   <p className="text-muted-foreground mt-2">
                     {dedupeAgainst(q.data, q.idea).map((part, j) =>
                       part.term ? (
-                        <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
+                        <ExplainTip key={j} term={part.term}><span className="explain-term">{part.text}</span></ExplainTip>
                       ) : (
                         <span key={j}><Explained text={part.text} /></span>
                       ),

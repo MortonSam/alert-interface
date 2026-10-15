@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
 import Tip from "@/components/Tip";
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 import {
   api,
   type Watchlist,
@@ -48,11 +49,7 @@ function fmtPrice(n: number | null): string {
 
 function fmtDate(d: string | null): string {
   if (!d) return "n/a";
-  const [y, m, day] = d.split("-").map(Number);
-  return new Date(y, m - 1, day).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return fmtOneDate(d.slice(0, 10)) ?? d;
 }
 
 function nextEarningsLabel(d: string): { label: string; full: string; days: number } {
@@ -62,7 +59,7 @@ function nextEarningsLabel(d: string): { label: string; full: string; days: numb
   today.setHours(0, 0, 0, 0);
   const diffMs = eventDate.getTime() - today.getTime();
   const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
-  const full = eventDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const full = fmtOneDate(d.slice(0, 10)) ?? d;
 
   if (days === 0) return { label: "Today", full, days };
   if (days === 1) return { label: "1d", full, days };
@@ -146,7 +143,7 @@ function WatchlistRow({
       <td className="py-3 px-4">
         <Link
           href={`/tickers/${ticker.symbol}`}
-          className="font-semibold text-foreground hover:underline"
+          className="font-semibold text-foreground"
         >
           {ticker.symbol}
         </Link>
@@ -452,7 +449,7 @@ export default function WatchlistPage() {
                 ← Home
               </Link>
             </div>
-            <h1 className="text-2xl font-display font-bold tracking-tight">Watchlist</h1>
+            <h1 className="text-display font-display font-bold">Watchlist</h1>
             {datasetAgeLine(health?.datasets, WATCHLIST_DATASETS, timeAgo) && (
               <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
                 {datasetAgeLine(health?.datasets, WATCHLIST_DATASETS, timeAgo)}
@@ -574,7 +571,7 @@ export default function WatchlistPage() {
             {/* Watchlist name (single watchlist, no tabs) */}
             {watchlists.length === 1 && (
               <div className="mb-5 flex items-center gap-3">
-                <h2 className="text-lg font-semibold">{activeWatchlist.name}</h2>
+                <h2 className="text-headline font-semibold">{activeWatchlist.name}</h2>
                 <span className="text-sm text-muted-foreground">
                   {activeWatchlist.items.length}{" "}
                   {activeWatchlist.items.length === 1 ? "ticker" : "tickers"}

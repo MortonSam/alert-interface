@@ -71,7 +71,7 @@ def fingerprint(symbol: str, inputs: list[dict]) -> str:
 
 
 def _when(dt: datetime) -> str:
-    return dt.astimezone(NEW_YORK).strftime("%a %b %-d, %-I:%M %p ET")
+    return dt.astimezone(NEW_YORK).strftime("%b %-d, %Y, %-I:%M %p ET")
 
 
 def build_prompt(symbol: str, name: str | None, move_pct: float, inputs: list[dict]) -> str:

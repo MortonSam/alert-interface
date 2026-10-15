@@ -17,34 +17,36 @@ describe("the counters row never overlaps", () => {
     expect(g.boxes[1][0] - g.boxes[0][1]).toBeGreaterThanOrEqual(COUNTER_LAYOUT.gapX);           // a real gap, not a touch
   });
 
-  it("the grid is 2x2 below 1024 and one column below 640", () => {
+  it("the grid is 2x2 below 1024, a phone included", () => {
     expect(counterGeometry(1023, NUMBERS).columns).toBe(2);
     expect(counterGeometry(640, NUMBERS).columns).toBe(2);
-    expect(counterGeometry(639, NUMBERS).columns).toBe(1);
+    expect(counterGeometry(390, NUMBERS).columns).toBe(2);
+    const phone = counterGeometry(390, NUMBERS.map(() => "1,234,567".slice(-7)));
+    for (const box of phone.boxes) expect(box[1] - box[0]).toBeLessThanOrEqual(phone.columnWidth);        // seven characters fit a phone column
     expect(counterGeometry(390, NUMBERS).boxes.every(([l, r]) => l >= 0 && r <= 390 - 2 * COUNTER_LAYOUT.sidePadding.base)).toBe(true);   // a phone: the number fits the row
   });
 
-  it("labels fit on one line from 1024 up; only the contracts label may wrap, and only below 1024", () => {
+  it("labels fit on one line from 1024 up; below it they may wrap", () => {
     for (const viewport of [1024, 1280, 1440]) {
       const g = counterGeometry(viewport, NUMBERS);
       for (const label of LABELS) expect(labelWidth(label), `${label} at ${viewport}`).toBeLessThanOrEqual(g.columnWidth);
     }
     const src = read("components/SiteCounters.tsx");
-    expect(src).toContain('row.key === "contracts" ? "lg:whitespace-nowrap" : "whitespace-nowrap"');
+    expect(src).toContain("tracking-[.08em] text-muted-foreground mt-3 lg:whitespace-nowrap");
   });
 
   it("the CSS carries the model's numbers", () => {
     const src = read("components/SiteCounters.tsx");
-    expect(src).toContain("grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5");
-    expect(src).toContain("max-w-6xl");
+    expect(src).toContain("grid grid-cols-2 lg:grid-cols-4 gap-x-4");
+    expect(read("app/page.tsx")).toContain('"w-full max-w-5xl mx-auto px-4 sm:px-8 text-left"');
     expect(src).toContain("text-[10px] uppercase tracking-[.08em]");
-    expect(COUNTER_LAYOUT.gapX).toBe(20);                                           // gap-x-5
-    expect(COUNTER_LAYOUT.containerMax).toBe(1152);                                 // max-w-6xl
+    expect(COUNTER_LAYOUT.gapX).toBe(16);                                           // gap-x-4
+    expect(COUNTER_LAYOUT.containerMax).toBe(1024);                                 // max-w-5xl
     const page = read("app/page.tsx");
     expect(page).toContain(`font-size: ${STAT_NUMBER_CLAMP};`);
-    const section = page.match(/<section className="([^"]*)">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
+    const section = page.match(/<section className="([^"]*)">\s*<div className=\{HOME_COL\}>\s*<p className="home-label">By the numbers<\/p>\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
     expect(section).toContain("screen-section");                                       // one screen minus the header at every width (globals.css)
-    expect(section).toContain("flex items-center justify-center");                    // the row centered vertically on that screen
+    expect(section).toContain("flex items-center");                                   // the row centered vertically on that screen, on the one left edge
     expect(section).toContain("py-12");
     expect(section).not.toMatch(/100vh|min-h-/);                                      // the height comes from the one snap rule
     const layout = read("app/layout.tsx");

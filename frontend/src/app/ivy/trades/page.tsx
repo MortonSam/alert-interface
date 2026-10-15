@@ -14,6 +14,7 @@ import { TRADES_FAILED, visitorMessage } from "@/lib/errors";
 import { api, type AlertPickLedgerItem, type IvyActivity } from "@/lib/api";
 import { capture } from "@/lib/analytics";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 const EXP_TAIL_RE = /\s*(?:;\s*max gain.*?)?\s+at\s+\d{4}-\d{2}-\d{2}\s+expiration\s*$/i;
 
 
@@ -26,7 +27,7 @@ function fmtPnlDollars(d: number): string {
   return d >= 0 ? `+$${d.toFixed(2)}` : `-$${Math.abs(d).toFixed(2)}`;
 }
 function fmtMarkDate(d: string): string {
-  return new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtOneDate(d.slice(0, 10)) ?? d;
 }
 
 function PickCard({
@@ -93,7 +94,7 @@ function PickCard({
           {displayStrategy}
           {pick.expiration && (
             <span className="ml-1">
-              · exp {new Date(pick.expiration + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              · exp {fmtOneDate(pick.expiration)}
             </span>
           )}
         </p>
@@ -102,12 +103,12 @@ function PickCard({
       {/* Exit rule line */}
       {pick.exit_date && !isClosed && (
         <p className="text-xs text-muted-foreground">
-          {rule ? exitRuleSentence(rule, new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })) : `Exit: ${new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+          {rule ? exitRuleSentence(rule, fmtOneDate(pick.exit_date)) : `Exit: ${fmtOneDate(pick.exit_date)}`}
         </p>
       )}
       {pick.exit_date && isClosed && (
         <p className="text-xs text-muted-foreground">
-          Closed {new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}<Explained text=" at planned exit" />
+          Closed {fmtOneDate(pick.exit_date)}<Explained text=" at planned exit" />
         </p>
       )}
 
@@ -237,7 +238,7 @@ function PickCard({
           </div>
         ))}
         <span className="ml-auto tabular-nums">
-          {new Date(pick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          {fmtOneDate(pick.generated_at)}
         </span>
       </div>
 
@@ -263,7 +264,7 @@ function PickCard({
               <span>implied {(pick.receipt.implied_pct as number).toFixed(1)}%</span>
             )}
             {pick.exit_date && (
-              <span>exit {new Date(pick.exit_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+              <span>exit {fmtOneDate(pick.exit_date)}</span>
             )}
           </div>
         </div>
@@ -271,7 +272,7 @@ function PickCard({
 
       {/* Picked by Ivy attribution */}
       <p className="text-[10px] text-muted-foreground/60">
-        Picked by Ivy {new Date(pick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+        Picked by Ivy {fmtOneDate(pick.generated_at)}
       </p>
 
       {/* Expandable reasoning */}
@@ -437,7 +438,7 @@ export default function IvyTradesPage() {
         </div>
         <p className="text-[11px] text-muted-foreground/60 -mt-4">
           <Explained text="Hypothetical, unexecuted picks. No commissions, fees, or slippage." />{" "}
-          <a href="/disclosures" className="underline">See Disclosures</a>.
+          <a href="/disclosures" className="font-medium text-foreground">See Disclosures →</a>.
         </p>
       </>)}
 
@@ -450,7 +451,7 @@ export default function IvyTradesPage() {
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const diff = Math.round((today.getTime() - new Date(rd.getFullYear(), rd.getMonth(), rd.getDate()).getTime()) / 86400000);
             if (diff <= 1) return "Last night";
-            return `On ${rd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+            return `On ${fmtOneDate(rd)}`;
           })()} Ivy {nightSummary(activity)}. {NIGHT_SUMMARY_KEY}
         </p>
       )}
@@ -524,7 +525,7 @@ export default function IvyTradesPage() {
       )}
       {voidPicks.length > 0 && (
         <section className="mt-16">
-          <h2 className="font-display text-lg font-bold text-foreground">Void</h2>
+          <h2 className="text-headline font-display font-bold text-foreground">Void</h2>
           <p className="text-xs text-muted-foreground mt-1">
             Picks made on a wrong report date. Kept here with the reason, counted in nothing above, never deleted.
           </p>
@@ -532,8 +533,8 @@ export default function IvyTradesPage() {
             {voidPicks.map((p) => (
               <li key={p.id} className="py-3 text-sm">
                 <span className="font-semibold">{p.symbol}</span>
-                <span className="text-muted-foreground"> · picked {p.generated_at.slice(0, 10)}</span>
-                {p.voided_at && <span className="text-muted-foreground"> · voided {p.voided_at.slice(0, 10)}</span>}
+                <span className="text-muted-foreground"> · picked {fmtOneDate(p.generated_at.slice(0, 10))}</span>
+                {p.voided_at && <span className="text-muted-foreground"> · voided {fmtOneDate(p.voided_at.slice(0, 10))}</span>}
                 {p.void_reason && <p className="text-muted-foreground mt-1">{p.void_reason}</p>}
               </li>
             ))}

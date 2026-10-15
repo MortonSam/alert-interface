@@ -28,7 +28,7 @@ export default function NavLinks() {
 
   const links = (onPhone: boolean) => NAV_LINKS.map(({ href, label }) => {
     const active = pathname === href || pathname.startsWith(href + "/");
-    const tone = active ? "font-semibold text-primary hover:text-primary/80" : "text-muted-foreground hover:text-foreground";
+    const tone = active ? "font-semibold text-primary hover:opacity-80" : "text-muted-foreground hover:text-foreground";
     return (
       <Link key={href} href={href} className={`text-sm ${tone} transition-colors ${onPhone ? "block px-4 py-3" : ""}`}>
         {label}
@@ -39,7 +39,7 @@ export default function NavLinks() {
   return (
     <>
       <div className="hidden sm:contents">{links(false)}</div>
-      <div ref={ref} className="sm:hidden" data-testid="phone-menu">
+      <div ref={ref} className="sm:hidden order-2" data-testid="phone-menu">
         <button
           type="button"
           aria-label={open ? "Close menu" : "Open menu"}

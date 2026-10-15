@@ -5,13 +5,13 @@ const NOW = new Date(2026, 8, 29, 10, 30);   // Sep 29, 2026, local. Checked-at 
 
 describe("next earnings line", () => {
   it("prints the date, the source and when the source was last asked", () => {
-    expect(nextEarningsLine("2026-10-29", "finnhub", "2026-09-29T14:05:00Z", null, null, NOW)).toBe("Next earnings Oct 29, estimated (checked today)");
-    expect(nextEarningsLine("2026-10-28", "yfinance", "2026-09-26T14:23:16Z", null, null, NOW)).toBe("Next earnings Oct 28, estimated (checked 3 days ago)");
+    expect(nextEarningsLine("2026-10-29", "finnhub", "2026-09-29T14:05:00Z", null, null, NOW)).toBe("Next earnings Oct 29, 2026, estimated (checked today)");
+    expect(nextEarningsLine("2026-10-28", "yfinance", "2026-09-26T14:23:16Z", null, null, NOW)).toBe("Next earnings Oct 28, 2026, estimated (checked 3 days ago)");
   });
   it("a missing date still says when it was checked, and an unchecked ticker says so", () => {
-    expect(nextEarningsLine(null, null, "2026-09-29T14:05:00Z", null, null, NOW)).toBe("No confirmed date yet (checked Sep 29)");
+    expect(nextEarningsLine(null, null, "2026-09-29T14:05:00Z", null, null, NOW)).toBe("No confirmed date yet (checked Sep 29, 2026)");
     expect(nextEarningsLine(null, null, null, null, null, NOW)).toBe("No confirmed date yet (not yet checked)");
-    expect(nextEarningsLine("2026-12-09", "finnhub", null, null, null, NOW)).toBe("Next earnings Dec 9, estimated (not yet checked)");
+    expect(nextEarningsLine("2026-12-09", "finnhub", null, null, null, NOW)).toBe("Next earnings Dec 9, 2026, estimated (not yet checked)");
   });
   it("checked phrases are calendar days, not 24-hour windows", () => {
     expect(checkedPhrase("2026-09-28T23:59:00", NOW)).toBe("checked yesterday");
@@ -26,9 +26,9 @@ describe("next earnings line", () => {
 
 describe("a ticker the calendar left without a date is never blank", () => {
   it("says so with the source and the check date, everywhere the date would show", () => {
-    expect(noDateLine("2026-09-28T14:05:00Z")).toBe("No confirmed date yet (checked Sep 28)");
-    expect(cardEarningsNote(null, null, "2026-09-29T14:05:00Z", null, null, NOW)).toBe("No confirmed date yet (checked Sep 29)");
-    expect(cardEarningsNote("2026-10-29", "finnhub", "2026-09-29T14:05:00Z", null, null, NOW)).toBe("Earnings Oct 29, estimated \u00B7 checked today");
+    expect(noDateLine("2026-09-28T14:05:00Z")).toBe("No confirmed date yet (checked Sep 28, 2026)");
+    expect(cardEarningsNote(null, null, "2026-09-29T14:05:00Z", null, null, NOW)).toBe("No confirmed date yet (checked Sep 29, 2026)");
+    expect(cardEarningsNote("2026-10-29", "finnhub", "2026-09-29T14:05:00Z", null, null, NOW)).toBe("Earnings Oct 29, 2026, estimated \u00B7 checked today");
   });
   it("the ticker grid, Build fact grid and Discover rows render the no-date line from the API fields", () => {
     const { readFileSync } = require("node:fs") as typeof import("node:fs");
@@ -38,9 +38,9 @@ describe("a ticker the calendar left without a date is never blank", () => {
     expect(grid).toContain("gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation)");   // date and status only
     expect(grid).not.toMatch(/\{ticker\.next_earnings_date && \(/);
     expect(grid).not.toMatch(/cardEarningsNote|noDateLine|checked/);
-    expect(gridEarningsLine("2026-10-29", "estimated")).toBe("Earnings Oct 29, estimated");
-    expect(gridEarningsLine("2026-10-29", "expected_unconfirmed")).toBe("Earnings Oct 29, estimated");
-    expect(gridEarningsLine("2026-10-01", "confirmed")).toBe("Earnings Oct 1, confirmed");
+    expect(gridEarningsLine("2026-10-29", "estimated")).toBe("Earnings Oct 29, 2026, estimated");
+    expect(gridEarningsLine("2026-10-29", "expected_unconfirmed")).toBe("Earnings Oct 29, 2026, estimated");
+    expect(gridEarningsLine("2026-10-01", "confirmed")).toBe("Earnings Oct 1, 2026, confirmed");
     expect(gridEarningsLine(null, null)).toBe("No confirmed date yet");
     expect([SHARE_CLASS.GOOGL, SHARE_CLASS.GOOG, SHARE_CLASS.FOXA, SHARE_CLASS.FOX, SHARE_CLASS.NWSA, SHARE_CLASS.NWS]).toEqual(["Class A", "Class C", "Class A", "Class B", "Class A", "Class B"]);
     const build = readFileSync(join(src, "app/build/page.tsx"), "utf8");
@@ -52,26 +52,26 @@ describe("a ticker the calendar left without a date is never blank", () => {
   });
 });
 
-describe("confirmation levels, NKE on 2026-09-29", () => {
+describe("confirmation levels, NKE on Sep 29, 2026", () => {
   const CHECKED = "2026-09-29T16:02:47Z";
   it("an estimate that passed unresolved reads 'expected around', never past", () => {
     expect(nextEarningsLine("2026-09-28", "finnhub", CHECKED, "expected_unconfirmed", "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR", NOW))
-      .toBe("Next earnings expected around Sep 28; not confirmed (checked today)");
+      .toBe("Next earnings expected around Sep 28, 2026; not confirmed (checked today)");
     expect(eventConfirmationBadge({ is_confirmed: false, unresolved_since: "2026-09-29", source: "finnhub" })).toBe("Expected, date not confirmed");
   });
-  it("the resolved NKE header is Yahoo's Oct 1 estimate, and a confirmed date says what confirmed it", () => {
+  it("the resolved NKE header is Yahoo's Oct 1, 2026 estimate, and a confirmed date says what confirmed it", () => {
     expect(nextEarningsLine("2026-10-01", "yfinance", CHECKED, "estimated", "estimated (Yahoo Finance); Finnhub says 2026-09-28", NOW))
-      .toBe("Next earnings Oct 1, estimated (checked today)");
+      .toBe("Next earnings Oct 1, 2026, estimated (checked today)");
     expect(nextEarningsLine("2026-10-01", "edgar", CHECKED, "confirmed", "confirmed: press release via Finnhub news 2026-08-28: NIKE, Inc. to Announce First Quarter Fiscal 2027 Results", NOW))
-      .toBe("Next earnings Oct 1, confirmed (company press release; checked today)");
+      .toBe("Next earnings Oct 1, 2026, confirmed (company press release; checked today)");
     expect(nextEarningsLine("2026-10-29", "finnhub", CHECKED, "confirmed", "confirmed: Finnhub and Yahoo Finance agree", NOW))
-      .toBe("Next earnings Oct 29, confirmed (two calendars agree; checked today)");
+      .toBe("Next earnings Oct 29, 2026, confirmed (two calendars agree; checked today)");
     expect(eventConfirmationBadge({ is_confirmed: true, source: "finnhub" })).toBe("Confirmed");
     expect(eventConfirmationBadge({ is_confirmed: false, source: "yfinance" })).toBe("Estimated");
   });
   it("cards carry the level too", () => {
-    expect(cardEarningsNote("2026-09-28", "finnhub", CHECKED, "expected_unconfirmed", null, NOW)).toBe("Earnings expected around Sep 28; not confirmed");
-    expect(cardEarningsNote("2026-10-01", "yfinance", CHECKED, "confirmed", "confirmed: Finnhub and Yahoo Finance agree", NOW)).toBe("Earnings Oct 1, confirmed (two calendars agree)");
+    expect(cardEarningsNote("2026-09-28", "finnhub", CHECKED, "expected_unconfirmed", null, NOW)).toBe("Earnings expected around Sep 28, 2026; not confirmed");
+    expect(cardEarningsNote("2026-10-01", "yfinance", CHECKED, "confirmed", "confirmed: Finnhub and Yahoo Finance agree", NOW)).toBe("Earnings Oct 1, 2026, confirmed (two calendars agree)");
   });
   it("the Catalysts hero shows Past only with a reaction row or a confirmed event", () => {
     const { readFileSync } = require("node:fs") as typeof import("node:fs");

@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { api, type HealthStatus, type IvyActivity } from "@/lib/api";
 import { IvyMark } from "@/components/IvyMark";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 function timeAgo(iso: string): string {
   const seconds = Math.floor(
     (Date.now() - new Date(iso).getTime()) / 1000
@@ -34,7 +35,7 @@ function fmtRvDate(iso: string): string {
     d.getDate() === today.getDate()
   )
     return "Today";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtOneDate(d) ?? "";
 }
 
 function StatRow({ label, value }: { label: string; value: string }) {
@@ -87,7 +88,7 @@ function StatsBlock({
 
 function Tile({ tile, refusal = false }: { tile: RuleTile; refusal?: boolean }) {
   return (
-    <div className={`h-full rounded-lg p-4 sm:p-5 ${refusal ? "border border-primary/60 bg-primary/[0.06]" : "border border-border bg-card/40"}`}>
+    <div className={`h-full rounded-lg p-4 sm:p-5 ${refusal ? "border border-amber-500/60 bg-amber-500/[0.06]" : "border border-border bg-card/40"}`}>
       <p className="font-display text-3xl sm:text-4xl font-bold leading-none tracking-tight text-foreground tabular-nums">{tile.figure}</p>
       <p className="text-xs text-muted-foreground mt-1.5">{tile.unit}</p>
       <p className="text-sm text-foreground/85 leading-snug mt-4"><Explained text={tile.caption} /></p>
@@ -105,9 +106,9 @@ function RuleTiles({ tiles, refusal }: { tiles: RuleTile[]; refusal: RuleTile })
           <Tile tile={t} />
         </div>
       ))}
-      <span aria-hidden="true" className="hidden lg:flex items-center justify-center text-xs font-semibold text-primary">then</span>
+      <span aria-hidden="true" className="hidden lg:flex items-center justify-center text-xs font-semibold text-muted-foreground">then</span>
       <div>
-        <p className="text-xs text-primary mb-1.5 lg:hidden">Then she checks the options</p>
+        <p className="text-xs text-muted-foreground mb-1.5 lg:hidden">Then she checks the options</p>
         <Tile tile={refusal} refusal />
       </div>
     </div>
@@ -197,7 +198,7 @@ export default function MeetIvyPage() {
       {/* Who she is, with the latest stored data beside it from 1024px up and under it below */}
       <div className="lg:grid lg:grid-cols-[1fr_300px] lg:gap-x-12 pt-4 sm:pt-6">
         <section className="pb-10">
-          <h2 className="font-display text-4xl sm:text-5xl font-bold text-foreground leading-tight text-balance flex items-center gap-4">
+          <h2 className="text-headline font-display font-bold text-foreground leading-tight text-balance flex items-center gap-4">
             <IvyMark size={48} className="shrink-0" />
             <span>The analyst inside Alert Interface</span>
           </h2>
@@ -221,7 +222,7 @@ export default function MeetIvyPage() {
       {/* Her rule */}
       {ivy && (
         <section className="border-t border-border pt-10 pb-14">
-          <h2 className="font-display text-2xl font-bold text-foreground">{ledgerHeadline(ivy.rule)}</h2>
+          <h2 className="text-headline font-display font-bold text-foreground">{ledgerHeadline(ivy.rule)}</h2>
           <p className="text-sm text-muted-foreground mt-2 max-w-prose">She picks only when all three hold, then checks what the options are pricing.</p>
           <RuleTiles tiles={ruleTiles(ivy.rule)} refusal={refusalTile(ivy.rule)} />
         </section>
@@ -231,7 +232,7 @@ export default function MeetIvyPage() {
       {evidence && (
         <section className="border-t border-border pt-10 pb-14 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-x-12">
           <div>
-            <h2 className="font-display text-2xl font-bold text-foreground">The evidence</h2>
+            <h2 className="text-headline font-display font-bold text-foreground">The evidence</h2>
             <p className="text-sm text-muted-foreground mt-2">Tested against {evidence.years}.</p>
             <div className="mt-6 flex items-end gap-6 sm:gap-8">
               <div>
@@ -255,7 +256,7 @@ export default function MeetIvyPage() {
       {/* Her limits */}
       {ivy && (
         <section className="border-t border-border pt-10 pb-14">
-          <h2 className="font-display text-2xl font-bold text-foreground">Her limits</h2>
+          <h2 className="text-headline font-display font-bold text-foreground">Her limits</h2>
           <ul className="mt-5 grid gap-x-10 sm:grid-cols-2">
             {limitLines(ivy.rule).map((line) => (
               <li key={line} className="flex gap-3 border-b border-border/60 py-3 text-sm text-foreground/85 leading-snug">

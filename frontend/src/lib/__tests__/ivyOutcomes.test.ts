@@ -68,21 +68,21 @@ describe("Ivy's desk outcomes", () => {
 
 describe("the desk says when the nightly did not complete", () => {
   it("failed run with a worksheet to fall back on", () => {
-    expect(runFailureLine({ last_run_at: "2026-09-23T06:16:18+00:00", last_run_exit: 1, last_run_error: "X: invalid input syntax for type json", last_run_stale: false, last_run_failed: true }, "Sep 22"))
-      .toBe("Last night's evaluation did not complete (exit 1 at 06:16Z): X: invalid input syntax for type json. Showing the Sep 22 worksheet.");
+    expect(runFailureLine({ last_run_at: "2026-09-23T06:16:18+00:00", last_run_exit: 1, last_run_error: "X: invalid input syntax for type json", last_run_stale: false, last_run_failed: true }, "Sep 22, 2026"))
+      .toBe("Last night's evaluation did not complete (exit 1 at 06:16Z): X: invalid input syntax for type json. Showing the Sep 22, 2026 worksheet.");
   });
   it("killed at the timeout, no error text, no worksheet yet", () => {
     expect(runFailureLine({ last_run_at: "2026-09-23T06:26:18+00:00", last_run_exit: -1, last_run_error: null, last_run_stale: false, last_run_failed: true }, null))
       .toBe("Last night's evaluation did not complete (exit -1 at 06:26Z). No worksheet to show yet.");
   });
   it("a clean run that is older than the latest expected run", () => {
-    expect(runFailureLine({ last_run_at: "2026-09-22T06:16:18+00:00", last_run_exit: 0, last_run_error: null, last_run_stale: true, last_run_failed: true }, "Sep 22"))
-      .toBe("Ivy's nightly evaluation did not run last night (last completed at 06:16Z on 2026-09-22). Showing the Sep 22 worksheet.");
+    expect(runFailureLine({ last_run_at: "2026-09-22T06:16:18+00:00", last_run_exit: 0, last_run_error: null, last_run_stale: true, last_run_failed: true }, "Sep 22, 2026"))
+      .toBe("Ivy's nightly evaluation did not run last night (last completed at 06:16Z on Sep 22, 2026). Showing the Sep 22, 2026 worksheet.");
   });
   it("never recorded, and a clean current run", () => {
     expect(runFailureLine({ last_run_at: null, last_run_exit: null, last_run_error: null, last_run_stale: true, last_run_failed: true }, null))
       .toBe("Ivy's nightly evaluation has not run yet. No worksheet to show yet.");
-    expect(runFailureLine({ last_run_at: "2026-09-23T06:16:18+00:00", last_run_exit: 0, last_run_failed: false }, "Sep 23")).toBeNull();
+    expect(runFailureLine({ last_run_at: "2026-09-23T06:16:18+00:00", last_run_exit: 0, last_run_failed: false }, "Sep 23, 2026")).toBeNull();
   });
 });
 

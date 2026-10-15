@@ -24,7 +24,7 @@ export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence, 
         className="group block py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6 [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:bg-muted/40 transition-colors"
       >
         <div className="flex items-baseline gap-2 min-w-0">
-          <span className="font-sans text-sm font-bold text-foreground [@media(hover:hover)]:group-hover:text-primary transition-colors shrink-0">
+          <span className="font-sans text-sm font-bold text-foreground [@media(hover:hover)]:group-hover:opacity-80 transition-colors shrink-0">
             {symbol}
           </span>
           {name && <span className="text-sm text-muted-foreground min-w-0 break-words">{name}</span>}

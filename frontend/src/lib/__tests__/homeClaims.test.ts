@@ -17,7 +17,7 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(block).toContain("The latest verified note");
     expect(block).toContain("if (!note) return null;");                  // none current (or a failure): no section, never an old note as current
     const { noteFacts, verificationLine, writtenBeforeLabel } = await import("@/lib/latestNote");
-    expect(writtenBeforeLabel("2026-09-30")).toBe("Written before the Sep 30 report");
+    expect(writtenBeforeLabel("2026-09-30")).toBe("Written before the Sep 30, 2026 report");
     expect(writtenBeforeLabel(null)).toBeNull();
     const ticker = read("app/tickers/[symbol]/page.tsx");
     expect(ticker.match(/writtenBeforeLabel\(note\.report_since\) && \(/g)?.length).toBe(2);   // both note headers label an older note
@@ -74,7 +74,7 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(block).toContain("api.system.stats()");
     expect(block).toContain("if (!rows.length) return <CountersUnavailable />;");                        // never an empty section
     expect(block).toContain("title={row.title ? row.title + stale : undefined}");                     // the date lives on the number's hover title
-    expect(block).toMatch(/stat-number[^"]*text-primary[^"]*tabular-nums/);                           // the accent, the largest numeric size, tabular figures
+    expect(block).toMatch(/stat-number[^"]*text-foreground[^"]*tabular-nums/);                        // the largest numeric size, tabular figures; not orange (DESIGN.md: no single number leads)
     expect(block).not.toMatch(/border|rounded|shadow/);                                               // no card
     expect(block.replace(/className="[^"]*"|className=\{`[^`]*`\}/g, "")).not.toMatch(/[0-9]{2,}/);    // no typed figure or year outside class names
     const { counterRows } = await import("@/lib/siteCounters");

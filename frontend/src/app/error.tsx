@@ -22,7 +22,7 @@ export default function Error({
         <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground">
           Something went wrong
         </p>
-        <h1 className="font-display text-3xl font-bold text-foreground">
+        <h1 className="text-display font-display font-bold text-foreground">
           That didn&apos;t load right.
         </h1>
         <p className="text-sm text-muted-foreground">

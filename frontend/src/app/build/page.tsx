@@ -35,6 +35,7 @@ import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 // ── Recent tickers (localStorage, SSR-safe) ──────────────────────────────────
 
 type RecentTicker = { symbol: string; name: string | null };
@@ -71,7 +72,7 @@ function StepHeader({ n, label, done }: { n: number; label: string; done?: boole
       >
         {done ? "✓" : n}
       </div>
-      <h2 className="text-base font-semibold text-muted-foreground">{label}</h2>
+      <h2 className="text-headline font-semibold text-muted-foreground">{label}</h2>
     </div>
   );
 }
@@ -390,7 +391,7 @@ function DraftDisplay({
 
       {/* Expensive options: the draft is a cheaper way to make the same bet, its cost beside the outright one */}
       {draft.options_expensive && (
-        <div className="rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 space-y-1" data-testid="cheaper-draft">
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-1" data-testid="cheaper-draft">
           <p className="text-sm text-foreground">{expensiveOptionsLine(draft.symbol)}</p>
           {cheaperLine && <p className="text-sm text-muted-foreground">{cheaperLine}</p>}
         </div>
@@ -413,7 +414,7 @@ function DraftDisplay({
 
       {/* C) Headline — strategy name + strikes + expiration in font-mono */}
       <div className="space-y-1.5">
-        <h2 className="text-3xl md:text-4xl font-display font-bold tracking-tight">
+        <h2 className="text-headline font-display font-bold">
           {shortName}
           {draft.suggested_strike != null && (
             <span className="font-mono text-foreground">
@@ -423,7 +424,7 @@ function DraftDisplay({
           )}
           {fb.expiration_used && (
             <span className="font-mono text-foreground">
-              {" "}· {new Date(fb.expiration_used + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              {" "}· {fmtOneDate(fb.expiration_used)}
             </span>
           )}
         </h2>
@@ -987,7 +988,7 @@ function BuildTradePageContent() {
           </div>
           <div className="rounded-xl border border-border/60 bg-transparent px-8 py-12 text-center space-y-5">
             <div className="text-5xl">✓</div>
-            <h2 className="text-2xl font-bold">Trade thesis saved</h2>
+            <h2 className="text-headline font-bold">Trade thesis saved</h2>
             <p className="text-muted-foreground text-sm max-w-sm mx-auto leading-relaxed">
               {(direction === "auto" && alertPick ? alertPick.picked_direction : direction) === "bullish" ? "Bullish" : "Bearish"} thesis on{" "}
               <span className="font-semibold text-foreground">{selectedTicker?.symbol}</span>{" "}
@@ -998,7 +999,7 @@ function BuildTradePageContent() {
                   {optionLeg.option_type === "call" ? "Long call" : "Long put"}{" "}
                   ${optionLeg.strike.toFixed(0)}
                   {optionLeg.strike2 != null ? ` / $${optionLeg.strike2.toFixed(0)}` : ""}{" "}
-                  · {optionLeg.option_expiration}.
+                  · {fmtOneDate(optionLeg.option_expiration) ?? optionLeg.option_expiration}.
                   {" "}{premiumSourcePhrase(draft?.fact_block.options_as_of)}
                 </>
               )}
@@ -1035,7 +1036,7 @@ function BuildTradePageContent() {
           <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground mb-5 inline-block">
             ← Home
           </Link>
-          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>
+          <h1 className="text-display font-display font-bold text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
             Ivy drafts the idea from the options data on file{optionsCadencePhrase(ivyRule?.rule.cadence) ? ` (${optionsCadencePhrase(ivyRule?.rule.cadence)})` : ""}, earnings history, and volatility.
             Not financial advice.
@@ -1122,7 +1123,7 @@ function BuildTradePageContent() {
                 <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 px-5 py-4 space-y-3 mb-4">
                   <p className="text-sm font-medium">
                     Ivy already has an open {alertPick.picked_direction} pick on {alertPick.symbol} from{" "}
-                    {new Date(alertPick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    {fmtOneDate(alertPick.generated_at)}
                   </p>
                   <p className="text-xs text-muted-foreground"><Explained text="Ivy holds one pick per symbol until it expires." /></p>
                 </div>
@@ -1130,7 +1131,7 @@ function BuildTradePageContent() {
 
               {/* Expensive options: no refusal, the customer picks a direction and gets a cheaper draft */}
               {alertPick && !alertPick.existing_pick && !alertPick.draft && alertPick.outcome === "vol_gate" && (
-                <p className="rounded-lg border border-primary/40 bg-primary/5 px-5 py-4 mb-4 text-sm" data-testid="expensive-options">
+                <p className="rounded-lg border border-border bg-muted/30 px-5 py-4 mb-4 text-sm" data-testid="expensive-options">
                   {expensiveOptionsPrompt(alertPick.symbol)}
                 </p>
               )}
@@ -1200,7 +1201,7 @@ function BuildTradePageContent() {
                     className={cn(
                       "py-8 rounded-[var(--radius)] border text-center transition-all select-none",
                       direction === "auto"
-                        ? "bg-orange-500/10 border-orange-500 text-orange-600 dark:text-orange-400"
+                        ? "bg-foreground/10 border-foreground text-foreground"
                         : "border-border text-muted-foreground hover:border-orange-500/50 hover:bg-orange-500/5",
                     )}
                   >
@@ -1241,7 +1242,7 @@ function BuildTradePageContent() {
                   </button>
                   <p className="text-[11px] text-muted-foreground/60 mt-3">
                     Educational draft, not a recommendation. Options can lose 100% of premium.{" "}
-                    <a href="/disclosures" className="underline">See Disclosures</a>.
+                    <a href="/disclosures" className="font-medium text-foreground">See Disclosures →</a>.
                   </p>
                 </div>
               )}
@@ -1303,9 +1304,9 @@ function BuildTradePageContent() {
               <div className="rounded-2xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground flex items-center gap-2">
                 <span className="font-medium text-foreground"><Explained text={draft.strategy} /></span>
                 {optionLeg?.strike != null && (
-                  <span>· {optionLeg.option_type} ${optionLeg.strike.toFixed(0)}{optionLeg.strike2 != null ? `/$${optionLeg.strike2.toFixed(0)}` : ""} exp {optionLeg.option_expiration}</span>
+                  <span>· {optionLeg.option_type} ${optionLeg.strike.toFixed(0)}{optionLeg.strike2 != null ? `/$${optionLeg.strike2.toFixed(0)}` : ""} exp {fmtOneDate(optionLeg.option_expiration) ?? optionLeg.option_expiration}</span>
                 )}
-                <button onClick={() => setStep("review_draft")} className="ml-auto text-xs underline hover:text-foreground">
+                <button onClick={() => setStep("review_draft")} className="ml-auto text-xs hover:text-foreground">
                   Edit
                 </button>
               </div>
@@ -1373,7 +1374,7 @@ function BuildTradePageContent() {
                       {optionLeg.option_type === "call" ? "Long call" : "Long put"}{" "}
                       ${optionLeg.strike.toFixed(0)}
                       {optionLeg.strike2 != null ? ` / $${optionLeg.strike2.toFixed(0)}` : ""}
-                      {optionLeg.option_expiration ? ` · exp ${optionLeg.option_expiration}` : ""}
+                      {optionLeg.option_expiration ? ` · exp ${fmtOneDate(optionLeg.option_expiration) ?? optionLeg.option_expiration}` : ""}
                       {optionLeg.spread_type ? ` (${optionLeg.spread_type.replace(/_/g, " ")})` : ""}
                     </span>
                     {" · "}{premiumSourcePhrase(draft?.fact_block.options_as_of)}

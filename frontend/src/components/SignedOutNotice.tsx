@@ -15,10 +15,10 @@ export default function SignedOutNotice({
       data-testid="signed-out-notice"
       className="rounded-xl border border-border/60 px-6 py-8 text-center space-y-3"
     >
-      <h2 className="text-lg font-display font-semibold">{title}</h2>
+      <h2 className="text-headline font-display font-semibold">{title}</h2>
       <p className="text-sm text-muted-foreground max-w-prose mx-auto">{body}</p>
       {openPath && (
-        <Link href={openPath.href} className="tap inline-block text-sm text-primary hover:text-primary/80">
+        <Link href={openPath.href} className="tap inline-block text-sm font-medium text-foreground hover:opacity-80">
           {openPath.label}
         </Link>
       )}

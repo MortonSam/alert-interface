@@ -36,7 +36,7 @@ describe("Meet Ivy: tiles, evidence and limits come from the rule", () => {
     const e = evidenceSummary(RULE, BACKTEST)!;
     expect([e.setups, e.hitRate, e.baseRate, e.years]).toEqual([365, "54.2", "52.4", "2023, 2024, and 2025-26"]);
     expect(e.honest).toBe("That edge is small, and most of it came in 2023 (59.6% against 51.5%). Since then it has been about a point. " +
-      "Those years chose the rule as much as tested it, so the only test that counts is the live record, kept on schedule since September 15, 2026 and public at launch. " +
+      "Those years chose the rule as much as tested it, so the only test that counts is the live record, kept on schedule since Sep 15, 2026 and public at launch. " +
       "A small edge you will be able to check beats a large one you can't.");
     expect(evidenceSummary(RULE, null)).toBeNull();
   });
@@ -44,9 +44,9 @@ describe("Meet Ivy: tiles, evidence and limits come from the rule", () => {
     const lines = limitLines(RULE);
     expect(lines[0]).toBe("At most 3 new picks a night");
     expect(lines[1]).toBe("At most 10 open at once");
-    expect(lines).toContain("Every pick since September 15, 2026 is recorded the night it is made. The ledger goes public at launch.");
+    expect(lines).toContain("Every pick since Sep 15, 2026 is recorded the night it is made. The ledger goes public at launch.");
     expect(lines).toContain("No bearish calls. The data has not earned them yet.");
-    expect(limitLines({ ...RULE, ledger_public: true })).toContain("Every pick since September 15, 2026 is on the ledger, losses next to wins.");
+    expect(limitLines({ ...RULE, ledger_public: true })).toContain("Every pick since Sep 15, 2026 is on the ledger, losses next to wins.");
   });
   it("the evidence chart reads one encoding, and its legend names every mark", () => {
     expect(ivyBacktestLegend().map((l) => l.label)).toEqual(Object.values(IVY_BACKTEST_ENCODING).map((e) => e.label));

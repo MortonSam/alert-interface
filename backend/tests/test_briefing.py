@@ -42,7 +42,7 @@ def test_profile_quotes_the_first_sentence_then_the_gics_sentence_with_quote_tim
                          "It's part of the S&P 500's Information Technology sector (Semiconductors), worth about $1.2 trillion.")
     assert {"name": "GICS sector", "value": "Information Technology", "as_of": "2026-10-05", "source": "S&P 500 constituent list, the same source Discover shows"} in s["inputs"]
     assert any(i["name"] == "shares outstanding" and i["value"] == "1,119.0 million" and i["as_of"] == "2026-10-05" for i in s["inputs"])
-    assert any(i["name"] == "market cap" and i["value"] == "$1.2 trillion" and i["as_of"] == "Oct 5, 4:00 PM ET" for i in s["inputs"])
+    assert any(i["name"] == "market cap" and i["value"] == "$1.2 trillion" and i["as_of"] == "Oct 5, 2026, 4:00 PM ET" for i in s["inputs"])
     assert any(i["name"] == "company name" and i["value"] == "Micron Technology" for i in s["inputs"])
     assert_clean(s)
     # no GICS data: the sector clause is omitted; no shares: no value; off the index: no S&P claim
@@ -82,10 +82,10 @@ def test_market_value_in_plain_words_one_decimal_at_most():
 
 def test_stock_sentence_names_the_quote_the_high_and_the_three_month_change_or_near_the_high():
     text, inputs, dates = B.stock_sentence("MU", **STOCK)
-    assert text == "MU is at $187.52 (Oct 5, 4:00 PM ET), 6.7% below its 52-week high of $201.00 (Sep 12, 2026), up 22.4% over three months."
+    assert text == "MU is at $187.52 (Oct 5, 2026, 4:00 PM ET), 6.7% below its 52-week high of $201.00 (Sep 12, 2026), up 22.4% over three months."
     assert "$185.10" not in text and any(i["name"] == "last close" and i["value"] == "$185.10" for i in inputs) and dates == [date(2026, 10, 5)]
     text, _, _ = B.stock_sentence("MU", quote_price=198.5, quote_ts=QUOTE_TS, high_52w=201.0, high_52w_date=date(2026, 9, 12), anchor_close_3m=220.0, anchor_date_3m=date(2026, 7, 6))
-    assert text == "MU is at $198.50 (Oct 5, 4:00 PM ET), near its 52-week high of $201.00 (Sep 12, 2026), down 9.8% over three months."
+    assert text == "MU is at $198.50 (Oct 5, 2026, 4:00 PM ET), near its 52-week high of $201.00 (Sep 12, 2026), down 9.8% over three months."
     assert B.stock_sentence("MU", quote_price=10.0, quote_ts=None) is None                 # a price without its time is not shown
 
 

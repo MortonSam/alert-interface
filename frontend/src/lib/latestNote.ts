@@ -2,12 +2,12 @@
 // note's stored stats and verification into the three facts and the one verification line it shows.
 
 import type { LatestVerifiedNote, StructuredNoteStats } from "@/lib/api";
+import { fmtDate } from "@/lib/dates";
 
 /** A note written before its company reported again: "Written before the Sep 30 report" (the API's report_since, services/note_currency). */
 export function writtenBeforeLabel(reportSince: string | null | undefined): string | null {
   if (!reportSince) return null;
-  const [y, m, d] = reportSince.split("-").map(Number);
-  return `Written before the ${new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })} report`;
+  return `Written before the ${fmtDate(reportSince.slice(0, 10))} report`;
 }
 
 function fmtCap(n: number): string {

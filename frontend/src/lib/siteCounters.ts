@@ -40,11 +40,11 @@ export function counterRows(stats: SiteStats | null): CounterRow[] {
 // numbers never overlap at 1024, 1280 and 1440 pixels. Glyph widths are the display face's measured averages.
 
 export const COUNTER_LAYOUT = {
-  containerMax: 1152,        // max-w-6xl
-  sidePadding: { base: 16, sm: 24 },   // px-4 sm:px-6 on the counters section
-  columns: { base: 1, sm: 2, lg: 4 },  // grid-cols-1 sm:grid-cols-2 lg:grid-cols-4
+  containerMax: 1024,        // max-w-5xl: the home page's one column (DESIGN.md)
+  sidePadding: { base: 16, sm: 32 },   // px-4 sm:px-8 on that column
+  columns: { base: 2, sm: 2, lg: 4 },  // grid-cols-2 lg:grid-cols-4: two by two on a phone
   breakpoints: { sm: 640, lg: 1024 },
-  gapX: 20,                  // gap-x-5
+  gapX: 16,                  // gap-x-4
   font: { min: 36, vw: 4.2, max: 60 },   // clamp(36px, 4.2vw, 60px) on .stat-number
   digitEm: 0.631,            // tabular digit advance in the display face (Newsreader 600), measured in Chrome at 60px
   commaEm: 0.241,

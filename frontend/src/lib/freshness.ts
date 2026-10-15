@@ -2,6 +2,7 @@
 // Nothing here types a cadence or a delay: "nightly", "once a day" and the price source come from the record, and
 // every quote and chain is named by its own date.
 import type { Cadence } from "@/lib/api";
+import { fmtDate as fmtOneDate, fmtDateTime } from "@/lib/dates";
 
 const MARKET_TZ = "America/New_York";
 
@@ -25,12 +26,9 @@ export function priceSourceLine(cadence: Cadence | null | undefined): string {
   return delay ? `Prices ${delay}` : "Prices dated by their last trade";     // the quote vendor is never named to a visitor
 }
 
-/** A quote's own time, always with its date, on the market clock: "Oct 5, 4:00 PM ET". */
+/** A quote's own time, always with its date, on the market clock: "Oct 5, 2026, 4:00 PM ET" (lib/dates, the one format). */
 export function fmtQuoteDateTime(unix: number | null | undefined): string | null {
-  if (unix == null) return null;
-  const d = new Date(unix * 1000);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: MARKET_TZ }) + " ET";
+  return unix == null ? null : fmtDateTime(unix);
 }
 
 /** What a quote's time marks, by the API's quote_basis (backend services/quote_fallback.BASIS_LABELS, mirrored by test):
@@ -59,19 +57,15 @@ export function quoteAsOf(unix: number | null | undefined, basis?: QuoteBasis | 
 /** The 1-day chart's bars line when they came from the live layer: "Bars through 1:05 PM ET, delayed N min"; null otherwise. */
 export function intradayBarsLine(barsBasis: string | null | undefined, barsThrough: string | null | undefined, delayMinutes: number | null | undefined): string | null {
   if (barsBasis !== "delayed" || !barsThrough) return null;
-  const d = new Date(barsThrough);
-  if (Number.isNaN(d.getTime())) return null;
-  const at = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: MARKET_TZ }) + " ET";
+  const at = fmtDateTime(barsThrough);
+  if (!at) return null;
   const delay = delayPhrase(delayMinutes);
   return `Bars through ${at}` + (delay ? `, ${delay}` : "");
 }
 
 /** An ISO timestamp the same way. */
 export function fmtIsoDateTime(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: MARKET_TZ }) + " ET";
+  return fmtDateTime(iso);
 }
 
 /** The nightly datasets a page shows, by the keys /health and /system/status publish (services/dataset_freshness). */
@@ -119,13 +113,13 @@ export function freshnessLine(datasetLine: string | null | undefined, cadence?: 
 /** Names the options data by its own date, and its cadence by the record. Never falls back to today. */
 export function optionsDataPhrase(chainDate: string | null | undefined, cadence?: Cadence | null): string {
   const cad = optionsCadencePhrase(cadence);
-  const base = chainDate ? `options data as of ${chainDate}` : "the latest options data on file";
+  const base = chainDate ? `options data as of ${fmtOneDate(chainDate) ?? chainDate}` : "the latest options data on file";
   return cad ? `${base}, ${cad}` : base;
 }
 
 export function premiumSourcePhrase(chainDate: string | null | undefined): string {
   return chainDate
-    ? `Entry premium taken from the ${chainDate} options data.`
+    ? `Entry premium taken from the ${fmtOneDate(chainDate) ?? chainDate} options data.`
     : "Entry premium taken from the latest options data on file.";
 }
 
@@ -157,7 +151,7 @@ export function pricedAtLine(
   fb: { current_price: number; options_as_of?: string | null; quote_price?: number | null; price_as_of?: string | null },
   fmtTime: (iso: string | null | undefined) => string | null,
 ): string {
-  const source = fb.options_as_of ? `from the ${fb.options_as_of} options data` : "from the latest options data on file";
+  const source = fb.options_as_of ? `from the ${fmtOneDate(fb.options_as_of) ?? fb.options_as_of} options data` : "from the latest options data on file";
   const head = `priced at $${fb.current_price.toFixed(2)} ${source}`;
   if (fb.quote_price == null) return head;
   const t = fmtTime(fb.price_as_of);
@@ -170,8 +164,8 @@ export function pricedAtLine(
  */
 export function impliedSpanPhrase(expiration: string | null | undefined, spanDays: number | null | undefined, chainDate: string | null | undefined): string | null {
   if (!expiration) return null;
-  if (spanDays == null || !chainDate) return `through ${expiration}`;
-  return `through ${expiration}, ${spanDays} ${spanDays === 1 ? "day" : "days"} from the ${chainDate} options data`;
+  if (spanDays == null || !chainDate) return `through ${fmtOneDate(expiration) ?? expiration}`;
+  return `through ${fmtOneDate(expiration) ?? expiration}, ${spanDays} ${spanDays === 1 ? "day" : "days"} from the ${fmtOneDate(chainDate) ?? chainDate} options data`;
 }
 
 /** "One-day earnings moves: avg ±5.2%, max ±11.0% over 12 prints" (a 0-1 decimal in, like the API). */

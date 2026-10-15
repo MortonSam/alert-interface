@@ -15,7 +15,7 @@ import {
 
 function ExternalHeadline({ url, headline }: { url: string; headline: string }) {
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" data-third-party className="text-foreground/85 [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:text-primary underline-offset-2 [@media(hover:hover)]:hover:underline break-words">
+    <a href={url} target="_blank" rel="noopener noreferrer" data-third-party className="text-foreground/85 [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:opacity-80 break-words">
       {headline}
     </a>
   );
@@ -59,7 +59,7 @@ function MoverRow({ m }: { m: MoverItem }) {
   return (
     <li className="py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6" data-testid="mover-row">
       <div className="flex items-baseline gap-2 min-w-0">
-        <Link href={`/tickers/${m.symbol}`} className="tap font-sans text-sm font-bold text-foreground [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:text-primary shrink-0">{m.symbol}</Link>
+        <Link href={`/tickers/${m.symbol}`} className="tap font-sans text-sm font-bold text-foreground [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:opacity-80 shrink-0">{m.symbol}</Link>
         {m.name && <span className="text-sm text-muted-foreground min-w-0 break-words">{m.name}</span>}
         <span className="ml-auto pl-2 font-mono text-xs text-right shrink-0">
           <span className="text-muted-foreground">${m.price.toFixed(2)}</span>{" "}
@@ -87,7 +87,7 @@ export default function NewsSections({ data, indexes }: { data: NewsSectionsResp
       {hasMovers && (
         <section className="border-t border-border py-10" data-testid="news-movers">
           <SectionKicker index={indexes.movers ?? ""} label="Today" />
-          <h2 className="font-display text-xl font-bold text-foreground">{MOVERS_TITLE}</h2>
+          <h2 className="text-headline font-display font-bold text-foreground">{MOVERS_TITLE}</h2>
           <p className="text-sm text-muted-foreground mt-1 mb-6">{MOVERS_SUBTITLE}</p>
           {moversMarketLine(data.spy_change_pct, data.market_day) && (
             <p className="text-sm text-foreground/80 -mt-3 mb-6" data-testid="movers-market">{moversMarketLine(data.spy_change_pct, data.market_day)}</p>
@@ -105,13 +105,13 @@ export default function NewsSections({ data, indexes }: { data: NewsSectionsResp
       {data.stories.length > 0 && (
         <section className="border-t border-border py-10" data-testid="news-stories">
           <SectionKicker index={indexes.stories ?? ""} label="Headlines" />
-          <h2 className="font-display text-xl font-bold text-foreground">{STORIES_TITLE}</h2>
+          <h2 className="text-headline font-display font-bold text-foreground">{STORIES_TITLE}</h2>
           <p className="text-sm text-muted-foreground mt-1 mb-6">{STORIES_SUBTITLE}</p>
           <ul className="divide-y divide-border/60">
             {data.stories.map((st) => (
               <li key={st.url} className="py-3 sm:grid sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-x-6" data-testid="news-story">
                 <div className="flex items-baseline gap-2 sm:flex-col sm:gap-0">
-                  <Link href={`/tickers/${st.symbol}`} className="tap font-sans text-sm font-bold text-foreground [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:text-primary">{st.symbol}</Link>
+                  <Link href={`/tickers/${st.symbol}`} className="tap font-sans text-sm font-bold text-foreground [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:opacity-80">{st.symbol}</Link>
                   <MoveChange pct={st.change_pct} />
                 </div>
                 <RowExplanation ivy={st.ivy ?? null} headline={st} />

@@ -7,6 +7,7 @@ import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api"
 import { fmtMarketCap } from "@/lib/utils";
 import { SHARE_CLASS, gridEarningsLine } from "@/lib/earningsSource";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 const PAGE_SIZE = 24;
 
 function fmtAgo(iso: string): string {
@@ -26,11 +27,7 @@ const fmtMcap = fmtMarketCap;
 
 function fmtDate(d: string | null): string {
   if (!d) return "";
-  const [y, m, day] = d.split("-").map(Number);
-  return new Date(y, m - 1, day).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return fmtOneDate(d.slice(0, 10)) ?? "";
 }
 
 type SortKey = "market_cap" | "symbol" | "name" | "next_earnings";
@@ -271,7 +268,7 @@ export function TickerGrid() {
         {isFiltered && (
           <button
             onClick={clearFilters}
-            className="hover:text-foreground underline underline-offset-2"
+            className="hover:text-foreground"
           >
             Clear filters
           </button>
@@ -284,7 +281,7 @@ export function TickerGrid() {
           <p className="text-sm text-muted-foreground mb-3">
             No tickers match your filters.
           </p>
-          <button onClick={clearFilters} className="text-sm text-primary hover:underline">
+          <button onClick={clearFilters} className="text-sm font-medium text-foreground">
             Clear filters
           </button>
         </div>

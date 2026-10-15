@@ -1,5 +1,6 @@
 import { fmtIsoDateTime } from "@/lib/freshness";
 import type { LegendItem } from "./encodings/types";
+import { fmtDate as fmtOneDate } from "@/lib/dates";
 // How an option mark describes itself. One label per backend mark_basis
 // (backend/app/schemas/thesis.py MARK_BASES); a vitest fails if one is missing.
 // Dates come from their own fields and are never parsed out of a sentence.
@@ -41,7 +42,7 @@ interface MarkDates {
 
 /** What the option values are as of, from the mark's own fields. Empty when unknown. */
 export function optionsAsOfLabel(mark: MarkDates): string {
-  if (mark.mark_basis === "settled" && mark.options_as_of) return `settled ${mark.options_as_of}`;
-  if (mark.chain_date) return `options data as of ${mark.chain_date}`;
+  if (mark.mark_basis === "settled" && mark.options_as_of) return `settled ${fmtOneDate(mark.options_as_of) ?? mark.options_as_of}`;
+  if (mark.chain_date) return `options data as of ${fmtOneDate(mark.chain_date) ?? mark.chain_date}`;
   return "";
 }

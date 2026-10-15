@@ -42,7 +42,7 @@ describe("the question strip renders answers from the API with a receipt on ever
       "FICO's realized volatility over the last 20 sessions is 123.7% annualized, more active than 89% of its own 20-day windows over the past year.",
       "Options price a move of about ±6.0% for the Oct 6, 2026 report; over the last 20 reports STZ has moved ±4.0% on average, so the market is pricing more than usual.",
       "On its 17 past upgrade days MU's median move was +1.8%, and in 71% of them the five-session move kept the first day's direction.",
-      "MU is at $1,063.96 (Oct 5, 4:00 PM ET), 12.3% below its 52-week high of $1,213.37 (Jun 25, 2026), up 8.0% over three months.",
+      "MU is at $1,063.96 (Oct 5, 2025, 4:00 PM ET), 12.3% below its 52-week high of $1,213.37 (Jun 25, 2026), up 8.0% over three months.",
       "Micron Technology designs memory. It's part of the S&P 500's Information Technology sector (Semiconductors), worth about $1.2 trillion.",
     ];
     for (const text of answers) {

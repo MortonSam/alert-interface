@@ -36,7 +36,7 @@ export default function PreviewToken() {
 
   return (
     <div className="space-y-5">
-      <h1 className="font-display text-2xl font-bold">Preview</h1>
+      <h1 className="text-display font-display font-bold">Preview</h1>
       <p className="text-sm text-muted-foreground" data-testid="preview-state">
         {saved === null ? "" : saved ? "Preview is on in this browser." : "Preview is off in this browser."}
       </p>

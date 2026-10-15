@@ -177,7 +177,7 @@ export default function DiscoverPage() {
               &larr; Home
             </Link>
           </div>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-foreground">
+          <h1 className="text-display font-display font-bold text-foreground">
             Discover
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -239,7 +239,7 @@ export default function DiscoverPage() {
         ) : !fetchError ? (
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="The calendar" />
-            <h2 className="font-display text-xl font-bold text-foreground">Reporting soon</h2>
+            <h2 className="text-headline font-display font-bold text-foreground">Reporting soon</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings in the next 7 days</p>
 
             {reportingSoon && reportingSoon.items.length === 0 ? (
@@ -270,7 +270,7 @@ export default function DiscoverPage() {
         ) : !fetchError && justReported && justReported.items.length === 0 ? null : !fetchError ? (
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="The results" />
-            <h2 className="font-display text-xl font-bold text-foreground">Just reported</h2>
+            <h2 className="text-headline font-display font-bold text-foreground">Just reported</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Earnings reactions in the last 5 days</p>
 
             <DiscoverRows>
@@ -294,7 +294,7 @@ export default function DiscoverPage() {
         ) : !fetchError && suggestionsAddValue ? (
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="Suggestion score" />
-            <h2 className="font-display text-xl font-bold text-foreground">Worth a look</h2>
+            <h2 className="text-headline font-display font-bold text-foreground">Worth a look</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6"><Explained text="Ranked by a simple score: earnings soon, a recent reaction, realized volatility. Not Ivy's rule; her picks are on the ledger." /></p>
 
             {suggestions && suggestions.length === 0 ? (
@@ -324,7 +324,7 @@ export default function DiscoverPage() {
         ) : !fetchError && unusuallyActive && unusuallyActive.length > 0 ? (
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="The tape" />
-            <h2 className="font-display text-xl font-bold text-foreground">Unusually active</h2>
+            <h2 className="text-headline font-display font-bold text-foreground">Unusually active</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">
               Stocks more <ExplainTip term="realized volatility">volatile</ExplainTip> than usual, each compared with its own past year.
             </p>

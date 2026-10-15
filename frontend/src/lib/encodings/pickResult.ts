@@ -3,13 +3,13 @@
 import type { LegendItem } from "./types";
 
 export const PICK_RESULT_ENCODING = {
-  hit:  { label: "Direction HIT",  detail: "stock closed the right side of entry", className: "bg-success/10 text-success" },
-  miss: { label: "Direction MISS", detail: "stock closed the wrong side of entry", className: "bg-destructive/10 text-destructive" },
+  hit:  { label: "Direction HIT",  detail: "stock closed the right side of entry", className: "bg-sky-500/10 text-sky-500" },
+  miss: { label: "Direction MISS", detail: "stock closed the wrong side of entry", className: "bg-amber-500/10 text-amber-500" },
 } as const;
 
 export const PICK_MOVE_ENCODING = {
-  favorable:   { label: "moved in Ivy's favor", className: "text-success" },
-  unfavorable: { label: "moved against Ivy",    className: "text-destructive" },
+  favorable:   { label: "moved in Ivy's favor", className: "text-sky-500" },
+  unfavorable: { label: "moved against Ivy",    className: "text-amber-500" },
   flat:        { label: "unchanged",            className: "text-muted-foreground" },
 } as const;
 

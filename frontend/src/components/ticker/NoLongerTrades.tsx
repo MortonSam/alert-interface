@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Ticker, TickerExit } from "@/lib/api";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 /** The ticker page for a stock that no longer trades and has no successor (backend services/ticker_exits): the stored line, and the
  * last stored close with its own date when one is stored. No trade builder, market value, catalysts, earnings line or Ask Ivy. */
 export function NoLongerTrades({ ticker, exit }: { ticker: Pick<Ticker, "symbol" | "name">; exit: TickerExit }) {
@@ -11,7 +12,7 @@ export function NoLongerTrades({ ticker, exit }: { ticker: Pick<Ticker, "symbol"
           ← All tickers
         </Link>
         <div id="overview" className="mt-6">
-          <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
+          <h1 className="text-display font-bold font-display">{ticker.symbol}</h1>
           {ticker.name && <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>}
         </div>
         <p className="mt-8 text-lg max-w-2xl" data-testid="exit-line">{exit.line}</p>
@@ -25,8 +26,7 @@ export function NoLongerTrades({ ticker, exit }: { ticker: Pick<Ticker, "symbol"
   );
 }
 
-/** "2026-08-04" -> "August 4, 2026", read from the date's own parts (no time zone can move it a day). */
+/** "2026-08-04" -> "Aug 4, 2026", the one date format (lib/dates), read as a calendar day (no time zone can move it a day). */
 export function longDate(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return fmtOneDate(iso.slice(0, 10)) ?? iso;
 }

@@ -9,6 +9,13 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // the one type scale (DESIGN.md): display for page titles and statements, headline for section titles, body, small
+      fontSize: {
+        display: ["clamp(32px, 3.6vw, 52px)", { lineHeight: "1.1", letterSpacing: "-0.01em" }],
+        headline: ["clamp(20px, 1.9vw, 24px)", { lineHeight: "1.25", letterSpacing: "-0.005em" }],
+        body: ["15px", { lineHeight: "1.6" }],
+        small: ["12px", { lineHeight: "1.5" }],
+      },
       colors: {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",

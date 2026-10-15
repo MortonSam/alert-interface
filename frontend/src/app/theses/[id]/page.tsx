@@ -23,21 +23,14 @@ import { fmtPnlPct } from "@/lib/pnl";
 import { buildPlainEnglish } from "@/lib/plain-english";
 import PayoffSimulator from "@/components/PayoffSimulator";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(v: string): string {
-  const [y, m, d] = v.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-  });
+  return fmtOneDate(v.slice(0, 10)) ?? v;
 }
 
-function fmtDateShort(v: string): string {
-  const [y, m, d] = v.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    month: "short", day: "numeric",
-  });
-}
+const fmtDateShort = fmtDate;     // one date format (DESIGN.md)
 
 // ── Build Leg[] from thesis ───────────────────────────────────────────────────
 
@@ -308,7 +301,7 @@ export default function ThesisDetailPage() {
   const stateBadge = isResolved
     ? { label: "CLOSED", cls: "bg-muted text-muted-foreground" }
     : isExpired
-      ? { label: "EXPIRED", cls: "bg-primary/10 text-primary" }
+      ? { label: "EXPIRED", cls: "bg-muted text-foreground" }
       : { label: "OPEN", cls: "bg-success/10 text-success" };
 
   // ── Loading / error states ──────────────────────────────────────────────────
@@ -512,7 +505,7 @@ export default function ThesisDetailPage() {
         )}
 
         <div className="flex items-center gap-3 text-sm flex-wrap">
-          <span className="text-primary tracking-wide">
+          <span className="text-muted-foreground tracking-wide">
             {"★".repeat(thesis.conviction)}{"☆".repeat(5 - thesis.conviction)}
           </span>
           {thesis.catalyst && (

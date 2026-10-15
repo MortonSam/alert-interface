@@ -9,8 +9,8 @@ const read = (p: string) => readFileSync(join(__dirname, "../..", p), "utf8");
 
 describe("ticker page times are on the market clock", () => {
   it("Ivy's Read price time is Eastern with its date and ET, whatever the browser's zone", () => {
-    expect(fmtTimestamp("2026-10-08T20:00:00+00:00")).toBe("Oct 8, 4:00 PM ET");
-    expect(fmtTimestamp("chain as of 2026-09-18")).toBeNull();
+    expect(fmtTimestamp("2026-10-08T20:00:00+00:00")).toBe("Oct 8, 2026, 4:00 PM ET");
+    expect(fmtTimestamp("chain as of Sep 18, 2026")).toBeNull();
   });
 
   it("no time on the ticker page is formatted without the New York zone", () => {

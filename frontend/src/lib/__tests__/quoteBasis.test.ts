@@ -16,8 +16,8 @@ describe("a quote names what its time marks", () => {
 
   it("a stored close is dated by its session and named a close; a last trade carries its date and time", () => {
     const closeAt = Date.UTC(2026, 9, 8, 20, 0) / 1000;                 // Oct 8, 4:00 PM New York
-    expect(quoteAsOf(closeAt, "close")).toBe("Oct 8, 4:00 PM ET close");
-    expect(quoteAsOf(closeAt, "last_trade")).toBe("Oct 8, 4:00 PM ET");
+    expect(quoteAsOf(closeAt, "close")).toBe("Oct 8, 2026, 4:00 PM ET close");
+    expect(quoteAsOf(closeAt, "last_trade")).toBe("Oct 8, 2026, 4:00 PM ET");
     expect(quoteAsOf(null, "close")).toBeNull();
   });
 });
