@@ -1817,7 +1817,8 @@ async def check_ai_api(session) -> CheckResult:
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     from app.services import ai_health as H
     from app.services.system_metadata_service import get_value
-    summary = H.health_summary(await get_value(session, H.FAILURES_KEY), await get_value(session, H.CHECK_KEY))
+    summary = H.health_summary(await get_value(session, H.FAILURES_KEY), await get_value(session, H.CHECK_KEY),
+                               serious_raw=await get_value(session, H.SERIOUS_KEY))
     check, serious = summary["key_check"], summary["last_billing_or_auth_failure"]
     rows = [f"{f['at']} {f['feature']}: {f['kind']} (status {f['status']}) {f['message'][:120]}" for f in _json.loads(await get_value(session, H.FAILURES_KEY) or "[]")[:10]]
     if check and check.get("ok") is False:

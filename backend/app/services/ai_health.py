@@ -6,6 +6,11 @@ balance, billing, spend limit), "auth" (an invalid or revoked key, a permission 
 system_metadata (FAILURES_KEY, newest first), is logged at ERROR, shows on /health (health_summary) and makes validate's
 ai_api check an ERROR the same night. The nightly also makes one tiny call (scripts/ai_key_check.py, CHECK_KEY) so a dead key
 is caught before a visitor finds it.
+
+A billing or auth failure raises the alarm on its first occurrence (ntfy, high priority, services/notify), not only at the nightly
+key check: the first one with none in the RECENT_HOURS before it sends one message, and the rest of that run of failures do not
+(on 2026-10-15 a usage limit failed 50 calls in a minute). The latest billing or auth failure is also kept on its own
+(SERIOUS_KEY), so a burst of other failures cannot push it out of the KEEP newest.
 """
 from __future__ import annotations
 
@@ -15,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 
 FAILURES_KEY = "ai_api_failures"     # system_metadata: [{at, feature, kind, status, message}], newest first
 CHECK_KEY = "ai_key_check"           # system_metadata: {at, ok, status, error, model}
+SERIOUS_KEY = "ai_api_last_serious"  # system_metadata: the latest billing or auth failure, one entry
+BILLING_WORDS = ("credit balance", "billing", "spend limit", "insufficient", "quota", "payment", "usage limits", "regain access")
 KEEP = 50
 RECENT_HOURS = 26                    # a billing or auth failure this recent is an ERROR in validate (one nightly cycle and change)
 CHECK_MODEL = "claude-haiku-4-5-20251001"   # the cheapest model, a few tokens
@@ -40,7 +47,7 @@ def classify(exc: BaseException) -> str:
     """Pure: "billing", "auth" or "other" for a failed API call."""
     status = getattr(exc, "status_code", None)
     text = str(exc).lower()
-    if any(w in text for w in ("credit balance", "billing", "spend limit", "insufficient", "quota", "payment")):
+    if any(w in text for w in BILLING_WORDS):
         return "billing"
     if status in (401, 403) or any(w in text for w in ("authentication", "invalid x-api-key", "invalid api key", "permission")):
         return "auth"
@@ -57,24 +64,52 @@ async def record_failure(method: str, exc: BaseException) -> dict:
     entry = {"at": datetime.now(timezone.utc).isoformat(), "feature": FEATURES.get(method, method), "method": method,
              "kind": classify(exc), "status": getattr(exc, "status_code", None), "message": _redacted(exc)}
     _log.error("Anthropic API call failed: %s (%s, status %s): %s", entry["feature"], entry["kind"], entry["status"], entry["message"])
+    first = False
     try:
         from app.database import ScriptSessionLocal
         from app.services.system_metadata_service import get_value, set_value
         async with ScriptSessionLocal() as s:
             old = json.loads(await get_value(s, FAILURES_KEY) or "[]")
             await set_value(s, FAILURES_KEY, json.dumps([entry] + old[: KEEP - 1]))
+            if entry["kind"] in SERIOUS:
+                first = is_first_serious(old, json.loads(await get_value(s, SERIOUS_KEY) or "null"), datetime.fromisoformat(entry["at"]))
+                await set_value(s, SERIOUS_KEY, json.dumps(entry))
             await s.commit()
     except Exception as e:                       # the record must never turn a failed call into a second failure
         _log.error("could not record the failed API call: %s", e)
+    if first:
+        try:
+            from app.services.notify import PRIORITY_HIGH, notify
+            await notify(*alarm_message(entry), PRIORITY_HIGH, ("rotating_light",))
+        except Exception as e:
+            _log.error("could not send the AI API alarm: %s", e)
     return entry
 
 
-def health_summary(failures_raw: str | None, check_raw: str | None, now: datetime | None = None) -> dict:
-    """Pure: what /health shows: the latest key check and the latest billing or auth failure, and whether one is recent."""
+SERIOUS = ("billing", "auth")
+
+
+def is_first_serious(failures: list[dict], last_serious: dict | None, now: datetime) -> bool:
+    """Pure: no billing or auth failure in the RECENT_HOURS before `now`, in the record or the separately kept latest one."""
+    seen = [f for f in failures if f.get("kind") in SERIOUS] + ([last_serious] if last_serious else [])
+    return not any(datetime.fromisoformat(f["at"]) >= now - timedelta(hours=RECENT_HOURS) for f in seen)
+
+
+def alarm_message(entry: dict) -> tuple[str, str]:
+    """Pure: the ntfy title and body for the first billing or auth failure."""
+    return (f"AI API {entry['kind']} failure", f"{entry['feature']} failed (status {entry['status']}): {entry['message'][:200]}\n"
+            "Every AI feature fails closed until this is fixed. Further failures of this kind in the next "
+            f"{RECENT_HOURS} hours send no message; see /health.")
+
+
+def health_summary(failures_raw: str | None, check_raw: str | None, now: datetime | None = None, serious_raw: str | None = None) -> dict:
+    """Pure: what /health shows: the latest key check and the latest billing or auth failure (from the record or SERIOUS_KEY,
+    whichever is newer), and whether one is recent."""
     now = now or datetime.now(timezone.utc)
     failures = json.loads(failures_raw or "[]")
     check = json.loads(check_raw or "null")
-    serious = next((f for f in failures if f.get("kind") in ("billing", "auth")), None)
+    candidates = [f for f in failures if f.get("kind") in SERIOUS][:1] + ([json.loads(serious_raw)] if serious_raw else [])
+    serious = max(candidates, key=lambda f: f["at"]) if candidates else None
     recent = bool(serious and datetime.fromisoformat(serious["at"]) >= now - timedelta(hours=RECENT_HOURS))
     return {"key_check": check, "last_billing_or_auth_failure": serious, "billing_or_auth_failure_recent": recent,
             "failures_last_day": sum(1 for f in failures if datetime.fromisoformat(f["at"]) >= now - timedelta(hours=24))}
