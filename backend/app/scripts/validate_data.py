@@ -1729,6 +1729,23 @@ async def check_live_quote_sanity(session) -> CheckResult:
     return CheckResult("live_quote_sanity", PASS, f"{len(quotes)} delayed quotes within {LIVE_SANITY_PCT:.0f}% of their last stored close")
 
 
+async def check_note_served_clean(session) -> CheckResult:
+    """ERROR when a complete research note, as a visitor is served it (services/note_valuation.served), still names a valuation multiple
+    while PE_ENABLED is off or states a market cap figure the Overview also states."""
+    from app.config import settings
+    from app.services.note_valuation import leaks, served
+    rows = (await session.execute(text("""SELECT t.symbol, n.structured_content, n.verification, n.content FROM research_notes n
+        JOIN tickers t ON t.id = n.ticker_id WHERE n.status = 'complete'"""))).all()
+    shown = bool(settings.pe_enabled)
+    bad = []
+    for r in rows:
+        sc, v, c = served(r.structured_content, r.verification, r.content, shown)
+        bad += [f"{r.symbol}: {x}" for x in leaks(sc, v, c, shown)]
+    if bad:
+        return CheckResult("note_served_clean", ERROR, f"{len(bad)} served note passage(s) name a multiple or a market cap figure", bad[:20])
+    return CheckResult("note_served_clean", PASS, f"{len(rows)} complete notes served with no multiple{'' if not shown else ' check (P/E shown)'} and no market cap figure")
+
+
 async def check_live_api_budget(session) -> CheckResult:
     """WARN when the live layer's calls at full load would use more than BUDGET_WARN_SHARE of Intrinio's per-minute limit."""
     from app.services import live_data
@@ -3653,6 +3670,7 @@ CHECKS = [
     check_live_quote_age,
     check_live_quote_sanity,
     check_live_api_budget,
+    check_note_served_clean,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard
