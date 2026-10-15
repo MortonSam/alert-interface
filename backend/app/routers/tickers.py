@@ -667,13 +667,18 @@ async def get_ticker_chart(
             )
             .order_by(HistoricalReaction.event_date)
         )
+        from app.services.beat_counts import served_outcome
+        from app.services.licensed_estimates import YearAgo, licensed
+        est_ok = licensed()                     # LICENSED_ESTIMATES off: no estimate, actual or outcome; the year-ago line instead
+        year_ago = None if est_ok else await YearAgo.load(db, sym)
         for r in (await db.execute(r_q)).scalars().all():
             if r.event_date.isoformat() >= min_date:
                 markers.append(EarningsMarker(
                     date=r.event_date.isoformat(),
-                    eps_estimate=float(r.eps_estimate) if r.eps_estimate is not None else None,
-                    eps_actual=float(r.eps_actual) if r.eps_actual is not None else None,
-                    outcome=r.outcome.value if hasattr(r.outcome, "value") else str(r.outcome),
+                    eps_estimate=float(r.eps_estimate) if est_ok and r.eps_estimate is not None else None,
+                    eps_actual=float(r.eps_actual) if est_ok and r.eps_actual is not None else None,
+                    outcome=served_outcome(r.outcome, r.eps_actual) if est_ok else "unknown",
+                    eps_line=None if est_ok else year_ago.for_report(r.event_date)["eps_line"],
                     pct_change_1d=float(r.pct_change_1d) if r.pct_change_1d is not None else None,
                     pct_change_3d=float(r.pct_change_3d) if r.pct_change_3d is not None else None,
                     pct_change_5d=float(r.pct_change_5d) if r.pct_change_5d is not None else None,
@@ -700,7 +705,9 @@ async def get_ticker_chart(
     if not hist.ok:
         print(f"[chart] {sym}: history={hist.state} ({hist.detail})", flush=True)
 
+    from app.services.licensed_estimates import licensed as _licensed
     return TickerChartRead(
+        licensed_estimates=_licensed(),
         price_history_excluded=excluded_reason is not None,
         exclusion_reason=excluded_reason,
         symbol=sym, period=period,

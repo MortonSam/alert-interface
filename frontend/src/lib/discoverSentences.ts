@@ -1,3 +1,4 @@
+import { estimatesShown } from "@/lib/licensedEstimates";
 import { fmtIsoDateTime } from "@/lib/freshness";
 /**
  * The one sentence under each Discover row: why this stock is in this section.
@@ -116,8 +117,12 @@ export function fmtMove(pct: number): string {
 export function justReportedSentence(item: JustReportedItem): string {
   const move = item.insight
     ?? (item.pct_change_1d != null ? `moved ${fmtMove(item.pct_change_1d)} on the 1-day reaction` : null);
-  return join([OUTCOME_LEAD[item.outcome] ?? OUTCOME_LEAD.unknown, move, ivClause(item.vol_regime)]);
+  // LICENSED_ESTIMATES off (lib/licensedEstimates): the reported EPS against a year earlier leads, never a beat or miss
+  const lead = estimatesShown(item) ? (OUTCOME_LEAD[item.outcome] ?? OUTCOME_LEAD.unknown) : (item.eps_line ?? NO_SEC_EPS_LEAD);
+  return join([lead, move, ivClause(item.vol_regime)]);
 }
+
+export const NO_SEC_EPS_LEAD = "Reported, with no EPS figure from SEC filings yet";
 
 /** Suggestion score: the most distinctive stored stat, then the next earnings date and its level. */
 export function suggestionSentence(item: SuggestionItem, now: Date = new Date()): string {

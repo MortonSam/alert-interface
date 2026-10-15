@@ -110,6 +110,14 @@ def _stats_block(s: dict) -> str:
         reason = s.get("unavailable_reason")
         return f"(No earnings history available: {reason}.)" if reason else "(No earnings history available.)"
 
+    from app.services.licensed_estimates import licensed
+    if not licensed():          # LICENSED_ESTIMATES off: the moves only, no beat, miss or estimate
+        return f"""\
+PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount or recalculate):
+  1d move avg/max/min : {s['avg_1d']} / {s['max_1d']} / {s['min_1d']}  (n={s['total']})
+  3d move avg/max/min : {s['avg_3d']} / {s['max_3d']} / {s['min_3d']}
+  5d move avg/max/min : {s['avg_5d']} / {s['max_5d']} / {s['min_5d']}\
+"""
     return f"""\
 PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount or recalculate):
   Beat/miss/meet  : {s['beat_sentence']}
@@ -198,7 +206,8 @@ def _build_stats_object(
             2,
         )
 
-    return stats
+    from app.services.licensed_estimates import licensed, strip_fields
+    return stats if licensed() else strip_fields(stats)          # LICENSED_ESTIMATES off: no estimate-based stat is stored
 
 
 async def _fetch_financials(symbol: str) -> dict | None:
@@ -268,7 +277,12 @@ def _build_generation_prompt(
     stats["unavailable_reason"] = _UNAVAILABLE_REASON.get(ticker.symbol)
     stats_block = _stats_block(stats)
 
-    if reactions:
+    from app.services.licensed_estimates import licensed
+    if reactions and not licensed():        # LICENSED_ESTIMATES off: dates and moves only
+        rows = [f"| {r.event_date} | " + " | ".join(f"{float(v):+.1f}%" if v is not None else "N/A" for v in (r.pct_change_1d, r.pct_change_3d, r.pct_change_5d)) + " |"
+                for r in reactions]
+        table_block = "\n".join(["| Date       |  1d%    |  3d%    |  5d%    |", "|------------|---------|---------|---------|"] + rows)
+    elif reactions:
         rows = []
         for r in reactions:
             eps_est = f"${float(r.eps_estimate):.2f}" if r.eps_estimate else "N/A"
@@ -324,6 +338,7 @@ RULES:
 - "rating" MUST be exactly one of: "bullish", "neutral", "bearish". Base it on the overall picture from filings + earnings data.
 - 3-6 items in each of highlights, watch, and risks.
 - The precomputed statistics above are authoritative. Use those exact figures for any numerical claim about earnings history.
+- Never mention analyst estimates, consensus, beats, misses or surprises unless the statistics above list them.
 - Do NOT count, rank, or compute any statistics yourself from the table.
 - Do NOT make superlative claims ("strongest", "best ever", "largest") unless the precomputed stats unambiguously support them.
 - Only state facts about the business that appear in the filing excerpt or are well-established public knowledge.

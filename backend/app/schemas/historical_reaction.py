@@ -47,6 +47,15 @@ class HistoricalReactionRead(HistoricalReactionBase):
     report_timing: str | None = None        # bmo | amc | unknown
     basis_mismatch: bool = False            # eps_basis_checks: actual and estimate on different bases; outcome is absent
     outcome_reason: str | None = None       # why the outcome is absent, when it is (basis_exclusion.BASIS_UNCLEAR_REASON)
+    # LICENSED_ESTIMATES (services/licensed_estimates): off, the estimate, actual, surprise and outcome above are withheld and the
+    # report's quarter is compared with the same quarter a year earlier from SEC filings instead
+    licensed_estimates: bool = True
+    sec_eps: float | None = None            # GAAP diluted EPS for the quarter the report announced (eps_quarters)
+    sec_eps_period_end: str | None = None
+    year_ago_eps: float | None = None       # the same quarter a year earlier
+    year_ago_period_end: str | None = None
+    eps_change_pct: float | None = None     # None between a loss and a profit (the line says it in words)
+    eps_line: str | None = None             # "EPS $2.22, up 111.4% from $1.05 a year ago", or the plain absence
     # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
     # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day
     # prices, not the post-earnings reaction. Meaningful decomposition requires next-day OHLCV
@@ -63,13 +72,13 @@ class ReactionSummaryRead(BaseModel):
     symbol: str
     sector: str | None
     total_quarters: int
-    quarters_with_data: int = 0             # quarters with both an EPS estimate and an actual: the only ones a beat or miss can count in
-    quarters_without_data: int = 0          # the rest: "19 quarters have no estimate data" (services/beat_counts)
-    beat_count: int
-    miss_count: int
-    meet_count: int
-    beat_rate_pct: float
-    beat_but_dropped_count: int             # beats where T+1 was negative
+    quarters_with_data: int | None = 0             # quarters with both an EPS estimate and an actual: the only ones a beat or miss can count in
+    quarters_without_data: int | None = 0          # the rest: "19 quarters have no estimate data" (services/beat_counts)
+    beat_count: int | None
+    miss_count: int | None
+    meet_count: int | None
+    beat_rate_pct: float | None
+    beat_but_dropped_count: int | None             # beats where T+1 was negative
     beat_but_dropped_rate_pct: float | None # beat_but_dropped / beat_count × 100
     avg_1d_on_beat: float | None
     avg_1d_on_miss: float | None
@@ -85,21 +94,22 @@ class ReactionSummaryRead(BaseModel):
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
     exclusion_reason: str | None = None
     deal_note: str | None = None            # a pending cash deal pauses these figures (services/pending_deals): the visitor note
+    licensed_estimates: bool = True         # off: every count and average above that rests on an estimate is None
 
 
 class ConditionalEarningsRead(BaseModel):
     """Conditional earnings intelligence: how does this ticker move on beats vs misses?"""
     symbol: str
     total_quarters: int
-    quarters_with_data: int = 0              # quarters with both an EPS estimate and an actual (services/beat_counts)
-    quarters_without_data: int = 0
+    quarters_with_data: int | None = 0              # quarters with both an EPS estimate and an actual (services/beat_counts)
+    quarters_without_data: int | None = 0
     has_sufficient_history: bool             # total_quarters >= MIN_QUARTERS (8)
 
     # ── Outcome breakdown (beat + miss + meet + unknown == total_quarters) ───
-    beat_count: int
-    miss_count: int
-    meet_count: int
-    unknown_count: int
+    beat_count: int | None
+    miss_count: int | None
+    meet_count: int | None
+    unknown_count: int | None
     basis_excluded: int = 0                 # quarters left out of the counts above: EPS basis unclear
     basis_excluded_note: str | None = None
     price_history_excluded: bool = False    # the ticker is on the RV exclusion list; rows exist but are not shown
@@ -116,11 +126,11 @@ class ConditionalEarningsRead(BaseModel):
     # ── Follow-through: does the 1d move hold by day 5? ──────────────────────
     beat_avg_5d: float | None
     beat_continuation_rate_pct: float | None  # % of beats where sign(5d) == sign(1d)
-    beat_5d_sample: int                        # beats with non-null pct_change_5d
+    beat_5d_sample: int | None                        # beats with non-null pct_change_5d
 
     miss_avg_5d: float | None
     miss_continuation_rate_pct: float | None
-    miss_5d_sample: int
+    miss_5d_sample: int | None
 
     # ── Magnitude trend: last 4 prints vs prior 4 ───────────────────────────
     recent_avg_abs_1d: float | None            # last 4 prints avg |pct_change_1d|
@@ -129,6 +139,7 @@ class ConditionalEarningsRead(BaseModel):
     magnitude_trend_as_of: str | None = None   # the snapshot's own date
     magnitude_trend_labeled: LabelRule | None = None  # human-friendly label + rule
     last_event_date: str | None = None         # ISO date of most recent earnings in sample
+    licensed_estimates: bool = True            # off: every beat and miss figure above is None
 
 
 class SectorPeerItem(BaseModel):

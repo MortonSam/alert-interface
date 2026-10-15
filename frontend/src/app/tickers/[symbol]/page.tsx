@@ -40,6 +40,7 @@ import {
 } from "@/lib/api";
 import { OWNER_REGENERATES, isSignedIn } from "@/lib/session";
 import { cn, fmtMarketCap } from "@/lib/utils";
+import { estimatesShown, YEAR_AGO_COLUMN, YEAR_AGO_COLUMN_TIP } from "@/lib/licensedEstimates";
 import { fmtPnlPct } from "@/lib/pnl";
 import { fmtPct } from "./fmtPct";
 import { barCellStyle, legendEntries } from "./reactionChartEncoding";
@@ -292,8 +293,8 @@ function HistoryInsightsPanel({
       : null;
 
   const showSector = sectorVsOwn != null && s.avg_abs_1d != null && s.sector_avg_abs_1d != null;
-  const showBeatFollow = ce != null && ce.beat_continuation_rate_pct != null && ce.beat_5d_sample >= 3;
-  const showMissFollow = ce != null && ce.miss_continuation_rate_pct != null && ce.miss_5d_sample >= 3;
+  const showBeatFollow = ce != null && ce.beat_continuation_rate_pct != null && (ce.beat_5d_sample ?? 0) >= 3;
+  const showMissFollow = ce != null && ce.miss_continuation_rate_pct != null && (ce.miss_5d_sample ?? 0) >= 3;
   const showMagnitude = ce != null && ce.magnitude_trend != null && ce.recent_avg_abs_1d != null && ce.prior_avg_abs_1d != null;
 
   if (!showSector && !showBeatFollow && !showMissFollow && !showMagnitude) return null;
@@ -352,14 +353,14 @@ function HistoryInsightsPanel({
         <p className="text-xs text-muted-foreground">
           <ExplainTip term="continuation rate">Beats held direction through day 5</ExplainTip> in{" "}
           <span className="font-medium">{ce!.beat_continuation_rate_pct!.toFixed(0)}%</span> of cases
-          {" "}({Math.round(ce!.beat_continuation_rate_pct! / 100 * ce!.beat_5d_sample)} of {ce!.beat_5d_sample})
+          {" "}({Math.round(ce!.beat_continuation_rate_pct! / 100 * (ce!.beat_5d_sample ?? 0))} of {ce!.beat_5d_sample})
         </p>
       )}
       {showMissFollow && (
         <p className="text-xs text-muted-foreground">
           <ExplainTip term="continuation rate">Misses held direction through day 5</ExplainTip> in{" "}
           <span className="font-medium">{ce!.miss_continuation_rate_pct!.toFixed(0)}%</span> of cases
-          {" "}({Math.round(ce!.miss_continuation_rate_pct! / 100 * ce!.miss_5d_sample)} of {ce!.miss_5d_sample})
+          {" "}({Math.round(ce!.miss_continuation_rate_pct! / 100 * (ce!.miss_5d_sample ?? 0))} of {ce!.miss_5d_sample})
         </p>
       )}
       {showMagnitude && (
@@ -398,7 +399,9 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
       style={flipLeft ? { transform: "translateX(calc(-100% - 16px))" } : undefined}
     >
       <p className="font-medium">{formatEventDate(d.date)}</p>
-      {!isFed && <p className="capitalize text-muted-foreground">{d.outcome}</p>}
+      {!isFed && (d.epsLine !== undefined
+        ? <p className="text-muted-foreground">{d.epsLine ?? "No EPS figure from SEC filings for this report."}</p>
+        : <p className="capitalize text-muted-foreground">{d.outcome}</p>)}
       {!isFed && d.epsActual != null && d.epsEstimate != null && (
         <p><Explained text="EPS $" />{parseFloat(d.epsActual).toFixed(2)} vs est ${parseFloat(d.epsEstimate).toFixed(2)}</p>
       )}
@@ -420,6 +423,7 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
 
 function ReactionChart({ reactions, mode = "earnings" }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed" }) {
   const isFed = mode === "fed";
+  const noOutcome = isFed || (reactions.length > 0 && !estimatesShown(reactions[0]));   // estimates off: direction only, as on Fed days
   const data = useMemo(() => {
     const chronological = [...reactions].sort((a, b) => a.event_date.localeCompare(b.event_date));
     const recent = chronological.slice(-20);
@@ -431,6 +435,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
       epsEstimate: r.eps_estimate,
       epsActual: r.eps_actual,
       epsSurprise: r.eps_surprise_pct,
+      ...(estimatesShown(r) ? {} : { epsLine: r.eps_line ?? null }),   // estimates off: the year-ago line in place of the outcome
     }));
   }, [reactions]);
 
@@ -473,13 +478,13 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
           <Tooltip content={<ReactionChartTooltip mode={mode} />} />
           <Bar dataKey="pct1d" radius={[2, 2, 0, 0]}>
             {data.map((entry, i) => {
-              const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, entry.outcome, isFed);
+              const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, entry.outcome, noOutcome);
               return <Cell key={i} {...cell} />;
             })}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <EncodingLegend items={legendEntries(isFed)} className="mt-1" />
+      <EncodingLegend items={legendEntries(noOutcome)} className="mt-1" />
     </div>
   );
 }
@@ -585,7 +590,7 @@ function DistributionPanel({ rows, filter, mode = "earnings" }: { rows: Historic
         <span className="text-xs font-mono uppercase tracking-wide text-muted-foreground">Distribution</span>
         <span className="text-xs text-muted-foreground">Based on {filterLabel}</span>
       </div>
-      {mode === "earnings" && (
+      {mode === "earnings" && (rows.length === 0 || estimatesShown(rows[0])) && (
         <p className="text-xs text-muted-foreground italic mb-3">
           <Explained text="Stats below show stock price moves, not EPS surprise magnitude." />
         </p>
@@ -721,6 +726,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
   ];
 
   const isFed = mode === "fed";
+  const est = reactions.length === 0 || estimatesShown(reactions[0]);    // LICENSED_ESTIMATES off: the year-ago line, no outcome
 
   return (
     <div className="space-y-3">
@@ -737,8 +743,8 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
 
       {!collapsed && (
         <>
-          {/* Filter pills — hidden for fed mode (no outcome data) */}
-          {!isFed && (
+          {/* Filter pills — hidden for fed mode (no outcome data) and with estimates off */}
+          {!isFed && est && (
             <div className="flex flex-wrap gap-2">
               {PILLS.map(({ key, label }) => (
                 <button
@@ -766,9 +772,9 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                     {!isFed && (
                       <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
                         <span className="inline-flex items-center gap-1">
-                          Outcome
+                          {est ? "Outcome" : YEAR_AGO_COLUMN}
                           <span
-                            title="Beat, Miss or Meet is the reported EPS against the analyst estimate, with the surprise printed beside it. The stock's move is in the 1d, 3d and 5d columns, not here."
+                            title={est ? "Beat, Miss or Meet is the reported EPS against the analyst estimate, with the surprise printed beside it. The stock's move is in the 1d, 3d and 5d columns, not here." : YEAR_AGO_COLUMN_TIP}
                             className="cursor-help opacity-60 hover:opacity-100 transition-opacity"
                           >
                             ⓘ
@@ -805,7 +811,10 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                             </span>
                           )}
                         </td>
-                        {!isFed && (
+                        {!isFed && !est && (
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{r.eps_line ?? "—"}</td>
+                        )}
+                        {!isFed && est && (
                           <td className="px-3 py-2.5">
                             <span className="inline-flex items-center gap-1.5 flex-wrap">
                               <OutcomeBadge outcome={r.outcome} reason={r.outcome_reason} />
@@ -1004,8 +1013,9 @@ function PriceChartTooltip({
       {marker && (
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 mt-1 space-y-0.5">
           <p style={{ color: earningsMarkerColor(marker.outcome) }} className="font-medium capitalize">
-            {marker.outcome === "unknown" ? "Earnings" : `Earnings ${marker.outcome}`}
+            {marker.outcome === "unknown" || marker.outcome === "no_reported_figure" ? "Earnings" : `Earnings ${marker.outcome}`}
           </p>
+          {marker.eps_line && <p className="text-zinc-500 dark:text-zinc-400">{marker.eps_line}</p>}
           {marker.eps_estimate != null && marker.eps_actual != null && (
             <p className="text-zinc-500 dark:text-zinc-400">
               <Explained text="EPS: " />{marker.eps_actual.toFixed(2)} vs {marker.eps_estimate.toFixed(2)} est.
@@ -1229,8 +1239,8 @@ function PriceChart({
             )}
             {earningsMarkers.length > 0 && (
               <span className="flex items-center gap-1.5">
-                <Explained text="Earnings dates, colored by EPS outcome:" />
-                <EncodingLegend items={earningsMarkerLegend()} />
+                <Explained text={estimatesShown(chartData) ? "Earnings dates, colored by EPS outcome:" : "Earnings dates:"} />
+                <EncodingLegend items={earningsMarkerLegend(estimatesShown(chartData))} />
               </span>
             )}
           </div>
@@ -2113,10 +2123,10 @@ export default function TickerPage() {
                   </div>
                 </div>
 
-                {showContextStrip && (() => {
+                {showContextStrip && estimatesShown(conditionalEarnings) && (() => {
                   const ce = conditionalEarnings!;
-                  const beatHasAvg = ce.beat_count >= 3 && ce.avg_1d_on_beat != null;
-                  const missHasAvg = ce.miss_count >= 3 && ce.avg_1d_on_miss != null;
+                  const beatHasAvg = (ce.beat_count ?? 0) >= 3 && ce.avg_1d_on_beat != null;
+                  const missHasAvg = (ce.miss_count ?? 0) >= 3 && ce.avg_1d_on_miss != null;
                   return (
                     <div className="mt-3 pt-3 border-t">
                       {reactionSummary?.mixed_versions && (
@@ -2163,7 +2173,7 @@ export default function TickerPage() {
                           )}
                         </div>
                       </div>
-                      {pricingNote && reactionSummary!.beat_count >= 3 && (
+                      {pricingNote && (reactionSummary!.beat_count ?? 0) >= 3 && (
                         <p className="text-xs mt-2 text-muted-foreground">
                           <Explained text="Stock fell on its 1-day reaction in " />{reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
                           {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.

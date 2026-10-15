@@ -132,6 +132,14 @@ export interface HistoricalReaction {
   eps_surprise_display_pct?: number | null; // capped at +/- EPS_SURPRISE_PCT_CAP
   eps_surprise_capped?: boolean;
   report_timing: string | null;    // bmo | amc | unknown
+  // LICENSED_ESTIMATES off (lib/licensedEstimates): the estimate fields above are null and the quarter is set against a year earlier
+  licensed_estimates?: boolean;
+  sec_eps?: number | null;
+  sec_eps_period_end?: string | null;
+  year_ago_eps?: number | null;
+  year_ago_period_end?: string | null;
+  eps_change_pct?: number | null;
+  eps_line?: string | null;        // "EPS $2.22, up 111.4% from $1.05 a year ago", or the plain absence
 }
 
 export interface LabelRule {
@@ -145,11 +153,11 @@ export interface ReactionSummary {
   total_quarters: number;
   quarters_with_data?: number;      // quarters with both an EPS estimate and an actual: the only ones a beat or miss counts in
   quarters_without_data?: number;   // the rest: "19 quarters have no estimate data"
-  beat_count: number;
-  miss_count: number;
-  meet_count: number;
-  beat_rate_pct: number;
-  beat_but_dropped_count: number;
+  beat_count: number | null;           // null with LICENSED_ESTIMATES off, as is every beat or miss figure below
+  miss_count: number | null;
+  meet_count: number | null;
+  beat_rate_pct: number | null;
+  beat_but_dropped_count: number | null;
   beat_but_dropped_rate_pct: number | null;
   avg_1d_on_beat: number | null;
   avg_1d_on_miss: number | null;
@@ -165,6 +173,7 @@ export interface ReactionSummary {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  licensed_estimates?: boolean;       // false: every beat and miss figure above is null (lib/licensedEstimates)
   bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
   bars_through?: string | null;       // the newest bar's own time (ISO with offset)
   delay_minutes?: number | null;      // the source's stated delay, rendered by the page
@@ -208,10 +217,10 @@ export interface ConditionalEarningsRead {
   quarters_with_data?: number;
   quarters_without_data?: number;
   has_sufficient_history: boolean;
-  beat_count: number;
-  miss_count: number;
-  meet_count: number;
-  unknown_count: number;
+  beat_count: number | null;          // null with LICENSED_ESTIMATES off, as is every beat or miss figure below
+  miss_count: number | null;
+  meet_count: number | null;
+  unknown_count: number | null;
   basis_excluded?: number;
   basis_excluded_note?: string | null;
   avg_1d_on_beat: number | null;
@@ -220,10 +229,10 @@ export interface ConditionalEarningsRead {
   median_1d_on_miss: number | null;
   beat_avg_5d: number | null;
   beat_continuation_rate_pct: number | null;
-  beat_5d_sample: number;
+  beat_5d_sample: number | null;
   miss_avg_5d: number | null;
   miss_continuation_rate_pct: number | null;
-  miss_5d_sample: number;
+  miss_5d_sample: number | null;
   recent_avg_abs_1d: number | null;
   prior_avg_abs_1d: number | null;
   magnitude_trend: string | null;
@@ -233,6 +242,7 @@ export interface ConditionalEarningsRead {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  licensed_estimates?: boolean;       // false: every beat and miss figure above is null (lib/licensedEstimates)
 }
 
 export interface AnalystReactionStatsRead {
@@ -400,11 +410,12 @@ export interface EarningsMarker {
   date: string;
   eps_estimate: number | null;
   eps_actual: number | null;
-  outcome: "beat" | "miss" | "meet" | "unknown";
+  outcome: "beat" | "miss" | "meet" | "unknown" | "no_reported_figure";
   pct_change_1d: number | null;
   pct_change_3d: number | null;
   pct_change_5d: number | null;
   report_timing: string | null;
+  eps_line?: string | null;        // LICENSED_ESTIMATES off: the quarter's EPS against a year earlier
 }
 
 export interface TickerChart {
@@ -419,6 +430,7 @@ export interface TickerChart {
   price_history_excluded?: boolean;    // rows exist but the ticker is on the RV exclusion list; nothing is shown
   exclusion_reason?: string | null;
   deal_note?: string | null;          // a pending cash deal pauses these figures: the visitor note
+  licensed_estimates?: boolean;       // false: the markers carry no estimate, actual or outcome, and eps_line instead (lib/licensedEstimates)
   bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
   bars_through?: string | null;       // the newest bar's own time (ISO with offset)
   delay_minutes?: number | null;      // the source's stated delay, rendered by the page
@@ -612,6 +624,8 @@ export interface JustReportedItem {
   outcome: EarningsOutcome;
   insight: string | null;
   vol_regime: string | null;
+  eps_line?: string | null;        // LICENSED_ESTIMATES off: the reported EPS against the same quarter a year earlier
+  licensed_estimates?: boolean;
 }
 
 export interface JustReportedResponse {
@@ -901,6 +915,7 @@ export interface ThesisDraftRead {
     implied_range_high: number | null;
     hist_avg_abs_move_pct: number | null;  // percentage, e.g. 2.74
     basis_excluded_note?: string | null;   // quarters left out of beat_rate_pct: EPS basis unclear
+    licensed_estimates?: boolean;          // false: beat_rate_pct and every beat or miss figure are withheld (lib/licensedEstimates)
     hist_max_abs_move_pct: number | null;
     hist_sample_size: number;
     beat_rate_pct: number | null;

@@ -145,7 +145,12 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     from app.config import settings
     # one verdict per claim is the truth: the stored verification is served normalized, its summary recounted from the claims
     data = {name: getattr(note, name) for name in ResearchNoteRead.model_fields if hasattr(note, name)}
-    data["verification"] = normalize_verification(getattr(note, "verification", None))
+    raw_verification = getattr(note, "verification", None)
+    from app.services.licensed_estimates import filter_note, licensed, mentions_estimates
+    if not licensed():          # LICENSED_ESTIMATES off: no point, claim, line or stat that rests on an estimate
+        data["structured_content"], raw_verification = filter_note(data.get("structured_content"), raw_verification)
+        data["content"] = "\n".join(line for line in (data.get("content") or "").split("\n") if not mentions_estimates(line))
+    data["verification"] = normalize_verification(raw_verification)
     data["valuation_shown"] = bool(settings.pe_enabled)
     read = ResearchNoteRead.model_validate(data)
     if admin:
@@ -199,11 +204,15 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     if row is None:
         raise HTTPException(status_code=404, detail="No current verified research note")
     note, symbol, name = row
-    sc = note.structured_content or {}
+    sc, ver = note.structured_content or {}, note.verification
+    from app.services.licensed_estimates import filter_note, licensed
+    if not licensed():          # LICENSED_ESTIMATES off: no estimate-based point, claim or stat
+        sc, ver = filter_note(sc, ver)
+        sc = sc or {}
     return LatestVerifiedNoteRead(
         symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
         rating=sc.get("rating"), stats=sc.get("stats"), highlights=list(sc.get("highlights") or [])[:2],
-        verification_summary=(normalize_verification(note.verification) or {}).get("summary"),    # counted from the claims, never the stored totals
+        verification_summary=(normalize_verification(ver) or {}).get("summary"),    # counted from the claims, never the stored totals
     )
 
 
