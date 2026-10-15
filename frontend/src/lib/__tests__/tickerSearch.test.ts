@@ -45,7 +45,7 @@ describe("one ticker matcher for every search box", () => {
     const box = read("components/TickerSearch.tsx");
     expect(box).toContain('className="hidden sm:block ml-auto w-56"');
     expect(box).toMatch(/className="(?:tap )?sm:hidden ml-auto[^"]*"\s+data-testid="header-search-toggle"/);
-    expect(box).toContain('<div className="sm:hidden basis-full pb-1">');
+    expect(box).toContain('<div className="sm:hidden basis-full order-3 pb-1">');
     expect(box).not.toMatch(/HomeTickerSearch|HOME_SEARCH_LABEL|autoFocus === "desktop"/);
     const home = read("app/page.tsx");
     expect(home).not.toMatch(/HomeTickerSearch|<SearchBox|Look up a stock/);

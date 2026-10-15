@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NoLongerTrades, longDate } from "@/components/ticker/NoLongerTrades";
 
 const EA = { symbol: "EA", name: "Electronic Arts Inc." };
-const LINE = "Electronic Arts was taken private on August 4, 2026, and its stock no longer trades.";
+const LINE = "Electronic Arts was taken private on Aug 4, 2026, and its stock no longer trades.";
 
 describe("NoLongerTrades", () => {
   it("shows the line and no close when none is stored", () => {
@@ -19,12 +19,12 @@ describe("NoLongerTrades", () => {
 
   it("shows the last stored close with its own date when one is stored", () => {
     const html = renderToStaticMarkup(<NoLongerTrades ticker={EA} exit={{ kind: "taken_private", line: LINE, since: "2026-08-04", last_close: 197.5, last_close_date: "2026-08-04" }} />);
-    expect(html).toContain("Last stored close $197.50 on August 4, 2026");
+    expect(html).toContain("Last stored close $197.50 on Aug 4, 2026");
   });
 
   it("reads a date from its own parts", () => {
-    expect(longDate("2026-08-04")).toBe("August 4, 2026");
-    expect(longDate("2026-01-01")).toBe("January 1, 2026");
+    expect(longDate("2026-08-04")).toBe("Aug 4, 2026");
+    expect(longDate("2026-01-01")).toBe("Jan 1, 2026");
   });
 
   it("the ticker page returns this view before the trade builder, market value, earnings line or question strip", () => {

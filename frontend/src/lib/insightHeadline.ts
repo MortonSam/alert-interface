@@ -1,4 +1,5 @@
 /** The overview headline block's own lines, rendered from the API's insight response and nothing typed by hand. */
+import { fmtDate } from "@/lib/dates";
 
 export const COMPUTED_HOW_PREFIX = "How this was computed: ";
 
@@ -11,9 +12,8 @@ export interface InsightView {
 /** "As of Sep 24, 2026" from the stat's own ISO date; null when the response carries none. */
 export function insightAsOfLine(asOf: string | null | undefined): string | null {
   if (!asOf) return null;
-  const d = new Date(`${asOf.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return null;
-  return `As of ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}`;
+  const on = fmtDate(asOf.slice(0, 10));
+  return on ? `As of ${on}` : null;
 }
 
 export function computedHowLine(rule: string | null | undefined): string | null {

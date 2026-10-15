@@ -22,7 +22,7 @@ describe("the briefing renders the API's sentences and receipts, nothing typed",
     expect(sentenceReceipt(S[0])).toEqual({ what: "What's been happening", asOf: "As of Oct 5, 2026", how: "How this was computed: Next report from the stored earnings calendar." });
     expect(sentenceReceipt({ ...S[1], rule: "", as_of: null })).toEqual({ what: "What it is", asOf: null, how: null });
     expect(sourceLine(S[0].inputs[0])).toBe("next earnings date: Oct 14, 2026 (As of Oct 14, 2026; finnhub)");
-    expect(sourceLine({ name: "quote time", value: "Oct 5, 4:00 PM ET", as_of: "Oct 5, 4:00 PM ET", source: "last trade" })).toBe("quote time: Oct 5, 4:00 PM ET (Oct 5, 4:00 PM ET; last trade)");
+    expect(sourceLine({ name: "quote time", value: "Oct 5, 2025, 4:00 PM ET", as_of: "Oct 5, 2025, 4:00 PM ET", source: "last trade" })).toBe("quote time: Oct 5, 2025, 4:00 PM ET (Oct 5, 2025, 4:00 PM ET; last trade)");
     expect(sourceLine({ name: "days away", value: "9", as_of: null, source: null })).toBe("days away: 9");
     expect(hasBriefing({ symbol: "MU", name: null, sentences: S })).toBe(true);
     expect(hasBriefing({ symbol: "MU", name: null, sentences: [] })).toBe(false);

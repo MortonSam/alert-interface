@@ -55,10 +55,10 @@ def fmt_date(d: date | None) -> str | None:
 
 
 def fmt_quote_time(ts: int | None) -> str | None:
-    """"Oct 5, 4:00 PM ET" from a Unix last-trade time, on the New York clock."""
+    """"Oct 5, 2026, 4:00 PM ET" from a Unix last-trade time, on the New York clock: the site's one time format (frontend DESIGN.md)."""
     if not ts:
         return None
-    return datetime.fromtimestamp(int(ts), NY).strftime("%b %-d, %-I:%M %p ET")
+    return datetime.fromtimestamp(int(ts), NY).strftime("%b %-d, %Y, %-I:%M %p ET")
 
 
 def fmt_money(x: float | None) -> str | None:

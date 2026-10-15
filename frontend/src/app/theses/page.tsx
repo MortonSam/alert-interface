@@ -8,6 +8,7 @@ import { fmtTimestamp, markBasisLabel, optionsAsOfLabel } from "@/lib/marks";
 import { fmtPnlPct } from "@/lib/pnl";
 import SignedOutNotice from "@/components/SignedOutNotice";
 import { SIGN_IN_PROMPT, isSignedIn, myTradesView } from "@/lib/session";
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 import {
   api,
   ApiError,
@@ -47,16 +48,10 @@ function fmtPrice(v: string | null | undefined): string {
 }
 
 function fmtDate(v: string): string {
-  const [y, m, d] = v.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-  });
+  return fmtOneDate(v.slice(0, 10)) ?? v;
 }
 
-function fmtDateShort(v: string): string {
-  const [y, m, d] = v.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
+const fmtDateShort = fmtDate;     // one date format (DESIGN.md)
 
 function pctChange(entry: string | null, resolution: string | null): string {
   if (!entry || !resolution) return "";
@@ -435,7 +430,7 @@ function ThesisCard({
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <Link href={`/tickers/${thesis.ticker_symbol}`} className="font-semibold hover:underline">
+          <Link href={`/tickers/${thesis.ticker_symbol}`} className="font-semibold">
             {thesis.ticker_symbol ?? "n/a"}
           </Link>
           <span className={`text-sm font-medium capitalize ${DIRECTION_COLOR[thesis.direction]}`}>
@@ -448,12 +443,12 @@ function ThesisCard({
             </span>
           )}
           {needsManual && (
-            <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">
               Needs manual resolution
             </span>
           )}
           {thesis.from_ai_draft && (
-            <span className="text-xs bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded">
+            <span className="text-xs bg-muted text-foreground border border-border px-1.5 py-0.5 rounded">
               Ivy
             </span>
           )}
@@ -875,7 +870,7 @@ export default function ThesesPage() {
       <main className="sm:min-h-screen p-4 sm:p-8">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-start justify-between mb-6">
-            <h1 className="text-2xl font-display font-bold tracking-tight">My Trades</h1>
+            <h1 className="text-display font-display font-bold">My Trades</h1>
             <Link href="/" className="tap text-sm text-muted-foreground hover:text-foreground">
               ← Home
             </Link>
@@ -895,7 +890,7 @@ export default function ThesesPage() {
       <div className="max-w-3xl mx-auto">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-display font-bold tracking-tight">My Trades</h1>
+            <h1 className="text-display font-display font-bold">My Trades</h1>
             <p className="text-muted-foreground text-sm mt-0.5">
               {openCount} open{dueCount > 0 ? ` · ${dueCount} due for resolution` : ""}
             </p>

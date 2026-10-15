@@ -1,3 +1,4 @@
+import { fmtDate as fmtOneDate } from "@/lib/dates";
 // ── Plain-English reasoning builder (deterministic, no LLM) ──────────────────
 
 export function buildPlainEnglish(opts: {
@@ -19,7 +20,7 @@ export function buildPlainEnglish(opts: {
 
   const $w = (n: number) => `$${Math.round(n)}`;                 // whole-dollar
   const $d = (n: number) => `$${n.toFixed(2)}`;                  // 2-decimal
-  const exp = expiration ? ` at expiration on ${expiration}` : " at expiration";
+  const exp = expiration ? ` at expiration on ${fmtOneDate(expiration) ?? expiration}` : " at expiration";
   const sentences: string[] = [];
 
   if (isSpread && direction === "bullish") {

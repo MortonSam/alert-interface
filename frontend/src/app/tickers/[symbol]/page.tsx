@@ -60,6 +60,7 @@ import StructuredNoteView from "@/components/StructuredNoteView";
 // Extracted components
 import ExplainTip from "@/components/ticker/ExplainTip";
 
+import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 // ── Date / number helpers ─────────────────────────────────────────────────────
 
 const TODAY = (() => {
@@ -67,20 +68,15 @@ const TODAY = (() => {
   d.setHours(0, 0, 0, 0);
   return d;
 })();
-const CURRENT_YEAR = TODAY.getFullYear();
 
 const formatMarketCap = (n: number) => fmtMarketCap(n);
 
 function formatEventDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  const mon = d.toLocaleString("en-US", { month: "short" });
-  const day = d.getDate();
-  return d.getFullYear() === CURRENT_YEAR ? `${mon} ${day}` : `${mon} ${day}, ${d.getFullYear()}`;
+  return fmtOneDate(iso.slice(0, 10)) ?? iso;
 }
 
 function fmtBasisDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  return fmtOneDate(iso.slice(0, 10)) ?? iso;
 }
 
 function daysFromToday(iso: string): number {
@@ -125,11 +121,11 @@ const EVENT_STYLES: Record<EventType, { label: string; cls: string }> = {
   macro:          { label: "Macro",          cls: "bg-violet/10 text-violet" },
   fda:            { label: "FDA",            cls: "bg-success/10 text-success" },
   ex_dividend:    { label: "Ex-Div",         cls: "bg-secondary text-muted-foreground" },
-  product_launch: { label: "Launch",         cls: "bg-primary/10 text-primary" },
+  product_launch: { label: "Launch",         cls: "bg-muted text-foreground" },
   fomc:           { label: "FOMC",           cls: "bg-violet/10 text-violet" },
-  split:          { label: "Split",          cls: "bg-orange-500/10 text-orange-500" },
+  split:          { label: "Split",          cls: "bg-muted text-foreground" },
   analyst_action: { label: "Analyst",       cls: "bg-sky-500/10 text-sky-500" },
-  spin_off:       { label: "Spin-off",       cls: "bg-orange-500/10 text-orange-500" },
+  spin_off:       { label: "Spin-off",       cls: "bg-muted text-foreground" },
   other:          { label: "Other",          cls: "bg-muted text-muted-foreground" },
 };
 
@@ -163,7 +159,7 @@ function OutcomeBadge({ outcome, reason }: { outcome: EarningsOutcome; reason?: 
 function DaysBadge({ days }: { days: number }) {
   const label = days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
   const cls =
-    days <= 7   ? "bg-primary/10 text-primary"
+    days <= 7   ? "bg-muted text-foreground"
     : days <= 30 ? "bg-amber-500/10 text-amber-500"
     : "bg-muted text-muted-foreground";
   return (
@@ -330,7 +326,7 @@ function HistoryInsightsPanel({
                       {sectorPeers.peers.map(p => {
                         const isOwn = p.symbol === s.symbol;
                         return (
-                          <tr key={p.symbol} className={isOwn ? "bg-primary/5 font-medium" : ""}>
+                          <tr key={p.symbol} className={isOwn ? "bg-muted font-medium" : ""}>
                             <td className="py-1 pr-3 text-xs">{p.symbol}</td>
                             <td className="py-1 pr-3 text-right tabular-nums">±{p.avg_abs_1d.toFixed(2)}%</td>
                             <td className="py-1 text-right tabular-nums">{p.quarter_count}</td>
@@ -864,9 +860,9 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
 // ── Verification panel ────────────────────────────────────────────────────────
 
 const CLAIM_STYLES: Record<VerificationClaim["verdict"], { dot: string; badge: string; label: string }> = {
-  supported:    { dot: "bg-success",      badge: "bg-success/10 text-success",           label: "Supported" },
-  unsupported:  { dot: "bg-amber-500",    badge: "bg-amber-500/10 text-amber-500",      label: "Unsupported" },
-  contradicted: { dot: "bg-destructive",  badge: "bg-destructive/10 text-destructive",  label: "Contradicted" },
+  supported:    { dot: "bg-foreground",        badge: "bg-foreground/10 text-foreground",           label: "Supported" },
+  unsupported:  { dot: "bg-muted-foreground",  badge: "bg-muted text-muted-foreground",             label: "Unsupported" },
+  contradicted: { dot: "bg-amber-500",         badge: "bg-amber-500/10 text-amber-500",             label: "Contradicted" },
 };
 
 function VerificationPanel({
@@ -893,10 +889,10 @@ function VerificationPanel({
         className="w-full flex items-center justify-between px-6 py-3 text-xs hover:bg-muted/30 transition-colors"
       >
         <span className="flex items-center gap-3 font-medium">
-          <span className="text-green-600 dark:text-green-400">✓ {supported} supported</span>
-          <span className="text-amber-600 dark:text-amber-400">⚠ {unsupported} unsupported</span>
+          <span className="text-foreground">✓ {supported} supported</span>
+          <span className="text-muted-foreground">⚠ {unsupported} unsupported</span>
           {contradicted > 0
-            ? <span className="text-red-600 dark:text-red-400">✗ {contradicted} contradicted</span>
+            ? <span className="text-amber-600 dark:text-amber-400">✗ {contradicted} contradicted</span>
             : <span className="text-muted-foreground">✗ 0 contradicted</span>
           }
           <span className="text-muted-foreground font-normal">
@@ -945,9 +941,9 @@ function SourceFilingsRow({ filings }: { filings: ResearchNote["source_filings"]
             href={f.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="tap text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+            className="tap text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            {f.form_type} · {f.filing_date}
+            {f.form_type} · {fmtOneDate(f.filing_date) ?? f.filing_date}
           </a>
         ))}
       </div>
@@ -1147,11 +1143,11 @@ function PriceChart({
                   if (!pt) return "";
                   if (period === "1d") {
                     const d = new Date(pt.date);
-                    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+                    return axisTime(d);
                   }
                   return pt.date.slice(5, 10);
                 }
-                return new Date(val as number).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                return axisDay(val as number);
               }}
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               axisLine={false}
@@ -1220,7 +1216,7 @@ function PriceChart({
       )}
         {!isIntraday && (earningsMarkers.length > 0 || (impliedRangeLow != null && impliedRangeHigh != null) || chartLastBar) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[10px] text-muted-foreground px-1">
-            {chartLastBar && <span>Last bar {chartLastBar}</span>}
+            {chartLastBar && <span>Last bar {fmtOneDate(chartLastBar) ?? chartLastBar}</span>}
             {impliedRangeLow != null && impliedRangeHigh != null && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
@@ -1876,7 +1872,7 @@ export default function TickerPage() {
         {/* Header */}
           <div id="overview" className="mt-6 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-5xl font-bold font-display tracking-tight">{ticker.symbol}</h1>
+              <h1 className="text-display font-bold font-display">{ticker.symbol}</h1>
               {ticker.name && (
                 <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
               )}
@@ -2441,7 +2437,7 @@ export default function TickerPage() {
               <div className="mb-8">
                 {facts.source === "read" && pricedAt && (
                   <p className="text-[11px] font-mono text-muted-foreground/70 mb-2">
-                    From Ivy&apos;s Read: {pricedAt}{facts.chain_date ? ` · options data as of ${facts.chain_date}` : ""}
+                    From Ivy&apos;s Read: {pricedAt}{facts.chain_date ? ` · options data as of ${fmtOneDate(facts.chain_date) ?? facts.chain_date}` : ""}
                   </p>
                 )}
                 {drift && <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">{drift}</p>}
@@ -2557,7 +2553,7 @@ export default function TickerPage() {
                   </span>
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {rvVal != null
-                      ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback{realizedVol?.as_of ? `, as of ${realizedVol.as_of.slice(0, 10)}` : ""})</span></>
+                      ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback{realizedVol?.as_of ? `, as of ${fmtOneDate(realizedVol.as_of.slice(0, 10))}` : ""})</span></>
                       : <span className="text-muted-foreground" title={rvUnavailableReason(shown, realizedVol, rvStatus)}>
                           <Explained text="RV unavailable" /><span className="block text-xs font-sans font-normal">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
@@ -2594,7 +2590,7 @@ export default function TickerPage() {
                     </span>
                     <span className="font-mono text-sm font-medium tabular-nums">
                       {rvRk.toFixed(1)} <span className={rvColor}>{rvLabeled.label}</span>
-                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule}{realizedVol?.as_of ? `; as of ${realizedVol.as_of.slice(0, 10)}` : ""})</span>
+                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule}{realizedVol?.as_of ? `; as of ${fmtOneDate(realizedVol.as_of.slice(0, 10))}` : ""})</span>
                     </span>
                   </div>
                 )}
@@ -2611,7 +2607,7 @@ export default function TickerPage() {
                           </>
                         )}
                         {putCall?.expiration_used && (
-                          <span className="text-muted-foreground text-xs ml-1">(volume, exp {putCall.expiration_used}{putCall.snapshot_date ? `, as of ${putCall.snapshot_date}` : ""})</span>
+                          <span className="text-muted-foreground text-xs ml-1">(volume, exp {fmtOneDate(putCall.expiration_used) ?? putCall.expiration_used}{putCall.snapshot_date ? `, as of ${fmtOneDate(putCall.snapshot_date) ?? putCall.snapshot_date}` : ""})</span>
                         )}
                       </>
                     ) : (
@@ -2731,7 +2727,7 @@ export default function TickerPage() {
           }
 
           function statusChip(t: Thesis) {
-            if (t.status === "open") return <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">Open</span>;
+            if (t.status === "open") return <span className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">Open</span>;
             if (t.status === "needs_manual_resolution") return <span className="text-xs bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded">Due</span>;
             if (t.status === "resolved") {
               if (t.target_reached) return <span className="text-xs bg-success/10 text-success px-1.5 py-0.5 rounded">Hit target</span>;
@@ -2808,7 +2804,7 @@ export default function TickerPage() {
           return (
             <section id="positions" className="border-t pt-16 pb-24 scroll-mt-28">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">Your Positions</h2>
+                <h2 className="text-headline font-semibold">Your Positions</h2>
                 <div className="flex items-center gap-2">
                   {marksAsOf && (
                     <span className="text-xs text-muted-foreground">
@@ -2838,7 +2834,7 @@ export default function TickerPage() {
                 {resolvedCapped.map((t) => renderThesisRow(t, true))}
                 {resolvedHidden > 0 && (
                   <p className="text-xs text-muted-foreground text-center py-1">
-                    +{resolvedHidden} more resolved. <Link href="/theses" className="underline hover:text-foreground">View all in My Trades</Link>
+                    +{resolvedHidden} more resolved. <Link href="/theses" className="hover:text-foreground">View all in My Trades</Link>
                   </p>
                 )}
               </div>
@@ -2939,10 +2935,7 @@ export default function TickerPage() {
                   valuationShown={note.valuation_shown === true}
                 />
               ) : (
-                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
-                  prose-headings:text-foreground prose-headings:font-semibold
-                  prose-p:text-foreground/90 prose-li:text-foreground/90
-                  prose-strong:text-foreground">
+                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
                   <ReactMarkdown>{note.content}</ReactMarkdown>
                 </div>
               )}
@@ -2995,12 +2988,12 @@ export default function TickerPage() {
               {noteStaleness?.stale && (
                 <div className="flex items-center justify-between px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
                   <span>
-                    {noteStaleness.reason}. Last generated {new Date(note.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" })}.
+                    {noteStaleness.reason}. Last generated {fmtOneDate(note.generated_at)}.
                   </span>
                   {genPolicy?.can_regenerate && (
                     <button
                       onClick={handleRegenerate}
-                      className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
+                      className="font-medium hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
                     >
                       Regenerate
                     </button>
@@ -3021,7 +3014,7 @@ export default function TickerPage() {
                 {genPolicy?.can_regenerate && (
                   <button
                     onClick={handleRegenerate}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Regenerate
                   </button>
@@ -3037,10 +3030,7 @@ export default function TickerPage() {
                   valuationShown={note.valuation_shown === true}
                 />
               ) : (
-                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none
-                  prose-headings:text-foreground prose-headings:font-semibold
-                  prose-p:text-foreground/90 prose-li:text-foreground/90
-                  prose-strong:text-foreground">
+                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
                   <ReactMarkdown>{note.content}</ReactMarkdown>
                 </div>
               )}
@@ -3068,7 +3058,7 @@ export default function TickerPage() {
                           } catch { /* ignore */ }
                         })();
                       }}
-                      className="ml-2 underline underline-offset-2 hover:text-foreground transition-colors"
+                      className="ml-2 hover:text-foreground transition-colors"
                     >
                       Retry verification
                     </button>

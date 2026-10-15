@@ -30,7 +30,7 @@ def is_stale(fetched_at: datetime | None, now: datetime) -> bool:
 
 def checked_label(fetched_at: datetime) -> str:
     """"checked Oct 6": the day the trend was last fetched (the data's own date, never the request time)."""
-    return f"checked {fetched_at.strftime('%b')} {fetched_at.day}"
+    return f"checked {fetched_at.strftime('%b')} {fetched_at.day}, {fetched_at.year}"
 
 
 def buy_share(row) -> tuple[float, int]:

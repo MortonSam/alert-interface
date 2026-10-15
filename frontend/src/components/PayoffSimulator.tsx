@@ -9,6 +9,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import Callout from "@/components/Callout";
+import { fmtDate as fmtOneDate } from "@/lib/dates";
 import {
   BS_R,
   type Leg,
@@ -138,9 +139,7 @@ export default function PayoffSimulator({
 
   const T_slider = Math.max(0, (totalDays - dateOffset) / 365.25);
   const selectedDateMs = nowMs + dateOffset * 86400000;
-  const selectedDateStr = new Date(selectedDateMs).toLocaleDateString("en-US", {
-    month: "short", day: "numeric",
-  });
+  const selectedDateStr = fmtOneDate(selectedDateMs) ?? "";
   const daysLeft = Math.max(0, totalDays - dateOffset);
 
   const showDisclaimer = earningsMs != null && selectedDateMs <= earningsMs;
@@ -194,9 +193,7 @@ export default function PayoffSimulator({
       : `${selectedDateStr} · ${daysLeft}d`;
 
   // "Expiry Jun 5" label for slider endpoint — derived from expirationMs
-  const expiryLabel = new Date(expirationMs).toLocaleDateString("en-US", {
-    month: "short", day: "numeric",
-  });
+  const expiryLabel = fmtOneDate(expirationMs) ?? "";
 
   return (
     <div className="rounded-lg border border-dashed bg-muted/20 px-5 py-4 space-y-3">
@@ -214,8 +211,8 @@ export default function PayoffSimulator({
       {ivLabel && !sdFailed && !usingIVFallback && (
         <p className="text-xs text-muted-foreground">
           <Explained text="Simulated at IV " />{ivLabel}, held constant
-          {ivContext?.expiration ? `, from the ${ivContext.expiration} expiration` : ""}
-          {ivContext?.chainDate ? ` · options data as of ${ivContext.chainDate}` : ""}
+          {ivContext?.expiration ? `, from the ${fmtOneDate(ivContext.expiration) ?? ivContext.expiration} expiration` : ""}
+          {ivContext?.chainDate ? ` · options data as of ${fmtOneDate(ivContext.chainDate) ?? ivContext.chainDate}` : ""}
         </p>
       )}
       {(sdFailed || usingIVFallback) && (

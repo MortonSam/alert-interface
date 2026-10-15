@@ -41,7 +41,7 @@ export default async function DisclosuresPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16">
       <DisclosuresTracker />
-      <h1 className="text-2xl font-semibold text-foreground">Disclosures</h1>
+      <h1 className="text-display font-semibold text-foreground">Disclosures</h1>
 
       <section className="mt-8">
         <p className="text-sm leading-normal text-muted-foreground">
@@ -75,7 +75,7 @@ export default async function DisclosuresPage() {
             href="https://www.theocc.com/company-information/documents-and-archives/options-disclosure-document"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline"
+            className="font-medium text-foreground"
           >
             Characteristics and Risks of Standardized Options
           </a>

@@ -47,7 +47,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
           placeholder="Is it more volatile than usual?"
           className="flex-1 min-h-[44px] sm:min-h-0 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <button type="submit" disabled={busy || !question.trim()} className="tap rounded-md border border-border px-3 py-2 text-sm hover:text-primary disabled:opacity-50 transition-colors">
+        <button type="submit" disabled={busy || !question.trim()} className="tap rounded-md border border-border px-3 py-2 text-sm hover:opacity-80 disabled:opacity-50 transition-colors">
           {busy ? "Asking…" : "Ask"}
         </button>
       </div>
@@ -57,9 +57,9 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
           <p className="text-foreground/90">
             {answerParts(answer.data, answer.inputs).map((part, j) =>
               part.receipt !== undefined ? (
-                <span key={j} data-quantity title={part.receipt ?? undefined} className="font-semibold underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span>
+                <span key={j} data-quantity title={part.receipt ?? undefined} className="font-semibold explain-term">{part.text}</span>
               ) : part.term ? (
-                <ExplainTip key={j} term={part.term}><span className="underline decoration-dotted underline-offset-4 cursor-help">{part.text}</span></ExplainTip>
+                <ExplainTip key={j} term={part.term}><span className="explain-term">{part.text}</span></ExplainTip>
               ) : (
                 <span key={j}><Explained text={part.text} /></span>
               ),

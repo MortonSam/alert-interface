@@ -29,7 +29,7 @@ describe("the home page on a phone", () => {
   it("the header is one row: the logo, a menu button for the five links, and the search icon", () => {
     const nav = read("components/NavLinks.tsx");
     expect(nav).toContain('<div className="hidden sm:contents">{links(false)}</div>');
-    expect(nav).toContain('className="sm:hidden" data-testid="phone-menu"');
+    expect(nav).toContain('className="sm:hidden order-2" data-testid="phone-menu"');      // at the right edge, after the search icon, clear of the wordmark
     expect(nav).toMatch(/aria-label=\{open \? "Close menu" : "Open menu"\}/);
   });
   it("stock cards wrap the sector name on a phone; the PostHog toolbar tab is hidden below 640px", () => {

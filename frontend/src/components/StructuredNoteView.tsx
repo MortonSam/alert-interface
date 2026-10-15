@@ -54,23 +54,24 @@ const sectionColors = {
     accent: "border-l-cool/30",
     bg: "bg-cool/[0.04]",
   },
+  // green and red mean up and down alone (DESIGN.md): a highlight is not "up" and a risk is not "down"
   highlights: {
-    dot: "bg-success",
-    label: "text-success",
-    accent: "border-l-success/30",
-    bg: "bg-success/[0.04]",
+    dot: "bg-foreground",
+    label: "text-foreground",
+    accent: "border-l-foreground/30",
+    bg: "bg-foreground/[0.03]",
   },
   watch: {
+    dot: "bg-muted-foreground",
+    label: "text-muted-foreground",
+    accent: "border-l-muted-foreground/30",
+    bg: "bg-muted-foreground/[0.04]",
+  },
+  risks: {
     dot: "bg-amber-500",
     label: "text-amber-500",
     accent: "border-l-amber-500/30",
     bg: "bg-amber-500/[0.04]",
-  },
-  risks: {
-    dot: "bg-destructive",
-    label: "text-destructive",
-    accent: "border-l-destructive/30",
-    bg: "bg-destructive/[0.04]",
   },
   neutral: {
     dot: "bg-muted-foreground/60",
@@ -482,9 +483,9 @@ export default function StructuredNoteView({
     const beatColor =
       stats.eps_beat_pct != null
         ? stats.eps_beat_pct > 0
-          ? "text-success"
+          ? "text-sky-500"            // a beat is not "up" (DESIGN.md): blue and amber, as the chart's markers
           : stats.eps_beat_pct < 0
-            ? "text-destructive"
+            ? "text-amber-500"
             : undefined
         : undefined;
     statCells.push(
@@ -508,9 +509,9 @@ export default function StructuredNoteView({
     const beatColor =
       stats.revenue_beat_pct != null
         ? stats.revenue_beat_pct > 0
-          ? "text-success"
+          ? "text-sky-500"
           : stats.revenue_beat_pct < 0
-            ? "text-destructive"
+            ? "text-amber-500"
             : undefined
         : undefined;
     statCells.push(

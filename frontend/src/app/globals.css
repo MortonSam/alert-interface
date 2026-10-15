@@ -101,3 +101,13 @@ main .screen-section { min-height: calc(100svh - 3.25rem - 1px); }
 .font-display.font-bold, .font-display.font-extrabold { font-weight: 600; }
 .font-display:is(.text-xs, .text-sm, .text-base, .text-lg, .text-\[15px\]):is(.font-bold, .font-extrabold, .font-semibold) { font-weight: 700; }
 .font-display.tracking-tight, .font-display.tracking-tighter { letter-spacing: -0.01em; }
+
+/* The one underline on the site (DESIGN.md): a dotted line under a term or a figure that opens its explanation or its receipt.
+   Links are never underlined; they read by color and by their arrow. */
+.explain-term {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 4px;
+  text-decoration-color: hsl(var(--muted-foreground) / 0.6);
+  cursor: help;
+}

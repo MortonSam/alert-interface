@@ -20,7 +20,7 @@ describe("option mark labels", () => {
   });
 
   it("cannot render Invalid Date", () => {
-    expect(fmtTimestamp("chain as of 2026-09-18")).toBeNull();   // the prose the API used to send
+    expect(fmtTimestamp("chain as of Sep 18, 2026")).toBeNull();   // the prose the API used to send
     expect(fmtTimestamp("")).toBeNull();
     expect(fmtTimestamp(null)).toBeNull();
     const ok = fmtTimestamp("2026-09-21T17:59:47+00:00", new Date("2026-09-21T18:30:00+00:00"));
@@ -29,8 +29,8 @@ describe("option mark labels", () => {
   });
 
   it("labels the options date from its own field", () => {
-    expect(optionsAsOfLabel({ mark_basis: "ingested_chain", chain_date: "2026-09-18" })).toBe("options data as of 2026-09-18");
-    expect(optionsAsOfLabel({ mark_basis: "settled", options_as_of: "2026-09-19" })).toBe("settled 2026-09-19");
+    expect(optionsAsOfLabel({ mark_basis: "ingested_chain", chain_date: "2026-09-18" })).toBe("options data as of Sep 18, 2026");
+    expect(optionsAsOfLabel({ mark_basis: "settled", options_as_of: "2026-09-19" })).toBe("settled Sep 19, 2026");
     expect(optionsAsOfLabel({ mark_basis: "not_found", chain_date: null })).toBe("");
   });
 

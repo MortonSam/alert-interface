@@ -1,3 +1,5 @@
+import { fmtDate } from "@/lib/dates";
+
 /**
  * The next-earnings line: the date, whether it is confirmed or estimated, and when the calendar was last asked.
  *
@@ -50,16 +52,14 @@ export function checkedPhrase(checkedAt: string | null | undefined, now: Date = 
 }
 
 export function fmtEarningsDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtDate(iso.slice(0, 10)) ?? iso;
 }
 
 /** "checked Sep 29" from an ISO timestamp, or "not yet checked". */
 export function checkedOn(checkedAt: string | null | undefined): string {
   if (!checkedAt) return "not yet checked";
-  const t = new Date(checkedAt);
-  if (isNaN(t.getTime())) return "not yet checked";
-  return `checked ${t.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const on = fmtDate(checkedAt);
+  return on ? `checked ${on}` : "not yet checked";
 }
 
 /** The line for a ticker the calendar left without a future date: when the calendar was last asked. */

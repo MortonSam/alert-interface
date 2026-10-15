@@ -4,6 +4,7 @@
 
 import type { Cadence } from "@/lib/api";
 import { nightlyWord, optionsCadencePhrase } from "@/lib/freshness";
+import { fmtDate } from "@/lib/dates";
 
 export interface IvyRule {
   momentum_cutoff_pct: number;        // -10: qualifies at or below this 20-day return
@@ -49,8 +50,7 @@ export interface IvyRuleResponse {
 const pct = (rate: number) => (rate * 100).toFixed(1);
 
 export function fmtLongDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return fmtDate(iso.slice(0, 10)) ?? iso;      // the one date format (lib/dates); the name is kept for its callers
 }
 
 function joinYears(labels: string[]): string {

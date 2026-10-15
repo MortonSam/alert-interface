@@ -1,3 +1,4 @@
+import { fmtDate as fmtOneDate } from "@/lib/dates";
 // Labels for every outcome the nightly evaluation can record, and the sentence
 // that summarises a night. Mirrors backend/app/services/ivy_outcomes.py; a
 // vitest reads that file and fails if an outcome has no label here.
@@ -115,7 +116,7 @@ export function runFailureLine(run: RunStatusFields, worksheetDate: string | nul
   if (run.last_run_at == null) {
     head = "Ivy's nightly evaluation has not run yet";
   } else if (run.last_run_stale && (run.last_run_exit ?? 0) === 0) {
-    head = `Ivy's nightly evaluation did not run last night (last completed${when} on ${run.last_run_at.slice(0, 10)})`;
+    head = `Ivy's nightly evaluation did not run last night (last completed${when} on ${fmtOneDate(run.last_run_at.slice(0, 10))})`;
   } else {
     head = `Last night's evaluation did not complete (exit ${run.last_run_exit ?? "unknown"}${when})`;
   }

@@ -102,7 +102,7 @@ describe("row sentences", () => {
     }
     expect(reportingSoonSentence(item, NOW)).toBe("Reports in 2 days (confirmed, company press release)");
     expect(reportingSoonSentence({ ...item, confirmation_note: filing }, NOW)).toBe("Reports in 2 days (confirmed, SEC filing)");
-    expect(earningsClause("2026-10-21", "edgar", TODAY_CHECK, "confirmed", headline, NOW)).toBe("reports Oct 21 (confirmed, company press release)");
+    expect(earningsClause("2026-10-21", "edgar", TODAY_CHECK, "confirmed", headline, NOW)).toBe("reports Oct 21, 2026 (confirmed, company press release)");
     // estimated dates keep the source and when it was checked
     expect(reportingSoonSentence({ ...item, confirmation: "estimated", source: "yfinance", is_confirmed: false }, NOW)).toBe(
       "Reports in 2 days (estimated, checked today)");
@@ -129,7 +129,7 @@ describe("row sentences", () => {
       earnings_confirmation: "estimated", earnings_note: null,
     };
     expect(suggestionSentence(s, NOW)).toBe(
-      "Beats estimates 90% of the time, versus 72% across the S&P; reports around Oct 7 (estimated, checked today)");     // no IV cheap on worth a look
+      "Beats estimates 90% of the time, versus 72% across the S&P; reports around Oct 7, 2026 (estimated, checked today)");     // no IV cheap on worth a look
   });
 
   it("the tape: words only, the volatility tier, the options clause, then the report date at its level", () => {
@@ -140,22 +140,22 @@ describe("row sentences", () => {
       earnings_confirmation: "confirmed", earnings_note: "confirmed: 8-K Item 7.01 filed 2026-09-15",
     };
     expect(unusuallyActiveSentence(u, NOW)).toBe(
-      "Its last month has been its choppiest in a year. Options are pricing a calmer month ahead. Reports Oct 21 (confirmed by the company).");
+      "Its last month has been its choppiest in a year. Options are pricing a calmer month ahead. Reports Oct 21, 2026 (confirmed by the company).");
     expect(unusuallyActiveSentence({ ...u, rv_rank: TAPE_ONE_OF_CHOPPIEST_RANK, iv_rv_spread_pp: TAPE_OPTIONS_BAND_PP + 0.1 }, NOW)).toBe(
-      "Its last month has been one of its choppiest in a year. Options are pricing an even bumpier month ahead. Reports Oct 21 (confirmed by the company).");
+      "Its last month has been one of its choppiest in a year. Options are pricing an even bumpier month ahead. Reports Oct 21, 2026 (confirmed by the company).");
     expect(unusuallyActiveSentence({ ...u, rv_rank: TAPE_CHOPPIEST_RANK - 0.6, iv_rv_spread_pp: TAPE_OPTIONS_BAND_PP }, NOW)).toBe(
-      "Its last month has been one of its choppiest in a year. Options are pricing about the same. Reports Oct 21 (confirmed by the company).");
+      "Its last month has been one of its choppiest in a year. Options are pricing about the same. Reports Oct 21, 2026 (confirmed by the company).");
     // no fresh chain: no options clause; an estimate says so; two calendars agreeing are not the company
     expect(unusuallyActiveSentence({ ...u, rv_rank: DISCOVER_ELEVATED_RV, iv_rv_spread_pp: null, iv_date: null, earnings_confirmation: "estimated", earnings_source: "finnhub" }, NOW)).toBe(
-      "Its last month has been choppier than most of its past year. Reports around Oct 21 (estimated).");
+      "Its last month has been choppier than most of its past year. Reports around Oct 21, 2026 (estimated).");
     expect(unusuallyActiveSentence({ ...u, earnings_note: "confirmed: Finnhub and Yahoo Finance agree" }, NOW)).toContain("(confirmed by two calendars).");
     expect(unusuallyActiveSentence({ ...u, earnings_date: null }, NOW)).toBe(
       "Its last month has been its choppiest in a year. Options are pricing a calmer month ahead.");
     // the figures are the hover
     const receipt = tapeReceipt(u, NOW);
     expect(receipt).toContain("RV rank 99 of 100 against its own past year; 20-day realized volatility 62.0%");
-    expect(receipt).toContain("Implied volatility 54.8% from the Sep 28 chain, 7.2 points below realized");
-    expect(receipt).toContain("Reports Oct 21 (confirmed, SEC filing)");
+    expect(receipt).toContain("Implied volatility 54.8% from the Sep 28, 2026 chain, 7.2 points below realized");
+    expect(receipt).toContain("Reports Oct 21, 2026 (confirmed, SEC filing)");
   });
 
   it("one dominating session or a held rank replaces both clauses", () => {
@@ -165,11 +165,11 @@ describe("row sentences", () => {
       dominant_date: "2026-10-05", dominant_move_pct: 33.5, iv_rv_spread_pp: null,
       earnings_date: "2026-11-11", earnings_source: "finnhub", earnings_checked_at: TODAY_CHECK, earnings_confirmation: "estimated", earnings_note: null,
     };
-    expect(unusuallyActiveSentence(u, NOW)).toBe("Its last month looks choppy mostly because of one big jump on Oct 5. Reports around Nov 11 (estimated).");
-    expect(unusuallyActiveSentence({ ...u, dominant_move_pct: -26.5 }, NOW)).toContain("one big drop on Oct 5.");
+    expect(unusuallyActiveSentence(u, NOW)).toBe("Its last month looks choppy mostly because of one big jump on Oct 5, 2026. Reports around Nov 11, 2026 (estimated).");
+    expect(unusuallyActiveSentence({ ...u, dominant_move_pct: -26.5 }, NOW)).toContain("one big drop on Oct 5, 2026.");
     expect(tapeReceipt(u, NOW)).toContain("One session dominates the 20-day window: Oct 5, 2026 (+33.5%)");
-    const held = { ...u, dominant_date: null, iv_rv_note: null, rank_hold_phrase: "Spun off Vylor on Oct 1", rank_hold_reason: "Spun off Vylor on Oct 1, 2026; 252 clean sessions after it are needed" };
-    expect(unusuallyActiveSentence(held, NOW)).toBe("Spun off Vylor on Oct 1, so its past year doesn't compare yet. Reports around Nov 11 (estimated).");
+    const held = { ...u, dominant_date: null, iv_rv_note: null, rank_hold_phrase: "Spun off Vylor on Oct 1, 2026", rank_hold_reason: "Spun off Vylor on Oct 1, 2026; 252 clean sessions after it are needed" };
+    expect(unusuallyActiveSentence(held, NOW)).toBe("Spun off Vylor on Oct 1, 2026, so its past year doesn't compare yet. Reports around Nov 11, 2026 (estimated).");
     expect(tapeReceipt(held, NOW)).toContain("Rank held: Spun off Vylor on Oct 1, 2026");
     const s: SuggestionItem = {
       ...base, symbol: "PTC", score: 5, reports_in_days: 8, recent_move_pct: null, recent_move_5d: null, recent_outcome: null, event_date: null,
@@ -182,7 +182,7 @@ describe("row sentences", () => {
   });
 
   it("no tape row carries a digit outside a date, or RV, IV, rank or pp", () => {
-    const DATE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}\b/g;
+    const DATE = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(?:, \d{4})?\b/g;      // the one date format carries its year (DESIGN.md)
     const rows: UnusuallyActiveItem[] = [];
     for (const rank of [100, 99, 98.6, 95, 94.4, 87, 85]) {
       for (const spread of [null, -12.3, -5, 0, 5.01, 22.7]) {
@@ -197,7 +197,7 @@ describe("row sentences", () => {
       }
     }
     rows.push({ ...rows[0], dominant_date: "2026-09-29", dominant_move_pct: -26.52, iv_rv_note: "one session dominates the 20-day window: Sep 29, 2026 (-26.5%)" });
-    rows.push({ ...rows[0], rank_hold_phrase: "Merged with AvalonBay on Aug 17", rank_hold_reason: "Merged with AvalonBay on Aug 17, 2026; 252 clean sessions after it are needed" });
+    rows.push({ ...rows[0], rank_hold_phrase: "Merged with AvalonBay on Aug 17, 2026", rank_hold_reason: "Merged with AvalonBay on Aug 17, 2026; 252 clean sessions after it are needed" });
     for (const r of rows) {
       const s = unusuallyActiveSentence(r, NOW);
       expect(s.replace(DATE, ""), s).not.toMatch(/\d/);

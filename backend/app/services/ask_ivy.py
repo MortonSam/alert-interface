@@ -527,13 +527,13 @@ def fingerprint(facts: list[dict]) -> str:
 
 def day_phrase(d: date) -> str:
     """"Wednesday, Oct 21": the weekday a visitor plans around."""
-    return d.strftime("%A, ") + B.fmt_date(d).rsplit(",", 1)[0]
+    return d.strftime("%A, ") + B.fmt_date(d)
 
 
 def close_phrase(chain_date: date, today: date) -> str:
     """"as of Friday's close" within the week, else "as of the Oct 9 close"."""
     days = (today - chain_date).days
-    return f"as of {chain_date.strftime('%A')}'s close" if 0 <= days <= 6 else f"as of the {B.fmt_date(chain_date).rsplit(',', 1)[0]} close"
+    return f"as of {chain_date.strftime('%A')}'s close" if 0 <= days <= 6 else f"as of the {B.fmt_date(chain_date)} close"
 
 
 async def event_facts(db: AsyncSession, symbol: str, raw: dict, today: date) -> list[dict]:
