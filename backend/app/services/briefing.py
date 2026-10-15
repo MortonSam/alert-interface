@@ -282,8 +282,10 @@ def in_reaction_window(event_date: date, today: date) -> bool:
 def year_ago_clause(y: dict) -> str:
     """Pure: "EPS $2.22, up 111.4% from $1.05 a year ago", or "EPS $2.39, with no figure from the same quarter a year earlier on
     file" (a clause, so it sits inside the Overview's sentence)."""
+    if y.get("sec_eps") is None:
+        return y["eps_line"]                          # a held FFO quarter says so
     if y.get("year_ago_eps") is None:
-        return f"EPS {fmt_money(y['sec_eps'])}, with no figure from the same quarter a year earlier on file"
+        return f"{y.get('measure') or 'EPS'} {fmt_money(y['sec_eps'])}, with no figure from the same quarter a year earlier on file"
     return y["eps_line"]
 
 
@@ -298,11 +300,18 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
     head = f"Reported {fmt_date(event_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "")
     clauses: list[str] = []
     if year_ago is not None:
+        ffo = year_ago.get("measure") == "FFO per share"
         if year_ago.get("sec_eps") is not None:
             clauses.append(year_ago_clause(year_ago))
-            inputs.append(_input("EPS (SEC filings)", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "GAAP diluted EPS for the quarter, from SEC filings"))
+            if ffo:
+                inputs.append(_input("FFO per share", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "Nareit FFO per diluted share for the quarter, from the earnings release, read twice and cross-checked against XBRL"))
+            else:
+                inputs.append(_input("EPS (SEC filings)", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "GAAP diluted EPS for the quarter, from SEC filings"))
             if year_ago.get("year_ago_eps") is not None:
-                inputs.append(_input("EPS a year earlier", fmt_money(year_ago["year_ago_eps"]), year_ago["year_ago_period_end"], "the same quarter a year earlier, from SEC filings"))
+                inputs.append(_input("FFO per share a year earlier" if ffo else "EPS a year earlier", fmt_money(year_ago["year_ago_eps"]), year_ago["year_ago_period_end"],
+                                     "the same quarter a year earlier, from its earnings release" if ffo else "the same quarter a year earlier, from SEC filings"))
+        elif year_ago.get("eps_line"):
+            clauses.append(year_ago["eps_line"])           # a held FFO quarter: the sentence says it is held
     elif eps_actual is not None and eps_estimate is not None:
         word = {"beat": "a beat", "miss": "a miss", "meet": "a match"}.get(outcome or "", None)
         clauses.append(f"EPS {fmt_money(eps_actual)} against a {fmt_money(eps_estimate)} estimate" + (f", {word}" if word else ""))

@@ -140,6 +140,7 @@ export interface HistoricalReaction {
   year_ago_period_end?: string | null;
   eps_change_pct?: number | null;
   eps_line?: string | null;        // "EPS $2.22, up 111.4% from $1.05 a year ago", or the plain absence
+  measure?: string | null;         // "EPS", or "FFO per share" for a REIT
 }
 
 export interface LabelRule {
