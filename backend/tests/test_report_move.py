@@ -280,3 +280,23 @@ async def test_the_strip_the_overview_and_ask_ivy_state_discovers_sentence(monke
         async with ScriptSessionLocal() as s:
             await _clean(s)
             await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_options_bundle_the_page_reads_carries_the_same_report_move(monkeypatch):
+    """The ticker page reads /tickers/options-bundle, not /tickers/expected-move: both return the report move and its sentence."""
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+    _patch_move(monkeypatch)
+    try:
+        await _seed()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            em = (await c.get(f"/api/v1/tickers/expected-move/{SYM}")).json()
+            bundle = (await c.get(f"/api/v1/tickers/options-bundle/{SYM}")).json()["expected_move"]
+        assert em["comparison"].startswith("Options price a move of about 8.7% from the report itself")
+        for k in ("report_move_state", "report_move", "comparison", "move_comparison", "typical_move_pct", "typical_n", "held"):
+            assert bundle[k] == em[k], k
+    finally:
+        async with ScriptSessionLocal() as s:
+            await _clean(s)
+            await s.commit()

@@ -1133,6 +1133,8 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db), ad
 
     # The price behind every derived figure, withheld unless its last trade is recent
     q = await _guarded_price(sym, db, admin)
+    from app.services.fact_holds import holds_for
+    rmf = await _report_move_fields(db, sym, today, sorted(await holds_for(db, sym)))     # the same report move the expected-move endpoint returns
     current_price = q.price
 
     # ── Ticker + next earnings ────────────────────────────────────────────────
@@ -1161,6 +1163,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db), ad
         no_data_note = await no_options_note(db, sym)
         empty_em = ExpectedMoveRead(
             **_quote_fields(q),
+            **rmf,
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -1199,6 +1202,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db), ad
         no_data_note = await no_options_note(db, sym)
         empty_em = ExpectedMoveRead(
             **_quote_fields(q),
+            **rmf,
             symbol=sym, current_price=current_price,
             expected_move_pct=None, expected_move_dollars=None,
             implied_range_low=None, implied_range_high=None,
@@ -1273,6 +1277,7 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db), ad
 
     em = ExpectedMoveRead(
             **_quote_fields(q),
+            **rmf,
         symbol=sym, current_price=current_price,
         expected_move_pct=expected_move_pct, expected_move_dollars=expected_move_dollars,
         implied_range_low=implied_range_low, implied_range_high=implied_range_high,
