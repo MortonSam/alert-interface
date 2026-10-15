@@ -187,7 +187,7 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
     if mv and quote_ts and shares_as_of:
         bits.append(f"worth about {mv}")
         t = fmt_quote_time(quote_ts)
-        inputs += [_input("market cap", mv, t, "latest quote times shares outstanding"), _input("quote", fmt_money(quote_price), t, "quote cache, dated by its last trade"),
+        inputs += [_input("market cap", mv, t, "latest quote times shares outstanding"), _input("quote", fmt_money(quote_price), t, "latest quote, dated by its last trade"),
                    _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "company profile")]
         dates += [datetime.fromtimestamp(int(quote_ts), NY).date(), shares_as_of]
     text = desc + (f" It's {', '.join(bits)}." if bits else "")
@@ -210,7 +210,7 @@ def stock_sentence(symbol: str, *, quote_price: float | None, quote_ts: int | No
         return None
     t = fmt_quote_time(quote_ts)
     bits = [f"{symbol} is at {fmt_money(quote_price)} ({t})"]
-    inputs = [_input("quote", fmt_money(quote_price), t, "quote cache, dated by its last trade"), _input("quote time", t, t, "last trade")]
+    inputs = [_input("quote", fmt_money(quote_price), t, "latest quote, dated by its last trade"), _input("quote time", t, t, "last trade")]
     dates = [datetime.fromtimestamp(int(quote_ts), NY).date()]
     if high_52w and high_52w_date:
         below = (high_52w - quote_price) / high_52w * 100

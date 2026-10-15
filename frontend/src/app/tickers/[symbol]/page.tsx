@@ -872,13 +872,11 @@ const CLAIM_STYLES: Record<VerificationClaim["verdict"], { dot: string; badge: s
 function VerificationPanel({
   verification,
   verifiedAt,
-  model,
   open,
   onToggle,
 }: {
   verification: VerificationResult;
   verifiedAt: string | null;
-  model: string | null;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -900,7 +898,7 @@ function VerificationPanel({
             : <span className="text-muted-foreground">✗ 0 contradicted</span>
           }
           <span className="text-muted-foreground font-normal">
-            · verified {verifiedAt ? timeAgo(verifiedAt) : "—"}{model ? ` · ${model}` : ""}
+            · verified {verifiedAt ? timeAgo(verifiedAt) : "—"}
           </span>
         </span>
         <span className="text-muted-foreground">{open ? "▲" : "▼"} {total} claims</span>
@@ -2651,8 +2649,7 @@ export default function TickerPage() {
               </p>
               <p className="text-sm leading-relaxed text-foreground">{optionsRead.content}</p>
               <p className="text-[10px] text-muted-foreground/60 mt-2">
-                {optionsRead.model_used}
-                {optionsRead.generated_at ? ` · ${optionsRead.cached ? "cached" : "generated"} ${timeAgo(optionsRead.generated_at)}` : ""}
+                {optionsRead.generated_at ? `Written ${timeAgo(optionsRead.generated_at)}` : ""}
                 {chainDateLabel(optionsRead)}
               </p>
             </div>
@@ -2926,7 +2923,6 @@ export default function TickerPage() {
                   {note.source_filings.length > 0 && (
                     <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
                   )}
-                  {" · "}{note.input_tokens + note.output_tokens} tokens
                 </span>
               </div>
               {note.structured_content ? (
@@ -2989,7 +2985,7 @@ export default function TickerPage() {
               {note.verification && note.verification.summary.contradicted > 0 && (
                 <Callout severity="alert" banner>
                   <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
-                  See the verification section below for details. Consider regenerating.
+                  See the verification section below for details.
                 </Callout>
               )}
               {noteStaleness?.stale && (
@@ -3016,7 +3012,6 @@ export default function TickerPage() {
                   {note.source_filings.length > 0 && (
                     <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
                   )}
-                  {" · "}{note.input_tokens + note.output_tokens} tokens
                 </span>
                 {genPolicy?.can_regenerate && (
                   <button
@@ -3049,7 +3044,6 @@ export default function TickerPage() {
                   <VerificationPanel
                     verification={note.verification}
                     verifiedAt={note.verified_at}
-                    model={note.verification_model}
                     open={verificationOpen}
                     onToggle={() => setVerificationOpen(o => !o)}
                   />

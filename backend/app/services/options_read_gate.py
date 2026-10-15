@@ -88,10 +88,9 @@ def stale_facts(fact_values: dict | None, servable_now: dict[str, bool] | None) 
 
 
 def stale_reason(fact_key: str) -> str:
-    """Visitor-facing: why a read is being regenerated."""
+    """Visitor-facing: why a read is held (the nightly warm rewrites a stale read)."""
     group = next((g for g, keys in SERVABLE_GROUPS.items() if fact_key in keys), fact_key)
-    return (f"Ivy's Read was written when {FACT_LABELS.get(group, group)} was unavailable and is being "
-            f"regenerated now that it is")
+    return f"Ivy's Read is held until the nightly run rewrites it with the {FACT_LABELS.get(group, group)} it was missing"
 
 
 async def load_cached_read_status(

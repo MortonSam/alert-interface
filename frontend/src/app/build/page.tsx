@@ -374,7 +374,7 @@ function DraftDisplay({
         <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
           Ivy&apos;s Draft · {draft.aggressiveness} · {draft.direction}
         </p>
-        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && (draft.model_used === "deterministic" ? <>drafted by Ivy from the stored options</> : <>drafted by Ivy · {draft.model_used}</>)}</span>
+        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && (draft.model_used === "deterministic" ? <>drafted by Ivy from the stored options</> : <>drafted by Ivy</>)}</span>
       </div>
 
       {/* B) Realism flag */}

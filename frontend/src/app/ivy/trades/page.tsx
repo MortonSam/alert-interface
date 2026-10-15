@@ -271,7 +271,7 @@ function PickCard({
 
       {/* Picked by Ivy attribution */}
       <p className="text-[10px] text-muted-foreground/60">
-        Picked by Ivy {new Date(pick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}{pick.model_used ? ` · ${pick.model_used}` : ""}
+        Picked by Ivy {new Date(pick.generated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
       </p>
 
       {/* Expandable reasoning */}
