@@ -11,12 +11,14 @@ from app.scripts.validate_data import ERROR, check_next_dividend_amount, run_che
 
 def test_the_forward_fetch_reads_the_last_payment_not_the_rate(monkeypatch):
     import yfinance as yf
+    from datetime import datetime, timezone
+    ex = date.today() + timedelta(days=5)             # a declared date ahead of the run (a past one is Intrinio's, from the bars)
     class FakeTicker:
         def __init__(self, sym): pass
-        info = {"exDividendDate": 1791936000, "dividendRate": 0.6, "lastDividendValue": 0.15}
+        info = {"exDividendDate": int(datetime(ex.year, ex.month, ex.day, tzinfo=timezone.utc).timestamp()), "dividendRate": 0.6, "lastDividendValue": 0.15}
     monkeypatch.setattr(yf, "Ticker", FakeTicker)
     got = _fetch_forward_sync("MU")
-    assert got == {"ex_date": date(2026, 10, 14), "last_payment": 0.15}
+    assert got == {"ex_date": ex, "last_payment": 0.15}
     assert "dividend_rate" not in got and FORWARD_BASIS_INTRINIO in PER_PAYMENT_BASES and FORWARD_BASIS_YFINANCE in PER_PAYMENT_BASES and "annual_rate" not in PER_PAYMENT_BASES
 
 
