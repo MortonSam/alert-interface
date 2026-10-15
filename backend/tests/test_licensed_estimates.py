@@ -111,6 +111,17 @@ def test_the_year_ago_line_and_the_plain_absence():
     assert year_ago_clause(ya.for_report(date(2026, 5, 28))) == "EPS $2.39, with no figure from the same quarter a year earlier on file"
 
 
+def test_a_change_that_rounds_to_zero_reads_unchanged():
+    from app.services.briefing import year_ago_clause
+    for prior, now in ((0.29, 0.29), (2.000, 2.0009), (10.00, 9.996)):        # 0.0%, +0.04%, -0.04%
+        pair = year_ago_pairs([(date(2025, 6, 29), prior), (date(2026, 6, 28), now)])[0]
+        line = LE.YearAgo([pair]).for_report(date(2026, 7, 28))["eps_line"]
+        assert line == f"EPS ${now:.2f}, unchanged from ${prior:.2f} a year ago", line
+        assert year_ago_clause(LE.YearAgo([pair]).for_report(date(2026, 7, 28))) == line
+    assert LE.YearAgo(year_ago_pairs([(date(2025, 6, 29), 1.00), (date(2026, 6, 28), 1.001)])).for_report(date(2026, 7, 28))["eps_line"] \
+        == "EPS $1.00, up 0.1% from $1.00 a year ago"
+
+
 def test_stored_text_and_notes_lose_their_estimate_sentences():
     assert LE.filter_text("Momentum is negative. It beat estimates in 18 of 20 quarters. Options are rich.") == "Momentum is negative. Options are rich."
     note = {"highlights": [{"lead": "Beat history", "detail": "Beat in 18 of 20."}, {"lead": "Margins", "detail": "Up from a year earlier."}],
