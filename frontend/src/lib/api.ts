@@ -530,6 +530,7 @@ export interface ReportMove {
   state: string; pct: number | null; e: number | null; t2_years: number | null;
   before: ReportMoveLeg | null; after: ReportMoveLeg | null; report_date: string | null; version: number;
   method?: "pair" | "term" | null; later?: ReportMoveLeg | null; t3_years?: number | null; base_variance?: number | null;
+  raw_base_variance?: number | null; rv_20d?: number | null; base_floored?: boolean | null;
 }
 
 export interface StrikeData {

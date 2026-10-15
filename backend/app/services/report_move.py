@@ -8,7 +8,10 @@ a few days' volatility with a month's, which is not the report.
 
 Term (the first two expirations after the report): s2 and T2 as above, s3 and T3 the next expiration after s2's. The normal
 variance without the report is base = (s3^2 x T3 - s2^2 x T2) / (T3 - T2), the forward variance between the two, which holds no
-report; E = sqrt(T2 x (s2^2 - base)). A base at or below zero is not a variance and gives no E.
+report; E = sqrt(T2 x (s2^2 - base)). A base at or below zero is not a variance and gives no E. A base near zero overstates the
+move (HBAN, CSX and AWK read two or three times their typical move), so the base is floored at the stock's 20-day realized variance
+(rv_20d squared, from the serving RV snapshot, rv_store.get_servable_rv) whenever that is higher; with no servable snapshot the
+base is left unfloored. The receipts carry the raw base, the realized volatility and whether the floor applied.
 
 The pair is tried first when it qualifies, then the term method; the first positive E wins. The report-only expected move is
 REPORT_SHARE x E (a straddle prices about 0.8 of a standard deviation). When neither method gives a positive E the options do not
@@ -28,7 +31,8 @@ from app.services.chain_shadow import counts_for_report
 from app.services.trading_calendar import nth_trading_day_after
 from app.services.iv_solver import nonstandard_mids, solve_atm, time_to_expiry
 
-REPORT_MOVE_VERSION = 2       # 2: the pair only when it qualifies, else the first two expirations after the report
+REPORT_MOVE_VERSION = 3       # 2: the pair only when it qualifies, else the first two expirations after the report
+                               # 3: the term method's base floored at the 20-day realized variance
 REPORT_SHARE = 0.80            # expected absolute move of a normal day, in standard deviations (sqrt(2/pi) = 0.798)
 PAIR_MIN_PRE_SESSIONS = 5      # the pair's pre-report expiration is at least this many trading days after the chain date
 PAIR_MAX_POST_DAYS = 21        # and its post-report expiration within this many calendar days of the report
@@ -53,19 +57,29 @@ def report_move_pct(s1: float, s2: float, t2: float) -> float | None:
     return REPORT_SHARE * math.sqrt(t2 * (s2 * s2 - s1 * s1))
 
 
-def term_move_pct(s2: float, t2: float, s3: float, t3: float) -> float | None:
-    """Pure: the term method, REPORT_SHARE x sqrt(T2 x (s2^2 - base)) with base = (s3^2 T3 - s2^2 T2) / (T3 - T2), as a 0-1
-    decimal; None when T3 is not after T2, base is not a positive variance, or s2^2 is not above it."""
+def term_move_pct(s2: float, t2: float, s3: float, t3: float, rv: float | None = None) -> float | None:
+    """Pure: the term method, REPORT_SHARE x sqrt(T2 x (s2^2 - base)) with base = (s3^2 T3 - s2^2 T2) / (T3 - T2), floored at
+    rv^2 when the 20-day realized volatility `rv` is given and higher, as a 0-1 decimal; None when T3 is not after T2, the raw
+    base is not a positive variance, or s2^2 is not above the base used."""
     if t2 <= 0 or t3 <= t2:
         return None
-    base = (s3 * s3 * t3 - s2 * s2 * t2) / (t3 - t2)
-    if base <= 0 or s2 * s2 <= base:
+    raw = term_base(s2, t2, s3, t3)
+    if raw is None or raw <= 0:
+        return None
+    base = floored_base(raw, rv)
+    if s2 * s2 <= base:
         return None
     return REPORT_SHARE * math.sqrt(t2 * (s2 * s2 - base))
 
 
 def term_base(s2: float, t2: float, s3: float, t3: float) -> float | None:
+    """Pure: the raw forward variance between the two expirations, before the floor."""
     return None if t3 <= t2 else (s3 * s3 * t3 - s2 * s2 * t2) / (t3 - t2)
+
+
+def floored_base(raw: float, rv: float | None) -> float:
+    """Pure: the base the term method uses, the raw base or the 20-day realized variance rv^2 when that is higher."""
+    return max(raw, rv * rv) if rv is not None and rv > 0 else raw
 
 
 def pick_legs(expirations: list[str], report_date: str, timing: str | None, chain_date: str) -> tuple[str | None, str | None, str | None]:
@@ -107,7 +121,10 @@ class ReportMove:
     method: str | None = None           # PAIR or TERM when a move is stated
     later: Leg | None = None            # s3's expiration (the term method)
     t3_years: float | None = None
-    base_variance: float | None = None  # the term method's normal variance, annualized
+    base_variance: float | None = None  # the term method's normal variance as used, annualized (after the floor)
+    raw_base_variance: float | None = None  # the forward variance before the floor
+    rv_20d: float | None = None          # the serving 20-day realized volatility the floor read, None with no servable snapshot
+    base_floored: bool | None = None     # the floor raised the base
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -159,7 +176,8 @@ async def report_move(db, sym: str, report_date: date | str, today: date | None 
     _, t2 = time_to_expiry(cd, date.fromisoformat(post_exp))
     computed, mixed, no_iv = False, False, False
     before = later = None
-    t3 = base = None
+    t3 = base = raw = None
+    rv = floored = None
     if use_pair:
         before = await leg(pre_exp)
         if before is None:
@@ -180,13 +198,20 @@ async def report_move(db, sym: str, report_date: date | str, today: date | None 
         else:
             computed = True
             _, t3 = time_to_expiry(cd, date.fromisoformat(later_exp))
-            base = term_base(after.atm_iv, t2, later.atm_iv, t3)
-            pct = term_move_pct(after.atm_iv, t2, later.atm_iv, t3)
+            from app.services.rv_store import get_servable_rv
+            rv_row, _ = await get_servable_rv(db, sym)
+            rv = float(rv_row.rv_20d) if rv_row is not None and rv_row.rv_20d is not None else None
+            raw = term_base(after.atm_iv, t2, later.atm_iv, t3)
+            base = floored_base(raw, rv) if raw is not None and raw > 0 else raw
+            floored = raw is not None and raw > 0 and base > raw
+            pct = term_move_pct(after.atm_iv, t2, later.atm_iv, t3, rv)
             if pct is not None:
                 return ReportMove(OK, pct=pct, e=pct / REPORT_SHARE, t2_years=t2, before=before, after=after, report_date=rd,
-                                  method=TERM, later=later, t3_years=t3, base_variance=base)
+                                  method=TERM, later=later, t3_years=t3, base_variance=base, raw_base_variance=raw, rv_20d=rv,
+                                  base_floored=floored)
     state = NOT_SEPARATED if computed else MIXED_DATES if mixed else NO_IV if no_iv else NO_LEGS
-    return ReportMove(state, t2_years=t2, before=before, after=after, report_date=rd, later=later, t3_years=t3, base_variance=base)
+    return ReportMove(state, t2_years=t2, before=before, after=after, report_date=rd, later=later, t3_years=t3, base_variance=base,
+                      raw_base_variance=raw, rv_20d=rv, base_floored=floored)
 
 
 async def report_move_view(db, sym: str, report_date: date | str, today: date | None = None, held_facts=(),

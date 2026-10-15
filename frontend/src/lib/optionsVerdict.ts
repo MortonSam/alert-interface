@@ -119,6 +119,10 @@ export function optionsVerdict(v: VerdictInput): Verdict {
   const chainDay = m?.after?.chain_date ?? f.chain_date;
   const forReport = legs && termLegs ? `, the first two after the report on ${report}` : `, for the report on ${report}`;
   let receipt: string | null = chainDay ? `From the ${fmtDay(chainDay)} options data${legs}${forReport}.` : null;
+  // the term method's normal volatility, raised to the 20-day realized volatility when the expirations implied less
+  if (receipt && legs && termLegs && m?.base_floored && m.rv_20d != null) {
+    receipt += ` The stock's usual swing is taken as its 20-day realized volatility of ${pct1(m.rv_20d)}, higher than the expirations imply.`;
+  }
   const comparison = (r.moveComparison ?? null) as MoveComparison | null;
   let why: string | null = null;
   if (r.state === "ok") {

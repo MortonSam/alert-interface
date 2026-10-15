@@ -3586,6 +3586,47 @@ async def check_data_age(session) -> CheckResult:
     )
 
 
+REPORT_MOVE_OUTLIER_RATIO = 2.0     # a report move over this multiple of the typical first-day move is listed
+REPORT_MOVE_OUTLIER_DAYS = 45       # upcoming reports this many days out (the nightly's report-move window)
+
+
+def report_move_outlier_result(moves: list[tuple[str, str, float, float, str | None]]) -> CheckResult:
+    """Pure: WARN listing every (symbol, report date, report move %, typical move %, method) whose report move is over
+    REPORT_MOVE_OUTLIER_RATIO times its typical move."""
+    out = [f"{s} report {d}: report move {rep:.1f}% against a typical {typ:.1f}% ({rep / typ:.1f}x, {method} method)"
+           for s, d, rep, typ, method in moves if typ and rep > REPORT_MOVE_OUTLIER_RATIO * typ]
+    if out:
+        return CheckResult("report_move_outlier", WARN,
+                           f"{len(out)} of {len(moves)} report moves over {REPORT_MOVE_OUTLIER_RATIO:g}x the typical move", out)
+    return CheckResult("report_move_outlier", PASS, f"none of {len(moves)} report moves over {REPORT_MOVE_OUTLIER_RATIO:g}x the typical move")
+
+
+async def check_report_move_outlier(session) -> CheckResult:
+    """WARN listing every active ticker with a confirmed report in the next REPORT_MOVE_OUTLIER_DAYS days whose report move
+    (services/report_move, as every surface states it) is over REPORT_MOVE_OUTLIER_RATIO times its typical first-day move."""
+    from app.routers.discover import _batch_conditional_stats
+    from app.services.earnings_calendar import level_of
+    from app.services.implied_move import implied_move_allowed
+    from app.services.report_move import OK, report_move_view
+    today = date.today()
+    rows = (await session.execute(text("""
+        SELECT DISTINCT ON (t.symbol) t.symbol, e.event_date, e.is_confirmed, e.unresolved_since FROM events e
+        JOIN tickers t ON t.id = e.ticker_id
+        WHERE e.event_type = 'earnings' AND t.is_active AND e.event_date >= :today AND e.event_date <= :cutoff
+        ORDER BY t.symbol, e.event_date"""), {"today": today, "cutoff": today + timedelta(days=REPORT_MOVE_OUTLIER_DAYS)})).all()
+    rows = [r for r in rows if implied_move_allowed(level_of(r.is_confirmed, r.unresolved_since))]
+    cond = await _batch_conditional_stats(session, [r.symbol for r in rows])
+    moves = []
+    for r in rows:
+        c = cond.get(r.symbol)
+        if not c or not c.get("avg_abs_1d"):
+            continue
+        v = await report_move_view(session, r.symbol, r.event_date, today, typical=(float(c["avg_abs_1d"]), int(c.get("total") or 0)))
+        if v.get("state") == OK and v.get("typical_move_pct"):
+            moves.append((r.symbol, r.event_date.isoformat(), v["rep"], v["typical_move_pct"], v["move"].method))
+    return report_move_outlier_result(moves)
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -3621,6 +3662,7 @@ CHECKS = [
     check_rv_snapshot_coverage,
     check_news_freshness,
     check_chain_parity,
+    check_report_move_outlier,
     check_excluded_ticker_hidden,
     check_analyst_stats_sessions,
     check_outcome_matches_eps,
