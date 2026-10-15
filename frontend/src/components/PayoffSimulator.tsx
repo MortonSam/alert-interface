@@ -3,11 +3,12 @@
 import Explained from "@/components/Explained";
 import EncodingLegend from "@/components/EncodingLegend";
 import { payoffChartLegend, payoffMark } from "@/lib/encodings/payoffChart";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  ResponsiveContainer, ReferenceLine, ReferenceDot,
 } from "recharts";
+import { priceAtX } from "@/lib/tradeMath";
 import Callout from "@/components/Callout";
 import {
   BS_R,
@@ -24,6 +25,7 @@ type ChartPoint = {
   pnl: number;
   pnl_pos: number | null;   // pnl when >= 0, else null  → green line
   pnl_neg: number | null;   // pnl when <  0, else null  → red line
+  expiry?: number;          // profit or loss at expiration at this price (the scrub's headline)
 };
 
 /**
@@ -70,33 +72,6 @@ function PayoffYTick({
     <text x={x} y={y} fill={color} fontSize={10} textAnchor="end" dominantBaseline="middle">
       {label}
     </text>
-  );
-}
-
-// ── SimTooltip ────────────────────────────────────────────────────────────────
-// Reads .pnl from the raw data point (not from a series value) so it works
-// regardless of which of the two colored Lines triggered the hover.
-
-function SimTooltip({
-  active, payload,
-}: {
-  active?: boolean;
-  payload?: Array<{ payload: ChartPoint }>;
-}) {
-  if (!active || !payload?.length) return null;
-  const pt = payload[0]?.payload;
-  if (!pt) return null;
-  const { price, pnl } = pt;
-  const abs = Math.abs(pnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (
-    <div className="rounded border bg-card border-border text-foreground shadow px-3 py-2 text-xs space-y-0.5">
-      <p className="text-muted-foreground">
-        Stock: <strong className="text-foreground">${price.toFixed(2)}</strong>
-      </p>
-      <p className={`font-medium ${pnl >= 0 ? "text-success" : "text-destructive"}`}>
-        Simulated: {pnl >= 0 ? "+" : "−"}${abs}
-      </p>
-    </div>
   );
 }
 
@@ -155,7 +130,7 @@ export default function PayoffSimulator({
       const pnl = multiLegPayoffBSPS(legs, S, T_slider, BS_R) * mult;
       return { price: parseFloat(S.toFixed(2)), pnl: parseFloat(pnl.toFixed(2)) };
     });
-    return splitBySign(raw);
+    return splitBySign(raw).map((d) => ({ ...d, expiry: parseFloat((multiLegPayoffPS(legs, d.price) * mult).toFixed(2)) }));
   }, [legs, xMin, xMax, T_slider, mult]);
 
   // Stable y-domain (computed from at-expiry + today curves so axis doesn't jump while sliding)
@@ -178,8 +153,21 @@ export default function PayoffSimulator({
     ? chartData.reduce((best, d) =>
         Math.abs(d.price - scrubPrice) < Math.abs(best.price - scrubPrice) ? d : best)
     : null;
-  const effectivePrice = scrubPoint?.price ?? scrubPrice;
-  const scrubPnl: number | null = scrubPoint?.pnl ?? null;
+  const effectivePrice = scrubPrice;
+  const scrubPnl: number | null = scrubPoint?.pnl ?? null;                         // on the selected date (the slider), simulated
+  const expiryPnlAtScrub = multiLegPayoffPS(legs, scrubPrice) * mult;             // the headline: at expiration, intrinsic value only
+
+  // Robinhood-style scrub: a finger dragged along the chart (or a pointer moved over it) sets the price; the plot starts after the
+  // y-axis (PLOT_LEFT) and ends before the right margin (PLOT_RIGHT), as the LineChart below lays it out
+  const PLOT_LEFT = 68, PLOT_RIGHT = 8;
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  function scrubTo(clientX: number) {
+    const el = plotRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setScrubPrice(priceAtX(clientX - r.left, r.width, PLOT_LEFT, PLOT_RIGHT, xMin, xMax));
+  }
 
   // ── Date slider geometry ──────────────────────────────────────────────────
   // thumbPct: 0% (Today) → 100% (Expiry), used for the visual fill + floating label
@@ -231,30 +219,34 @@ export default function PayoffSimulator({
 
       {/* Hero simulated P&L */}
       <div className="py-1">
-        <p className="text-xs text-muted-foreground mb-1.5">
-          {symbol} at ${scrubPrice.toFixed(2)}
-          {" · "}
-          {daysLeft === 0 ? "At expiration" : selectedDateStr}
+        <p className="text-xs text-muted-foreground mb-1.5" data-testid="scrub-label">
+          {symbol} at ${scrubPrice.toFixed(2)} <Explained text="at expiration" />
         </p>
         <p className={[
           "text-4xl font-bold font-mono tabular-nums tracking-tight leading-none",
-          scrubPnl == null
-            ? "text-muted-foreground"
-            : scrubPnl >= 0
-              ? "text-success"
-              : "text-destructive",
-        ].join(" ")}>
-          {scrubPnl == null
-            ? "—"
-            : `${scrubPnl >= 0 ? "+" : "−"}$${Math.abs(scrubPnl).toLocaleString("en-US", {
-                minimumFractionDigits: 2, maximumFractionDigits: 2,
-              })}`}
+          expiryPnlAtScrub >= 0 ? "text-success" : "text-destructive",
+        ].join(" ")} data-testid="scrub-pnl">
+          {`${expiryPnlAtScrub >= 0 ? "+" : "\u2212"}$${Math.abs(expiryPnlAtScrub).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
         </p>
+        {scrubPnl != null && daysLeft > 0 && (
+          <p className="text-xs text-muted-foreground mt-1.5">
+            On {selectedDateStr}, simulated {scrubPnl >= 0 ? "+" : "\u2212"}${Math.abs(scrubPnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </p>
+        )}
       </div>
 
       {/* ── Payoff chart ──────────────────────────────────────────────────── */}
       {chartData.length > 0 && (
-        <div className="relative">
+        <div
+          className="relative select-none"
+          ref={plotRef}
+          style={{ touchAction: "pan-y" }}
+          data-testid="payoff-scrub"
+          onPointerDown={(e) => { setDragging(true); (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId); scrubTo(e.clientX); }}
+          onPointerMove={(e) => { if (dragging || e.pointerType === "mouse") scrubTo(e.clientX); }}
+          onPointerUp={() => setDragging(false)}
+          onPointerCancel={() => setDragging(false)}
+        >
           {/* SIMULATED watermark — keeps the "this is modeled" signal in the chart itself */}
           <div
             className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
@@ -269,18 +261,6 @@ export default function PayoffSimulator({
             <LineChart
               data={chartData}
               margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
-              onMouseMove={(e) => {
-                if (e.activeLabel != null) {
-                  const p = parseFloat(String(e.activeLabel));
-                  if (!isNaN(p)) setScrubPrice(p);
-                }
-              }}
-              onClick={(e) => {
-                if (e.activeLabel != null) {
-                  const p = parseFloat(String(e.activeLabel));
-                  if (!isNaN(p)) setScrubPrice(p);
-                }
-              }}
             >
               <CartesianGrid
                 strokeDasharray="2 6"
@@ -304,7 +284,6 @@ export default function PayoffSimulator({
                 tickLine={false}
                 width={68}
               />
-              <Tooltip content={<SimTooltip />} />
 
               {/* Zero line */}
               <ReferenceLine y={0} {...payoffMark("zero")} />
@@ -318,11 +297,15 @@ export default function PayoffSimulator({
                 />
               )}
 
-              {/* Price scrubber */}
+              {/* At expiration: the curve the scrub's headline reads */}
+              <Line dataKey="expiry" {...payoffMark("expiry")} dot={false} activeDot={false} type="linear" isAnimationActive={false} />
+
+              {/* Price scrubber: a line and a marker on the expiration curve */}
               <ReferenceLine
                 x={effectivePrice}
                 {...payoffMark("scrubber")}
               />
+              <ReferenceDot x={effectivePrice} y={expiryPnlAtScrub} r={5} fill={payoffMark("scrubber").stroke} stroke="hsl(var(--background))" strokeWidth={2} />
 
               {/* Green: profit zone (pnl >= 0) */}
               <Line

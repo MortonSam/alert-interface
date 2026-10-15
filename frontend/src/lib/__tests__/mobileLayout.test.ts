@@ -44,7 +44,7 @@ describe("390px layout (audit item 24)", () => {
   it("Build stacks its tiles and grids on a phone and wraps its button rows", () => {
     const build = read("app/build/page.tsx");
     expect(build).toContain('cn("grid gap-4 grid-cols-1", ivyDecided ? "sm:grid-cols-2" : "sm:grid-cols-3")');
-    expect(build.match(/grid grid-cols-1 sm:grid-cols-3 gap-4/g)?.length).toBe(2);   // cost/risk and the alternative
+    expect(build.match(/grid grid-cols-1 sm:grid-cols-2 gap-4/g)?.length).toBe(2);   // cost/risk and the alternative: one line for cost and max loss beside the gain
     expect(build).toContain('<div className="grid grid-cols-1 sm:grid-cols-2 gap-5">');   // the confirm grid
     expect(build).not.toMatch(/"grid grid-cols-[23] gap-[45]/);
     expect(build.match(/flex flex-wrap gap-3 pt-1/g)?.length).toBe(2);

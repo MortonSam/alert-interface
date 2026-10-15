@@ -30,6 +30,7 @@ import { NO_DRAFT_NOT_CHARGED, ivyDecisionSentence } from "@/lib/ivyOutcomes";
 import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
 import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
 import { matchTickers } from "@/lib/tickerSearch";
+import { ESTIMATE_NOTE, chancePastBreakeven, estimateReceipt, fmtDollars, gainAtImpliedMove, payoffRange, stretchLine, type DebitTrade } from "@/lib/tradeMath";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
@@ -182,8 +183,12 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
     symbol: draft.symbol,
     expirationMs: dateMs(fb.expiration_used),
     mult: 100,
-    xMin: fb.implied_range_low ?? fb.current_price * 0.8,
-    xMax: fb.implied_range_high ?? fb.current_price * 1.2,
+    ...(() => {
+      const be = draft.direction === "bullish" ? draft.suggested_strike + (row1.mid - (legs[1]?.mid ?? 0)) : draft.suggested_strike - (row1.mid - (legs[1]?.mid ?? 0));
+      const [xMin, xMax] = payoffRange(fb.implied_range_low, fb.implied_range_high, fb.current_price,
+                                       [draft.suggested_strike, be, ...(draft.suggested_spread_strike != null ? [draft.suggested_spread_strike] : [])]);
+      return { xMin, xMax };
+    })(),
     earningsMs: fb.earnings_date ? dateMs(fb.earnings_date) : null,
     ivContext: { expiration: fb.expiration_used, chainDate: fb.options_as_of ?? null },
     pricing: pricedAtLine(fb, fmtTimestamp),
@@ -260,6 +265,21 @@ function DraftDisplay({
       : draft.suggested_strike - leg1Mid;
   })();
 
+  // The upside of an uncapped call in two figures, and the breakeven against the implied move (lib/tradeMath)
+  const spot = fb.current_price;
+  const movePct = fb.expected_move_pct;
+  const estDays = fb.span_days ?? fb.days_to_expiration ?? null;
+  const trade: DebitTrade | null = draft.suggested_strike != null && (isSpread ? netDebit : leg1Mid) != null && (draft.direction === "bullish" || draft.direction === "bearish")
+    ? { direction: draft.direction, strike: draft.suggested_strike, spreadStrike: draft.suggested_spread_strike ?? null, costPerShare: (isSpread ? netDebit : leg1Mid) as number }
+    : null;
+  const upside = {
+    moveLabel: movePct != null ? `If ${draft.symbol} moves the implied ${movePct.toFixed(1)}% by expiration` : "If it moves the implied amount by expiration",
+    gain: trade && movePct != null ? gainAtImpliedMove(trade, spot, movePct) : null,
+    chance: trade && breakeven != null && fb.atm_iv_pct != null && estDays != null ? chancePastBreakeven(spot, breakeven, fb.atm_iv_pct, estDays, trade.direction) : null,
+    receipt: fb.atm_iv_pct != null && estDays != null ? estimateReceipt(fb.atm_iv_pct, estDays, spot, fb.options_as_of) : null,
+  };
+  const stretch = breakeven != null && movePct != null ? stretchLine(spot, breakeven, movePct) : null;
+
   // Plain-English reasoning (deterministic, template-stitched)
   const plainEnglish = buildPlainEnglish({
     shortName,
@@ -292,7 +312,6 @@ function DraftDisplay({
   // ── Alternative cost/risk — derived from altResult when fits=true ──────────
   const altIsSpread = altResult?.fits ? altResult.suggested_spread_strike != null : false;
   const altCostToEnter: number | null = altResult?.fits ? (altResult.cost_to_enter ?? null) : null;
-  const altMaxLoss: number | null = altCostToEnter;
   // Spread: (width − net_debit) × 100 = width × 100 − cost_to_enter
   // Naked call: Unlimited (signal via altIsUnlimited)
   // Naked put: (strike − cost_to_enter/100) × 100
@@ -305,6 +324,14 @@ function DraftDisplay({
               ? (altResult.suggested_strike - altCostToEnter / 100) * 100
               : null))
       : null;
+
+  // the alternative's uncapped call, in the same two figures
+  const altTrade: DebitTrade | null = altIsUnlimited && altResult?.suggested_strike != null && altCostToEnter != null
+    ? { direction: "bullish", strike: altResult.suggested_strike, spreadStrike: null, costPerShare: altCostToEnter / 100 } : null;
+  const altUpside = {
+    gain: altTrade && movePct != null ? gainAtImpliedMove(altTrade, spot, movePct) : null,
+    chance: altTrade && fb.atm_iv_pct != null && estDays != null ? chancePastBreakeven(spot, altTrade.strike + altTrade.costPerShare, fb.atm_iv_pct, estDays, "bullish") : null,
+  };
 
   const simProps = useMemo(() => buildDraftSimProps(draft), [draft]);
 
@@ -489,34 +516,43 @@ function DraftDisplay({
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <Explained text="Position cost & risk · per contract" />
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="border border-border/60 bg-transparent rounded-md p-5">
-              <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="border border-border/60 bg-transparent rounded-md p-5" data-testid="cost-and-max-loss">
+              <p className="text-xs text-muted-foreground mb-2">Cost and max loss</p>
               <p className="font-mono text-3xl font-semibold tabular-nums">
                 {costPerContract != null ? `$${Math.round(costPerContract)}` : "absent: no priced contract at this strike"}
               </p>
             </div>
-            <div className="border border-border/60 bg-transparent rounded-md p-5">
-              <p className="text-xs text-muted-foreground mb-2">Max loss</p>
-              <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
-                {maxLossPerContract != null ? `$${Math.round(maxLossPerContract)}` : "absent: no priced contract at this strike"}
-              </p>
-            </div>
-            <div className="border border-border/60 bg-transparent rounded-md p-5">
-              <p className="text-xs text-muted-foreground mb-2">Max gain</p>
-              {isSpread ? (
+            {isSpread || draft.direction !== "bullish" ? (
+              <div className="border border-border/60 bg-transparent rounded-md p-5">
+                <p className="text-xs text-muted-foreground mb-2">Max gain</p>
                 <p className="font-mono text-3xl font-semibold tabular-nums text-success">
                   {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "absent: no priced contract at this strike"}
                 </p>
-              ) : draft.direction === "bullish" ? (
-                <p className="text-xl font-semibold text-success">Unlimited</p>
-              ) : (
-                <p className="font-mono text-3xl font-semibold tabular-nums text-success">
-                  {maxGainPerContract != null ? `$${Math.round(maxGainPerContract).toLocaleString()}` : "absent: no priced contract at this strike"}
-                </p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="border border-border/60 bg-transparent rounded-md p-5 space-y-3" data-testid="upside-estimate">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">{upside.moveLabel}</p>
+                  <p className={`font-mono text-2xl font-semibold tabular-nums ${upside.gain == null ? "text-muted-foreground" : upside.gain >= 0 ? "text-success" : "text-destructive"}`}>
+                    {upside.gain != null ? fmtDollars(upside.gain) : "absent: no implied move in the options data"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1"><Explained text="Chance it finishes past breakeven" /></p>
+                  <p className="font-mono text-2xl font-semibold tabular-nums">
+                    {upside.chance != null ? `${Math.round(upside.chance * 100)}%` : "absent: no implied volatility in the options data"}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
+          {!isSpread && draft.direction === "bullish" && upside.receipt && (
+            <p className="text-xs text-muted-foreground" data-testid="upside-receipt">{upside.receipt} {ESTIMATE_NOTE}</p>
+          )}
+          {stretch && (
+            <Callout severity="caution" compact>{stretch}</Callout>
+          )}
           {isSpread && netDebit != null && spreadWidth != null && (
             <p className="text-xs text-muted-foreground">
               <Explained text="Net debit $" />{netDebit.toFixed(2)}<Explained text=" · spread width $" />{spreadWidth.toFixed(0)}
@@ -592,30 +628,38 @@ function DraftDisplay({
                   {altResult.strategy && (
                     <p className="text-lg font-bold text-foreground"><Explained text={altResult.strategy} /></p>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-0.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-0.5">
                     <div className="border border-border/60 bg-transparent rounded-md p-5">
-                      <p className="text-xs text-muted-foreground mb-2">Cost to enter</p>
+                      <p className="text-xs text-muted-foreground mb-2">Cost and max loss</p>
                       <p className="font-mono text-3xl font-semibold tabular-nums">
                         {altCostToEnter != null ? `$${Math.round(altCostToEnter).toLocaleString()}` : "absent: no priced contract at this strike"}
                       </p>
                     </div>
-                    <div className="border border-border/60 bg-transparent rounded-md p-5">
-                      <p className="text-xs text-muted-foreground mb-2">Max loss</p>
-                      <p className="font-mono text-3xl font-semibold tabular-nums text-destructive">
-                        {altMaxLoss != null ? `$${Math.round(altMaxLoss).toLocaleString()}` : "absent: no priced contract at this strike"}
-                      </p>
-                    </div>
-                    <div className="border border-border/60 bg-transparent rounded-md p-5">
-                      <p className="text-xs text-muted-foreground mb-2">Max gain</p>
-                      {altIsUnlimited ? (
-                        <p className="text-xl font-semibold text-success">Unlimited</p>
-                      ) : (
+                    {altIsUnlimited ? (
+                      <div className="border border-border/60 bg-transparent rounded-md p-5 space-y-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">{upside.moveLabel}</p>
+                          <p className={`font-mono text-2xl font-semibold tabular-nums ${altUpside.gain == null ? "text-muted-foreground" : altUpside.gain >= 0 ? "text-success" : "text-destructive"}`}>
+                            {altUpside.gain != null ? fmtDollars(altUpside.gain) : "absent: no implied move in the options data"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1"><Explained text="Chance it finishes past breakeven" /></p>
+                          <p className="font-mono text-2xl font-semibold tabular-nums">
+                            {altUpside.chance != null ? `${Math.round(altUpside.chance * 100)}%` : "absent: no implied volatility in the options data"}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="border border-border/60 bg-transparent rounded-md p-5">
+                        <p className="text-xs text-muted-foreground mb-2">Max gain</p>
                         <p className="font-mono text-3xl font-semibold tabular-nums text-success">
                           {altMaxGain != null ? `$${Math.round(altMaxGain).toLocaleString()}` : "absent: no priced contract at this strike"}
                         </p>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
+                  {altIsUnlimited && upside.receipt && <p className="text-xs text-muted-foreground">{upside.receipt} {ESTIMATE_NOTE}</p>}
                   {altResult.target != null && (
                     <p className="text-xs text-muted-foreground">
                       Target: <span className="text-foreground font-medium">${altResult.target.toFixed(2)}</span>
