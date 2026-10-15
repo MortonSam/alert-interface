@@ -32,3 +32,16 @@ def test_the_cap_never_drops_the_front_or_an_earnings_expiry():
     assert got == ["2026-10-16", "2026-11-20", "2026-12-18"]
     assert wanted_expirations(CMG_LISTED, "2026-10-08", [], [], 5) == ["2026-10-09"]       # no courier, no earnings: the front only
     assert EARNINGS_WINDOW_DAYS == 45
+
+
+def test_the_report_moves_second_post_report_expiry_is_stored_outside_the_cap():
+    from app.services.chain_shadow import report_move_expirations
+    listed = ["2026-10-16", "2026-10-23", "2026-10-30", "2026-11-20", "2026-12-18"]
+    earnings = [("2026-10-19", "amc")]
+    # the first expiry capturing an Oct 19 after-close report is Oct 23, the second Oct 30
+    assert report_move_expirations(listed, "2026-10-14", earnings) == ["2026-10-30"]
+    assert report_move_expirations(["2026-10-16", "2026-10-23"], "2026-10-14", earnings) == []          # only one after the report
+    capped = wanted_expirations(listed, "2026-10-14", [], earnings, 2)
+    assert "2026-10-30" not in capped
+    got = wanted_expirations(listed, "2026-10-14", [], earnings, 2, report_move=report_move_expirations(listed, "2026-10-14", earnings))
+    assert set(got) - set(capped) == {"2026-10-30"}

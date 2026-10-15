@@ -130,10 +130,18 @@ describe("report cards match the stored rows", () => {
     const c = cards[0];
     expect(c.date).toBe("Aug 26, 2026");
     expect(c.timing).toBe("After the close");
-    expect(c.eps).toBe("EPS $2.22 against a $2.09 estimate, a 6.2% beat");
+    expect(c.eps).toBe("EPS $2.22 against a $2.09 estimate, beat by 6.2%");
     expect(c.moves.map((m) => m.value)).toEqual([8.738, 5.3038, 7.0352]);
     expect(c.moves.map((m) => fmtMove(m.value!))).toEqual(["+8.7%", "+5.3%", "+7.0%"]);
   });
+  it("the surprise size follows the verb, so no size ever takes an article (never \"a 8.0% beat\")", () => {
+    const beat = epsLine(row({ outcome: "beat", eps_actual: "1.08", eps_estimate: "1.00", eps_surprise_pct: 8.0, eps_surprise_display_pct: 8.0 })).eps!;
+    const miss = epsLine(row({ outcome: "miss", eps_actual: "0.92", eps_estimate: "1.00", eps_surprise_pct: -8.0, eps_surprise_display_pct: -8.0 })).eps!;
+    expect(beat).toBe("EPS $1.08 against a $1.00 estimate, beat by 8.0%");
+    expect(miss).toBe("EPS $0.92 against a $1.00 estimate, missed by 8.0%");
+    for (const s of [beat, miss]) expect(s).not.toMatch(/\ban? [\d.]+%/);
+  });
+
   it("a report without a judged EPS figure shows the absence, never a beat or miss", () => {
     const c = reportCards([VMRK_ROW])[0];
     expect(c.eps).toBeNull();
@@ -196,13 +204,18 @@ describe("the options verdict states the API's report move and never overstates"
     expect(v.kind === "verdict" && v.sentence).toBe(parts.map((p) => p.text).join(""));
     expect(v.kind === "verdict" && [v.reportPct, v.typicalPct]).toEqual([discover.report_move_pct, discover.typical_move_pct]);
   });
+  it("a term-method move names the first two expirations after the report in its receipt", () => {
+    const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, move: { ...NVDA_REPORT.move!, method: "term", before: null,
+      later: { expiration: "2026-12-18", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.45 }, t3_years: 67 / 365 } } });
+    expect(v.kind === "verdict" && v.receipt).toBe("From the Oct 12, 2026 options data, the Nov 20, 2026 expiration at 51.2% and the Dec 18, 2026 expiration at 45.0% implied volatility, the first two after the report on Nov 17, 2026. Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
+  });
   it("says plainly when the options don't separate a report move, with no comparison", () => {
-    const text = "The options don't separate a report move, because the expiration after the report is priced no higher than the one before it.";
+    const text = "The options don't separate a report move from the stock's usual swing.";
     const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, state: "not_separated", comparison: text, moveComparison: null,
       move: { ...NVDA_REPORT.move!, state: "not_separated", pct: null, e: null } } });
     expect(v.kind === "verdict" && [v.sentence, v.comparison, v.reportPct]).toEqual([text, null, null]);
-    const none = optionsVerdict({ ...NVDA_VERDICT, report: { state: "no_pre_expiration", comparison: "The options don't separate a report move, because no expiration ends before the report.", move: null, heldFacts: [] } });
-    expect(none.kind === "verdict" && none.sentence).toMatch(/^The options don't separate a report move/);
+    const none = optionsVerdict({ ...NVDA_VERDICT, report: { state: "no_legs", comparison: "Too few expirations near the report are on hand to separate a report move.", move: null, heldFacts: [] } });
+    expect(none.kind === "verdict" && none.sentence).toMatch(/^Too few expirations/);
     expect(none.kind === "verdict" && none.receipt).toBe("From the Oct 12, 2026 options data, for the report on Nov 17, 2026.");
   });
   it("no comparison words without a typical move over enough reports, and a held fact drops the verdict", () => {

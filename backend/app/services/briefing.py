@@ -371,10 +371,35 @@ def big_move_clause(*, move_date: date, move_pct: float, typical_abs: float, mul
     return text, inputs, [move_date]
 
 
+def report_move_inputs(view: dict) -> list[dict]:
+    """The report move's receipts (services/report_move.report_move_view) as inputs, the same in the Overview and the strip: the
+    move, its method, the two expirations it read with their implied volatilities, the chain date, and the typical move it is
+    compared with."""
+    rm = view.get("move")
+    if rm is None or rm.after is None:
+        return []
+    cd = view.get("chain_date") or date.fromisoformat(rm.after.chain_date)
+    out = []
+    if view.get("rep") is not None:
+        out.append(_input("report move", f"{view['rep']:.1f}%", cd, "0.80 x the report's one-day standard deviation, from the options around the report"))
+        out.append(_input("report move method", "the expirations before and after the report" if rm.method == "pair" else "the first two expirations after the report", cd,
+                          "services/report_move"))
+    legs = [rm.before, rm.after] if rm.method == "pair" else [rm.after, rm.later]
+    for leg in legs:
+        if leg is not None and leg.atm_iv is not None:
+            out.append(_input(f"implied volatility to {fmt_date(date.fromisoformat(leg.expiration))}", f"{leg.atm_iv * 100:.1f}%", cd, "at-the-money, solved from the chain"))
+    out.append(_input("chain date", fmt_date(cd), cd, "options chain last trade"))
+    if view.get("move_comparison") and view.get("typical_move_pct") is not None:
+        out += [_input("typical move after a report", f"{view['typical_move_pct']:.1f}%", None, f"past earnings reactions, mean absolute 1-day move over {last_reports(view['typical_n'])}"),
+                _input("reports in the sample", view["typical_n"], None)]
+    return out
+
+
 def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = None, note: str | None = None, source: str | None = None,
-                    timing: str | None = None, implied_pct: float | None = None, chain_date: date | None = None, expiration: date | None = None,
-                    avg_abs_1d: float | None = None, sample_n: int = 0, sample_as_of: date | None = None) -> tuple[str, list[dict], list[date]]:
-    """"Reports <date> <timing>, <N> days away (confirmed by the company); options price a move of about ±X% against a typical ±Y%.\""""
+                    timing: str | None = None, report_view: dict | None = None) -> tuple[str, list[dict], list[date]]:
+    """"Reports <date> <timing>, <N> days away (confirmed by the company)." then, when the options give one, the report move's own
+    sentence (services/report_move.report_move_view), word for word the one the verdict, Discover and the strip state; when the
+    options do not separate a report move, that sentence."""
     days = (next_date - today).days
     conf = confidence_phrase(confirmation)
     text = f"Reports {fmt_date(next_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "") + ", " + ("today" if days == 0 else plural(days, "day away", "days away"))
@@ -385,21 +410,14 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     if ev:
         inputs.append(_input("evidence", ev, next_date, "earnings calendar note"))
     dates = [next_date]
-    if implied_pct is not None and chain_date:
-        pct = fmt_pct(implied_pct * 100, signed=False)
-        clause = f"options price a move of about ±{pct}"
-        inputs += [_input("implied move", pct, chain_date, "at-the-money straddle over the stock price; chain " + fmt_date(chain_date)), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade")]
-        if expiration:
-            inputs.append(_input("expiration", fmt_date(expiration), expiration, "chosen expiry"))
-        dates.append(chain_date)
-        if avg_abs_1d is not None and sample_n > 0:
-            avg = fmt_pct(avg_abs_1d, signed=False)
-            clause += f" against a typical ±{avg}"
-            inputs += [_input("typical move after a report", avg, sample_as_of, f"stored earnings reactions, mean absolute 1-day move over {last_reports(sample_n)}"), _input("reports in the sample", sample_n, sample_as_of)]
-            if sample_as_of:
-                dates.append(sample_as_of)
-        text += f"; {clause}"
-    return text + ".", inputs, dates
+    text += "."
+    v = report_view or {}
+    if v.get("state") in ("ok", "not_separated") and v.get("comparison"):
+        text += " " + v["comparison"]
+        inputs += report_move_inputs(v)
+        if v.get("chain_date"):
+            dates.append(v["chain_date"])
+    return text, inputs, dates
 
 
 def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict | None = None, big_move: dict | None = None, upcoming: dict | None = None) -> dict | None:
@@ -427,8 +445,8 @@ def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict
             f"first stored close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, the EPS on the event row against "
             f"the estimate (actual above estimate is a beat) and the 1-day move from the stored bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "
             f"else the largest daily move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates when it is at least {BIG_MOVE_MULTIPLE} times the median absolute daily "
-            f"move of the past year, with no cause stated; else the next report within {NEXT_WITHIN_DAYS} days. A report comes from the stored calendar, with the at-the-money "
-            "straddle over spot from the latest fresh chain against the mean absolute 1-day move after past reports.")
+            f"move of the past year, with no cause stated; else the next report within {NEXT_WITHIN_DAYS} days. A report comes from the stored calendar, with the report move "
+            "(the part of the options' expected move that belongs to the report alone) against the mean absolute 1-day move after past reports, the sentence Discover states.")
     return _sentence("happening", text, rule, max(dates) if dates else None, inputs)
 
 

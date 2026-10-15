@@ -110,11 +110,15 @@ export function optionsVerdict(v: VerdictInput): Verdict {
   }
 
   const m = r.move;
-  const legs = m?.before?.atm_iv != null && m.after?.atm_iv != null
-    ? `, the ${fmtDay(m.before.expiration)} expiration at ${pct1(m.before.atm_iv)} and the ${fmtDay(m.after.expiration)} expiration at ${pct1(m.after.atm_iv)} implied volatility`
+  // the receipt names the two expirations the stated method read: around the report (pair), or the first two after it (term)
+  const termLegs = m?.method === "term" || (m?.method == null && m?.before?.atm_iv == null && m?.later?.atm_iv != null);
+  const [l1, l2] = termLegs ? [m?.after, m?.later] : [m?.before, m?.after];
+  const legs = l1?.atm_iv != null && l2?.atm_iv != null
+    ? `, the ${fmtDay(l1.expiration)} expiration at ${pct1(l1.atm_iv)} and the ${fmtDay(l2.expiration)} expiration at ${pct1(l2.atm_iv)} implied volatility`
     : "";
   const chainDay = m?.after?.chain_date ?? f.chain_date;
-  let receipt: string | null = chainDay ? `From the ${fmtDay(chainDay)} options data${legs}, for the report on ${report}.` : null;
+  const forReport = legs && termLegs ? `, the first two after the report on ${report}` : `, for the report on ${report}`;
+  let receipt: string | null = chainDay ? `From the ${fmtDay(chainDay)} options data${legs}${forReport}.` : null;
   const comparison = (r.moveComparison ?? null) as MoveComparison | null;
   let why: string | null = null;
   if (r.state === "ok") {

@@ -47,7 +47,7 @@ export function surpriseSize(r: HistoricalReaction): string | null {
 
 const NO_EPS = "No EPS figure is stored for this report.";
 
-/** "EPS $0.41 against a $0.35 estimate, a 17.1% beat" */
+/** "EPS $0.41 against a $0.35 estimate, beat by 17.1%" (never "a 8.0% beat": the size follows the verb, so no article depends on it) */
 export function epsLine(r: HistoricalReaction): { eps: string | null; epsAbsent: string | null } {
   const outcome = judgedOutcome(r);
   if (!outcome) return { eps: null, epsAbsent: r.outcome_reason ?? NO_EPS };
@@ -55,7 +55,8 @@ export function epsLine(r: HistoricalReaction): { eps: string | null; epsAbsent:
   const base = `EPS $${a.toFixed(2)} against a $${e.toFixed(2)} estimate`;
   if (outcome === "meet") return { eps: `${base}, in line`, epsAbsent: null };
   const size = surpriseSize(r);
-  return { eps: size ? `${base}, a ${size} ${outcome}` : `${base}, a ${outcome}`, epsAbsent: null };
+  if (!size) return { eps: `${base}, a ${outcome}`, epsAbsent: null };
+  return { eps: `${base}, ${outcome === "beat" ? "beat" : "missed"} by ${size}`, epsAbsent: null };
 }
 
 export function reportCard(r: HistoricalReaction): ReportCard {

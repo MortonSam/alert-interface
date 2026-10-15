@@ -13,9 +13,14 @@ from app.services import briefing_build as BB
 from app.services.next_earnings import NextEarnings
 
 
-def _fake_implied(pct=0.035):
-    async def fake(db, sym, spot, min_date, today):
-        return {"implied_pct": pct, "chain_date": today, "expiration": min_date + timedelta(days=2)}
+def _fake_view():
+    from app.services import report_move as RM
+    from app.services.move_comparison import report_sentence
+    async def fake(db, sym, report_date, today=None, held_facts=(), typical=None):
+        rm = RM.ReportMove(RM.OK, pct=0.035, e=0.035 / 0.8, t2_years=0.05, before=RM.Leg("2026-10-16", today.isoformat(), 1.0, 0.3),
+                           after=RM.Leg("2026-10-23", today.isoformat(), 1.0, 0.5), report_date=str(report_date), method=RM.PAIR)
+        return {"state": RM.OK, "move": rm, "report_move": rm.as_dict(), "pct": 0.035, "rep": 3.5, "chain_date": today, "typical_move_pct": 5.0,
+                "typical_n": 20, "move_comparison": "less than usual", "comparison": report_sentence(3.5, 5.0, "less than usual", today)}
     return fake
 
 
@@ -29,14 +34,14 @@ async def test_strip_overview_and_ask_ivy_price_only_a_confirmed_date(monkeypatc
     async def fake_next(db, ticker_id, when):
         return NextEarnings(date=when + timedelta(days=10), source="yfinance" if confirmation != "confirmed" else "edgar", confirmation=confirmation, note="x")
     monkeypatch.setattr(BB, "next_earnings_for", fake_next)
-    monkeypatch.setattr(BB, "_implied", _fake_implied())
+    monkeypatch.setattr(BB, "report_move_view", _fake_view())
     async with ScriptSessionLocal() as db:
         qs = await BB.build_questions(db, "MU", today)
         brief = await BB.build_briefing(db, "MU", today)
         pack = await A.fact_pack(db, "MU", today)
     assert ("implied_big" in [q["key"] for q in qs["questions"]]) is shown, [q["key"] for q in qs["questions"]]
-    assert any("options price a move" in s["text"] for s in brief["sentences"]) is shown, [s["text"] for s in brief["sentences"]]
-    assert any(f["id"] in ("implied_vs_typical", "implied_move") for f in pack["facts"]) is shown, [f["id"] for f in pack["facts"]]
+    assert any("Options price a move" in s["text"] for s in brief["sentences"]) is shown, [s["text"] for s in brief["sentences"]]
+    assert any(f["id"] in ("implied_vs_typical", "report_move", "report_move_sentence") for f in pack["facts"]) is shown, [f["id"] for f in pack["facts"]]
 
 
 @pytest.mark.asyncio

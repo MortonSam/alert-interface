@@ -199,7 +199,7 @@ TOPICS: list[tuple[str, str, tuple[str, ...], re.Pattern, re.Pattern]] = [
     ("past_moves", "how it has moved after past reports", ("typical_move", "typical_move_after_a_report", "reports_up"),
      re.compile(r"\b(?:move|moves|moved|react|reacts|reacted|go up|go down)\b[^?]*\b(?:earnings|report|reports)\b", re.I),
      re.compile(r"\b(?:moves?|reactions?) after (?:past |its )?reports\b|\btypical (?:earnings )?move\b", re.I)),
-    ("options", "what the options are pricing", ("implied_move_by_first_expiration_after_report", "implied_move"),
+    ("options", "what the options are pricing", ("report_move_sentence", "report_move"),
      re.compile(r"\boptions?\b|\bimplied\b|\bstrikes?\b|\bexpirations?\b|\bcalls?\b|\bputs?\b", re.I),
      re.compile(r"\boptions? (?:are )?(?:pricing|prices|market)\b|\bimplied moves?\b", re.I)),
     ("price_range", "where its price sits in its range", ("quote", "last_close"),
@@ -467,9 +467,10 @@ def volatility_word(rv_rank: float) -> str:
 def word_facts(raw: dict) -> list[dict]:
     """Pure: the comparisons Ivy may state, each computed here from the same numbers the strip uses (never by the model)."""
     out: list[dict] = []
-    imp, typ = raw.get("implied"), raw.get("typical_abs")
-    if imp and typ:
-        out.append(_fact("implied_vs_typical", "implied move against the typical move", compare_moves(imp["implied_pct"] * 100, typ), imp["chain_date"],
+    typ = raw.get("typical_abs")
+    view = raw.get("report_view") or {}
+    if view.get("move_comparison"):            # the report move's own comparison, the words the verdict, Discover and the strip use
+        out.append(_fact("implied_vs_typical", "report move against the typical move", view["move_comparison"], view["chain_date"],
                          "services/move_comparison: over 1.2x is more than usual, under 0.8x less", "word"))
     bars, quote = raw.get("bars") or {}, raw.get("quote_price")
     price = quote if quote is not None else bars.get("last_close")
@@ -538,12 +539,11 @@ def close_phrase(chain_date: date, today: date) -> str:
 
 async def event_facts(db: AsyncSession, symbol: str, raw: dict, today: date) -> list[dict]:
     """The dates a visitor plans around: the next report's day and timing, the session the stock reacts on, the expirations before
-    and after it from the serving chain, the implied move by the first expiration after the report (dated by its chain), and how
-    often the stock rose after its last reports."""
+    and after it from the serving chain, the report move and its sentence (services/report_move.report_move_view, dated by its
+    chain), and how often the stock rose after its last reports."""
     from app.scripts.ivy_v3_pull import next_session
     from app.services import chain_store
     from app.services.chain_shadow import counts_for_report
-    from app.services.implied_move import straddle_implied_move
     out: list[dict] = []
     nxt = raw.get("next_report") or {}
     d = nxt.get("date")
@@ -565,16 +565,15 @@ async def event_facts(db: AsyncSession, symbol: str, raw: dict, today: date) -> 
             e = date.fromisoformat(after[0])
             out.append(_fact("first_expiration_after_report", "first expiration after the report", B.fmt_date(e).rsplit(",", 1)[0], chain_date,
                              "options chain, the expirations listed", phrase=day_phrase(e)))
-            got = await chain_store.get_chain(db, symbol, after[0])
-            if got and got[1] and chain_store.is_fresh(got[1], today=today):
-                chain, cd = got[0], date.fromisoformat(str(got[1])[:10])
-                spot = chain.get("underlying_price") or raw.get("quote_price")
-                im = straddle_implied_move(chain.get("calls") or [], chain.get("puts") or [], spot)
-                if im is not None:
-                    pct = f"{im.pct * 100:.1f}%"
-                    out.append(_fact("implied_move_by_first_expiration_after_report", "implied move by the first expiration after the report", f"±{pct}", cd,
-                                     "at-the-money straddle over the stock price, the stored chain for that expiration",
-                                     phrase=f"about {pct} by {B.fmt_date(e).rsplit(',', 1)[0]} {close_phrase(cd, today)}"))
+    view = raw.get("report_view") or {}
+    if view.get("state") in ("ok", "not_separated") and view.get("comparison"):
+        # the report move and its sentence, word for word what the ticker page's verdict, Discover, the strip and the Overview state
+        cd = view.get("chain_date") or (date.fromisoformat(view["move"].after.chain_date) if view.get("move") and view["move"].after else None)
+        if view.get("rep") is not None:
+            out.append(_fact("report_move", "report move", f"{view['rep']:.1f}%", cd, "services/report_move, the options around the report",
+                             phrase=f"about {view['rep']:.1f}% from the report itself {close_phrase(cd, today)}" if cd else None))
+        out.append(_fact("report_move_sentence", "what the options price for the report", view["comparison"], cd, "services/report_move and services/move_comparison",
+                         phrase=view["comparison"]))
     rows = (await db.execute(text("""SELECT hr.event_date, hr.pct_change_1d FROM historical_reactions hr JOIN tickers t ON t.id = hr.ticker_id
         WHERE t.symbol = :s AND hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL ORDER BY hr.event_date DESC LIMIT 20"""), {"s": symbol})).all()
     if rows:
@@ -612,6 +611,8 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
     brief = await build_briefing(db, symbol, today)
     qs = await build_questions(db, symbol, today, raw=raw, all_candidates=True)
     facts = with_denominators(number_facts(brief["sentences"], qs["questions"])) + word_facts(raw) + await event_facts(db, symbol, raw, today)
+    ids: set[str] = set()
+    facts = [f for f in facts if not (f["id"] in ids or ids.add(f["id"]))]        # a receipt's fact first, the event fact of the same id dropped
     date_phrases(facts)
     last = raw.get("last_report") or {}
     for f in facts:
@@ -1009,9 +1010,9 @@ FALLBACK_TEMPLATES: dict[str, list[tuple[tuple[str, ...], str]]] = {
     "past_moves": [(("typical_move", "reports_up"), "It has moved {fact:typical_move}, and it was {fact:reports_up}."),
                    (("typical_move_after_a_report", "reports_up"), "It has moved {fact:typical_move_after_a_report}, and it was {fact:reports_up}."),
                    (("typical_move",), "It has moved {fact:typical_move}."), (("reports_up",), "It was {fact:reports_up}.")],
-    "options": [(("first_expiration_after_report", "implied_move_by_first_expiration_after_report"),
-                 "The first expiration that includes the report is {fact:first_expiration_after_report}, and options are pricing {fact:implied_move_by_first_expiration_after_report}."),
-                (("implied_move_by_first_expiration_after_report",), "Options are pricing {fact:implied_move_by_first_expiration_after_report}.")],
+    "options": [(("first_expiration_after_report", "report_move_sentence"),
+                 "The first expiration that includes the report is {fact:first_expiration_after_report}. {fact:report_move_sentence}"),
+                (("report_move_sentence",), "{fact:report_move_sentence}")],
     "price_range": [(("quote", "quote_time", "distance_below_52_week_high"), "The stock is at {fact:quote} {fact:quote_time}, {fact:distance_below_52_week_high}."),
                     (("last_close", "distance_below_52_week_high"), "The stock closed at {fact:last_close}, {fact:distance_below_52_week_high}."),
                     (("quote", "quote_time"), "The stock is at {fact:quote} {fact:quote_time}."), (("last_close",), "The stock closed at {fact:last_close}.")],

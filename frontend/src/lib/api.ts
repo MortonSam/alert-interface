@@ -525,11 +525,13 @@ export interface ExpectedMove {
   held_facts?: string[];
 }
 
-/** backend services/report_move.ReportMove: s1 is `before`'s ATM IV, s2 `after`'s, the move 0.80 x sqrt(T2 x (s2^2 - s1^2)). */
+/** backend services/report_move.ReportMove. Pair: s1 is `before`'s ATM IV, s2 `after`'s, the move 0.80 x sqrt(T2 x (s2^2 - s1^2)).
+ *  Term: s2 `after`'s, s3 `later`'s, base = (s3^2 T3 - s2^2 T2) / (T3 - T2), the move 0.80 x sqrt(T2 x (s2^2 - base)). */
 export interface ReportMoveLeg { expiration: string; chain_date: string; atm_strike: number | null; atm_iv: number | null }
 export interface ReportMove {
   state: string; pct: number | null; e: number | null; t2_years: number | null;
   before: ReportMoveLeg | null; after: ReportMoveLeg | null; report_date: string | null; version: number;
+  method?: "pair" | "term" | null; later?: ReportMoveLeg | null; t3_years?: number | null; base_variance?: number | null;
 }
 
 export interface StrikeData {

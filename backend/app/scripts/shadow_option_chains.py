@@ -6,7 +6,8 @@ request lists Intrinio's expirations after the EOD date; the front expiry, and f
 EARNINGS_WINDOW_DAYS the nearest expiry that captures each report (after the report day, or on it for a before-open report) and the last
 one that does not, are always fetched,
 then the expirations the courier holds up to MAX_EXPIRATIONS in all, and, outside that cap, the expiration a Build a Trade draft reads
-(services/chain_shadow.wanted_expirations and draft_expirations; pages read these chains since 2026-10-09). They are fetched and stored under intrinio_chain:{SYM}:{EXP} with chain_last_trade = the EOD
+and, for each report in the window, the second expiry that captures it (the report move's term method, services/report_move)
+(services/chain_shadow.wanted_expirations, draft_expirations and report_move_expirations; pages read these chains since 2026-10-09). They are fetched and stored under intrinio_chain:{SYM}:{EXP} with chain_last_trade = the EOD
 date, the quote timestamps kept, and the spot from the stored shadow bar of that date. Expired Intrinio chains
 are removed. As each ticker's front-expiry chain is stored it is compared with the courier's chain for the same session
 (services/chain_shadow.compare_front) and the night's figures go to chain_shadow:{date} and the outcome, which validate's
@@ -33,7 +34,7 @@ from app.database import ScriptSessionLocal
 from app.models.security_record import SecurityRecord
 from app.models.ticker import Ticker
 from app.services import chain_store
-from app.services.chain_shadow import (draft_expirations, EARNINGS_WINDOW_DAYS, MAX_WAIT_SECONDS, PER_TICKER_COLUMNS, chain_dates, clock_fields, compare_front,
+from app.services.chain_shadow import (draft_expirations, report_move_expirations, EARNINGS_WINDOW_DAYS, MAX_WAIT_SECONDS, PER_TICKER_COLUMNS, chain_dates, clock_fields, compare_front,
                                        expected_session, front_expiration, local_now, night_totals, to_stored_chain, wait_seconds,
                                        wanted_expirations)
 from app.services.system_metadata_service import set_value
@@ -142,6 +143,7 @@ async def run(argv: list[str]) -> int:
     earnings = await _earnings_dates(expected)                           # one query: who reports in the window, and when
     reports = await _report_dates(expected)                              # one query: every upcoming report, for the draft's expiry
     draft_extra = 0                                                      # chains stored only because a draft reads them (exempt from the cap)
+    report_move_extra = 0                                                # chains stored only for the report move's term method (exempt too)
     client = IntrinioClient()
     chains_written = 0
     tickers_with_chains: list[str] = []
@@ -159,10 +161,14 @@ async def run(argv: list[str]) -> int:
                 if not exps:
                     no_options.append(sym)
                     continue
-                capped = wanted_expirations(exps, expected.isoformat(), sorted(courier.get(sym, {})), earnings.get(sym, []), MAX_EXPIRATIONS)
-                wanted = wanted_expirations(exps, expected.isoformat(), sorted(courier.get(sym, {})), earnings.get(sym, []), MAX_EXPIRATIONS,
-                                            draft=draft_expirations(exps, expected.isoformat(), reports.get(sym, [])))
-                draft_extra += len(set(wanted) - set(capped))
+                base_args = (exps, expected.isoformat(), sorted(courier.get(sym, {})), earnings.get(sym, []), MAX_EXPIRATIONS)
+                capped = wanted_expirations(*base_args)
+                draft = draft_expirations(exps, expected.isoformat(), reports.get(sym, []))
+                with_draft = wanted_expirations(*base_args, draft=draft)
+                wanted = wanted_expirations(*base_args, draft=draft,
+                                            report_move=report_move_expirations(exps, expected.isoformat(), earnings.get(sym, [])))
+                draft_extra += len(set(with_draft) - set(capped))
+                report_move_extra += len(set(wanted) - set(with_draft))
                 wrote = 0
                 stored_chains: dict[str, dict] = {}
                 for exp in wanted:
@@ -211,11 +217,11 @@ async def run(argv: list[str]) -> int:
     fields = {"expected_session": expected.isoformat(), "eod_dates": eod_dates, "tickers": len(targets), "tickers_with_chains": len(tickers_with_chains),
               "compared": len(per_ticker), "missing_intrinio": len(missing_intrinio),
               "chains": chains_written, "no_options": no_options[:50], "no_options_count": len(no_options), "late": late, "no_spot": no_spot[:50],
-              "expired_removed": len(removed), "draft_extra_chains": draft_extra, "requests": client.request_count, "retries": client.log.retries, "errors": errors[:50], "error": None,
+              "expired_removed": len(removed), "draft_extra_chains": draft_extra, "report_move_extra_chains": report_move_extra, "requests": client.request_count, "retries": client.log.retries, "errors": errors[:50], "error": None,
               **clock_fields(now_utc, waited, early_reason)}
     print(f"{STEP_LABEL}: {len(targets)} ticker(s), {len(tickers_with_chains)} with chains, {chains_written} chain(s) for session {expected} "
           f"(EOD dates {eod_dates}), {len(no_options)} without options, {len(late)} late, {len(no_spot)} without a stored spot, "
-          f"{len(removed)} expired removed, {draft_extra} draft-only chain(s), {client.request_count} request(s), {len(errors)} error(s); compared {len(per_ticker)} ticker(s) with the courier, "
+          f"{len(removed)} expired removed, {draft_extra} draft-only chain(s), {report_move_extra} report-move-only chain(s) (one request each), {client.request_count} request(s), {len(errors)} error(s); compared {len(per_ticker)} ticker(s) with the courier, "
           f"{len(missing_intrinio)} courier ticker(s) without an Intrinio chain; clock {fields['clock']} {fields['started_local']} waited {fields['waited_seconds']}s")
     for e in errors[:10]:
         print("   ", e)

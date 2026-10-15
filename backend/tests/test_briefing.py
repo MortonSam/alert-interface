@@ -122,12 +122,24 @@ def test_branch_2_big_move_is_the_largest_off_earnings_move_at_least_three_times
     assert B.find_big_move(daily2, {daily[-3][0], daily[-2][0]}, T) is None
 
 
+def _view(rep, typ, n, chain):
+    from tests.test_questions import _view as v
+    return v(rep, typ, n, chain)
+
+
 def test_branch_3_next_report_within_45_days_with_the_options_clause_only_on_a_fresh_chain():
-    t, _, _ = B.upcoming_clause(today=T, next_date=date(2026, 10, 14), confirmation="confirmed", note="confirmed: press release via Finnhub news 2026-09-10: Q4 date", source="finnhub",
-                                timing="amc", implied_pct=0.087, chain_date=date(2026, 10, 2), avg_abs_1d=6.3, sample_n=20, sample_as_of=date(2026, 6, 25))
-    assert t == "Reports Oct 14, 2026 after the close, 9 days away (confirmed by the company); options price a move of about ±8.7% against a typical ±6.3%."
-    t, _, _ = B.upcoming_clause(today=T, next_date=date(2026, 10, 6), confirmation="estimated", source="yfinance", timing="bmo", avg_abs_1d=4.0, sample_n=8)
-    assert t == "Reports Oct 6, 2026 before the open, 1 day away (estimated)."                  # no fresh chain: no options clause
+    v = _view(8.7, 6.3, 20, date(2026, 10, 2))
+    t, inputs, _ = B.upcoming_clause(today=T, next_date=date(2026, 10, 14), confirmation="confirmed", note="confirmed: press release via Finnhub news 2026-09-10: Q4 date", source="finnhub",
+                                     timing="amc", report_view=v)
+    assert t == ("Reports Oct 14, 2026 after the close, 9 days away (confirmed by the company). Options price a move of about 8.7% from the report itself, "
+                 "more than the 6.3% it has moved on a typical report (options from Oct 2, 2026).")
+    assert t.endswith(v["comparison"])                                                          # the report move's own sentence, word for word
+    assert {i["name"] for i in inputs} >= {"report move", "chain date", "typical move after a report"}
+    t, _, _ = B.upcoming_clause(today=T, next_date=date(2026, 10, 6), confirmation="estimated", source="yfinance", timing="bmo", report_view={})
+    assert t == "Reports Oct 6, 2026 before the open, 1 day away (estimated)."                  # no report move: no options clause
+    absent = {"state": "not_separated", "comparison": "The options don't separate a report move from the stock's usual swing."}
+    assert B.upcoming_clause(today=T, next_date=date(2026, 10, 6), timing="bmo", report_view=absent)[0].endswith(absent["comparison"])
+    assert B.upcoming_clause(today=T, next_date=date(2026, 10, 6), timing="bmo", report_view={"state": "no_chain", "comparison": "x"})[0].endswith("away.")
     assert B.upcoming_clause(today=T, next_date=T, confirmation="expected_unconfirmed")[0] == "Reports Oct 5, 2026, today (expected, not confirmed)."
 
 
@@ -159,15 +171,13 @@ def test_sentence_b_priority_window_then_report_within_7_days_then_big_move_then
 def test_no_number_in_a_block_is_a_literal_of_its_template():
     a = [B.profile_sentence(name="Alpha Inc.", short_description="Alpha makes chips.", gics_sector="Information Technology", gics_sub_industry="Semiconductors", gics_as_of=date(2026, 10, 5), index_member=True,
                             profile_as_of=date(2026, 10, 5), quote_price=187.52, quote_ts=QUOTE_TS, shares_outstanding=6_350_000_000, shares_as_of=date(2026, 10, 2)),
-         B.happening_sentence("MU", stock=STOCK, upcoming=dict(today=T, next_date=date(2026, 10, 14), confirmation="confirmed", timing="amc", implied_pct=0.087, chain_date=date(2026, 10, 2),
-                                                               avg_abs_1d=6.3, sample_n=20, sample_as_of=date(2026, 6, 25))),
+         B.happening_sentence("MU", stock=STOCK, upcoming=dict(today=T, next_date=date(2026, 10, 14), confirmation="confirmed", timing="amc", report_view=_view(8.7, 6.3, 20, date(2026, 10, 2)))),
          B.happening_sentence("MU", stock=STOCK, big_move=dict(move_date=date(2026, 9, 25), move_pct=-9.1, typical_abs=1.3, multiple=7.0))]
     b = [B.profile_sentence(name="Beta Corp.", short_description="Beta sells shoes.", gics_sector="Consumer Discretionary", gics_sub_industry="Footwear", gics_as_of=date(2025, 4, 11), index_member=False,
                             profile_as_of=date(2025, 4, 11), quote_price=43.11, quote_ts=1744398000, shares_outstanding=540_000_000, shares_as_of=date(2025, 4, 9)),
          B.happening_sentence("ZZ", stock=dict(quote_price=43.11, quote_ts=1744398000, last_close=41.77, last_close_date=date(2025, 4, 11), high_52w=66.6, high_52w_date=date(2025, 1, 3),
                                                anchor_close_3m=48.8, anchor_date_3m=date(2025, 1, 13)),
-                              upcoming=dict(today=date(2025, 4, 14), next_date=date(2025, 4, 29), confirmation="estimated", source="x", timing="bmo", implied_pct=0.041, chain_date=date(2025, 4, 11),
-                                            avg_abs_1d=3.3, sample_n=36, sample_as_of=date(2025, 1, 29))),
+                              upcoming=dict(today=date(2025, 4, 14), next_date=date(2025, 4, 29), confirmation="estimated", source="x", timing="bmo", report_view=_view(4.1, 3.3, 36, date(2025, 4, 11)))),
          B.happening_sentence("ZZ", stock=dict(quote_price=43.11, quote_ts=1744398000, high_52w=66.6, high_52w_date=date(2025, 1, 3), anchor_close_3m=48.8, anchor_date_3m=date(2025, 1, 13)),
                               big_move=dict(move_date=date(2025, 4, 8), move_pct=12.4, typical_abs=2.2, multiple=5.6))]
     for sa, sb in zip(a, b):

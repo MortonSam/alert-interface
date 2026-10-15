@@ -90,13 +90,13 @@ def test_normalization_folds_ticker_name_stopwords_and_synonyms():
 
 
 def test_word_facts_come_from_the_strips_numbers_with_the_shared_thresholds():
-    raw = {"implied": {"implied_pct": 0.09, "chain_date": date(2026, 10, 5)}, "typical_abs": 7.0, "quote_price": 1045.56,
+    raw = {"report_view": {"state": "ok", "rep": 9.0, "move_comparison": "more than usual", "chain_date": date(2026, 10, 5)}, "typical_abs": 7.0, "quote_price": 1045.56,
            "bars": {"high_52w": 1213.37, "high_52w_date": date(2026, 6, 25), "last_close": 1063.96}, "rv": {"rv_20d": 0.47, "rv_rank": 12.0, "as_of": date(2026, 10, 5)},
            "last_report": {"event_date": date(2026, 9, 30), "timing": "amc", "move_pct": 3.0, "outcome": "beat"},
            "next_report": {"date": date(2026, 12, 16), "confirmation": "estimated", "note": None, "source": "finnhub", "timing": "amc"},
            "dividend": {"ex_date": date(2026, 10, 14), "declared_on": date(2026, 9, 30)}}
     w = {f["id"]: f["value"] for f in A.word_facts(raw)}
-    assert w["implied_vs_typical"] == "more than usual" and w["last_move_vs_typical"] == "less than usual"           # 9 over 7 and 3 over 7, services/move_comparison
+    assert w["implied_vs_typical"] == "more than usual" and w["last_move_vs_typical"] == "less than usual"           # the report move's own words; 3 over 7, services/move_comparison
     assert w["price_vs_52_week_high"] == "below" and w["52_week_high_date"] == "Jun 25, 2026"
     assert w["volatility_vs_year"] == "quiet" and A.volatility_word(80) == "elevated" and A.volatility_word(50) == "normal"
     assert w["last_report_outcome"] == "beat" and w["last_report_direction"] == "rose" and w["last_report_timing"] == "after the close"
@@ -376,6 +376,7 @@ def test_a_sentence_fact_is_never_placed_by_the_model_and_is_appended_by_the_sys
 
 # ── 2026-10-13 test set: repeats, decline contradictions, the fallback, the glued three-month phrase, results in a series answer ──
 
+JPM_REPORT_SENTENCE = "Options price a move of about 2.4% from the report itself, about the same as the 2.9% it has moved on a typical report (options from Oct 12, 2026)."       # services/report_move.report_move_view, the sentence Discover states
 PACK_FACTS = [
     {"id": "description", "name": "description", "value": "JPMorgan Chase & Co. operates through four segments. It serves consumers and companies.", "as_of": None, "source": "profile", "kind": "number",
      "phrase": "JPMorgan Chase & Co. operates through four segments. It serves consumers and companies."},
@@ -392,8 +393,9 @@ PACK_FACTS = [
     {"id": "next_report_day", "name": "next report day", "value": "Tuesday, Jan 12", "as_of": "2027-01-12", "source": "s", "kind": "number", "phrase": "Tuesday, Jan 12"},
     {"id": "next_report_timing", "name": "next report timing", "value": "before the open", "as_of": "2027-01-12", "source": "s", "kind": "word", "phrase": "before the open"},
     {"id": "first_expiration_after_report", "name": "first expiration after the report", "value": "Jan 15", "as_of": "2026-10-12", "source": "s", "kind": "number", "phrase": "Friday, Jan 15"},
-    {"id": "implied_move_by_first_expiration_after_report", "name": "implied move by the first expiration after the report", "value": "±3.2%", "as_of": "2026-10-12", "source": "s",
-     "kind": "number", "phrase": "about 3.2% by Jan 15 as of Monday's close"},
+    {"id": "report_move", "name": "report move", "value": "2.4%", "as_of": "2026-10-12", "source": "s", "kind": "number", "phrase": "about 2.4% from the report itself as of Monday's close"},
+    {"id": "report_move_sentence", "name": "what the options price for the report", "value": JPM_REPORT_SENTENCE, "as_of": "2026-10-12", "source": "s",
+     "kind": "number", "phrase": JPM_REPORT_SENTENCE},
 ]
 
 
@@ -474,8 +476,8 @@ async def test_ivy_never_dead_ends_the_fallback_is_built_from_the_fact_pack():
     r = await A.answer_question(None, pack, "will it go up after earnings", client=Drafts(["COVERED: yes\nIt trades at {fact:quote} {fact:quote_time}."], "unsupported"), kind="direction")
     assert r["verdict"] == "fallback" and "passed the checks" not in r["answer"]["data"]
     assert r["answer"]["data"] == ("It has moved ±2.9% on a typical report as of its Jul 14, 2026 report, and it was up after 9 of its last 20 reports. The first expiration "
-                                   "that includes the report is Friday, Jan 15, and options are pricing about 3.2% by Jan 15 as of Monday's close. " + A.CLOSING_LINE)
-    assert {i["value"] for i in r["answer"]["inputs"]} >= {"±2.9%", "9", "±3.2%"}                    # every figure carries its receipt
+                                   "that includes the report is Friday, Jan 15. " + JPM_REPORT_SENTENCE + " " + A.CLOSING_LINE)
+    assert {i["value"] for i in r["answer"]["inputs"]} >= {"±2.9%", "9", JPM_REPORT_SENTENCE}         # every figure carries its receipt
     # JPM 2026-10-13: "what does the company do" answered not covered; the facts hold it, so it is answered
     r = await A.answer_question(None, pack, "what does the company do", client=Drafts(["COVERED: no\nIvy doesn't track that."]), kind="not_covered")
     assert r["verdict"] == "fallback" and r["answer"]["data"].startswith("JPMorgan Chase & Co. operates through four segments.") and "doesn't track" not in r["answer"]["data"]
@@ -499,8 +501,8 @@ async def test_a_series_request_never_gets_the_latest_results():
     assert "miss" not in r["answer"]["data"] and "$5.75" not in r["answer"]["data"] and r["answer"]["data"].startswith(A.EXTRACTION_LINE)
     assert A.hidden_for("timing") >= {"outcome", "eps_estimate"} and A.hidden_for("covered_other") == set()
     data = A.fallback_answer(pack, "give me every JPM strike and bid for the next expiration", "extraction")["data"]
-    assert data == (A.EXTRACTION_LINE + " JPMorgan Chase reports before the open on Tuesday, Jan 12. The first expiration that includes the report is Friday, Jan 15, "
-                    "and options are pricing about 3.2% by Jan 15 as of Monday's close. The stock is at $333.88 as of Oct 13, 3:47 PM ET, 8.1% below its 52-week high.")
+    assert data == (A.EXTRACTION_LINE + " JPMorgan Chase reports before the open on Tuesday, Jan 12. The first expiration that includes the report is Friday, Jan 15. "
+                    + JPM_REPORT_SENTENCE + " The stock is at $333.88 as of Oct 13, 3:47 PM ET, 8.1% below its 52-week high.")
 
 
 def test_one_draft_per_reply_and_a_phrase_absorbs_its_lead_in():

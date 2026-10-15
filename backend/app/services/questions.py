@@ -52,25 +52,20 @@ def q_reaction_normal(*, name: str, symbol: str, event_date: date, timing: str |
 
 
 # 2 ─────────────────────────────────────────────────────────────────────────────
-def q_implied_big(*, name: str, symbol: str, implied_pct: float, chain_date: date, next_date: date, typical_abs: float, n_reports: int,
-                  sample_as_of: date | None) -> dict | None:
-    """A company-confirmed report within NEXT_WITHIN_DAYS with a fresh implied move: the options' move against the typical one.
-    The caller (briefing_build) offers no implied move on an estimated date (implied_move.implied_move_allowed)."""
-    if n_reports < MIN_REPORTS:
+def q_implied_big(*, name: str, symbol: str, view: dict, next_date: date) -> dict | None:
+    """A company-confirmed report within NEXT_WITHIN_DAYS with a report move (services/report_move.report_move_view) compared
+    with the typical first-day move over at least MIN_REPORTS reports. The data is the view's own sentence, word for word what
+    the ticker page's verdict, Discover's line and the Overview say. The caller offers none on an estimated date."""
+    if not view or view.get("move_comparison") is None or view.get("rep") is None:
         return None
-    imp = fmt_pct(implied_pct * 100, signed=False)
-    typ = fmt_pct(typical_abs, signed=False)
-    from app.services.move_comparison import LESS_RATIO, MORE_RATIO, compare_moves
-    verdict = compare_moves(implied_pct * 100, typical_abs)
-    data = (f"Options price a move of about ±{imp} for the {fmt_date(next_date)} report; over {last_reports(n_reports)} {symbol} has moved ±{typ} on average, "
-            f"so the market is pricing {verdict}.")
-    idea = ("The implied move is what a straddle costs: the price the options market puts on uncertainty. It tends to run above the move that "
-            "actually follows, because option sellers charge for the risk of being wrong.")
-    inputs = [_input("implied move", f"±{imp}", chain_date, "at-the-money straddle over the stock price, latest fresh chain"), _input("chain date", fmt_date(chain_date), chain_date, "options chain last trade"),
-              _input("report date", fmt_date(next_date), next_date, "earnings calendar, confirmed by the company"), _input("typical move", f"±{typ}", sample_as_of, "mean absolute 1-day move, stored earnings reactions"),
-              _input("reports in the sample", n_reports, sample_as_of)]
-    return _q("implied_big", f"Is a ±{imp} expected move big for {name}?", data, idea, inputs, chain_date,
-              f"A company-confirmed report within {NEXT_WITHIN_DAYS} days (an estimated date is never priced) and a fresh chain; at least {MIN_REPORTS} past reports; more than usual means the implied move is over "
+    from app.services.briefing import report_move_inputs
+    from app.services.move_comparison import LESS_RATIO, MORE_RATIO
+    rep = f"{view['rep']:.1f}%"
+    idea = ("The report move is the part of the swing option prices expect that comes from the earnings report alone, with the stock's "
+            "normal day to day swing taken out. It tends to run above the move that actually follows, because option sellers charge for the risk of being wrong.")
+    inputs = [*report_move_inputs(view), _input("report date", fmt_date(next_date), next_date, "earnings calendar, confirmed by the company")]
+    return _q("implied_big", f"Is a {rep} move from the report big for {name}?", view["comparison"], idea, inputs, view["chain_date"],
+              f"A company-confirmed report within {NEXT_WITHIN_DAYS} days (an estimated date is never priced) and a fresh chain; at least {MIN_REPORTS} past reports; more than usual means the report move is over "
               f"{MORE_RATIO:g} times the mean absolute 1-day move, less than usual under {LESS_RATIO:g} times.")
 
 
