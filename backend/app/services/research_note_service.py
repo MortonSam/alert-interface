@@ -103,6 +103,9 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
 
 # symbol -> why its earnings history is withheld (set by _fetch_context, read by the prompt and stats)
 _UNAVAILABLE_REASON: dict[str, str] = {}
+# symbol -> the COMPARISON FACTS block (services/note_comparisons), set by _fetch_context, read by both prompts
+_COMPARISONS: dict[str, str] = {}
+MODEL_TIMEOUT_SECONDS = 180      # every generation and verification call is bounded
 
 
 def _stats_block(s: dict) -> str:
@@ -264,27 +267,8 @@ def _build_generation_prompt(
     else:
         filing_block = "(No SEC filing available. Use general knowledge for this company.)"
 
-    stats = _precompute_stats(reactions)
-    stats["unavailable_reason"] = _UNAVAILABLE_REASON.get(ticker.symbol)
-    stats_block = _stats_block(stats)
-
-    if reactions:
-        rows = []
-        for r in reactions:
-            eps_est = f"${float(r.eps_estimate):.2f}" if r.eps_estimate else "N/A"
-            eps_act = f"${float(r.eps_actual):.2f}"   if r.eps_actual   else "N/A"
-            pct_1d  = f"{float(r.pct_change_1d):+.1f}%" if r.pct_change_1d else "N/A"
-            pct_3d  = f"{float(r.pct_change_3d):+.1f}%" if r.pct_change_3d else "N/A"
-            pct_5d  = f"{float(r.pct_change_5d):+.1f}%" if r.pct_change_5d else "N/A"
-            rows.append(
-                f"| {r.event_date} | {r.outcome.value:7} | {eps_est:8} | {eps_act:8} "
-                f"| {pct_1d:7} | {pct_3d:7} | {pct_5d:7} |"
-            )
-        header = "| Date       | Outcome | EPS Est  | EPS Act  |  1d%    |  3d%    |  5d%    |"
-        sep    = "|------------|---------|----------|----------|---------|---------|---------|"
-        table_block = "\n".join([header, sep] + rows)
-    else:
-        table_block = "(No earnings data.)"
+    comparisons = _COMPARISONS.get(ticker.symbol) or "COMPARISON FACTS: (none on file)"
+    from app.services.note_rules import MAX_POINTS
 
     return f"""\
 You are a financial research analyst producing a STRUCTURED research note for {ticker.symbol}.
@@ -295,40 +279,33 @@ MARKET CAP: {market_cap}
 
 {filing_block}
 
-{stats_block}
-
-EARNINGS TABLE (for qualitative context, do NOT count rows, recompute averages, or derive any statistics; use the precomputed values above for all numerical claims):
-{table_block}
+{comparisons}
 
 OUTPUT FORMAT: Return ONLY a valid JSON object with exactly these keys (no markdown fences, no preamble, no text outside the JSON):
 
 {{
-  "rating": "bullish" | "neutral" | "bearish",
-  "bottom_line": "One paragraph (3-5 sentences) synthesizing the investment picture. What matters most right now.",
+  "bottom_line": "Two to four sentences summarizing what to watch next and why it matters. Neutral: no view on the stock.",
   "what_they_do": "2-4 sentences on core business and revenue model.",
-  "highlights": [
-    {{"lead": "short bold label (2-5 words)", "detail": "1-3 sentence analysis"}},
-    ...
-  ],
-  "watch": [
-    {{"lead": "short label", "detail": "1-3 sentence analysis"}},
-    ...
-  ],
-  "risks": [
-    {{"lead": "short label", "detail": "1-3 sentence analysis"}},
-    ...
-  ]
+  "highlights": [{{"lead": "short label (2-5 words)", "detail": "1-3 sentences"}}],
+  "watch": [{{"lead": "short label", "detail": "1-3 sentences"}}],
+  "risks": [{{"lead": "short label", "detail": "1-3 sentences"}}]
 }}
 
 RULES:
-- "rating" MUST be exactly one of: "bullish", "neutral", "bearish". Base it on the overall picture from filings + earnings data.
-- 3-6 items in each of highlights, watch, and risks.
-- The precomputed statistics above are authoritative. Use those exact figures for any numerical claim about earnings history.
-- Do NOT count, rank, or compute any statistics yourself from the table.
-- Do NOT make superlative claims ("strongest", "best ever", "largest") unless the precomputed stats unambiguously support them.
-- Only state facts about the business that appear in the filing excerpt or are well-established public knowledge.
+- At most {MAX_POINTS} points in each of highlights, watch and risks. Fewer is fine, and a section may be empty. Write only the
+  points that matter most.
+- Every point that states a figure sets it against something: the company's own history (for example a margin against its
+  five-year average), the same quarter a year earlier, or sector peers. Take those comparisons from COMPARISON FACTS or the filing.
+  Never a bare number. A point with no comparison available states no figure.
+- Do not repeat what the ticker page already shows: no beat rate, no count of beats or misses, no EPS surprise, and nothing about
+  how the stock moved after past reports.
+- The bottom_line summarizes what to watch and stays neutral. No verdict on the stock, no rating, and none of "compelling",
+  "exceptional", "strong buy", "undervalued", "overvalued", "bullish", "bearish", "attractive valuation" or anything similar.
+- No em dashes or en dashes anywhere. Use commas or separate sentences.
+- Use "an" before a number spoken with a vowel sound ("an 18% rise", "an 8-quarter run", "an 11.5% margin") and "a" otherwise.
+- Only state facts about the business that appear in the filing excerpt, COMPARISON FACTS, or are well-established public knowledge.
 - Do NOT invent revenue figures, margin percentages, ARR, RPO, guidance, or valuation multiples not present in the provided context.
-- Do NOT include a "stats" key. Numerical stats are attached separately by the system.
+- Do NOT make superlative claims ("strongest", "best ever", "largest") unless the provided context unambiguously supports them.
 - Return ONLY valid JSON. No markdown fences. No preamble. No explanation outside the JSON object.\
 """
 
@@ -356,17 +333,14 @@ def _parse_generation_response(raw_text: str) -> dict:
         raise ValueError(f"Model returned invalid JSON: {redact(exc)}") from exc
 
     # Validate required keys
-    required = {"rating", "bottom_line", "what_they_do", "highlights", "watch", "risks"}
+    required = {"bottom_line", "what_they_do", "highlights", "watch", "risks"}
     missing = required - set(data.keys())
     if missing:
         raise ValueError(f"Model response missing required keys: {missing}")
 
-    if data["rating"] not in ("bullish", "neutral", "bearish"):
-        raise ValueError(f"Invalid rating: {data['rating']!r}")
-
     for section in ("highlights", "watch", "risks"):
-        if not isinstance(data[section], list) or len(data[section]) == 0:
-            raise ValueError(f"Section '{section}' must be a non-empty array")
+        if not isinstance(data[section], list):
+            raise ValueError(f"Section '{section}' must be an array")            # empty is allowed: no minimum
         for item in data[section]:
             if not isinstance(item, dict) or "lead" not in item or "detail" not in item:
                 raise ValueError(f"Each item in '{section}' must have 'lead' and 'detail'")
@@ -379,7 +353,7 @@ def _serialize_structured_note(structured: dict, ticker: Ticker) -> str:
     name = ticker.name or ticker.symbol
     lines = [
         f"# {ticker.symbol} ({name})",
-        f"**Rating: {structured['rating'].title()}**",
+        *([f"**Rating: {structured['rating'].title()}**"] if structured.get("rating") else []),
         "",
         structured["bottom_line"],
         "",
@@ -445,6 +419,8 @@ def _build_verification_prompt(
         f"MARKET CAP: {_format_market_cap(ticker.market_cap)}"
     )
 
+    comparisons = _COMPARISONS.get(ticker.symbol) or "COMPARISON FACTS: (none on file)"
+
     return f"""\
 You are a rigorous fact-checker for financial research notes. Verify every factual claim in the note below against the provided evidence sources ONLY.
 
@@ -457,11 +433,15 @@ EVIDENCE SOURCE 2 (PRECOMPUTED STATISTICS, ground truth for all numerical earnin
 EVIDENCE SOURCE 3 (TICKER METADATA, live data from the application database injected at generation time):
 {ticker_block}
 
+EVIDENCE SOURCE 4 (COMPARISONS computed by the system from stored SEC filings and financial data, ground truth for every
+year-earlier, five-year-average and sector-peer comparison):
+{comparisons}
+
 NOTE TO VERIFY:
 {note_content}
 
 CLASSIFICATION RULES:
-- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, or ticker metadata. Quote the specific supporting text in "reason".
+- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, ticker metadata, or the comparisons. Quote the specific supporting text in "reason".
 - "unsupported": The claim is plausible but cannot be confirmed from the provided sources (e.g. drawn from general knowledge, an estimate, or an inference not in the sources). Say why in "reason".
 - "contradicted": The claim directly conflicts with the filing text, precomputed stats, or ticker metadata. Quote the contradiction in "reason".
 
@@ -511,6 +491,12 @@ async def _fetch_context(
     if await is_excluded(db, ticker.symbol):
         reactions = []      # rows stay stored; the note says why there is no earnings history
         _UNAVAILABLE_REASON[ticker.symbol] = EXCLUSION_REASON
+    try:
+        from app.services.note_comparisons import comparison_block
+        _COMPARISONS[ticker.symbol] = await comparison_block(db, ticker.symbol, ticker.sector, await _fetch_financials(ticker.symbol))
+    except Exception as exc:
+        print(f"Comparison facts failed for {ticker.symbol}: {redact(exc)}", flush=True)
+        _COMPARISONS[ticker.symbol] = "COMPARISON FACTS: (none on file)"
     basis_unclear = await basis_mismatch_dates(db, ticker.id)
     for r in reactions:
         r.basis_mismatch = r.event_date in basis_unclear   # transient marker read by _precompute_stats
@@ -528,7 +514,7 @@ async def _run_verification(
 ) -> tuple[dict, str, int, int]:
     """Call Opus to verify the note. Returns (verification_dict, model_used, input_tokens, output_tokens)."""
     prompt = _build_verification_prompt(note_content, filing, sections, reactions, ticker)
-    client = AnthropicClient()
+    client = AnthropicClient(timeout=MODEL_TIMEOUT_SECONDS, max_retries=2)
     raw = await client.verify_research_note(prompt)
 
     model_used    = raw["model_used"]
@@ -666,6 +652,31 @@ async def start_research_note_generation(
     return note
 
 
+async def _generate_structured(prompt: str, symbol: str) -> tuple[dict, dict]:
+    """Generate, check the draft against services/note_rules, retry once with the broken rules named, then enforce them in
+    code. Returns (structured note, {model_used, input_tokens, output_tokens} over both calls)."""
+    from app.services.note_rules import enforce, note_problems
+    client = AnthropicClient(timeout=MODEL_TIMEOUT_SECONDS, max_retries=2)
+    gen = await client.generate_research_note(prompt)
+    structured = _parse_generation_response(gen["content"])
+    used = {"model_used": gen["model_used"], "input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"], "attempts": 1}
+    problems = note_problems(structured)
+    if problems:
+        retry = prompt + "\n\nYOUR PREVIOUS DRAFT BROKE THESE RULES; write the note again without them:\n" + "\n".join(f"- {p}" for p in problems)
+        again = await client.generate_research_note(retry)
+        used["input_tokens"] += again["input_tokens"]
+        used["output_tokens"] += again["output_tokens"]
+        used["attempts"] = 2
+        try:
+            structured = _parse_generation_response(again["content"])
+        except ValueError:
+            pass                                            # the first draft, enforced below
+    used["problems_first_draft"] = problems
+    print(f"Research note generated for {symbol}: {used['input_tokens']} in / {used['output_tokens']} out tokens, "
+          f"{used['attempts']} attempt(s), {len(problems)} rule(s) broken in the first draft", flush=True)
+    return enforce(structured), used
+
+
 async def run_research_note_background(
     ticker_id: uuid.UUID,
     symbol: str,
@@ -691,17 +702,7 @@ async def run_research_note_background(
 
             # ── Phase 1: Sonnet generation (structured JSON) ─────────────
             prompt = _build_generation_prompt(ticker, filing, sections, reactions)
-            client = AnthropicClient()
-            gen = await client.generate_research_note(prompt)
-
-            print(
-                f"Research note generated for {ticker.symbol}: "
-                f"{gen['input_tokens']} in / {gen['output_tokens']} out tokens",
-                flush=True,
-            )
-
-            # Parse structured JSON from model response
-            structured = _parse_generation_response(gen["content"])
+            structured, gen = await _generate_structured(prompt, ticker.symbol)
 
             # Attach Python-computed stats (exact DB values, never model-generated)
             stats_obj = _build_stats_object(ticker, reactions)
