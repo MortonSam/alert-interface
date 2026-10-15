@@ -38,6 +38,7 @@ REPORT_MOVE_ABSENT = {
     "no_chain": "No options prices from the last session cover the report, so there is no report move.",
     "mixed_dates": "The expirations around the report were priced on different days, so there is no report move.",
     "no_iv": "The options prices around the report could not be read as a volatility, so there is no report move.",
+    "unsteady": "The options don't give a steady read of the report move yet.",
 }
 
 

@@ -412,7 +412,8 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     dates = [next_date]
     text += "."
     v = report_view or {}
-    if v.get("state") in ("ok", "not_separated") and v.get("comparison"):
+    from app.services.report_move import STATED
+    if v.get("state") in STATED and v.get("comparison"):
         text += " " + v["comparison"]
         inputs += report_move_inputs(v)
         if v.get("chain_date"):

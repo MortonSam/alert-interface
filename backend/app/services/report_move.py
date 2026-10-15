@@ -19,6 +19,11 @@ separate a report move and none is stated.
 
 Every IV is solved here (iv_solver.solve_atm) from the chains' own mids, spot (`underlying_price`, the close on the chain date) and
 the stored rate on that date. Any change to the formula or its inputs bumps REPORT_MOVE_VERSION.
+
+Stability: a term-method move over STEADY_RATIO times the typical move is stated only when the term move from the previous chain
+date for the same report (the history the nightly records, record_history) is within STEADY_TOLERANCE of it; otherwise every
+surface says the options don't give a steady read yet (state UNSTEADY), which is also what it says before a previous chain date
+is on file.
 """
 from __future__ import annotations
 
@@ -47,7 +52,13 @@ NO_LEGS = "no_legs"                           # the pair does not qualify and no
 NO_CHAIN = "no_chain"                         # no fresh stored chain captures the report
 MIXED_DATES = "mixed_dates"                   # the legs a method needs were stored on different days
 NO_IV = "no_iv"                               # an ATM IV could not be solved on a leg either method needs
-STATES = (OK, NOT_SEPARATED, NO_LEGS, NO_CHAIN, MIXED_DATES, NO_IV)
+UNSTEADY = "unsteady"                         # a term move over STEADY_RATIO x typical with no steady previous chain date
+STATES = (OK, NOT_SEPARATED, NO_LEGS, NO_CHAIN, MIXED_DATES, NO_IV, UNSTEADY)
+STATED = (OK, NOT_SEPARATED, UNSTEADY)        # states whose sentence every surface states (the rest say why on the ticker page only)
+
+STEADY_RATIO = 2.0             # a term move over this multiple of the typical move needs a steady previous chain date
+STEADY_TOLERANCE = 0.25        # the previous chain date's term move within this share of today's
+HISTORY_KEEP = 6               # chain dates kept per report in the history
 
 
 def report_move_pct(s1: float, s2: float, t2: float) -> float | None:
@@ -214,6 +225,42 @@ async def report_move(db, sym: str, report_date: date | str, today: date | None 
                       raw_base_variance=raw, rv_20d=rv, base_floored=floored)
 
 
+def history_key(sym: str, report_date: str) -> str:
+    return f"report_move_history:{sym}:{report_date}"
+
+
+async def record_history(db, sym: str, rm: ReportMove) -> bool:
+    """Keep the move under its chain date in the report's history (system_metadata, HISTORY_KEEP newest); True when recorded."""
+    if rm.state != OK or rm.after is None:
+        return False
+    import json
+    from app.services.system_metadata_service import get_value, set_value
+    key = history_key(sym, rm.report_date)
+    hist = json.loads(await get_value(db, key) or "{}")
+    hist[rm.after.chain_date] = {"pct": rm.pct, "method": rm.method, "version": rm.version}
+    await set_value(db, key, json.dumps(dict(sorted(hist.items())[-HISTORY_KEEP:])))
+    return True
+
+
+async def previous_term_move(db, sym: str, report_date: str, chain_date: str) -> tuple[str, float] | None:
+    """(chain date, move) of the newest term-method move of this REPORT_MOVE_VERSION recorded on a chain date before `chain_date`."""
+    import json
+    from app.services.system_metadata_service import get_value
+    hist = json.loads(await get_value(db, history_key(sym, report_date)) or "{}")
+    prior = [(d, h["pct"]) for d, h in sorted(hist.items()) if d < chain_date and h.get("method") == TERM and h.get("version") == REPORT_MOVE_VERSION]
+    return prior[-1] if prior else None
+
+
+def steady(pct: float, previous: float | None) -> bool:
+    """Pure: the previous chain date's move is within STEADY_TOLERANCE of today's."""
+    return previous is not None and abs(previous - pct) <= STEADY_TOLERANCE * pct
+
+
+def needs_steady_check(method: str | None, rep: float, typical: float | None) -> bool:
+    """Pure: a term-method move over STEADY_RATIO times the typical move."""
+    return method == TERM and typical is not None and typical > 0 and rep > STEADY_RATIO * typical
+
+
 async def report_move_view(db, sym: str, report_date: date | str, today: date | None = None, held_facts=(),
                            typical: tuple[float | None, int] | None = None) -> dict:
     """The report move as every surface states it (the ticker page's verdict, Discover's reporting-soon line, the strip question,
@@ -241,7 +288,12 @@ async def report_move_view(db, sym: str, report_date: date | str, today: date | 
             typical = (float(cond["avg_abs_1d"]), int(cond.get("total") or 0)) if cond and cond.get("avg_abs_1d") else (None, 0)
         typ = round(typical[0], 1) if typical[0] else None
         n = typical[1] if typ is not None else 0
-    verdict = report_verdict(rep, typ, n)
     chain_day = date.fromisoformat(rm.after.chain_date)
+    if needs_steady_check(rm.method, rep, typ):
+        prev = await previous_term_move(db, sym, rm.report_date, rm.after.chain_date)
+        if not steady(rm.pct, prev[1] if prev else None):
+            return {**out, "state": UNSTEADY, "comparison": REPORT_MOVE_ABSENT[UNSTEADY], "unsteady_move_pct": rep,
+                    "previous": {"chain_date": prev[0], "pct": prev[1]} if prev else None, "typical_move_pct": typ, "typical_n": n or None}
+    verdict = report_verdict(rep, typ, n)
     return {**out, "pct": rm.pct, "rep": rep, "chain_date": chain_day, "typical_move_pct": typ, "typical_n": n or None,
             "move_comparison": verdict, "comparison": report_sentence(rep, typ if verdict else None, verdict, chain_day)}

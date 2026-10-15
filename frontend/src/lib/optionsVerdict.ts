@@ -139,7 +139,7 @@ export function optionsVerdict(v: VerdictInput): Verdict {
   }
   return {
     kind: "verdict", sentence: r.comparison ?? null, comparison: r.state === "ok" ? comparison : null,
-    reportPct: m?.pct != null ? Number((m.pct * 100).toFixed(1)) : null, typicalPct: comparison ? r.typicalPct ?? null : null,
+    reportPct: r.state === "ok" && m?.pct != null ? Number((m.pct * 100).toFixed(1)) : null, typicalPct: comparison ? r.typicalPct ?? null : null,
     why, receipt, rangeReceipt, band,
   };
 }

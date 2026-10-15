@@ -101,6 +101,8 @@ STEPS: list[tuple[str, list[str]]] = [
     # Scheduled at 03:05 America/New_York by the script itself (it waits when reached early); shadow only, no reader switches.
     ("Options chains (Intrinio)",      ["python", "-m", "app.scripts.shadow_option_chains"]),
     ("ATM IV (solver)",                ["python", "-m", "app.scripts.solve_atm_iv"]),
+    # each upcoming report's move under tonight's chain date, so a large term move is stated only when it holds from one chain date to the next
+    ("Report move history",            ["python", "-m", "app.scripts.record_report_moves"]),
     # every ticker's newest chain from each source against the official close (services/options_source); before the warmed reads
     ("Chain parity (both sources)",    ["python", "-m", "app.scripts.check_chain_parity"]),
     ("Put/call ratio (Intrinio)",      ["python", "-m", "app.scripts.compute_put_call"]),
@@ -135,6 +137,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Chain parity (both sources)": 1200,             # two chains and the close per ticker, read from the database
     "ATM IV (solver)": 1200,                        # batched: ~60 round trips for 510 tickers; the backstop covers a slow database link
     "Warm options reads": 3600,
+    "Report move history": 1200,                   # three chain reads and solves per upcoming report, about 450 in season
 }
 
 
