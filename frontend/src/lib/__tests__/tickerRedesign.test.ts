@@ -218,6 +218,13 @@ describe("the options verdict states the API's report move and never overstates"
       later: { expiration: "2026-12-18", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.45 }, t3_years: 67 / 365, base_floored: false, rv_20d: 0.1 } } });
     expect(raw.kind === "verdict" && raw.receipt).not.toMatch(/realized/);
   });
+  it("an unsteady term move states the sentence and shows no figure", () => {
+    const text = "The options don't give a steady read of the report move yet.";
+    const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, state: "unsteady", comparison: text, moveComparison: null,
+      move: { ...NVDA_REPORT.move!, method: "term", before: null,
+        later: { expiration: "2026-12-18", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.45 }, t3_years: 67 / 365 } } });
+    expect(v.kind === "verdict" && [v.sentence, v.comparison, v.reportPct, v.typicalPct]).toEqual([text, null, null, null]);
+  });
   it("says plainly when the options don't separate a report move, with no comparison", () => {
     const text = "The options don't separate a report move from the stock's usual swing.";
     const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, state: "not_separated", comparison: text, moveComparison: null,

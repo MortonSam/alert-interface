@@ -566,7 +566,8 @@ async def event_facts(db: AsyncSession, symbol: str, raw: dict, today: date) -> 
             out.append(_fact("first_expiration_after_report", "first expiration after the report", B.fmt_date(e).rsplit(",", 1)[0], chain_date,
                              "options chain, the expirations listed", phrase=day_phrase(e)))
     view = raw.get("report_view") or {}
-    if view.get("state") in ("ok", "not_separated") and view.get("comparison"):
+    from app.services.report_move import STATED
+    if view.get("state") in STATED and view.get("comparison"):
         # the report move and its sentence, word for word what the ticker page's verdict, Discover, the strip and the Overview state
         cd = view.get("chain_date") or (date.fromisoformat(view["move"].after.chain_date) if view.get("move") and view["move"].after else None)
         if view.get("rep") is not None:

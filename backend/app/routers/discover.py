@@ -1232,7 +1232,7 @@ async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today
     Any other missing side gets no line."""
     from app.services.earnings_calendar import level_of
     from app.services.implied_move import implied_move_allowed
-    from app.services.report_move import NOT_SEPARATED, report_move_view
+    from app.services.report_move import NOT_SEPARATED, UNSTEADY, report_move_view
     out: dict[str, dict] = {}
     for r in rows:
         if not implied_move_allowed(level_of(r.is_confirmed, getattr(r, "unresolved_since", None))):
@@ -1241,7 +1241,7 @@ async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today
         if not cond or not cond.get("avg_abs_1d"):
             continue
         v = await report_move_view(db, r.symbol, r.event_date, today, typical=(float(cond["avg_abs_1d"]), int(cond.get("total") or 0)))
-        if v["state"] == NOT_SEPARATED:
+        if v["state"] in (NOT_SEPARATED, UNSTEADY):
             out[r.symbol] = {"report_move_state": v["state"], "report_move": v["report_move"], "comparison": v["comparison"]}
             continue
         if "pct" not in v or v["move_comparison"] is None:

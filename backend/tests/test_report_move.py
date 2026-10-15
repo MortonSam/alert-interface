@@ -354,3 +354,80 @@ async def test_the_report_move_outlier_check_runs_on_the_copied_data():
         r = await check_report_move_outlier(db)
         await db.rollback()
     assert r.level in ("pass", "warn") and r.name == "report_move_outlier"
+
+
+def test_steady_within_a_quarter_of_todays_move():
+    assert RM.steady(0.080, 0.065) and RM.steady(0.080, 0.0999) and RM.steady(0.080, 0.0601)
+    assert not RM.steady(0.080, 0.059) and not RM.steady(0.080, 0.1011) and not RM.steady(0.080, None)
+    assert RM.needs_steady_check(RM.TERM, 7.6, 2.9) and not RM.needs_steady_check(RM.TERM, 5.8, 2.9)
+    assert not RM.needs_steady_check(RM.PAIR, 7.6, 2.9) and not RM.needs_steady_check(RM.TERM, 7.6, None)
+    assert RM.UNSTEADY in RM.STATES and RM.UNSTEADY in REPORT_MOVE_ABSENT and RM.UNSTEADY in RM.STATED
+    assert REPORT_MOVE_ABSENT[RM.UNSTEADY] == "The options don't give a steady read of the report move yet."
+
+
+def _term_chains(cd):
+    return {e: _chain(100.0, 100.0, iv, cd, e, 0.04) for e, iv in (("2026-10-16", 0.30), ("2026-11-20", 0.60), ("2026-12-18", 0.50))}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous,state", [(None, "unsteady"), ("near", "ok"), ("far", "unsteady")])
+async def test_a_large_term_move_is_stated_only_when_the_previous_chain_date_agrees(monkeypatch, previous, state):
+    cd = date(2026, 10, 14)
+    _patch_store(monkeypatch, _term_chains(cd), "2026-11-20")
+    rm = await RM.report_move(None, "ZZRM", "2026-10-19", cd)
+    assert rm.method == RM.TERM
+    rep = round(rm.pct * 100, 1)
+    prev = {None: None, "near": ("2026-10-13", rm.pct * 1.2), "far": ("2026-10-13", rm.pct * 0.7)}[previous]
+    async def prev_move(db, sym, rd, chain_date):
+        assert (sym, rd, chain_date) == ("ZZRM", "2026-10-19", "2026-10-14")
+        return prev
+    monkeypatch.setattr(RM, "previous_term_move", prev_move)
+    v = await RM.report_move_view(None, "ZZRM", "2026-10-19", cd, typical=(rep / 2.5, 20))
+    assert v["state"] == state
+    if state == "unsteady":
+        assert v["comparison"] == REPORT_MOVE_ABSENT["unsteady"] and "rep" not in v
+        assert "pct" not in v and v["unsteady_move_pct"] == rep and (v["previous"] is None) == (previous is None)
+    else:
+        assert v["rep"] == rep and v["move_comparison"] == "more than usual"
+    # under twice the typical move, no check: stated whatever the history
+    v = await RM.report_move_view(None, "ZZRM", "2026-10-19", cd, typical=(rep / 1.5, 20))
+    assert v["state"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_discover_and_the_overview_state_the_unsteady_sentence(monkeypatch):
+    from app.routers.discover import _batch_move_comparison
+    from app.services.briefing import upcoming_clause
+    cd = date(2026, 10, 14)
+    _patch_store(monkeypatch, _term_chains(cd), "2026-11-20")
+    async def none(db, sym, rd, chain_date): return None
+    monkeypatch.setattr(RM, "previous_term_move", none)
+    row = SimpleNamespace(symbol="ZZRM", event_date=date(2026, 10, 19), is_confirmed=True, unresolved_since=None)
+    out = await _batch_move_comparison(None, [row], {"ZZRM": {"avg_abs_1d": 1.0, "total": 20}}, cd)
+    want = REPORT_MOVE_ABSENT["unsteady"]
+    assert out["ZZRM"]["comparison"] == want and out["ZZRM"]["report_move_state"] == "unsteady" and "report_move_pct" not in out["ZZRM"]
+    v = await RM.report_move_view(None, "ZZRM", "2026-10-19", cd, typical=(1.0, 20))
+    text_, _, _ = upcoming_clause(today=cd, next_date=date(2026, 10, 19), confirmation="confirmed", report_view=v)
+    assert text_.endswith(want)
+
+
+@pytest.mark.asyncio
+async def test_the_history_keeps_the_newest_chain_dates_and_reads_the_one_before():
+    from app.services.system_metadata_service import set_value
+    async with ScriptSessionLocal() as db:
+        await db.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": RM.history_key("ZZRM", "2026-10-30")})
+        after = lambda d: RM.Leg("2026-11-20", d, 100.0, 0.5)
+        for i, d in enumerate(["2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14"]):
+            rm = RM.ReportMove(RM.OK, pct=0.05 + i / 100, after=after(d), report_date="2026-10-30", method=RM.TERM)
+            assert await RM.record_history(db, "ZZRM", rm)
+        assert not await RM.record_history(db, "ZZRM", RM.ReportMove(RM.NOT_SEPARATED, report_date="2026-10-30"))
+        import json
+        from app.services.system_metadata_service import get_value
+        hist = json.loads(await get_value(db, RM.history_key("ZZRM", "2026-10-30")))
+        assert len(hist) == RM.HISTORY_KEEP and "2026-10-06" not in hist
+        assert await RM.previous_term_move(db, "ZZRM", "2026-10-30", "2026-10-14") == ("2026-10-13", 0.10)
+        assert await RM.previous_term_move(db, "ZZRM", "2026-10-30", "2026-10-07") is None
+        await set_value(db, RM.history_key("ZZRM", "2026-10-30"), json.dumps({"2026-10-13": {"pct": 0.1, "method": "pair", "version": RM.REPORT_MOVE_VERSION},
+                                                                                 "2026-10-12": {"pct": 0.1, "method": "term", "version": 2}}))
+        assert await RM.previous_term_move(db, "ZZRM", "2026-10-30", "2026-10-14") is None     # a pair move or an older version never counts
+        await db.rollback()
