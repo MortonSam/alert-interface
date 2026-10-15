@@ -284,12 +284,14 @@ def _record_step_timing(label: str, started_at: datetime, seconds: float, ok: bo
 
 
 def timings_history(raw: str | None, run: dict, keep: int = TIMINGS_KEEP) -> list[dict]:
-    """Pure: the stored history with this run added (replacing an entry for the same slot), newest last, at most `keep` runs."""
+    """Pure: the stored history with this run added (replacing an entry for the same nightly slot), newest last, at most `keep` runs."""
     try:
         history = [h for h in (json.loads(raw) if raw else []) if isinstance(h, dict)]
     except (TypeError, ValueError):
         history = []
-    history = [h for h in history if h.get("slot") != run.get("slot")] + [run]
+    if run.get("slot"):                   # a resumed nightly replaces its slot's entry; boot runs (no slot) each keep their own
+        history = [h for h in history if h.get("slot") != run.get("slot")]
+    history = history + [run]
     return history[-keep:]
 
 
@@ -324,11 +326,37 @@ def _record_refresh() -> None:
 
 
 JUDGE_STEPS = {"Validate data"}      # validate judges the data; it is not a data step, and its errors are reported on their own
+# The key check probes the Anthropic key and writes no data; its failure is reported on its own (/health ai_api, the step alert).
+# Counted as a data step, the 2026-10-15 usage-limit night held last_refreshed_at at Oct 14 and every deploy started a full run.
+PROBE_STEPS = {"AI key check"}
+NOT_DATA_STEPS = JUDGE_STEPS | PROBE_STEPS
 
 
 def should_record_refresh(results: list[tuple[str, bool]]) -> bool:
-    """last_refreshed_at is written only when every data step (every step but the judges) exited 0."""
-    return all(ok for label, ok in results if label not in JUDGE_STEPS)
+    """last_refreshed_at is written only when every data step (every step but the judges and the probes) exited 0."""
+    return all(ok for label, ok in results if label not in NOT_DATA_STEPS)
+
+
+def last_successful_nightly(raw_history: str | None) -> datetime | None:
+    """Pure: when the newest nightly (a run with a slot) whose data steps all passed finished, from the stored nightly_timings."""
+    try:
+        history = [h for h in (json.loads(raw_history) if raw_history else []) if isinstance(h, dict)]
+    except (TypeError, ValueError):
+        return None
+    best = None
+    for run in history:
+        steps = run.get("steps") or {}
+        if not run.get("slot") or not run.get("finished_at") or run.get("interrupted") or not steps:
+            continue
+        if not should_record_refresh([(label, bool((s or {}).get("ok"))) for label, s in steps.items()]):
+            continue
+        try:
+            finished = datetime.fromisoformat(run["finished_at"])
+        except (TypeError, ValueError):
+            continue
+        if best is None or finished > best:
+            best = finished
+    return best
 
 
 def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime) -> tuple[str, str]:

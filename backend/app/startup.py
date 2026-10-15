@@ -1,5 +1,7 @@
 """FastAPI lifespan: check reference-data staleness on startup and trigger
-a background refresh if the data is older than REFRESH_IF_OLDER_THAN_HOURS.
+a background refresh if the data is older than REFRESH_IF_OLDER_THAN_HOURS,
+unless a successful nightly or any recent run makes it a second run in a day
+(boot_refresh_decision).
 
 Design notes
 ------------
@@ -43,8 +45,12 @@ from app.services.system_metadata_service import get_value, set_value
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-# Trigger a background refresh if reference data is older than this many hours.
+# Trigger a background refresh if reference data is older than this many hours (and boot_refresh_decision allows it).
 REFRESH_IF_OLDER_THAN_HOURS = 24
+# A deploy never starts a refresh when a nightly whose data steps all passed finished within this many hours ...
+SKIP_AFTER_SUCCESSFUL_NIGHTLY_HOURS = 30
+# ... nor when any run (nightly or boot) started within this many: a run re-generates Ivy's Reads (~$2.50), so never twice a day.
+SKIP_AFTER_ANY_RUN_HOURS = 24
 
 # Treat the in-progress sentinel as stale after this many minutes.
 # If a refresh takes longer than this or the process was killed, the next
@@ -123,6 +129,53 @@ async def _background_refresh(nightly_slot: str | None = None) -> None:
         except Exception:
             pass
         _refresh_in_progress = False
+
+
+def _parse(raw: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def boot_refresh_decision(now: datetime, last_refreshed_raw: str | None, last_nightly_success: datetime | None,
+                          last_run_started: datetime | None) -> tuple[bool, str]:
+    """Pure: (start a refresh on this boot?, why). Checked in order:
+    1. a nightly whose data steps all passed finished within SKIP_AFTER_SUCCESSFUL_NIGHTLY_HOURS: no;
+    2. any run, nightly or boot, started within SKIP_AFTER_ANY_RUN_HOURS: no (an unfinished nightly is the loop's to resume);
+    3. last_refreshed_at missing, unreadable or older than REFRESH_IF_OLDER_THAN_HOURS: yes;
+    4. otherwise no."""
+    if last_nightly_success is not None:
+        hours = (now - last_nightly_success).total_seconds() / 3600
+        if hours < SKIP_AFTER_SUCCESSFUL_NIGHTLY_HOURS:
+            return False, f"a successful nightly finished {hours:.1f}h ago (under {SKIP_AFTER_SUCCESSFUL_NIGHTLY_HOURS}h) — skipping refresh."
+    if last_run_started is not None:
+        hours = (now - last_run_started).total_seconds() / 3600
+        if hours < SKIP_AFTER_ANY_RUN_HOURS:
+            return False, f"a refresh run started {hours:.1f}h ago (under {SKIP_AFTER_ANY_RUN_HOURS}h) — skipping refresh."
+    if last_refreshed_raw is None:
+        return True, "last_refreshed_at not found — reference data has never been refreshed."
+    last_dt = _parse(last_refreshed_raw)
+    if last_dt is None:
+        return True, f"Cannot parse last_refreshed_at={last_refreshed_raw!r} — scheduling refresh as precaution."
+    age_hours = (now - last_dt).total_seconds() / 3600
+    if age_hours > REFRESH_IF_OLDER_THAN_HOURS:
+        return True, f"Reference data is {age_hours:.1f}h old (threshold: {REFRESH_IF_OLDER_THAN_HOURS}h) — scheduling background refresh."
+    return False, f"Reference data is {age_hours:.1f}h old — fresh enough, skipping refresh."
+
+
+async def _read_run_history() -> tuple[datetime | None, datetime | None]:
+    """(when the last successful nightly finished, when the latest run of any kind started), from system_metadata."""
+    import json  # noqa: PLC0415
+    from app.scripts.refresh import RUN_LABEL, TIMINGS_KEY, last_successful_nightly  # noqa: PLC0415
+    async with AsyncSessionLocal() as session:
+        timings_raw = await get_value(session, TIMINGS_KEY)
+        outcomes_raw = await get_value(session, "step_outcomes")
+    try:
+        started_raw = ((json.loads(outcomes_raw) if outcomes_raw else {}).get(RUN_LABEL) or {}).get("started_at")
+    except (TypeError, ValueError, AttributeError):
+        started_raw = None
+    return last_successful_nightly(timings_raw), _parse(started_raw)
 
 
 # ── Refresh loop ──────────────────────────────────────────────────────────────
@@ -299,28 +352,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
             _log("Refresh already in progress in this process — skipping duplicate.")
             skip_refresh = True
 
-        # Staleness check
+        # Staleness check (boot_refresh_decision)
         if not skip_refresh:
-            should_refresh = False
-
-            if last_raw is None:
-                _log("last_refreshed_at not found — reference data has never been refreshed.")
-                should_refresh = True
-            else:
-                try:
-                    last_dt = datetime.fromisoformat(last_raw)
-                    age_hours = (now - last_dt).total_seconds() / 3600
-                    if age_hours > REFRESH_IF_OLDER_THAN_HOURS:
-                        _log(
-                            f"Reference data is {age_hours:.1f}h old "
-                            f"(threshold: {REFRESH_IF_OLDER_THAN_HOURS}h) — scheduling background refresh."
-                        )
-                        should_refresh = True
-                    else:
-                        _log(f"Reference data is {age_hours:.1f}h old — fresh enough, skipping refresh.")
-                except ValueError:
-                    _log(f"Cannot parse last_refreshed_at={last_raw!r} — scheduling refresh as precaution.")
-                    should_refresh = True
+            last_nightly_success, last_run_started = await _read_run_history()
+            should_refresh, why = boot_refresh_decision(now, last_raw, last_nightly_success, last_run_started)
+            _log(why)
 
             if should_refresh:
                 _refresh_in_progress = True
