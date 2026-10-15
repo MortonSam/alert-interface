@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from app.models.enums import EarningsOutcome
-from app.scripts.seed_historical_reactions import FROZEN_KEYS, outcome_after_write
+from app.scripts.seed_historical_reactions import FROZEN_KEYS, frozen_update_data, outcome_after_write
 
 D = Decimal
 
@@ -38,3 +38,13 @@ def test_missing_incoming_actual_falls_back_to_stored():
 def test_outcome_is_not_a_frozen_key():
     assert "outcome" not in FROZEN_KEYS
     assert FROZEN_KEYS == {"eps_estimate", "revenue_estimate"}
+
+
+def test_a_missing_incoming_actual_never_erases_the_stored_one():
+    # JBHT 2026-04-15: the stored actual stayed behind the beat label while a refresh without the actual wrote NULL over it
+    data = {"eps_estimate": D("1.45"), "eps_actual": None, "pct_change_1d": D("6.3")}
+    upd = frozen_update_data(data)
+    assert "eps_actual" not in upd and "eps_estimate" not in upd and upd["pct_change_1d"] == D("6.3")
+    assert outcome_after_write(stored_estimate=D("1.45"), stored_actual=D("1.49"), data=data, frozen=True) == EarningsOutcome.BEAT
+    # the label and the actual it rests on are both kept, so the row can never read beat with no actual
+    assert frozen_update_data({"eps_actual": D("1.52")})["eps_actual"] == D("1.52")      # a revised actual still lands

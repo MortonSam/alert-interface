@@ -133,6 +133,16 @@ def rebased_estimate(estimate: Decimal, factor: float) -> Decimal:
     return (Decimal(estimate) / Decimal(str(factor))).quantize(Decimal("0.0001"))
 
 
+def frozen_update_data(data: dict) -> dict:
+    """Pure: what an upsert writes over a row that already holds an actual: never the frozen estimates, and never a missing
+    actual over the stored one. outcome_after_write derives the outcome from the stored actual when none arrives, so writing
+    NULL over it left beat and miss labels with no actual (JBHT 2026-04-15, VMRK 2026-07-22; validate outcome_requires_actual)."""
+    out = {k: v for k, v in data.items() if k not in FROZEN_KEYS}
+    if out.get("eps_actual") is None:
+        out.pop("eps_actual", None)
+    return out
+
+
 def outcome_after_write(
     stored_estimate: Decimal | None,
     stored_actual: Decimal | None,
@@ -546,7 +556,7 @@ async def upsert_reaction(
     frozen = row is not None and row.eps_actual is not None
     stored_estimate = row.eps_estimate if row is not None else None
     if frozen:
-        update_data = {k: v for k, v in data.items() if k not in FROZEN_KEYS}
+        update_data = frozen_update_data(data)
         # A split after the quarter restates the actual on the new share count;
         # the frozen estimate is re-based by the same factor so they still compare.
         cands = candidates(splits_after(await load_splits(session, ticker.id), event_date))

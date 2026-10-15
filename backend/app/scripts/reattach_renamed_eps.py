@@ -119,7 +119,8 @@ async def run(argv: list[str]) -> int:
                         await s.execute(text("UPDATE events SET " + ", ".join(f"{k} = :{k}" for k in cols) + " WHERE id = :id"), {**cols, "id": ev_id})
                         a = (await s.execute(text("SELECT eps_actual, eps_estimate FROM events WHERE id = :id"), {"id": ev_id})).one()
                         outcome = eps_outcome(float(a[0]) if a[0] is not None else None, float(a[1]) if a[1] is not None else None)
-                        await s.execute(text("""UPDATE historical_reactions hr SET eps_actual = :a, eps_estimate = :e, outcome = COALESCE(CAST(:o AS earnings_outcome_enum), outcome)
+                        await s.execute(text("""UPDATE historical_reactions hr SET eps_actual = COALESCE(:a, hr.eps_actual), eps_estimate = COALESCE(:e, hr.eps_estimate),
+                            outcome = COALESCE(CAST(:o AS earnings_outcome_enum), CASE WHEN COALESCE(:a, hr.eps_actual) IS NULL THEN 'unknown' ELSE hr.outcome END)
                             FROM tickers t WHERE t.id = hr.ticker_id AND t.symbol = :s AND hr.event_type = 'earnings' AND abs(hr.event_date - :d) <= 2"""),
                                         {"a": a[0], "e": a[1], "o": outcome, "s": new, "d": d})
                     await s.commit()

@@ -200,3 +200,24 @@ class TestMissingLeg:
         receipt = {"expected_pct": 5.0}
         ic = await _build_iron_condor(session, "TEST", date(2026, 9, 20), receipt)
         assert ic is None
+
+
+class TestNoCreditNoCondor:
+    """WRB 2026-10-14: the short and long mids cancelled up to float noise (about 1e-16), which passed "credit <= 0" and was stored
+    as a credit of 0.0000. A condor must collect at least MIN_CONDOR_CREDIT as stored."""
+
+    @pytest.mark.asyncio
+    async def test_a_credit_of_float_noise_is_not_a_condor(self):
+        from datetime import date
+        from unittest.mock import AsyncMock, patch
+        from app.scripts.auto_pick import MIN_CONDOR_CREDIT
+        # mids: short put 0.30000000000000004, long put 0.3, short call 0.30000000000000004, long call 0.3: credit 1.1e-16
+        puts = [{"strike": 90, "bid": 0.1, "ask": 0.5}, {"strike": 92, "bid": 0.2, "ask": 0.4}]
+        calls = [{"strike": 108, "bid": 0.2, "ask": 0.4}, {"strike": 110, "bid": 0.1, "ask": 0.5}]
+        assert (_leg_mid(puts[1]) + _leg_mid(calls[0])) - (_leg_mid(puts[0]) + _leg_mid(calls[1])) > 0      # the old check let it through
+        chain_data = {"puts": puts, "calls": calls, "underlying_price": 100.0}
+        with patch("app.scripts.auto_pick.chain_store") as mock_cs:
+            mock_cs.pick_expiration = AsyncMock(return_value="2026-10-17")
+            mock_cs.get_chain = AsyncMock(return_value=(chain_data, "2026-09-15"))
+            ic = await _build_iron_condor(AsyncMock(), "TEST", date(2026, 9, 20), {"expected_pct": 5.0, "implied_pct": 8.0})
+        assert ic is None and MIN_CONDOR_CREDIT == 0.01

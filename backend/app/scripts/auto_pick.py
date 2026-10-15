@@ -169,6 +169,9 @@ def _leg_mid(row: dict) -> float:
     return 0.0
 
 
+MIN_CONDOR_CREDIT = 0.01       # a shadow condor collects at least a cent; validate credit_shadow_integrity errors on credit <= 0
+
+
 async def _build_iron_condor(session, sym: str, event_date: date, receipt: dict) -> CreditShadowPick | None:
     """Record a hypothetical iron condor from a vol_gate refusal. Returns None if structure can't be built."""
     expected_pct = receipt.get("expected_pct")
@@ -243,8 +246,10 @@ async def _build_iron_condor(session, sym: str, event_date: date, receipt: dict)
     lp_mid = _leg_mid(long_put_row)
     lc_mid = _leg_mid(long_call_row)
 
-    credit = (sp_mid + sc_mid) - (lp_mid + lc_mid)
-    if credit <= 0:
+    # rounded as stored before the check: float noise (WRB 2026-10-14, a credit of about 1e-16) passed "credit <= 0" and was
+    # stored as 0.0000; a condor must collect at least MIN_CONDOR_CREDIT as stored
+    credit = round((sp_mid + sc_mid) - (lp_mid + lc_mid), 4)
+    if credit < MIN_CONDOR_CREDIT:
         return None
 
     put_wing = sp_strike - long_put_row["strike"]
