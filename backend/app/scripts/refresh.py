@@ -68,6 +68,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Expected report windows (SEC filings)", ["python", "-m", "app.scripts.expected_report_windows"]),
     # GAAP diluted EPS from the earnings release for quarters XBRL does not hold yet, then checked against XBRL once filed
     ("Release EPS (8-K exhibits)",     ["python", "-m", "app.scripts.seed_release_eps", "--due", "--write"]),
+    ("Release FFO (REIT 8-K exhibits)", ["python", "-m", "app.scripts.seed_release_ffo", "--due", "--write"]),
     ("Release EPS vs XBRL",            ["python", "-m", "app.scripts.check_release_eps"]),
     # after the price bars and the release figures: price over the four latest reported quarters, per ticker and per sector
     # completed spin-offs, mergers and share-exchange acquisitions from new 8-K Item 2.01 filings, before the P/E judges its windows

@@ -42,7 +42,7 @@ import {
 } from "@/lib/api";
 import { OWNER_REGENERATES, isSignedIn } from "@/lib/session";
 import { cn, fmtMarketCap } from "@/lib/utils";
-import { estimatesShown, YEAR_AGO_COLUMN, YEAR_AGO_COLUMN_TIP } from "@/lib/licensedEstimates";
+import { estimatesShown, yearAgoColumn } from "@/lib/licensedEstimates";
 import { fmtPnlPct } from "@/lib/pnl";
 import { fmtPct } from "./fmtPct";
 import { barCellStyle, legendEntries } from "./reactionChartEncoding";
@@ -734,6 +734,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
 
   const isFed = mode === "fed";
   const est = reactions.length === 0 || estimatesShown(reactions[0]);    // LICENSED_ESTIMATES off: the year-ago line, no outcome
+  const yearAgoCol = yearAgoColumn(reactions);                          // a REIT's rows read FFO per share (backend services/ffo)
 
   return (
     <div className="space-y-3">
@@ -779,9 +780,9 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
                     {!isFed && (
                       <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
                         <span className="inline-flex items-center gap-1">
-                          {est ? "Outcome" : YEAR_AGO_COLUMN}
+                          {est ? "Outcome" : yearAgoCol.label}
                           <span
-                            title={est ? "Beat, Miss or Meet is the reported EPS against the analyst estimate, with the surprise printed beside it. The stock's move is in the 1d, 3d and 5d columns, not here." : YEAR_AGO_COLUMN_TIP}
+                            title={est ? "Beat, Miss or Meet is the reported EPS against the analyst estimate, with the surprise printed beside it. The stock's move is in the 1d, 3d and 5d columns, not here." : yearAgoCol.tip}
                             className="cursor-help opacity-60 hover:opacity-100 transition-opacity"
                           >
                             ⓘ

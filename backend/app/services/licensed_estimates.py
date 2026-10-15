@@ -56,26 +56,39 @@ def mentions_estimates(text: str | None) -> bool:
 
 
 def year_ago_fields(pair: dict | None) -> dict:
-    """Pure: the fields a reaction row or a report carries instead of an estimate."""
+    """Pure: the fields a reaction row or a report carries instead of an estimate. `measure` names the figure: "EPS", or "FFO per
+    share" for a REIT (services/ffo); a held FFO quarter carries no figure and its eps_line says it is held."""
     if pair is None:
         return {"sec_eps": None, "sec_eps_period_end": None, "year_ago_eps": None, "year_ago_period_end": None,
-                "eps_change_pct": None, "eps_line": None}
+                "eps_change_pct": None, "eps_line": None, "measure": None}
+    if pair.get("held_line"):
+        return {"sec_eps": None, "sec_eps_period_end": pair["period_end"].isoformat(), "year_ago_eps": None, "year_ago_period_end": None,
+                "eps_change_pct": None, "eps_line": pair["held_line"], "measure": pair.get("measure")}
     return {"sec_eps": pair["eps"], "sec_eps_period_end": pair["period_end"].isoformat(), "year_ago_eps": pair["year_ago_eps"],
             "year_ago_period_end": pair["year_ago_end"].isoformat() if pair["year_ago_end"] else None,
-            "eps_change_pct": pair["pct"], "eps_line": eps_line(pair)}
+            "eps_change_pct": pair["pct"], "eps_line": eps_line(pair), "measure": pair.get("measure") or "EPS"}
 
 
 class YearAgo:
-    """One ticker's SEC quarters, loaded once, answering per report day."""
-    def __init__(self, pairs: list[dict]):
+    """One ticker's quarters, loaded once, answering per report day: SEC EPS, or for a REIT its release FFO per share (services/ffo),
+    with any held FFO quarter answering that it is held."""
+    def __init__(self, pairs: list[dict], held: dict | None = None):
         self.pairs = pairs
+        self.held = held or {}
 
     @classmethod
     async def load(cls, db, symbol: str) -> "YearAgo":
+        from app.services import ffo
+        if await ffo.ticker_is_reit(db, symbol):
+            shown, held = await ffo.load_ffo(db, symbol)
+            pairs = [{**p, "measure": ffo.MEASURE} for p in year_ago_pairs(shown)]
+            held_pairs = {end: {"period_end": end, "measure": ffo.MEASURE, "held_line": ffo.HELD_LINE.format(gap=gap)} for end, gap in held.items()}
+            return cls(pairs, held_pairs)
         return cls(year_ago_pairs(await load_quarters(db, symbol)))
 
     def for_report(self, report_day: date) -> dict:
-        return year_ago_fields(quarter_for_report(self.pairs, report_day))
+        cands = self.pairs + list(self.held.values())
+        return year_ago_fields(quarter_for_report(cands, report_day))
 
 
 def filter_note(structured: dict | None, verification: dict | None) -> tuple[dict | None, dict | None]:

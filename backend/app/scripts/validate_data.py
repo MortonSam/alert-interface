@@ -1772,6 +1772,28 @@ async def check_note_served_clean(session) -> CheckResult:
     return CheckResult("note_served_clean", PASS, f"{len(rows)} complete notes served with no multiple{'' if not shown else ' check (P/E shown)'} and no market cap figure")
 
 
+FFO_BAND = (-5.0, 50.0)          # a quarter's FFO per share outside this is a misread (the largest REIT quarterly FFO is near $10)
+
+
+async def check_ffo_quarters(session) -> CheckResult:
+    """ERROR when a shown FFO quarter (ffo_quarters state 'ok') is outside FFO_BAND, carries an XBRL gap over FFO_GAP_PCT (it should
+    be held), or belongs to a ticker that is not a REIT; PASS with the counts by state."""
+    from app.services.ffo import FFO_GAP_PCT, is_reit
+    if (await session.execute(text("SELECT to_regclass('ffo_quarters')"))).scalar() is None:
+        return CheckResult("ffo_quarters", PASS, "No ffo_quarters table yet")
+    rows = (await session.execute(text("""SELECT f.symbol, f.period_end, f.ffo_per_share, f.state, f.xbrl_gap_pct, t.sector, t.industry
+        FROM ffo_quarters f LEFT JOIN tickers t ON t.symbol = f.symbol"""))).all()
+    lo, hi = FFO_BAND
+    bad = [f"{r.symbol} {r.period_end}: {r.ffo_per_share} " + ("outside the band" if not lo <= float(r.ffo_per_share) <= hi else
+                                                              f"gap {r.xbrl_gap_pct}% shown" if r.xbrl_gap_pct is not None and float(r.xbrl_gap_pct) > FFO_GAP_PCT else "not a REIT")
+           for r in rows if r.state == "ok" and (not lo <= float(r.ffo_per_share) <= hi or (r.xbrl_gap_pct is not None and float(r.xbrl_gap_pct) > FFO_GAP_PCT)
+                                                  or not is_reit(r.sector, r.industry))]
+    counts = {k: sum(1 for r in rows if r.state == k) for k in ("ok", "held", "unread")}
+    if bad:
+        return CheckResult("ffo_quarters", ERROR, f"{len(bad)} shown FFO quarter(s) fail their checks", bad[:20])
+    return CheckResult("ffo_quarters", PASS, f"FFO quarters: {counts['ok']} shown, {counts['held']} held, {counts['unread']} unread")
+
+
 async def check_live_api_budget(session) -> CheckResult:
     """WARN when the live layer's calls at full load would use more than BUDGET_WARN_SHARE of Intrinio's per-minute limit."""
     from app.services import live_data
@@ -3741,6 +3763,7 @@ CHECKS = [
     check_live_api_budget,
     check_market_beside_bands,
     check_note_served_clean,
+    check_ffo_quarters,
     check_pending_deal_price_band,
     check_pinned_without_deal,
     # NaN guard

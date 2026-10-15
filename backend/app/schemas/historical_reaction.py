@@ -56,6 +56,7 @@ class HistoricalReactionRead(HistoricalReactionBase):
     year_ago_period_end: str | None = None
     eps_change_pct: float | None = None     # None between a loss and a profit (the line says it in words)
     eps_line: str | None = None             # "EPS $2.22, up 111.4% from $1.05 a year ago", or the plain absence
+    measure: str | None = None              # "EPS", or "FFO per share" for a REIT (services/ffo)
     # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
     # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day
     # prices, not the post-earnings reaction. Meaningful decomposition requires next-day OHLCV
