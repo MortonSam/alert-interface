@@ -4,6 +4,7 @@ import Explained from "@/components/Explained";
 import EncodingLegend from "@/components/EncodingLegend";
 import { payoffChartLegend, payoffMark } from "@/lib/encodings/payoffChart";
 import { useEffect, useMemo, useState } from "react";
+import { useTapAway } from "@/lib/useTapAway";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -131,6 +132,7 @@ export default function PayoffSimulator({
 
   const [dateOffset, setDateOffset] = useState(0);
   const [scrubPrice, setScrubPrice] = useState<number>(spot);
+  const tapAway = useTapAway();
 
   useEffect(() => {
     setScrubPrice(spot);
@@ -254,7 +256,7 @@ export default function PayoffSimulator({
 
       {/* ── Payoff chart ──────────────────────────────────────────────────── */}
       {chartData.length > 0 && (
-        <div className="relative">
+        <div className="relative" ref={tapAway.ref}>
           {/* SIMULATED watermark — keeps the "this is modeled" signal in the chart itself */}
           <div
             className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
@@ -304,7 +306,7 @@ export default function PayoffSimulator({
                 tickLine={false}
                 width={68}
               />
-              <Tooltip content={<SimTooltip />} />
+              <Tooltip active={tapAway.tooltipActive} content={<SimTooltip />} />
 
               {/* Zero line */}
               <ReferenceLine y={0} {...payoffMark("zero")} />

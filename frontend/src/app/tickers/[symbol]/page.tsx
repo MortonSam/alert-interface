@@ -16,6 +16,8 @@ import { analystSampleLabel, analystSampleFooter, hasAnalystSignal } from "@/lib
 import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTapAway } from "@/lib/useTapAway";
+import { yearLabel, yearTicks } from "@/lib/chartAxis";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { NoLongerTrades } from "@/components/ticker/NoLongerTrades";
 import Link from "next/link";
@@ -419,6 +421,7 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
 }
 
 function ReactionChart({ reactions, mode = "earnings" }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed" }) {
+  const tapAway = useTapAway();
   const isFed = mode === "fed";
   const data = useMemo(() => {
     const chronological = [...reactions].sort((a, b) => a.event_date.localeCompare(b.event_date));
@@ -451,7 +454,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
   if (data.length === 0) return null;
 
   return (
-    <div className="mb-4">
+    <div className="mb-4" ref={tapAway.ref}>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
@@ -470,7 +473,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
             width={40}
           />
           <ReferenceLine y={0} stroke="hsl(var(--border))" />
-          <Tooltip content={<ReactionChartTooltip mode={mode} />} />
+          <Tooltip active={tapAway.tooltipActive} content={<ReactionChartTooltip mode={mode} />} />
           <Bar dataKey="pct1d" radius={[2, 2, 0, 0]}>
             {data.map((entry, i) => {
               const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, entry.outcome, isFed);
@@ -1043,6 +1046,7 @@ function PriceChart({
   impliedChainDate?: string | null;    // the options data's own date: the band is labelled by it, never "today"
 }) {
   const [chartData, setChartData] = useState<TickerChart | null>(null);
+  const tapAway = useTapAway();
 
   useEffect(() => {
     setChartData(null);
@@ -1074,6 +1078,8 @@ function PriceChart({
       idx: i,
     }));
   }, [chartData]);
+
+  const fiveYearTicks = useMemo(() => (lineData.length > 1 ? yearTicks(lineData[0].epochMs, lineData[lineData.length - 1].epochMs) : undefined), [lineData]);
 
   const yDomain = useMemo<[number, number]>(() => {
     if (lineData.length === 0) return [0, 1];
@@ -1128,7 +1134,7 @@ function PriceChart({
       </div>
 
       {/* Chart */}
-      <div className="rounded-lg border bg-card px-2 py-3">
+      <div className="rounded-lg border bg-card px-2 py-3" ref={tapAway.ref}>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart
             data={lineData}
@@ -1149,8 +1155,10 @@ function PriceChart({
                   }
                   return pt.date.slice(5, 10);
                 }
+                if (period === "5y") return yearLabel(val as number);
                 return new Date(val as number).toLocaleDateString("en-US", { month: "short", day: "numeric" });
               }}
+              ticks={period === "5y" ? fiveYearTicks : undefined}
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               axisLine={false}
               tickLine={false}
@@ -1165,6 +1173,7 @@ function PriceChart({
               width={50}
             />
             <Tooltip
+              active={tapAway.tooltipActive}
               content={
                 <PriceChartTooltip period={period} earningsMap={earningsMap} />
               }
