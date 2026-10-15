@@ -117,3 +117,22 @@ async def test_counts_come_from_the_claims_and_a_self_correcting_reason_is_verif
     v, _, _, _ = await R._run_verification("note", None, None, [], t)
     assert v["summary"] == {"supported": 1, "unsupported": 1, "contradicted": 1}
     assert v["claims"][1]["verdict"] == "unsupported" and v["claims"][1]["reason"] == "The sources do not state it."
+
+
+def test_recount_note_verdicts_settles_each_claim_and_counts_the_summary():
+    from app.scripts.recount_note_verdicts import recount
+    from app.services.verification_verdicts import UNSETTLED_REASON, problems
+    stored = {"summary": {"supported": 3, "unsupported": 0, "contradicted": 0}, "model": "x",
+              "claims": [{"claim": "A", "status": "supported", "evidence": "The filing says so."},
+                         {"claim": "B", "status": "supported", "evidence": "Re-evaluating: actually this is unsupported."},
+                         {"claim": "C", "status": "partly", "evidence": "Close enough."}]}
+    assert problems(stored)
+    new, changes = recount(stored)
+    assert problems(new) == [] and new["model"] == "x"
+    assert new["summary"] == {"supported": 1, "unsupported": 2, "contradicted": 0}
+    b = new["claims"][1]
+    assert (b["claim"], b["verdict"], b["status"], b["reason"], b["evidence"]) == ("B", "unsupported", "unsupported", UNSETTLED_REASON, UNSETTLED_REASON)
+    assert b["prior_reason"] == "Re-evaluating: actually this is unsupported."
+    assert new["claims"][0] == {**stored["claims"][0], "verdict": "supported", "reason": "The filing says so."}
+    assert len(changes) == 3 and changes[-1].startswith("summary ")
+    assert recount(new)[1] == []                                    # a corrected note needs nothing more
