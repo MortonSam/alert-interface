@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Trailing P/E (pe_snapshots): strip question 9 and the P/E facts Ask Ivy may cite. Off in production until Sam approves the
     # figures; on locally. The nightly still computes the snapshots either way; the flag only gates what the pages serve.
     pe_enabled: bool = False
+    # LICENSED_ESTIMATES: analyst EPS estimates are shown (estimate, beat, miss, surprise, beat rate) only with a licence for them.
+    # Off (the default): every such place compares the reported EPS from SEC filings with the same quarter a year earlier
+    # (services/licensed_estimates) and no estimate-derived figure leaves the API.
+    licensed_estimates: bool = False
     # Discover's "Today's biggest movers" and "In the news" (services/news). Off in production until launched; the admin token sees them.
     discover_news_enabled: bool = False
     # The hourly intraday news run (startup's news loop, 9-17 New York on weekdays). A Railway variable, NEWS_INTRADAY_ENABLED=false,

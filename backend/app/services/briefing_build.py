@@ -139,7 +139,11 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         actual = _f(ev.eps_actual if ev and ev.eps_actual is not None else (hr["eps_actual"] if hr else None))
         estimate = _f(ev.eps_estimate if ev and ev.eps_estimate is not None else (hr["eps_estimate"] if hr else None))
         stored = _f(hr["pct_change_1d"]) if hr else None
+        from app.services.licensed_estimates import YearAgo, licensed
+        if not licensed():              # LICENSED_ESTIMATES off: the quarter against a year earlier, from SEC filings, never an estimate
+            actual = estimate = None
         reported = {"today": today, "event_date": latest, "timing": timing, "eps_actual": actual, "eps_estimate": estimate, "outcome": eps_outcome(actual, estimate),
+                    "year_ago": None if licensed() else (await YearAgo.load(db, sym)).for_report(latest),
                     "bars_through": facts.get("last_close_date"), "pct_change_1d": stored if stored is not None else move_from_bars(df, latest, timing)}
     else:
         ne = await next_earnings_for(db, ticker.id, today) if "report_date" not in held else NextEarnings()
@@ -207,7 +211,9 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         if move is not None:
             past = [abs(m) for r, m in zip(sample, moves) if r["event_date"] != latest]
             if raw is not None:
-                raw.update(last_report={"event_date": latest, "timing": timing, "move_pct": move, "outcome": eps_outcome(_f(ev.eps_actual) if ev else None, _f(ev.eps_estimate) if ev else None)})
+                from app.services.licensed_estimates import licensed
+                raw.update(last_report={"event_date": latest, "timing": timing, "move_pct": move,
+                                        "outcome": eps_outcome(_f(ev.eps_actual) if ev else None, _f(ev.eps_estimate) if ev else None) if licensed() else None})
             cands.append(Q.q_reaction_normal(name=name, symbol=sym, event_date=latest, timing=timing, move_pct=move, typical_abs=typical_abs,
                                              larger_count=sum(1 for m in past if m > abs(move)), n_reports=len(past), sample_as_of=sample_as_of))
     # 2. a company-confirmed report within 45 days with a fresh implied move (an estimated date prices nothing: implied_move_allowed)
@@ -221,8 +227,10 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
             raw.update(report_view=view or None)
         cands.append(Q.q_implied_big(name=name, symbol=sym, view=view, next_date=ne.date))
     # 3. beats followed by a fall
-    beats = [r for r in sample if r["outcome"] == "beat" and r["has_eps"]]      # a beat needs both figures (services/beat_counts)
-    cands.append(Q.q_beat_fell(name=name, symbol=sym, beats=len(beats), fell=sum(1 for r in beats if float(r["pct_change_1d"]) < 0), as_of=sample_as_of))
+    from app.services.licensed_estimates import licensed
+    if licensed():                      # LICENSED_ESTIMATES off: no question about beats
+        beats = [r for r in sample if r["outcome"] == "beat" and r["has_eps"]]      # a beat needs both figures (services/beat_counts)
+        cands.append(Q.q_beat_fell(name=name, symbol=sym, beats=len(beats), fell=sum(1 for r in beats if float(r["pct_change_1d"]) < 0), as_of=sample_as_of))
     # 4. a big non-earnings move
     exclude = set()
     for d in earnings_dates:

@@ -1,5 +1,6 @@
 "use client";
 
+import { estimatesShown } from "@/lib/licensedEstimates";
 import Explained from "@/components/Explained";
 import { cheaperCostLine, expensiveOptionsLine, expensiveOptionsPrompt } from "@/lib/cheaperDraft";
 import { volRegime } from "@/lib/encodings/volRegime";
@@ -494,7 +495,7 @@ function DraftDisplay({
           One-day earnings move, avg ±:{" "}
           <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct != null ? `${fb.hist_avg_abs_move_pct.toFixed(2)}%` : absentCell(fb, "hist_avg_abs_move_pct", "no earnings reactions with a one-day move on file")}</span>
         </span>
-        <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no quarters with an EPS outcome on file")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
+        {estimatesShown(fb) && <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no quarters with an EPS outcome on file")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>}
         <span><Explained text="ATM IV:" /> <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
         <span><Explained text="Realized-vol rank: " />{fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
         <span><Explained text="IV−RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>

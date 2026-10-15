@@ -74,6 +74,9 @@ def _to_read(thesis: Thesis) -> ThesisRead:
     read = ThesisRead.model_validate(thesis)
     read.ticker_symbol = thesis.ticker.symbol if thesis.ticker else None
     read.is_due = thesis.target_date <= date.today()
+    from app.services.licensed_estimates import filter_text, licensed
+    if not licensed():          # LICENSED_ESTIMATES off: no stored sentence about a beat, miss or estimate
+        read.reasoning = filter_text(read.reasoning)
     return read
 
 
@@ -617,6 +620,11 @@ async def _run_draft_generation(
     miss_cont_pct = data["miss_cont_pct"]
     miss_5d_n = data["miss_5d_n"]
     magnitude_trend = data["magnitude_trend"]
+    from app.services.licensed_estimates import licensed
+    est_ok = licensed()
+    if not est_ok:              # LICENSED_ESTIMATES off: the draft's prompt names no beat, miss or estimate (the data itself is unchanged)
+        beats, ce_misses, beat_rate, bbd_rate = [], [], None, None
+        avg_1d_on_beat = median_1d_on_beat = avg_1d_on_miss = median_1d_on_miss = beat_cont_pct = miss_cont_pct = None
     analyst_row = data["analyst_row"]
     chosen_exp = data["chosen_exp"]
     days_to_exp = data["days_to_exp"]
@@ -790,6 +798,9 @@ async def _run_draft_generation(
         "secondary_strikes":         secondary_rows,
         "options_as_of":             options_as_of,
     }
+    if not est_ok:              # LICENSED_ESTIMATES off: the draft's receipts carry no estimate-based figure
+        from app.services.licensed_estimates import strip_fields
+        fact_block = {**strip_fields(fact_block), "licensed_estimates": False}
 
     # ── 8b. Expensive options: a cheaper defined-risk spread in the customer's direction, from the same checked strikes ──
     if premium and premium.get("expensive"):
@@ -827,6 +838,9 @@ async def _run_draft_generation(
         vol_regime_display = f"IV FAIR (IV {iv_rv_spread_pp:+.1f}pp vs RV)"
     else:
         vol_regime_display = "(unavailable)"
+
+    beat_lines = (f"  Beat rate:          {_n(beat_rate)}%" + ((" (" + excluded_note(data.get("basis_excluded", 0)) + ")") if data.get("basis_excluded") else "") + "\n"
+                  f"  Beat-but-dropped:   {_n(bbd_rate)}% (price fell after beating this % of the time)\n") if est_ok else ""
 
     # Conditional earnings profile section
     ce_lines = []
@@ -900,9 +914,7 @@ HISTORICAL EARNINGS (1-day reactions, {hist_sample} quarters):
   Avg absolute move:  ±{_n(hist_avg*100 if hist_avg else None)}%
   Max absolute move:  ±{_n(hist_max*100 if hist_max else None)}%
   Min absolute move:  ±{_n(hist_min*100 if hist_min else None)}%
-  Beat rate:          {_n(beat_rate)}%{(" (" + excluded_note(data.get("basis_excluded", 0)) + ")") if data.get("basis_excluded") else ""}
-  Beat-but-dropped:   {_n(bbd_rate)}% (price fell after beating this % of the time)
-  NOTE: These are 1-day earnings-day reactions; the expiration above covers the full period.
+{beat_lines}  NOTE: These are 1-day earnings-day reactions; the expiration above covers the full period.
 {ce_section}\
 VOLATILITY:
   ATM implied vol:    {_pct(atm_iv)}
@@ -1534,6 +1546,7 @@ async def compute_alert_pick(
     chosen_exp = data["chosen_exp"]
 
     # ── Earnings lean ────────────────────────────────────────────────────────
+    from app.services.licensed_estimates import licensed as _lic      # off: the lean's wording names no beat rate (the lean itself is unchanged)
     if earnings_str and hist_sample >= 8 and beat_rate is not None:
         med_beat = median_1d_on_beat or 0.0
         med_miss = median_1d_on_miss or 0.0
@@ -1542,12 +1555,14 @@ async def compute_alert_pick(
         if weighted > 0.5:
             earnings_lean = SignalLean(
                 signal="earnings", direction="bullish",
-                justification=f"Beats {beat_rate:.0f}% of the time (median +{med_beat:.1f}%); weighted expected 1d: {weighted:+.1f}%",
+                justification=(f"Beats {beat_rate:.0f}% of the time (median +{med_beat:.1f}%); weighted expected 1d: {weighted:+.1f}%" if _lic()
+                               else f"Past reports weigh to a {weighted:+.1f}% 1-day move"),
             )
         elif weighted < -0.5:
             earnings_lean = SignalLean(
                 signal="earnings", direction="bearish",
-                justification=f"Weighted expected 1d: {weighted:+.1f}% (beat rate {beat_rate:.0f}%, median on beat {med_beat:+.1f}%, on miss {med_miss:+.1f}%)",
+                justification=(f"Weighted expected 1d: {weighted:+.1f}% (beat rate {beat_rate:.0f}%, median on beat {med_beat:+.1f}%, on miss {med_miss:+.1f}%)" if _lic()
+                               else f"Past reports weigh to a {weighted:+.1f}% 1-day move"),
             )
         else:
             earnings_lean = SignalLean(
@@ -1954,6 +1969,8 @@ async def list_alert_picks(
     """
     if not LEDGER_PUBLIC and not ledger_reader:
         return []
+    from app.services.licensed_estimates import filter_receipt as _filter_receipt, filter_text as _filter_text, licensed
+    _est_ok = licensed()        # LICENSED_ESTIMATES off: reasoning and receipts lose every beat, miss or estimate mention
     rows = (await db.execute(
         select(AlertPick)
         .where(
@@ -2143,8 +2160,8 @@ async def list_alert_picks(
             algo_version=r.algo_version,
             model_used=r.model_used,
             source=r.source,
-            leans=[SignalLean(**l) for l in r.leans],
-            reasoning=r.reasoning,
+            leans=[SignalLean(**l) if _est_ok else SignalLean(**{**l, "justification": _filter_text(l.get("justification")) or ""}) for l in r.leans],
+            reasoning=r.reasoning if _est_ok else _filter_text(r.reasoning),
             generated_at=r.generated_at.isoformat(),
             status=r.status,
             void_reason=r.void_reason,
@@ -2158,7 +2175,7 @@ async def list_alert_picks(
             option_mark_as_of=option_mark_as_of,
             option_mark_note=option_mark_note,
             season=r.season,
-            receipt=r.receipt,
+            receipt=r.receipt if _est_ok else _filter_receipt(r.receipt),
             exit_rule=r.exit_rule,
             exit_date=r.exit_date.isoformat() if r.exit_date else None,
             stock_move_5d=float(r.stock_move_5d) if r.stock_move_5d is not None else None,

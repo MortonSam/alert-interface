@@ -145,10 +145,15 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     from app.config import settings
     # one verdict per claim is the truth: the stored verification is served normalized, its summary recounted from the claims
     data = {name: getattr(note, name) for name in ResearchNoteRead.model_fields if hasattr(note, name)}
+    raw_verification = getattr(note, "verification", None)
+    from app.services.licensed_estimates import filter_note, licensed, mentions_estimates
+    if not licensed():          # LICENSED_ESTIMATES off: no point, claim, line or stat that rests on an estimate
+        data["structured_content"], raw_verification = filter_note(data.get("structured_content"), raw_verification)
+        data["content"] = "\n".join(line for line in (data.get("content") or "").split("\n") if not mentions_estimates(line))
     data["valuation_shown"] = bool(settings.pe_enabled)
     # no multiple while PE_ENABLED is off, and no figure the Overview states (services/note_valuation); totals recounted after
     from app.services.note_valuation import served
-    data["structured_content"], verification, data["content"] = served(data.get("structured_content"), getattr(note, "verification", None),
+    data["structured_content"], verification, data["content"] = served(data.get("structured_content"), raw_verification,
                                                                        data.get("content"), data["valuation_shown"])
     data["verification"] = normalize_verification(verification)
     read = ResearchNoteRead.model_validate(data)
@@ -205,7 +210,12 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     note, symbol, name = row
     from app.config import settings
     from app.services.note_valuation import served
-    sc, verification, _ = served(note.structured_content or {}, note.verification, None, bool(settings.pe_enabled))
+    sc, ver = note.structured_content or {}, note.verification
+    from app.services.licensed_estimates import filter_note, licensed
+    if not licensed():          # LICENSED_ESTIMATES off: no estimate-based point, claim or stat
+        sc, ver = filter_note(sc, ver)
+        sc = sc or {}
+    sc, verification, _ = served(sc, ver, None, bool(settings.pe_enabled))
     return LatestVerifiedNoteRead(
         symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
         rating=sc.get("rating"), stats=sc.get("stats"), highlights=list(sc.get("highlights") or [])[:2],

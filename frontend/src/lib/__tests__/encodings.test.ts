@@ -59,7 +59,7 @@ describe("price-chart earnings markers", () => {
     const src = read("app/tickers/[symbol]/page.tsx");
     expect(src).not.toContain("OUTCOME_DOT_COLOR");
     expect(src).not.toContain("green = beat");
-    expect(src).toContain("earningsMarkerLegend()");
+    expect(src).toContain("earningsMarkerLegend(estimatesShown(chartData))");      // the plain mark when estimates are withheld
   });
 });
 

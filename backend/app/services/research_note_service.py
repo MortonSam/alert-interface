@@ -113,6 +113,14 @@ def _stats_block(s: dict) -> str:
         reason = s.get("unavailable_reason")
         return f"(No earnings history available: {reason}.)" if reason else "(No earnings history available.)"
 
+    from app.services.licensed_estimates import licensed
+    if not licensed():          # LICENSED_ESTIMATES off: the moves only, no beat, miss or estimate
+        return f"""\
+PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount or recalculate):
+  1d move avg/max/min : {s['avg_1d']} / {s['max_1d']} / {s['min_1d']}  (n={s['total']})
+  3d move avg/max/min : {s['avg_3d']} / {s['max_3d']} / {s['min_3d']}
+  5d move avg/max/min : {s['avg_5d']} / {s['max_5d']} / {s['min_5d']}\
+"""
     return f"""\
 PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount or recalculate):
   Beat/miss/meet  : {s['beat_sentence']}
@@ -201,7 +209,8 @@ def _build_stats_object(
             2,
         )
 
-    return stats
+    from app.services.licensed_estimates import licensed, strip_fields
+    return stats if licensed() else strip_fields(stats)          # LICENSED_ESTIMATES off: no estimate-based stat is stored
 
 
 async def _fetch_financials(symbol: str) -> dict | None:

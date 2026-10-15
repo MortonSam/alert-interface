@@ -312,14 +312,31 @@ def in_reaction_window(event_date: date, today: date) -> bool:
     return event_date <= today <= nth_trading_day_after(event_date, REACTION_WINDOW_SESSIONS)
 
 
+def year_ago_clause(y: dict) -> str:
+    """Pure: "EPS $2.22, up 111.4% from $1.05 a year ago", or "EPS $2.39, with no figure from the same quarter a year earlier on
+    file" (a clause, so it sits inside the Overview's sentence)."""
+    if y.get("year_ago_eps") is None:
+        return f"EPS {fmt_money(y['sec_eps'])}, with no figure from the same quarter a year earlier on file"
+    return y["eps_line"]
+
+
 def reported_clause(*, today: date, event_date: date, timing: str | None = None, eps_actual: float | None = None, eps_estimate: float | None = None,
-                    outcome: str | None = None, pct_change_1d: float | None = None, bars_through: date | None = None) -> tuple[str, list[dict], list[date]]:
+                    outcome: str | None = None, pct_change_1d: float | None = None, bars_through: date | None = None,
+                    year_ago: dict | None = None) -> tuple[str, list[dict], list[date]]:
     """"Reported <date> <timing>: EPS $a against a $e estimate, a beat; the stock moved +x% the next session." The EPS clause is
-    omitted without an actual; the move clause reads "the move settles at today's close" while the second bar is missing."""
+    omitted without an actual; the move clause reads "the move settles at today's close" while the second bar is missing.
+    `year_ago` (services/licensed_estimates.year_ago_fields, given when LICENSED_ESTIMATES is off) replaces the estimate clause
+    with the quarter's EPS from SEC filings against the same quarter a year earlier."""
     inputs = [_input("report date", fmt_date(event_date), event_date, "earnings calendar"), _input("report timing", timing or "unknown", event_date, "earnings calendar, report timing")]
     head = f"Reported {fmt_date(event_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "")
     clauses: list[str] = []
-    if eps_actual is not None and eps_estimate is not None:
+    if year_ago is not None:
+        if year_ago.get("sec_eps") is not None:
+            clauses.append(year_ago_clause(year_ago))
+            inputs.append(_input("EPS (SEC filings)", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "GAAP diluted EPS for the quarter, from SEC filings"))
+            if year_ago.get("year_ago_eps") is not None:
+                inputs.append(_input("EPS a year earlier", fmt_money(year_ago["year_ago_eps"]), year_ago["year_ago_period_end"], "the same quarter a year earlier, from SEC filings"))
+    elif eps_actual is not None and eps_estimate is not None:
         word = {"beat": "a beat", "miss": "a miss", "meet": "a match"}.get(outcome or "", None)
         clauses.append(f"EPS {fmt_money(eps_actual)} against a {fmt_money(eps_estimate)} estimate" + (f", {word}" if word else ""))
         inputs += [_input("EPS actual", fmt_money(eps_actual), event_date, "reported EPS, the night of the report"),

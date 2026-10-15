@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.basis_exclusion import BASIS_UNCLEAR_REASON, basis_mismatch_dates, excluded_note
 from app.services.beat_counts import coverage, has_data, served_outcome
+from app.services.licensed_estimates import YearAgo, licensed, withhold
 from app.services.pending_deals import deal_for, note_for
 from app.services.price_history_exclusion import exclusion_reason, is_excluded
 from app.thresholds import eps_surprise
@@ -46,9 +47,18 @@ def _to_lr(lv: object) -> LabelRule | None:
 
 # ── Per-row enrichment helper ──────────────────────────────────────────────────
 
-def _enrich(r: HistoricalReaction, basis_unclear: set | None = None) -> HistoricalReactionRead:
-    """Convert ORM row to read schema, adding computed fields."""
+def _enrich(r: HistoricalReaction, basis_unclear: set | None = None, year_ago=None) -> HistoricalReactionRead:
+    """Convert ORM row to read schema, adding computed fields. With LICENSED_ESTIMATES off (services/licensed_estimates) the
+    estimate, actual, surprise and outcome are withheld and an earnings row carries its quarter against a year earlier instead."""
     read = HistoricalReactionRead.model_validate(r)
+    if not licensed():
+        withhold(read)
+        read.outcome = EarningsOutcome.UNKNOWN.value
+        read.basis_mismatch = False
+        if year_ago is not None and r.event_type == EventType.EARNINGS:
+            for k, v in year_ago.for_report(r.event_date).items():
+                setattr(read, k, v)
+        return read
     read.outcome = served_outcome(r.outcome, r.eps_actual)       # a beat or miss needs a stored EPS actual (services/beat_counts)
     if basis_unclear and r.event_date in basis_unclear:
         read.basis_mismatch = True
@@ -134,7 +144,7 @@ async def get_reaction_summary(
 
     total = len(rows)
     if total == 0:
-        return ReactionSummaryRead(
+        return _summary_out(ReactionSummaryRead(
             **held,
             symbol=sym, sector=ticker.sector, total_quarters=0,
             beat_count=0, miss_count=0, meet_count=0, beat_rate_pct=0.0,
@@ -144,7 +154,7 @@ async def get_reaction_summary(
             basis_excluded=basis_excluded, basis_excluded_note=excluded_note(basis_excluded),
             price_history_excluded=excluded_reason is not None, exclusion_reason=excluded_reason,
             deal_note=note_for(deal) if deal else None,
-        )
+        ))
 
     # a beat, miss or meet counts only in a quarter with both an estimate and an actual stored (services/beat_counts)
     beats  = [r for r in rows if r.outcome == EarningsOutcome.BEAT and has_data(r)]
@@ -185,7 +195,7 @@ async def get_reaction_summary(
     ))
 
     cov = coverage(rows)
-    return ReactionSummaryRead(
+    return _summary_out(ReactionSummaryRead(
         **held,
         symbol=sym,
         sector=ticker.sector,
@@ -209,7 +219,12 @@ async def get_reaction_summary(
         priced_in=_to_lr(priced_in_label(beat_dropped_rate)),
         last_event_date=max(r.event_date for r in rows).isoformat(),
         mixed_versions=mixed_versions,
-    )
+    ))
+
+
+def _summary_out(read):
+    """Every estimate-based figure withheld when LICENSED_ESTIMATES is off (services/licensed_estimates)."""
+    return read if licensed() else withhold(read)
 
 
 @router.get("/sector-peers", response_model=SectorPeersRead)
@@ -400,7 +415,7 @@ async def get_conditional_earnings(
     # Insufficient history — return skeleton with counts only
     cov = coverage(rows)
     if not sufficient:
-        return ConditionalEarningsRead(
+        return _summary_out(ConditionalEarningsRead(
             symbol=sym,
             total_quarters=total,
             quarters_with_data=cov["with_data"], quarters_without_data=cov["without_data"],
@@ -415,7 +430,7 @@ async def get_conditional_earnings(
             beat_avg_5d=None, beat_continuation_rate_pct=None, beat_5d_sample=0,
             miss_avg_5d=None, miss_continuation_rate_pct=None, miss_5d_sample=0,
             recent_avg_abs_1d=None, prior_avg_abs_1d=None, magnitude_trend=None,
-        )
+        ))
 
     # ── Conditional 1d moves ─────────────────────────────────────────────────
     beat_1d = [float(r.pct_change_1d) for r in beats]
@@ -449,7 +464,7 @@ async def get_conditional_earnings(
         magnitude_trend = mag_snap.trend
         magnitude_trend_as_of = mag_snap.as_of_date.isoformat()
 
-    return ConditionalEarningsRead(
+    return _summary_out(ConditionalEarningsRead(
         symbol=sym,
         total_quarters=total,
         quarters_with_data=cov["with_data"], quarters_without_data=cov["without_data"],
@@ -476,7 +491,7 @@ async def get_conditional_earnings(
         magnitude_trend_as_of=magnitude_trend_as_of,
         magnitude_trend_labeled=_to_lr(magnitude_trend_label(magnitude_trend)),
         last_event_date=max(r.event_date for r in rows).isoformat() if rows else None,
-    )
+    ))
 
 
 @router.get("/analyst-stats", response_model=AnalystReactionStatsRead)
@@ -571,7 +586,11 @@ async def list_reactions(
     basis_unclear: set = set()
     for tid in {r.ticker_id for r in rows}:
         basis_unclear |= {(tid, d) for d in await basis_mismatch_dates(db, tid)}
-    return [_enrich(r, {d for t, d in basis_unclear if t == r.ticker_id}) for r in rows]
+    year_ago: dict = {}
+    if not licensed():          # each ticker's SEC quarters, once
+        syms = dict((await db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.id.in_({r.ticker_id for r in rows})))).all())
+        year_ago = {tid: await YearAgo.load(db, sym) for tid, sym in syms.items()}
+    return [_enrich(r, {d for t, d in basis_unclear if t == r.ticker_id}, year_ago.get(r.ticker_id)) for r in rows]
 
 
 @router.post("", response_model=HistoricalReactionRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])

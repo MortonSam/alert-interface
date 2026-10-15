@@ -64,7 +64,8 @@ class EarningsMarker(BaseModel):
     date: str             # "YYYY-MM-DD"
     eps_estimate: float | None = None
     eps_actual: float | None = None
-    outcome: str          # "beat" | "miss" | "meet" | "unknown"
+    outcome: str          # "beat" | "miss" | "meet" | "unknown" | "no_reported_figure"; "unknown" with LICENSED_ESTIMATES off
+    eps_line: str | None = None   # LICENSED_ESTIMATES off: the quarter's EPS against a year earlier (services/licensed_estimates)
     pct_change_1d: float | None = None
     pct_change_3d: float | None = None
     pct_change_5d: float | None = None
@@ -85,6 +86,7 @@ class TickerChartRead(BaseModel):
     bars_basis: str | None = None        # "delayed" when the 1-day bars came from the live layer; the page labels them from this
     bars_through: str | None = None      # the newest bar's own time (ISO with offset) when bars_basis is set
     delay_minutes: int | None = None
+    licensed_estimates: bool = True      # LICENSED_ESTIMATES off: markers carry no estimate, actual or outcome, and eps_line instead
 
 
 # ── Quote response (Finnhub) ──────────────────────────────────────────────────

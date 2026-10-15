@@ -12,6 +12,7 @@ from sqlalchemy import Date as SADate, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.discover_blurbs import MIN_QUARTERS, earnings_blurb, reaction_blurb, volatility_blurb
+from app.services.licensed_estimates import licensed as _licensed
 from app.services.pnl_math import pnl_percent
 from app.auth import may_read_ledger
 from app.services.earnings_calendar import level_of, shown_level
@@ -126,8 +127,10 @@ class JustReportedItem(BaseModel):
     industry: str | None = None
     event_date: str  # ISO date
     pct_change_1d: float | None
-    outcome: str  # beat / miss / meet / unknown
+    outcome: str  # beat / miss / meet / unknown ("unknown" with LICENSED_ESTIMATES off)
     insight: str | None = None  # e.g. "Moved -6.3% vs +2.7% typical beat"
+    eps_line: str | None = None  # LICENSED_ESTIMATES off: the reported EPS against the same quarter a year earlier
+    licensed_estimates: bool = True
     vol_regime: str | None = None
     iv_rv_note: str | None = None
 
@@ -287,6 +290,11 @@ async def _batch_conditional_stats(
             "avg_abs_1d": avg_abs_1d,
             "basis_excluded": excluded.get(sym, 0),
         }
+    from app.services.licensed_estimates import licensed
+    if not licensed():          # LICENSED_ESTIMATES off: no beat, miss or estimate-coverage figure reaches a blurb or an insight
+        for c in out.values():
+            c.update(beat_count=0, miss_count=0, bbd_count=0, avg_1d_on_beat=None, avg_1d_on_miss=None, quarters_with_data=None,
+                     quarters_without_data=None, basis_excluded=0)
     return out
 
 
@@ -822,6 +830,7 @@ async def just_reported(
             HistoricalReaction.event_date,
             HistoricalReaction.pct_change_1d,
             HistoricalReaction.outcome,
+            HistoricalReaction.eps_actual,
         )
         .join(Ticker, Ticker.id == HistoricalReaction.ticker_id)
         .where(
@@ -852,12 +861,18 @@ async def just_reported(
     vol_data = await _batch_vol_regime(db, symbols)
 
     # Build + re-sort: most recent first, then by |move| desc within same date
+    from app.services.beat_counts import served_outcome
+    from app.services.licensed_estimates import YearAgo, licensed
+    est_ok = licensed()
+    eps_lines: dict[str, str | None] = {}
     raw_items = []
     for r in deduped:
         cond = cond_stats.get(r.symbol)
         vol = vol_data.get(r.symbol)
         pct = float(r.pct_change_1d) if r.pct_change_1d is not None else 0.0
-        outcome = r.outcome.value if r.outcome else "unknown"
+        outcome = served_outcome(r.outcome, r.eps_actual) if est_ok else "unknown"
+        if not est_ok:
+            eps_lines[r.symbol] = (await YearAgo.load(db, r.symbol)).for_report(r.event_date)["eps_line"]
         raw_items.append((r, cond, vol, pct, outcome))
 
     # Sort: primary by event_date DESC, secondary by |pct_change_1d| DESC
@@ -873,6 +888,8 @@ async def just_reported(
             pct_change_1d=round(pct, 2) if pct else None,
             outcome=outcome,
             insight=_just_reported_insight(pct, outcome, cond, r.symbol),
+            eps_line=eps_lines.get(r.symbol),
+            licensed_estimates=est_ok,
             vol_regime=vol["vol_regime"] if vol else None,
             iv_rv_note=vol.get("iv_rv_note") if vol else None,
         )
@@ -965,7 +982,7 @@ async def suggestions(
                 "recent_move_pct": round(move, 2),
                 "recent_move_5d": move_5d,
                 "recent_outcome": (
-                    r.outcome.value if r.outcome else "unknown"
+                    (r.outcome.value if r.outcome else "unknown") if _licensed() else None
                 ),
                 "event_date": r.event_date.isoformat(),
             }

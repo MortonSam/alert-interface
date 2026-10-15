@@ -326,9 +326,10 @@ async def decide(
     else:
         base_rate_up_5d, base_rate_n = None, 0
 
+    from app.services.licensed_estimates import licensed
     receipt = {
         "n_comparable": prior_n,
-        "beat_rate": beat_rate,
+        "beat_rate": beat_rate if licensed() else None,     # the gates never read it; off, the receipt does not carry it
         "momentum_20d": momentum_20d,
         "momentum_reason": getattr(features, "momentum_reason", None),
         "expected_pct": round(expected, 2) if expected else None,
@@ -471,8 +472,10 @@ async def _ai_narrate(
         f"Prior earnings events: {prior_n}",
         f"Historical avg |5d move|: {expected:.1f}%" if expected is not None else "Historical avg |5d move|: unavailable",
         f"Implied move (ATM straddle): {implied:.1f}%" if implied is not None else "Implied move: unavailable",
-        f"Beat rate: {beat_rate:.0f}%" if beat_rate is not None else "Beat rate: unavailable",
     ]
+    from app.services.licensed_estimates import licensed
+    if licensed():              # LICENSED_ESTIMATES off: the narration names no beat rate
+        facts.append(f"Beat rate: {beat_rate:.0f}%" if beat_rate is not None else "Beat rate: unavailable")
     if base_rate is not None and base_rate_n > 0:
         facts.append(f"Walk-forward base rate (momentum ≤ -15%, ≥8 prior, up at 5d): {base_rate*100:.0f}% over {base_rate_n} events")
 

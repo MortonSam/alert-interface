@@ -27,3 +27,12 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if item.get_closest_marker("xdist_group") is None:
             item.add_marker(pytest.mark.xdist_group(name=item.module.__name__))
+
+
+@pytest.fixture(autouse=True)
+def _licensed_estimates_on(monkeypatch):
+    """The suite was written against the licensed behaviour (estimates, beats and misses shown); LICENSED_ESTIMATES defaults to
+    off (services/licensed_estimates), so each test starts with it on and test_licensed_estimates turns it off where it checks
+    that mode. test_licensed_estimates also checks the default itself is off."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "licensed_estimates", True)

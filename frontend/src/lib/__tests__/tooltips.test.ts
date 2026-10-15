@@ -45,7 +45,7 @@ describe("tooltips describe what the code does (audit item 11)", () => {
 
   it("the Outcome tooltip describes the badge and the surprise beside it, and no arrow", () => {
     const page = read("app/tickers/[symbol]/page.tsx");
-    const m = page.match(/title="(Beat, Miss or Meet[^"]*)"/);
+    const m = page.match(/title=\{est \? "(Beat, Miss or Meet[^"]*)"/);     // with estimates off the column is the year-ago line (lib/licensedEstimates)
     expect(m).not.toBeNull();
     expect(m![1]).toContain("the surprise printed beside it");
     expect(m![1]).toContain("1d, 3d and 5d columns");

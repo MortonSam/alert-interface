@@ -14,13 +14,19 @@ export const EARNINGS_MARKER_ENCODING = {
 
 export const EARNINGS_MARKER_DASH = "3 3";
 
+// LICENSED_ESTIMATES off (lib/licensedEstimates): every marker is the same mark, a report date with no outcome
+export const EARNINGS_MARKER_PLAIN = { label: "Earnings date", color: EARNINGS_MARKER_ENCODING.unknown.color } as const;
+
 export function earningsMarkerColor(outcome: EarningsOutcome | string): string {
   return (EARNINGS_MARKER_ENCODING as Record<string, { color: string }>)[outcome]?.color ?? EARNINGS_MARKER_ENCODING.unknown.color;
 }
 
 /** One swatch per distinct look: unknown and no_reported_figure share gray, so they share an entry, and each label is named
- * once in it (they carry the same words). */
-export function earningsMarkerLegend(): LegendItem[] {
+ * once in it (they carry the same words). With estimates off, one entry: the plain mark. */
+export function earningsMarkerLegend(estimates = true): LegendItem[] {
+  if (!estimates) {
+    return [{ key: EARNINGS_MARKER_PLAIN.color, label: EARNINGS_MARKER_PLAIN.label, swatch: { kind: "line", color: EARNINGS_MARKER_PLAIN.color, dashed: true } }];
+  }
   const byColor = new Map<string, string[]>();
   for (const [, v] of Object.entries(EARNINGS_MARKER_ENCODING)) {
     const labels = byColor.get(v.color) ?? [];
