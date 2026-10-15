@@ -209,6 +209,15 @@ describe("the options verdict states the API's report move and never overstates"
       later: { expiration: "2026-12-18", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.45 }, t3_years: 67 / 365 } } });
     expect(v.kind === "verdict" && v.receipt).toBe("From the Oct 12, 2026 options data, the Nov 20, 2026 expiration at 51.2% and the Dec 18, 2026 expiration at 45.0% implied volatility, the first two after the report on Nov 17, 2026. Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
   });
+  it("a floored term-method base names the 20-day realized volatility in the receipt", () => {
+    const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, move: { ...NVDA_REPORT.move!, method: "term", before: null,
+      later: { expiration: "2026-12-18", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.45 }, t3_years: 67 / 365,
+      base_floored: true, rv_20d: 0.312, raw_base_variance: 0.01, base_variance: 0.312 ** 2 } } });
+    expect(v.kind === "verdict" && v.receipt).toContain("the first two after the report on Nov 17, 2026. The stock's usual swing is taken as its 20-day realized volatility of 31.2%, higher than the expirations imply.");
+    const raw = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, move: { ...NVDA_REPORT.move!, method: "term", before: null,
+      later: { expiration: "2026-12-18", chain_date: "2026-10-12", atm_strike: 227.5, atm_iv: 0.45 }, t3_years: 67 / 365, base_floored: false, rv_20d: 0.1 } } });
+    expect(raw.kind === "verdict" && raw.receipt).not.toMatch(/realized/);
+  });
   it("says plainly when the options don't separate a report move, with no comparison", () => {
     const text = "The options don't separate a report move from the stock's usual swing.";
     const v = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, state: "not_separated", comparison: text, moveComparison: null,

@@ -78,8 +78,10 @@ def _chain(spot: float, k: float, sigma: float, chain_day: date, exp: str, rate:
             "calls": [{"strike": k, "bid": c - 0.005, "ask": c + 0.005}], "puts": [{"strike": k, "bid": p - 0.005, "ask": p + 0.005}]}
 
 
-def _patch_store(monkeypatch, chains: dict[str, dict], post: str | None, timing="amc", rate=0.04):
-    from app.services import chain_store, rates
+def _patch_store(monkeypatch, chains: dict[str, dict], post: str | None, timing="amc", rate=0.04, rv: float | None = None):
+    from app.services import chain_store, rates, rv_store
+    async def servable_rv(db, sym): return (SimpleNamespace(rv_20d=rv), None) if rv is not None else (None, "no snapshot")
+    monkeypatch.setattr(rv_store, "get_servable_rv", servable_rv)
     async def pick(db, sym, min_date, source=None): return post
     async def get(db, sym, exp, source=None): return (chains[exp], chains[exp]["chain_last_trade"]) if exp in chains else None
     async def exps(db, sym, source=None): return sorted(chains)
@@ -104,7 +106,7 @@ async def test_report_move_solves_both_legs_and_carries_its_receipts(monkeypatch
     assert (rm.before.expiration, rm.after.expiration, rm.before.chain_date, rm.after.chain_date) == ("2026-10-23", "2026-10-30", "2026-10-14", "2026-10-14")
     assert abs(rm.t2_years - 16 / 365) < 1e-12
     assert abs(rm.pct - RM.report_move_pct(rm.before.atm_iv, rm.after.atm_iv, 16 / 365)) < 1e-12 and round(rm.pct * 100, 1) == 8.7
-    assert rm.method == RM.PAIR and rm.version == 2
+    assert rm.method == RM.PAIR and rm.version == RM.REPORT_MOVE_VERSION == 3
     assert set(rm.as_dict()) >= {"state", "pct", "e", "t2_years", "before", "after", "report_date", "version", "method", "later"}
 
 
@@ -119,6 +121,37 @@ async def test_a_pair_that_does_not_qualify_gives_way_to_the_term_method(monkeyp
     assert (rm.after.expiration, rm.later.expiration) == ("2026-11-20", "2026-12-18")
     want = RM.term_move_pct(rm.after.atm_iv, rm.t2_years, rm.later.atm_iv, rm.t3_years)
     assert abs(rm.pct - want) < 1e-12 and rm.base_variance > 0
+
+
+def test_the_term_base_is_floored_at_the_20_day_realized_variance():
+    t2, t3 = 16 / 365, 37 / 365
+    raw = RM.term_base(0.60, t2, 0.45, t3)                          # 0.0825, a normal volatility of about 28.7%
+    assert RM.floored_base(raw, None) == raw and RM.floored_base(raw, 0.20) == raw          # no snapshot, or a lower RV: unfloored
+    assert abs(RM.floored_base(raw, 0.40) - 0.16) < 1e-12                                   # a higher RV: its variance
+    assert RM.term_move_pct(0.60, t2, 0.45, t3, 0.20) == RM.term_move_pct(0.60, t2, 0.45, t3)
+    want = 0.80 * math.sqrt(t2 * (0.36 - 0.16))
+    assert abs(RM.term_move_pct(0.60, t2, 0.45, t3, 0.40) - want) < 1e-12 and want < RM.term_move_pct(0.60, t2, 0.45, t3)
+    assert RM.term_move_pct(0.60, t2, 0.45, t3, 0.60) is None       # the realized variance reaches s2^2: no report move
+    # the HBAN shape: a base near zero against a stock that swings 25% a year
+    near_zero = RM.term_base(0.30, t2, 0.1987, t3)
+    assert 0 < near_zero < 0.002
+    assert RM.term_move_pct(0.30, t2, 0.1987, t3, 0.25) < 0.6 * RM.term_move_pct(0.30, t2, 0.1987, t3)
+    assert RM.term_move_pct(0.90, t2, 0.30, t3, 0.25) is None       # a raw base below zero still gives none, floor or not
+
+
+@pytest.mark.asyncio
+async def test_the_term_method_reads_the_serving_rv_and_records_the_floor(monkeypatch):
+    cd = date(2026, 10, 14)
+    chains = {e: _chain(100.0, 100.0, iv, cd, e, 0.04) for e, iv in (("2026-10-16", 0.30), ("2026-11-20", 0.40), ("2026-12-18", 0.31))}
+    _patch_store(monkeypatch, chains, "2026-11-20", rv=0.33)
+    rm = await RM.report_move(None, "ZZRM", "2026-10-19", cd)
+    assert rm.state == RM.OK and rm.method == RM.TERM and rm.base_floored and rm.rv_20d == 0.33
+    assert abs(rm.base_variance - 0.33 ** 2) < 1e-12 and rm.raw_base_variance < rm.base_variance
+    assert abs(rm.pct - RM.term_move_pct(rm.after.atm_iv, rm.t2_years, rm.later.atm_iv, rm.t3_years, 0.33)) < 1e-12
+    _patch_store(monkeypatch, chains, "2026-11-20", rv=None)
+    unfloored = await RM.report_move(None, "ZZRM", "2026-10-19", cd)
+    assert unfloored.base_floored is False and unfloored.rv_20d is None and unfloored.base_variance == unfloored.raw_base_variance
+    assert unfloored.pct > rm.pct
 
 
 @pytest.mark.asyncio
@@ -300,3 +333,24 @@ async def test_the_options_bundle_the_page_reads_carries_the_same_report_move(mo
         async with ScriptSessionLocal() as s:
             await _clean(s)
             await s.commit()
+
+
+def test_report_move_outlier_lists_moves_over_twice_the_typical_move():
+    from app.scripts.validate_data import PASS, WARN, report_move_outlier_result
+    r = report_move_outlier_result([("HBAN", "2026-10-17", 7.6, 2.9, "term"), ("GPC", "2026-10-21", 5.9, 5.1, "term"),
+                                    ("ZZEQ", "2026-10-22", 5.8, 2.9, "pair")])
+    assert r.name == "report_move_outlier" and r.level == WARN
+    assert r.rows == ["HBAN report 2026-10-17: report move 7.6% against a typical 2.9% (2.6x, term method)"]
+    assert report_move_outlier_result([("GPC", "2026-10-21", 5.9, 5.1, "term")]).level == PASS
+    assert report_move_outlier_result([]).level == PASS
+
+
+@pytest.mark.asyncio
+async def test_the_report_move_outlier_check_runs_on_the_copied_data():
+    from app.scripts.validate_data import CHECKS, check_report_move_outlier
+    assert check_report_move_outlier in CHECKS
+    async with ScriptSessionLocal() as db:
+        await db.execute(text("SET TRANSACTION READ ONLY"))
+        r = await check_report_move_outlier(db)
+        await db.rollback()
+    assert r.level in ("pass", "warn") and r.name == "report_move_outlier"
