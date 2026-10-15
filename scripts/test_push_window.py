@@ -126,3 +126,36 @@ class NightlyTests(unittest.TestCase):
         self.assertIn("starts at 02:30", nightly_block({}, datetime(2026, 10, 9, 2, 20, tzinfo=NY)))
         self.assertIsNone(nightly_block({}, datetime(2026, 10, 9, 2, 10, tzinfo=NY)))
         self.assertIsNone(nightly_block({}, datetime(2026, 10, 8, 23, 10, tzinfo=NY)))
+
+    def test_a_no_push_run_goes_on_during_a_refresh_and_a_push_waits(self):
+        from push_window import nightly_stops
+        why = "no push: the production nightly has been running since 14:20 New York (30 min)"
+        self.assertFalse(nightly_stops(why, ["--no-push"]))
+        self.assertFalse(nightly_stops(why, ["--no-push", "--frontend-only"]))
+        self.assertTrue(nightly_stops(why, []))
+        self.assertTrue(nightly_stops(why, ["--ref=abc123"]))
+        self.assertTrue(nightly_stops(why, ["--branch=ticker-redesign"]))
+        self.assertFalse(nightly_stops(None, []))
+
+    def test_main_runs_every_step_under_a_refresh_with_no_push_and_never_pushes(self):
+        from unittest import mock
+        ran = []
+        why = "no push: the production nightly has been running since 14:20 New York (30 min)"
+        patches = [mock.patch.object(push_window, "in_window", return_value=False),
+                   mock.patch.object(push_window, "nightly_check", return_value=why),
+                   mock.patch.object(push_window, "changed_files", return_value=["frontend/src/x.ts"]),
+                   mock.patch.object(push_window, "_stop_dev_server", return_value=False),
+                   mock.patch.object(push_window, "_run", side_effect=lambda cmd, cwd: ran.append(cmd) or 0)]
+        for p in patches:
+            p.start()
+        try:
+            self.assertEqual(push_window.main(["--no-push"]), 0)
+            self.assertEqual(len(ran), len(foreground_steps("frontend")))
+            self.assertFalse(any(c[:2] == ["git", "push"] for c in ran))
+            ran.clear()
+            self.assertEqual(push_window.main([]), 1)              # a push waits, before any step
+            self.assertEqual(ran, [])
+            self.assertEqual(push_window.main(["--check-only", "--no-push"]), 1)
+        finally:
+            for p in patches:
+                p.stop()

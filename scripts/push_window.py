@@ -3,7 +3,8 @@
 
     python3 scripts/push_window.py              # checks, then pushes origin main
     python3 scripts/push_window.py --check-only # the courier-window check alone, no tests, no push
-    python3 scripts/push_window.py --no-push    # every step, then stop before git push (the result to show before a go)
+    python3 scripts/push_window.py --no-push    # every step, then stop before git push (the result to show before a go);
+                                                # runs during a production refresh, which only a push waits for
     python3 scripts/push_window.py --ref=SHA    # push that commit of HEAD's history to main (git push origin SHA:main): an earlier deploy
 
 In order, each read by its exit code directly (never through a pipe): the no-push window (16:00 to 16:45 America/New_York on
@@ -156,6 +157,12 @@ def nightly_check(argv: list[str]) -> str | None:
     return why
 
 
+def nightly_stops(why: str | None, argv: list[str]) -> bool:
+    """Pure: whether the nightly check's `why` stops this run. A --no-push run uses only the local test and validate databases
+    and deploys nothing, so a production refresh does not stop it; it reports the block instead. A push always waits."""
+    return bool(why) and "--no-push" not in argv
+
+
 def in_window(now: datetime) -> bool:
     """True when `now` (any zone; naive is read as New York) falls in the weekday no-push window."""
     local = now.astimezone(ZONE) if now.tzinfo else now.replace(tzinfo=ZONE)
@@ -200,12 +207,13 @@ def main(argv: list[str]) -> int:
         return 1
     print(f"push window open: {now:%a %H:%M} New York")
     why = nightly_check(argv)
-    if why:
+    if "--check-only" in argv:
+        print(why or "production nightly: not running", file=sys.stderr if why else sys.stdout)
+        return 1 if why else 0
+    if nightly_stops(why, argv):
         print(why, file=sys.stderr)
         return 1
-    print("production nightly: not running")
-    if "--check-only" in argv:
-        return 0
+    print(f"{why}\n--no-push: the steps use only local databases, so they run; a push would wait" if why else "production nightly: not running")
     changed = changed_files()
     lane = lane_for(changed or [], argv) if changed is not None else "full"
     print(f"{lane} lane: " + ("the push carries frontend/ changes only; the backend suite is skipped" if lane == "frontend"
@@ -259,11 +267,11 @@ def main(argv: list[str]) -> int:
     if not ok:
         return 1
     why = nightly_check(argv)              # checked again: the gate takes minutes and the nightly may have started meanwhile
-    if why:
+    if nightly_stops(why, argv):
         print(why, file=sys.stderr)
         return 1
     if "--no-push" in argv:
-        print("--no-push: every step passed; nothing pushed")
+        print("--no-push: every step passed; nothing pushed" + (f" (and a push now would wait: {why})" if why else ""))
         return 0
     return _run(push_command(argv), ROOT)
 
