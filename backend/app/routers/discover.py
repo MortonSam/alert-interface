@@ -1228,12 +1228,11 @@ async def latest_pick(
 async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today: date) -> dict[str, dict]:
     """Per symbol: the report-only expected move (services/report_move, the chain date its receipt) against the typical 1-day
     move over at least MIN_REPORTS stored reports, and the one sentence the ticker page's verdict also says. When the options
-    do not separate a report move (no expiration before it, or the later expiration priced no higher), the sentence says so.
+    do not separate a report move (neither method gives a positive E), the sentence says so.
     Any other missing side gets no line."""
     from app.services.earnings_calendar import level_of
     from app.services.implied_move import implied_move_allowed
-    from app.services.move_comparison import REPORT_MOVE_ABSENT, report_sentence, report_verdict
-    from app.services.report_move import NO_PRE_EXPIRATION, NOT_SEPARATED, OK, report_move
+    from app.services.report_move import NOT_SEPARATED, report_move_view
     out: dict[str, dict] = {}
     for r in rows:
         if not implied_move_allowed(level_of(r.is_confirmed, getattr(r, "unresolved_since", None))):
@@ -1241,20 +1240,15 @@ async def _batch_move_comparison(db: AsyncSession, rows, cond_stats: dict, today
         cond = cond_stats.get(r.symbol)
         if not cond or not cond.get("avg_abs_1d"):
             continue
-        rm = await report_move(db, r.symbol, r.event_date, today)
-        if rm.state in (NO_PRE_EXPIRATION, NOT_SEPARATED):
-            out[r.symbol] = {"report_move_state": rm.state, "report_move": rm.as_dict(), "comparison": REPORT_MOVE_ABSENT[rm.state]}
+        v = await report_move_view(db, r.symbol, r.event_date, today, typical=(float(cond["avg_abs_1d"]), int(cond.get("total") or 0)))
+        if v["state"] == NOT_SEPARATED:
+            out[r.symbol] = {"report_move_state": v["state"], "report_move": v["report_move"], "comparison": v["comparison"]}
             continue
-        if rm.state != OK:
+        if "pct" not in v or v["move_comparison"] is None:
             continue
-        typ, n = round(float(cond["avg_abs_1d"]), 1), int(cond.get("total") or 0)
-        verdict = report_verdict(rm.pct * 100, typ, n)
-        if verdict is None:
-            continue
-        rep = round(rm.pct * 100, 1)
-        chain_day = date.fromisoformat(rm.after.chain_date)
-        out[r.symbol] = {"report_move_pct": rep, "report_move_state": OK, "report_move": rm.as_dict(), "chain_date": rm.after.chain_date,
-                         "typical_move_pct": typ, "typical_n": n, "move_comparison": verdict, "comparison": report_sentence(rep, typ, verdict, chain_day)}
+        out[r.symbol] = {"report_move_pct": v["rep"], "report_move_state": v["state"], "report_move": v["report_move"],
+                         "chain_date": v["chain_date"].isoformat(), "typical_move_pct": v["typical_move_pct"], "typical_n": v["typical_n"],
+                         "move_comparison": v["move_comparison"], "comparison": v["comparison"]}
     return out
 
 

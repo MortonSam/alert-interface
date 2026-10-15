@@ -19,8 +19,9 @@ from app.services import chain_store, price_bars
 from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.eps_actuals import eps_outcome
 from app.services.trading_calendar import nth_trading_day_after
-from app.services.implied_move import implied_move_allowed, straddle_implied_move
+from app.services.implied_move import implied_move_allowed
 from app.services.next_earnings import NextEarnings, next_earnings_for
+from app.services.report_move import report_move_view
 from app.services.fact_holds import holds_for
 from app.services.price_history_exclusion import is_excluded
 from app.services.rv_store import get_servable_rv
@@ -69,19 +70,6 @@ def move_from_bars(df, event_date: date, timing: str | None) -> float | None:
         return None
     pct = (data or {}).get("pct_change_1d")
     return float(pct) if pct is not None else None
-
-
-async def _implied(db: AsyncSession, sym: str, spot: float | None, min_date: date, today: date) -> dict:
-    exp = await chain_store.pick_expiration(db, sym, min_date.isoformat())
-    if not exp:
-        return {}
-    got = await chain_store.get_chain(db, sym, exp)
-    if not got or not got[1] or not chain_store.is_fresh(got[1], today=today):
-        return {}
-    im = straddle_implied_move(got[0].get("calls") or [], got[0].get("puts") or [], spot)
-    if im is None:
-        return {}
-    return {"implied_pct": im.pct, "chain_date": date.fromisoformat(str(got[1])[:10]), "expiration": date.fromisoformat(exp)}
 
 
 def daily_moves(df) -> list[tuple[date, float]]:
@@ -151,10 +139,10 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
         ne = await next_earnings_for(db, ticker.id, today) if "report_date" not in held else NextEarnings()
         if ne.date and 0 <= (ne.date - today).days <= B.NEXT_WITHIN_DAYS:
             ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
-            implied = await _implied(db, sym, quote_price, ne.date, today) if implied_move_allowed(ne.confirmation) and "implied_move" not in held else {}   # never priced against an estimate
-            avg_abs = sum(abs(float(r["pct_change_1d"])) for r in sample) / len(sample) if sample else None
+            view = await report_move_view(db, sym, ne.date, today, sorted(held), typical=(None, 0) if excluded else None) \
+                if implied_move_allowed(ne.confirmation) else {}                    # never priced against an estimate
             upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
-                        "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "avg_abs_1d": avg_abs, "sample_n": len(sample), "sample_as_of": sample_as_of, **implied}
+                        "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "report_view": view}
         exclude = set()
         for d in earnings_dates:
             exclude.add(d); exclude.add(nth_trading_day_after(d, 1))
@@ -221,13 +209,11 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     if raw is not None and ne.date:
         ev_t = (await db.execute(select(Event.report_timing).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date == ne.date))).scalar()
         raw.update(next_report={"date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source, "timing": ev_t})
-    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and typical_abs and implied_move_allowed(ne.confirmation) and "implied_move" not in held:
-        implied = await _implied(db, sym, quote_price, ne.date, today)
+    if ne.date and 0 <= (ne.date - today).days <= Q.NEXT_WITHIN_DAYS and implied_move_allowed(ne.confirmation) and "implied_move" not in held:
+        view = await report_move_view(db, sym, ne.date, today, sorted(held), typical=(None, 0) if excluded else None)   # the sentence Discover states
         if raw is not None:
-            raw.update(implied=implied or None)
-        if implied:
-            cands.append(Q.q_implied_big(name=name, symbol=sym, implied_pct=implied["implied_pct"], chain_date=implied["chain_date"], next_date=ne.date,
-                                         typical_abs=typical_abs, n_reports=len(sample), sample_as_of=sample_as_of))
+            raw.update(report_view=view or None)
+        cands.append(Q.q_implied_big(name=name, symbol=sym, view=view, next_date=ne.date))
     # 3. beats followed by a fall
     beats = [r for r in sample if r["outcome"] == "beat" and r["has_eps"]]      # a beat needs both figures (services/beat_counts)
     cands.append(Q.q_beat_fell(name=name, symbol=sym, beats=len(beats), fell=sum(1 for r in beats if float(r["pct_change_1d"]) < 0), as_of=sample_as_of))

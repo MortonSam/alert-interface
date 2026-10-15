@@ -42,14 +42,29 @@ def test_1_reaction_normal_needs_eight_past_reports():
     assert Q.q_reaction_normal(name="X", symbol="X", event_date=T, timing="bmo", move_pct=1.0, typical_abs=2.0, larger_count=3, n_reports=Q.MIN_REPORTS - 1, sample_as_of=T) is None
 
 
-def test_2_implied_big_words_the_comparison_and_needs_eight_reports():
-    q = Q.q_implied_big(name="Constellation Brands", symbol="STZ", implied_pct=0.06, chain_date=date(2026, 10, 5), next_date=date(2026, 10, 6), typical_abs=4.0, n_reports=20, sample_as_of=date(2026, 7, 1))
-    assert q["question"] == "Is a ±6.0% expected move big for Constellation Brands?"
-    assert q["data"].endswith("so the market is pricing more than usual.")
+def _view(rep: float, typ: float | None, n: int, chain: date = date(2026, 10, 5)) -> dict:
+    """A services/report_move.report_move_view result, built from the same pure rules."""
+    from app.services import report_move as RM
+    from app.services.move_comparison import report_sentence, report_verdict
+    rm = RM.ReportMove(RM.OK, pct=rep / 100, e=rep / 80, t2_years=0.05, before=RM.Leg("2026-10-02", chain.isoformat(), 1.0, 0.3),
+                       after=RM.Leg("2026-10-09", chain.isoformat(), 1.0, 0.5), report_date="2026-10-06", method=RM.PAIR)
+    verdict = report_verdict(rep, typ, n)
+    return {"state": RM.OK, "move": rm, "report_move": rm.as_dict(), "pct": rep / 100, "rep": rep, "chain_date": chain, "typical_move_pct": typ,
+            "typical_n": n, "move_comparison": verdict, "comparison": report_sentence(rep, typ if verdict else None, verdict, chain)}
+
+
+def test_2_implied_big_states_the_report_moves_sentence_and_needs_eight_reports():
+    v = _view(6.0, 4.0, 20)
+    q = Q.q_implied_big(name="Constellation Brands", symbol="STZ", view=v, next_date=date(2026, 10, 6))
+    assert q["question"] == "Is a 6.0% move from the report big for Constellation Brands?"
+    assert q["data"] == v["comparison"] == ("Options price a move of about 6.0% from the report itself, more than the 4.0% it has moved on a typical report "
+                                           "(options from Oct 5, 2026).")
+    assert {i["name"] for i in q["inputs"]} >= {"report move", "chain date", "typical move after a report", "reports in the sample"}
     assert_clean(q)
-    assert Q.q_implied_big(name="X", symbol="X", implied_pct=0.04, chain_date=T, next_date=T, typical_abs=4.0, n_reports=12, sample_as_of=T)["data"].endswith("about its usual.")
-    assert Q.q_implied_big(name="X", symbol="X", implied_pct=0.02, chain_date=T, next_date=T, typical_abs=4.0, n_reports=12, sample_as_of=T)["data"].endswith("less than usual.")
-    assert Q.q_implied_big(name="X", symbol="X", implied_pct=0.06, chain_date=T, next_date=T, typical_abs=4.0, n_reports=7, sample_as_of=T) is None
+    assert "about the same as" in Q.q_implied_big(name="X", symbol="X", view=_view(4.0, 4.0, 12), next_date=T)["data"]
+    assert "less than" in Q.q_implied_big(name="X", symbol="X", view=_view(2.0, 4.0, 12), next_date=T)["data"]
+    assert Q.q_implied_big(name="X", symbol="X", view=_view(6.0, 4.0, 7), next_date=T) is None          # under eight reports: no comparison, no question
+    assert Q.q_implied_big(name="X", symbol="X", view={}, next_date=T) is None
 
 
 def test_3_beat_fell_needs_half_of_at_least_eight_beats():
@@ -128,13 +143,13 @@ def test_choose_keeps_catalog_order_and_four_at_most():
 
 def test_no_number_in_an_answer_is_a_literal_of_its_template():
     a = [Q.q_reaction_normal(name="A", symbol="A", event_date=date(2026, 9, 30), timing="amc", move_pct=3.0, typical_abs=7.0, larger_count=15, n_reports=20, sample_as_of=date(2026, 6, 25)),
-         Q.q_implied_big(name="A", symbol="A", implied_pct=0.06, chain_date=date(2026, 10, 5), next_date=date(2026, 10, 6), typical_abs=4.0, n_reports=20, sample_as_of=date(2026, 7, 1)),
+         Q.q_implied_big(name="A", symbol="A", view=_view(6.0, 4.0, 20, date(2026, 10, 5)), next_date=date(2026, 10, 6)),
          Q.q_beat_fell(name="A", symbol="A", beats=18, fell=11, as_of=date(2026, 6, 25)),
          Q.q_big_move(name="A", symbol="A", move_date=date(2026, 9, 29), move_pct=-26.5, typical_abs=1.6, multiple=16.6, smaller_share=99.84, n_sessions=1254),
          Q.q_upgrades(name="A", symbol="A", upgrades_30d=1, upgrade_sessions=17, median_1d=1.8, continuation_pct=70.6, sample_5d=17, stats_as_of=date(2026, 10, 6), newest_upgrade=date(2026, 9, 30)),
          Q.q_ex_dividend(name="A", symbol="A", ex_date=date(2026, 10, 14), amount=0.6, today=T)]
     b = [Q.q_reaction_normal(name="B", symbol="B", event_date=date(2025, 4, 23), timing="bmo", move_pct=-8.8, typical_abs=5.4, larger_count=9, n_reports=36, sample_as_of=date(2025, 1, 29)),
-         Q.q_implied_big(name="B", symbol="B", implied_pct=0.093, chain_date=date(2025, 4, 11), next_date=date(2025, 4, 29), typical_abs=5.4, n_reports=36, sample_as_of=date(2025, 1, 29)),
+         Q.q_implied_big(name="B", symbol="B", view=_view(9.3, 5.4, 36, date(2025, 4, 11)), next_date=date(2025, 4, 29)),
          Q.q_beat_fell(name="B", symbol="B", beats=27, fell=19, as_of=date(2025, 1, 29)),
          Q.q_big_move(name="B", symbol="B", move_date=date(2025, 4, 8), move_pct=12.4, typical_abs=2.2, multiple=5.6, smaller_share=98.7, n_sessions=1113),
          Q.q_upgrades(name="B", symbol="B", upgrades_30d=3, upgrade_sessions=22, median_1d=0.7, continuation_pct=55.0, sample_5d=22, stats_as_of=date(2025, 4, 13), newest_upgrade=date(2025, 4, 2)),

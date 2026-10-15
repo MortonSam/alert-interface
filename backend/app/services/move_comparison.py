@@ -33,10 +33,10 @@ COMPARISON_WORDS = {
     "about its usual": "about the same as",
 }
 REPORT_MOVE_ABSENT = {
-    "no_pre_expiration": "The options don't separate a report move, because no expiration ends before the report.",
-    "not_separated": "The options don't separate a report move, because the expiration after the report is priced no higher than the one before it.",
+    "not_separated": "The options don't separate a report move from the stock's usual swing.",
+    "no_legs": "Too few expirations near the report are on hand to separate a report move.",
     "no_chain": "No options prices from the last session cover the report, so there is no report move.",
-    "mixed_dates": "The two expirations around the report were priced on different days, so there is no report move.",
+    "mixed_dates": "The expirations around the report were priced on different days, so there is no report move.",
     "no_iv": "The options prices around the report could not be read as a volatility, so there is no report move.",
 }
 

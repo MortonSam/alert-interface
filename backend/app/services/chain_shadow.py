@@ -164,10 +164,23 @@ def draft_expirations(expirations: list[str], chain_date: str, reports: list[str
     return out
 
 
+def report_move_expirations(expirations: list[str], chain_date: str, earnings: list[tuple[str, str | None]]) -> list[str]:
+    """Pure: for each (earnings date, report timing), the second listed expiry that captures the report: with the first
+    (earnings_expirations) it gives services/report_move's term method its two legs."""
+    later = sorted(e for e in expirations if e > chain_date)
+    out: list[str] = []
+    for ed, timing in sorted(set(earnings)):
+        posts = [e for e in later if counts_for_report(e, ed, timing)]
+        if len(posts) > 1 and posts[1] not in out:
+            out.append(posts[1])
+    return out
+
+
 def wanted_expirations(expirations: list[str], chain_date: str, courier_exps: list[str], earnings: list[tuple[str, str | None]], cap: int,
-                       draft: list[str] = ()) -> list[str]:
+                       draft: list[str] = (), report_move: list[str] = ()) -> list[str]:
     """Pure: the expiries the Intrinio step stores. The front expiry and the earnings expiries always; then the courier's
-    expiries Intrinio also lists, up to `cap` chains in all; then the draft's expiries (draft_expirations), exempt from the cap."""
+    expiries Intrinio also lists, up to `cap` chains in all; then the draft's expiries (draft_expirations) and the report move's
+    second post-report expiries (report_move_expirations), exempt from the cap."""
     front = front_expiration(expirations, chain_date)
     keep: list[str] = []
     for e in ([front] if front else []) + earnings_expirations(expirations, chain_date, earnings):
@@ -176,7 +189,7 @@ def wanted_expirations(expirations: list[str], chain_date: str, courier_exps: li
     listed = set(expirations)
     rest = [e for e in sorted(set(courier_exps)) if e in listed and e > chain_date and e not in keep]
     capped = keep + rest[:max(0, cap - len(keep))]
-    return sorted(set(capped) | {e for e in draft if e in listed and e > chain_date})
+    return sorted(set(capped) | {e for e in (*draft, *report_move) if e in listed and e > chain_date})
 
 
 def _mids(side: list[dict]) -> dict[float, float]:

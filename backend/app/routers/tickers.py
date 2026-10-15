@@ -756,11 +756,9 @@ async def _report_move_fields(db: AsyncSession, sym: str, today: date, held_fact
     """The report-only expected move for the ticker's next report and its comparison, the same figure and sentence Discover's
     reporting-soon line states (routers/discover._batch_move_comparison). Only a confirmed date is priced; a held implied move or
     typical move drops what it feeds (services/fact_holds), and `held` says so."""
-    from app.routers.discover import _batch_conditional_stats
     from app.services.earnings_calendar import level_of
     from app.services.implied_move import implied_move_allowed
-    from app.services.move_comparison import REPORT_MOVE_ABSENT, report_sentence, report_verdict
-    from app.services.report_move import OK, report_move
+    from app.services.report_move import report_move_view
     held = {"held": bool({"implied_move", "typical_move", "report_date"} & set(held_facts)), "held_facts": held_facts}
     if {"implied_move", "report_date"} & set(held_facts):
         return held
@@ -771,18 +769,12 @@ async def _report_move_fields(db: AsyncSession, sym: str, today: date, held_fact
     )).first()
     if ev is None or not implied_move_allowed(level_of(ev.is_confirmed, ev.unresolved_since)):
         return held
-    rm = await report_move(db, sym, ev.event_date, today)
-    out = {**held, "report_move_state": rm.state, "report_move": rm.as_dict()}
-    if rm.state != OK:                  # the page says why (Discover shows only the two the options themselves cause)
-        return {**out, "comparison": REPORT_MOVE_ABSENT[rm.state]}
-    rep = round(rm.pct * 100, 1)
-    out["report_move_pct"] = rm.pct
-    cond = None if "typical_move" in held_facts else (await _batch_conditional_stats(db, [sym])).get(sym)
-    typ = round(float(cond["avg_abs_1d"]), 1) if cond and cond.get("avg_abs_1d") else None
-    n = int(cond.get("total") or 0) if cond else 0
-    verdict = report_verdict(rep, typ, n)
-    return {**out, "typical_move_pct": typ, "typical_n": n or None, "move_comparison": verdict,
-            "comparison": report_sentence(rep, typ if verdict else None, verdict, date.fromisoformat(rm.after.chain_date))}
+    v = await report_move_view(db, sym, ev.event_date, today, held_facts)
+    out = {**held, "report_move_state": v["state"], "report_move": v["report_move"], "comparison": v["comparison"]}
+    if "pct" not in v:                  # the page says why (Discover shows only the case the options themselves cause)
+        return out
+    return {**out, "report_move_pct": v["pct"], "typical_move_pct": v["typical_move_pct"], "typical_n": v["typical_n"],
+            "move_comparison": v["move_comparison"]}
 
 
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
