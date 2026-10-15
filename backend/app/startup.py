@@ -178,6 +178,41 @@ async def _read_run_history() -> tuple[datetime | None, datetime | None]:
     return last_successful_nightly(timings_raw), _parse(started_raw)
 
 
+RUNNING_MARKER_MAX_HOURS = 6     # an in-progress marker younger than this is a running run (the nightly's longest steps outlive the 45-minute rule)
+
+
+def catch_up_decision(now: datetime, process_running: bool, sentinel_raw: str | None, last_run_started: datetime | None,
+                      force: bool) -> tuple[bool, str]:
+    """Pure: (start a catch-up refresh on purpose?, why). Refused while a run is in progress, force or not (two pipelines
+    would write the same tables at once); refused when any run started within SKIP_AFTER_ANY_RUN_HOURS unless force."""
+    if process_running:
+        return False, "a refresh is running in this process"
+    started = _parse(sentinel_raw) if sentinel_raw and sentinel_raw != "done" else None
+    if started is not None and (now - started).total_seconds() / 3600 < RUNNING_MARKER_MAX_HOURS:
+        return False, f"a refresh has been running since {started.isoformat()} (refresh_in_progress_since)"
+    if last_run_started is not None and not force:
+        hours = (now - last_run_started).total_seconds() / 3600
+        if hours < SKIP_AFTER_ANY_RUN_HOURS:
+            return False, (f"a refresh run started {hours:.1f}h ago (under {SKIP_AFTER_ANY_RUN_HOURS}h); it would re-generate Ivy's Reads "
+                           "a second time today; pass force=true to run anyway")
+    return True, "catch-up refresh started (a boot-style run, no slot)" + (" with force=true" if force else "")
+
+
+async def start_catch_up(force: bool) -> tuple[bool, str]:
+    """Start a catch-up refresh now when catch_up_decision allows it: the same run a boot starts, recorded the same way."""
+    global _refresh_in_progress
+    now = datetime.now(timezone.utc)
+    _, sentinel_raw = await _read_sentinel()
+    _, last_run_started = await _read_run_history()
+    ok, why = catch_up_decision(now, _refresh_in_progress, sentinel_raw, last_run_started, force)
+    _log(f"Catch-up request: {why}")
+    if ok:
+        _refresh_in_progress = True
+        await _write_sentinel(now.isoformat())
+        asyncio.create_task(_background_refresh())
+    return ok, why
+
+
 # ── Refresh loop ──────────────────────────────────────────────────────────────
 
 LOOP_INTERVAL_SECONDS = 5 * 60   # how often the loop looks at the clock; the run starts within this of the slot

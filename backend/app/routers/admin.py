@@ -52,6 +52,17 @@ class ChainIngestRequest(BaseModel):
     chains: list[ChainIngestItem]
 
 
+@router.post("/catch-up-refresh", dependencies=[Depends(require_admin)], status_code=202)
+async def catch_up_refresh(force: bool = False):
+    """Start a catch-up refresh on purpose (the run a boot would start, recorded the same way). 409 while a run is in
+    progress, or when any run started within 24 hours unless force=true (startup.catch_up_decision)."""
+    from app.startup import start_catch_up
+    ok, why = await start_catch_up(force)
+    if not ok:
+        raise HTTPException(status_code=409, detail=why)
+    return {"started": True, "detail": why}
+
+
 @router.post("/ingest-options-chains", dependencies=[Depends(require_admin)])
 async def ingest_options_chains(
     payload: ChainIngestRequest,

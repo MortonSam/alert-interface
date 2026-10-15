@@ -1,6 +1,9 @@
 """The boot refresh rule (startup.boot_refresh_decision) and the mark it reads (refresh.should_record_refresh). Pure, no database."""
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 import app.startup as startup
 from app.scripts import refresh
@@ -72,3 +75,54 @@ def test_the_lifespan_uses_the_decision():
     src = inspect.getsource(startup.lifespan)
     assert "boot_refresh_decision(" in src and "_read_run_history()" in src
     assert "REFRESH_IF_OLDER_THAN_HOURS:" not in src            # the old inline age check is gone
+
+
+def test_catch_up_refuses_while_running_and_within_24_hours_unless_forced():
+    now = datetime(2026, 10, 15, 21, 0, tzinfo=Z)
+    recent = now - timedelta(hours=3)
+    assert startup.catch_up_decision(now, True, None, None, force=True) == (False, "a refresh is running in this process")
+    ok, why = startup.catch_up_decision(now, False, (now - timedelta(hours=2)).isoformat(), None, force=True)
+    assert not ok and "running since" in why                         # force never runs two pipelines at once
+    ok, why = startup.catch_up_decision(now, False, "done", recent, force=False)
+    assert not ok and "force=true" in why
+    ok, why = startup.catch_up_decision(now, False, "done", recent, force=True)
+    assert ok and "force=true" in why
+    assert startup.catch_up_decision(now, False, (now - timedelta(hours=7)).isoformat(), now - timedelta(hours=25), force=False)[0]   # a dead marker
+
+
+@pytest.mark.asyncio
+async def test_the_catch_up_endpoint_needs_the_admin_token_and_starts_a_boot_style_run(monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+    import app.auth as auth
+    from app.main import app
+
+    monkeypatch.setattr(auth.settings, "admin_token", "t")
+    started, writes = [], []
+
+    async def history():
+        return None, datetime.now(Z) - timedelta(hours=2)
+
+    async def sentinel():
+        return None, "done"
+
+    async def write(v):
+        writes.append(v)
+
+    async def fake_run(nightly_slot=None):
+        started.append(nightly_slot)
+
+    monkeypatch.setattr(startup, "_read_run_history", history)
+    monkeypatch.setattr(startup, "_read_sentinel", sentinel)
+    monkeypatch.setattr(startup, "_write_sentinel", write)
+    monkeypatch.setattr(startup, "_background_refresh", fake_run)
+    monkeypatch.setattr(startup, "_refresh_in_progress", False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.post("/api/v1/admin/catch-up-refresh")).status_code == 401
+        r = await c.post("/api/v1/admin/catch-up-refresh", headers={"X-Admin-Token": "t"})
+        assert r.status_code == 409 and "force=true" in r.json()["detail"] and started == []
+        r = await c.post("/api/v1/admin/catch-up-refresh?force=true", headers={"X-Admin-Token": "t"})
+        assert r.status_code == 202 and r.json()["started"] is True
+        await asyncio.sleep(0)
+        assert started == [None] and len(writes) == 1          # no slot: recorded in nightly_timings like a boot run
+        r = await c.post("/api/v1/admin/catch-up-refresh?force=true", headers={"X-Admin-Token": "t"})
+        assert r.status_code == 409                            # this process now holds a run
