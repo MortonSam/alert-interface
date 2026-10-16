@@ -50,14 +50,15 @@ def eps_line(pair: dict | None) -> str | None:
     if pair is None:
         return None
     m = pair.get("measure") or "EPS"            # "FFO per share" for a REIT (services/ffo)
+    fig = f"{m} {_money(pair['eps'])}{pair.get('note') or ''}"     # a derived FFO figure says so (services/ffo.DERIVED_NOTE)
     if pair["year_ago_eps"] is None:
-        return f"{m} {_money(pair['eps'])}. " + (NO_YEAR_AGO if m == "EPS" else NO_YEAR_AGO.replace("No EPS figure", f"No {m.split(' per ')[0]} figure"))
+        return f"{fig}. " + (NO_YEAR_AGO if m == "EPS" else NO_YEAR_AGO.replace("No EPS figure", f"No {m.split(' per ')[0]} figure"))
     if pair["pct"] is not None:
         if f"{abs(pair['pct']):.1f}" == "0.0":      # rounds to 0.0%: never "up 0.0%"
-            return f"{m} {_money(pair['eps'])}, unchanged from {_money(pair['year_ago_eps'])} a year ago"
+            return f"{fig}, unchanged from {_money(pair['year_ago_eps'])} a year ago"
         direction = "up" if pair["pct"] >= 0 else "down"
-        return f"{m} {_money(pair['eps'])}, {direction} {abs(pair['pct']):.1f}% from {_money(pair['year_ago_eps'])} a year ago"
-    return f"{m} {_money(pair['eps'])} against {_money(pair['year_ago_eps'])} a year ago, {pair['phrase']}"
+        return f"{fig}, {direction} {abs(pair['pct']):.1f}% from {_money(pair['year_ago_eps'])} a year ago"
+    return f"{fig} against {_money(pair['year_ago_eps'])} a year ago, {pair['phrase']}"
 
 
 async def load_quarters(db, symbol: str) -> list[tuple[date, float]]:

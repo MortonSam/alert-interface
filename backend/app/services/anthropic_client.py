@@ -147,12 +147,12 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
-    async def read_release_eps(self, prompt: str) -> dict:
+    async def read_release_eps(self, prompt: str, max_tokens: int = 400) -> dict:
         """The second reader of an earnings release (services/release_reader): Sonnet returns JSON with the quarter's GAAP diluted
         EPS and the verbatim quote it came from; the caller verifies the quote and stores only on agreement with the pattern parser."""
         msg = await self._create("read_release_eps", 
             model=GENERATION_MODEL,
-            max_tokens=400,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
         return {

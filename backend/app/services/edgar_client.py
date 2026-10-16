@@ -314,8 +314,9 @@ class EdgarClient:
             pass
         return resp.text
 
-    async def filing_texts(self, cik: str, accession_number: str, primary_document: str) -> list[tuple[str, str]]:
-        """(document name, plain text) for the cover and every exhibit of a filing; the cover first."""
+    async def filing_texts(self, cik: str, accession_number: str, primary_document: str, every_exhibit: bool = False) -> list[tuple[str, str]]:
+        """(document name, plain text) for the cover and every exhibit of a filing; the cover first. every_exhibit as in
+        list_filing_documents (REG's "reg-ex99_1.htm" starts with "r")."""
         from bs4 import BeautifulSoup
         out = []
         try:
@@ -324,7 +325,7 @@ class EdgarClient:
         except Exception:
             pass
         try:
-            for name in await self.list_filing_documents(cik, accession_number):
+            for name in await self.list_filing_documents(cik, accession_number, every_exhibit):
                 if name == primary_document:
                     continue
                 html = await self.fetch_filing_document(cik, accession_number, name)
