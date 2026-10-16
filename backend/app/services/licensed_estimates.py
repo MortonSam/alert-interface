@@ -80,10 +80,12 @@ class YearAgo:
     async def load(cls, db, symbol: str) -> "YearAgo":
         from app.services import ffo
         if await ffo.ticker_is_reit(db, symbol):
-            shown, held = await ffo.load_ffo(db, symbol)
-            pairs = [{**p, "measure": ffo.MEASURE} for p in year_ago_pairs(shown)]
-            held_pairs = {end: {"period_end": end, "measure": ffo.MEASURE, "held_line": ffo.HELD_LINE.format(gap=gap)} for end, gap in held.items()}
-            return cls(pairs, held_pairs)
+            f = await ffo.load_ffo(db, symbol)
+            if f["reports_ffo"]:                                  # a REIT whose releases never name FFO (WY) keeps EPS
+                pairs = [{**p, "measure": ffo.MEASURE, "note": ffo.DERIVED_NOTE if p["period_end"] in f["derived"] else None}
+                         for p in year_ago_pairs(f["shown"])]
+                held_pairs = {end: {"period_end": end, "measure": ffo.MEASURE, "held_line": line} for end, line in f["held"].items()}
+                return cls(pairs, held_pairs)
         return cls(year_ago_pairs(await load_quarters(db, symbol)))
 
     def for_report(self, report_day: date) -> dict:

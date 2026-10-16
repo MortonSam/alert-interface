@@ -1788,10 +1788,10 @@ async def check_ffo_quarters(session) -> CheckResult:
                                                               f"gap {r.xbrl_gap_pct}% shown" if r.xbrl_gap_pct is not None and float(r.xbrl_gap_pct) > FFO_GAP_PCT else "not a REIT")
            for r in rows if r.state == "ok" and (not lo <= float(r.ffo_per_share) <= hi or (r.xbrl_gap_pct is not None and float(r.xbrl_gap_pct) > FFO_GAP_PCT)
                                                   or not is_reit(r.sector, r.industry))]
-    counts = {k: sum(1 for r in rows if r.state == k) for k in ("ok", "held", "unread")}
+    counts = {k: sum(1 for r in rows if r.state == k) for k in ("ok", "held", "unread", "none")}
     if bad:
         return CheckResult("ffo_quarters", ERROR, f"{len(bad)} shown FFO quarter(s) fail their checks", bad[:20])
-    return CheckResult("ffo_quarters", PASS, f"FFO quarters: {counts['ok']} shown, {counts['held']} held, {counts['unread']} unread")
+    return CheckResult("ffo_quarters", PASS, f"FFO quarters: {counts['ok']} shown, {counts['held']} held, {counts['unread']} unread, {counts['none']} naming no FFO")
 
 
 async def check_live_api_budget(session) -> CheckResult:
