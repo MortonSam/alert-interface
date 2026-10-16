@@ -40,6 +40,7 @@ import {
   type HealthStatus,
   type GenerationPolicy, type MarketSession,
 } from "@/lib/api";
+import { putCallReceipt } from "@/lib/putCallReceipt";
 import { OWNER_REGENERATES, isSignedIn } from "@/lib/session";
 import { cn, fmtMarketCap } from "@/lib/utils";
 import { estimatesShown, yearAgoColumn } from "@/lib/licensedEstimates";
@@ -2695,8 +2696,8 @@ export default function TickerPage() {
                             <span className="text-muted-foreground text-xs ml-1">({putCall.label.rule})</span>
                           </>
                         )}
-                        {putCall?.expiration_used && (
-                          <span className="text-muted-foreground text-xs ml-1">(volume, exp {fmtOneDate(putCall.expiration_used) ?? putCall.expiration_used}{putCall.snapshot_date ? `, as of ${fmtOneDate(putCall.snapshot_date) ?? putCall.snapshot_date}` : ""})</span>
+                        {putCall && putCallReceipt(putCall) && (
+                          <span className="text-muted-foreground text-xs ml-1">({putCallReceipt(putCall)})</span>
                         )}
                       </>
                     ) : (

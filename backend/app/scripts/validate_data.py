@@ -2471,6 +2471,18 @@ async def check_put_call_fresh(session) -> CheckResult:
 PUT_CALL_COVERAGE_MIN = 0.90
 
 
+async def check_put_call_expirations(session) -> CheckResult:
+    """ERROR when a version-4 put/call row (every stored expiration summed) carries no expirations_used, or its nearest expiration is not
+    among them, so the receipt would name nothing or the wrong expirations."""
+    rows = (await session.execute(text("""SELECT symbol, snapshot_date, expiration_used, expirations_used FROM put_call_snapshots
+        WHERE computation_version >= 4 AND (expirations_used IS NULL OR cardinality(expirations_used) = 0
+            OR NOT (expiration_used = ANY(expirations_used)))"""))).all()
+    if rows:
+        return CheckResult("put_call_expirations", ERROR, f"{len(rows)} version-4 put/call row(s) without their expirations",
+                           [f"{r.symbol} {r.snapshot_date}: {r.expiration_used} / {r.expirations_used}" for r in rows[:20]])
+    return CheckResult("put_call_expirations", PASS, "Every version-4 put/call row names the expirations it sums")
+
+
 async def check_put_call_ratio_range(session) -> CheckResult:
     """Multi-tier put/call ratio validation.
 
@@ -3816,6 +3828,7 @@ CHECKS = [
     # Put/call ratio (stored snapshots)
     check_put_call_ratio_range,
     check_put_call_fresh,
+    check_put_call_expirations,
     check_put_call_per_side_guard,
     # Options-read coverage
     check_options_read_coverage,

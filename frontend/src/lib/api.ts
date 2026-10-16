@@ -615,6 +615,7 @@ export interface PutCallRead {
   put_total: number | null;
   call_total: number | null;
   expiration_used: string | null;
+  expirations_used?: string[] | null;   // every expiration the ratio sums (compute_put_call version 4)
   snapshot_date: string | null;
   reason: string | null;
 }

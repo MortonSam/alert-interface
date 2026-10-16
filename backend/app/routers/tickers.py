@@ -1833,42 +1833,12 @@ async def get_explain(
 
     elif metric == "put_call":
         metric_label = "put/call ratio"
-        try:
-            # Earnings-aware expiration pick (mirrors bundle logic)
-            earnings_str_local: str | None = None
-            if ticker_row:
-                ned = (await db.execute(
-                    select(func.min(Event.event_date))
-                    .where(Event.event_type == "earnings", Event.event_date >= today,
-                           Event.ticker_id == ticker_row.id)
-                )).scalar_one_or_none()
-                if ned:
-                    earnings_str_local = ned.isoformat() if hasattr(ned, "isoformat") else str(ned)
-
-            min_date = earnings_str_local or (today + timedelta(days=7)).isoformat()
-            exp = await chain_store.pick_expiration(db, sym, min_date)
-
-            if exp:
-                chain_result = await chain_store.get_chain(db, sym, exp)
-                if chain_result and chain_store.is_fresh(chain_result[1]):
-                    chain_data = chain_result[0]
-                    put_vol = sum(p.get("volume", 0) or 0 for p in chain_data.get("puts", []))
-                    call_vol = sum(c.get("volume", 0) or 0 for c in chain_data.get("calls", []))
-                    ratio = put_vol / call_vol if call_vol > 0 else None
-                    facts.update({
-                        "put_call_ratio": f"{ratio:.2f}" if ratio is not None else "(unavailable)",
-                        "put_volume": str(put_vol),
-                        "call_volume": str(call_vol),
-                        "expiration": exp,
-                        "interpretation": (
-                            put_call_label(ratio).label if put_call_label(ratio) else "(unavailable)"
-                        ),
-                    })
-                else:
-                    facts.update({"put_call_ratio": "(unavailable)"})
-            else:
-                facts.update({"put_call_ratio": "(unavailable)"})
-        except Exception:
+        pc = await put_call_for(db, sym)                 # the row's own stored figure, so the popover explains the number on the page
+        if pc.ratio is not None:
+            facts.update({"put_call_ratio": f"{pc.ratio:.2f}", "put_volume": str(pc.put_total), "call_volume": str(pc.call_total),
+                          "expiration": ", ".join(pc.expirations_used or ([pc.expiration_used] if pc.expiration_used else [])),
+                          "interpretation": pc.label.label if pc.label else "(unavailable)"})
+        else:
             facts.update({"put_call_ratio": "(unavailable)"})
 
     elif metric == "beat_drop_pattern":
@@ -2054,6 +2024,11 @@ async def get_put_call(
     db: AsyncSession = Depends(get_db),
 ) -> PutCallRead:
     """Return the latest stored put/call ratio for a symbol (within 3 days)."""
+    return await put_call_for(db, symbol)
+
+
+async def put_call_for(db: AsyncSession, symbol: str) -> PutCallRead:
+    """The latest stored put/call ratio for a symbol (within 3 days), as the row and its explanation both show it."""
     sym = symbol.upper()
     from app.services.pending_deals import deal_for, note_for
     deal = await deal_for(db, sym)
@@ -2099,6 +2074,7 @@ async def get_put_call(
         put_total=row.put_total,
         call_total=row.call_total,
         expiration_used=row.expiration_used,
+        expirations_used=list(row.expirations_used) if row.expirations_used else None,
         snapshot_date=row.snapshot_date.isoformat(),
         reason=reason,
     )

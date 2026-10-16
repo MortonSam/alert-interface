@@ -173,5 +173,6 @@ class PutCallRead(BaseModel):
     put_total: int | None = None
     call_total: int | None = None
     expiration_used: str | None = None
+    expirations_used: list[str] | None = None   # every expiration the ratio sums (version 4); the receipt names them
     snapshot_date: str | None = None
     reason: str | None = None          # set when ratio is null

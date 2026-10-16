@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, datetime
 
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy import Date, DateTime, Integer, Numeric, SmallInteger, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -23,6 +24,7 @@ class PutCallSnapshot(Base):
     put_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     call_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expiration_used: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    expirations_used: Mapped[list[str] | None] = mapped_column(ARRAY(String(10)), nullable=True)   # every expiration a version-4 ratio sums
     computation_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
