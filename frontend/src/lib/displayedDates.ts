@@ -30,7 +30,7 @@ export const DATE_REQUIREMENTS: { file: string; require: RegExp; because: string
   { file: "components/Briefing.tsx", require: /sentenceReceipt\(s\)/, because: "every briefing sentence shows how it was computed and its own as-of date, from the API" },
   { file: "components/Briefing.tsx", require: /sourceLine\(inp\)/, because: "every input is listed with its own date and source" },
   { file: "app/tickers/[symbol]/page.tsx", require: /Last bar \{fmtOneDate\(chartLastBar\)/, because: "the chart names its last bar" },
-  { file: "app/tickers/[symbol]/page.tsx", require: /putCall\.snapshot_date/, because: "the put/call ratio shows its snapshot date" },
+  { file: "app/tickers/[symbol]/page.tsx", require: /putCall\.snapshot_date|putCallReceipt\(putCall\)/, because: "the put/call ratio shows its snapshot date (lib/putCallReceipt, tested)" },
   { file: "app/tickers/[symbol]/page.tsx", require: /realizedVol\?\.as_of/, because: "RV and RV rank show their snapshot date" },
   { file: "app/tickers/[symbol]/page.tsx", require: /magnitude_trend_as_of/, because: "the magnitude trend shows its snapshot date" },
   { file: "app/discover/page.tsx", require: /priceAsOf=\{quoteAsOf\(/, because: "every Discover price carries its as-of" },

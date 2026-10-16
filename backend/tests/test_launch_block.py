@@ -27,8 +27,8 @@ def test_pages_read_intrinio_only_and_the_courier_stays_a_shadow():
     assert "intrinio_chain:%" in (ROOT / "app" / "routers" / "system.py").read_text()      # the home counter counts the serving source's chains
 
 
-def test_the_put_call_ratio_is_a_nightly_intrinio_step_at_version_3():
-    assert PUT_CALL_COMPUTATION_VERSION == 3 and check_put_call_fresh in CHECKS
+def test_the_put_call_ratio_is_a_nightly_intrinio_step_at_version_4():
+    assert PUT_CALL_COMPUTATION_VERSION == 4 and check_put_call_fresh in CHECKS          # 4 (2026-10-16): every stored expiration
     labels = [label for label, _ in refresh.STEPS]
     assert labels.index("Put/call ratio (Intrinio)") > labels.index("Options chains (Intrinio)")
     assert nearest_expiration(["2026-10-09", "2026-10-16", "2026-10-23"], "2026-10-09") == "2026-10-16" and nearest_expiration(["2026-10-09"], "2026-10-09") is None
