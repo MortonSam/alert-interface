@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.services import ask_ivy as A
@@ -21,7 +22,10 @@ def _fake_implied(pct=0.035):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("confirmation,shown", [("estimated", False), ("expected_unconfirmed", False), ("confirmed", True)])
 async def test_strip_overview_and_ask_ivy_price_only_a_confirmed_date(monkeypatch, confirmation, shown):
-    today = date.today() + timedelta(days=60)          # past MU's post-report window, so the Overview takes its "upcoming" branch
+    async with ScriptSessionLocal() as db:             # pinned past MU's latest stored report and its reaction window, so the Overview takes its "upcoming" branch
+        latest = (await db.execute(text("SELECT max(e.event_date) FROM events e JOIN tickers t ON t.id = e.ticker_id "
+                                         "WHERE t.symbol = 'MU' AND e.event_type = 'earnings'"))).scalar()
+    today = max(latest or date.today(), date.today()) + timedelta(days=20)
     async def fake_next(db, ticker_id, when):
         return NextEarnings(date=when + timedelta(days=10), source="yfinance" if confirmation != "confirmed" else "edgar", confirmation=confirmation, note="x")
     monkeypatch.setattr(BB, "next_earnings_for", fake_next)
