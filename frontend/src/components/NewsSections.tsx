@@ -15,7 +15,7 @@ import {
 
 function ExternalHeadline({ url, headline }: { url: string; headline: string }) {
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="text-foreground/85 [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:text-primary underline-offset-2 [@media(hover:hover)]:hover:underline break-words">
+    <a href={url} target="_blank" rel="noopener noreferrer" data-third-party className="text-foreground/85 [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:text-primary underline-offset-2 [@media(hover:hover)]:hover:underline break-words">
       {headline}
     </a>
   );

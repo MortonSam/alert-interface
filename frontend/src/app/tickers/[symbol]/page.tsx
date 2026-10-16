@@ -3097,6 +3097,7 @@ export default function TickerPage() {
                         href={item.url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        data-third-party
                         className="tap text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
                       >
                         {item.headline}
@@ -3107,7 +3108,7 @@ export default function TickerPage() {
                         <span>{timeAgoUnix(item.datetime)}</span>
                       </div>
                       {item.summary && (
-                        <p className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
+                        <p data-third-party className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
                           {item.summary}
                         </p>
                       )}

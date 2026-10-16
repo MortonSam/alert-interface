@@ -61,3 +61,14 @@ describe("public pages show no model names, token counts, costs or developer mes
     expect(FORBIDDEN.length).toBe(4);
   });
 });
+
+describe("a publisher's text is marked as such", () => {
+  it("every news headline and summary carries data-third-party, which the browser check leaves out", () => {
+    const unmarked = SOURCES.flatMap(({ p, src }) => src.split("\n").map((l, i) => ({ l, i }))
+      .filter(({ l }) => /^\s*\{(?:item\.|h\.|n\.)?(?:headline|summary)\}\s*$/.test(l))   // rendered as text, not passed as a prop
+      .filter(({ i }) => !src.split("\n").slice(Math.max(0, i - 6), i + 1).some((x) => x.includes("data-third-party")))
+      .map(({ l, i }) => `${p}:${i + 1}: ${l.trim()}`));
+    expect(unmarked).toEqual([]);
+    expect(readFileSync(join(SRC, "../scripts/public-pages-check.mjs"), "utf8")).toContain('querySelectorAll("[data-third-party]")');
+  });
+});

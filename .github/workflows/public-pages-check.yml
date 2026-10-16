@@ -1,0 +1,58 @@
+# Renders every public route of production as an anonymous visitor (frontend/scripts/public-pages-check.mjs) after every deploy
+# and after every nightly, and sends one ntfy alarm when any route shows a token count, a model name, a cost or a developer message.
+# When it runs is decided by scripts/public_check_due.py (tested in scripts/test_public_check_due.py).
+name: Public pages check
+
+on:
+  status:                       # Vercel's and Railway's deploy statuses
+  schedule:
+    - cron: "17 * * * *"        # hourly; runs only when a refresh finished within the last hour
+  workflow_dispatch:
+
+concurrency:
+  group: public-pages-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE: https://alertinterface.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Due
+        id: due
+        run: |
+          curl -s -m 15 "$BASE/api/v1/health" -o health.json || echo "health unreadable"
+          python3 scripts/public_check_due.py due "${{ github.event_name }}" "$GITHUB_EVENT_PATH" health.json | tee -a "$GITHUB_OUTPUT"
+      - name: Wait for the deploy to serve
+        if: steps.due.outputs.run == 'true' && github.event_name == 'status'
+        run: sleep 60
+      - uses: actions/setup-node@v4
+        if: steps.due.outputs.run == 'true'
+        with:
+          node-version: 20
+      - name: Install puppeteer-core
+        if: steps.due.outputs.run == 'true'
+        run: mkdir -p "$RUNNER_TEMP/pp" && cd "$RUNNER_TEMP/pp" && npm init -y >/dev/null && npm i --no-audit --no-fund puppeteer-core@23.11.1
+      - name: Check every public route
+        id: check
+        if: steps.due.outputs.run == 'true'
+        env:
+          PUPPETEER_DIR: ${{ runner.temp }}/pp
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -o pipefail
+          timeout 900 node frontend/scripts/public-pages-check.mjs "$BASE" 2>&1 | tee check.txt
+      - name: Alarm
+        if: failure() && steps.due.outputs.run == 'true'
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+        run: python3 scripts/public_check_due.py alarm check.txt "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

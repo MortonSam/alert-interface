@@ -13,7 +13,8 @@ const sitemap = readFileSync(new URL("../src/app/sitemap.ts", import.meta.url), 
 const PUBLIC_PATHS = JSON.parse(sitemap.match(/PUBLIC_PATHS = (\[[^\]]*\])/)[1]);
 const routes = [...PUBLIC_PATHS, "/ivy/picks", "/theses", ...TICKERS.map((s) => `/tickers/${s}`)];
 
-const browser = await puppeteer.launch({ executablePath: process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: "new" });
+const browser = await puppeteer.launch({ executablePath: process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: "new",
+  args: process.env.CI ? ["--no-sandbox"] : [] });   // a CI runner (GitHub Actions) has no usable Chrome sandbox
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 for (const path of routes) {
@@ -27,6 +28,8 @@ for (const path of routes) {
     // the page's text, every title attribute, and every collapsed panel opened (a verification panel's claims, a "Why" disclosure)
     await page.evaluate(() => document.querySelectorAll("button[aria-expanded=false], details:not([open]) > summary").forEach((b) => { try { b.click(); } catch {} }));
     await sleep(800);
+    // a news headline or its summary is a publisher's text, not ours: marked data-third-party and left out (TSLA's Dow Jones headline named Anthropic)
+    await page.evaluate(() => document.querySelectorAll("[data-third-party]").forEach((e) => e.remove()));
     const text = await page.evaluate(() => document.body.innerText + "\n" + [...document.querySelectorAll("[title]")].map((e) => e.getAttribute("title")).join("\n"));
     const v = violations(text);
     if (v.length) { failed += 1; console.log(`FAIL ${path}`); v.slice(0, 10).forEach((x) => console.log(`  ${x}`)); }
