@@ -67,6 +67,7 @@ router = APIRouter(prefix="/theses", tags=["theses"])
 # ── Shared helpers ─────────────────────────────────────────────────────────────
 
 from app.services.implied_move import mid_or_last as _mid_or_last, span_days, straddle_implied_move  # noqa: E402
+from app.services.dates import fmt_day
 
 
 def _to_read(thesis: Thesis) -> ThesisRead:
@@ -211,7 +212,7 @@ async def _compute_option_mark(
             if settlement is not None:
                 current_price = settlement
                 mark_basis = "settled"
-                mark_note = f"Expired {exp_date.isoformat()}, settled at official close"
+                mark_note = f"Expired {fmt_day(exp_date)}, settled at official close"
                 price_as_of = options_as_of = exp_date.isoformat()
             else:
                 # Fallback: live quote with "intrinsic" label (history unavailable)
@@ -236,7 +237,7 @@ async def _compute_option_mark(
                     finally:
                         await finnhub.close()
                 mark_basis = "intrinsic"
-                mark_note = f"Expired {exp_date.isoformat()}, expiration-day close unavailable, using live price"
+                mark_note = f"Expired {fmt_day(exp_date)}, expiration-day close unavailable, using live price"
 
         if current_price is not None:
             current_mid1, current_mid2 = compute_intrinsic_mids(
@@ -245,10 +246,10 @@ async def _compute_option_mark(
             if mark_basis == "not_found":
                 # stock_price_override was provided
                 mark_basis = "settled"
-                mark_note = f"Expired {exp_date.isoformat()}, settled at official close"
+                mark_note = f"Expired {fmt_day(exp_date)}, settled at official close"
                 price_as_of = options_as_of = exp_date.isoformat()
         else:
-            mark_note = f"Expired {exp_date.isoformat()}, could not fetch stock price for intrinsic"
+            mark_note = f"Expired {fmt_day(exp_date)}, could not fetch stock price for intrinsic"
     else:
         # Live quotes for unexpired options
         if current_price is None:
@@ -1296,7 +1297,7 @@ async def _compute_alert_pick_v2(
             "outcome": "unconfirmed_date",
             "leans": None,
             "pick_id": None,
-            "note": f"report date {live_features.event_date.isoformat()} is {how}; Ivy picks only a company-confirmed date",
+            "note": f"report date {fmt_day(live_features.event_date)} is {how}; Ivy picks only a company-confirmed date",
             "generated_at": generated_at,
             "existing_pick": False,
             "draft": None,

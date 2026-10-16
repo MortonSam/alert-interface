@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from app.services.dates import fmt_day
 
 NEAR_DAYS = 3                        # candidates this close from different sources are the same report (same day: they agree)
 SAME_REPORT_DAYS = 60                # two dates closer than this are the same quarterly report; quarters are ~91 days apart
@@ -96,7 +97,7 @@ def far_note(day: date, last_report: date | None) -> str | None:
     if last_report is None or (day - last_report).days <= FAR_AFTER_LAST_REPORT_DAYS:
         return None
     due = last_report + timedelta(days=QUARTER_DAYS)
-    return f"the last report was {last_report.isoformat()}, so a quarterly report would usually be due around {due.isoformat()}"
+    return f"the last report was {fmt_day(last_report)}, so a quarterly report would usually be due around {fmt_day(due)}"
 
 
 def standing_candidates(stored: list[StoredDate], answered: set[str], today: date) -> list[Candidate]:
@@ -156,7 +157,7 @@ def merge_future(candidates: list[Candidate], last_report: date | None, today: d
                                       fin.timing if fin.timing != "unknown" else yf.timing))
         elif fin is not None and yf is not None:
             keep, other = tie_break(fin, yf)
-            note = f"estimated ({SOURCE_LABELS[keep.source]}); {SOURCE_LABELS[other.source]} says {other.day.isoformat()}"
+            note = f"estimated ({SOURCE_LABELS[keep.source]}); {SOURCE_LABELS[other.source]} says {fmt_day(other.day)}"
             decided.append(FutureDate(keep.day, False, note, keep.source, keep.timing if keep.timing != "unknown" else other.timing))
         elif yf is not None:
             decided.append(FutureDate(yf.day, False, "estimated (Yahoo Finance)", "yfinance", yf.timing))
@@ -187,35 +188,35 @@ def resolve_past(
     near_row = [d for d in reaction_dates if abs((d - estimate).days) <= SUPERSEDED_DAYS]
     if near_row:
         d = min(near_row, key=lambda d: abs((d - estimate).days))
-        return PastResolution("superseded", f"the quarter was reported on {d.isoformat()}; the {estimate.isoformat()} estimate is removed", d)
+        return PastResolution("superseded", f"the quarter was reported on {fmt_day(d)}; the {fmt_day(estimate)} estimate is removed", d)
 
     announced = [d for d in confirmed_future if 0 < (d - estimate).days < SAME_REPORT_DAYS]
     if announced:
         d = min(announced)
-        return PastResolution("superseded", f"the company confirmed {d.isoformat()} for this report; the {estimate.isoformat()} estimate is removed", d)
+        return PastResolution("superseded", f"the company confirmed {fmt_day(d)} for this report; the {fmt_day(estimate)} estimate is removed", d)
 
     replacing = [d for d in future_estimates if 0 <= (d - estimate).days <= REPLACED_BY_ESTIMATE_DAYS]
     if replacing:
         d = min(replacing)
-        return PastResolution("superseded", f"replaced by the {d.isoformat()} estimate", d)
+        return PastResolution("superseded", f"replaced by the {fmt_day(d)} estimate", d)
 
     for label, dates in (("finnhub", finnhub_actual_dates), ("yfinance", yfinance_reported_dates)):
         hit = [d for d in dates if abs((d - estimate).days) <= EVIDENCE_DAYS]
         if hit:
             d = min(hit, key=lambda d: abs((d - estimate).days))
-            return PastResolution("reported", f"reported on {d.isoformat()} per {SOURCE_LABELS[label]} (actual EPS)", d)
+            return PastResolution("reported", f"reported on {fmt_day(d)} per {SOURCE_LABELS[label]} (actual EPS)", d)
     hit = [d for d in edgar_202_dates if estimate - timedelta(days=EDGAR_202_LOOKBACK_DAYS) <= d <= today]
     if hit:
         d = min(hit)
-        return PastResolution("reported", f"reported on {d.isoformat()} per EDGAR (8-K Item 2.02)", d)
+        return PastResolution("reported", f"reported on {fmt_day(d)} per EDGAR (8-K Item 2.02)", d)
 
     checked = {
         "finnhub": "no actual EPS within 3 days",
         "yfinance": "no reported EPS within 3 days",
-        "edgar": f"no 8-K Item 2.02 filed since {(estimate - timedelta(days=EDGAR_202_LOOKBACK_DAYS)).isoformat()}",
+        "edgar": f"no 8-K Item 2.02 filed since {fmt_day(estimate - timedelta(days=EDGAR_202_LOOKBACK_DAYS))}",
         "checked_at": checked_at.isoformat(),
     }
-    return PastResolution("unresolved", f"expected around {estimate.isoformat()}; not confirmed by Finnhub, Yahoo Finance or EDGAR", None, checked)
+    return PastResolution("unresolved", f"expected around {fmt_day(estimate)}; not confirmed by Finnhub, Yahoo Finance or EDGAR", None, checked)
 
 
 def beyond_calendar_reach(stored: StoredDate, reaction_dates: list[date], actual_dates: list[date]) -> str | None:

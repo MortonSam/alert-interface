@@ -378,7 +378,7 @@ function HistoryInsightsPanel({
           {ce!.magnitude_trend_labeled?.rule && (
             <span className="text-xs ml-1">({ce!.magnitude_trend_labeled.rule})</span>
           )}
-          {ce!.magnitude_trend_as_of && <span className="text-xs ml-1">as of {ce!.magnitude_trend_as_of}</span>}
+          {ce!.magnitude_trend_as_of && <span className="text-xs ml-1">as of {fmtOneDate(ce!.magnitude_trend_as_of) ?? ce!.magnitude_trend_as_of}</span>}
         </p>
       )}
       {/* Basis line */}
@@ -1241,7 +1241,7 @@ function PriceChart({
             {impliedRangeLow != null && impliedRangeHigh != null && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
-                Shaded band: range implied by {impliedChainDate ? `the ${fmtDay(impliedChainDate)} options data` : "the options data on file"}{impliedExpiration ? ` for options expiring ${fmtDay(impliedExpiration)}` : ""}
+                Shaded band: range implied by {impliedChainDate ? `the ${fmtOneDate(impliedChainDate) ?? impliedChainDate} options data` : "the options data on file"}{impliedExpiration ? ` for options expiring ${fmtOneDate(impliedExpiration) ?? impliedExpiration}` : ""}
               </span>
             )}
             {earningsMarkers.length > 0 && (
@@ -2621,7 +2621,7 @@ export default function TickerPage() {
                   </span>
                   <span className="font-mono text-sm font-medium tabular-nums">
                     {ivVal != null
-                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1"><Explained text="(ATM, nearest expiry ≥7d out" />{ivAsOf ? `, ${ivAsOf}` : ""})</span></>
+                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1"><Explained text="(ATM, nearest expiry ≥7d out" />{ivAsOf ? `, ${fmtOneDate(ivAsOf) ?? ivAsOf}` : ""})</span></>
                       : <span className="text-muted-foreground" title={ivUnavailableReason(shown, realizedVol, rvStatus)}>
                           <Explained text="IV unavailable" /><span className="block text-xs font-sans font-normal">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
@@ -3001,7 +3001,7 @@ export default function TickerPage() {
                   )}
                   Generated {timeAgo(note.generated_at)}
                   {note.source_filings.length > 0 && (
-                    <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
+                    <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
                   )}
                 </span>
               </div>
@@ -3087,7 +3087,7 @@ export default function TickerPage() {
                   )}
                   Generated {timeAgo(note.generated_at)}
                   {note.source_filings.length > 0 && (
-                    <> · {note.source_filings[0].form_type} {note.source_filings[0].filing_date}</>
+                    <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
                   )}
                 </span>
                 {genPolicy?.can_regenerate && (

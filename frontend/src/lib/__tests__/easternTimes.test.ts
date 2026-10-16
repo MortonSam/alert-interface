@@ -26,7 +26,7 @@ describe("ticker page times are on the market clock", () => {
 describe("the full-period caveat", () => {
   it("shows past the threshold with the API's sentence and not at or below it", () => {
     expect(expiryCaveat("2026-11-20", "2026-10-20")).toBe(
-      "Nearest available expiration (2026-11-20) is 31 days after the 2026-10-20 earnings date. The implied move covers the full period to expiration, not just the earnings event.");
+      "Nearest available expiration (Nov 20, 2026) is 31 days after the Oct 20, 2026 earnings date. The implied move covers the full period to expiration, not just the earnings event.");
     expect(expiryCaveat("2026-10-27", "2026-10-20")).toBeNull();          // exactly EXPIRY_CAVEAT_DAYS
     expect(EXPIRY_CAVEAT_DAYS).toBe(7);
     expect(expiryCaveat("2026-11-20", null)).toBeNull();
@@ -34,7 +34,9 @@ describe("the full-period caveat", () => {
 
   it("the backend writes the same sentence", () => {
     const py = readFileSync(join(__dirname, "../../../../backend/app/services/implied_move.py"), "utf8");
-    expect(py).toContain('f"Nearest available expiration ({str(expiration)[:10]}) is {days} days after the {str(earnings_date)[:10]} earnings date. "');
+    expect(py).toContain('f"Nearest available expiration ({fmt_day(expiration)}) is {days} days after the {fmt_day(earnings_date)} earnings date. "');
+    const dates = readFileSync(join(__dirname, "../../../../backend/app/services/dates.py"), "utf8");
+    expect(dates).toContain('return d.strftime("%b %-d, %Y")');             // the same "Nov 20, 2026" lib/dates.fmtDate writes
     expect(py).toContain('f"The implied move covers the full period to expiration, not just the earnings event."');
   });
 });

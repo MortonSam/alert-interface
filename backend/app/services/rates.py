@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.models.rate import Rate
 from app.services.iv_solver import RATE_MAX_AGE_SESSIONS, RATE_SCALE, RATE_SERIES
+from app.services.dates import fmt_day
 
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 
@@ -66,11 +67,11 @@ def pick_rate(rows: list[tuple[date, float]], on: date, max_sessions: int = RATE
     from app.services.trading_calendar import sessions_after
     before = sorted((d, v) for d, v in rows if d <= on)
     if not before:
-        return RateOn(None, None, f"no {RATE_SERIES} value on file on or before {on.isoformat()}")
+        return RateOn(None, None, f"no {RATE_SERIES} value on file on or before {fmt_day(on)}")
     d, v = before[-1]
     age = sessions_after(d, on)
     if age > max_sessions:
-        return RateOn(None, None, f"latest {RATE_SERIES} value is dated {d.isoformat()}, {age} sessions before {on.isoformat()} (limit {max_sessions})")
+        return RateOn(None, None, f"latest {RATE_SERIES} value is dated {fmt_day(d)}, {age} sessions before {fmt_day(on)} (limit {max_sessions})")
     return RateOn(v * RATE_SCALE, d, None)
 
 

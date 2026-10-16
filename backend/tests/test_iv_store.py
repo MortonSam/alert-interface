@@ -40,8 +40,8 @@ async def test_snps_three_row_fixture_serves_the_0921_value_at_1945z_on_0923():
                 # window arithmetic: 09-21 is inside today - 3 = 09-20; on 09-25 it is not
                 iv = await get_servable_iv(s, SYM, date(2026, 9, 25))
                 assert iv.value is None and iv.reason.startswith(f"No ATM implied volatility in the last {IV_WINDOW_DAYS} days")
-                assert "the 2026-09-23 snapshot recorded none: no implied volatility on the ATM strike" in iv.reason
-                assert iv.reason.endswith("; last: 46.9% on 2026-09-21")
+                assert "the Sep 23, 2026 snapshot recorded none: no implied volatility on the ATM strike" in iv.reason
+                assert iv.reason.endswith("; last: 46.9% on Sep 21, 2026") and "2026-" not in iv.reason
                 raise _Rollback
 
 
@@ -68,7 +68,7 @@ def test_pick_servable_is_pure_and_orders_by_date():
 def test_snapshot_never_writes_a_bare_null():
     assert null_iv_reason(0.47, 900.0, "2026-10-16") is None
     assert null_iv_reason(None, None, "2026-10-16") == "no current price to locate the ATM strike"
-    assert null_iv_reason(None, 900.0, "2026-10-16") == "no implied volatility on the ATM strike for expiration 2026-10-16"
+    assert null_iv_reason(None, 900.0, "2026-10-16") == "no implied volatility on the ATM strike for expiration Oct 16, 2026"
     src = Path(__file__).resolve().parents[1].joinpath("app/scripts/snapshot_iv.py").read_text()
     assert "atm_iv_reason    = EXCLUDED.atm_iv_reason" in src and "cleared by backfill cleanup" in src
 

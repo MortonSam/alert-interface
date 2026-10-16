@@ -1,3 +1,4 @@
+import { fmtDate } from "@/lib/dates";
 // While Ivy's Read is shown, the rows beside it render from the fact block the
 // read was generated from, so a number in the prose and a number in a row can
 // never disagree. Without a read, the rows render from the live endpoints.
@@ -78,7 +79,7 @@ export function expiryCaveat(expiration: string | null | undefined, earningsDate
   const exp = expiration.slice(0, 10), earn = earningsDate.slice(0, 10);
   const days = Math.round((Date.parse(`${exp}T00:00:00Z`) - Date.parse(`${earn}T00:00:00Z`)) / 86_400_000);
   if (!Number.isFinite(days) || days <= EXPIRY_CAVEAT_DAYS) return null;
-  return `Nearest available expiration (${exp}) is ${days} days after the ${earn} earnings date. The implied move covers the full period to expiration, not just the earnings event.`;
+  return `Nearest available expiration (${fmtDate(exp)}) is ${days} days after the ${fmtDate(earn)} earnings date. The implied move covers the full period to expiration, not just the earnings event.`;
 }
 
 /** "priced at $339.07, last trade 17:59" for the block's label. */
