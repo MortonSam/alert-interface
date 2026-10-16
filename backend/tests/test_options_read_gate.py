@@ -15,7 +15,7 @@ def test_stale_quote_is_never_a_current_price():
     # EQR locally: Finnhub returned 65.35 with a last trade on 2026-09-04.
     q = assess_quote(65.35, _ts(2026, 9, 4), today=TODAY)
     assert q.price is None and q.state == "stale"
-    assert "2026-09-04" in q.reason
+    assert "Sep 4, 2026" in q.reason
     fresh = assess_quote(339.07, _ts(2026, 9, 18), today=TODAY)
     assert fresh.price == 339.07 and fresh.state == "ok"
 

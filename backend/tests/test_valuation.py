@@ -53,7 +53,7 @@ def test_the_window_must_hold_the_latest_reported_quarter():
     assert four is None and "release EPS is not stored" in why                                           # Sep 30 reported, XBRL through May 28
     four, why = V.fresh_window(MU_Q, date(2026, 9, 30), {"eps": 32.87, "period_end": date(2026, 9, 3), "accession": "0000723125-26-000018"}, today)
     assert [x["eps"] for x in four] == [4.60, 12.07, 24.67, 32.87] and four[-1]["source"] == "release" and why.startswith("three XBRL")
-    assert V.pe(1063.96, four) == 14.34 and V.period_label(four) == "2025-08-29 to 2026-09-03"
+    assert V.pe(1063.96, four) == 14.34 and V.period_label(four) == "Aug 29, 2025 to Sep 3, 2026"
     stale = MU_Q[:2]  + [q(date(2025, 12, 31), 1.0, date(2026, 2, 20))]                               # XBRL two quarters behind: no window
     four, why = V.fresh_window(stale, date(2026, 7, 14), {"eps": 2.0, "period_end": date(2026, 6, 30), "accession": "x"}, today)
     assert four is None and "more than one quarter behind" in why
@@ -215,13 +215,13 @@ def test_quarters_and_closes_are_restated_across_recorded_splits():
         "WeightedAverageNumberOfDilutedSharesOutstanding": {"units": {"shares": [{"start": "2025-07-01", "end": "2025-09-30", "filed": "2025-10-28", "val": 32558000}]}}}}}
     qs = V.eps_quarters(facts, splits)
     by = {q["end"].isoformat(): q for q in qs}
-    assert by["2025-09-30"]["eps"] == 3.3764 and by["2025-09-30"]["rebased"] == "25:1 split of 2026-04-06" and by["2025-09-30"]["diluted_shares"] == 32558000 * 25
+    assert by["2025-09-30"]["eps"] == 3.3764 and by["2025-09-30"]["rebased"] == "25:1 split of Apr 6, 2026" and by["2025-09-30"]["diluted_shares"] == 32558000 * 25
     assert by["2025-12-31"]["derived"] and by["2025-12-31"]["eps"] == round(165.0 / 25 - (0.40 + 1.10 + 3.3764), 4) and by["2025-12-31"]["rebased"]
     assert "rebased" not in by["2026-03-31"] and by["2026-03-31"]["eps"] == 1.36
     four = [by[k] for k in ("2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30")]
     assert 15 < V.pe(157.63, four) < 20                                                     # a sane P/E, not 0.94
     assert V.eps_quarters(facts)[2]["eps"] == 84.41                                          # no splits known: as filed
     assert V.rebase_closes([(date(2026, 4, 1), 5000.0), (date(2026, 4, 7), 200.0)], splits) == [(date(2026, 4, 1), 200.0), (date(2026, 4, 7), 200.0)]
-    assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), 0.2)]) == (0.2, ["1:5 reverse split of 2026-02-01"])     # a reverse split multiplies
+    assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), 0.2)]) == (0.2, ["1:5 reverse split of Feb 1, 2026"])     # a reverse split multiplies
     assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), None)]) == (1.0, [])                                      # unreadable ratio: left alone
     assert V.PE_COMPUTATION_VERSION == 2

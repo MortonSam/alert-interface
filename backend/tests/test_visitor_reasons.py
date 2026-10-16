@@ -26,7 +26,7 @@ def test_rv_old_snapshot_and_stale_history_reasons_are_plain():
     assert _plain(_why_not(old, cutoff=date(2026, 9, 14))[0])
     stale = SimpleNamespace(status="ok", as_of_date=date(2026, 9, 21), sample_days=252, last_bar_date=date(2026, 8, 21))
     reason, detail = _why_not(stale, cutoff=date(2026, 9, 14))
-    assert _plain(reason) and "2026-08-21" in reason
+    assert _plain(reason) and "Aug 21, 2026" in reason
     assert "sessions" in detail
     ok = SimpleNamespace(status="ok", as_of_date=date(2026, 9, 21), sample_days=252, last_bar_date=date(2026, 9, 18))
     assert _why_not(ok, cutoff=date(2026, 9, 14)) is None

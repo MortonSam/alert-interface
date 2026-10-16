@@ -107,9 +107,9 @@ def test_the_rate_is_the_latest_published_value_within_five_sessions_else_none_w
     r = pick_rate(rows, date(2026, 10, 7))                 # 10-01 is 3 sessions before 10-07: still good
     assert r.rate == pytest.approx(0.04) and r.rate_date == date(2026, 10, 1)
     r = pick_rate(rows, date(2026, 10, 12))                # 6 sessions (Oct 2, 5, 6, 7, 8, 9): fail closed
-    assert r.rate is None and "6 sessions before 2026-10-12" in r.reason and "limit 5" in r.reason
+    assert r.rate is None and "6 sessions before Oct 12, 2026" in r.reason and "limit 5" in r.reason
     r = pick_rate(rows, date(2026, 9, 1))
-    assert r.rate is None and "on or before 2026-09-01" in r.reason
+    assert r.rate is None and "on or before Sep 1, 2026" in r.reason
     assert pick_rate([], date(2026, 10, 1)).rate is None
 
 
