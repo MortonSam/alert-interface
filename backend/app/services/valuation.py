@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import statistics
 from datetime import date, timedelta
+from app.services.dates import fmt_day
 
 QUARTER_DAYS = (80, 100)          # a quarterly EPS fact covers a period this long
 EPS_FACT_MAX = 1_000_000          # an EPS fact beyond this is a tagging error (ICE's 2015 10-Qs carry $112,000,000 as EPS); Berkshire's class A EPS is ~30,000
@@ -397,7 +398,7 @@ def split_factor(filed: date, splits: list[tuple[date, float | None]] | None) ->
     for day, ratio in splits or []:
         if ratio and filed < day:
             factor *= ratio
-            notes.append(f"{ratio:g}:1 split of {day.isoformat()}" if ratio >= 1 else f"1:{1 / ratio:g} reverse split of {day.isoformat()}")
+            notes.append(f"{ratio:g}:1 split of {fmt_day(day)}" if ratio >= 1 else f"1:{1 / ratio:g} reverse split of {fmt_day(day)}")
     return factor, notes
 
 
@@ -532,13 +533,13 @@ def fresh_window(quarters: list[dict], latest_report: date | None, release: dict
     when the newest quarter cannot be read."""
     if newer_quarter_reported(quarters, latest_report):
         if release is None or release.get("eps") is None:
-            return None, f"the {latest_report.isoformat()} report is newer than XBRL (through {quarters[-1]['end'].isoformat()}) and its release EPS is not stored"
+            return None, f"the {fmt_day(latest_report)} report is newer than XBRL (through {fmt_day(quarters[-1]['end'])}) and its release EPS is not stored"
         three = [q for q in quarters if q["end"] <= as_of][-3:]
         if len(three) < 3:
             return None, "fewer than three XBRL quarters before the release quarter"
         rel_end = release.get("period_end") or latest_report
         if (rel_end - three[-1]["end"]).days > MAX_QUARTER_GAP_DAYS:
-            return None, f"XBRL is more than one quarter behind the latest report (through {three[-1]['end'].isoformat()}, release quarter ended {rel_end.isoformat()})"
+            return None, f"XBRL is more than one quarter behind the latest report (through {fmt_day(three[-1]['end'])}, release quarter ended {fmt_day(rel_end)})"
         rel = {"end": rel_end, "start": three[-1]["end"] + timedelta(days=1), "eps": float(release["eps"]), "filed": latest_report,
                "form": f"earnings release 8-K {release.get('accession') or ''}".strip(), "derived": False, "source": "release"}
         return three + [rel], "three XBRL quarters plus the release quarter"
@@ -556,7 +557,7 @@ def pe(price: float | None, four: list[dict] | None) -> float | None:
 
 
 def period_label(four: list[dict]) -> str:
-    return f"{four[0]['start'].isoformat()} to {four[-1]['end'].isoformat()}"
+    return f"{fmt_day(four[0]['start'])} to {fmt_day(four[-1]['end'])}"
 
 
 def pe_history(bars: list[tuple[date, float]], quarters: list[dict], current: float | None) -> dict:

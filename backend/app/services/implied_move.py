@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from app.services.dates import fmt_day
 
 
 MAX_STRADDLE_SPREAD_PCT = 100.0     # the ATM straddle's combined bid-ask spread, as a percent of its mid, above which the move is paused
@@ -98,7 +99,7 @@ def expiry_caveat(expiration: str | None, earnings_date: str | None) -> str | No
     days = (date.fromisoformat(str(expiration)[:10]) - date.fromisoformat(str(earnings_date)[:10])).days
     if days <= EXPIRY_CAVEAT_DAYS:
         return None
-    return (f"Nearest available expiration ({str(expiration)[:10]}) is {days} days after the {str(earnings_date)[:10]} earnings date. "
+    return (f"Nearest available expiration ({fmt_day(expiration)}) is {days} days after the {fmt_day(earnings_date)} earnings date. "
             f"The implied move covers the full period to expiration, not just the earnings event.")
 
 
@@ -120,3 +121,4 @@ def implied_move_allowed(confirmation: str | None) -> bool:
     strip question, the Overview clause, the Discover options-against-typical line and Ask Ivy's implied-move facts are all
     absent. `confirmation` is next_earnings.level_of: "confirmed", "estimated" or "expected_unconfirmed"."""
     return confirmation == "confirmed"
+

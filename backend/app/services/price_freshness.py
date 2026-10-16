@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 from app.services.trading_calendar import sessions_after
+from app.services.dates import fmt_day
 
 MAX_STALE_SESSIONS = 3
 MAX_QUOTE_DIVERGENCE = 0.25
@@ -46,7 +47,7 @@ def assess_history(
     if missed > MAX_STALE_SESSIONS:
         return HistoryState(
             "stale",
-            f"Price history for this ticker stopped updating on {last_bar_date.isoformat()}",
+            f"Price history for this ticker stopped updating on {fmt_day(last_bar_date)}",
             last_bar_date,
             detail=f"last bar {last_bar_date} is {missed} sessions old",
         )
@@ -79,6 +80,6 @@ def assess_quote(quote_price: float | None, timestamp: int | None, today: date |
     traded = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
     missed = sessions_after(traded, today or date.today())
     if missed > MAX_STALE_SESSIONS:
-        return QuoteState(None, "stale", f"The latest price is from {traded.isoformat()} and is no longer current",
+        return QuoteState(None, "stale", f"The latest price is from {fmt_day(traded)} and is no longer current",
                           traded, int(timestamp))
     return QuoteState(float(quote_price), "ok", None, traded, int(timestamp))

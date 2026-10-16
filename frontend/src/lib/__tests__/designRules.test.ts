@@ -31,9 +31,12 @@ describe("one date format", () => {
     expect(hits).toEqual([]);
   });
   it("no page prints a raw ISO date: a date field or a sliced timestamp goes through lib/dates", () => {
-    const RAW = /\$\{[\w?.]+\.slice\(0, 10\)\}|(?<![=(])\{[\w?.]+\.slice\(0, 10\)\}|\$\{[\w?.]*(?:chain_date|expiration_used|snapshot_date|options_as_of|filing_date|option_expiration)\}|(?<![=(])\{[\w?.]*(?:chain_date|expiration_used|snapshot_date|options_as_of|filing_date|option_expiration)\}/;
+    // a date field printed as it is: by name (chain_date, filing_date, ivAsOf, impliedExpiration, magnitude_trend_as_of, ...), sliced or not
+    const FIELD = String.raw`[\w?.!\[\]]*(?:chain_date|expiration_used|snapshot_date|options_as_of|filing_date|option_expiration|_as_of|AsOf|Expiration|ChainDate)`;
+    const RAW = new RegExp(String.raw`\$\{[\w?.]+\.slice\(0, 10\)\}|(?<![=(])\{[\w?.]+\.slice\(0, 10\)\}|\$\{` + FIELD + String.raw`\}|(?<![=(])\{` + FIELD + String.raw`\}(?!\s*[?:&|])`);
+    const FORMATTED = /\b(?:priceAsOf|contractsAsOf)\b/;   // already through lib/dates: quoteAsOf(...), insightAsOfLine(...)
     const hits = SOURCES.filter(({ p }) => p.endsWith(".tsx") || p.startsWith("lib/")).flatMap(({ p, src }) => code(src)
-      .filter(({ l }) => RAW.test(l)).map(({ l, i }) => `${p}:${i}: ${l.trim().slice(0, 100)}`));
+      .filter(({ l }) => RAW.test(l.replace(new RegExp(FORMATTED.source, "g"), "x"))).map(({ l, i }) => `${p}:${i}: ${l.trim().slice(0, 100)}`));
     expect(hits).toEqual([]);
   });
 });

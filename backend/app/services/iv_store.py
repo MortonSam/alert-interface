@@ -20,6 +20,7 @@ from datetime import date, timedelta
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.dates import fmt_day, fmt_days_in
 
 IV_WINDOW_DAYS = 3
 
@@ -85,9 +86,9 @@ async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = No
     if chain_age:
         reason += f" ({chain_age})"
     if newest is not None:
-        reason += f" (the {newest.date.isoformat()} snapshot recorded none"
-        reason += f": {newest.atm_iv_reason})" if newest.atm_iv_reason else ")"
+        reason += f" (the {fmt_day(newest.date)} snapshot recorded none"
+        reason += f": {fmt_days_in(newest.atm_iv_reason)})" if newest.atm_iv_reason else ")"
     last_good = (await db.execute(_LAST_GOOD_SQL, {"s": symbol, "src": src})).first()
     if last_good is not None:
-        reason += f"; last: {float(last_good.atm_iv) * 100:.1f}% on {last_good.date.isoformat()}"
+        reason += f"; last: {float(last_good.atm_iv) * 100:.1f}% on {fmt_day(last_good.date)}"
     return IVState(None, None, reason)

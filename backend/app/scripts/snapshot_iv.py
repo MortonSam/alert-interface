@@ -36,6 +36,7 @@ import sqlalchemy as sa
 from app.database import ScriptSessionLocal as AsyncSessionLocal
 from app.models.ticker import Ticker
 from app.services.rv_store import get_latest_rv
+from app.services.dates import fmt_day
 
 # Sanity band — reject ATM IV outside this range
 _IV_MIN = 0.05
@@ -86,7 +87,7 @@ def null_iv_reason(atm_iv: float | None, current_price: float | None, chosen_exp
         return None
     if current_price is None:
         return "no current price to locate the ATM strike"
-    return f"no implied volatility on the ATM strike for expiration {chosen_exp}"
+    return f"no implied volatility on the ATM strike for expiration {fmt_day(chosen_exp)}"
 
 
 async def _backfill_cleanup() -> None:
