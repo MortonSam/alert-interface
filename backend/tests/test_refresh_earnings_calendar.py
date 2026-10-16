@@ -71,9 +71,9 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
             plan = await reconcile(s, tickers, sources, NOW, edgar=None)
         assert plan.checked == 3
         assert plan.inserted == [f"{NKE}: 2026-10-01 estimated (Yahoo Finance)"]
-        assert plan.superseded == [f"{NKE}: 2026-06-25 the quarter was reported on 2026-06-30; the 2026-06-25 estimate is removed",      # an old estimate never stands beside a reported quarter
-                                   f"{NKE}: 2026-09-28 replaced by the 2026-10-01 estimate"]
-        assert plan.unresolved == [f"{LONE}: 2026-09-28 expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
+        assert plan.superseded == [f"{NKE}: 2026-06-25 the quarter was reported on Jun 30, 2026; the Jun 25, 2026 estimate is removed",      # an old estimate never stands beside a reported quarter
+                                   f"{NKE}: 2026-09-28 replaced by the Oct 1, 2026 estimate"]
+        assert plan.unresolved == [f"{LONE}: 2026-09-28 expected around Sep 28, 2026; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
         assert plan.no_date == [LONE, NONE]
         assert plan.replaced == [f"{NKE}: 2026-12-16 -> 2026-10-01"]
         assert plan.dropped == [] and plan.kept == []
@@ -86,7 +86,7 @@ async def test_nke_rows_resolve_to_oct_1_estimated_and_the_lone_estimate_becomes
             checked = dict((await s.execute(text("SELECT symbol, earnings_checked_at FROM tickers WHERE symbol = ANY(:s)"), {"s": list(SYMS)})).all())
         got = [tuple(r) for r in rows]
         assert got == [
-            (LONE, date(2026, 9, 28), "finnhub", False, TODAY, "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR", "unknown"),
+            (LONE, date(2026, 9, 28), "finnhub", False, TODAY, "expected around Sep 28, 2026; not confirmed by Finnhub, Yahoo Finance or EDGAR", "unknown"),
             (NKE, date(2026, 6, 30), "yfinance", False, None, None, "unknown"),
             (NKE, date(2026, 10, 1), "yfinance", False, None, "estimated (Yahoo Finance)", "amc"),
             (NKE, date(2026, 12, 16), "finnhub", False, None, "estimated (Finnhub)", "unknown"),
@@ -132,7 +132,7 @@ async def test_ccl_the_edgar_report_date_is_kept_and_finnhubs_dec_18_is_added_as
         await _cleanup(s)
         await s.execute(text("INSERT INTO tickers (id, symbol, name, is_active, created_at, updated_at) VALUES (gen_random_uuid(), :s, 'calendar test', true, now(), now())"), {"s": CCL})
         await _event(s, CCL, date(2026, 6, 24), "yfinance")
-        await _event(s, CCL, date(2026, 9, 29), "edgar", confirmed=True, note="reported on 2026-09-29 per EDGAR (8-K Item 2.02)")
+        await _event(s, CCL, date(2026, 9, 29), "edgar", confirmed=True, note="reported on Sep 29, 2026 per EDGAR (8-K Item 2.02)")
         await _reaction(s, CCL, date(2026, 3, 27), 0.20, 0.08); await _reaction(s, CCL, date(2026, 6, 23), 0.41, 0.31)
         await s.commit()
     sources = {"finnhub_future": {CCL: {date(2026, 12, 18): "amc"}}, "finnhub_actual": {},
@@ -150,7 +150,7 @@ async def test_ccl_the_edgar_report_date_is_kept_and_finnhubs_dec_18_is_added_as
                 FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = :s AND e.event_type = 'earnings' ORDER BY e.event_date"""), {"s": CCL})).all()
         assert [tuple(r) for r in rows] == [
             (date(2026, 6, 24), "yfinance", False, None, None),
-            (date(2026, 9, 29), "edgar", True, "reported on 2026-09-29 per EDGAR (8-K Item 2.02)", NOW),
+            (date(2026, 9, 29), "edgar", True, "reported on Sep 29, 2026 per EDGAR (8-K Item 2.02)", NOW),
             (date(2026, 12, 18), "finnhub", False, "estimated (Finnhub)", NOW),
         ]
         from app.models.event import Event
@@ -173,7 +173,7 @@ async def test_ccl_the_edgar_report_date_is_kept_and_finnhubs_dec_18_is_added_as
                 SELECT e.event_date, e.source::text, e.is_confirmed, e.confirmation_note FROM events e JOIN tickers t ON t.id = e.ticker_id
                 WHERE t.symbol = :s AND e.event_type = 'earnings' AND e.event_date >= :d ORDER BY e.event_date"""), {"s": CCL, "d": TODAY})).all()
         assert [tuple(r) for r in rows] == [
-            (date(2026, 9, 29), "edgar", True, "reported on 2026-09-29 per EDGAR (8-K Item 2.02)"),
+            (date(2026, 9, 29), "edgar", True, "reported on Sep 29, 2026 per EDGAR (8-K Item 2.02)"),
             (date(2026, 12, 18), "finnhub", True, "confirmed: Finnhub and Yahoo Finance agree"),
         ]
     finally:
@@ -225,18 +225,18 @@ async def test_production_2026_09_29_a_silent_yahoo_drops_nothing_unh_uber_and_n
             tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_(syms)).order_by(Ticker.symbol))).scalars().all())
             plan = await reconcile(s, tickers, silent, NOW, edgar=None)
         assert plan.dropped == [] and plan.replaced == [] and plan.no_date == []
-        assert plan.superseded == [f"{UNH}: 2026-07-28 the quarter was reported on 2026-07-16; the 2026-07-28 estimate is removed"]   # the stale July estimate goes
+        assert plan.superseded == [f"{UNH}: 2026-07-28 the quarter was reported on Jul 16, 2026; the Jul 28, 2026 estimate is removed"]   # the stale July estimate goes
         assert plan.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub)"]
         assert plan.standing == [
             f"{UBER}: 2026-11-03 (yfinance) stands; Yahoo Finance returned no future date this run",
             f"{UNH}: 2026-10-13 (yfinance) stands; Yahoo Finance returned no future date this run",
         ]
-        assert plan.unresolved == [f"{NKE}: 2026-09-28 expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
+        assert plan.unresolved == [f"{NKE}: 2026-09-28 expected around Sep 28, 2026; not confirmed by Finnhub, Yahoo Finance or EDGAR"]
         async with ScriptSessionLocal() as s:
             got = await _rows(s, syms, since=date(2026, 9, 1))
         assert got == [
-            (NKE, date(2026, 9, 28), "finnhub", False, "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"),
-            (NKE, date(2026, 12, 16), "finnhub", False, "estimated (Finnhub); the last report was 2026-06-30, so a quarterly report would usually be due around 2026-09-29"),
+            (NKE, date(2026, 9, 28), "finnhub", False, "expected around Sep 28, 2026; not confirmed by Finnhub, Yahoo Finance or EDGAR"),
+            (NKE, date(2026, 12, 16), "finnhub", False, "estimated (Finnhub); the last report was Jun 30, 2026, so a quarterly report would usually be due around Sep 29, 2026"),
             (UBER, date(2026, 11, 3), "yfinance", False, "estimated (Yahoo Finance)"),
             (UNH, date(2026, 10, 13), "yfinance", False, "estimated (Yahoo Finance)"),
             (UNH, date(2027, 1, 25), "finnhub", False, "estimated (Finnhub)"),
@@ -251,7 +251,7 @@ async def test_production_2026_09_29_a_silent_yahoo_drops_nothing_unh_uber_and_n
             plan = await reconcile(s, tickers, answered, NOW, edgar=None)
         assert plan.standing == [] and plan.dropped == []
         assert plan.inserted == [f"{NKE}: 2026-10-01 estimated (Yahoo Finance)"]
-        assert plan.superseded == [f"{NKE}: 2026-09-28 replaced by the 2026-10-01 estimate"]
+        assert plan.superseded == [f"{NKE}: 2026-09-28 replaced by the Oct 1, 2026 estimate"]
         async with ScriptSessionLocal() as s:
             got = await _rows(s, syms, since=date(2026, 9, 1))
         assert got == [
@@ -286,7 +286,7 @@ async def test_a_stored_estimate_is_dropped_only_by_its_own_source_or_a_higher_o
             tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_((VEEV, UNH))).order_by(Ticker.symbol))).scalars().all())
             dry = await reconcile(s, tickers, sources, NOW, edgar=None, write=False)
         assert dry.dropped == [f"{UNH}: dropped 2026-10-13 (finnhub); Finnhub now lists 2027-01-25"]
-        assert dry.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub); the last report was 2026-07-16, so a quarterly report would usually be due around 2026-10-15"]
+        assert dry.inserted == [f"{UNH}: 2027-01-25 estimated (Finnhub); the last report was Jul 16, 2026, so a quarterly report would usually be due around Oct 15, 2026"]
         async with ScriptSessionLocal() as s:
             assert await _rows(s, (VEEV, UNH)) == [(UNH, date(2026, 10, 13), "finnhub", False, "estimated (Finnhub)"),
                                                     (VEEV, date(2026, 11, 18), "finnhub", False, "estimated (Finnhub)")]
@@ -299,8 +299,8 @@ async def test_a_stored_estimate_is_dropped_only_by_its_own_source_or_a_higher_o
         assert (wet.dropped, wet.inserted) == (dry.dropped, dry.inserted)
         async with ScriptSessionLocal() as s:
             assert await _rows(s, (VEEV, UNH)) == [
-                (UNH, date(2027, 1, 25), "finnhub", False, "estimated (Finnhub); the last report was 2026-07-16, so a quarterly report would usually be due around 2026-10-15"),
-                (VEEV, date(2026, 11, 18), "finnhub", False, "estimated (Finnhub); Yahoo Finance says 2026-11-25"),   # both full sessions: the stored date stands
+                (UNH, date(2027, 1, 25), "finnhub", False, "estimated (Finnhub); the last report was Jul 16, 2026, so a quarterly report would usually be due around Oct 15, 2026"),
+                (VEEV, date(2026, 11, 18), "finnhub", False, "estimated (Finnhub); Yahoo Finance says Nov 25, 2026"),   # both full sessions: the stored date stands
             ]
     finally:
         async with ScriptSessionLocal() as s:

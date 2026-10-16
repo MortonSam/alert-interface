@@ -27,15 +27,15 @@ def test_nke_sep_28_estimate_is_superseded_by_the_oct_1_estimate_never_labelled_
     res = resolve_past(date(2026, 9, 28), TODAY, NKE_REACTIONS, [date(2026, 10, 1), date(2026, 12, 16)],
                        finnhub_actual_dates=[], yfinance_reported_dates=[date(2026, 6, 30)], edgar_202_dates=[], checked_at=NOW)
     assert res.action == "superseded" and res.report_date == date(2026, 10, 1)
-    assert "replaced by the 2026-10-01 estimate" in res.note
+    assert "replaced by the Oct 1, 2026 estimate" in res.note
 
 
 def test_a_passed_estimate_with_no_alternative_and_no_evidence_is_unresolved_with_the_sources_checked():
     res = resolve_past(date(2026, 9, 28), TODAY, NKE_REACTIONS, [date(2026, 12, 16)], [], [date(2026, 6, 30)], [], NOW)
     assert res.action == "unresolved"
-    assert res.note == "expected around 2026-09-28; not confirmed by Finnhub, Yahoo Finance or EDGAR"
+    assert res.note == "expected around Sep 28, 2026; not confirmed by Finnhub, Yahoo Finance or EDGAR"
     assert set(res.sources_checked) == {"finnhub", "yfinance", "edgar", "checked_at"}
-    assert res.sources_checked["edgar"] == "no 8-K Item 2.02 filed since 2026-09-23"
+    assert res.sources_checked["edgar"] == "no 8-K Item 2.02 filed since Sep 23, 2026"
     assert level_of(False, date(2026, 9, 29)) == "expected_unconfirmed"
 
 
@@ -59,7 +59,7 @@ def test_two_sources_on_the_same_day_confirm_and_a_company_announcement_wins():
     assert agree[0].confirmed and agree[0].note == "confirmed: Finnhub and Yahoo Finance agree" and agree[0].timing == "amc"
     differ = merge_future([Candidate(date(2026, 10, 28), "finnhub"), Candidate(date(2026, 10, 29), "yfinance", "amc")], date(2026, 7, 30), TODAY)
     assert not differ[0].confirmed and differ[0].day == date(2026, 10, 28)     # neither stored, both full sessions: the nearer day
-    assert differ[0].note == "estimated (Finnhub); Yahoo Finance says 2026-10-29" and differ[0].timing == "amc"
+    assert differ[0].note == "estimated (Finnhub); Yahoo Finance says Oct 29, 2026" and differ[0].timing == "amc"
     company = merge_future([Candidate(date(2026, 9, 28), "finnhub"), Candidate(date(2026, 10, 1), "yfinance", "amc"),
                             Candidate(date(2026, 10, 1), "company", "amc", "press release via Finnhub news 2026-08-28: NIKE, Inc. to Announce First Quarter Fiscal 2027 Results")],
                            date(2026, 6, 30), TODAY)
@@ -70,7 +70,7 @@ def test_two_sources_on_the_same_day_confirm_and_a_company_announcement_wins():
 def test_a_far_finnhub_date_alone_says_when_a_quarterly_report_would_usually_be_due():
     only_far = merge_future([Candidate(date(2026, 12, 16), "finnhub")], date(2026, 6, 30), TODAY)
     assert only_far[0].day == date(2026, 12, 16) and not only_far[0].confirmed
-    assert "the last report was 2026-06-30, so a quarterly report would usually be due around 2026-09-29" in only_far[0].note
+    assert "the last report was Jun 30, 2026, so a quarterly report would usually be due around Sep 29, 2026" in only_far[0].note
     # with a nearer estimate from any source, the nearer one is next and the far one is just a later date
     both = merge_future([Candidate(date(2026, 12, 16), "finnhub"), Candidate(date(2026, 10, 1), "yfinance", "amc")], date(2026, 6, 30), TODAY)
     assert both[0].day == date(2026, 10, 1) and "usually be due" not in both[0].note
@@ -100,7 +100,7 @@ def test_a_company_confirmation_is_kept_but_two_calendar_sources_agreeing_is_sti
     from app.services.earnings_calendar import AGREEMENT_NOTE, StoredDate, beyond_calendar_reach
     company = StoredDate(date(2026, 10, 29), "finnhub", True, "confirmed: 8-K Item 7.01 filed 2026-09-20")
     assert beyond_calendar_reach(company, [], []) == "company announcement"
-    reported = StoredDate(date(2026, 9, 29), "finnhub", True, "reported on 2026-09-29 per Finnhub (actual EPS)")
+    reported = StoredDate(date(2026, 9, 29), "finnhub", True, "reported on Sep 29, 2026 per Finnhub (actual EPS)")
     assert beyond_calendar_reach(reported, [], []) == "report evidence"
     agreed = StoredDate(date(2026, 10, 29), "finnhub", True, AGREEMENT_NOTE)
     assert beyond_calendar_reach(agreed, [], []) is None      # Finnhub and Yahoo may move what only they set
@@ -142,7 +142,7 @@ def test_nke_with_yahoo_silent_dec_16_stands_and_nothing_else_is_decided():
     cands = [Candidate(date(2026, 12, 16), "finnhub")] + standing_candidates(stored, answered={"finnhub"}, today=TODAY)
     decided = merge_future(cands, last_report=date(2026, 6, 30), today=TODAY)
     assert [(f.day, f.source) for f in decided] == [(date(2026, 12, 16), "finnhub")]
-    assert "usually be due around 2026-09-29" in decided[0].note
+    assert "usually be due around Sep 29, 2026" in decided[0].note
 
 
 def test_a_nearer_stored_estimate_outranks_a_farther_calendar_date_for_the_same_quarter():
@@ -150,11 +150,11 @@ def test_a_nearer_stored_estimate_outranks_a_farther_calendar_date_for_the_same_
     # VEEV: Yahoo's Nov 25 stands (Yahoo silent); Finnhub says Nov 18: one report, Yahoo's day, Finnhub's in the note
     stored = [StoredDate(date(2026, 11, 25), "yfinance", False, "estimated (Yahoo Finance)", "amc")]
     decided = merge_future(standing_candidates(stored, {"finnhub"}, TODAY) + [Candidate(date(2026, 11, 18), "finnhub")], None, TODAY)
-    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 11, 25), "yfinance", "estimated (Yahoo Finance); Finnhub says 2026-11-18")]
+    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 11, 25), "yfinance", "estimated (Yahoo Finance); Finnhub says Nov 18, 2026")]
     # a stored Finnhub estimate with Finnhub silent and Yahoo naming another full session in the same quarter: the stored date stands
     stored = [StoredDate(date(2026, 10, 13), "finnhub", False, "estimated (Finnhub)")]
     decided = merge_future(standing_candidates(stored, {"yfinance"}, TODAY) + [Candidate(date(2026, 10, 20), "yfinance")], None, TODAY)
-    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 10, 13), "finnhub", "estimated (Finnhub); Yahoo Finance says 2026-10-20")]
+    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 10, 13), "finnhub", "estimated (Finnhub); Yahoo Finance says Oct 20, 2026")]
     # the same source returning a different date is a retraction: nothing stands in for it
     assert standing_candidates(stored, {"finnhub"}, TODAY) == []
     assert [f.day for f in merge_future([Candidate(date(2027, 1, 25), "finnhub")], None, TODAY)] == [date(2027, 1, 25)]
@@ -187,25 +187,25 @@ def test_adsk_a_half_day_loses_the_tie_and_dri_christmas_eve_loses_it():
         cands = [Candidate(date(2026, 11, 23), "finnhub", standing=standing == "finnhub"),
                  Candidate(date(2026, 11, 27), "yfinance", "amc", standing=standing == "yfinance")]
         decided = merge_future(cands, None, TODAY)
-        assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 11, 23), "finnhub", "estimated (Finnhub); Yahoo Finance says 2026-11-27")], standing
+        assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 11, 23), "finnhub", "estimated (Finnhub); Yahoo Finance says Nov 27, 2026")], standing
     # DRI: Dec 16 vs Dec 24
     decided = merge_future([Candidate(date(2026, 12, 24), "finnhub"), Candidate(date(2026, 12, 16), "yfinance", "bmo")], None, TODAY)
-    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 12, 16), "yfinance", "estimated (Yahoo Finance); Finnhub says 2026-12-24")]
+    assert [(f.day, f.source, f.note) for f in decided] == [(date(2026, 12, 16), "yfinance", "estimated (Yahoo Finance); Finnhub says Dec 24, 2026")]
     # a weekend loses too
     decided = merge_future([Candidate(date(2026, 10, 24), "yfinance", standing=True), Candidate(date(2026, 10, 22), "finnhub")], None, TODAY)
-    assert decided[0].day == date(2026, 10, 22) and decided[0].note == "estimated (Finnhub); Yahoo Finance says 2026-10-24"
+    assert decided[0].day == date(2026, 10, 22) and decided[0].note == "estimated (Finnhub); Yahoo Finance says Oct 24, 2026"
 
 
 def test_a_plain_disagreement_keeps_the_stored_date_and_notes_the_other_with_no_source_preferred():
     stored_yahoo = merge_future([Candidate(date(2026, 10, 27), "finnhub"), Candidate(date(2026, 10, 29), "yfinance", standing=True)], None, TODAY)
-    assert (stored_yahoo[0].day, stored_yahoo[0].source, stored_yahoo[0].note) == (date(2026, 10, 29), "yfinance", "estimated (Yahoo Finance); Finnhub says 2026-10-27")
+    assert (stored_yahoo[0].day, stored_yahoo[0].source, stored_yahoo[0].note) == (date(2026, 10, 29), "yfinance", "estimated (Yahoo Finance); Finnhub says Oct 27, 2026")
     stored_finnhub = merge_future([Candidate(date(2026, 10, 29), "finnhub", standing=True), Candidate(date(2026, 10, 27), "yfinance")], None, TODAY)
-    assert (stored_finnhub[0].day, stored_finnhub[0].source, stored_finnhub[0].note) == (date(2026, 10, 29), "finnhub", "estimated (Finnhub); Yahoo Finance says 2026-10-27")
+    assert (stored_finnhub[0].day, stored_finnhub[0].source, stored_finnhub[0].note) == (date(2026, 10, 29), "finnhub", "estimated (Finnhub); Yahoo Finance says Oct 27, 2026")
     # neither stored (a first run): the nearer day, whichever source
     fresh = merge_future([Candidate(date(2026, 10, 29), "finnhub"), Candidate(date(2026, 10, 27), "yfinance")], None, TODAY)
     assert (fresh[0].day, fresh[0].source) == (date(2026, 10, 27), "yfinance")
     fresh = merge_future([Candidate(date(2026, 10, 27), "finnhub"), Candidate(date(2026, 10, 29), "yfinance")], None, TODAY)
-    assert (fresh[0].day, fresh[0].source, fresh[0].note) == (date(2026, 10, 27), "finnhub", "estimated (Finnhub); Yahoo Finance says 2026-10-29")
+    assert (fresh[0].day, fresh[0].source, fresh[0].note) == (date(2026, 10, 27), "finnhub", "estimated (Finnhub); Yahoo Finance says Oct 29, 2026")
     # the same day is still agreement, and a company announcement still wins
     assert merge_future([Candidate(date(2026, 10, 29), "finnhub"), Candidate(date(2026, 10, 29), "yfinance")], None, TODAY)[0].confirmed
 
@@ -216,7 +216,7 @@ def test_fdx_sep_16_estimate_is_removed_once_the_company_confirms_oct_28():
     res = resolve_past(date(2026, 9, 16), date(2026, 10, 8), [date(2026, 6, 23)], [date(2026, 12, 16)], [], [], [], NOW,
                        confirmed_future=[date(2026, 10, 28), date(2026, 12, 16)])
     assert res.action == "superseded" and res.report_date == date(2026, 10, 28)
-    assert res.note == "the company confirmed 2026-10-28 for this report; the 2026-09-16 estimate is removed"
+    assert res.note == "the company confirmed Oct 28, 2026 for this report; the Sep 16, 2026 estimate is removed"
     # a confirmed date a full quarter later is the next report, not this one: the estimate stays unresolved
     assert resolve_past(date(2026, 9, 16), date(2026, 10, 8), [date(2026, 6, 23)], [], [], [], [], NOW, confirmed_future=[date(2026, 12, 16)]).action == "unresolved"
     assert resolve_past(date(2026, 9, 16), date(2026, 10, 8), [date(2026, 6, 23)], [], [], [], [], NOW).action == "unresolved"
