@@ -17,7 +17,7 @@ export function NoLongerTrades({ ticker, exit }: { ticker: Pick<Ticker, "symbol"
         <p className="mt-8 text-lg max-w-2xl" data-testid="exit-line">{exit.line}</p>
         {exit.last_close != null && exit.last_close_date && (
           <p className="mt-3 font-mono text-xs text-muted-foreground" data-testid="exit-last-close">
-            Last stored close ${exit.last_close.toFixed(2)} on {longDate(exit.last_close_date)}
+            Last close on file ${exit.last_close.toFixed(2)} on {longDate(exit.last_close_date)}
           </p>
         )}
       </div>

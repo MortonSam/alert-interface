@@ -112,21 +112,21 @@ export function datasetsStale(datasets: Record<string, DatasetAgeLike> | null | 
  * dataset line the research clause names the cadence only when the record gives it. */
 export function freshnessLine(datasetLine: string | null | undefined, cadence?: Cadence | null): string {
   const word = nightlyWord(cadence);
-  const research = datasetLine ?? (word ? `Research data refreshed ${word}` : "Research data from the stored refresh steps");
+  const research = datasetLine ?? (word ? `Research data refreshed ${word}` : "Research data from the refresh steps");
   return `${priceSourceLine(cadence)} · ${research}`;
 }
 
 /** Names the options data by its own date, and its cadence by the record. Never falls back to today. */
 export function optionsDataPhrase(chainDate: string | null | undefined, cadence?: Cadence | null): string {
   const cad = optionsCadencePhrase(cadence);
-  const base = chainDate ? `options data as of ${chainDate}` : "the latest stored options data";
+  const base = chainDate ? `options data as of ${chainDate}` : "the latest options data on file";
   return cad ? `${base}, ${cad}` : base;
 }
 
 export function premiumSourcePhrase(chainDate: string | null | undefined): string {
   return chainDate
     ? `Entry premium taken from the ${chainDate} options data.`
-    : "Entry premium taken from the latest stored options data.";
+    : "Entry premium taken from the latest options data on file.";
 }
 
 /**
@@ -157,7 +157,7 @@ export function pricedAtLine(
   fb: { current_price: number; options_as_of?: string | null; quote_price?: number | null; price_as_of?: string | null },
   fmtTime: (iso: string | null | undefined) => string | null,
 ): string {
-  const source = fb.options_as_of ? `from the ${fb.options_as_of} options data` : "from the latest stored options data";
+  const source = fb.options_as_of ? `from the ${fb.options_as_of} options data` : "from the latest options data on file";
   const head = `priced at $${fb.current_price.toFixed(2)} ${source}`;
   if (fb.quote_price == null) return head;
   const t = fmtTime(fb.price_as_of);

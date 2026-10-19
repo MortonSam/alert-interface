@@ -82,7 +82,7 @@ const LEGACY: Record<string, string> = {
   atm:
     "At the money - the strike price closest to where the stock trades right now. ATM options have the highest time value and are the most sensitive to price changes.",
   "52-week high":
-    "The highest closing price of the past year, from the stored daily bars. The distance below it says how far the stock has come off its best level, not whether it will get back there.",
+    "The highest closing price of the past year, from the daily bars. The distance below it says how far the stock has come off its best level, not whether it will get back there.",
   "after the close":
     "The company reports after the market closes, so the first trading on the news is the next session. The 1-day move for such a report runs from the report day's close to the next session's close.",
   "before the open":

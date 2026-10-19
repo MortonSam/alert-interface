@@ -598,8 +598,8 @@ def _just_reported_insight(
 # An insight compares a stock to the S&P median. When that median is not there the
 # line says so and why; it never prints the placeholder ("versus ±0.0% across the S&P").
 INDEX_BASE_NOT_LOADED = "S&P comparison unavailable: index medians were not loaded for this view"
-INDEX_BASE_TOO_FEW = "S&P comparison unavailable: fewer than 3 tickers have this stat stored"
-INDEX_BASE_ZERO = "S&P comparison unavailable: the stored index median is zero, which is not a real value"
+INDEX_BASE_TOO_FEW = "S&P comparison unavailable: fewer than 3 tickers have this stat on file"
+INDEX_BASE_ZERO = "S&P comparison unavailable: the index median is zero, which is not a real value"
 
 
 def _index_median(base: dict, key: str) -> tuple[float | None, str | None]:

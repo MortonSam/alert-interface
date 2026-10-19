@@ -145,7 +145,7 @@ describe("report cards match the stored rows", () => {
   it("a report without a judged EPS figure shows the absence, never a beat or miss", () => {
     const c = reportCards([VMRK_ROW])[0];
     expect(c.eps).toBeNull();
-    expect(c.epsAbsent).toBe("No EPS figure is stored for this report.");
+    expect(c.epsAbsent).toBe("No EPS figure is on file for this report.");
     expect(epsLine(row({ outcome: "beat", eps_actual: "1", eps_estimate: "0.9", outcome_reason: "EPS basis unclear" })).epsAbsent).toBe("EPS basis unclear");
   });
   it("the tapped line uses only stored facts and leaves missing parts out", () => {
@@ -241,19 +241,19 @@ describe("the options verdict states the API's report move and never overstates"
     expect(thin.kind === "verdict" && thin.why).toMatch(/fewer than the 8/);
     const heldTypical = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, moveComparison: null, typicalPct: null, heldFacts: ["typical_move"],
       comparison: "Options price a move of about 6.9% from the report itself (options from Oct 12, 2026)." } });
-    expect(heldTypical.kind === "verdict" && heldTypical.why).toMatch(/paused/);
+    expect(heldTypical.kind === "verdict" && heldTypical.why).toBe("The typical move is on hold while we verify it, so the move is not compared with one.");
     const heldImplied = optionsVerdict({ ...NVDA_VERDICT, report: { ...NVDA_REPORT, heldFacts: ["implied_move"] } });
     expect(heldImplied.kind).toBe("absent");
     expect(storedTypical({ ...NVDA_SUMMARY, held: true })).toBeNull();      // the cards compare with nothing while it is held
   });
   it("gives way to one plain line without a report date or a confirmed date; an older API shows the range alone", () => {
     const line = (o: Partial<VerdictInput>) => { const v = optionsVerdict({ ...NVDA_VERDICT, ...o }); return v.kind === "absent" ? v.line : null; };
-    expect(line({ nextReport: null })).toBe("No upcoming report date is stored for NVDA, so there is no options verdict.");
-    expect(line({ confirmation: "estimated" })).toBe("NVDA has not confirmed its next report date, so options are not read against it yet.");
+    expect(line({ nextReport: null })).toBe("No upcoming report date is on file for NVDA, so there is no options verdict.");
+    expect(line({ confirmation: "estimated" })).toBe("NVDA hasn't confirmed its next report date, so there's no options verdict yet.");
     const old = optionsVerdict({ ...NVDA_VERDICT, report: null });
     expect(old.kind === "verdict" && [old.sentence, old.band?.high]).toEqual([null, 247.32]);
-    expect(line({ report: null, facts: { ...NVDA_VERDICT.facts, expected_move_pct: null } })).toBe("No usable options prices are stored for NVDA, so there is no options verdict.");
-    expect(line({ report: null, nextReport: "2026-11-18" })).toBe("The stored options data was priced for a different report date, so there is no options verdict.");
+    expect(line({ report: null, facts: { ...NVDA_VERDICT.facts, expected_move_pct: null } })).toBe("No usable options prices are on file for NVDA, so there is no options verdict.");
+    expect(line({ report: null, nextReport: "2026-11-18" })).toBe("The options data on file was priced for a different report date, so there is no options verdict.");
   });
   it("without a quote the band marks the price the range was computed from, with its date", () => {
     const v = optionsVerdict({ ...NVDA_VERDICT, quote: null });

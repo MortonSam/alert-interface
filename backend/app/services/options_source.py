@@ -57,7 +57,7 @@ def parity(chain: dict, spot: float | None, chain_date: date, expiration: date, 
     if not spot or spot <= 0:
         return Parity(False, None, None, "no official close for the chain's date")
     if rate is None:
-        return Parity(False, None, None, "no stored risk-free rate for the chain's date")
+        return Parity(False, None, None, "no risk-free rate on file for the chain's date")
     t = (expiration - chain_date).days / 365.0
     if t <= 0:
         return Parity(False, None, None, "the front expiry is not after the chain's date")

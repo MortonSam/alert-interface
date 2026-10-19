@@ -82,9 +82,9 @@ const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
 export function optionsVerdict(v: VerdictInput): Verdict {
   const f = v.facts;
   const r = v.report ?? null;
-  if (!v.nextReport) return { kind: "absent", line: `No upcoming report date is stored for ${v.symbol}, so there is no options verdict.` };
+  if (!v.nextReport) return { kind: "absent", line: `No upcoming report date is on file for ${v.symbol}, so there is no options verdict.` };
   if (v.confirmation !== "confirmed") {
-    return { kind: "absent", line: `${v.symbol} has not confirmed its next report date, so options are not read against it yet.` };
+    return { kind: "absent", line: `${v.symbol} hasn't confirmed its next report date, so there's no options verdict yet.` };
   }
   if (r?.heldFacts?.some((x) => x === "implied_move" || x === "report_date")) {
     return { kind: "absent", line: `The options figures for ${v.symbol} are on hold while we verify them.` };
@@ -103,8 +103,8 @@ export function optionsVerdict(v: VerdictInput): Verdict {
 
   if (!r?.state) {            // an API without the report move: the range alone, as before it shipped
     if (!rangeFacts) {
-      return { kind: "absent", line: sameReport ? `No usable options prices are stored for ${v.symbol}, so there is no options verdict.`
-        : `The stored options data was priced for a different report date, so there is no options verdict.` };
+      return { kind: "absent", line: sameReport ? `No usable options prices are on file for ${v.symbol}, so there is no options verdict.`
+        : `The options data on file was priced for a different report date, so there is no options verdict.` };
     }
     return { kind: "verdict", sentence: null, comparison: null, reportPct: null, typicalPct: null, why: null, receipt: null, rangeReceipt, band };
   }
@@ -132,7 +132,7 @@ export function optionsVerdict(v: VerdictInput): Verdict {
     } else if (r.heldFacts?.includes("typical_move")) {
       why = "The typical move is on hold while we verify it, so the move is not compared with one.";
     } else if (r.typicalN != null && r.typicalN < MOVE_MIN_REPORTS) {
-      why = `Only ${r.typicalN} past reports are stored, fewer than the ${MOVE_MIN_REPORTS} a typical move needs, so the move is not compared with one.`;
+      why = `Only ${r.typicalN} past reports are on file, fewer than the ${MOVE_MIN_REPORTS} a typical move needs, so the move is not compared with one.`;
     } else {
       why = "No typical earnings move is on file for this stock, so the move is not compared with one.";
     }

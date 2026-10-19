@@ -237,10 +237,10 @@ def classify(
     if bucket == "none":
         if pattern in ("bmo", "amc") and stored_timing == pattern:
             return Decision(pattern, "no_filing_stored_matches_pattern",
-                            "no filing; the stored timing matches the ticker's price pattern")
+                            "no filing; the timing on file matches the ticker's price pattern")
         return Decision("unknown", "no_filing", "no 8-K found near the event date")
     return Decision("unknown", "filing_far_from_event_date",
-                    "the nearest filing is on a day the stored event date cannot explain")
+                    "the nearest filing is on a day the event date on file cannot explain")
 
 
 def _classify_borrowed(bucket: str, pattern: str) -> Decision:
@@ -253,7 +253,7 @@ def _classify_borrowed(bucket: str, pattern: str) -> Decision:
     implied = _BUCKET_IMPLIES.get(bucket)
     if implied is None:
         return Decision("unknown", "filing_far_from_event_date_any8k",
-                        "no earnings filing; the nearest 8-K is on a day the stored event date cannot explain")
+                        "no earnings filing; the nearest 8-K is on a day the event date on file cannot explain")
     if pattern == "mixed":
         return Decision("unknown", "any8k_pattern_mixed",
                         "no earnings filing, and the ticker has no clear price pattern to confirm another 8-K's time")

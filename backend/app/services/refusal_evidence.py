@@ -47,7 +47,7 @@ def describe(verdict: str) -> str:
         SUPPORTS_BLOCKING: "SEC acceptance supports the blocking row",
         SUPPORTS_BOTH: "SEC acceptance is consistent with both dates",
         SUPPORTS_NEITHER: "SEC acceptance explains neither date",
-        NO_ACCEPTANCE: "no SEC acceptance time stored for the blocking row",
+        NO_ACCEPTANCE: "no SEC acceptance time on file for the blocking row",
     }[verdict]
 
 

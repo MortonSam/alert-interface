@@ -36,7 +36,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
           The latest verified note
         </h2>
         <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
-          Rendered from the stored note: its own figures, its own words, and what the second model found.
+          Rendered from the note on file: its own figures, its own words, and what the second model found.
         </p>
       </div>
     <div className="relative rounded-2xl border border-border bg-card" data-testid="latest-verified-note">

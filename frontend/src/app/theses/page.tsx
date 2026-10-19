@@ -363,7 +363,7 @@ function ResolveForm({
         />
       </div>
       {thesis.option_type && (
-        <p className="text-xs text-muted-foreground"><Explained text="Option P&L is computed from the stored options data at resolution, or at intrinsic value once expired." /></p>
+        <p className="text-xs text-muted-foreground"><Explained text="Option P&L is computed from the options data on file at resolution, or at intrinsic value once expired." /></p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex gap-2">

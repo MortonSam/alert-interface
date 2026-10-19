@@ -532,7 +532,7 @@ def fresh_window(quarters: list[dict], latest_report: date | None, release: dict
     when the newest quarter cannot be read."""
     if newer_quarter_reported(quarters, latest_report):
         if release is None or release.get("eps") is None:
-            return None, f"the {latest_report.isoformat()} report is newer than XBRL (through {quarters[-1]['end'].isoformat()}) and its release EPS is not stored"
+            return None, f"the {latest_report.isoformat()} report is newer than XBRL (through {quarters[-1]['end'].isoformat()}) and its release EPS is not on file"
         three = [q for q in quarters if q["end"] <= as_of][-3:]
         if len(three) < 3:
             return None, "fewer than three XBRL quarters before the release quarter"
@@ -600,7 +600,7 @@ def snapshot(price: float | None, quarters: list[dict], latest_report: date | No
     base.update(window_start=four[0]["start"], window_end=four[-1]["end"], window_source=why, trailing_eps=total,
                 quarters=[{**q, "end": q["end"].isoformat(), "start": q["start"].isoformat(), "filed": q["filed"].isoformat()} for q in four])
     if price is None:
-        return {**base, "reason": "no stored close"}
+        return {**base, "reason": "no close on file"}
     if total <= 0:
         return {**base, "status": "not_meaningful", "reason": NOT_MEANINGFUL_REASON}
     value = round(price / total, 2)
@@ -702,7 +702,7 @@ def implausible(eps: float, close: float | None, adjusted_eps: float | None) -> 
     if adjusted_eps is not None and eps > 0 and adjusted_eps > 0:
         ratio = eps / adjusted_eps
         if ratio > EPS_MAX_ADJUSTED_RATIO or ratio < 1 / EPS_MAX_ADJUSTED_RATIO:
-            return f"{eps:+.2f} is {ratio:.1f}x the stored adjusted EPS for the report ({adjusted_eps:+.2f})"
+            return f"{eps:+.2f} is {ratio:.1f}x the adjusted EPS on file for the report ({adjusted_eps:+.2f})"
     return None
 
 

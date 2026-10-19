@@ -115,7 +115,7 @@ describe("IV unavailable and the spread row always carry their reason", () => {
     const both = { source: "live", atm_iv: null, rv_20d: null } as unknown as Shown;
     expect(spreadUnavailableReason(both, null, "error", false)).toContain("both missing");
     const present = { source: "read", atm_iv: 0.47, rv_20d: 0.65 } as unknown as Shown;
-    expect(spreadUnavailableReason(present, null, "done", false)).toBe("IV-RV spread unavailable: the stored spread does not match the IV and RV shown");
+    expect(spreadUnavailableReason(present, null, "done", false)).toBe("IV-RV spread unavailable: the spread on file does not match the IV and RV shown");
     expect(spreadUnavailableReason(present, null, "done", true)).toBeNull();
   });
 });

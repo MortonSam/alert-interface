@@ -30,7 +30,7 @@ describe("freshness wording", () => {
     expect(optionsDataPhrase("2026-10-01")).toBe("options data as of 2026-10-01");           // no record: no cadence claim
     expect(freshnessLine("Earnings history as of 5h ago", cadence)).toBe("Prices dated by their last trade · Earnings history as of 5h ago");
     expect(freshnessLine(null, cadence)).toBe("Prices dated by their last trade · Research data refreshed nightly");
-    expect(freshnessLine(null)).toBe("Prices dated by their last trade · Research data from the stored refresh steps");
+    expect(freshnessLine(null)).toBe("Prices dated by their last trade · Research data from the refresh steps");
     expect(fmtQuoteDateTime(1759694400)).toBe("Oct 5, 4:00 PM ET");                            // 2026-10-05 20:00Z
     expect(fmtIsoDateTime("2026-10-05T20:00:00+00:00")).toBe("Oct 5, 4:00 PM ET");
     expect(fmtQuoteDateTime(null)).toBeNull();

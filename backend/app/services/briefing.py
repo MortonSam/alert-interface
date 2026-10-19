@@ -221,7 +221,7 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
                    _input("shares outstanding", f"{shares_outstanding / 1e6:,.1f} million", shares_as_of, "company profile")]
         dates += [datetime.fromtimestamp(int(quote_ts), NY).date(), shares_as_of]
     text = desc + (f" It's {', '.join(bits)}." if bits else "")
-    rule = (f"The first sentence of the company's description as stored by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
+    rule = (f"The first sentence of the company's description as recorded by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
             f"{SECOND_SENTENCE_IF_FIRST_UNDER} characters and when it is not a list of segments, products or brands; incorporation and renaming boilerplate removed; "
             f"{DESCRIPTION_CAP} characters at most, whole sentences only). Sector and sub-industry are GICS from the S&P 500 constituent list, never the profile vendor's "
             "categories; membership from the nightly list. The market value is the latest quote times the shares outstanding from the company profile, in round words, "
@@ -250,15 +250,15 @@ def stock_sentence(symbol: str, *, quote_price: float | None, quote_ts: int | No
             bits.append(f"near its 52-week high of {fmt_money(high_52w)} ({fmt_date(high_52w_date)})")
         else:
             bits.append(f"{fmt_pct(below, signed=False)} below its 52-week high of {fmt_money(high_52w)} ({fmt_date(high_52w_date)})")
-            inputs.append(_input("distance below 52-week high", fmt_pct(below, signed=False), high_52w_date, "quote against the highest stored close"))
-        inputs.append(_input("52-week high", fmt_money(high_52w), high_52w_date, f"stored daily closes, highest close over {WINDOW_52W_DAYS} days"))
+            inputs.append(_input("distance below 52-week high", fmt_pct(below, signed=False), high_52w_date, "quote against the highest close"))
+        inputs.append(_input("52-week high", fmt_money(high_52w), high_52w_date, f"daily closes, highest close over {WINDOW_52W_DAYS} days"))
     if anchor_close_3m and anchor_date_3m:
         change = (quote_price / anchor_close_3m - 1) * 100
         bits.append(f"{'up' if change >= 0 else 'down'} {fmt_pct(abs(change), signed=False)} over three months")
         inputs += [_input("three-month change", fmt_pct(change), anchor_date_3m, "quote against the three-month anchor close"),
-                   _input("three-month anchor close", fmt_money(anchor_close_3m), anchor_date_3m, f"first stored close on or after {WINDOW_3M_DAYS} days back")]
+                   _input("three-month anchor close", fmt_money(anchor_close_3m), anchor_date_3m, f"first close on or after {WINDOW_3M_DAYS} days back")]
     if last_close is not None and last_close_date:
-        inputs.append(_input("last close", fmt_money(last_close), last_close_date, "stored daily closes"))
+        inputs.append(_input("last close", fmt_money(last_close), last_close_date, "daily closes"))
     return ", ".join(bits) + ".", inputs, dates
 
 
@@ -327,7 +327,7 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
     when = "that session" if timing == "bmo" else "the next session"
     if pct_change_1d is not None and after_date:
         clauses.append(f"the stock moved {fmt_pct(pct_change_1d)} {when}")
-        inputs += [_input("1-day move", fmt_pct(pct_change_1d), after_date, "stored daily closes (close to close)"),
+        inputs += [_input("1-day move", fmt_pct(pct_change_1d), after_date, "daily closes (close to close)"),
                    _input("1-day move window", f"close {fmt_date(base_date)} to close {fmt_date(after_date)}", after_date, "trading calendar")]
     elif after_date is None:
         clauses.append("the move is recorded once the report timing is known")
@@ -338,8 +338,8 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
         clauses.append(f"the move settles at the close on {fmt_date(after_date)}")
         inputs.append(_input("settlement session", fmt_date(after_date), after_date, "trading calendar"))
     else:
-        clauses.append(f"the move (close {fmt_date(base_date)} to close {fmt_date(after_date)}) is not yet stored")
-        inputs.append(_input("newest stored bar", fmt_date(bars_through) if bars_through else "none", bars_through, "stored daily closes"))
+        clauses.append(f"the move (close {fmt_date(base_date)} to close {fmt_date(after_date)}) is not yet on file")
+        inputs.append(_input("newest daily bar", fmt_date(bars_through) if bars_through else "none", bars_through, "daily closes"))
     return f"{head}: " + "; ".join(clauses) + ".", inputs, [event_date]
 
 
@@ -365,7 +365,7 @@ def big_move_clause(*, move_date: date, move_pct: float, typical_abs: float, mul
     """"Its biggest move in the past month was +Z% on <date>, about N times a typical day for this stock." No cause is stated."""
     n = f"{multiple:.0f}"
     text = f"Its biggest move in the past month was {fmt_pct(move_pct)} on {fmt_date(move_date)}, about {n} times a typical day for this stock."
-    inputs = [_input("biggest daily move", fmt_pct(move_pct), move_date, f"stored daily closes, close to close, largest absolute move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates"),
+    inputs = [_input("biggest daily move", fmt_pct(move_pct), move_date, f"daily closes, close to close, largest absolute move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates"),
               _input("typical daily move", fmt_pct(typical_abs, signed=False), move_date, f"median absolute daily move over {WINDOW_52W_DAYS} days"),
               _input("multiple of a typical day", n, move_date, f"at least {BIG_MOVE_MULTIPLE} to be shown")]
     return text, inputs, [move_date]
@@ -387,7 +387,7 @@ def report_move_inputs(view: dict) -> list[dict]:
     legs = [rm.before, rm.after] if rm.method == "pair" else [rm.after, rm.later]
     for leg in legs:
         if leg is not None and leg.atm_iv is not None:
-            out.append(_input(f"implied volatility to {fmt_date(date.fromisoformat(leg.expiration))}", f"{leg.atm_iv * 100:.1f}%", cd, "at-the-money, solved from the chain"))
+            out.append(_input(f"implied volatility to {fmt_date(date.fromisoformat(leg.expiration))}", f"{leg.atm_iv * 100:.1f}%", cd, "at-the-money, from the options prices"))
     out.append(_input("chain date", fmt_date(cd), cd, "options chain last trade"))
     if view.get("move_comparison") and view.get("typical_move_pct") is not None:
         out += [_input("typical move after a report", f"{view['typical_move_pct']:.1f}%", None, f"past earnings reactions, mean absolute 1-day move over {last_reports(view['typical_n'])}"),
@@ -442,11 +442,11 @@ def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict
     inputs = [i for p in parts for i in p[1]]
     today = (reported or upcoming or {}).get("today") or date.today()
     dates = [d for p in parts for d in p[2] if d <= today]          # an as-of is when we knew, never a report day still ahead
-    rule = (f"The stock: the latest quote dated by its last trade, against its 52-week high (the highest stored close over {WINDOW_52W_DAYS} days; within {NEAR_HIGH_PCT}% reads near) and the "
-            f"first stored close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, the EPS on the event row against "
-            f"the estimate (actual above estimate is a beat) and the 1-day move from the stored bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "
+    rule = (f"The stock: the latest quote dated by its last trade, against its 52-week high (the highest close over {WINDOW_52W_DAYS} days; within {NEAR_HIGH_PCT}% reads near) and the "
+            f"first close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, the EPS on the event row against "
+            f"the estimate (actual above estimate is a beat) and the 1-day move from the daily bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "
             f"else the largest daily move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates when it is at least {BIG_MOVE_MULTIPLE} times the median absolute daily "
-            f"move of the past year, with no cause stated; else the next report within {NEXT_WITHIN_DAYS} days. A report comes from the stored calendar, with the report move "
+            f"move of the past year, with no cause stated; else the next report within {NEXT_WITHIN_DAYS} days. A report comes from the earnings calendar, with the report move "
             "(the part of the options' expected move that belongs to the report alone) against the mean absolute 1-day move after past reports, the sentence Discover states.")
     return _sentence("happening", text, rule, max(dates) if dates else None, inputs)
 

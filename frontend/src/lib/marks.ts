@@ -5,7 +5,7 @@ import type { LegendItem } from "./encodings/types";
 // Dates come from their own fields and are never parsed out of a sentence.
 
 export const MARK_BASIS_LABELS = {
-  ingested_chain: "marked from stored options data",
+  ingested_chain: "marked from the options data on file",
   settled: "settled at the expiration-day close",
   intrinsic: "intrinsic value, expiration close unavailable",
   not_found: "mark unavailable",

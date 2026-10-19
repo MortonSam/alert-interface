@@ -51,7 +51,7 @@ export function ReportCards({ reactions, typical }: { reactions: HistoricalReact
                         m.value == null ? "text-muted-foreground font-normal"
                           : Number(m.value.toFixed(1)) > 0 ? "text-success" : Number(m.value.toFixed(1)) < 0 ? "text-destructive" : "text-foreground",
                       )} data-testid={`report-card-${m.key}`}>
-                        {m.value == null ? "Not stored" : fmtMove(m.value)}
+                        {m.value == null ? "Not on file" : fmtMove(m.value)}
                       </span>
                     </span>
                   ))}

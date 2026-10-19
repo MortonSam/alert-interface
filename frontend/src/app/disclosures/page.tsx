@@ -26,12 +26,12 @@ export const metadata: Metadata = {
 async function refreshCadenceWord(): Promise<string> {
   try {
     const res = await fetch(`${API}/v1/theses/ivy-rule`, { cache: "no-store" });
-    if (!res.ok) return "on its stored schedule";
+    if (!res.ok) return "on its schedule";
     const body = (await res.json()) as { rule?: { cadence?: { nightly: { per_day: number } } } };
     const n = body.rule?.cadence?.nightly.per_day;
-    return n === 1 ? "nightly" : n ? `${n} times a day` : "on its stored schedule";
+    return n === 1 ? "nightly" : n ? `${n} times a day` : "on its schedule";
   } catch {
-    return "on its stored schedule";
+    return "on its schedule";
   }
 }
 

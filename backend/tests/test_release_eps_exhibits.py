@@ -58,7 +58,7 @@ def test_plausibility_guard_refuses_on_price_and_adjusted_eps_and_notes_year_ove
     assert V.implausible(397.0, 95.0, 2.22) is not None and "25%" in V.implausible(397.0, 95.0, 2.22)        # a net income in millions read as EPS
     assert V.implausible(429.7, 150.0, 1.06) is not None
     assert V.implausible(0.74, 95.0, 0.86) is None                                       # GIS: GAAP near adjusted
-    assert "5.9x the stored adjusted EPS" in V.implausible(12.5, 400.0, 2.11)             # five times the adjusted figure for the same report: refused
+    assert "5.9x the adjusted EPS on file" in V.implausible(12.5, 400.0, 2.11)             # five times the adjusted figure for the same report: refused
     assert V.implausible(0.30, 400.0, 2.11) is not None                                  # under a fifth of it likewise
     assert V.implausible(32.87, 1063.96, 33.42) is None                                  # Micron: GAAP 32.87 beside adjusted 33.42 is fine
     assert V.implausible(32.87, 1063.96, None) is None                                   # no adjusted figure stored: only the price test

@@ -154,7 +154,7 @@ export function spreadUnavailableReason(
   }
   if (ivMissing) return `IV-RV spread unavailable: implied volatility is missing (${ivUnavailableReason(shown, realizedVol, rvStatus)})`;
   if (rvMissing) return `IV-RV spread unavailable: realized volatility is missing (${rvUnavailableReason(shown, realizedVol, rvStatus)})`;
-  if (!spreadShown) return "IV-RV spread unavailable: the stored spread does not match the IV and RV shown";
+  if (!spreadShown) return "IV-RV spread unavailable: the spread on file does not match the IV and RV shown";
   return null;
 }
 

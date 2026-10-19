@@ -232,7 +232,7 @@ def can_answer_clause(pack: dict, question: str | None = None) -> str:
     asked = {t[0] for t in asked_topics(pack, question)} if question else set()
     parts = [t[1] for t in held_topics(pack) if t[0] not in asked]
     if not parts:
-        return "its stored figures"
+        return "its figures on file"
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
@@ -478,13 +478,13 @@ def word_facts(raw: dict) -> list[dict]:
         below = (bars["high_52w"] - price) / bars["high_52w"] * 100
         near = below < B.NEAR_HIGH_PCT
         out.append(_fact("price_vs_52_week_high", "price against the 52-week high", "near" if near else "below", bars.get("high_52w_date"),
-                         f"within {B.NEAR_HIGH_PCT}% of the highest stored close is near", "word", phrase="near its 52-week high" if near else "below its 52-week high"))
+                         f"within {B.NEAR_HIGH_PCT}% of the highest close is near", "word", phrase="near its 52-week high" if near else "below its 52-week high"))
         if bars.get("high_52w_date"):
-            out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "stored daily closes, the day of the highest close"))
+            out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "daily closes, the day of the highest close"))
     rv = raw.get("rv")
     if rv:
         out.append(_fact("volatility_vs_year", "20-day realized volatility against the stock's own past year", volatility_word(rv["rv_rank"]), rv["as_of"],
-                         f"stored volatility rank: at or above the {RV_ELEVATED_RANK}th percentile is elevated, at or below the {RV_QUIET_RANK}th quiet", "word"))
+                         f"volatility rank: at or above the {RV_ELEVATED_RANK}th percentile is elevated, at or below the {RV_QUIET_RANK}th quiet", "word"))
     last = raw.get("last_report")
     if last:
         if last.get("timing") in B.TIMING_PHRASE:
@@ -496,7 +496,7 @@ def word_facts(raw: dict) -> list[dict]:
             out.append(_fact("last_report_outcome", "last report against the EPS estimate", last["outcome"], last["event_date"], "reported EPS against the analyst consensus estimate", "word"))
         if last.get("move_pct") is not None:
             out.append(_fact("last_report_direction", "direction of the move after the last report", "rose" if last["move_pct"] > 0 else "fell" if last["move_pct"] < 0 else "unchanged",
-                             last["event_date"], "sign of the stored 1-day move", "word"))
+                             last["event_date"], "sign of the 1-day move", "word"))
     nxt = raw.get("next_report")
     if nxt and nxt.get("date"):
         out.append(_fact("next_report_status", "next report date", "confirmed" if nxt.get("confirmation") == "confirmed" else "estimated", nxt["date"], nxt.get("note"), "word"))
@@ -511,10 +511,10 @@ def word_facts(raw: dict) -> list[dict]:
         from app.services.questions import pe_history_words
         if pe.get("hist_median") is not None:
             out.append(_fact("pe_vs_history", "P/E against its five-year median", pe_history_words(pe["pe"], pe["hist_median"]),
-                             pe["as_of"], "stored P/E against its five-year median, judged at one decimal", "word"))
+                             pe["as_of"], "P/E against its five-year median, judged at one decimal", "word"))
         if pe.get("sector_median") is not None:
             out.append(_fact("pe_vs_sector", "P/E against its sector median", pe_history_words(pe["pe"], pe["sector_median"]),
-                             pe["as_of"], "stored P/E against its sector median, judged at one decimal", "word"))
+                             pe["as_of"], "P/E against its sector median, judged at one decimal", "word"))
     div = raw.get("dividend")
     if div:
         out.append(_fact("dividend_status", "next dividend", "declared" if div.get("declared_on") else "estimated", div.get("declared_on") or div.get("ex_date"), "events (ex_dividend)", "word"))
@@ -579,7 +579,7 @@ async def event_facts(db: AsyncSession, symbol: str, raw: dict, today: date) -> 
         WHERE t.symbol = :s AND hr.event_type = 'earnings' AND hr.pct_change_1d IS NOT NULL ORDER BY hr.event_date DESC LIMIT 20"""), {"s": symbol})).all()
     if rows:
         ups = sum(1 for _, m in rows if float(m) > 0)
-        out.append(_fact("reports_up", "reports followed by a rise", str(ups), rows[0][0], "stored earnings reactions, the 1-day move after each report",
+        out.append(_fact("reports_up", "reports followed by a rise", str(ups), rows[0][0], "earnings reactions, the 1-day move after each report",
                          phrase=f"up after {ups} of its last {len(rows)} reports"))
     return out
 
@@ -949,8 +949,8 @@ async def add_spend(db: AsyncSession, cost: float | None, now: datetime | None =
 
 # ── the answer ───────────────────────────────────────────────────────────────
 
-RULE = ("Ivy wrote the words from this stock's stored facts and typed no number: every quantity was inserted from a stored fact with its receipt, "
-        "every comparison word was checked against a stored comparison, and each sentence was checked against those facts before display; "
+RULE = ("Ivy wrote the words from this stock's facts on file and typed no number: every quantity was inserted from a fact on file with its receipt, "
+        "every comparison word was checked against a comparison on file, and each sentence was checked against those facts before display; "
         "a sentence the check did not support was dropped.")
 
 

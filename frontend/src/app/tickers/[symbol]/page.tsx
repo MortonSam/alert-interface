@@ -1099,7 +1099,7 @@ function PriceChart({
             onClick={() => onPeriodChange(p)}
             disabled={empty}
             aria-pressed={p === period}
-            title={empty ? "No bars stored for this period" : undefined}
+            title={empty ? "No price data on file for this period" : undefined}
             className={cn(
               "tap px-2.5 py-1 rounded text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
               p === period
@@ -1245,7 +1245,7 @@ function PriceChart({
             {impliedRangeLow != null && impliedRangeHigh != null && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
-                Shaded band: range implied by {impliedChainDate ? `the ${fmtDay(impliedChainDate)} options data` : "the stored options data"}{impliedExpiration ? ` for options expiring ${fmtDay(impliedExpiration)}` : ""}
+                Shaded band: range implied by {impliedChainDate ? `the ${fmtDay(impliedChainDate)} options data` : "the options data on file"}{impliedExpiration ? ` for options expiring ${fmtDay(impliedExpiration)}` : ""}
               </span>
             )}
             {earningsMarkers.length > 0 && (

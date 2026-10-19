@@ -50,7 +50,7 @@ def test_eps_quarters_derives_the_fourth_quarter_from_the_annual_fact():
 def test_the_window_must_hold_the_latest_reported_quarter():
     today = date(2026, 10, 7)
     four, why = V.fresh_window(MU_Q, date(2026, 9, 30), None, today)
-    assert four is None and "release EPS is not stored" in why                                           # Sep 30 reported, XBRL through May 28
+    assert four is None and "release EPS is not on file" in why                                           # Sep 30 reported, XBRL through May 28
     four, why = V.fresh_window(MU_Q, date(2026, 9, 30), {"eps": 32.87, "period_end": date(2026, 9, 3), "accession": "0000723125-26-000018"}, today)
     assert [x["eps"] for x in four] == [4.60, 12.07, 24.67, 32.87] and four[-1]["source"] == "release" and why.startswith("three XBRL")
     assert V.pe(1063.96, four) == 14.34 and V.period_label(four) == "2025-08-29 to 2026-09-03"
@@ -97,11 +97,11 @@ def test_snapshot_states_ok_not_meaningful_or_missing_with_reasons():
     assert s["status"] == "ok" and s["pe"] == 14.34 and s["window_start"] == date(2025, 8, 29) and s["window_end"] == date(2026, 9, 3)
     assert s["quarters"][-1]["source"] == "release" and s["quarters"][-1]["form"].startswith("earnings release 8-K 0000723125")
     s = V.snapshot(1063.96, MU_Q, date(2026, 9, 30), None, today)
-    assert s["status"] == "missing" and "release EPS is not stored" in s["reason"] and s["pe"] is None
+    assert s["status"] == "missing" and "release EPS is not on file" in s["reason"] and s["pe"] is None
     loss = [{**q, "eps": -1.0} for q in MU_Q]
     s = V.snapshot(50.0, loss, date(2026, 6, 25), None, today)
     assert s["status"] == "not_meaningful" and s["reason"] == "lost money over the last four quarters" and s["trailing_eps"] == -4.0 and s["window_end"] == date(2026, 5, 28)
-    assert V.snapshot(None, MU_Q, date(2026, 6, 25), None, today)["reason"] == "no stored close"
+    assert V.snapshot(None, MU_Q, date(2026, 6, 25), None, today)["reason"] == "no close on file"
     tiny = [{**q, "eps": 0.05} for q in MU_Q]                                                    # trailing 0.20 under a 50 close: P/E 250
     s = V.snapshot(50.0, tiny, date(2026, 6, 25), None, today)
     assert s["status"] == "not_meaningful" and s["pe"] == 250.0 and s["reason"] == "earnings near zero: P/E above 100" and V.PE_MAX_MEANINGFUL == 100

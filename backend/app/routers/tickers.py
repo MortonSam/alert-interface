@@ -2142,7 +2142,7 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     if pack is None:                                     # the fact pack ran past its deadline: a plain sentence, nothing charged
         return {"symbol": symbol.upper(), "name": symbol.upper(), "answer": A.timeout_answer(symbol.upper(), question), "cached": False}
     if not pack["active"]:
-        raise HTTPException(status_code=404, detail="No stored data for this stock")
+        raise HTTPException(status_code=404, detail="No data on file for this stock")
     ip = get_client_ip(request)
     normalized = A.normalize_question(question, pack["symbol"], pack["name"])
     key = A.cache_key(pack["symbol"], normalized, pack["fingerprint"])

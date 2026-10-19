@@ -59,7 +59,7 @@ function StatsBlock({
     <div>
       <div className="flex items-center gap-2 mb-3">
         <span className="font-mono text-[10px] uppercase tracking-[.16em] text-muted-foreground">
-          Latest stored data
+          Latest data on file
         </span>
       </div>
 

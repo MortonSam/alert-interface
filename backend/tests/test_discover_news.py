@@ -64,7 +64,7 @@ def test_the_sections_fail_closed():
     assert N.visibility(fresh, None, NOW, fresh).visible
     assert N.visibility(fresh, 1, NOW, fresh).reason == "the news step's last run failed"
     assert N.visibility(NOW - timedelta(hours=25), 0, NOW, fresh).reason == "the newest story is more than 24 hours old"
-    assert N.visibility(None, 0, NOW, fresh).reason == "no stories stored"
+    assert N.visibility(None, 0, NOW, fresh).reason == "no stories on file"
     assert N.visibility(fresh, 0, NOW, NOW - timedelta(hours=30)).reason == "no quote snapshot from the last 24 hours"
 
 

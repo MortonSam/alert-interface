@@ -19,7 +19,7 @@ describe("NoLongerTrades", () => {
 
   it("shows the last stored close with its own date when one is stored", () => {
     const html = renderToStaticMarkup(<NoLongerTrades ticker={EA} exit={{ kind: "taken_private", line: LINE, since: "2026-08-04", last_close: 197.5, last_close_date: "2026-08-04" }} />);
-    expect(html).toContain("Last stored close $197.50 on August 4, 2026");
+    expect(html).toContain("Last close on file $197.50 on August 4, 2026");
   });
 
   it("reads a date from its own parts", () => {

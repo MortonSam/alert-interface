@@ -130,7 +130,7 @@ def headline_problem(story: dict, symbol: str, name: str | None, last_report, si
     if _QUARTER.search(h):
         day = story["published_at"].astimezone(NEW_YORK).date()
         if last_report is None or not 0 <= (day - last_report).days <= REPORT_HEADLINE_DAYS:
-            when = f"latest report {last_report.isoformat()}" if last_report else "no stored report"
+            when = f"latest report {last_report.isoformat()}" if last_report else "no report on file"
             return f"names an earnings quarter but is not from the {REPORT_HEADLINE_DAYS} days after the company's latest report ({when})"
     return None
 
@@ -184,7 +184,7 @@ def visibility(newest_story: datetime | None, step_exit: int | None, now: dateti
     if newest_quote is None or now - newest_quote > timedelta(hours=FRESH_HOURS):
         return Visibility(False, f"no quote snapshot from the last {FRESH_HOURS} hours")
     if newest_story is None:
-        return Visibility(False, "no stories stored")
+        return Visibility(False, "no stories on file")
     if now - newest_story > timedelta(hours=FRESH_HOURS):
         return Visibility(False, f"the newest story is more than {FRESH_HOURS} hours old")
     return Visibility(True, None)

@@ -169,7 +169,7 @@ async def compute_live_features(symbol: str, db: AsyncSession) -> LiveFeatures |
                         )
                         momentum_reason = None
     except Exception:
-        momentum_reason = "stored price bars could not be read"
+        momentum_reason = "daily price bars could not be read"
 
     return LiveFeatures(
         symbol=symbol,

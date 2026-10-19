@@ -401,7 +401,7 @@ function DraftDisplay({
         <p className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
           Ivy&apos;s Draft · {draft.aggressiveness} · {draft.direction}
         </p>
-        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && (draft.model_used === "deterministic" ? <>drafted by Ivy from the stored options</> : <>drafted by Ivy</>)}</span>
+        <span className="text-[10px] text-muted-foreground/60">{draft.model_used && (draft.model_used === "deterministic" ? <>drafted by Ivy from the options data on file</> : <>drafted by Ivy</>)}</span>
       </div>
 
       {/* B) Realism flag */}
@@ -491,9 +491,9 @@ function DraftDisplay({
         <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>
         <span>
           One-day earnings move, avg ±:{" "}
-          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct != null ? `${fb.hist_avg_abs_move_pct.toFixed(2)}%` : absentCell(fb, "hist_avg_abs_move_pct", "no stored earnings reactions with a one-day move")}</span>
+          <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct != null ? `${fb.hist_avg_abs_move_pct.toFixed(2)}%` : absentCell(fb, "hist_avg_abs_move_pct", "no earnings reactions with a one-day move on file")}</span>
         </span>
-        <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no stored quarters with an EPS outcome")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
+        <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no quarters with an EPS outcome on file")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>
         <span><Explained text="ATM IV:" /> <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
         <span><Explained text="Realized-vol rank: " />{fb.rv_rank != null ? (<><span className="font-mono text-foreground">{fb.rv_rank.toFixed(0)}</span> · <span className={rvRankShort(fb.rv_rank).colorClass}>{rvRankShort(fb.rv_rank).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
         <span><Explained text="IV−RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
@@ -1037,7 +1037,7 @@ function BuildTradePageContent() {
           </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight text-foreground">Build a Trade</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Ivy drafts the idea from stored options data{optionsCadencePhrase(ivyRule?.rule.cadence) ? ` (${optionsCadencePhrase(ivyRule?.rule.cadence)})` : ""}, earnings history, and volatility.
+            Ivy drafts the idea from the options data on file{optionsCadencePhrase(ivyRule?.rule.cadence) ? ` (${optionsCadencePhrase(ivyRule?.rule.cadence)})` : ""}, earnings history, and volatility.
             Not financial advice.
           </p>
         </div>

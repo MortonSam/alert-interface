@@ -101,7 +101,7 @@ def test_branch_1_reported_state_with_and_without_eps_before_and_after_settlemen
     t, _, _ = B.reported_clause(today=date(2026, 10, 6), event_date=date(2026, 10, 5), timing="bmo", eps_actual=1.0, eps_estimate=1.0, outcome="meet", pct_change_1d=1.25)
     assert t == "Reported Oct 5, 2026 before the open: EPS $1.00 against a $1.00 estimate, a match; the stock moved +1.2% that session."
     assert B.reported_clause(today=date(2026, 10, 2), event_date=date(2026, 10, 2), timing="amc")[0].endswith("the move settles at the close on Oct 5, 2026.")
-    assert B.reported_clause(today=date(2026, 10, 7), event_date=date(2026, 10, 2), timing="amc", bars_through=date(2026, 10, 2))[0].endswith("(close Oct 2, 2026 to close Oct 5, 2026) is not yet stored.")
+    assert B.reported_clause(today=date(2026, 10, 7), event_date=date(2026, 10, 2), timing="amc", bars_through=date(2026, 10, 2))[0].endswith("(close Oct 2, 2026 to close Oct 5, 2026) is not yet on file.")
     assert "recorded once the report timing is known" in B.reported_clause(today=T, event_date=T, timing="unknown")[0]
     assert B.in_reaction_window(date(2026, 10, 2), T) and not B.in_reaction_window(date(2026, 9, 20), T)
 

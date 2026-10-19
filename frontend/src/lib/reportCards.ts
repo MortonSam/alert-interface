@@ -45,7 +45,7 @@ export function surpriseSize(r: HistoricalReaction): string | null {
   return `${Math.abs(shown).toFixed(1)}%`;
 }
 
-const NO_EPS = "No EPS figure is stored for this report.";
+const NO_EPS = "No EPS figure is on file for this report.";
 
 /** "EPS $0.41 against a $0.35 estimate, beat by 17.1%" (never "a 8.0% beat": the size follows the verb, so no article depends on it) */
 export function epsLine(r: HistoricalReaction): { eps: string | null; epsAbsent: string | null } {

@@ -39,7 +39,7 @@ export function OptionsVerdictView({ verdict }: { verdict: Verdict }) {
   }
   if (!VERDICT_SENTENCE_SHOWN || !verdict.sentence) {
     // the range alone, by the expiration, with its receipt: the switch is off, or the API sent no report move
-    if (!verdict.band) return <p className="text-base text-muted-foreground max-w-2xl" data-testid="options-verdict-absent"><Explained text="No implied range is stored for this expiration." /></p>;
+    if (!verdict.band) return <p className="text-base text-muted-foreground max-w-2xl" data-testid="options-verdict-absent"><Explained text="No implied range is on file for this expiration." /></p>;
     return (
       <div data-testid="options-range-only">
         <RangeBandView band={verdict.band} />

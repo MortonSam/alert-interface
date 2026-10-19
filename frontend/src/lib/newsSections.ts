@@ -5,7 +5,7 @@ import type { NewsHeadline } from "@/lib/api";
 import { fmtIsoDateTime } from "@/lib/freshness";
 
 export const MOVERS_TITLE = "Today's biggest movers";
-export const MOVERS_SUBTITLE = "The S&P 500 stocks up and down the most today, from our latest stored quotes.";
+export const MOVERS_SUBTITLE = "The S&P 500 stocks up and down the most today, from our latest quotes on file.";
 export const STORIES_TITLE = "In the news";
 export const STORIES_SUBTITLE = "Today's stories about S&P 500 companies, the companies that moved most first. Headlines link to the original article.";
 

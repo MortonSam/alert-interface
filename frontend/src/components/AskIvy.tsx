@@ -66,7 +66,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
             )}
           </p>
           {answer.inputs.length > 0 && (
-            <p className="font-mono text-[11px] text-muted-foreground/70 mt-2" title={answer.rule}>{asOf ? `${asOf} · ` : ""}Checked against this page&apos;s stored facts</p>
+            <p className="font-mono text-[11px] text-muted-foreground/70 mt-2" title={answer.rule}>{asOf ? `${asOf} · ` : ""}Checked against this page&apos;s facts on file</p>
           )}
         </div>
       )}

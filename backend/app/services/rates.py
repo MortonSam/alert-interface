@@ -66,7 +66,7 @@ def pick_rate(rows: list[tuple[date, float]], on: date, max_sessions: int = RATE
     from app.services.trading_calendar import sessions_after
     before = sorted((d, v) for d, v in rows if d <= on)
     if not before:
-        return RateOn(None, None, f"no {RATE_SERIES} value stored on or before {on.isoformat()}")
+        return RateOn(None, None, f"no {RATE_SERIES} value on file on or before {on.isoformat()}")
     d, v = before[-1]
     age = sessions_after(d, on)
     if age > max_sessions:
