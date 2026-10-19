@@ -30,7 +30,7 @@ import { NO_DRAFT_NOT_CHARGED, ivyDecisionSentence } from "@/lib/ivyOutcomes";
 import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
 import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
 import { matchTickers } from "@/lib/tickerSearch";
-import { ESTIMATE_NOTE, chancePastBreakeven, estimateReceipt, fmtDollars, gainAtImpliedMove, payoffRange, stretchLine, type DebitTrade } from "@/lib/tradeMath";
+import { ESTIMATE_NOTE, NO_IMPLIED_MOVE, NO_IMPLIED_VOL, chancePastBreakeven, estimateReceipt, fmtDollars, gainAtImpliedMove, impliedMoveLabel, payoffRange, stretchLine, type DebitTrade } from "@/lib/tradeMath";
 import PayoffSimulator from "@/components/PayoffSimulator";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
@@ -273,7 +273,7 @@ function DraftDisplay({
     ? { direction: draft.direction, strike: draft.suggested_strike, spreadStrike: draft.suggested_spread_strike ?? null, costPerShare: (isSpread ? netDebit : leg1Mid) as number }
     : null;
   const upside = {
-    moveLabel: movePct != null ? `If ${draft.symbol} moves the implied ${movePct.toFixed(1)}% by expiration` : "If it moves the implied amount by expiration",
+    moveLabel: movePct != null && trade ? impliedMoveLabel(draft.symbol, trade.direction, movePct) : null,
     gain: trade && movePct != null ? gainAtImpliedMove(trade, spot, movePct) : null,
     chance: trade && breakeven != null && fb.atm_iv_pct != null && estDays != null ? chancePastBreakeven(spot, breakeven, fb.atm_iv_pct, estDays, trade.direction) : null,
     receipt: fb.atm_iv_pct != null && estDays != null ? estimateReceipt(fb.atm_iv_pct, estDays, spot, fb.options_as_of) : null,
@@ -533,15 +533,15 @@ function DraftDisplay({
             ) : (
               <div className="border border-border/60 bg-transparent rounded-md p-5 space-y-3" data-testid="upside-estimate">
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">{upside.moveLabel}</p>
+                  {upside.moveLabel && <p className="text-xs text-muted-foreground mb-1">{upside.moveLabel}</p>}
                   <p className={`font-mono text-2xl font-semibold tabular-nums ${upside.gain == null ? "text-muted-foreground" : upside.gain >= 0 ? "text-success" : "text-destructive"}`}>
-                    {upside.gain != null ? fmtDollars(upside.gain) : "absent: no implied move in the options data"}
+                    {upside.gain != null ? fmtDollars(upside.gain) : NO_IMPLIED_MOVE}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1"><Explained text="Chance it finishes past breakeven" /></p>
                   <p className="font-mono text-2xl font-semibold tabular-nums">
-                    {upside.chance != null ? `${Math.round(upside.chance * 100)}%` : "absent: no implied volatility in the options data"}
+                    {upside.chance != null ? `${Math.round(upside.chance * 100)}%` : NO_IMPLIED_VOL}
                   </p>
                 </div>
               </div>
@@ -638,15 +638,15 @@ function DraftDisplay({
                     {altIsUnlimited ? (
                       <div className="border border-border/60 bg-transparent rounded-md p-5 space-y-3">
                         <div>
-                          <p className="text-xs text-muted-foreground mb-1">{upside.moveLabel}</p>
+                          {movePct != null && <p className="text-xs text-muted-foreground mb-1">{impliedMoveLabel(draft.symbol, "bullish", movePct)}</p>}
                           <p className={`font-mono text-2xl font-semibold tabular-nums ${altUpside.gain == null ? "text-muted-foreground" : altUpside.gain >= 0 ? "text-success" : "text-destructive"}`}>
-                            {altUpside.gain != null ? fmtDollars(altUpside.gain) : "absent: no implied move in the options data"}
+                            {altUpside.gain != null ? fmtDollars(altUpside.gain) : NO_IMPLIED_MOVE}
                           </p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground mb-1"><Explained text="Chance it finishes past breakeven" /></p>
                           <p className="font-mono text-2xl font-semibold tabular-nums">
-                            {altUpside.chance != null ? `${Math.round(altUpside.chance * 100)}%` : "absent: no implied volatility in the options data"}
+                            {altUpside.chance != null ? `${Math.round(altUpside.chance * 100)}%` : NO_IMPLIED_VOL}
                           </p>
                         </div>
                       </div>

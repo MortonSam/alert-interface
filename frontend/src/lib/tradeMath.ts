@@ -73,12 +73,38 @@ export function stretchLine(spot: number, breakeven: number, movePct: number): s
   const s = breakevenStretch(spot, breakeven, movePct);
   if (!s || s.ratio <= BREAKEVEN_STRETCH_FLAG) return null;
   const times = s.ratio.toFixed(1) === BREAKEVEN_STRETCH_FLAG.toFixed(1) ? s.ratio.toFixed(2) : s.ratio.toFixed(1);   // never "1.5 times" for a flag past 1.5
-  return `Breakeven needs a ${s.requiredPct.toFixed(1)}% move, ${times} times the ${movePct.toFixed(1)}% the options imply.`;
+  const required = s.requiredPct.toFixed(1);
+  return `Breakeven needs ${articleFor(required)} ${required}% move, ${times} times the ${movePct.toFixed(1)}% the options imply.`;
 }
+
+/** "a" or "an" before a number as it is read aloud: "an" when the reading starts with a vowel sound (eight, eighty, eight hundred,
+ *  eleven, eighteen, in the leading group of thousands), "a" otherwise. an 8%, an 11.3%, an 18%, an 80% to 89.9%, a 7.5%, a 1.5%. */
+export function articleFor(numText: string): "a" | "an" {
+  const int = numText.replace(/^[^0-9]*/, "").split(".")[0].replace(/,/g, "").replace(/^0+(?=\d)/, "");
+  if (!int || int === "0") return "a";                                  // "zero point ..."
+  const lead = Number(int.slice(0, ((int.length - 1) % 3) + 1));     // the leading group: 11 in 11,300, 8 in 8,000, 850 in 850
+  if (lead === 11 || lead === 18) return "an";
+  return String(lead).startsWith("8") ? "an" : "a";
+}
+
+/** "Oct 14, 2026" from the options data's ISO date (a calendar day, read in UTC so no zone moves it); other text passes through. */
+export function fmtChainDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+/** The label over the gain at the implied move: a call needs the stock to rise, a put needs it to fall. */
+export function impliedMoveLabel(symbol: string, direction: "bullish" | "bearish", movePct: number): string {
+  return `If ${symbol} ${direction === "bearish" ? "falls" : "rises"} the ${movePct.toFixed(1)}% the options imply by expiration`;
+}
+
+export const NO_IMPLIED_MOVE = "Not shown because the options data has no implied move.";
+export const NO_IMPLIED_VOL = "Not shown because the options data has no implied volatility.";
 
 /** The receipt under the two figures: what the estimate used. */
 export function estimateReceipt(ivPct: number, days: number, spot: number, chainDate: string | null | undefined): string {
-  return `At-the-money implied volatility ${ivPct.toFixed(1)}%, ${days} days to expiration, stock at $${spot.toFixed(2)}${chainDate ? ` in the ${chainDate} options data` : ""}.`;
+  return `At-the-money implied volatility ${ivPct.toFixed(1)}%, ${days} days to expiration, stock at $${spot.toFixed(2)}${chainDate ? ` in the ${fmtChainDate(chainDate)} options data` : ""}.`;
 }
 
 export const ESTIMATE_NOTE = "An estimate from option prices, not a forecast.";

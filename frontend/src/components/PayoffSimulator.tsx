@@ -149,12 +149,7 @@ export default function PayoffSimulator({
     return [yMin - pad, yMax + pad];
   }, [legs, xMin, xMax, daysToExpiry, mult]);
 
-  const scrubPoint = chartData.length
-    ? chartData.reduce((best, d) =>
-        Math.abs(d.price - scrubPrice) < Math.abs(best.price - scrubPrice) ? d : best)
-    : null;
   const effectivePrice = scrubPrice;
-  const scrubPnl: number | null = scrubPoint?.pnl ?? null;                         // on the selected date (the slider), simulated
   const expiryPnlAtScrub = multiLegPayoffPS(legs, scrubPrice) * mult;             // the headline: at expiration, intrinsic value only
 
   // Robinhood-style scrub: a finger dragged along the chart (or a pointer moved over it) sets the price; the plot starts after the
@@ -228,11 +223,6 @@ export default function PayoffSimulator({
         ].join(" ")} data-testid="scrub-pnl">
           {`${expiryPnlAtScrub >= 0 ? "+" : "\u2212"}$${Math.abs(expiryPnlAtScrub).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
         </p>
-        {scrubPnl != null && daysLeft > 0 && (
-          <p className="text-xs text-muted-foreground mt-1.5">
-            On {selectedDateStr}, simulated {scrubPnl >= 0 ? "+" : "\u2212"}${Math.abs(scrubPnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </p>
-        )}
       </div>
 
       {/* ── Payoff chart ──────────────────────────────────────────────────── */}

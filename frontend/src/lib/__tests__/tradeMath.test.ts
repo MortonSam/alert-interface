@@ -47,7 +47,7 @@ describe("the two figures that replace Unlimited", () => {
     expect(chancePastBreakeven(100, 107, 40, 0, "bullish")).toBeNull();
   });
   it("the receipt and the note say what the estimate is", () => {
-    expect(estimateReceipt(40, 30, 100, "2026-10-14")).toBe("At-the-money implied volatility 40.0%, 30 days to expiration, stock at $100.00 in the 2026-10-14 options data.");
+    expect(estimateReceipt(40, 30, 100, "2026-10-14")).toBe("At-the-money implied volatility 40.0%, 30 days to expiration, stock at $100.00 in the Oct 14, 2026 options data.");
     expect(ESTIMATE_NOTE).toBe("An estimate from option prices, not a forecast.");
   });
 });
@@ -84,6 +84,32 @@ describe("the payoff chart's range takes in the strikes and breakeven", () => {
   });
   it("never says 1.5 times for a ratio past the 1.5 flag", async () => {
     const { stretchLine } = await import("@/lib/tradeMath");
-    expect(stretchLine(362.44, 403.55, 7.47)).toBe("Breakeven needs a 11.3% move, 1.52 times the 7.5% the options imply.");
+    expect(stretchLine(362.44, 403.55, 7.47)).toBe("Breakeven needs an 11.3% move, 1.52 times the 7.5% the options imply.");
+  });
+});
+
+describe("Build a Trade wording (Sam, 2026-10-19)", () => {
+  it("chooses a or an by how the number is read", async () => {
+    const { articleFor } = await import("@/lib/tradeMath");
+    for (const n of ["8", "8.0", "11.3", "11", "18", "18.4", "80", "80.0", "85.5", "89.9", "800", "8,000", "11,300", "18,000"]) expect([n, articleFor(n)]).toEqual([n, "an"]);
+    for (const n of ["7.5", "1.5", "0.8", "1", "10", "12.0", "19", "90", "100", "110", "118", "180", "1,800", "111"]) expect([n, articleFor(n)]).toEqual([n, "a"]);
+  });
+  it("flags with an article that fits the number", async () => {
+    const { stretchLine } = await import("@/lib/tradeMath");
+    expect(stretchLine(100, 118, 10)).toBe("Breakeven needs an 18.0% move, 1.8 times the 10.0% the options imply.");
+    expect(stretchLine(100, 185, 50)).toBe("Breakeven needs an 85.0% move, 1.7 times the 50.0% the options imply.");
+    expect(stretchLine(100, 92.5, 4)).toBe("Breakeven needs a 7.5% move, 1.9 times the 4.0% the options imply.");
+  });
+  it("labels the implied move by direction and states absences in full sentences", async () => {
+    const { impliedMoveLabel, NO_IMPLIED_MOVE, NO_IMPLIED_VOL } = await import("@/lib/tradeMath");
+    expect(impliedMoveLabel("TSLA", "bullish", 7.47)).toBe("If TSLA rises the 7.5% the options imply by expiration");
+    expect(impliedMoveLabel("TSLA", "bearish", 7.47)).toBe("If TSLA falls the 7.5% the options imply by expiration");
+    expect(NO_IMPLIED_MOVE).toBe("Not shown because the options data has no implied move.");
+    expect(NO_IMPLIED_VOL).toBe("Not shown because the options data has no implied volatility.");
+  });
+  it("dates the receipt in the site format", async () => {
+    const { estimateReceipt, ESTIMATE_NOTE } = await import("@/lib/tradeMath");
+    expect(`${estimateReceipt(59.1, 9, 362.44, "2026-10-14")} ${ESTIMATE_NOTE}`).toBe(
+      "At-the-money implied volatility 59.1%, 9 days to expiration, stock at $362.44 in the Oct 14, 2026 options data. An estimate from option prices, not a forecast.");
   });
 });
