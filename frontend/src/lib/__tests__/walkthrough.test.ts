@@ -91,3 +91,19 @@ describe("the line comparing two stocks on a known concept", () => {
     expect(src).toMatch(/const known = from && line \?/);
   });
 });
+
+describe("step order and the entry", () => {
+  it("shows the quick check before the idea, and the idea only once the visitor answers or skips", () => {
+    const src = read("components/walkthrough/Walkthrough.tsx");
+    const check = src.indexOf("<QuickCheck key={step.key}");
+    const idea = src.indexOf("<IdeaBox idea={step.idea}");
+    expect(check).toBeGreaterThan(0);
+    expect(idea).toBeGreaterThan(check);
+    expect(src).toMatch(/step\.idea && \(!asks \|\| checked\) && <IdeaBox/);
+    expect(src).toMatch(/setSkipped\(true\); onDone\(\);/);
+    expect(src).toMatch(/setPicked\(i\); onDone\(\);/);
+  });
+  it("a ticker page offers the walkthrough only when the API says enough steps show data", () => {
+    expect(read("components/walkthrough/WalkthroughEntry.tsx")).toMatch(/!r\.entry\) return;/);
+  });
+});

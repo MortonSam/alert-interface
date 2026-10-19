@@ -6,6 +6,10 @@ it is trustworthy by its own arithmetic: on one axis (business segments first, t
 year the 10-K reports, every member's revenue on the same tag as the company's total adds up to that total within
 SUM_TOLERANCE (eliminations and corporate rows count toward the sum and are never shown as a segment). Anything else is
 returned as an absence with its reason; a split is never estimated or normalised to fit.
+
+A segment's name is its filed label (or its member's name), then written the way the 10-K's own text writes it (text_name):
+among the label and its variants ("and" for "And", "&" for "and", the plural or singular of its last word), the one the
+document's text uses most, and the label with a lower-case "and" when the text uses none of them.
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ from io import BytesIO
 
 from app.services.growth import revenue_tags
 
-SEGMENTS_VERSION = 1
+SEGMENTS_VERSION = 2                 # 2 (2026-10-19): names as the 10-K's text writes them (text_name)
 SUM_TOLERANCE = 0.01                 # members must add up to the total within 1%
 FY_DAYS = (350, 380)                 # the fiscal year's duration
 MIN_SEGMENTS = 2                     # one member is the company itself, not a split
@@ -122,6 +126,44 @@ def label_for(member: str, labels: dict[str, str]) -> str:
     """Pure: the filed label (else the humanized name), without a trailing "Segment" or "Reportable Segment"."""
     label = labels.get(member.replace(":", "_")) or humanize(member)
     return re.sub(r"\s+(?:reportable\s+)?(?:operating\s+)?segments?$", "", label, flags=re.I).strip() or label
+
+
+def name_variants(label: str) -> list[str]:
+    """Pure: the label tidied (a lower-case "and", no "[member]", no space before a comma) and its variants: "&" for "and", and the
+    plural or singular of its last word. The tidied label comes first."""
+    base = re.sub(r"\s*\[member\]\s*$", "", label, flags=re.I)
+    base = re.sub(r"\s+,", ",", base)
+    base = re.sub(r"(?<=\S) And (?=\S)", " and ", base).strip()
+    out = [base]
+    if " and " in base:
+        out.append(base.replace(" and ", " & "))
+    if " & " in base:
+        out.append(base.replace(" & ", " and "))
+    for v in list(out):
+        head, _, last = v.rpartition(" ")
+        word = last or v
+        other = word[:-1] if word.endswith("s") and not word.endswith("ss") else word + "s"
+        if word[:1].isalpha() and len(word) > 2:
+            out.append(f"{head} {other}" if head else other)
+    return list(dict.fromkeys(out))
+
+
+def document_text(html: str | None) -> str:
+    """Pure: a filing's visible text, entities decoded, white space collapsed."""
+    import html as H
+    if not html:
+        return ""
+    t = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", H.unescape(t)).replace("\u00a0", " ")
+
+
+def text_name(label: str, text: str) -> str:
+    """Pure: the variant of the label (name_variants) the 10-K's text uses most, case and word boundaries exact; the tidied label
+    on a tie or when the text uses none."""
+    variants = name_variants(label)
+    counts = [len(re.findall(rf"(?<![\w&]){re.escape(v)}(?![\w&])", text)) if text else 0 for v in variants]
+    best = max(range(len(variants)), key=lambda i: (counts[i], -i))
+    return variants[best] if counts[best] > 0 else variants[0]
 
 
 def fiscal_year(parsed: dict) -> tuple[date, date] | None:
@@ -303,4 +345,9 @@ async def read_segments(edgar, ciks: list[str], sector: str | None) -> dict:
         lx = await edgar._paced_get(edgar._sec_client, f"{base}/{lab}")
         if lx.status_code == 200:
             labels = parse_labels(lx.content)
-    return {**split_revenue(parse_instance(x.content), sector, labels), **receipt}
+    out = split_revenue(parse_instance(x.content), sector, labels)
+    if out.get("ok"):
+        text = document_text(await edgar.fetch_filing_html(cik, k["accession"], k["primary_document"]))
+        for g in out["segments"]:
+            g["label"] = text_name(g["label"], text)
+    return {**out, **receipt}

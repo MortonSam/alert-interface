@@ -98,6 +98,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     name = short_name(re.sub(r"\s*\([^)]*\)\s*$", "", t["name"] or ""), sym) or sym     # "Clorox Company (The)", "Kimco Realty Corporation (HC)"
     sector = t["sector"]
     reit = W.is_reit(sector, t["industry"])
+    noun = W.noun_for(t["industry"])
     merger = u["mergers"].get(sym)
     held = set(await holds_for(db, sym))
     periods = (src.get("periods") or {}).get("map") or {}
@@ -107,10 +108,10 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     actions = u["actions"].get(sym, [])
     ffo = await D.ffo_figures(db, sym) if reit else None
     close = await D.last_close(db, sym)
-    s1 = W.step_business(name, u["profiles"].get(sym), seg, merger, periods)
+    s1 = W.step_business(name, u["profiles"].get(sym), seg, merger, periods, noun)
     growth_rows = u["growth"].get(sym)
-    s2 = W.step_growth(name, growth_rows, sector, True, periods, reit, ffo)
-    s3 = W.step_margins(name, m, actions, periods)
+    s2 = W.step_growth(name, growth_rows, sector, True, periods, reit, ffo, noun)
+    s3 = W.step_margins(name, m, actions, periods, noun)
     rdays = await D.report_days(db, t["id"])
     stock = u["closes"].get(sym, [])
     moves = D.biggest_moves(stock, u["spy"], rdays, MARKET_DAY_MIN_SPY_PCT)
@@ -131,21 +132,21 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
                                    {"t": t["id"], "d": ne.date})).scalar()
         implied = None if "implied_move" in held else await D.implied_move(db, sym, ne.date, today)
     typical = await D.typical_move(db, t["id"], sym, held)
-    last = await D.last_report(db, t["id"], typical, today)
     fed = next(iter(decision_days(today, today + timedelta(days=400))), None)
-    s6 = W.step_upcoming(name, ne, timing, implied, typical, fed, last, D.ordinary_move(stock, rdays) if typical and not last else None)
+    s6 = W.step_upcoming(name, ne, timing, implied, typical, fed, D.ordinary_move(stock, rdays) if typical else None)
     s7 = W.step_risks(name, risks, merger)
     steps = [s1, s2, s3, s4, s5, s6, s7]
     fl = (ffo or {}).get("latest")
-    ffo_cell = ({"value": W.signed(fl["growth_pct"]), "as_of": f"{quarter_label(periods, fl['end'])}, against a year earlier"}
+    ffo_cell = ({"value": W.signed(fl["growth_pct"]), "as_of": f"{quarter_label(periods, fl['end'])}, against a year earlier", "end": str(fl["end"])}
                 if fl and fl.get("growth_pct") is not None else None)
-    row = W.compare_row(name, sym, steps, reit=reit, ffo_growth=ffo_cell, dividend=await D.dividend_yield(db, sym, close))
+    row = W.compare_row(name, sym, steps, reit=reit, noun=noun, ffo_growth=ffo_cell, dividend=await D.dividend_yield(db, sym, close))
     as_of = max([d for d, _ in u["spy"][-1:]] or [today])
-    payload = {"version": W.WALKTHROUGH_VERSION, "symbol": sym, "name": name, "sector": sector, "industry": t["industry"], "reit": reit, "minutes": W.MINUTES,
+    payload = {"version": W.WALKTHROUGH_VERSION, "symbol": sym, "name": name, "sector": sector, "industry": t["industry"], "reit": reit, "noun": noun, "minutes": W.MINUTES,
                "as_of": as_of.isoformat(), "steps": steps, "compare": row, "market_cap": t["market_cap"]}
-    story_facts = {"name": name, "sector": sector, "industry": t["industry"],
+    story_facts = {"name": name, "sector": sector, "industry": t["industry"], "noun": noun,
                    "description": (s1["sentences"][0] if s1["status"] != "absent" and u["profiles"].get(sym) else None),
-                   "steps": {s["key"]: {"numbers": s["numbers"], "sentences": s["sentences"]} for s in (s1, s2, s3) if s["status"] != "absent"},
+                   "business": ((risks or {}).get("business") or None) if s1["status"] != "absent" and not W.predates(merger, (risks or {}).get("filed")) else None,
+                   "steps": {s["key"]: {"numbers": list(s["numbers"]), "sentences": list(s["sentences"])} for s in (s1, s2, s3) if s["status"] != "absent"},
                    "risks": [{"n": r["n"], "heading": r["heading"], "body": r["body"]} for r in (risks or {}).get("risks", [])] if s7["status"] != "absent" else [],
                    "risk_filed": (risks or {}).get("filed").isoformat() if s7["status"] != "absent" and risks and risks.get("filed") else None}
     return {"payload": json.loads(json.dumps(payload, default=str)), "steps_shown": W.steps_shown(steps), "story_facts": story_facts, "as_of": as_of}

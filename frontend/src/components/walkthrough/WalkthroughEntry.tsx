@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { entryLine, fetchWalkthrough, type Walkthrough } from "@/lib/walkthrough";
 import WalkthroughOverlay, { screenFromParam, screenParam, type Screen } from "./Walkthrough";
 
-/** The line under the company name on a ticker page, and the walkthrough it opens. Shown only when a walkthrough is stored;
+/** The line under the company name on a ticker page, and the walkthrough it opens. Shown only when a walkthrough is stored and
+ *  the API says it has enough steps with data (`entry`);
  *  ?learn=1..7, ?learn=summary or ?learn=compare&with=AAPL opens it at that screen (the home page's entry links here). */
 export default function WalkthroughEntry({ symbol }: { symbol: string }) {
   const [w, setW] = useState<Walkthrough | null>(null);
@@ -13,7 +14,7 @@ export default function WalkthroughEntry({ symbol }: { symbol: string }) {
   useEffect(() => {
     let live = true;
     fetchWalkthrough(symbol).then((r) => {
-      if (!live || !r) return;
+      if (!live || !r || !r.entry) return;
       setW(r);
       const q = new URLSearchParams(window.location.search);
       if (q.get("learn")) setOpen(screenFromParam(q.get("learn"), q.get("with")));

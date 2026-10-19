@@ -36,7 +36,7 @@ export interface WalkStep {
   risks?: { n: number; sentence: string }[];
 }
 
-export interface CompareCell { value: string; as_of: string; measure?: string }
+export interface CompareCell { value: string; as_of: string }
 export interface CompareSide { symbol: string; name: string; reit?: boolean; rows: Record<string, CompareCell | null> }
 export interface CompareChoice { kind: "rival" | "ruler"; symbol: string; name: string; basis?: string; label?: string; rule?: string }
 
@@ -53,6 +53,8 @@ export interface Walkthrough {
   compare: CompareSide;
   compare_choices: CompareChoice[];
   ask_enabled: boolean;
+  /** Whether a ticker page offers this walkthrough: enough of its steps show data (the backend's ENTRY_MIN_STEPS). */
+  entry: boolean;
 }
 
 export interface CompareResult {

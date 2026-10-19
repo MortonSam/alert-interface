@@ -173,3 +173,14 @@ def read_html(html: str | bytes) -> dict:
         return {"ok": False, "reason": f"Item 1A's risk headings could not be read ({len(found)} found)", "section_chars": sum(len(p["text"]) for p in section),
                 "business": business}
     return {"ok": True, "risks": found, "section_chars": sum(len(p["text"]) for p in section), "business": business}
+
+
+async def read_risk_factors(edgar, ciks: list[str]) -> dict:
+    """The latest 10-K's risk factors (read_html) with the filing's receipt {accession, filed, form, url}."""
+    from app.services.segments import latest_annual_for
+    cik, k = await latest_annual_for(edgar, ciks)
+    if not k:
+        return {"ok": False, "reason": "no 10-K on file at the SEC"}
+    html = await edgar.fetch_filing_html(cik, k["accession"], k["primary_document"])
+    url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{k['accession'].replace('-', '')}/{k['primary_document']}"
+    return {**read_html(html), "accession": k["accession"], "filed": k["filed"], "form": k["form"], "url": url}

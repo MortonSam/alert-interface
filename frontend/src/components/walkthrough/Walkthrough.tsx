@@ -43,7 +43,7 @@ function IdeaBox({ idea, known }: { idea: WalkIdea; known: { from: string; line:
   );
 }
 
-function QuickCheck({ check }: { check: WalkCheck }) {
+function QuickCheck({ check, onDone }: { check: WalkCheck; onDone: () => void }) {
   const [picked, setPicked] = useState<number | null>(null);
   const [skipped, setSkipped] = useState(false);
   if (skipped) return null;
@@ -53,7 +53,7 @@ function QuickCheck({ check }: { check: WalkCheck }) {
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{T.quickCheck}</p>
         {!done && (
-          <button type="button" onClick={() => setSkipped(true)} className="tap text-xs text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={() => { setSkipped(true); onDone(); }} className="tap text-xs text-muted-foreground hover:text-foreground">
             {T.skip}
           </button>
         )}
@@ -68,7 +68,7 @@ function QuickCheck({ check }: { check: WalkCheck }) {
               key={o}
               type="button"
               disabled={done}
-              onClick={() => setPicked(i)}
+              onClick={() => { setPicked(i); onDone(); }}
               className={`tap text-left rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                 state === "right" ? "border-success/60 bg-success/10 text-foreground"
                   : state === "wrong" ? "border-destructive/60 bg-destructive/10 text-foreground"
@@ -93,6 +93,9 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
   const from = learnedElsewhere(step.idea, learned, w.symbol);
   const line = from && step.idea ? compareLine(factFor(others[from.symbol] ?? null, step.idea.concept), step.fact) : null;
   const known = from && line ? { from: others[from.symbol]?.name ?? from.name, line } : null;
+  // order: numbers, Ivy's sentences, the quick check, then "The idea" once the visitor answers or skips (it never shows beside an open question)
+  const asks = step.status !== "absent" && !!step.check;
+  const [checked, setChecked] = useState(false);
   return (
     <div>
       <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight text-foreground">{step.question}</h2>
@@ -131,8 +134,8 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
           {step.chart?.kind === "pe_range" && <PeRangeChart chart={step.chart} />}
         </>
       )}
-      {step.idea && <IdeaBox idea={step.idea} known={known} />}
-      {step.status !== "absent" && step.check && <QuickCheck key={step.key} check={step.check} />}
+      {asks && step.check && <QuickCheck key={step.key} check={step.check} onDone={() => setChecked(true)} />}
+      {step.idea && (!asks || checked) && <IdeaBox idea={step.idea} known={known} />}
       {(step.deeper.length > 0 || step.source) && step.status !== "absent" && (
         <details className="mt-6 group">
           <summary className="tap cursor-pointer select-none text-sm font-medium text-foreground/85 hover:text-foreground">{T.goDeeper}</summary>
@@ -267,7 +270,7 @@ function CompareScreen({ w, other, setOther }: { w: Walkthrough; other: string |
                         {cell ? (
                           <>
                             <span className="text-foreground">{cell.value}</span>
-                            <span className="block text-[11px] leading-snug text-muted-foreground">{cell.measure ? `${cell.measure}, ` : ""}{cell.as_of}</span>
+                            <span className="block text-[11px] leading-snug text-muted-foreground">{cell.as_of}</span>
                           </>
                         ) : (
                           <span className="text-muted-foreground">{data.missing}</span>

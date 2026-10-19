@@ -44,7 +44,8 @@ def ruler_for(symbol: str) -> str:
 
 def served_steps(payload: dict, growth_on: bool, pe_on: bool) -> int:
     """Pure: steps a visitor sees with data, after the flags (routers/walkthrough.gate) hide growth or the P/E."""
-    return sum(1 for s in payload["steps"] if s["status"] != "absent" and not (s["key"] == "growth" and not growth_on) and not (s["key"] == "valuation" and not pe_on))
+    return sum(1 for s in payload["steps"] if s["status"] != "absent" and not (s["key"] == "growth" and not growth_on)
+               and not (s["key"] == "valuation" and not pe_on and not payload.get("reit")))
 
 
 def choose_featured(cands: list[dict], today: date, history: list[dict]) -> dict | None:

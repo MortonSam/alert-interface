@@ -4069,8 +4069,8 @@ def visible_text(payload: dict) -> list[str]:
             out += [n["label"], n["value"], n["as_of"]]
         if st.get("check"):
             out += [st["check"]["question"], st["check"]["why"], *st["check"]["options"]]
-    for c in ((payload.get("compare") or {}).get("rows") or {}).values():
-        if c:
+    for by_measure in ((payload.get("compare") or {}).get("rows") or {}).values():
+        for c in (by_measure or {}).values():
             out += [c.get("value") or "", c.get("as_of") or ""]
     return [t for t in out if t]
 
@@ -4107,7 +4107,7 @@ async def check_walkthrough_claims(session) -> CheckResult:
                 v = st["numbers"][0]["value"] if st["numbers"] else None
                 if v is None or not 0 < float(v.replace(",", "").replace("\u2212", "-")) <= 100:
                     bad.append(f"{sym}: {st['numbers'][0]['label'] if st['numbers'] else 'P/E'} {v} outside 0 to 100")
-        dy = ((payload or {}).get("compare") or {}).get("rows", {}).get("dividend_yield")
+        dy = (((payload or {}).get("compare") or {}).get("rows", {}).get("dividend_yield") or {}).get("close")
         if dy and not 0 < dy.get("pct", 0) <= DIVIDEND_YIELD_MAX_PCT:
             bad.append(f"{sym}: dividend yield {dy.get('value')} outside 0 to {DIVIDEND_YIELD_MAX_PCT}%")
         for t in visible_text(payload or {}):

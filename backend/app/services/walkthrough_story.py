@@ -19,9 +19,11 @@ from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
 
-STORY_VERSION = 7                      # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
+STORY_VERSION = 8                      # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
                                        # 6 (same day): step 1's story never sizes its lines; no "doubled"; no comparison with companies the evidence doesn't name
                                        # 7 (same day): no "whether", "keeps climbing" or "holding up" outside step 7
+                                       # 8 (same day): "revenue", never "sales", for banks and insurers; "does" says what it sells or makes, never slogans;
+                                       #   step 2's story never says how much profit each sale earns (its check's answer); the opening of the 10-K's Item 1 as evidence
 SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|reflect\w*|result of|owing to|information (?:shown|here|given)|"
                          r"not (?:described|stated|shown|mentioned)|shown here|the (?:evidence|facts)|the data(?!\s+cent)|tends? to|(?:is|are|isn't|not|no) available|no description|not been (?:described|stated|shown)|described here|a fraction)\b", re.I)
 # Sam's rule (2026-10-19): no model sentence says what the company is sensitive or exposed to, and only step 7 names risks or what
@@ -32,8 +34,10 @@ OUTLOOK = re.compile(r"\b(?:may|might|could|can|will|would|should|going forward|
 # a step's story never states the reading its quick check asks for (walkthrough_checks)
 GIVEAWAY = {"business": re.compile(r"\b(?:depend\w*|reli\w*|concentrat\w*|diversif\w*|single|one line|two lines|several lines|most|mostly|bulk|majority|"
                                   r"nearly all|remainder|rest|share|main|mainly|primar\w*|dominat\w*|largest|biggest|smaller|larger)\b", re.I),
-            "growth": re.compile(r"\b(?:faster|slower|outpac\w*|outgr\w*|accelerat\w*|decelerat\w*|speed\w*|slow\w*|lag\w*|kept pace|in step)\b", re.I),
+            "growth": re.compile(r"\b(?:faster|slower|outpac\w*|outgr\w*|accelerat\w*|decelerat\w*|speed\w*|slow\w*|lag\w*|kept pace|in step|"
+                                 r"each (?:sale|dollar)|per sale|(?:more|less) profit|profitab\w*)\b", re.I),
             "margins": re.compile(r"\b(?:pricing power|competition|competitive|costs? (?:fell|rose|dropped|climbed)|lower costs|rising costs|swing|swung|cycl\w*|volatil\w*|steady|stable|barely)\b", re.I)}
+SALES_WORD = re.compile(r"\bsales?\b", re.I)                                  # a bank or an insurer has revenue, never sales
 MULTIPLES = re.compile(r"\b(?:doubl\w*|tripl\w*|quadrupl\w*|halv\w*|tenfold|\w+fold)\b", re.I)    # a figure in words
 MODEL_SECONDS = 60
 CALL_SECONDS = 150
@@ -65,6 +69,8 @@ def fact_lines(facts: dict) -> list[str]:
         lines.append(f"Sub-industry: {facts['industry']}")
     if facts.get("description"):
         lines.append(f"Company description: {facts['description']}")
+    if facts.get("business"):
+        lines.append(f"From Item 1, Business, of its 10-K: {facts['business']}")
     for key, st in (facts.get("steps") or {}).items():
         for n in st["numbers"]:
             lines.append(f"[{key}] {n['label']}: {n['value']} ({n['as_of']})")
@@ -93,6 +99,7 @@ def build_prompt(facts: dict, redo: dict | None = None) -> str:
     redo_block = ""
     if redo:
         redo_block = "\nYOUR LAST DRAFT FAILED THESE CHECKS. Write each again so it passes:\n" + "\n".join(f"- {k}: {v}" for k, v in redo.items()) + "\n"
+    revenue_rule = ("\n- This company is a bank or an insurer: call what it brings in \"revenue\", never \"sales\"." if facts.get("noun") == "revenue" else "")
     return f"""{VOICE}
 
 COMPANY: {facts['name']} ({facts.get('sector') or 'sector not on file'})
@@ -111,7 +118,8 @@ WRITE
   big any line is or how much the company depends on it (no most, bulk, majority, share, main).
   For "margins", never say what the change in its margin points to (pricing, costs, competition) or call it a swing or a cycle.
 - For "does": ONE sentence of at most {STORY_WORDS} words saying in plain words what the company does, what it sells or makes and to
-  whom, using only the facts and the risk factors above (begin with the company's name). No marketing words.
+  whom, using only the facts and the risk factors above (begin with the company's name). No marketing words, no slogans, nothing about
+  the index it belongs to or how it describes itself.{revenue_rule}
 - For "risks": choose up to {MAX_RISKS} of the risk factors that matter most for understanding this business, and say each in ONE plain sentence of
   at most {RISK_WORDS} words, true to its heading and text, with no detail that is not in them.
 - No digits, no currency or percent signs, no number words (one, two, ten, twice, double, half, dozen). No dates. No colons, semicolons or dashes.
@@ -141,7 +149,7 @@ def parse_draft(content: str) -> dict:
     return out
 
 
-def output_problems(sentence: str, words: int, key: str | None = None) -> list[str]:
+def output_problems(sentence: str, words: int, key: str | None = None, noun: str = "sales") -> list[str]:
     """Pure: why a drafted sentence cannot be shown (ask_ivy.check_output with no facts allowed, plus length and punctuation, plus
     Sam's rule: nothing sensitive or exposed anywhere, and outside the risks (key "risk:N") no risk and nothing about what may
     happen next; a step's sentence never states its check's answer)."""
@@ -166,6 +174,8 @@ def output_problems(sentence: str, words: int, key: str | None = None) -> list[s
         m = OUTLOOK.search(sentence)
         if m:
             problems.append(f"names a risk or what may happen next, which only the risks may: {m.group(0)}")
+    if noun == "revenue" and SALES_WORD.search(sentence):
+        problems.append("says sales for a bank or an insurer, which has revenue")
     if key in GIVEAWAY:
         m = GIVEAWAY[key].search(sentence)
         if m:
@@ -245,7 +255,7 @@ async def story_for(facts: dict, *, client=None) -> dict:
         failed: dict[str, str] = {}
         clean = []
         for i, s in drafted:
-            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i)
+            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "sales")
             if p:
                 failed[i] = "; ".join(p)
                 verdicts[i] = {"status": "rejected", "reason": failed[i], "round": rnd, "draft": s}
@@ -272,8 +282,9 @@ async def story_for(facts: dict, *, client=None) -> dict:
     return {"version": STORY_VERSION, "sentences": kept, "verdicts": verdicts, "dropped": dropped, "cost_usd": round(cost, 4)}
 
 
-def apply(payload: dict, story: dict, headings: dict[int, str] | None = None, decoy_risks: list[str] | None = None) -> None:
-    """Pure (in place): the verified sentences onto the payload's steps; the "does" line leads the summary's step 1 line."""
+def apply(payload: dict, story: dict, headings: dict[int, str] | None = None) -> None:
+    """Pure (in place): the verified sentences onto the payload's steps. The "does" line replaces step 1's vendor description (when that
+    is its first sentence) and leads the summary's step 1 line."""
     from app.services import walkthrough as W
     sents = (story or {}).get("sentences") or {}
     by_key = {s["key"]: s for s in payload["steps"]}
@@ -282,12 +293,14 @@ def apply(payload: dict, story: dict, headings: dict[int, str] | None = None, de
             by_key[k]["story"] = sents[k]
     b = by_key["business"]
     if sents.get("does") and b["status"] != "absent":
+        if b.get("described") and b["sentences"]:
+            b["sentences"][0] = sents["does"]
         seg_line = b["summary"] if b.get("fact") else None          # with a sales split, its line follows; else the plain line replaces the description
         b["summary"] = sents["does"] + (f" {seg_line}" if seg_line else "")
     risks = [{"n": int(i.split(":")[1]), "sentence": s} for i, s in sents.items() if i.startswith("risk:")]
     st = by_key["risks"]
     if st["status"] != "absent":
-        W.with_risk_story(st, payload["name"], sorted(risks, key=lambda r: r["n"]), headings, payload["steps"], decoy_risks)
+        W.with_risk_story(st, payload["name"], sorted(risks, key=lambda r: r["n"]), headings, payload["steps"], payload.get("noun") or "sales")
     payload["summary"] = W.summary(payload["name"], payload["steps"])
 
 
@@ -295,78 +308,29 @@ def headings_of(b: dict) -> dict[int, str]:
     return {r["n"]: r["heading"] for r in (b.get("story_facts") or {}).get("risks") or []}
 
 
-def decoys_for(sym: str, sector: str | None, pool: dict[str, tuple[str | None, str]]) -> list[str]:
-    """Pure: two risk sentences for step 7's fallback check, from companies in two other sectors (one each), in a fixed per-stock
-    order. pool is {symbol: (sector, its first shown risk sentence)}."""
-    from app.services.walkthrough_checks import decoy_order
-    picked, sectors = [], {sector}
-    for other in sorted((o for o in pool if o != sym), key=lambda o: decoy_order(sym, o)):
-        sec, sentence = pool[other]
-        if sec and sec not in sectors:
-            picked.append(sentence)
-            sectors.add(sec)
-        if len(picked) == 2:
-            break
-    return picked
-
-
-def names_itself(sentence: str, name: str | None, symbol: str | None = None) -> bool:
-    from app.services.walkthrough_checks import names_itself as n
-    return n(sentence, name, symbol)
-
-
-async def risk_pool(built: dict) -> dict[str, tuple[str | None, str]]:
-    """{symbol: (sector, first shown risk sentence)} over the stored walkthroughs and tonight's build."""
-    from sqlalchemy import text
-    from app.database import ScriptSessionLocal
-    pool: dict[str, tuple[str | None, str]] = {}
-    async with ScriptSessionLocal() as db:
-        for sym, p in (await db.execute(text("SELECT symbol, payload FROM ivy_walkthroughs"))).all():
-            r = next((s.get("risks") for s in p.get("steps", []) if s["key"] == "risks" and s["status"] == "ok"), None)
-            pick = next((x["sentence"] for x in r or [] if not names_itself(x["sentence"], p.get("name"), sym)), None)
-            if pick:
-                pool[sym] = (p.get("sector"), pick)
-    for sym, b in built.items():
-        r = next((s.get("risks") for s in b["payload"]["steps"] if s["key"] == "risks" and s["status"] == "ok"), None)
-        pick = next((x["sentence"] for x in r or [] if not names_itself(x["sentence"], b["payload"].get("name"), sym)), None)
-        if pick:
-            pool[sym] = (b["payload"].get("sector"), pick)
-        else:
-            pool.pop(sym, None)
-    return pool
-
-
-async def fill_risk_fallbacks(built: dict) -> None:
-    """Step 7's check for each stock with no mapped risk: which of three sentences the company lists (two decoys from other sectors)."""
-    from app.services import walkthrough as W
-    pool = await risk_pool(built)
-    for sym, b in built.items():
-        st = next(s for s in b["payload"]["steps"] if s["key"] == "risks")
-        if st["status"] == "ok" and st.get("check") is None and st.get("risks"):
-            st["check"] = W.risk_check(b["payload"]["name"], st["risks"], headings_of(b), b["payload"]["steps"],
-                                       decoys_for(sym, b["payload"].get("sector"), pool))
-
-
 # ── Compare's sentence ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 STORY_COMPARE_ROWS = ("sells", "growth", "keeps_now", "keeps_then")    # filing facts only: a price, a P/E or a date would change nightly and stale the sentence
 
 
+def slow_rows(a: dict, b: dict) -> list[dict]:
+    from app.services.walkthrough import compare_table
+    return [r for r in compare_table(a["compare"], b["compare"]) if r["key"] in STORY_COMPARE_ROWS]
+
+
 def compare_fingerprint(a: dict, b: dict) -> str:
     from app.services import walkthrough as W
-    slow = lambda p: {k: p["compare"]["rows"].get(k) for k in STORY_COMPARE_ROWS}
-    return W.fingerprint({"v": STORY_VERSION, "a": slow(a), "b": slow(b), "da": described(a), "db": described(b)})
+    return W.fingerprint({"v": STORY_VERSION, "rows": slow_rows(a, b), "da": described(a), "db": described(b)})
 
 
 def compare_facts(a: dict, b: dict) -> list[str]:
-    from app.services.walkthrough import COMPARE_LABELS
     lines = []
-    for p in (a, b):
-        for key in STORY_COMPARE_ROWS:
-            label = COMPARE_LABELS[key]
-            v = p["compare"]["rows"].get(key)
+    rows = slow_rows(a, b)
+    for p, side in ((a, "a"), (b, "b")):
+        for r in rows:
+            v = r[side]
             if v:
-                lines.append(f"{p['name']}, {label}: {v['value']} ({v['as_of']}{', ' + v['measure'] if v.get('measure') else ''})")
+                lines.append(f"{p['name']}, {r['label']}: {v['value']} ({v['as_of']})")
         desc = next((s["sentences"][0] for s in p["steps"] if s["key"] == "business" and s["status"] != "absent" and s["sentences"]), None)
         if desc:
             lines.append(f"{p['name']}, description: {desc}")
@@ -443,7 +407,6 @@ async def run_stories(built: dict, today: date, cap: float = NIGHTLY_STORY_CAP_U
         else:
             b["story"], b["story_fingerprint"] = {}, None          # facts changed and the night's cap is spent: no stale story
         apply(b["payload"], b["story"], headings_of(b))
-    await fill_risk_fallbacks(built)
     return await compare_stories(built, spent, cap)
 
 
@@ -456,7 +419,6 @@ async def reuse_stories(built: dict) -> None:
         ok = prior.get("story_fingerprint") == fp and prior.get("story")
         b["story"], b["story_fingerprint"] = (prior["story"], fp) if ok else ({}, None)
         apply(b["payload"], b["story"], headings_of(b))
-    await fill_risk_fallbacks(built)
 
 
 async def compare_stories(built: dict, spent: float, cap: float) -> float:

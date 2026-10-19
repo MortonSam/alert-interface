@@ -6,7 +6,8 @@
 
 IVY_WALKTHROUGH_ENABLED (off in production until the wording is approved) hides all three from everyone but the admin token.
 GROWTH_ENABLED and PE_ENABLED apply here (gate), at serve time: while one is off its step is the honest in-review line, its
-Compare row is blank and the summary marks it. Nothing here calls a model or fetches a price.
+Compare row is blank and the summary marks it. `entry` says whether a ticker page offers the walkthrough (at least
+W.ENTRY_MIN_STEPS steps shown after the flags). Nothing here calls a model or fetches a price.
 """
 from __future__ import annotations
 
@@ -31,25 +32,27 @@ def gate(payload: dict, growth_on: bool, pe_on: bool) -> dict:
     out = copy.deepcopy(payload)
     name = out["name"]
     reit = bool(out.get("reit"))
+    noun = out.get("noun") or "sales"
     hidden = set()
     for i, s in enumerate(out["steps"]):
         if s["key"] == "growth" and not growth_on:
-            out["steps"][i] = W.step_growth(name, None, out.get("sector"), False)
+            out["steps"][i] = W.step_growth(name, None, out.get("sector"), False, noun=noun)
             hidden.add("growth")
         if s["key"] == "valuation" and not pe_on and not reit:
             out["steps"][i] = W.step_valuation(name, out.get("sector"), None, [], None, False)
             hidden.add("valuation")
     rows = out["compare"]["rows"]
     if "growth" in hidden:
-        rows["growth"] = None
+        rows["growth"] = {}
     if "valuation" in hidden:
-        rows["valuation"] = None
+        rows["valuation"] = {}
     risks = next(s for s in out["steps"] if s["key"] == "risks")
     gone = {s.get("point") for s in payload["steps"] if s["key"] in hidden} - {None}
     if risks.get("check") and gone & set(risks["check"]["options"]):
         headings = {int(k): v for k, v in (risks.get("headings") or {}).items()}
-        risks["check"] = W.risk_check(name, risks.get("risks") or [], headings, out["steps"])
+        risks["check"] = W.risk_check(name, risks.get("risks") or [], headings, out["steps"], noun)
     out["summary"] = W.summary(name, out["steps"])
+    out["entry"] = W.steps_shown(out["steps"]) >= W.ENTRY_MIN_STEPS
     return out
 
 
@@ -72,7 +75,9 @@ async def compare(a: str = Query(..., max_length=10), b: str = Query(..., max_le
         raise HTTPException(status_code=404, detail="No walkthrough for one of these stocks")
     story = (await db.execute(text("SELECT sentence FROM ivy_compare_stories WHERE symbol = :a AND other = :b"), {"a": pa["symbol"], "b": pb["symbol"]})).scalar()
     title, idea = W.COMPARE_IDEA
-    return {"a": pa["compare"], "b": pb["compare"], "rows": W.compare_rows(pa["compare"], pb["compare"]), "missing": W.COMPARE_MISSING,
+    table = W.compare_table(pa["compare"], pb["compare"])
+    side = lambda p, k: {**{f: p["compare"][f] for f in ("symbol", "name", "reit")}, "rows": {r["key"]: r[k] for r in table}}
+    return {"a": side(pa, "a"), "b": side(pb, "b"), "rows": [{"key": r["key"], "label": r["label"]} for r in table], "missing": W.COMPARE_MISSING,
             "story": story, "idea": {"concept": "comparing", "title": title, "text": idea}}
 
 

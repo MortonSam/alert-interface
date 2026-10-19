@@ -150,19 +150,7 @@ async def typical_move(db, ticker_id, symbol: str, held: set[str]) -> dict | Non
     sample = [(d, float(m)) for d, m in rows if d not in mismatch]
     if not sample:
         return None
-    return {"pct": round(sum(abs(m) for _, m in sample) / len(sample), 1), "n": len(sample), "as_of": sample[-1][0], "dates": [d for d, _ in sample],
-            "last": {"date": sample[-1][0], "move": round(sample[-1][1], 1)}}
-
-
-async def last_report(db, ticker_id, typical: dict | None, today: date) -> dict | None:
-    """The last report's 1-day move when it is settled: the latest earnings event before today has its stored move in the typical
-    sample. A report whose move is not stored yet (or was left out of the sample) returns None, and step 6 asks about an
-    ordinary day instead."""
-    if not typical:
-        return None
-    latest = (await db.execute(text("SELECT max(event_date) FROM events WHERE ticker_id = :t AND event_type = 'earnings' AND event_date < :d"),
-                               {"t": ticker_id, "d": today})).scalar()
-    return typical["last"] if latest and typical["last"]["date"] == latest else None
+    return {"pct": round(sum(abs(m) for _, m in sample) / len(sample), 1), "n": len(sample), "as_of": sample[-1][0], "dates": [d for d, _ in sample]}
 
 
 def ordinary_move(series: list[tuple[date, float]], report_days: set[date], sessions: int = YEAR_SESSIONS) -> float | None:
@@ -200,7 +188,7 @@ def dividend_cell(rows: list[tuple[date, float]], close: dict) -> dict | None:
         return None
     total = sum(v for _, v in rows)
     return {"value": f"{total / close['close'] * 100:,.1f}%", "as_of": f"{len(rows)} dividends in the year to the {fmt_date(close['date'])} close",
-            "pct": round(total / close["close"] * 100, 2)}
+            "pct": round(total / close["close"] * 100, 2), "end": str(close["date"])}
 
 
 async def ffo_figures(db, symbol: str) -> dict | None:

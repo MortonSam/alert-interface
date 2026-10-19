@@ -1,24 +1,28 @@
-"""Ivy's quick checks: one per walkthrough step, never written by a model.
+"""Ivy's quick checks: one per walkthrough step from step 2 on, never written by a model.
 
-Every question (a) cannot be answered from any text on its own screen, (b) uses this company's own numbers and (c) needs at
-least two facts from the walkthrough put together. No arithmetic drills and no definitions: the answer is a reading of the
-numbers by a fixed rule, and the step's own sentences never state that reading. Each template returns {concept, question,
-options, answer (index into options), why}, or None when the data cannot support a fair question. Options keep a fixed order
-(categorical, or sorted by their text), so the right answer's position follows the data, not a coin.
+Every question states one fact about this stock and asks what it means for the business or for someone holding the stock; the
+answer is a reading no text on its screen states (the step's sentences give figures, never their meaning, and "The idea" appears
+only after the visitor answers or skips). The right option follows the direction of the data by a fixed rule; each wrong option is
+clearly wrong to someone who understood the idea. Each template returns {concept, question, options, answer (index into options),
+why}, or None when the data cannot support a fair question. Options whose right answer is the same text for every stock are
+ordered per stock (_ordered: a fixed hash of the stock's name), so the right answer's position is not always the same.
 
 The rules (each constant below is the threshold the explanation quotes):
-  step 1  depends on one line when the biggest is ONE_LINE_SHARE or more of sales, two lines when the biggest two make
-          TWO_LINES_SHARE or more, several otherwise.
-  step 2  earnings per share grew faster or slower than sales when one growth factor (1 + growth) is more than SAME_RATIO
-          above or below the other; the same rule compares the latest quarter with the last four quarters.
-  step 3  a margin that rose by MARGIN_SAME_POINTS or more points to pricing power or lower costs, one that fell that much to
-          competition or rising costs, anything less barely moved; a swing of CYCLICAL_SWING_POINTS or more is named cyclical.
+  step 1  no check.
+  step 2  earnings (or FFO) per share grew faster or slower than sales when one growth factor (1 + growth) is more than
+          SAME_RATIO above or below the other; about as fast asks nothing, and nor does a slower case whose sales fell.
+  step 3  a margin that rose by MARGIN_SAME_CENTS or more (in the whole cents shown) points to pricing power or lower costs,
+          one that fell that much to competition or rising costs, anything less barely moved; a swing of CYCLICAL_SWING_CENTS
+          or more is named cyclical.
   step 4  two moves are close when within CLOSE_POINTS percentage points or within CLOSE_SHARE of the larger move, whichever is
-          wider. The year was the whole market's when the stock is close to the S&P 500, else its industry's when close to the
-          median stock of its sector, else the company's own.
-  step 5  the P/E reads above or below a reference when more than PE_SAME_RATIO away from it.
-  step 6  a report-day move is bigger or smaller than usual when more than REPORT_SAME_RATIO away from the typical move.
-  step 7  a risk heading maps to the walkthrough number it would show up in first by RISK_TARGETS (first match wins).
+          wider. The year was the closer of the S&P 500 and the median stock of its sector when that one is close, else the
+          company's own.
+  step 5  investors pay more or less than usual when the P/E is more than PE_SAME_RATIO above or below its five-year median;
+          about usual asks nothing.
+  step 6  report days move the stock k times as much as an ordinary day (the typical report-day move over the ordinary day's);
+          under REPORT_MULTIPLE_MIN asks nothing.
+  step 7  a risk maps to the result it would hit first by RISK_TARGETS, only when its heading and sentence match exactly one
+          target and no supply-chain word (RISK_EXCLUDED); the options are this walkthrough's business results only.
 """
 from __future__ import annotations
 
@@ -27,28 +31,36 @@ import re
 
 from app.services.fiscal_periods import cap
 
-ONE_LINE_SHARE = 66.7           # the biggest line alone brings in two thirds of sales or more
-TWO_LINES_SHARE = 80.0          # the biggest two together bring in four fifths or more
 SAME_RATIO = 0.05               # growth factors within 5% of each other grew "about as fast"
-MARGIN_SAME_POINTS = 1.0        # margins within a point "barely moved"
-CYCLICAL_SWING_POINTS = 20.0    # a margin that moved this many points in three years marks a cyclical business
+MARGIN_SAME_CENTS = 1           # margins within a cent of each dollar (as shown, in whole cents) "barely moved"
+CYCLICAL_SWING_CENTS = 20       # a margin that moved this many cents of each dollar in three years marks a cyclical business
 CLOSE_POINTS = 5.0
 CLOSE_SHARE = 0.2
 PE_SAME_RATIO = 0.05
-REPORT_SAME_RATIO = 0.2         # Sam's rule: "about the same" is within 20% of the typical report-day move
+REPORT_MULTIPLE_MIN = 1.5       # report days must move the stock at least this many times an ordinary day for step 6's check
 GROWTH_FLAT_PCT = 2.0           # sales within this many percent of the year before read "about flat" (the summary's word)
 MOVE_MARKET_SHARE = 0.5         # a single day is the market's when SPY moved the same way by at least this share of the stock's move
 
-# step 7: a risk heading's words, and the step whose number would show the risk first (order matters: the first match wins)
+# step 7: the result a risk would hit first, by the words of its heading and sentence. A risk matching both, or none, or any
+# supply-chain word, gets no check. RISK_WORDS is how the explanation names each list (a test holds them to the patterns).
 RISK_TARGETS = (
-    (re.compile(r"\b(?:prices?|pricing|supply|oversupply|compet\w*)\b", re.I), "margins"),
-    (re.compile(r"\b(?:customers?|concentrat\w*|demand|orders?)\b", re.I), "growth"),
+    ("margins", re.compile(r"\b(?:prices?|pricing|oversupply|compet\w*)\b", re.I)),
+    ("growth", re.compile(r"\b(?:customers?|concentrat\w*|demand|orders?|rents?|rental|tenants?|vacanc\w*|leases?|revenues?)\b", re.I)),
 )
+RISK_WORDS = {"margins": "prices, pricing, oversupply or competition", "growth": "customers, concentration, demand, orders, rent, tenants, vacancy, leases or revenue"}
+RISK_EXCLUDED = re.compile(r"\b(?:supply|supplies|suppliers?|supply[- ]chains?)\b", re.I)
 # a risk sentence that names its own answer's measure is never the question
 RISK_GIVEAWAY = {"margins": re.compile(r"\b(?:margins?|profit\w*|keeps?|kept|slice)\b", re.I),
                  "growth": re.compile(r"\b(?:sales|revenues?|grow\w*|growth)\b", re.I)}
+RISK_OPTION_STEPS = ("business", "growth", "margins")     # step 7's options: business results only, never the stock price or the P/E
 
 CONCEPTS = ("segments", "growth", "margins", "market_vs_company", "pe", "p_ffo", "report_move", "risk_factors")
+
+
+def _ordered(options: list[str], right: str, seed: str) -> tuple[list[str], int]:
+    """Pure: the options in a fixed per-stock order (a hash of seed and each option), and the right one's index."""
+    o = sorted(options, key=lambda x: hashlib.sha256(f"{seed}|{x}".encode()).hexdigest())
+    return o, o.index(right)
 
 
 # ── number words (shared with services/walkthrough) ────────────────────────────────────────────────────────────────────────
@@ -93,37 +105,6 @@ def kept(x: float, tense: str = "keeps") -> str:
     return f"{'loses' if tense == 'keeps' else 'lost'} {abs(round(x))}¢ on"
 
 
-def _sorted(options: list[str], right: str) -> tuple[list[str], int]:
-    o = sorted(options)
-    return o, o.index(right)
-
-
-# ── step 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-def dependence(shares: list[float]) -> str:
-    top = sorted(shares, reverse=True)
-    if top[0] >= ONE_LINE_SHARE:
-        return "One line"
-    if len(top) > 1 and top[0] + top[1] >= TWO_LINES_SHARE:
-        return "Two lines"
-    return "Several lines"
-
-
-def segments_check(name: str, segments: list[dict], period: str) -> dict | None:
-    """The biggest two lines' shares: does the company depend on one line, two, or several?"""
-    if len(segments) < 2:
-        return None
-    a, b = sorted(segments, key=lambda s: -s["share"])[:2]
-    options = ["One line", "Two lines", "Several lines"]
-    word = dependence([s["share"] for s in segments])
-    why = {"One line": f"{a['label']} alone brought in {pct(a['share'])}, two thirds or more of its sales, so {name} depends mostly on one line.",
-           "Two lines": f"{a['label']} and {b['label']} together brought in {pct(a['share'] + b['share'])}, four fifths or more of its sales, so {name} depends mostly on those two.",
-           "Several lines": f"Its biggest two lines together brought in {pct(a['share'] + b['share'])}, under four fifths of its sales, so {name} leans on several lines."}[word]
-    return {"concept": "segments", "options": options, "answer": options.index(word), "why": why,
-            "question": f"In {period}, {a['label']} brought in {pct(a['share'])} of {name}'s sales and {b['label']} {pct(b['share'])}. "
-                        f"Does {name} depend mostly on one line of business, two, or several?"}
-
-
 # ── step 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def faster(a_pct: float, b_pct: float) -> str:
@@ -132,35 +113,40 @@ def faster(a_pct: float, b_pct: float) -> str:
     return "faster" if r > 1 + SAME_RATIO else "slower" if r < 1 - SAME_RATIO else "same"
 
 
-def growth_check(name: str, sales_pct: float, quarter: str, per_share_pct: float | None = None, per_share: str = "earnings per share",
-                 ttm_pct: float | None = None) -> dict | None:
-    """With a per-share figure for the same quarter: did it grow faster or slower than sales? Else, with the last four quarters:
-    was the latest quarter's sales growth faster or slower than the year's? None with neither (one fact is no question)."""
-    if per_share_pct is not None and sales_pct > -100 and per_share_pct > -100:
-        options = ["Faster than its sales", "About as fast as its sales", "Slower than its sales"]
-        w = faster(per_share_pct, sales_pct)
-        pick = {"faster": options[0], "same": options[1], "slower": options[2]}[w]
-        verb = lambda x: f"{'rose' if x >= 0 else 'fell'} {pct(x)}"
-        why = (f"{cap(per_share)} {verb(per_share_pct)} while sales {verb(sales_pct)}, "
-               + {"faster": "so each dollar of sales turned into more profit per share than a year earlier.",
-                  "slower": "so each dollar of sales turned into less profit per share than a year earlier.",
-                  "same": "so profit per share kept pace with sales."}[w]
-               + f" Ivy counts the two as about as fast when they are within {SAME_RATIO:.0%} of each other.")
-        return {"concept": "growth", "options": options, "answer": options.index(pick), "why": why,
-                "question": f"In {quarter}, {name}'s sales {verb(sales_pct)} from a year earlier and its {per_share} {verb(per_share_pct)}. "
-                            f"Did its {per_share} grow faster or slower than its sales?"}
-    if ttm_pct is not None:
-        options = ["Faster in the latest quarter", "About the same", "Slower in the latest quarter"]
-        w = faster(sales_pct, ttm_pct)
-        pick = {"faster": options[0], "same": options[1], "slower": options[2]}[w]
-        verb = lambda x: f"{'rose' if x >= 0 else 'fell'} {pct(x)}"
-        return {"concept": "growth", "options": options, "answer": options.index(pick),
-                "question": f"{name}'s sales {verb(ttm_pct)} over the last four quarters against the four before, and {verb(sales_pct)} in {quarter} "
-                            f"against a year earlier. Was its growth faster or slower in the latest quarter than over the whole year?",
-                "why": f"{pct(sales_pct)} in the latest quarter against {pct(ttm_pct)} over the year reads "
-                       + {"faster": "faster", "slower": "slower", "same": "about the same"}[w]
-                       + f". Ivy counts the two as about the same when they are within {SAME_RATIO:.0%} of each other."}
-    return None
+GROWTH_RIGHT = {"faster": "Each sale earns more profit than a year ago", "slower": "It is selling more but earning less on each sale"}
+GROWTH_RIGHT_REVENUE = {"faster": "Each dollar of revenue earns more profit than a year ago",
+                        "slower": "It is bringing in more revenue but earning less on each dollar"}
+GROWTH_TOGETHER = {"sales": "Its sales and profit always grow together", "revenue": "Its revenue and profit always grow together"}
+
+
+def growth_check(name: str, sales_pct: float | None, period: str, per_share_pct: float | None, per_share: str = "earnings per share",
+                 noun: str = "sales") -> dict | None:
+    """Earnings (or FFO) per share grew faster or slower than sales in the latest quarter: what does that usually mean? None when
+    they grew about as fast, when either figure is missing, or in the slower case when sales fell (the right option says it is
+    selling more)."""
+    if sales_pct is None or per_share_pct is None or sales_pct <= -100 or per_share_pct <= -100:
+        return None
+    w = faster(per_share_pct, sales_pct)
+    if w == "same" or (w == "slower" and sales_pct <= 0):
+        return None
+    right_words = GROWTH_RIGHT_REVENUE if noun == "revenue" else GROWTH_RIGHT
+    right = right_words[w]
+    other = right_words["slower" if w == "faster" else "faster"]
+    options, answer = _ordered([right, other, GROWTH_TOGETHER[noun]], right, name)
+    if per_share_pct < 0 <= sales_pct:
+        fact = f"{name}'s {per_share} fell while its {noun} rose in {period}."
+    elif sales_pct < 0 <= per_share_pct:
+        fact = f"{name}'s {per_share} rose while its {noun} fell in {period}."
+    else:
+        fact = f"{name}'s {per_share} grew {w} than its {noun} in {period}."
+    verb = lambda x: f"{'rose' if x >= 0 else 'fell'} {pct(x)}"
+    why = (f"{cap(per_share)} {verb(per_share_pct)} while {noun} {verb(sales_pct)}. "
+           + (f"When profit per share grows faster than {noun}, each dollar of {noun} is bringing in more profit than a year ago. "
+              if w == "faster" else
+              f"When profit per share grows more slowly than {noun}, the company is earning less on each dollar of {noun} than a year ago. ")
+           + f"Share buybacks also lift {per_share}, since the same profit is split over fewer shares. "
+           + f"Ivy asks this only when the two growth rates are more than {SAME_RATIO:.0%} apart.")
+    return {"concept": "growth", "options": options, "answer": answer, "why": why, "question": f"{fact} What does that usually mean?"}
 
 
 def growth_word(x: float) -> str:
@@ -169,24 +155,29 @@ def growth_word(x: float) -> str:
 
 # ── step 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+def cents_word(c: int) -> str:
+    return f"{c}¢" if c >= 0 else f"a loss of {abs(c)}¢"
+
+
 def is_cyclical(now: float, then: float | None) -> bool:
-    return then is not None and abs(now - then) >= CYCLICAL_SWING_POINTS
+    return then is not None and abs(round(now) - round(then)) >= CYCLICAL_SWING_CENTS
 
 
 def margins_check(name: str, now: float, then: float | None, unit: str = "sales dollar") -> dict | None:
-    """Now against three years earlier: what does a change like that usually point to (the idea box's reading, applied)?"""
+    """Now against three years earlier, in the whole cents the step shows: what does a change like that usually point to?"""
     if then is None:
         return None
     options = ["Pricing power or lower costs", "Competition or rising costs", "Not much, the slice barely moved"]
-    d = now - then
-    pick = options[0] if d >= MARGIN_SAME_POINTS else options[1] if d <= -MARGIN_SAME_POINTS else options[2]
-    if abs(d) < MARGIN_SAME_POINTS:
-        why = f"The slice it keeps moved less than {MARGIN_SAME_POINTS:.0f} point in three years, which Ivy reads as barely moved."
+    a, b = round(then), round(now)
+    d = b - a
+    pick = options[0] if d >= MARGIN_SAME_CENTS else options[1] if d <= -MARGIN_SAME_CENTS else options[2]
+    if abs(d) < MARGIN_SAME_CENTS:
+        why = f"The slice it keeps stayed at {cents_word(b)} of each dollar over three years, which Ivy reads as barely moved."
     else:
-        why = (f"The slice it keeps {'rose' if d > 0 else 'fell'} by {num(abs(d))} points in three years. "
+        why = (f"The slice it keeps went from {cents_word(a)} to {cents_word(b)} of each dollar in three years, {abs(d)}¢ {'more' if d > 0 else 'less'}. "
                + ("A rising margin usually points to pricing power or lower costs." if d > 0 else "A falling margin usually points to competition or rising costs."))
     if is_cyclical(now, then):
-        why += (f" A swing of {CYCLICAL_SWING_POINTS:.0f} points or more in three years is the mark of a cyclical business, whose prices rise "
+        why += (f" A swing of {CYCLICAL_SWING_CENTS}¢ or more in three years is the mark of a cyclical business, whose prices rise "
                 "and fall with supply and demand, so one good year says little about the next.")
     return {"concept": "margins", "options": options, "answer": options.index(pick), "why": why,
             "question": f"{name} {kept(then, 'kept')} each {unit} three years earlier and {kept(now)} each one over the last four quarters. "
@@ -200,12 +191,11 @@ def close(a: float, b: float) -> bool:
 
 
 def year_owner(stock: float, sector: float, market: float) -> str:
-    """Pure: "market", "industry" or "company" for a year's move (the step 4 rule in the module docstring)."""
-    if close(stock, market):
-        return "market"
-    if close(stock, sector):
-        return "industry"
-    return "company"
+    """Pure: "market", "industry" or "company" for a year's move: the closer of the two benchmarks when it is close by the rule
+    (the S&P 500 on a tie), else the company's own."""
+    near = [(abs(stock - market), 0, "market"), (abs(stock - sector), 1, "industry")]
+    near = [x for x in near if close(stock, market if x[2] == "market" else sector)]
+    return min(near)[2] if near else "company"
 
 
 OWNER_SUMMARY = {"market": "in step with the whole market", "industry": "in step with its industry", "company": "mostly its own"}
@@ -214,11 +204,17 @@ OWNER_SUMMARY = {"market": "in step with the whole market", "industry": "in step
 def market_check(name: str, sector: str, stock: float, sector_pct: float, market: float) -> dict:
     options = ["The company", "Its industry", "The whole market"]
     owner = year_owner(stock, sector_pct, market)
+    near_m, near_s = close(stock, market), close(stock, sector_pct)
+    typ = f"the typical {sector} stock's"
     rule = (f" Ivy calls two moves close when they are within {CLOSE_POINTS:.0f} points or within a fifth of the larger move, whichever is wider, "
-            "and checks the whole market first.")
-    why = {"market": f"{name}'s {pct(stock)} {'rise' if stock >= 0 else 'fall'} is close to the S&P 500's, so its year was mostly the whole market.",
-           "industry": f"{name}'s move is far from the S&P 500's but close to the typical {sector} stock's, so its year was mostly its industry.",
-           "company": f"{name}'s move is far from both the typical {sector} stock's and the S&P 500's, so its year was mostly the company's own."}[owner]
+            "and when both are close it picks the closer one.")
+    if owner == "company":
+        why = f"{name}'s move is far from both {typ} and the S&P 500's, so its year was mostly the company's own."
+    else:
+        mine, other = ("the S&P 500's", typ) if owner == "market" else (typ, "the S&P 500's")
+        whose = "the whole market" if owner == "market" else "its industry"
+        why = (f"{name}'s move is close to both, and closer to {mine} than to {other}, so its year was mostly {whose}." if near_m and near_s else
+               f"{name}'s move is close to {mine} and far from {other}, so its year was mostly {whose}.")
     return {"concept": "market_vs_company", "options": options, "answer": options.index({"company": "The company", "industry": "Its industry", "market": "The whole market"}[owner]),
             "why": why + rule,
             "question": f"Over the year {name} {moved(stock)}, the typical {sector} stock {moved(sector_pct)} and the S&P 500 {moved(market)}. "
@@ -248,97 +244,65 @@ def pe_word(pe: float, median: float) -> str:
     return {"same": "About the same as usual", "above": "More than usual", "below": "Less than usual"}[against(pe, median)]
 
 
-def pe_check(name: str, pe: float, median: float, sector: str | None = None, sector_median: float | None = None) -> dict:
-    """Against its own five-year median and the median stock of its sector: below both, above both, or between them. When the
-    P/E is about level with either (PE_SAME_RATIO) or the sector has no median shown, against its own median alone."""
+PE_RIGHT = {"below": "They expect its profits to fall from here", "above": "They expect its profits to keep growing"}
+PE_SPLIT = "Its stock split"
+
+
+def pe_check(name: str, pe: float, median: float) -> dict | None:
+    """Investors pay more or less than usual (the P/E against its own five-year median): what is a common reason? None when about
+    usual."""
     a = against(pe, median)
-    b = against(pe, sector_median) if sector_median else None
-    if b is not None and "same" not in (a, b):
-        options = ["Below both", "Between the two", "Above both"]
-        pick = options[0] if a == b == "below" else options[2] if a == b == "above" else options[1]
-        return {"concept": "pe", "options": options, "answer": options.index(pick),
-                "question": f"{name}'s P/E is {num(pe)}. Its own five-year median is {num(median)}, and the median {sector} stock in the S&P 500 is at "
-                            f"{num(sector_median)}. Next to its own past and its sector, where does today's price for each dollar of its profit sit?",
-                "why": f"{num(pe)} is {'below' if a == 'below' else 'above'} its own median of {num(median)} and {'below' if b == 'below' else 'above'} "
-                       f"its sector's {num(sector_median)}. Ivy reads a P/E within {PE_SAME_RATIO:.0%} of a median as level with it."}
-    options = ["More than usual", "About the same as usual", "Less than usual"]
-    word = pe_word(pe, median)
-    return {"concept": "pe", "options": options, "answer": options.index(word),
-            "question": f"{name}'s P/E is {num(pe)} and its five-year median is {num(median)}. Are investors paying more or less than usual for each dollar of its profit?",
-            "why": f"{num(pe)} against a median of {num(median)}. Ivy reads a P/E within {PE_SAME_RATIO:.0%} of its median as about the same, above that more, below it less."}
+    if a == "same":
+        return None
+    right = PE_RIGHT[a]
+    options, answer = _ordered([right, PE_RIGHT["above" if a == "below" else "below"], PE_SPLIT], right, name)
+    lower = a == "below"
+    return {"concept": "pe", "options": options, "answer": answer,
+            "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is a common reason?",
+            "why": f"Its P/E of {num(pe)} is {'below' if lower else 'above'} its five-year median of {num(median)}. A {'lower' if lower else 'higher'} P/E than usual "
+                   f"commonly means investors expect its profits to {'fall' if lower else 'keep growing'}. A stock split changes the share price and earnings "
+                   f"per share together, so it leaves the P/E unchanged. Ivy asks this only when the P/E is more than {PE_SAME_RATIO:.0%} from its median."}
 
 
 # ── step 6 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-def report_size(move: float, typical: float) -> str:
-    r = abs(move) / typical
-    return "Bigger" if r > 1 + REPORT_SAME_RATIO else "Smaller" if r < 1 - REPORT_SAME_RATIO else "About the same"
+REPORT_RIGHT = "Expect a bigger swing that day, in either direction"
+REPORT_WRONG = ("Expect the stock to rise that day", "Report days rarely matter for this stock")
 
 
-def last_report_check(name: str, day: str, move: float, typical: float) -> dict:
-    options = ["Bigger", "About the same", "Smaller"]
-    word = report_size(move, typical)
-    return {"concept": "report_move", "options": options, "answer": options.index(word),
-            "question": f"Last report, on {day}, {name} {moved(move)}. Its typical report day is ±{num(typical)}%. Was that a bigger or smaller move than usual?",
-            "why": f"{cap(a_an(pct(move)))} {pct(move)} move against a typical ±{num(typical)}% reads {word.lower()}. Ivy counts a move within {REPORT_SAME_RATIO:.0%} of the typical one "
-                   f"as about the same."}
+def report_multiple(typical: float, ordinary: float | None) -> float | None:
+    return typical / ordinary if ordinary and ordinary > 0 else None
 
 
-def multiple_options(ratio: float) -> tuple[list[int], int]:
-    """Pure: (three distinct multiples in ascending order, the right one): the ratio rounded (at least 1), and two wrong ones."""
-    right = max(1, round(ratio))
-    wrong = [right * 2, right + 1] if right <= 2 else [max(1, round(right / 2)), right * 2]
-    opts = sorted({right, *wrong})
-    k = 1
-    while len(opts) < 3:
-        opts = sorted({*opts, right * 2 + k})
-        k += 1
-    return opts, right
-
-
-def ordinary_day_check(name: str, ordinary: float, typical: float) -> dict | None:
-    if ordinary <= 0:
+def report_check(name: str, typical: float, ordinary: float | None, due: str) -> dict | None:
+    """Report days move the stock k times as much as an ordinary day: what does that mean for someone holding it through the next
+    report (due: "its next report on Nov 17, 2026")? None under REPORT_MULTIPLE_MIN or without an ordinary day's move."""
+    k = report_multiple(typical, ordinary)
+    if k is None or k < REPORT_MULTIPLE_MIN:
         return None
-    opts, right = multiple_options(typical / ordinary)
-    options = [f"About {n} {'time' if n == 1 else 'times'}" for n in opts]
-    return {"concept": "report_move", "options": options, "answer": opts.index(right),
-            "question": f"On an ordinary day {name} moves about ±{num(ordinary)}%. On report days it moves ±{num(typical)}%. Roughly how many times bigger is a report day?",
-            "why": f"±{num(typical)}% is {num(typical / ordinary)} times ±{num(ordinary)}%, so a report day moves it about {right} {'time' if right == 1 else 'times'} as much as an ordinary day."}
+    options, answer = _ordered([REPORT_RIGHT, *REPORT_WRONG], REPORT_RIGHT, name)
+    return {"concept": "report_move", "options": options, "answer": answer,
+            "question": f"Report days move {name} about {num(k)} times as much as an ordinary day. What does that mean for someone holding it through {due}?",
+            "why": f"A typical report day has moved it ±{num(typical)}%, against about ±{num(ordinary)}% on an ordinary day. A report can move it either way, "
+                   f"so holding through one means a bigger swing that day, up or down. Ivy asks this only when report days move a stock at least "
+                   f"{num(REPORT_MULTIPLE_MIN)} times as much as an ordinary day."}
 
 
 # ── step 7 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-def risk_target(heading: str) -> str | None:
-    for rx, step in RISK_TARGETS:
-        if rx.search(heading or ""):
-            return step
-    return None
-
-
-def risk_number_check(name: str, sentence: str, right: str, decoys: list[str]) -> dict:
-    options, answer = _sorted([right] + decoys[:2], right)
-    return {"concept": "risk_factors", "options": options, "answer": answer,
-            "question": f"{name} lists this risk. {sentence} If it came true, which number from this walkthrough would show it first?",
-            "why": f"{right} is the first number such a risk would reach. Ivy maps a risk about prices, supply or competition to what the company keeps "
-                   f"of each sale, and one about customers, demand or orders to its sales."}
-
-
-def risk_list_check(name: str, sentence: str, decoys: list[str]) -> dict | None:
-    if len(decoys) < 2:
+def risk_target(heading: str, sentence: str = "") -> str | None:
+    """Pure: "margins" or "growth" when the risk's heading and sentence match exactly one target and no supply-chain word, else None."""
+    words = f"{heading or ''} {sentence or ''}"
+    if RISK_EXCLUDED.search(words):
         return None
-    options, answer = _sorted([sentence] + decoys[:2], sentence)
+    hits = {step for step, rx in RISK_TARGETS if rx.search(words)}
+    return hits.pop() if len(hits) == 1 else None
+
+
+def risk_check(name: str, sentence: str, right: str, decoys: list[str], noun: str = "sales") -> dict:
+    options, answer = _ordered([right] + decoys[:2], right, name)
+    each = "each revenue dollar" if noun == "revenue" else "each sale"
     return {"concept": "risk_factors", "options": options, "answer": answer,
-            "question": f"Which of these does {name} list as a risk?",
-            "why": f"The right one comes from Item 1A of {name}'s annual report. The other two come from the annual reports of companies in other sectors."}
-
-
-def names_itself(sentence: str, name: str | None, symbol: str | None = None) -> bool:
-    """Pure: the sentence names its own company by the first word of its name or its symbol ("Apple's markets", "AMD sells"), which
-    would give it away among the options of step 7's fallback check."""
-    words = [w for w in [(name or "").split()[0] if name else "", symbol or ""] if w]
-    return any(re.search(rf"\b{re.escape(w)}\b", sentence, re.I) for w in words)
-
-
-def decoy_order(symbol: str, other: str) -> str:
-    """Pure: a fixed, per-stock order for picking decoys (the same every night for the same pool)."""
-    return hashlib.sha256(f"{symbol}:{other}".encode()).hexdigest()
+            "question": f"{name} lists this risk. {sentence} If it came true, which of {name}'s own results would it hit most directly?",
+            "why": f"{right} is the result such a risk would reach first. A risk about {RISK_WORDS['margins']} hits what a company keeps of {each}, "
+                   f"and one about {RISK_WORDS['growth']} hits its {noun}."}

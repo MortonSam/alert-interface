@@ -9,6 +9,9 @@ Real estate trusts get no measure: depreciation makes their margins say little, 
 judged by is not in XBRL. "Now" is the latest four consecutive quarters as first filed; "three years earlier" is the four
 quarters ending THREE_YEARS_DAYS before (within END_MATCH_DAYS). Both halves use one revenue tag. Every figure is checked
 against MARGIN_BAND before it is used.
+
+by_measure carries every measure the company's filings support ({measure: {now, then, now_end, then_end}}), the step's own among
+them, so Compare can show two companies on a measure both have (walkthrough.compare_table). A financial is read on net only.
 """
 from __future__ import annotations
 
@@ -16,7 +19,8 @@ from datetime import date, timedelta
 
 from app.services.growth import quarter_readings, revenue_tags
 
-MARGINS_VERSION = 2                  # 2 (2026-10-19): the profit line with a recent quarter; three years earlier on any revenue tag
+MARGINS_VERSION = 3                  # 2 (2026-10-19): the profit line with a recent quarter; three years earlier on any revenue tag
+                                     # 3 (same day): every measure the company files (by_measure), so Compare can set like against like
 THREE_YEARS_DAYS = 1092              # 156 weeks: the fiscal quarter three years earlier (52/53-week years drift a few days)
 END_MATCH_DAYS = 20
 FRESH_DAYS = 230                     # the latest quarter used ended within this many days (a tag the company stopped filing is skipped)
@@ -80,6 +84,23 @@ def _ttm_ending(us_gaap: dict, sector: str | None, profit: dict[date, dict], tar
     return None
 
 
+MEASURE_TAGS = {"gross": GROSS_TAGS, "operating": OPERATING_TAGS, "net": NET_TAGS}
+
+
+def by_measure(facts: dict, sector: str | None, today: date) -> dict[str, dict]:
+    """Pure: {measure: {now, then, now_end, then_end}} for each measure the filings support within its band (net only for a financial)."""
+    if measure_for(sector) is None:
+        return {}
+    us_gaap = (facts.get("facts") or {}).get("us-gaap") or {}
+    out = {}
+    for measure in (("net",) if measure_for(sector) == "net" else ("gross", "operating", "net")):
+        cands = [(measure, q, t) for t in MEASURE_TAGS[measure] if (q := _quarters(us_gaap, t))]
+        r = _read(us_gaap, sector, cands, today)
+        if r.get("ok"):
+            out[measure] = {"now": r["now"], "then": r["then"], "now_end": r["now_end"], "then_end": r["then_end"]}
+    return out
+
+
 def margins(facts: dict, sector: str | None, today: date) -> dict:
     """Pure: {ok, measure, label, plain, now, then, now_start, now_end, then_end, filed_on, revenue_tag, profit_tag, now_revenue, now_profit,
     then_revenue, then_profit} or {ok: False, reason}. Percentages to one decimal. "Now" is the latest four consecutive quarters
@@ -89,7 +110,14 @@ def margins(facts: dict, sector: str | None, today: date) -> dict:
     if first is None:
         return {"ok": False, "reason": NO_MEASURE[sector]}
     us_gaap = (facts.get("facts") or {}).get("us-gaap") or {}
-    for measure, profit, ptag in _profit_candidates(us_gaap, first):
+    out = _read(us_gaap, sector, _profit_candidates(us_gaap, first), today)
+    if out.get("ok"):
+        out["by_measure"] = by_measure(facts, sector, today)
+    return out
+
+
+def _read(us_gaap: dict, sector: str | None, candidates: list, today: date) -> dict:
+    for measure, profit, ptag in candidates:
         recent = [d for d in profit if (today - d).days <= FRESH_DAYS]
         for end in sorted(recent, reverse=True)[:2]:
             got = _ttm_ending(us_gaap, sector, profit, end)
