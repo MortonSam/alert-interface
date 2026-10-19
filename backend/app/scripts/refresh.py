@@ -116,12 +116,12 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Material filings (8-K)",         ["python", "-m", "app.scripts.scan_material_filings"]),
     ("Research notes (nightly)",       ["python", "-m", "app.scripts.generate_notes"]),
     ("Research note check",            ["python", "-m", "app.scripts.note_smoke", "--rotate=3"]),
-    # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
-    # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
-    ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
     # after the P/E, the reactions, the chains and the calendar it reads: Ivy's walkthrough, rule-built steps for every stock and
     # model sentences only where a stock's filing facts changed (services/walkthrough_story's nightly cap)
     ("Ivy walkthroughs",                ["python", "-m", "app.scripts.build_walkthroughs", "--write"]),
+    # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
+    # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
+    ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 

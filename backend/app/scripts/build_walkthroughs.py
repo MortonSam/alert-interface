@@ -200,7 +200,8 @@ async def run(argv: list[str]) -> int:
                      "p": json.dumps(payload, default=str), "src": json.dumps(b["sources"], default=str), "st": json.dumps(b.get("story") or {}, default=str),
                      "n": b["steps_shown"]})
             if not only:
-                await db.execute(text("DELETE FROM ivy_walkthroughs WHERE NOT (symbol = ANY(:s))"), {"s": symbols})
+                # a ticker that left the index or stopped trading keeps no walkthrough
+                await db.execute(text("DELETE FROM ivy_walkthroughs WHERE symbol NOT IN (SELECT symbol FROM tickers WHERE is_active)"))
                 from app.services.walkthrough_compare import featured
                 prev = (await db.execute(text("SELECT value FROM system_metadata WHERE key = :k"), {"k": FEATURED_KEY})).scalar()
                 pick = featured(built, u, today, (json.loads(prev) or {}).get("history", []) if prev else [])
