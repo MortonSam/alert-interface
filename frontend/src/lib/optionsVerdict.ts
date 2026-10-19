@@ -87,7 +87,7 @@ export function optionsVerdict(v: VerdictInput): Verdict {
     return { kind: "absent", line: `${v.symbol} has not confirmed its next report date, so options are not read against it yet.` };
   }
   if (r?.heldFacts?.some((x) => x === "implied_move" || x === "report_date")) {
-    return { kind: "absent", line: `The options figures for ${v.symbol} are paused while a check on them is open, so there is no options verdict.` };
+    return { kind: "absent", line: `The options figures for ${v.symbol} are on hold while we verify them.` };
   }
   const report = fmtDay(v.nextReport)!;
   const sameReport = !f.next_earnings_date || f.next_earnings_date.slice(0, 10) === v.nextReport.slice(0, 10);
@@ -130,7 +130,7 @@ export function optionsVerdict(v: VerdictInput): Verdict {
       const through = fmtDay(v.typical.through);
       receipt += ` Typical move is the average size of the first-day move across ${r.typicalN} reports${through ? ` through ${through}` : ""}.`;
     } else if (r.heldFacts?.includes("typical_move")) {
-      why = "The typical move is paused while a check on it is open, so the move is not compared with one.";
+      why = "The typical move is on hold while we verify it, so the move is not compared with one.";
     } else if (r.typicalN != null && r.typicalN < MOVE_MIN_REPORTS) {
       why = `Only ${r.typicalN} past reports are stored, fewer than the ${MOVE_MIN_REPORTS} a typical move needs, so the move is not compared with one.`;
     } else {
