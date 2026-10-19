@@ -261,7 +261,7 @@ function CompareScreen({ w, other, setOther }: { w: Walkthrough; other: string |
                       <td key={side.symbol} className="py-2.5 pr-2">
                         {cell ? (
                           <>
-                            <span className="tabular-nums text-foreground">{cell.value}</span>
+                            <span className="text-foreground">{cell.value}</span>
                             <span className="block text-[11px] leading-snug text-muted-foreground">{cell.measure ? `${cell.measure}, ` : ""}{cell.as_of}</span>
                           </>
                         ) : (

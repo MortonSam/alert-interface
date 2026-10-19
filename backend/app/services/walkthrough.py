@@ -104,6 +104,12 @@ def day_words(d: date) -> str:
     return d.strftime("%a, ") + fmt_date(d)
 
 
+def iso_dates(text: str) -> str:
+    """Pure: "2026-06-29" written "Jun 29, 2026" (a stored reason carries ISO dates; the site never shows them)."""
+    import re
+    return re.sub(r"\b(\d{4})-(\d{2})-(\d{2})\b", lambda m: fmt_date(date(int(m[1]), int(m[2]), int(m[3]))), text)
+
+
 def _num(label: str, value: str, as_of: str) -> dict:
     return {"label": label, "value": value, "as_of": as_of}
 
@@ -202,9 +208,12 @@ def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled:
         return _step(2, status="absent", absent=cant(name, GROWTH_IN_REVIEW), idea="growth")
     rev = [r for r in rows or [] if r["metric"] == "revenue"]
     eps = {r["period_end"]: r for r in rows or [] if r["metric"] == "eps"}
-    latest = max(rev, key=lambda r: r["period_end"], default=None)
-    if not latest or latest.get("held_reason") or latest.get("value") is None or latest.get("growth_pct") is None and not latest.get("phrase"):
-        why = f"{latest['held_reason']}." if latest and latest.get("held_reason") else "Its filings and its earnings releases do not yet agree on these figures."
+    newest = max(rev, key=lambda r: r["period_end"], default=None)
+    agreed = [r for r in rev if not r.get("held_reason") and r.get("value") is not None and (r.get("growth_pct") is not None or r.get("phrase"))]
+    latest = max(agreed, key=lambda r: r["period_end"], default=None)     # the newest quarter both readers agree on (it carries its own date)
+    if newest and newest.get("held_reason") or not latest:
+        why = (f"{iso_dates(newest['held_reason'])}." if newest and newest.get("held_reason")
+               else "Its filings and its earnings releases do not yet agree on these figures.")
         return _step(2, status="absent", absent=cant(name, why), idea="growth")
     end = latest["period_end"]
     q_as_of = f"Quarter to {fmt_date(end)}"

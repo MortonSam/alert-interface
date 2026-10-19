@@ -308,6 +308,11 @@ def test_story_output_check_rejects_numbers_verdicts_and_punctuation():
     assert WS.output_problems("The stock looks cheap after the drop.", WS.STORY_WORDS)
     assert WS.output_problems("Prices swing: a lot.", WS.STORY_WORDS)
     assert WS.output_problems("It sells twice as much as before.", WS.STORY_WORDS)
+    assert WS.output_problems("Margins are high, likely because its chips are hard to replace.", WS.STORY_WORDS)
+    assert WS.output_problems("Its region is not described in the information shown here.", WS.STORY_WORDS)
+    assert WS.output_problems("Much of its revenue comes from the data center market.", WS.STORY_WORDS) == []
+    assert WS.output_problems("Apple sells phones while there is no available description of what Vivmark does.", WS.STORY_WORDS)
+    assert WS.output_problems("Vivmark operates in a manner that has not been described here.", WS.STORY_WORDS)
 
 
 def test_parse_draft_and_items_drop_unknown_risks():
@@ -322,3 +327,24 @@ def test_apply_puts_verified_sentences_on_their_steps():
     assert payload["steps"][0]["story"] == "Story." and payload["steps"][1]["story"] is None
     assert payload["steps"][6]["status"] == "ok" and payload["steps"][6]["risks"] == [{"n": 4, "sentence": "Rivals cut prices."}]
     assert payload["steps"][6]["check"]["concept"] == "risk_factors"
+
+
+def test_growth_falls_back_to_the_newest_agreed_quarter_and_never_prints_iso_dates():
+    rows = [{"metric": "revenue", "period_end": date(2026, 3, 31), "value": 110, "year_ago_value": 100, "growth_pct": 10.0, "phrase": "up 10.0% from a year earlier",
+             "held_reason": None, "readers": "XBRL and the earnings release / XBRL and the earnings release"},
+            {"metric": "revenue", "period_end": date(2026, 6, 30), "value": None, "year_ago_value": None, "growth_pct": None, "phrase": None, "held_reason": None, "readers": None}]
+    s = W.step_growth("Micron", rows, "Information Technology", True)
+    assert s["status"] == "partial" and s["numbers"][0]["as_of"] == "Quarter to Mar 31, 2026"
+    held = W.step_growth("Micron", [{**rows[0], "period_end": date(2026, 6, 30), "held_reason": "Spun off Qnity on 2025-11-01, inside the year compared"}], None, True)
+    assert held["absent"] == "Ivy can't show this for Micron yet. Spun off Qnity on Nov 1, 2025, inside the year compared."
+
+
+def test_nightly_cost_guards_compare_sentences_and_margins_change_only_with_filings():
+    from app.scripts.build_walkthroughs import latest_periodic
+    side = lambda **rows: {"compare": {"rows": {"sells": {"value": "DRAM"}, "growth": None, "keeps_now": None, "keeps_then": None, **rows}},
+                           "steps": [{"key": "business", "status": "ok"}]}
+    a, b = side(stock_1y={"value": "+1%"}, pe={"value": "11.8"}), side()
+    assert WS.compare_fingerprint(a, b) == WS.compare_fingerprint(side(stock_1y={"value": "+9%"}, pe={"value": "12.4"}), b)   # prices move nightly
+    assert WS.compare_fingerprint(a, b) != WS.compare_fingerprint(side(sells={"value": "NAND"}), b)
+    subs = {"filings": {"recent": {"form": ["8-K", "10-Q", "10-K"], "accessionNumber": ["a1", "a2", "a3"]}}}
+    assert latest_periodic(subs) == "a2"

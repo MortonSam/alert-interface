@@ -49,10 +49,19 @@ async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: 
     if (out.get("risks") or {}).get("accession") != acc or (out.get("risks") or {}).get("version") != R.RISK_FACTORS_VERSION:
         rk = await asyncio.wait_for(R.read_risk_factors(edgar, list(dict.fromkeys(ciks))), SEC_SECONDS)
         out["risks"] = {**_jsonable(rk), "version": R.RISK_FACTORS_VERSION}
-    if cik:
+    periodic = latest_periodic(await edgar.get_submissions(cik)) if cik else None
+    m = out.get("margins") or {}
+    if cik and (m.get("periodic") != periodic or m.get("version") != M.MARGINS_VERSION or not m.get("periodic")):
         facts = await asyncio.wait_for(company_facts_merged(edgar, cik, sym), SEC_SECONDS)
-        out["margins"] = {**_jsonable(M.margins(facts, sector, today)), "version": M.MARGINS_VERSION}
+        out["margins"] = {**_jsonable(M.margins(facts, sector, today)), "version": M.MARGINS_VERSION, "periodic": periodic}
     return out
+
+
+def latest_periodic(submissions: dict) -> str | None:
+    """Pure: the accession of the newest 10-Q or 10-K: the company facts change only when one is filed, so margins are recomputed
+    only then (a night without one reads no company facts)."""
+    r = (submissions.get("filings") or {}).get("recent") or {}
+    return next((a for f, a in zip(r.get("form") or [], r.get("accessionNumber") or []) if f in ("10-Q", "10-K", "10-KT")), None)
 
 
 def _jsonable(d: dict) -> dict:

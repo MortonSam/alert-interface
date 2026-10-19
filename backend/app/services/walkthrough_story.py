@@ -18,7 +18,9 @@ from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
 
-STORY_VERSION = 1
+STORY_VERSION = 4                      # 4 (2026-10-19): no speculation, no stated causes the evidence lacks, no talk about the information
+SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|information (?:shown|here|given)|"
+                         r"not (?:described|stated|shown|mentioned)|shown here|the (?:evidence|facts)|the data(?!\s+cent)|tends? to|(?:is|are|isn't|not|no) available|no description|not been (?:described|stated|shown)|described here|a fraction)\b", re.I)
 MODEL_SECONDS = 60
 CALL_SECONDS = 150
 NIGHTLY_STORY_CAP_USD = 8.0
@@ -30,7 +32,10 @@ BODY_TO_MODEL = 700
 STORY_STEPS = ("business", "growth", "margins")
 
 VOICE = """You are Ivy, explaining a company to someone who has never heard of it. Plain words, short sentences, no jargon, no hype.
-Never recommend buying or selling, never call a stock cheap, expensive, a bargain or overvalued, never predict the price."""
+Never recommend buying or selling, never call a stock cheap, expensive, a bargain or overvalued, never predict the price.
+State only what the evidence says. Never guess at a cause, never generalise about an industry, never use "likely", "probably",
+"suggests", "because", "due to" or "driven by" unless the risk factor text itself gives that cause, and never talk about the
+information you were given or what it lacks."""
 
 
 def _client():
@@ -84,6 +89,8 @@ WRITE
 - For "risks": choose up to {MAX_RISKS} of the risk factors that matter most for understanding this business, and say each in ONE plain sentence of
   at most {RISK_WORDS} words, true to its heading and text, with no detail that is not in them.
 - No digits, no currency or percent signs, no number words (one, two, ten, twice, double, half, dozen). No dates. No colons, semicolons or dashes.
+  For size, use plain words: most, the bulk, a large share, a small share, a majority, sharply, steadily. If a sentence cannot be
+  written well without a number, write about what the figure means instead.
 - Never mention Ivy, this page, the chart, the data or your sources.
 
 Return JSON only: {{{shape}}}"""
@@ -118,6 +125,9 @@ def output_problems(sentence: str, words: int) -> list[str]:
         problems.append(f"over {words} words")
     if re.search(r"[:;—–]", sentence):
         problems.append("a colon, semicolon or dash")
+    m = SPECULATION.search(sentence)
+    if m:
+        problems.append(f"speculation, a stated cause or talk about the information: {m.group(0)}")
     return problems
 
 
@@ -171,6 +181,8 @@ async def _call(fn, prompt: str) -> tuple[str, float | None]:
 
 async def story_for(facts: dict, *, client=None) -> dict:
     """{sentences: {id: sentence}, verdicts: {id: {status, reason, round}}, dropped: [...], cost_usd}. Two rounds at most."""
+    if not any(k in (facts.get("steps") or {}) for k in STORY_STEPS) and not facts.get("risks"):
+        return {"version": STORY_VERSION, "sentences": {}, "verdicts": {}, "dropped": [], "cost_usd": 0.0}     # nothing to write about: no call
     client = client or _client()
     risk_ns = {r["n"] for r in facts.get("risks") or []}
     kept: dict[str, str] = {}
@@ -231,11 +243,22 @@ def apply(payload: dict, story: dict) -> None:
 
 # ── Compare's sentence ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+STORY_COMPARE_ROWS = ("sells", "growth", "keeps_now", "keeps_then")    # filing facts only: a price, a P/E or a date would change nightly and stale the sentence
+
+
+def compare_fingerprint(a: dict, b: dict) -> str:
+    from app.services import walkthrough as W
+    slow = lambda p: {k: p["compare"]["rows"].get(k) for k in STORY_COMPARE_ROWS}
+    return W.fingerprint({"v": STORY_VERSION, "a": slow(a), "b": slow(b), "da": described(a), "db": described(b)})
+
+
 def compare_facts(a: dict, b: dict) -> list[str]:
     from app.services.walkthrough import COMPARE_ROWS
     lines = []
     for p in (a, b):
         for key, label in COMPARE_ROWS:
+            if key not in STORY_COMPARE_ROWS:
+                continue
             v = p["compare"]["rows"].get(key)
             if v:
                 lines.append(f"{p['name']}, {label}: {v['value']} ({v['as_of']}{', ' + v['measure'] if v.get('measure') else ''})")
@@ -243,6 +266,10 @@ def compare_facts(a: dict, b: dict) -> list[str]:
         if desc:
             lines.append(f"{p['name']}, description: {desc}")
     return lines
+
+
+def described(p: dict) -> bool:
+    return any(s["key"] == "business" and s["status"] != "absent" for s in p["steps"])
 
 
 def compare_prompt(a: dict, b: dict, redo: str | None = None) -> str:
@@ -341,11 +368,12 @@ async def compare_stories(built: dict, spent: float, cap: float) -> float:
             rival = rival_for(sym, tickers, have)
             for other in [o for o in [(rival or {}).get("symbol"), ruler_for(sym)] if o and o in payloads and o != sym]:
                 a, b = payloads[sym], payloads[other]
-                fp = W.fingerprint({"v": STORY_VERSION, "a": a["compare"], "b": b["compare"]})
+                fp = compare_fingerprint(a, b)
                 if stored.get((sym, other)) == fp or spent >= cap:
                     continue
                 try:
-                    st = await compare_story(a, b)
+                    # a side with no step 1 has nothing true to contrast: no call, no sentence (VMRK 2026-10-19 drafted "no description is available")
+                    st = (await compare_story(a, b)) if described(a) and described(b) else {"sentence": None, "verdicts": [{"status": "skipped", "reason": "a side has no step 1"}], "cost_usd": 0.0}
                 except Exception as exc:
                     print(f"  {sym} vs {other}: compare sentence failed: {redact(exc)[:120]}", flush=True)
                     continue
