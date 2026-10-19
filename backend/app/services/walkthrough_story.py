@@ -157,6 +157,8 @@ def output_problems(sentence: str, words: int, key: str | None = None, noun: str
     problems = check_output(sentence, set())
     if len(sentences(sentence)) != 1:
         problems.append("not exactly one sentence")
+    if not sentence.rstrip().endswith((".", "!", "?")):
+        problems.append("does not end with a full stop")
     if len(sentence.split()) > words:
         problems.append(f"over {words} words")
     if re.search(r"[:;—–]", sentence):
@@ -311,6 +313,12 @@ def headings_of(b: dict) -> dict[int, str]:
 # ── Compare's sentence ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 STORY_COMPARE_ROWS = ("sells", "growth", "keeps_now", "keeps_then")    # filing facts only: a price, a P/E or a date would change nightly and stale the sentence
+COMPARE_STORY_VERSION = 2              # 2 (2026-10-19): a Compare sentence uses only the rows its table shows (row_problems, the verifier's rule)
+# what a sentence about each row says; a row the table hides (or, for the price rows, never gives the model) may not be named
+ROW_WORDS = {"sells": re.compile(r"\b(?:biggest|largest|main|single) (?:line|product|business|segment)|\bmost of its (?:sales|revenue)|\bshare of (?:its )?(?:sales|revenue)", re.I),
+             "growth": re.compile(r"\b(?:gr[eo]w\w*|growth|faster|slower|expand\w*|shr[iu]nk\w*)\b", re.I),
+             "keeps": re.compile(r"\b(?:margins?|keeps?|kept|profit\w*)\b|\beach (?:sales |revenue )?dollar", re.I),
+             "price": re.compile(r"\b(?:stock|share price|valued|valuation|P/E|price to|dividends?|yield)\b", re.I)}
 
 
 def slow_rows(a: dict, b: dict) -> list[dict]:
@@ -320,7 +328,18 @@ def slow_rows(a: dict, b: dict) -> list[dict]:
 
 def compare_fingerprint(a: dict, b: dict) -> str:
     from app.services import walkthrough as W
-    return W.fingerprint({"v": STORY_VERSION, "rows": slow_rows(a, b), "da": described(a), "db": described(b)})
+    return W.fingerprint({"v": STORY_VERSION, "cv": COMPARE_STORY_VERSION, "rows": slow_rows(a, b), "da": described(a), "db": described(b)})
+
+
+def row_problems(sentence: str, shown: set[str]) -> list[str]:
+    """Pure: a Compare sentence naming a row its table hides (shown: the keys of the rows given to the model)."""
+    have = {"sells": "sells" in shown, "growth": "growth" in shown, "keeps": bool({"keeps_now", "keeps_then"} & shown), "price": False}
+    out = []
+    for k, rx in ROW_WORDS.items():
+        m = rx.search(sentence)
+        if m and not have[k]:
+            out.append(f"names a row the table does not show: {m.group(0)}")
+    return out
 
 
 def compare_facts(a: dict, b: dict) -> list[str]:
@@ -348,6 +367,7 @@ Two companies side by side, {a['name']} and {b['name']}. The reader sees these f
 {chr(10).join(compare_facts(a, b))}
 {f"YOUR LAST DRAFT FAILED: {redo}" if redo else ""}
 Write ONE sentence of at most {STORY_WORDS} words that tells a newcomer the most useful difference between the two businesses, using only the facts above.
+Use only the rows listed above: say nothing about growth, margins, the biggest line, the stock, its price or its valuation unless that row is listed.
 No digits, no currency or percent signs, no number words, no dates, no colons, semicolons or dashes. Return JSON only: {{"sentence": "..."}}"""
 
 
@@ -362,13 +382,14 @@ async def compare_story(a: dict, b: dict, *, client=None) -> dict:
             s = " ".join(str(json.loads(m.group(0)).get("sentence") or "").split()) if m else ""
         except ValueError:
             s = ""
-        problems = output_problems(s, STORY_WORDS) if s else ["no sentence"]
+        problems = (output_problems(s, STORY_WORDS) + row_problems(s, {r["key"] for r in slow_rows(a, b)})) if s else ["no sentence"]
         if not problems:
             vcontent, vc = await _call(client.verify_walkthrough, f"""You are a rigorous fact-checker. Check the sentence against the evidence ONLY.
 EVIDENCE:
 {chr(10).join(compare_facts(a, b))}
 SENTENCE: compare: {s}
-A comparison is supported when the figures confirm it. Bias toward "unsupported" when in doubt.
+A comparison is supported when the figures confirm it. The sentence may use only the rows listed in the evidence: a claim about growth, margins,
+the biggest line, the stock, its price or its valuation is "unsupported" when the evidence lists no such row. Bias toward "unsupported" when in doubt.
 Return JSON only: {{"verdicts": [{{"id": "compare", "status": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}""")
             cost += vc or 0.0
             v = parse_verdicts(vcontent).get("compare") or {"status": "unsupported", "reason": "no verdict returned"}

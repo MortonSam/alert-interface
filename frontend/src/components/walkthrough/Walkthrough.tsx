@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Ticker } from "@/lib/api";
 import { matchTickers } from "@/lib/tickerSearch";
 import {
-  compareLine, factFor, fetchCompare, fetchWalkthrough, learn, learnedElsewhere, readLearned,
+  alreadyMet, compareLine, factFor, fetchCompare, fetchWalkthrough, learn, learnedElsewhere, readLearned,
   type CompareResult, type Learned, type WalkCheck, type WalkIdea, type WalkStep, type Walkthrough,
 } from "@/lib/walkthrough";
 import { WALK_COPY as T } from "@/lib/walkthroughCopy";
@@ -93,8 +93,9 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
   const from = learnedElsewhere(step.idea, learned, w.symbol);
   const line = from && step.idea ? compareLine(factFor(others[from.symbol] ?? null, step.idea.concept), step.fact) : null;
   const known = from && line ? { from: others[from.symbol]?.name ?? from.name, line } : null;
-  // order: numbers, Ivy's sentences, the quick check, then "The idea" once the visitor answers or skips (it never shows beside an open question)
-  const asks = step.status !== "absent" && !!step.check;
+  // order: numbers, Ivy's sentences, the quick check, then "The idea" once the visitor answers or skips (it never shows beside an open question).
+  // A check whose answer the visitor has already met for this concept is not asked again: the line comparing the two stocks shows instead.
+  const asks = step.status !== "absent" && !!step.check && !alreadyMet(step.check, learned);
   const [checked, setChecked] = useState(false);
   return (
     <div>
@@ -313,7 +314,7 @@ export default function WalkthroughOverlay({ w, initial, onClose, onScreen }: {
     setScreen((cur) => {
       if (cur.kind === "step") {
         const idea = w.steps[cur.i]?.idea;
-        if (idea && w.steps[cur.i].status !== "absent") learn(idea.concept, w.symbol, w.name);
+        if (idea && w.steps[cur.i].status !== "absent") learn(idea.concept, w.symbol, w.name, new Date(), w.steps[cur.i].check?.same_answer);
       }
       return s;
     });

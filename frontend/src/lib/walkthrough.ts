@@ -8,7 +8,8 @@
  */
 
 export interface WalkNumber { label: string; value: string; as_of: string }
-export interface WalkCheck { concept: string; question: string; options: string[]; answer: number; why: string }
+/** same_answer: set when the right answer is the same text for every stock that reaches it (step 6; step 2 by direction). */
+export interface WalkCheck { concept: string; question: string; options: string[]; answer: number; why: string; same_answer?: string }
 export interface WalkIdea { concept: string; title: string; text: string }
 export interface ChartSeries { key: "stock" | "spy" | "sector"; label: string; points: [string, number][] }
 export interface PriceChart { kind: "price_vs_market"; as_of: string; start: string; series: ChartSeries[] }
@@ -96,7 +97,8 @@ export const HOME_ENTRY = (minutes: number) => `Learn to read a stock in ${minut
 // ── concepts learned, in this browser only ──────────────────────────────────────────────────────────────────────────────
 
 const STORE_KEY = "ivy_concepts_v1";
-export interface Learned { [concept: string]: { symbol: string; name: string; at: string } }
+/** Per concept: the stock it was first learned on, and the last check answer met for it (WalkCheck.same_answer). */
+export interface Learned { [concept: string]: { symbol: string; name: string; at: string; last?: string } }
 
 export function readLearned(): Learned {
   if (typeof window === "undefined") return {};
@@ -108,11 +110,13 @@ export function readLearned(): Learned {
   }
 }
 
-/** Record a concept the first time it is learned; a concept keeps the stock it was first learned on. */
-export function learn(concept: string, symbol: string, name: string, now = new Date()): Learned {
+/** Record a concept the first time it is learned (it keeps the stock it was first learned on), and the last same-answer check met. */
+export function learn(concept: string, symbol: string, name: string, now = new Date(), met?: string): Learned {
   const cur = readLearned();
-  if (!cur[concept]) {
-    cur[concept] = { symbol, name, at: now.toISOString() };
+  const first = !cur[concept];
+  if (first) cur[concept] = { symbol, name, at: now.toISOString() };
+  if (met) cur[concept] = { ...cur[concept], last: met };
+  if (first || met) {
     try {
       window.localStorage.setItem(STORE_KEY, JSON.stringify(cur));
     } catch {
@@ -141,6 +145,11 @@ export function factFor(w: Walkthrough | null, concept: string): WalkFact | null
  */
 export function compareLine(other: WalkFact | null, mine: WalkFact | null): string | null {
   if (!other || !mine || other.concept !== mine.concept || other.measure !== mine.measure) return null;
-  const tail = mine.tail === other.tail ? "" : ` ${mine.tail}`;
-  return `${other.lead} ${other.tail}. ${mine.short}${tail}.`;
+  const tail = mine.tail === other.tail || !mine.tail ? "" : ` ${mine.tail}`;
+  return `${other.lead}${other.tail ? ` ${other.tail}` : ""}. ${mine.short}${tail}.`;
+}
+
+/** A check whose right answer the visitor has already met for this concept (its last one): shown only the first time. */
+export function alreadyMet(check: WalkCheck | null, learned: Learned): boolean {
+  return !!check?.same_answer && learned[check.concept]?.last === check.same_answer;
 }

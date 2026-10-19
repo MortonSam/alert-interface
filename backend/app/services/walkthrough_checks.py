@@ -5,7 +5,10 @@ answer is a reading no text on its screen states (the step's sentences give figu
 only after the visitor answers or skips). The right option follows the direction of the data by a fixed rule; each wrong option is
 clearly wrong to someone who understood the idea. Each template returns {concept, question, options, answer (index into options),
 why}, or None when the data cannot support a fair question. Options whose right answer is the same text for every stock are
-ordered per stock (_ordered: a fixed hash of the stock's name), so the right answer's position is not always the same.
+ordered per stock (_ordered: a fixed hash of the stock's name), so the right answer's position is not always the same, and carry
+`same_answer`: the frontend shows such a check only the first time a visitor meets that answer (the last one met for its concept),
+and the line comparing the two stocks after that. Explanations never restate the rules below; step 4's closeness rule is in its
+Go deeper (CLOSE_RULE).
 
 The rules (each constant below is the threshold the explanation quotes):
   step 1  no check.
@@ -144,9 +147,9 @@ def growth_check(name: str, sales_pct: float | None, period: str, per_share_pct:
            + (f"When profit per share grows faster than {noun}, each dollar of {noun} is bringing in more profit than a year ago. "
               if w == "faster" else
               f"When profit per share grows more slowly than {noun}, the company is earning less on each dollar of {noun} than a year ago. ")
-           + f"Share buybacks also lift {per_share}, since the same profit is split over fewer shares. "
-           + f"Ivy asks this only when the two growth rates are more than {SAME_RATIO:.0%} apart.")
-    return {"concept": "growth", "options": options, "answer": answer, "why": why, "question": f"{fact} What does that usually mean?"}
+           + f"Share buybacks also lift {per_share}, since the same profit is split over fewer shares.")
+    return {"concept": "growth", "options": options, "answer": answer, "why": why, "question": f"{fact} What does that usually mean?",
+            "same_answer": f"growth:{w}"}
 
 
 def growth_word(x: float) -> str:
@@ -201,13 +204,15 @@ def year_owner(stock: float, sector: float, market: float) -> str:
 OWNER_SUMMARY = {"market": "in step with the whole market", "industry": "in step with its industry", "company": "mostly its own"}
 
 
+CLOSE_RULE = (f"Ivy calls two moves close when they are within {CLOSE_POINTS:.0f} points or within a fifth of the larger move, whichever is wider, "
+              "and when both benchmarks are close it picks the closer one.")
+
+
 def market_check(name: str, sector: str, stock: float, sector_pct: float, market: float) -> dict:
     options = ["The company", "Its industry", "The whole market"]
     owner = year_owner(stock, sector_pct, market)
     near_m, near_s = close(stock, market), close(stock, sector_pct)
     typ = f"the typical {sector} stock's"
-    rule = (f" Ivy calls two moves close when they are within {CLOSE_POINTS:.0f} points or within a fifth of the larger move, whichever is wider, "
-            "and when both are close it picks the closer one.")
     if owner == "company":
         why = f"{name}'s move is far from both {typ} and the S&P 500's, so its year was mostly the company's own."
     else:
@@ -216,7 +221,7 @@ def market_check(name: str, sector: str, stock: float, sector_pct: float, market
         why = (f"{name}'s move is close to both, and closer to {mine} than to {other}, so its year was mostly {whose}." if near_m and near_s else
                f"{name}'s move is close to {mine} and far from {other}, so its year was mostly {whose}.")
     return {"concept": "market_vs_company", "options": options, "answer": options.index({"company": "The company", "industry": "Its industry", "market": "The whole market"}[owner]),
-            "why": why + rule,
+            "why": why,
             "question": f"Over the year {name} {moved(stock)}, the typical {sector} stock {moved(sector_pct)} and the S&P 500 {moved(market)}. "
                         f"Was {name}'s year mostly the company, its industry, or the whole market?"}
 
@@ -260,8 +265,9 @@ def pe_check(name: str, pe: float, median: float) -> dict | None:
     return {"concept": "pe", "options": options, "answer": answer,
             "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is a common reason?",
             "why": f"Its P/E of {num(pe)} is {'below' if lower else 'above'} its five-year median of {num(median)}. A {'lower' if lower else 'higher'} P/E than usual "
-                   f"commonly means investors expect its profits to {'fall' if lower else 'keep growing'}. A stock split changes the share price and earnings "
-                   f"per share together, so it leaves the P/E unchanged. Ivy asks this only when the P/E is more than {PE_SAME_RATIO:.0%} from its median."}
+                   f"commonly means " + ("investors expect its profits to fall from here, or its profits have grown faster than its price. " if lower else
+                                        "investors expect its profits to keep growing, or its profits have fallen while its price held. ")
+                   + "A stock split changes the share price and earnings per share together, so it leaves the P/E unchanged."}
 
 
 # ── step 6 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -284,8 +290,7 @@ def report_check(name: str, typical: float, ordinary: float | None, due: str) ->
     return {"concept": "report_move", "options": options, "answer": answer,
             "question": f"Report days move {name} about {num(k)} times as much as an ordinary day. What does that mean for someone holding it through {due}?",
             "why": f"A typical report day has moved it ±{num(typical)}%, against about ±{num(ordinary)}% on an ordinary day. A report can move it either way, "
-                   f"so holding through one means a bigger swing that day, up or down. Ivy asks this only when report days move a stock at least "
-                   f"{num(REPORT_MULTIPLE_MIN)} times as much as an ordinary day."}
+                   f"so holding through one means a bigger swing that day, up or down.", "same_answer": "report_move"}
 
 
 # ── step 7 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

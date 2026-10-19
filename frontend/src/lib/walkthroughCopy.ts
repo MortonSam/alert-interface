@@ -25,7 +25,7 @@ export const WALK_COPY = {
   compareTitle: "Compare side by side",
   rivalChoice: (name: string, label?: string) => `${name}, ${label ?? "another company in its industry"}`,
   rulerChoice: (name: string) => `${name}, a company you know`,
-  knownFrom: (title: string, from: string) => `You know ${title} from ${from}`,
+  knownFrom: (title: string, from: string) => `You know ${title.replace(/^The /, "the ")} from ${from}`,
   searchPrompt: "Or pick any S&P 500 stock",
   searchPlaceholder: "Symbol or company name",
   noWalkthrough: (name: string) => `Ivy has no walkthrough for ${name} yet.`,

@@ -107,3 +107,33 @@ describe("step order and the entry", () => {
     expect(read("components/walkthrough/WalkthroughEntry.tsx")).toMatch(/!r\.entry\) return;/);
   });
 });
+
+describe("a check whose answer is the same for every stock", () => {
+  beforeEach(() => window.localStorage.clear());
+  it("is asked only until the visitor has met that answer for the concept", async () => {
+    const { alreadyMet } = await import("../walkthrough");
+    const check = { concept: "report_move", question: "q", options: ["a"], answer: 0, why: "w", same_answer: "report_move" };
+    expect(alreadyMet(check, readLearned())).toBe(false);
+    learn("report_move", "TSLA", "Tesla", new Date(), "report_move");
+    expect(alreadyMet(check, readLearned())).toBe(true);
+    const faster = { ...check, concept: "growth", same_answer: "growth:faster" };
+    learn("growth", "MU", "Micron", new Date(), "growth:slower");
+    expect(alreadyMet(faster, readLearned())).toBe(false);                 // the direction differs from the last one met
+    learn("growth", "AAPL", "Apple", new Date(), "growth:faster");
+    expect(alreadyMet(faster, readLearned())).toBe(true);
+    expect(readLearned().growth.symbol).toBe("MU");                         // still the stock it was first learned on
+    expect(alreadyMet({ ...check, same_answer: undefined }, readLearned())).toBe(false);
+  });
+  it("the comparison line reads with an empty period", () => {
+    const t: WalkFact = { concept: "report_move", measure: "report_multiple", lead: "Tesla's report days swing 4.1 times an ordinary day", short: "Tesla's swing 4.1 times", tail: "" };
+    const m: WalkFact = { ...t, lead: "Micron Technology's report days swing 1.7 times an ordinary day", short: "Micron Technology's swing 1.7 times" };
+    expect(compareLine(t, m)).toBe("Tesla's report days swing 4.1 times an ordinary day. Micron Technology's swing 1.7 times.");
+  });
+});
+
+describe("known-concept heading", () => {
+  it("reads naturally for a title that starts with The", () => {
+    expect(WALK_COPY.knownFrom("The report move", "Tesla")).toBe("You know the report move from Tesla");
+    expect(WALK_COPY.knownFrom("Growth", "Micron Technology")).toBe("You know Growth from Micron Technology");
+  });
+});

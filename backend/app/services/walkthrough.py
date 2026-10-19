@@ -471,6 +471,8 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
         chart["series"].append({"key": "sector", "label": f"Median {sector} stock", "points": _points(sec["index"])})
     deeper = [_num(f"{name} over three months", signed(c3[0]), as_of), _num("S&P 500 over three months", signed(p3[0]), as_of)]
     if sec:
+        deeper.append(_num(C.CLOSE_RULE, "", ""))
+    if sec:
         deeper += [_num(f"Median {sector} stock over one year", signed(sec["change_1y"]), f"{sec['members']} S&P 500 stocks, close {fmt_date(end)}"),
                    _num(f"Median {sector} stock over three months", signed(sec["change_3m"]), f"{sec['members']} S&P 500 stocks, close {fmt_date(end)}")]
     for mv in moves:
@@ -614,7 +616,10 @@ def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typic
     summary = (f"It reports next {due}" + (f", and {typ}." if typ else ".")) if due else f"It {typ}."
     fact = point = None
     if typical:
-        fact = {"concept": "report_move", "measure": "typical", "lead": f"{name} has moved ±{num(typical['pct'])}% on a typical report day", "short": f"{name} has moved ±{num(typical['pct'])}%",
+        k = C.report_multiple(typical["pct"], ordinary)
+        fact = ({"concept": "report_move", "measure": "report_multiple", "lead": f"{name}'s report days swing {num(k)} times an ordinary day",
+                 "short": f"{name}'s swing {num(k)} times", "tail": ""} if k else None) or \
+               {"concept": "report_move", "measure": "typical", "lead": f"{name} has moved ±{num(typical['pct'])}% on a typical report day", "short": f"{name} has moved ±{num(typical['pct'])}%",
                 "tail": f"over its last {typical['n']} reports"}
         point = f"Its typical ±{num(typical['pct'])}% move on a report day"
     st = _step(6, status="ok" if date_ or getattr(ne, "window_start", None) else "partial", numbers=numbers, sentences=sentences, idea="report_move", check=check,

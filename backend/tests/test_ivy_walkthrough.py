@@ -275,7 +275,7 @@ def test_market_check_picks_the_closer_benchmark():
     c = C.market_check("Micron", "Information Technology", 358.4, 20.1, 16.0)
     assert c["answer"] == 0 and c["question"] == ("Over the year Micron rose 358.4%, the typical Information Technology stock rose 20.1% and the S&P 500 rose 16.0%. "
                                                   "Was Micron's year mostly the company, its industry, or the whole market?")
-    assert "within 5 points" in c["why"] and "picks the closer one" in c["why"]
+    assert "within 5 points" not in c["why"] and "picks the closer one" in C.CLOSE_RULE
 
 
 def test_move_owner_for_one_day():
@@ -783,3 +783,41 @@ def test_story_outlook_words_fail_outside_the_risks():
     assert WS.output_problems("Watching whether sales keep climbing tells you how the model is holding up.", WS.STORY_WORDS, "growth")
     assert WS.output_problems("Sales rose at a solid pace, reflecting its effort to add properties.", WS.STORY_WORDS, "growth")
     assert WS.output_problems("Each sale now brings in more profit.", WS.STORY_WORDS, "growth")
+
+
+# ── last round (2026-10-19): repeated answers, step 5's two reasons, no rule sentences, Compare sentences on shown rows ────
+
+def test_same_answer_checks_are_marked_and_explanations_carry_no_rule_sentences():
+    g = C.growth_check("Micron", 379.3, "q", 1061.5)
+    assert g["same_answer"] == "growth:faster" and C.growth_check("X", 10.0, "q", -3.7)["same_answer"] == "growth:slower"
+    r = C.report_check("Tesla", 8.6, 2.1, "its next report")
+    assert r["same_answer"] == "report_move"
+    assert "same_answer" not in C.margins_check("X", 40, 10) and "same_answer" not in C.pe_check("X", 10, 12)
+    checks = [g, r, C.pe_check("X", 10, 12), C.pe_check("X", 14, 12), C.market_check("X", "Energy", 19.4, 20.1, 16.0), C.margins_check("X", 40, 10)]
+    for c in checks:
+        assert "Ivy asks" not in c["why"] and "Ivy calls" not in c["why"], c["why"]
+    assert "or its profits have grown faster than its price" in C.pe_check("X", 10, 12)["why"]
+    assert "or its profits have fallen while its price held" in C.pe_check("X", 14, 12)["why"]
+
+
+def test_step4_keeps_the_closeness_rule_in_go_deeper_and_step6_serves_the_multiple():
+    from types import SimpleNamespace
+    ne = SimpleNamespace(date=date(2026, 10, 21), confirmation="estimated", window_start=None, window_end=None, note=None)
+    s = W.step_upcoming("Tesla", ne, None, None, {"pct": 8.6, "n": 20, "as_of": date(2026, 7, 22)}, None, 2.1)
+    assert s["fact"] == {"concept": "report_move", "measure": "report_multiple", "lead": "Tesla's report days swing 4.1 times an ordinary day",
+                         "short": "Tesla's swing 4.1 times", "tail": ""}
+    assert C.CLOSE_RULE.startswith("Ivy calls two moves close when they are within 5 points")
+
+
+def test_a_compare_sentence_names_only_rows_its_table_shows():
+    s = "Apple keeps far more of each dollar than Dell does, while Dell has recently grown its sales much faster."
+    assert WS.row_problems(s, {"keeps_now", "keeps_then", "growth"}) == []
+    assert WS.row_problems(s, {"keeps_now", "keeps_then"})                      # growth hidden
+    assert WS.row_problems("Micron makes memory chips while AMD designs processors.", set()) == []
+    assert WS.row_problems("Apple's stock rose more than Dell's.", {"growth", "keeps_now"})     # price rows are never given
+    side = lambda: {"name": "X", "compare": {"rows": {}}, "steps": []}
+    assert "Use only the rows listed above" in WS.compare_prompt(side(), side())
+
+
+def test_a_sentence_without_a_full_stop_fails():
+    assert "does not end with a full stop" in WS.output_problems("Micron makes its own memory chips while AMD designs chips that others manufacture for it", WS.STORY_WORDS)
