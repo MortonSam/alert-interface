@@ -1,3 +1,4 @@
+import { fmtDate } from "@/lib/dates";
 import { normCDF } from "@/lib/black-scholes";
 
 /**
@@ -89,9 +90,7 @@ export function articleFor(numText: string): "a" | "an" {
 
 /** "Oct 14, 2026" from the options data's ISO date (a calendar day, read in UTC so no zone moves it); other text passes through. */
 export function fmtChainDate(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? (fmtDate(iso) ?? iso) : iso;
 }
 
 /** The label over the gain at the implied move: a call needs the stock to rise, a put needs it to fall. */

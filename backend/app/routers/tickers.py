@@ -683,6 +683,21 @@ async def get_ticker_chart(
                     pct_change_5d=float(r.pct_change_5d) if r.pct_change_5d is not None else None,
                     report_timing=r.report_timing if r.report_timing != "unknown" else None,
                 ))
+        # a confirmed report whose reaction is still settling: its marker shows from the report date, with no outcome or move until
+        # the reaction row lands (services/chart_markers)
+        from app.services.chart_markers import settling_dates, today_ny
+        ev_rows = (await db.execute(
+            select(Event.event_date, Event.report_timing).where(
+                Event.ticker_id == ticker_row.id, Event.event_type == "earnings",
+                (Event.is_confirmed.is_(True)) | (Event.eps_actual.isnot(None)),
+                Event.event_date <= today_ny(),
+            )
+        )).all()
+        timing = {d: t for d, t in ev_rows}
+        for d in settling_dates([date.fromisoformat(m.date) for m in markers], list(timing), date.fromisoformat(min_date[:10]), today_ny()):
+            markers.append(EarningsMarker(date=d.isoformat(), outcome="unknown",
+                                          report_timing=timing[d] if timing[d] != "unknown" else None))
+        markers.sort(key=lambda m: m.date)
 
     # Same freshness test as the quote endpoint. The quote comes from the shared
     # cache when warm, otherwise from the latest stored iv_history price.

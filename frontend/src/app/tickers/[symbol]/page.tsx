@@ -967,7 +967,7 @@ function formatTooltipDate(date: string, period: ChartPeriod): string {
     const d = new Date(date);
     return fmtIsoDateTime(d.toISOString()) ?? date;
   }
-  return date;
+  return fmtOneDate(date) ?? date;      // a daily bar: "Sep 29, 2026", the site's one date format
 }
 
 function PriceChartTooltip({
@@ -1163,7 +1163,7 @@ function PriceChart({
                     const d = new Date(pt.date);
                     return axisTime(d);
                   }
-                  return new Date(pt.date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
+                  return axisDay(pt.date);
                 }
                 if (period === "5y") return yearLabel(val as number);
                 return axisDay(val as number);

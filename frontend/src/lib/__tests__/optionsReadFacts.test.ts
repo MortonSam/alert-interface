@@ -124,10 +124,14 @@ describe("the absent read's sentence", () => {
   it("a read the nightly has not written yet is not 'Unavailable', and the sentence mirrors the backend's", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const { READ_PENDING_NIGHTLY, absentReadLine } = await import("@/lib/optionsReadFacts");
+    const { READ_ON_HOLD, READ_PENDING_NIGHTLY, absentReadLine } = await import("@/lib/optionsReadFacts");
     expect(absentReadLine(READ_PENDING_NIGHTLY)).toBe("Ivy's Read for today's options data arrives after the nightly run");
     expect(absentReadLine("no fresh options chain")).toBe("Unavailable. no fresh options chain");
     expect(absentReadLine(null)).toBe("Unavailable.");
+    expect(absentReadLine("Ivy's Read is on hold until tonight's update adds the realized volatility it was missing"))
+      .toBe("Ivy's Read is on hold until tonight's update adds the realized volatility it was missing");   // W12, alone (Sam, 2026-10-19)
+    const gate = readFileSync(join(__dirname, "../../../../backend/app/services/options_read_gate.py"), "utf8");
+    expect(gate).toContain(`f"${READ_ON_HOLD} tonight's update adds the {FACT_LABELS`);    // the backend's sentence starts as the page expects
     const backend = readFileSync(join(__dirname, "../../../../backend/app/routers/tickers.py"), "utf8");
     expect(backend).toContain(`READ_PENDING_NIGHTLY = "${READ_PENDING_NIGHTLY}"`);
     expect(backend).toContain('return absent(READ_PENDING_NIGHTLY, "cache miss, no admin token")');

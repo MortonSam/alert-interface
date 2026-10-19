@@ -3,7 +3,7 @@ import { chainDateLabel } from "../[symbol]/optionsReadFootnote";
 
 describe("Ivy's Read chain date label", () => {
   it("uses the chain's own date", () => {
-    expect(chainDateLabel({ chain_date: "2026-09-18" })).toBe(" · chain as of Sep 18, 2026");
+    expect(chainDateLabel({ chain_date: "2026-09-18" })).toBe(" · options data as of Sep 18, 2026");
   });
   it("is omitted when there is no chain date, and never falls back to today", () => {
     const today = new Date().toISOString().slice(0, 10);

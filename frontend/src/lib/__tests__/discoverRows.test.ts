@@ -268,9 +268,9 @@ describe("Discover beside the market (2026-10-15)", () => {
   });
   it("says once when most of the tape moved with the market", () => {
     expect(sharedSessionLine({ date: "2026-10-09", rows: 7, spy_move_pct: -2.1, with_market: true }, 12))
-      .toBe("7 of these 12 stocks owe their choppy month mostly to Oct 9, a day they moved with the market (SPY fell 2.1%).");
+      .toBe("7 of these 12 stocks owe their choppy month mostly to Oct 9, 2026, a day they moved with the market (SPY fell 2.1%).");
     expect(sharedSessionLine({ date: "2026-10-09", rows: 7, spy_move_pct: -0.3, with_market: false }, 12))
-      .toBe("7 of these 12 stocks owe their choppy month mostly to Oct 9. SPY moved -0.3% that day.");
+      .toBe("7 of these 12 stocks owe their choppy month mostly to Oct 9, 2026. SPY moved -0.3% that day.");
     expect(sharedSessionLine(null, 12)).toBeNull();
   });
   it("puts SPY above the movers, and says when most stocks moved with it", () => {

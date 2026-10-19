@@ -162,8 +162,12 @@ export function spreadUnavailableReason(
 /** The absent-read reason that is not a failure (mirrors READ_PENDING_NIGHTLY in backend routers/tickers.py, by test). */
 export const READ_PENDING_NIGHTLY = "Ivy's Read for today's options data arrives after the nightly run";
 
-/** What the block says when no read is shown: the pending sentence alone, or "Unavailable. <reason>". */
+/** The start of the backend's held-read sentence (services/options_read_gate.stale_reason), "Ivy's Read is on hold until tonight's
+ *  update adds the realized volatility it was missing" (Sam, 2026-10-19). */
+export const READ_ON_HOLD = "Ivy's Read is on hold until";
+
+/** What the block says when no read is shown: the pending or on-hold sentence alone, or "Unavailable. <reason>". */
 export function absentReadLine(reason: string | null | undefined): string {
-  if (reason === READ_PENDING_NIGHTLY) return reason;
+  if (reason === READ_PENDING_NIGHTLY || reason?.startsWith(READ_ON_HOLD)) return reason as string;
   return reason ? `Unavailable. ${reason}` : "Unavailable.";
 }

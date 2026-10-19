@@ -56,7 +56,7 @@ describe("public pages show no model names, token counts, costs or developer mes
     for (const bad of ["Generated 3d ago · 10-Q 2026-07-23 · 5227 tokens", "verified 3d ago · claude-opus-4-6", "claude-sonnet-4-6 · cached 5h ago",
       "Ivy's Read was written when realized volatility was unavailable and is being regenerated now that it is", "quote cache, dated by its last trade"])
       expect(violations(bad).length, bad).toBeGreaterThan(0);
-    for (const ok of ["Written 5h ago · chain as of 2026-10-14", "verified 3d ago", "Max loss $240", "latest quote, dated by its last trade", "drafted by Ivy"])
+    for (const ok of ["Written 5h ago · options data as of Oct 14, 2026", "verified 3d ago", "Max loss $240", "latest quote, dated by its last trade", "drafted by Ivy"])
       expect(violations(ok), ok).toEqual([]);
     expect(FORBIDDEN.length).toBe(4);
   });

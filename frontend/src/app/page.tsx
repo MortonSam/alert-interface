@@ -96,10 +96,10 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── 3. The gap ── */}
+      {/* ── 3. The problem ── */}
       <section className="screen-section flex items-center py-12 sm:py-0">
         <div className={HOME_COL}>
-          <p className="home-label">The gap</p>
+          <p className="home-label">The problem</p>
           <h2 className="text-display font-display font-bold text-foreground max-w-[20ch]">
             Trading apps throw you confetti. Terminals hand you a $30,000 bill.
           </h2>

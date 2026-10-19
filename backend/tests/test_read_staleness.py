@@ -52,7 +52,7 @@ async def test_cached_read_with_null_rv_is_not_served_once_rv_is_servable():
 
 
 def test_stale_reason_is_plain_language():
-    assert stale_reason("rv_20d") == "Ivy's Read is held until the nightly run rewrites it with the realized volatility it was missing"
+    assert stale_reason("rv_20d") == "Ivy's Read is on hold until tonight's update adds the realized volatility it was missing"
     assert "regenerat" not in stale_reason("rv_20d")
     assert "implied volatility" in stale_reason("atm_iv")
 
