@@ -10,7 +10,9 @@ from app.scripts.snapshot_iv import null_iv_reason
 
 APP = Path(__file__).resolve().parents[1] / "app"
 INTERNAL = {"services/pick_void.py", "services/corporate_actions.py", "services/security_records.py", "services/fomc_calendar.py",
-            "services/news.py", "services/ir_feeds.py", "services/intrinio_client.py", "routers/admin.py"}
+            "services/news.py", "services/ir_feeds.py", "services/intrinio_client.py", "routers/admin.py",
+            "services/report_date_reader.py",       # the confirmation reader's notes: the page reads them through confirmedKind, never raw
+            "services/research_note_service.py"}    # the research-note model prompt
 ISO_IN_FSTRING = re.compile(r'f"[^"\n]*\{[^}\n]*(?:\.isoformat\(\)|\[:10\])[^}\n]*\}[^"\n]*"')
 NOT_A_SENTENCE = re.compile(r"logger\.|print\(|log\.|key|url|params|cache|SELECT|WHERE|_input\(|\"date\":|f\"/|f\"\{[^}]*\}:\{")
 
