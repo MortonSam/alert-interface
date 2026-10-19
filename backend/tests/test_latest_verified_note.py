@@ -11,7 +11,8 @@ from app.database import ScriptSessionLocal
 from app.main import app
 
 SYM = "ZZNOTE"
-VERIFIED = (datetime.now(timezone.utc) - timedelta(days=2)).replace(microsecond=0)   # recent enough for the home page
+# an hour ahead: newer than any note the copied dev data holds (one generated today would otherwise be the latest), and fresh for the home page
+VERIFIED = (datetime.now(timezone.utc) + timedelta(hours=1)).replace(microsecond=0)
 VERIFICATION = {"claims": [{"claim": "Revenue grew", "status": "supported", "evidence": "10-K"}], "summary": {"supported": 1, "unsupported": 0, "contradicted": 0}}
 STRUCTURED = {"rating": "neutral", "stats": {"market_cap": 4.3e12, "eps_actual": 2.01, "eps_estimate": 1.94, "eps_beat_pct": 3.6, "beat_count": 18, "total_quarters": 20, "latest_move_1d": "+3.56%", "latest_outcome": "beat"},
               "highlights": [{"lead": "Services revenue grew", "detail": "14% year over year."}, {"lead": "Beats", "detail": "18 of 20."}, {"lead": "Third", "detail": "dropped"}]}
@@ -45,7 +46,7 @@ async def test_the_latest_verified_note_is_the_newest_verified_complete_one_with
             assert r.status_code == 200, r.text
             body = r.json()
             assert (body["symbol"], body["company_name"], body["rating"]) == (SYM, "Note Test Inc.", "neutral")
-            assert body["stats"]["eps_actual"] == 2.01 and body["stats"]["beat_count"] == 18
+            assert body["stats"]["eps_actual"] == 2.01 and body["stats"]["beat_count"] is None and body["stats"]["latest_move_1d"] is None   # no beat rate or past move (note_valuation)
             assert [h["lead"] for h in body["highlights"]] == ["Services revenue grew", "Beats"]
             assert body["verification_summary"] == {"supported": 1, "unsupported": 0, "contradicted": 0}
             assert body["verified_at"].startswith(VERIFIED.isoformat()[:19])
