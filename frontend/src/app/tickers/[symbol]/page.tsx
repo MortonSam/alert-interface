@@ -20,6 +20,7 @@ import { useTapAway } from "@/lib/useTapAway";
 import { impliedBand, yearLabel, yearTicks } from "@/lib/chartAxis";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { NoLongerTrades } from "@/components/ticker/NoLongerTrades";
+import WalkthroughEntry from "@/components/walkthrough/WalkthroughEntry";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
@@ -1972,6 +1973,7 @@ export default function TickerPage() {
             {ticker.name && (
               <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
             )}
+            <WalkthroughEntry symbol={ticker.symbol} />
             {!ticker.index_member && (
               <div className="mt-1.5">
                 <ExplainTip term="index-removal">

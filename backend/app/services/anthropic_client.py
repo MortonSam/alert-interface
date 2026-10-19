@@ -228,6 +228,26 @@ class AnthropicClient:
             "output_tokens": msg.usage.output_tokens,
         }
 
+    async def generate_walkthrough(self, prompt: str, max_tokens: int = 900) -> dict:
+        """Ivy's walkthrough (services/walkthrough_story): story and risk sentences as JSON, no figures. Sonnet."""
+        msg = await self._create("generate_walkthrough",
+            model=GENERATION_MODEL,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"content": _extract_text(msg).strip(), "model_used": GENERATION_MODEL,
+                "input_tokens": msg.usage.input_tokens, "output_tokens": msg.usage.output_tokens}
+
+    async def verify_walkthrough(self, prompt: str) -> dict:
+        """The walkthrough's verifier: the research-note verifier's model over the fact pack and the filing text."""
+        msg = await self._create("verify_walkthrough",
+            model=VERIFICATION_MODEL,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"content": _extract_text(msg), "model_used": VERIFICATION_MODEL,
+                "input_tokens": msg.usage.input_tokens, "output_tokens": msg.usage.output_tokens}
+
     async def classify_question(self, prompt: str) -> dict:
         """Ask Ivy's classifier (services/ask_ivy.classify_question): the kind of question, as JSON, from the small model."""
         msg = await self._create("classify_question",

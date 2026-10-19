@@ -119,6 +119,9 @@ STEPS: list[tuple[str, list[str]]] = [
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
+    # after the P/E, the reactions, the chains and the calendar it reads: Ivy's walkthrough, rule-built steps for every stock and
+    # model sentences only where a stock's filing facts changed (services/walkthrough_story's nightly cap)
+    ("Ivy walkthroughs",                ["python", "-m", "app.scripts.build_walkthroughs", "--write"]),
     ("Validate data",                   ["python", "-m", "app.scripts.validate_data"]),
 ]
 
@@ -129,6 +132,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Research notes (nightly)": 3600,         # 170 notes, four at a time, about a minute each
     "Refresh profiles (Finnhub)": 300,
     "Growth (XBRL and 8-K releases)": 3600,      # --due; the first night reads every active ticker's facts and releases (about 40 minutes)
+    "Ivy walkthroughs": 2400,                    # the first night reads every 10-K (about 8 SEC requests a stock); later nights only new ones
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks

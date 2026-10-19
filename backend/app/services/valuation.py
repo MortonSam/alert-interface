@@ -758,6 +758,21 @@ def pe_history_clean(bars: list[tuple[date, float]], quarters: list[dict], curre
     return out
 
 
+def pe_series_clean(bars: list[tuple[date, float]], quarters: list[dict], action_dates: list[date]) -> list[tuple[date, float]]:
+    """Pure: the daily P/E series pe_history_clean summarises ([(session, close over the four quarters filed by then)], the same
+    sessions kept), for a chart of the stock against its own five-year range. Its median is pe_history_clean's median."""
+    out: list[tuple[date, float]] = []
+    for d, close in bars:
+        four = trailing_four(quarters, d, d)
+        if four is None:
+            continue
+        total = sum(q["eps"] for q in four)
+        if total <= 0 or total < MIN_EARNINGS_YIELD * close or any(four[0]["start"] <= a <= d for a in action_dates):
+            continue
+        out.append((d, round(close / total, 2)))
+    return out
+
+
 EPS_MAX_SHARE_OF_PRICE = 0.25       # a quarter's EPS above this share of the stock's close on the report date is not a per-share figure
 EPS_MAX_ADJUSTED_RATIO = 5.0        # a GAAP figure more than this many times (or under a fifth of) the stored adjusted EPS for the same report, both positive, is refused
 EPS_MAX_YEAR_RATIO = 10.0           # a quarter's EPS more than this many times (or under a tenth of) the same quarter a year earlier, both positive, is noted for the digest
