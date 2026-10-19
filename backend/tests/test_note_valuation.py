@@ -1,5 +1,5 @@
 """A served research note: no valuation multiple while PE_ENABLED is off, and no figure the Overview states (services/note_valuation)."""
-from app.services.note_valuation import leaks, served
+from app.services.note_valuation import PAST_REPORT_STATS, leaks, served
 from app.services.verification_verdicts import normalize_verification
 
 NOTE = {
@@ -35,3 +35,17 @@ def test_with_pe_on_multiples_stay_and_the_market_cap_still_goes():
     assert s["bottom_line"] == "Results improved. Its EV/EBITDA is 25x."
     assert s["stats"]["market_cap"] is None
     assert [x["claim"] for x in v["claims"]] == ["Revenue rose 12%", "The P/E is 61"]
+
+
+def test_no_beat_rate_and_no_move_after_past_reports_in_the_stats_strip():
+    stats = {"beat_count": 10, "total_quarters": 20, "quarters_with_data": 20, "quarters_without_data": 0, "basis_excluded": 0,
+             "unavailable_reason": None, "latest_move_1d": "-14.52%", "latest_outcome": "miss", "eps_actual": 0.33, "eps_estimate": 0.54}
+    raw = {"highlights": [], "watch": [], "risks": [], "bottom_line": "", "stats": stats}
+    assert {x.split(": ")[1] for x in leaks(raw, None, None, False)} == {"beat_count", "latest_move_1d"}
+    s, _, _ = served(raw, None, None, False)
+    assert all(s["stats"][k] is None for k in PAST_REPORT_STATS)
+    assert s["stats"]["eps_actual"] == 0.33 and s["stats"]["eps_estimate"] == 0.54      # the latest quarter's EPS stays
+    assert leaks(s, None, None, False) == []
+    # a note whose beats were unavailable must not draw an "EPS beats" cell with its reason either
+    s, _, _ = served({**raw, "stats": {"beat_count": None, "unavailable_reason": "no estimates on file"}}, None, None, False)
+    assert s["stats"]["unavailable_reason"] is None

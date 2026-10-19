@@ -7,6 +7,8 @@
    shares outstanding, dated, and shown only where it agrees with the dated market cap on file; a note's market cap is the figure at
    the hour it was written. The served note drops its market cap stat and every sentence that states a market cap figure, so the
    page shows one market value, the Overview's (VMRK's note said $47.32B beside an Overview of $23 billion on 2026-10-15).
+3. A note states no beat rate and no move after past reports (Sam, 2026-10-19): the stats strip's "EPS beats 10/20" and "Latest Move
+   -14.5% post-earnings 1d" are dropped as served; the ticker page's Evidence holds the past reports.
 
 Applied at serve time to stored notes (routers/research_notes), so no stored note is rewritten.
 """
@@ -21,6 +23,8 @@ VALUATION = re.compile(
 MARKET_CAP_FIGURE = re.compile(r"market (?:cap(?:italization)?|value)[^.]{0,60}?\$\s?\d|\$\s?\d[\d.,]*\s?(?:[BMT]|billion|trillion|million)\b[^.]{0,30}market (?:cap|value)", re.I)
 VALUATION_FIELDS = ("pe_ttm", "forward_pe", "peg_ttm", "ps_ttm", "pb", "ev_ebitda", "pe_percentile", "pe_sector_median")
 OVERVIEW_STATS = ("market_cap",)
+PAST_REPORT_STATS = ("beat_count", "total_quarters", "quarters_with_data", "quarters_without_data", "basis_excluded", "unavailable_reason",
+                     "latest_move_1d", "latest_outcome")
 _SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 
@@ -39,7 +43,7 @@ def served(structured: dict | None, verification: dict | None, content: str | No
             s[sec] = [p for p in (s.get(sec) or []) if not any(x.search(f"{p.get('lead', '')} {p.get('detail', '')}") for x in pats)]
         s["bottom_line"] = _drop(s.get("bottom_line"), *pats) or ""
         if isinstance(s.get("stats"), dict):
-            s["stats"] = {k: (None if k in OVERVIEW_STATS else v) for k, v in s["stats"].items()}
+            s["stats"] = {k: (None if k in OVERVIEW_STATS or k in PAST_REPORT_STATS else v) for k, v in s["stats"].items()}
         if not valuation_shown and isinstance(s.get("financials"), dict):
             s["financials"] = {k: v for k, v in s["financials"].items() if k not in VALUATION_FIELDS}
         structured = s
@@ -51,7 +55,10 @@ def served(structured: dict | None, verification: dict | None, content: str | No
 
 
 def leaks(structured: dict | None, verification: dict | None, content: str | None, valuation_shown: bool) -> list[str]:
-    """Pure: every place a served note still names a multiple (while they are held) or a market cap figure; empty when clean."""
+    """Pure: every place a served note still names a multiple (while they are held), a market cap figure, a beat rate or a move after
+    past reports (the stats strip); empty when clean."""
+    out = [f"past-report stat: {k}" for k in ("beat_count", "latest_move_1d")
+           if structured and isinstance(structured.get("stats"), dict) and structured["stats"].get(k) is not None]
     texts = [content or ""]
     if structured:
         texts += [f"{p.get('lead', '')} {p.get('detail', '')}" for sec in ("highlights", "watch", "risks") for p in (structured.get(sec) or [])]
@@ -59,4 +66,4 @@ def leaks(structured: dict | None, verification: dict | None, content: str | Non
     if verification:
         texts += [str(c.get("claim") or "") for c in verification.get("claims") or [] if isinstance(c, dict)]
     pats = [("market cap figure", MARKET_CAP_FIGURE)] + ([] if valuation_shown else [("valuation multiple", VALUATION)])
-    return [f"{name}: {t[:120]}" for t in texts for name, p in pats if p.search(t)]
+    return out + [f"{name}: {t[:120]}" for t in texts for name, p in pats if p.search(t)]
