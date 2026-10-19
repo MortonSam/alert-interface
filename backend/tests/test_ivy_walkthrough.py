@@ -2,14 +2,18 @@
 honest absences (the VMRK rule, the flags), the rival and featured rules, and the story sentences' output check. All pure."""
 from __future__ import annotations
 
-from datetime import date
+import json
+import re
+from datetime import date, timedelta
 
+from app.services import fiscal_periods as F
 from app.services import margins as M
 from app.services import risk_factors as R
 from app.services import segments as S
 from app.services import walkthrough as W
 from app.services import walkthrough_checks as C
 from app.services import walkthrough_compare as WC
+from app.services import walkthrough_data as W_D
 from app.services import walkthrough_story as WS
 from app.services import valuation as V
 
@@ -141,71 +145,209 @@ def test_a_tag_the_company_stopped_filing_is_not_now():
     assert not out["ok"]
 
 
+# ── fiscal quarter names (DEI DocumentFiscalPeriodFocus / DocumentFiscalYearFocus) ───────────────────────────────────────────
+
+def _fy_facts(rows: list[tuple[str, str, str, int, str, str]]) -> dict:
+    """Company facts with one revenue fact per filing: (accn, start, end, fy, fp, form)."""
+    return {"facts": {"us-gaap": {REV: {"units": {"USD": [{"accn": a, "start": s, "end": e, "fy": fy, "fp": fp, "form": form, "val": 1}
+                                                          for a, s, e, fy, fp, form in rows]}}}}}
+
+
+# Micron: a 52/53-week year ending around the start of September (fiscal 2026 ended Sep 3, 2026, a 53-week year)
+MU_PERIODS = F.period_map(_fy_facts([("a1", "2025-08-29", "2025-11-27", 2026, "Q1", "10-Q"), ("a2", "2025-11-28", "2026-02-26", 2026, "Q2", "10-Q"),
+                                     ("a3", "2026-02-27", "2026-05-28", 2026, "Q3", "10-Q"), ("a4", "2025-08-29", "2026-09-03", 2026, "FY", "10-K"),
+                                     ("a0", "2022-09-02", "2023-08-31", 2023, "FY", "10-K")]))
+JPM_PERIODS = F.period_map(_fy_facts([("b1", "2026-04-01", "2026-06-30", 2026, "Q2", "10-Q"), ("b2", "2025-01-01", "2025-12-31", 2025, "FY", "10-K"),
+                                      ("b3", "2025-07-01", "2025-09-30", 2025, "Q3", "10-Q")]))
+
+
+def test_period_map_reads_each_filing_once_and_the_10k_is_q4():
+    assert MU_PERIODS["2026-09-03"] == [2026, "Q4"] and MU_PERIODS["2025-11-27"] == [2026, "Q1"]
+    two = _fy_facts([("x", "2026-01-01", "2026-03-31", 2026, "Q1", "10-Q"), ("x", "2026-01-01", "2026-03-31", 2025, "Q4", "10-Q")])
+    assert F.period_map(two) == {}                                            # a filing naming two periods names none
+    dell = _fy_facts([("e1", "2023-02-04", "2023-05-05", 2024, "FY", "10-Q"), ("e2", "2023-05-06", "2023-08-04", 2024, "FY", "10-Q"),
+                      ("e3", "2023-08-05", "2023-11-03", 2024, "Q3", "10-Q")])
+    assert F.period_map(dell) == {"2023-11-03": [2024, "Q3"]}                 # Dell's 2023 10-Qs say "FY": no fiscal name, never Q4
+    assert F.through(F.period_map(dell), date(2023, 8, 4)) == "through the quarter ended Aug 4, 2023"
+    dup = _fy_facts([("f1", "2023-01-01", "2023-03-31", 2023, "Q1", "10-Q"), ("f2", "2023-04-01", "2023-06-30", 2023, "Q1", "10-Q")])
+    assert F.period_map(dup) == {}                                            # a name two quarters claim names neither
+
+
+def test_a_september_fiscal_year_end_reads_fiscal_quarters():
+    assert F.quarter_label(MU_PERIODS, date(2026, 9, 3)) == "Fiscal Q4 2026, ended Sep 3, 2026"
+    assert F.four_label(MU_PERIODS, date(2026, 9, 3)) == "Last four quarters, through fiscal Q4 2026"
+    assert F.quarter(MU_PERIODS, date(2025, 11, 27)) == "fiscal Q1 2026, ended Nov 27, 2025"
+    assert F.year(MU_PERIODS, date(2026, 9, 3)) == "fiscal 2026, ended Sep 3, 2026"
+    assert F.through(MU_PERIODS, date(2023, 8, 31)) == "through fiscal Q4 2023"
+
+
+def test_a_calendar_year_reads_plain_quarters():
+    assert F.quarter_label(JPM_PERIODS, date(2026, 6, 30)) == "Q2 2026, ended Jun 30, 2026"
+    assert F.four_label(JPM_PERIODS, date(2026, 6, 30)) == "Last four quarters, through Q2 2026"
+    assert F.year(JPM_PERIODS, date(2025, 12, 31)) == "the year ended Dec 31, 2025"
+
+
+def test_a_52_53_week_year():
+    intc = F.period_map(_fy_facts([("c1", "2026-06-28", "2026-09-26", 2026, "Q3", "10-Q"), ("c2", "2024-12-29", "2025-12-27", 2025, "FY", "10-K"),
+                                   ("c3", "2026-12-27", "2027-01-02", 2026, "FY", "10-K")]))
+    assert F.quarter_label(intc, date(2026, 9, 26)) == "Q3 2026, ended Sep 26, 2026"          # ends near the calendar's: no "fiscal"
+    assert F.quarter_label(intc, date(2025, 12, 27)) == "Q4 2025, ended Dec 27, 2025"
+    assert F.quarter_label(intc, date(2027, 1, 2)) == "Q4 2026, ended Jan 2, 2027"             # a 53rd week into January stays Q4 2026
+    wmt = F.period_map(_fy_facts([("d1", "2025-08-02", "2025-10-31", 2026, "Q3", "10-Q")]))
+    assert F.quarter_label(wmt, date(2025, 10, 31)) == "Fiscal Q3 2026, ended Oct 31, 2025"   # a year ending in January
+    assert F.quarter_label(intc, date(2026, 9, 28)) == "Q3 2026, ended Sep 28, 2026"           # a stored end two days off takes the filing's name
+    assert F.quarter_label({}, date(2026, 9, 3)) == "Quarter ended Sep 3, 2026"               # no filing names it: never a guess
+
+
+def test_quarter_to_never_appears():
+    rows = [{"metric": "revenue", "period_end": date(2025, 11, 27) + timedelta(days=91 * i), "value": 100 + i, "year_ago_value": 50, "growth_pct": 50.0 + i,
+             "phrase": "up", "held_reason": None, "readers": "XBRL / XBRL"} for i in range(4)]
+    s = W.step_growth("Micron", rows, "Information Technology", True, MU_PERIODS)
+    text = json.dumps(s)
+    assert "Quarter to" not in text and "quarter to" not in text and "Four quarters to" not in text
+    assert s["numbers"][1]["as_of"].startswith("Last four quarters, through")
+
+
 # ── quick checks: worked examples for every template ──────────────────────────────────────────────────────────────────────
+# Sam's rule: (a) not answerable from any text on the same screen, (b) this company's own numbers, (c) at least two facts combined.
 
-def test_segments_check():
-    c = C.segments_check("Micron", [{"label": "DRAM", "value": 76, "share": 75.6}, {"label": "NAND", "value": 24, "share": 23.9}], "fiscal year to Sep 3, 2026")
-    assert c["options"] == ["DRAM", "NAND"] and c["options"][c["answer"]] == "DRAM" and "75.6%" in c["why"]
-    assert C.segments_check("X", [{"label": "A", "value": 1, "share": 100.0}], "p") is None
-
-
-def test_growth_check():
-    for pct, word in ((167.0, "Grew"), (-12.5, "Shrank"), (1.9, "About flat"), (-1.9, "About flat"), (2.0, "Grew")):
-        c = C.growth_check("Micron", pct, "four quarters")
-        assert c["options"][c["answer"]] == word
-
-
-def test_margins_check():
-    c = C.margins_check("Apple", 46.9, "after paying for what it sold")
-    assert c["options"][c["answer"]] == "About $47" and len(set(c["options"])) == 3
-    c = C.margins_check("JPM", 30.0, "as profit after every cost")
-    assert c["options"][c["answer"]] == "About $30" and "About $70" in c["options"] and "About $3" in c["options"]
+def test_segments_check_reads_dependence_from_the_top_two_lines():
+    mu = [{"label": "DRAM", "value": 76, "share": 75.6}, {"label": "NAND", "value": 24, "share": 23.9}]
+    c = C.segments_check("Micron", mu, "fiscal 2026, ended Sep 3, 2026")
+    assert c["options"][c["answer"]] == "One line" and "DRAM brought in 75.6%" in c["question"] and "NAND 23.9%" in c["question"]
+    jpm = [{"label": "CIB", "value": 43, "share": 43.0}, {"label": "CCB", "value": 42, "share": 41.7}, {"label": "AWM", "value": 15, "share": 15.3}]
+    assert C.segments_check("JPM", jpm, "p")["options"][C.segments_check("JPM", jpm, "p")["answer"]] == "Two lines"
+    spread = [{"label": x, "value": 1, "share": 25.0} for x in "ABCD"]
+    assert C.dependence([g["share"] for g in spread]) == "Several lines"
+    assert C.segments_check("X", [{"label": "A", "value": 1, "share": 100.0}], "p") is None          # one fact is no question
 
 
-def test_cyclical_check():
-    assert C.is_cyclical(80.7, -9.1) and not C.is_cyclical(48.7, 43.4) and not C.is_cyclical(50.0, None)
-    c = C.cyclical_check("Micron", 80.7, -9.1)
-    assert c["answer"] == 0 and "lost 9¢ on each sales dollar" in c["question"] and "keeps 81¢ of each one" in c["question"]
+def test_step1_text_never_states_the_dependence_reading():
+    seg = {"ok": True, "filed": date(2026, 10, 9), "end": date(2026, 9, 3), "total": 133.2e9, "url": "u",
+           "segments": [{"label": "DRAM Products", "value": 100.7e9, "share": 75.6}, {"label": "NAND Products", "value": 31.8e9, "share": 23.9}]}
+    s = W.step_business("Micron", {"short_description": "Micron makes memory."}, seg, None, MU_PERIODS)
+    text = " ".join(s["sentences"]).lower()
+    assert "one line" not in text and "most of" not in text and "depend" not in text
 
 
-def test_market_check_and_the_owner_rule():
-    assert C.move_owner(18.4, 1.7, 1.0) == "company"           # SPY moved, but under half the stock's move
-    assert C.move_owner(-3.0, -2.0, 1.0) == "market"           # same way, at least the minimum, at least half
-    assert C.move_owner(-3.0, 2.0, 1.0) == "company"           # the other way
-    assert C.move_owner(1.2, 0.8, 1.0) == "company"            # SPY under MARKET_DAY_MIN_SPY_PCT
-    assert C.move_owner(5.0, None, 1.0) == "company"           # no SPY figure is never guessed
-    c = C.market_check("Micron", "Jul 30, 2026", 18.4, 1.7, 1.0)
-    assert c["options"][c["answer"]] == "The company"
-    c = C.market_check("JPM", "Apr 7, 2025", -3.0, -2.0, 1.0)
-    assert c["options"][c["answer"]] == "The market"
+def test_growth_check_compares_earnings_per_share_with_sales_else_the_quarter_with_the_year():
+    c = C.growth_check("Micron", 379.3, "fiscal Q4 2026", 1061.5)
+    assert c["options"][c["answer"]] == "Faster than its sales" and "1,061.5%" in c["question"] and "379.3%" in c["question"]
+    assert C.growth_check("X", 10.0, "Q2 2026", 10.4)["answer"] == 1          # factors 1.104 / 1.10: within 5%, about as fast
+    assert C.growth_check("X", 10.0, "Q2 2026", -3.7)["answer"] == 2
+    c = C.growth_check("Realty Income", 9.7, "Q2 2026", None, ttm_pct=11.0)
+    assert c["options"][c["answer"]] == "About the same"
+    assert C.growth_check("X", 30.0, "Q2 2026", None, ttm_pct=10.0)["answer"] == 0
+    assert C.growth_check("X", 9.7, "Q2 2026") is None                        # one fact is no question
+    for c in (C.growth_check("A", -3.0, "Q1 2026", 2.0), C.growth_check("A", 3.0, "Q1 2026", None, ttm_pct=-4.0)):
+        assert "+" not in c["question"] and "-" not in c["question"].replace("year-", "")
 
 
-def test_pe_check():
+def test_margins_check_applies_the_idea_to_its_own_two_figures():
+    c = C.margins_check("Micron", 80.7, -9.1)
+    assert c["options"][c["answer"]] == "Pricing power or lower costs" and "lost 9¢ on each sales dollar three years earlier" in c["question"]
+    assert "cyclical" in c["why"] and "89.8 points" in c["why"]
+    assert C.margins_check("Tesla", 18.9, 21.5)["answer"] == 1
+    c = C.margins_check("JPM", 32.6, 32.6, "revenue dollar")
+    assert c["answer"] == 2 and "0.0" not in c["why"]
+    assert C.margins_check("X", 40.0, None) is None
+
+
+def test_market_check_the_three_numbers_rule():
+    assert C.year_owner(358.4, 20.1, 16.0) == "company"                      # Micron: far from both
+    assert C.year_owner(-0.5, 2.3, 16.0) == "industry"                       # Realty Income: 2.8 points from its sector, 16.5 from the market
+    assert C.year_owner(13.3, 30.0, 16.0) == "market"                        # within 5 points of the S&P 500
+    assert C.year_owner(19.4, 20.1, 16.0) == "market"                        # close to both: the market is checked first
+    assert C.close(100.0, 120.0) and not C.close(100.0, 126.0)               # a fifth of the larger move once that is wider than 5 points
+    c = C.market_check("Micron", "Information Technology", 358.4, 20.1, 16.0)
+    assert c["options"] == ["The company", "Its industry", "The whole market"] and c["answer"] == 0
+    assert c["question"] == ("Over the year Micron rose 358.4%, the typical Information Technology stock rose 20.1% and the S&P 500 rose 16.0%. "
+                             "Was Micron's year mostly the company, its industry, or the whole market?")
+    assert "within 5 points" in c["why"]
+    assert "fell 0.5%" in C.market_check("O", "Real Estate", -0.5, 2.3, 16.0)["question"]
+
+
+def test_move_owner_for_one_day():
+    assert C.move_owner(18.4, 1.7, 1.0) == "company" and C.move_owner(-3.0, -2.0, 1.0) == "market"
+    assert C.move_owner(-3.0, 2.0, 1.0) == "company" and C.move_owner(1.2, 0.8, 1.0) == "company" and C.move_owner(5.0, None, 1.0) == "company"
+
+
+def test_pe_check_against_its_past_and_its_sector():
+    c = C.pe_check("Micron", 11.8, 16.7, "Information Technology", 31.7)
+    assert c["options"][c["answer"]] == "Below both"
+    assert C.pe_check("X", 25.0, 16.7, "IT", 31.7)["options"][C.pe_check("X", 25.0, 16.7, "IT", 31.7)["answer"]] == "Between the two"
+    assert C.pe_check("X", 40.0, 16.7, "IT", 31.7)["answer"] == 2
     for pe, med, word in ((11.8, 16.7, "Less than usual"), (39.4, 34.3, "More than usual"), (14.2, 14.4, "About the same as usual")):
-        c = C.pe_check("X", pe, med)
+        c = C.pe_check("X", pe, med)                                         # no sector median: its own past alone
         assert c["options"][c["answer"]] == word
+    c = C.pe_check("X", 14.2, 14.4, "Financials", 16.0)                     # level with its own median: its own past alone
+    assert c["options"][c["answer"]] == "About the same as usual"
 
 
-def test_report_move_checks():
-    assert C.report_move_check("X", 7.5, 6.0)["answer"] == 0       # 1.25x: bigger than usual
-    assert C.report_move_check("X", 4.0, 6.0)["answer"] == 1       # 0.67x: smaller
-    assert C.report_move_check("X", 6.0, 6.0)["answer"] == 2
-    c = C.typical_move_check("Micron", 6.8)
-    assert c["options"][c["answer"]] == "About $7" and c["options"] == ["About $2", "About $7", "About $28"]
+def test_report_checks_last_report_and_ordinary_day():
+    for move, typical, word in ((3.0, 6.8, "Smaller"), (-7.4, 3.1, "Bigger"), (6.0, 5.5, "About the same"), (6.6, 5.5, "About the same"), (6.7, 5.5, "Bigger")):
+        c = C.last_report_check("X", "Sep 30, 2026", move, typical)
+        assert c["options"] == ["Bigger", "About the same", "Smaller"] and c["options"][c["answer"]] == word
+    c = C.last_report_check("NVIDIA", "Aug 26, 2026", 8.7, 6.6)
+    assert c["question"] == "Last report, on Aug 26, 2026, NVIDIA rose 8.7%. Its typical report day is ±6.6%. Was that a bigger or smaller move than usual?"
+    assert c["why"].startswith("An 8.7% move")
+    c = C.ordinary_day_check("JPM", 1.1, 2.9)
+    assert c["options"] == ["About 2 times", "About 3 times", "About 6 times"] and c["options"][c["answer"]] == "About 3 times"
+    assert C.multiple_options(4.1) == ([2, 4, 8], 4) and C.multiple_options(1.2) == ([1, 2, 3], 1)
 
 
-def test_risk_check():
-    c = C.risk_check("Micron", "Chip prices swing widely.")
-    assert c["answer"] == 1 and "disclosure" in c["why"]
+def test_step6_text_never_states_the_last_report_move():
+    from types import SimpleNamespace
+    ne = SimpleNamespace(date=date(2026, 12, 15), confirmation="estimated", window_start=None, window_end=None, note=None)
+    s = W.step_upcoming("Micron", ne, None, None, {"pct": 6.8, "n": 21, "as_of": date(2026, 9, 30)}, date(2026, 10, 28),
+                        {"date": date(2026, 9, 30), "move": 3.0})
+    assert s["check"]["question"].startswith("Last report, on Sep 30, 2026, Micron rose 3.0%")
+    assert "3.0%" not in " ".join(s["sentences"] + [n["value"] for n in s["numbers"] + s["deeper"]])
+    s = W.step_upcoming("JPM", ne, None, None, {"pct": 2.9, "n": 20, "as_of": date(2026, 7, 14)}, None, None, 1.1)
+    assert s["check"]["question"].startswith("On an ordinary day JPM moves about ±1.1%")
 
 
-def test_every_check_is_free_of_colons_and_em_dashes():
-    checks = [C.segments_check("A", [{"label": "B", "value": 2, "share": 60.0}, {"label": "C", "value": 1, "share": 40.0}], "p"), C.growth_check("A", 3, "p"),
-              C.margins_check("A", 40, "after paying for what it sold"), C.cyclical_check("A", 40, 10), C.market_check("A", "d", 3, 2, 1),
-              C.pe_check("A", 10, 12), C.report_move_check("A", 5, 4), C.typical_move_check("A", 5), C.risk_check("A", "B.")]
+def test_risk_mapping_and_the_number_check():
+    assert C.risk_target("Volatility in average selling prices for our products") == "margins"
+    assert C.risk_target("We face intense competition in the semiconductor memory market") == "margins"
+    assert C.risk_target("A significant portion of our revenue is from a limited number of customers") == "growth"
+    assert C.risk_target("Changes in demand and orders could hurt us") == "growth"
+    assert C.risk_target("Cybersecurity incidents could disrupt our business") is None
+    steps = [W._step(n, status="ok", idea=None) for n in range(1, 8)]
+    pts = {2: "The 379.3% rise in its sales in fiscal Q4 2026", 3: "The 81¢ it keeps of each sales dollar", 4: "The 358.4% rise in its stock over the year",
+           5: "Its P/E of 11.8", 1: "The 75.6% of its sales from DRAM Products", 6: "Its typical ±6.8% move on a report day"}
+    for st in steps:
+        st["point"] = pts.get(st["n"])
+    risks = [{"n": 1, "sentence": "Selling prices for its chips have swung sharply."}, {"n": 2, "sentence": "A few customers bring in most revenue."}]
+    c = W.risk_check("Micron", risks, {1: "Volatility in average selling prices", 2: "Customer concentration"}, steps)
+    assert c["options"][c["answer"]] == "The 81¢ it keeps of each sales dollar"
+    assert set(c["options"]) == {pts[3], pts[4], pts[5]} and c["options"] == sorted(c["options"])
+    assert c["question"] == ("Micron lists this risk. Selling prices for its chips have swung sharply. If it came true, which number from this walkthrough "
+                             "would show it first?")
+    giveaway = [{"n": 1, "sentence": "Falling prices would squeeze its margins."}]       # names its own answer: never the question
+    assert W.risk_check("Micron", giveaway, {1: "Pricing pressure"}, steps) is None
+    c = W.risk_check("Micron", [{"n": 9, "sentence": "Hackers could break in."}], {9: "Cybersecurity"}, steps, ["Tenants may not pay rent.", "Drug trials can fail."])
+    assert c["question"] == "Which of these does Micron list as a risk?" and c["options"][c["answer"]] == "Hackers could break in."
+
+
+def test_risk_decoys_come_from_two_other_sectors_in_a_fixed_order():
+    pool = {"O": ("Real Estate", "Tenants may not pay rent."), "SPG": ("Real Estate", "Malls may lose shoppers."), "PFE": ("Health Care", "Drug trials can fail."),
+            "MU": ("Information Technology", "Chip prices swing."), "AMD": ("Information Technology", "Rivals cut prices.")}
+    d = WS.decoys_for("MU", "Information Technology", pool)
+    assert len(d) == 2 and d == WS.decoys_for("MU", "Information Technology", pool)
+    assert "Drug trials can fail." in d and not {"Chip prices swing.", "Rivals cut prices."} & set(d)
+
+
+def test_every_check_is_free_of_colons_em_dashes_and_plus_signs():
+    checks = [C.segments_check("A", [{"label": "B", "value": 2, "share": 60.0}, {"label": "C", "value": 1, "share": 40.0}], "p"),
+              C.growth_check("A", 3, "p", 5), C.growth_check("A", 3, "p", None, ttm_pct=-2), C.margins_check("A", 40, 10), C.margins_check("A", -5, 2),
+              C.market_check("A", "Energy", 3, 2, 1), C.pe_check("A", 10, 12, "Energy", 15), C.pe_check("A", 10, 12),
+              C.last_report_check("A", "d", -5, 4), C.ordinary_day_check("A", 1.5, 5), C.risk_number_check("A", "B.", "C", ["D", "E"]),
+              C.risk_list_check("A", "B.", ["D.", "E."])]
     for c in checks:
         text = " ".join([c["question"], c["why"], *c["options"]])
-        assert ":" not in text and "—" not in text, text
+        assert ":" not in text and "—" not in text and "+" not in text, text
+        assert not re.search(r"(?<![\w-])-\d", text), text
 
 
 # ── step builders ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -228,8 +370,8 @@ def test_negative_margin_reads_as_a_loss_and_a_number():
          "now_revenue": 1.0, "now_profit": 1.0, "then_revenue": 1.0, "then_profit": 1.0}
     s = W.step_margins("Micron", m, [])
     assert [n["value"] for n in s["numbers"]] == ["81¢", "−9¢"]
-    assert s["sentences"][0] == "Micron keeps 81¢ of each sales dollar after paying for what it sold, up from a loss of 9¢ three years earlier."
-    assert s["idea"]["concept"] == "cyclical"
+    assert s["sentences"][0] == "Micron keeps 81¢ of each sales dollar after paying for what it sold, against a loss of 9¢ three years earlier."
+    assert s["idea"]["concept"] == "margins"
     held = W.step_margins("Micron", m, [{"kind": "merger", "date": date(2026, 1, 5), "name": "Other Co"}])
     assert held["status"] == "absent"
 
@@ -246,13 +388,16 @@ def test_flags_gate_growth_and_pe_at_serve_time():
     from app.routers.walkthrough import gate
     steps = [W._step(n, status="ok", idea=None, summary=f"line {n}") for n in range(1, 8)]
     payload = {"name": "Micron", "sector": "Information Technology", "steps": steps,
-               "compare": {"rows": {"growth": {"value": "+1%"}, "pe": {"value": "11.8"}}}}
+               "compare": {"rows": {"growth": {"value": "+1%"}, "valuation": {"value": "11.8"}}}}
     out = gate(payload, growth_on=False, pe_on=False)
     assert out["steps"][1]["status"] == "absent" and W.GROWTH_IN_REVIEW in out["steps"][1]["absent"]
     assert out["steps"][4]["status"] == "absent" and W.PE_IN_REVIEW in out["steps"][4]["absent"]
-    assert out["compare"]["rows"]["growth"] is None and out["compare"]["rows"]["pe"] is None
-    assert not out["summary"]["known"][1]["shown"] and payload["steps"][1]["status"] == "ok"      # the stored payload is untouched
+    assert out["compare"]["rows"]["growth"] is None and out["compare"]["rows"]["valuation"] is None
+    assert 2 not in [k["n"] for k in out["summary"]["known"]] and payload["steps"][1]["status"] == "ok"      # the stored payload is untouched
+    assert "Whether its sales are growing (figures still being checked)" in out["summary"]["uncertain"]
     assert gate(payload, True, True)["steps"][1]["status"] == "ok"
+    reit = {**payload, "reit": True}
+    assert gate(reit, True, False)["steps"][4]["status"] == "ok"             # a trust's price to FFO is not a P/E: PE_ENABLED leaves it
 
 
 def test_pe_series_median_is_the_stored_median():
@@ -264,12 +409,20 @@ def test_pe_series_median_is_the_stored_median():
     assert round(median(v for _, v in series), 1) == V.pe_history_clean(bars, quarters, 20.0, [])["median"]
 
 
-def test_summary_marks_absent_steps_and_lists_concepts_once():
-    steps = [W._step(1, status="ok", idea="segments", summary="A."), W._step(2, status="absent", idea="growth", absent="x"),
-             W._step(3, status="ok", idea="margins", summary="C.", uncertain="U.")] + [W._step(n, status="absent", idea=None) for n in range(4, 8)]
+def test_summary_lists_takeaways_and_this_stocks_real_gaps():
+    steps = [W._step(1, status="ok", idea="segments", summary="A."), W._step(2, status="absent", idea="growth", absent="x", gap="its filings and earnings releases don't agree yet"),
+             W._step(3, status="ok", idea="margins", summary="C.")] + [W._step(n, status="absent", idea=None, gap="why") for n in range(4, 6)]
+    from types import SimpleNamespace
+    ne = SimpleNamespace(date=date(2026, 12, 15), confirmation="estimated", window_start=None, window_end=None, note=None)
+    steps += [W.step_upcoming("Micron", ne, None, None, None, None), W._step(7, status="absent", idea=None, gap="its risk section couldn't be found")]
     s = W.summary("Micron", steps)
-    assert s["known"][1] == {"n": 2, "line": "Not shown for Micron yet (is the business getting bigger).", "shown": False}
-    assert [c["concept"] for c in s["concepts"]] == ["segments", "margins"] and s["uncertain"] == ["U."] and s["closing"] == W.CLOSING_LINE
+    assert [k["n"] for k in s["known"]] == [1, 3, 6]
+    assert s["uncertain"] == ["Whether its sales are growing (its filings and earnings releases don't agree yet)", "How its stock did against the market (why)",
+                              "How it is valued (why)", "What could go wrong (its risk section couldn't be found)",
+                              "What its next report shows, due around Dec 15, 2026, a date the company hasn't confirmed."]
+    assert [c["concept"] for c in s["concepts"]] == ["segments", "margins", "report_move"] and s["closing"] == W.CLOSING_LINE
+    generic = ("Whether growth this fast lasts.", "Where the cycle in its prices turns next.", "Whether any of the risks it names comes to pass.")
+    assert not set(generic) & set(s["uncertain"])
 
 
 # ── rules: rival, ruler, featured ───────────────────────────────────────────────────────────────────────────────────────────
@@ -323,10 +476,16 @@ def test_parse_draft_and_items_drop_unknown_risks():
 def test_apply_puts_verified_sentences_on_their_steps():
     payload = {"name": "Micron", "steps": [W._step(n, status="ok" if n != 7 else "partial", idea=None) for n in range(1, 8)]}
     payload["steps"][6]["source"] = {"label": "Item 1A of its 10-K, filed Oct 9, 2026", "url": "u"}
-    WS.apply(payload, {"sentences": {"business": "Story.", "risk:4": "Rivals cut prices."}})
+    payload["steps"][0]["summary"] = "Its biggest line, DRAM Products, brought in 75.6% of its sales in fiscal 2026, ended Sep 3, 2026."
+    payload["steps"][0]["fact"] = {"concept": "segments"}
+    for st, pt in zip(payload["steps"], ["A", "B", "The 81¢ it keeps of each sales dollar", "C", "D", "E", None]):
+        st["point"] = pt
+    WS.apply(payload, {"sentences": {"business": "Story.", "does": "Micron makes memory chips.", "risk:4": "Rivals cut prices."}}, {4: "Intense competition"})
     assert payload["steps"][0]["story"] == "Story." and payload["steps"][1]["story"] is None
+    assert payload["summary"]["known"][0]["line"] == "Micron makes memory chips. Its biggest line, DRAM Products, brought in 75.6% of its sales in fiscal 2026, ended Sep 3, 2026."
     assert payload["steps"][6]["status"] == "ok" and payload["steps"][6]["risks"] == [{"n": 4, "sentence": "Rivals cut prices."}]
-    assert payload["steps"][6]["check"]["concept"] == "risk_factors"
+    c = payload["steps"][6]["check"]
+    assert c["concept"] == "risk_factors" and c["options"][c["answer"]] == "The 81¢ it keeps of each sales dollar"
 
 
 def test_growth_falls_back_to_the_newest_agreed_quarter_and_never_prints_iso_dates():
@@ -334,7 +493,8 @@ def test_growth_falls_back_to_the_newest_agreed_quarter_and_never_prints_iso_dat
              "held_reason": None, "readers": "XBRL and the earnings release / XBRL and the earnings release"},
             {"metric": "revenue", "period_end": date(2026, 6, 30), "value": None, "year_ago_value": None, "growth_pct": None, "phrase": None, "held_reason": None, "readers": None}]
     s = W.step_growth("Micron", rows, "Information Technology", True)
-    assert s["status"] == "partial" and s["numbers"][0]["as_of"] == "Quarter to Mar 31, 2026"
+    assert s["status"] == "partial" and s["numbers"][0]["as_of"] == "Quarter ended Mar 31, 2026"
+    assert W.step_growth("JPM", rows, "Financials", True, {"2026-03-31": [2026, "Q1"]})["numbers"][0]["as_of"] == "Q1 2026, ended Mar 31, 2026"
     held = W.step_growth("Micron", [{**rows[0], "period_end": date(2026, 6, 30), "held_reason": "Spun off Qnity on 2025-11-01, inside the year compared"}], None, True)
     assert held["absent"] == "Ivy can't show this for Micron yet. Spun off Qnity on Nov 1, 2025, inside the year compared."
 
@@ -365,3 +525,156 @@ def test_the_walkthrough_is_hidden_until_its_flag_or_the_admin_token():
         _shown(admin=False)
     finally:
         settings.ivy_walkthrough_enabled = old
+
+
+# ── numbers and signs ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_figures_carry_separators_and_true_minus_signs_and_sentences_use_words():
+    assert C.signed(1061.5) == "+1,061.5%" and C.signed(-0.4) == "−0.4%" and C.pct(-1061.5) == "1,061.5%" and C.num(-9.04) == "−9.0"
+    assert C.moved(1.6) == "rose 1.6%" and C.moved(-0.4) == "fell 0.4%"
+    assert C.change_noun(3.1) == "a 3.1% rise" and C.change_noun(8.2) == "an 8.2% rise" and C.change_noun(-11.0) == "an 11.0% fall" and C.change_noun(-1.2) == "a 1.2% fall"
+    assert W.money_words(-1.4e9) == "−$1.4 billion" and W.dollars(-0.12) == "−$0.12" and W.cents_value(-9.1) == "−9¢"
+    assert W.change_phrase(1061.5, "up 1061.5% from a year earlier") == "up 1,061.5% from a year earlier"
+    assert W.change_phrase(None, "swung to a profit") == "swung to a profit"
+    rows = [{"metric": "revenue", "period_end": date(2026, 9, 3), "value": 54.2e9, "year_ago_value": 11.3e9, "growth_pct": 379.3, "phrase": "up 379.3% from a year earlier",
+             "held_reason": None, "readers": "XBRL"},
+            {"metric": "eps", "period_end": date(2026, 9, 3), "value": 32.87, "year_ago_value": 2.83, "growth_pct": 1061.5, "phrase": "up 1061.5% from a year earlier", "held_reason": None}]
+    s = W.step_growth("Micron", rows, "Information Technology", True, MU_PERIODS)
+    assert s["sentences"][-1] == "Earnings per share were $32.87 in that quarter, up 1,061.5% from a year earlier."
+    for t in s["sentences"]:
+        assert "+" not in t
+
+
+def test_validate_flags_unformatted_figures():
+    from app.scripts.validate_data import WALK_HYPHEN_MINUS, WALK_NO_SEPARATOR, visible_text
+    assert WALK_HYPHEN_MINUS.search("fell -9.0%") and not WALK_HYPHEN_MINUS.search("fell −9.0%") and not WALK_HYPHEN_MINUS.search("year-ago 5")
+    assert WALK_NO_SEPARATOR.search("up 1061.5%") and not WALK_NO_SEPARATOR.search("up 1,061.5% in 2026") and WALK_NO_SEPARATOR.search("$1234")
+    p = {"steps": [W._step(4, status="ok", idea=None, sentences=["It rose 1.6%."], numbers=[{"label": "a", "value": "+1.6%", "as_of": "Close Oct 16, 2026"}])], "compare": {"rows": {}}}
+    assert "It rose 1.6%." in visible_text(p) and "+1.6%" in visible_text(p)
+
+
+# ── real estate trusts ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_a_reit_is_never_taught_pe():
+    assert W.is_reit("Real Estate", "Retail REITs") and not W.is_reit("Real Estate", "Real Estate Services") and not W.is_reit("Financials", "Diversified Banks")
+    s = W.step_valuation_reit("Realty Income", None, {"date": date(2026, 10, 16), "close": 57.0})
+    assert s["status"] == "absent" and s["idea"]["concept"] == "p_ffo" and "FFO" in s["absent"] and "P/E" not in s["absent"]
+    assert "P/E" not in W.IDEAS["p_ffo"][1]
+    ffo = W_D.ffo_view([(date(2025, 6, 30), 1.05), (date(2025, 9, 30), 1.06), (date(2025, 12, 31), 1.06), (date(2026, 3, 31), 1.06), (date(2026, 6, 30), 1.09)])
+    assert ffo["latest"]["growth_pct"] == 3.8 and ffo["ttm"]["sum"] == 4.27
+    s = W.step_valuation_reit("Realty Income", ffo, {"date": date(2026, 10, 16), "close": 57.0}, JPM_PERIODS)
+    assert s["numbers"][0]["value"] == "13.3" and s["numbers"][0]["label"] == "Price to FFO" and "P/E" not in json.dumps(s)
+    assert s["numbers"][0]["as_of"] == "Close Oct 16, 2026, FFO over the last four quarters, through Q2 2026"
+
+
+def test_dividend_yield_cell():
+    rows = [(date(2025, 10, 31) + timedelta(days=30 * i), 0.27) for i in range(12)]
+    c = W_D.dividend_cell(rows, {"date": date(2026, 10, 16), "close": 57.0})
+    assert c["value"] == "5.7%" and c["as_of"] == "12 dividends in the year to the Oct 16, 2026 close"
+    assert W_D.dividend_cell([], {"date": date(2026, 10, 16), "close": 57.0}) is None
+
+
+# ── Compare ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def _side(reit=False, **rows):
+    base = {k: None for k in ("sells", "growth", "keeps_now", "keeps_then", "stock_1y", "valuation", "ffo_growth", "dividend_yield", "next_report")}
+    return {"reit": reit, "rows": {**base, **rows}}
+
+
+def test_compare_rows_hide_rows_both_lack_and_reit_pairs_get_reit_rows():
+    cell = {"value": "x", "as_of": "y"}
+    mu, aapl = _side(sells=cell, keeps_now=cell, valuation=cell, dividend_yield=cell), _side(sells=cell, valuation=cell, dividend_yield=cell)
+    assert [r["key"] for r in W.compare_rows(mu, aapl)] == ["sells", "keeps_now", "valuation"]       # no dividend row for a non-trust pair
+    assert next(r for r in W.compare_rows(mu, aapl) if r["key"] == "valuation")["label"] == "P/E"
+    o, spg = _side(True, growth=cell, dividend_yield=cell, stock_1y=cell), _side(True, dividend_yield=cell, valuation=cell)
+    assert [r["key"] for r in W.compare_rows(o, spg)] == ["growth", "stock_1y", "valuation", "dividend_yield"]
+    assert next(r for r in W.compare_rows(o, spg) if r["key"] == "valuation")["label"] == "Price to FFO"
+    assert next(r for r in W.compare_rows(o, mu) if r["key"] == "valuation")["label"] == "P/E, or price to FFO for a real estate trust"
+
+
+def test_compare_growth_falls_back_to_the_latest_quarter_with_its_name():
+    rows = [{"metric": "revenue", "period_end": date(2026, 6, 30), "value": 1.5e9, "year_ago_value": 1.4e9, "growth_pct": 9.7, "phrase": "p", "held_reason": None, "readers": "X"}]
+    s = W.step_growth("Realty Income", rows, "Real Estate", True, JPM_PERIODS, reit=True)
+    assert s["cell"] == {"value": "+9.7%", "as_of": "Q2 2026, ended Jun 30, 2026, against a year earlier"}
+
+
+def test_another_names_the_sub_industry_for_every_index_industry():
+    assert W.another("Semiconductors") == "another semiconductor company"
+    assert W.another("Diversified Banks") == "another diversified bank"
+    assert W.another("Retail REITs") == "another retail REIT"
+    assert W.another("Automobile Manufacturers") == "another automobile manufacturer"
+    assert W.another("Systems Software") == "another systems software company"
+    assert W.another("Technology Hardware, Storage & Peripherals") == "another technology hardware, storage and peripherals company"
+    assert W.another("Electric Utilities") == "another electric utility" and W.another("Multi-Utilities") == "another multi-utility"
+    assert W.another(None, "Information Technology") == "another information technology company"
+    for ind in INDUSTRIES:
+        label = W.another(ind)
+        assert label.startswith("another ") and "&" not in label and not re.search(r"\b(?:Banks|REITs|Utilities|Manufacturers|Airlines)\b", label), label
+
+
+INDUSTRIES = ("Advertising|Aerospace & Defense|Agricultural & Farm Machinery|Air Freight & Logistics|Apparel Retail|Application Software|"
+              "Asset Management & Custody Banks|Automobile Manufacturers|Biotechnology|Consumer Finance|Data Center REITs|Distillers & Vintners|"
+              "Distributors|Diversified Banks|Electric Utilities|Food Distributors|Health Care REITs|IT Consulting & Other Services|"
+              "Independent Power Producers & Energy Traders|Insurance Brokers|Multi-Sector Holdings|Multi-Utilities|Passenger Airlines|Pharmaceuticals|"
+              "Regional Banks|Restaurants|Semiconductors|Trading Companies & Distributors|Water Utilities").split("|")
+
+
+# ── the line comparing two stocks on a known concept ──────────────────────────────────────────────────────────────────────
+
+def test_every_shown_step_with_a_figure_serves_its_fact():
+    rows = [{"metric": "revenue", "period_end": date(2026, 9, 3), "value": 54.2e9, "year_ago_value": 11.3e9, "growth_pct": 379.3, "phrase": "p", "held_reason": None, "readers": "X"}]
+    f = W.step_growth("Micron", rows, "Information Technology", True, MU_PERIODS)["fact"]
+    assert f == {"concept": "growth", "measure": "sales_yoy", "lead": "Micron's sales grew 379.3% from a year earlier", "short": "Micron's grew 379.3%",
+                 "tail": "in fiscal Q4 2026"}
+    m = {"ok": True, "measure": "gross", "label": "gross margin", "plain": "after paying for what it sold", "now": 80.7, "then": -9.1,
+         "now_start": date(2025, 9, 1), "now_end": date(2026, 9, 3), "then_end": date(2023, 8, 31), "revenue_tag": REV, "profit_tag": "GrossProfit",
+         "now_revenue": 1.0, "now_profit": 1.0, "then_revenue": 1.0, "then_profit": 1.0}
+    assert W.step_margins("Micron", m, [], MU_PERIODS)["fact"]["measure"] == "gross"
+    assert W.step_risks("X", {"ok": True, "filed": date(2026, 2, 1), "url": "u"}, None)["fact"] is None      # risks carry no figure: the full idea shows
+
+
+# ── story sentences: Sam's rule (2026-10-19) ───────────────────────────────────────────────────────────────────────────────
+
+def test_no_model_sentence_says_sensitive_exposed_or_what_may_happen_next_outside_the_risks():
+    assert WS.STORY_VERSION >= 5
+    for bad in ("Sales and earnings surged, making the company highly sensitive to any reversal in that momentum.",
+                "Its chips are exposed to swings in memory prices.", "Keeping the bulk of each sales dollar is a sign of pricing power, yet this can reverse.",
+                "The company warns profits may fall.", "Demand could slow next year."):
+        assert WS.output_problems(bad, WS.STORY_WORDS, "margins"), bad
+    risk = "Rivals including large corporations may use aggressive pricing to take market share."
+    assert WS.output_problems(risk, WS.RISK_WORDS, "risk:2") == []                  # step 7 names the company's own risks
+    assert WS.output_problems("Its sales are exposed to a few customers.", WS.RISK_WORDS, "risk:3")
+    assert WS.output_problems("Memory chips go into phones and computers, so prices for them shape Micron's results.", WS.STORY_WORDS, "business") == []
+    assert "sensitive" in WS.VOICE and "sensitive or exposed" in WS.verification_prompt({"name": "X"}, [("business", "A.")])
+
+
+def test_a_step_story_never_states_its_checks_answer():
+    assert WS.output_problems("Earnings grew faster than sales.", WS.STORY_WORDS, "growth")
+    assert WS.output_problems("The company depends on a single product line.", WS.STORY_WORDS, "business")
+    assert WS.output_problems("That rise reflects pricing power in a cyclical market.", WS.STORY_WORDS, "margins")
+    assert WS.output_problems("Earnings grew faster than sales.", WS.STORY_WORDS, "does") == []
+
+
+def test_step1_story_never_sizes_its_lines_and_figures_in_words_fail():
+    assert WS.output_problems("Most of its revenue comes from banking, with consumer banking making up nearly all of the remainder.", WS.STORY_WORDS, "business")
+    assert WS.output_problems("DRAM is a type of memory chip used in computers, phones and data centers.", WS.STORY_WORDS, "business") == []
+    assert WS.output_problems("Sales have roughly doubled in a year.", WS.STORY_WORDS, "growth")
+
+
+def test_summary_risk_line_keeps_names_capitalised_and_decoys_never_name_their_company():
+    assert W.lead_lower("Micron competes against large rivals.", "Micron Technology") == "Micron competes against large rivals."
+    assert W.lead_lower("JPMorgan Chase operates under supervision.", "JPMorgan Chase") == "JPMorgan Chase operates under supervision."
+    assert W.lead_lower("Apple's markets are competitive.", "Apple") == "Apple's markets are competitive."
+    assert W.lead_lower("Other buyers compete for properties.", "Realty Income") == "other buyers compete for properties."
+    assert WS.names_itself("Apple's markets are defined by price competition.", "Apple") and not WS.names_itself("Leases are short term.", "Vivmark Residential")
+
+
+def test_fallback_risk_check_never_offers_a_sentence_naming_its_company():
+    assert C.names_itself("The markets AMD sells into are competitive.", "Advanced Micro Devices", "AMD")
+    steps = [W._step(n, status="ok", idea=None) for n in range(1, 8)]
+    risks = [{"n": 1, "sentence": "JPMorgan Chase operates under extensive supervision."}, {"n": 2, "sentence": "Lawsuits could bring penalties."}]
+    c = W.risk_check("JPMorgan Chase", risks, {}, steps, ["Leases run short.", "Drug trials can fail."])
+    assert c["options"][c["answer"]] == "Lawsuits could bring penalties." and "JPMorgan" not in " ".join(c["options"])
+    assert W.risk_check("JPMorgan Chase", risks[:1], {}, steps, ["Leases run short.", "Drug trials can fail."]) is None
+    assert WS.output_problems("Watching whether sales keep climbing tells you how the model is holding up.", WS.STORY_WORDS, "growth")
+    assert WS.output_problems("Sales rose at a solid pace, reflecting its effort to add properties.", WS.STORY_WORDS, "growth")

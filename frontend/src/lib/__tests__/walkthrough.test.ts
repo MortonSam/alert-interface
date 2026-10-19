@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import { PE_RANGE_ENCODING, PRICE_VS_MARKET_ENCODING, peMark, peRangeLegend, priceMark, priceVsMarketLegend, type PeMarkKey, type PriceMarkKey } from "../encodings/walkthroughCharts";
 import { WALK_COPY } from "../walkthroughCopy";
-import { entryLine, HOME_ENTRY, knownLine, learn, readLearned } from "../walkthrough";
+import { compareLine, entryLine, HOME_ENTRY, learn, learnedElsewhere, readLearned, type WalkFact } from "../walkthrough";
 
 const read = (p: string) => readFileSync(join(__dirname, "../..", p), "utf8");
 
@@ -57,14 +57,37 @@ describe("walkthrough copy", () => {
 
 describe("concepts learned (this browser only)", () => {
   beforeEach(() => window.localStorage.clear());
-  it("keeps the first stock a concept was learned on, and shortens the idea only on another stock", () => {
+  it("keeps the first stock a concept was learned on, and points to it only from another stock", () => {
     learn("pe", "MU", "Micron");
     learn("pe", "NVDA", "NVIDIA");
     expect(readLearned().pe.symbol).toBe("MU");
     const idea = { concept: "pe", title: "P/E", text: "..." };
-    const tpl = "You know {title} from {learned_from}. Here's how {name} compares.";
-    expect(knownLine(tpl, idea, readLearned(), "NVDA", "NVIDIA")).toBe("You know P/E from Micron. Here's how NVIDIA compares.");
-    expect(knownLine(tpl, idea, readLearned(), "MU", "Micron")).toBeNull();
-    expect(knownLine(tpl, { ...idea, concept: "growth" }, readLearned(), "NVDA", "NVIDIA")).toBeNull();
+    expect(learnedElsewhere(idea, readLearned(), "NVDA")).toEqual({ symbol: "MU", name: "Micron" });
+    expect(learnedElsewhere(idea, readLearned(), "MU")).toBeNull();
+    expect(learnedElsewhere({ ...idea, concept: "growth" }, readLearned(), "NVDA")).toBeNull();
+  });
+});
+
+describe("the line comparing two stocks on a known concept", () => {
+  const mu: WalkFact = { concept: "growth", measure: "sales_yoy", lead: "Micron Technology's sales grew 379.3% from a year earlier", short: "Micron Technology's grew 379.3%", tail: "in fiscal Q4 2026" };
+  const o: WalkFact = { concept: "growth", measure: "sales_yoy", lead: "Realty Income's sales grew 9.7% from a year earlier", short: "Realty Income's grew 9.7%", tail: "in Q2 2026" };
+  it("states both figures, each with its own period", () => {
+    expect(compareLine(mu, o)).toBe("Micron Technology's sales grew 379.3% from a year earlier in fiscal Q4 2026. Realty Income's grew 9.7% in Q2 2026.");
+  });
+  it("names a shared period once", () => {
+    const a: WalkFact = { concept: "market_vs_company", measure: "stock_1y", lead: "Micron Technology's stock rose 358.4%", short: "Micron Technology's rose 358.4%", tail: "over the year to Oct 16, 2026" };
+    const b: WalkFact = { ...a, lead: "Realty Income's stock fell 0.5%", short: "Realty Income's fell 0.5%" };
+    expect(compareLine(a, b)).toBe("Micron Technology's stock rose 358.4% over the year to Oct 16, 2026. Realty Income's fell 0.5%.");
+  });
+  it("is null (the full idea shows) when either figure is missing or the measures differ", () => {
+    expect(compareLine(null, o)).toBeNull();
+    expect(compareLine(mu, null)).toBeNull();
+    const gross: WalkFact = { concept: "margins", measure: "gross", lead: "a", short: "b", tail: "c" };
+    expect(compareLine(gross, { ...gross, measure: "operating" })).toBeNull();
+  });
+  it("the overlay never shows a known-concept line without both figures", () => {
+    const src = read("components/walkthrough/Walkthrough.tsx");
+    expect(src).not.toContain("known_concept_line");
+    expect(src).toMatch(/const known = from && line \?/);
   });
 });

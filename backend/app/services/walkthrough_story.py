@@ -1,5 +1,6 @@
-"""The model's part of Ivy's walkthrough: at most one story sentence for steps 1 to 3, up to three plain sentences for the risks
-the company names in Item 1A (step 7), and one sentence for each Compare pair. Every number on screen is rule-built elsewhere
+"""The model's part of Ivy's walkthrough: at most one story sentence for steps 1 to 3, one plain line on what the company does (the
+summary's first line), up to three plain sentences for the risks the company names in Item 1A (step 7), and one sentence for each
+Compare pair. Every number on screen is rule-built elsewhere
 (services/walkthrough); these sentences carry none: a digit, a currency or percent sign or a number word fails the output check
 (ask_ivy.check_output, which also rejects recommendation language, valuation verdicts and unexplained terms).
 
@@ -18,9 +19,22 @@ from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
 
-STORY_VERSION = 4                      # 4 (2026-10-19): no speculation, no stated causes the evidence lacks, no talk about the information
-SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|information (?:shown|here|given)|"
+STORY_VERSION = 7                      # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
+                                       # 6 (same day): step 1's story never sizes its lines; no "doubled"; no comparison with companies the evidence doesn't name
+                                       # 7 (same day): no "whether", "keeps climbing" or "holding up" outside step 7
+SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|reflect\w*|result of|owing to|information (?:shown|here|given)|"
                          r"not (?:described|stated|shown|mentioned)|shown here|the (?:evidence|facts)|the data(?!\s+cent)|tends? to|(?:is|are|isn't|not|no) available|no description|not been (?:described|stated|shown)|described here|a fraction)\b", re.I)
+# Sam's rule (2026-10-19): no model sentence says what the company is sensitive or exposed to, and only step 7 names risks or what
+# may happen next (and only the company's own, from its Item 1A)
+EXPOSURE = re.compile(r"\b(?:sensitive|sensitivity|exposed|exposure|vulnerab\w*)\b", re.I)
+OUTLOOK = re.compile(r"\b(?:may|might|could|can|will|would|should|going forward|in the future|future|next|ahead|reverse|reversal|risks?|risky|warns?|threat\w*|"
+                     r"uncertain\w*|momentum|lasts?|sustain\w*|outlook|whether|keeps? (?:climbing|rising|growing|falling)|holding up)\b", re.I)
+# a step's story never states the reading its quick check asks for (walkthrough_checks)
+GIVEAWAY = {"business": re.compile(r"\b(?:depend\w*|reli\w*|concentrat\w*|diversif\w*|single|one line|two lines|several lines|most|mostly|bulk|majority|"
+                                  r"nearly all|remainder|rest|share|main|mainly|primar\w*|dominat\w*|largest|biggest|smaller|larger)\b", re.I),
+            "growth": re.compile(r"\b(?:faster|slower|outpac\w*|outgr\w*|accelerat\w*|decelerat\w*|speed\w*|slow\w*|lag\w*|kept pace|in step)\b", re.I),
+            "margins": re.compile(r"\b(?:pricing power|competition|competitive|costs? (?:fell|rose|dropped|climbed)|lower costs|rising costs|swing|swung|cycl\w*|volatil\w*|steady|stable|barely)\b", re.I)}
+MULTIPLES = re.compile(r"\b(?:doubl\w*|tripl\w*|quadrupl\w*|halv\w*|tenfold|\w+fold)\b", re.I)    # a figure in words
 MODEL_SECONDS = 60
 CALL_SECONDS = 150
 NIGHTLY_STORY_CAP_USD = 8.0
@@ -30,12 +44,14 @@ MAX_RISKS = 3
 RISKS_SHOWN_TO_MODEL = 12
 BODY_TO_MODEL = 700
 STORY_STEPS = ("business", "growth", "margins")
+SUMMARY_KEYS = ("does",)               # the summary's plain line on what the company does (never on a step screen)
 
 VOICE = """You are Ivy, explaining a company to someone who has never heard of it. Plain words, short sentences, no jargon, no hype.
 Never recommend buying or selling, never call a stock cheap, expensive, a bargain or overvalued, never predict the price.
 State only what the evidence says. Never guess at a cause, never generalise about an industry, never use "likely", "probably",
 "suggests", "because", "due to" or "driven by" unless the risk factor text itself gives that cause, and never talk about the
-information you were given or what it lacks."""
+information you were given or what it lacks. Never say what the company is sensitive to or exposed to. Outside the risks, never
+name a risk or say what may, could or will happen next: describe what is, not what might be."""
 
 
 def _client():
@@ -45,6 +61,8 @@ def _client():
 
 def fact_lines(facts: dict) -> list[str]:
     lines = []
+    if facts.get("industry"):
+        lines.append(f"Sub-industry: {facts['industry']}")
     if facts.get("description"):
         lines.append(f"Company description: {facts['description']}")
     for key, st in (facts.get("steps") or {}).items():
@@ -65,6 +83,8 @@ def risk_lines(facts: dict, limit: int = RISKS_SHOWN_TO_MODEL, body: int = BODY_
 def build_prompt(facts: dict, redo: dict | None = None) -> str:
     steps = [k for k in STORY_STEPS if k in (facts.get("steps") or {})]
     want = {k: "one sentence" for k in steps}
+    if facts.get("description") or "business" in (facts.get("steps") or {}):
+        want["does"] = "one sentence"
     if facts.get("risks"):
         want["risks"] = f"up to {MAX_RISKS} items"
     if redo:
@@ -84,8 +104,14 @@ RISK FACTORS FROM ITEM 1A OF ITS 10-K (filed {facts.get('risk_filed') or 'n/a'})
 {chr(10).join(risk_lines(facts)) or '(none)'}
 {redo_block}
 WRITE
-- For each of {', '.join(k for k in want if k != 'risks') or 'no step'}: ONE sentence of at most {STORY_WORDS} words that helps a newcomer see why the figures for that step matter
-  for this company, using only the facts and the risk factors above. It adds meaning, it does not repeat the figures.
+- For each of {', '.join(k for k in want if k not in ('risks', 'does')) or 'no step'}: ONE sentence of at most {STORY_WORDS} words that helps a newcomer see why the figures for that step matter
+  for this company, using only the facts and the risk factors above. It adds meaning, it does not repeat the figures. It describes
+  what is: no risks, nothing the company is sensitive or exposed to, nothing about what may happen next.
+  For "growth", never compare how fast two figures grew. For "business", say what its biggest line is or does in plain words, never how
+  big any line is or how much the company depends on it (no most, bulk, majority, share, main).
+  For "margins", never say what the change in its margin points to (pricing, costs, competition) or call it a swing or a cycle.
+- For "does": ONE sentence of at most {STORY_WORDS} words saying in plain words what the company does, what it sells or makes and to
+  whom, using only the facts and the risk factors above (begin with the company's name). No marketing words.
 - For "risks": choose up to {MAX_RISKS} of the risk factors that matter most for understanding this business, and say each in ONE plain sentence of
   at most {RISK_WORDS} words, true to its heading and text, with no detail that is not in them.
 - No digits, no currency or percent signs, no number words (one, two, ten, twice, double, half, dozen). No dates. No colons, semicolons or dashes.
@@ -103,7 +129,7 @@ def parse_draft(content: str) -> dict:
     except ValueError:
         d = {}
     out: dict = {}
-    for k in STORY_STEPS:
+    for k in STORY_STEPS + SUMMARY_KEYS:
         if isinstance(d.get(k), str) and d[k].strip():
             out[k] = " ".join(d[k].split())
     risks = []
@@ -115,8 +141,10 @@ def parse_draft(content: str) -> dict:
     return out
 
 
-def output_problems(sentence: str, words: int) -> list[str]:
-    """Pure: why a drafted sentence cannot be shown (ask_ivy.check_output with no facts allowed, plus length and punctuation)."""
+def output_problems(sentence: str, words: int, key: str | None = None) -> list[str]:
+    """Pure: why a drafted sentence cannot be shown (ask_ivy.check_output with no facts allowed, plus length and punctuation, plus
+    Sam's rule: nothing sensitive or exposed anywhere, and outside the risks (key "risk:N") no risk and nothing about what may
+    happen next; a step's sentence never states its check's answer)."""
     from app.services.ask_ivy import check_output, sentences
     problems = check_output(sentence, set())
     if len(sentences(sentence)) != 1:
@@ -128,12 +156,26 @@ def output_problems(sentence: str, words: int) -> list[str]:
     m = SPECULATION.search(sentence)
     if m:
         problems.append(f"speculation, a stated cause or talk about the information: {m.group(0)}")
+    m = MULTIPLES.search(sentence)
+    if m:
+        problems.append(f"a figure in words: {m.group(0)}")
+    m = EXPOSURE.search(sentence)
+    if m:
+        problems.append(f"says what the company is sensitive or exposed to: {m.group(0)}")
+    if not (key or "").startswith("risk:"):
+        m = OUTLOOK.search(sentence)
+        if m:
+            problems.append(f"names a risk or what may happen next, which only the risks may: {m.group(0)}")
+    if key in GIVEAWAY:
+        m = GIVEAWAY[key].search(sentence)
+        if m:
+            problems.append(f"states the reading the step's quick check asks for: {m.group(0)}")
     return problems
 
 
 def items(draft: dict, risk_ns: set[int]) -> list[tuple[str, str]]:
     """Pure: [(id, sentence)] in a fixed order: steps, then risk:<n> for risks the filing has (an unknown number is dropped)."""
-    out = [(k, draft[k]) for k in STORY_STEPS if k in draft]
+    out = [(k, draft[k]) for k in STORY_STEPS + SUMMARY_KEYS if k in draft]
     seen = set()
     for r in draft.get("risks", []):
         if r["n"] in risk_ns and r["n"] not in seen:
@@ -158,6 +200,10 @@ SENTENCES:
 RULES
 - "supported": every factual claim is confirmed by the evidence. A sentence with id risk:N must be true to RISK N's heading and text. A general
   explanation of an idea with no claim about this company is supported. A clause saying why a confirmed fact matters does not make it unsupported.
+- A sentence whose id is not risk:N is "unsupported" if it says what the company is sensitive or exposed to, names a risk, or says what
+  may, could or will happen next. Only risk:N sentences may name risks, and only the company's own.
+- A "does" sentence must say only what the company does, sells or makes, as the evidence states it.
+- A comparison with other companies or an industry ("few companies match", "unlike its peers") is "unsupported" unless the evidence names them.
 - "unsupported": it claims something about this company the evidence does not confirm.
 - "contradicted": it conflicts with the evidence.
 - Bias toward "unsupported" when in doubt.
@@ -199,7 +245,7 @@ async def story_for(facts: dict, *, client=None) -> dict:
         failed: dict[str, str] = {}
         clean = []
         for i, s in drafted:
-            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS)
+            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i)
             if p:
                 failed[i] = "; ".join(p)
                 verdicts[i] = {"status": "rejected", "reason": failed[i], "round": rnd, "draft": s}
@@ -226,19 +272,79 @@ async def story_for(facts: dict, *, client=None) -> dict:
     return {"version": STORY_VERSION, "sentences": kept, "verdicts": verdicts, "dropped": dropped, "cost_usd": round(cost, 4)}
 
 
-def apply(payload: dict, story: dict) -> None:
-    """Pure (in place): the verified sentences onto the payload's steps."""
+def apply(payload: dict, story: dict, headings: dict[int, str] | None = None, decoy_risks: list[str] | None = None) -> None:
+    """Pure (in place): the verified sentences onto the payload's steps; the "does" line leads the summary's step 1 line."""
     from app.services import walkthrough as W
     sents = (story or {}).get("sentences") or {}
     by_key = {s["key"]: s for s in payload["steps"]}
     for k in STORY_STEPS:
         if k in sents and by_key[k]["status"] != "absent":
             by_key[k]["story"] = sents[k]
+    b = by_key["business"]
+    if sents.get("does") and b["status"] != "absent":
+        seg_line = b["summary"] if b.get("fact") else None          # with a sales split, its line follows; else the plain line replaces the description
+        b["summary"] = sents["does"] + (f" {seg_line}" if seg_line else "")
     risks = [{"n": int(i.split(":")[1]), "sentence": s} for i, s in sents.items() if i.startswith("risk:")]
     st = by_key["risks"]
     if st["status"] != "absent":
-        W.with_risk_story(st, payload["name"], sorted(risks, key=lambda r: r["n"]))
+        W.with_risk_story(st, payload["name"], sorted(risks, key=lambda r: r["n"]), headings, payload["steps"], decoy_risks)
     payload["summary"] = W.summary(payload["name"], payload["steps"])
+
+
+def headings_of(b: dict) -> dict[int, str]:
+    return {r["n"]: r["heading"] for r in (b.get("story_facts") or {}).get("risks") or []}
+
+
+def decoys_for(sym: str, sector: str | None, pool: dict[str, tuple[str | None, str]]) -> list[str]:
+    """Pure: two risk sentences for step 7's fallback check, from companies in two other sectors (one each), in a fixed per-stock
+    order. pool is {symbol: (sector, its first shown risk sentence)}."""
+    from app.services.walkthrough_checks import decoy_order
+    picked, sectors = [], {sector}
+    for other in sorted((o for o in pool if o != sym), key=lambda o: decoy_order(sym, o)):
+        sec, sentence = pool[other]
+        if sec and sec not in sectors:
+            picked.append(sentence)
+            sectors.add(sec)
+        if len(picked) == 2:
+            break
+    return picked
+
+
+def names_itself(sentence: str, name: str | None, symbol: str | None = None) -> bool:
+    from app.services.walkthrough_checks import names_itself as n
+    return n(sentence, name, symbol)
+
+
+async def risk_pool(built: dict) -> dict[str, tuple[str | None, str]]:
+    """{symbol: (sector, first shown risk sentence)} over the stored walkthroughs and tonight's build."""
+    from sqlalchemy import text
+    from app.database import ScriptSessionLocal
+    pool: dict[str, tuple[str | None, str]] = {}
+    async with ScriptSessionLocal() as db:
+        for sym, p in (await db.execute(text("SELECT symbol, payload FROM ivy_walkthroughs"))).all():
+            r = next((s.get("risks") for s in p.get("steps", []) if s["key"] == "risks" and s["status"] == "ok"), None)
+            pick = next((x["sentence"] for x in r or [] if not names_itself(x["sentence"], p.get("name"), sym)), None)
+            if pick:
+                pool[sym] = (p.get("sector"), pick)
+    for sym, b in built.items():
+        r = next((s.get("risks") for s in b["payload"]["steps"] if s["key"] == "risks" and s["status"] == "ok"), None)
+        pick = next((x["sentence"] for x in r or [] if not names_itself(x["sentence"], b["payload"].get("name"), sym)), None)
+        if pick:
+            pool[sym] = (b["payload"].get("sector"), pick)
+        else:
+            pool.pop(sym, None)
+    return pool
+
+
+async def fill_risk_fallbacks(built: dict) -> None:
+    """Step 7's check for each stock with no mapped risk: which of three sentences the company lists (two decoys from other sectors)."""
+    from app.services import walkthrough as W
+    pool = await risk_pool(built)
+    for sym, b in built.items():
+        st = next(s for s in b["payload"]["steps"] if s["key"] == "risks")
+        if st["status"] == "ok" and st.get("check") is None and st.get("risks"):
+            st["check"] = W.risk_check(b["payload"]["name"], st["risks"], headings_of(b), b["payload"]["steps"],
+                                       decoys_for(sym, b["payload"].get("sector"), pool))
 
 
 # ── Compare's sentence ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -253,12 +359,11 @@ def compare_fingerprint(a: dict, b: dict) -> str:
 
 
 def compare_facts(a: dict, b: dict) -> list[str]:
-    from app.services.walkthrough import COMPARE_ROWS
+    from app.services.walkthrough import COMPARE_LABELS
     lines = []
     for p in (a, b):
-        for key, label in COMPARE_ROWS:
-            if key not in STORY_COMPARE_ROWS:
-                continue
+        for key in STORY_COMPARE_ROWS:
+            label = COMPARE_LABELS[key]
             v = p["compare"]["rows"].get(key)
             if v:
                 lines.append(f"{p['name']}, {label}: {v['value']} ({v['as_of']}{', ' + v['measure'] if v.get('measure') else ''})")
@@ -337,11 +442,12 @@ async def run_stories(built: dict, today: date, cap: float = NIGHTLY_STORY_CAP_U
                 b["story"], b["story_fingerprint"] = {}, None
         else:
             b["story"], b["story_fingerprint"] = {}, None          # facts changed and the night's cap is spent: no stale story
-        apply(b["payload"], b["story"])
+        apply(b["payload"], b["story"], headings_of(b))
+    await fill_risk_fallbacks(built)
     return await compare_stories(built, spent, cap)
 
 
-def reuse_stories(built: dict) -> None:
+async def reuse_stories(built: dict) -> None:
     """Without model calls: each stock keeps its stored story only while its story facts are unchanged."""
     from app.services import walkthrough as W
     for b in built.values():
@@ -349,7 +455,8 @@ def reuse_stories(built: dict) -> None:
         prior = b["prior"] or {}
         ok = prior.get("story_fingerprint") == fp and prior.get("story")
         b["story"], b["story_fingerprint"] = (prior["story"], fp) if ok else ({}, None)
-        apply(b["payload"], b["story"])
+        apply(b["payload"], b["story"], headings_of(b))
+    await fill_risk_fallbacks(built)
 
 
 async def compare_stories(built: dict, spent: float, cap: float) -> float:

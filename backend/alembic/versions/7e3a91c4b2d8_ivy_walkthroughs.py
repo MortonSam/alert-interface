@@ -1,13 +1,13 @@
 """ivy_walkthroughs and ivy_compare_stories: Ivy's stock walkthrough, rebuilt nightly (services/walkthrough, scripts/build_walkthroughs).
 
-Revision ID: f2a3b4c5d6e7
+Revision ID: 7e3a91c4b2d8
 Revises: e1f2a3b4c5d6
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = "f2a3b4c5d6e7"
+revision = "7e3a91c4b2d8"
 down_revision = "e1f2a3b4c5d6"
 branch_labels = None
 depends_on = None

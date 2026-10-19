@@ -17,6 +17,7 @@ from __future__ import annotations
 from app.services.redact import redact
 
 import asyncio
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -4054,10 +4055,31 @@ async def check_walkthrough_staleness(session) -> CheckResult:
     return CheckResult("walkthrough_staleness", PASS, f"Every walkthrough is version {WALKTHROUGH_VERSION} and built within {WALKTHROUGH_MAX_AGE_HOURS} hours")
 
 
+DIVIDEND_YIELD_MAX_PCT = 20.0
+WALK_HYPHEN_MINUS = re.compile(r"(?<![\w-])-\d")                          # "-9.0%" where a true minus belongs
+WALK_NO_SEPARATOR = re.compile(r"(?<![\d,.])\d{4,}\.\d|\$\d{4,}")           # "1061.5" or "$1234" (years and dates have no decimals)
+
+
+def visible_text(payload: dict) -> list[str]:
+    """Pure: every string a visitor reads in a stored walkthrough (labels, figures, sentences, checks, the summary)."""
+    out: list[str] = []
+    for st in payload.get("steps", []):
+        out += [st.get("absent") or "", *st.get("sentences", []), st.get("summary") or "", st.get("gap") or ""]
+        for n in st.get("numbers", []) + st.get("deeper", []):
+            out += [n["label"], n["value"], n["as_of"]]
+        if st.get("check"):
+            out += [st["check"]["question"], st["check"]["why"], *st["check"]["options"]]
+    for c in ((payload.get("compare") or {}).get("rows") or {}).values():
+        if c:
+            out += [c.get("value") or "", c.get("as_of") or ""]
+    return [t for t in out if t]
+
+
 async def check_walkthrough_claims(session) -> CheckResult:
     """ERROR when a stored walkthrough shows a model sentence without a "supported" verdict or with a digit, a Compare sentence
     without one, or a figure outside its band: segment shares 0-100% adding to no more than 101%, margins inside
-    services/margins.MARGIN_BAND, a P/E above 0."""
+    services/margins.MARGIN_BAND, a P/E or price to FFO above 0 and at most 100, a dividend yield of at most DIVIDEND_YIELD_MAX_PCT, and
+    no visible text with a hyphen for a minus sign or a four-digit figure without its thousands separator."""
     import re
     from app.services.margins import MARGIN_BAND
     bad: list[str] = []
@@ -4083,8 +4105,15 @@ async def check_walkthrough_claims(session) -> CheckResult:
         for st in (payload or {}).get("steps", []):
             if st["key"] == "valuation" and st["status"] != "absent":
                 v = st["numbers"][0]["value"] if st["numbers"] else None
-                if v is None or not 0 < float(v) <= 100:
-                    bad.append(f"{sym}: P/E {v} outside 0 to 100")
+                if v is None or not 0 < float(v.replace(",", "").replace("\u2212", "-")) <= 100:
+                    bad.append(f"{sym}: {st['numbers'][0]['label'] if st['numbers'] else 'P/E'} {v} outside 0 to 100")
+        dy = ((payload or {}).get("compare") or {}).get("rows", {}).get("dividend_yield")
+        if dy and not 0 < dy.get("pct", 0) <= DIVIDEND_YIELD_MAX_PCT:
+            bad.append(f"{sym}: dividend yield {dy.get('value')} outside 0 to {DIVIDEND_YIELD_MAX_PCT}%")
+        for t in visible_text(payload or {}):
+            if WALK_HYPHEN_MINUS.search(t) or WALK_NO_SEPARATOR.search(t):
+                bad.append(f"{sym}: unformatted figure in {t[:80]!r}")
+                break
     for sym, other, sentence, verdicts in (await session.execute(text("SELECT symbol, other, sentence, verdicts FROM ivy_compare_stories WHERE sentence IS NOT NULL"))).all():
         if not any((v or {}).get("status") == "supported" and v.get("draft") == sentence for v in (verdicts or [])):
             bad.append(f"{sym} vs {other}: Compare sentence without a supported verdict")

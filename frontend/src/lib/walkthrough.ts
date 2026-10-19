@@ -2,8 +2,9 @@
  * Ivy's walkthrough: the types the API serves (backend routers/walkthrough, services/walkthrough), the fetchers, and the
  * concepts a visitor has learned, kept in this browser only (localStorage, no account).
  *
- * Every sentence and number arrives built by the backend; this module adds no figure and no wording of its own beyond the
- * known-concept line, which also comes from the API (known_concept_line).
+ * Every sentence and number arrives built by the backend; this module adds no figure of its own. Once a concept is known from
+ * another stock, "The idea" becomes one line comparing the two stocks on it, each half the `fact` its own walkthrough serves
+ * (compareLine), so both figures come from the API with their periods; with either missing, the full idea shows.
  */
 
 export interface WalkNumber { label: string; value: string; as_of: string }
@@ -11,6 +12,8 @@ export interface WalkCheck { concept: string; question: string; options: string[
 export interface WalkIdea { concept: string; title: string; text: string }
 export interface ChartSeries { key: "stock" | "spy" | "sector"; label: string; points: [string, number][] }
 export interface PriceChart { kind: "price_vs_market"; as_of: string; start: string; series: ChartSeries[] }
+/** This stock's figure for its step's concept, for the line comparing two stocks once the concept is known. */
+export interface WalkFact { concept: string; measure: string; lead: string; short: string; tail: string }
 export interface PeChart { kind: "pe_range"; as_of: string; points: [string, number][]; median: number; today: number; sector_median: number | null; sector: string | null }
 
 export interface WalkStep {
@@ -28,25 +31,26 @@ export interface WalkStep {
   deeper: WalkNumber[];
   source: { label: string; url: string | null } | null;
   summary: string | null;
-  uncertain: string | null;
+  gap: string | null;
+  fact: WalkFact | null;
   risks?: { n: number; sentence: string }[];
 }
 
 export interface CompareCell { value: string; as_of: string; measure?: string }
-export interface CompareSide { symbol: string; name: string; rows: Record<string, CompareCell | null> }
-export interface CompareChoice { kind: "rival" | "ruler"; symbol: string; name: string; basis?: string; rule?: string }
+export interface CompareSide { symbol: string; name: string; reit?: boolean; rows: Record<string, CompareCell | null> }
+export interface CompareChoice { kind: "rival" | "ruler"; symbol: string; name: string; basis?: string; label?: string; rule?: string }
 
 export interface Walkthrough {
   version: number;
   symbol: string;
   name: string;
   sector: string | null;
+  reit?: boolean;
   minutes: number;
   as_of: string;
   steps: WalkStep[];
   summary: { known: { n: number; line: string; shown: boolean }[]; uncertain: string[]; concepts: { concept: string; title: string }[]; closing: string };
   compare: CompareSide;
-  known_concept_line: string;
   compare_choices: CompareChoice[];
   ask_enabled: boolean;
 }
@@ -116,9 +120,25 @@ export function learn(concept: string, symbol: string, name: string, now = new D
   return cur;
 }
 
-/** The short "The idea" line for a concept learned on another stock, or null (learned on this stock, or never). */
-export function knownLine(template: string, idea: WalkIdea, learned: Learned, symbol: string, name: string): string | null {
-  const l = learned[idea.concept];
-  if (!l || l.symbol === symbol) return null;
-  return template.replace("{title}", idea.title).replace("{learned_from}", l.name).replace("{name}", name);
+/** The stock a concept was first learned on, when that is another stock (else null: learned here, or never). */
+export function learnedElsewhere(idea: WalkIdea | null, learned: Learned, symbol: string): { symbol: string; name: string } | null {
+  const l = idea ? learned[idea.concept] : undefined;
+  return l && l.symbol !== symbol ? { symbol: l.symbol, name: l.name } : null;
+}
+
+/** The fact a walkthrough serves for a concept (from a shown step), or null. */
+export function factFor(w: Walkthrough | null, concept: string): WalkFact | null {
+  const s = w?.steps.find((x) => x.status !== "absent" && x.fact?.concept === concept);
+  return s?.fact ?? null;
+}
+
+/**
+ * One line comparing the stock a concept was learned on with this one, both figures on the same measure:
+ * "Micron Technology's sales grew 379.3% from a year earlier in fiscal Q4 2026. Realty Income's grew 9.7% in Q2 2026."
+ * Null (show the full idea) when either figure is missing or the two are different measures (a gross margin and an operating one).
+ */
+export function compareLine(other: WalkFact | null, mine: WalkFact | null): string | null {
+  if (!other || !mine || other.concept !== mine.concept || other.measure !== mine.measure) return null;
+  const tail = mine.tail === other.tail ? "" : ` ${mine.tail}`;
+  return `${other.lead} ${other.tail}. ${mine.short}${tail}.`;
 }

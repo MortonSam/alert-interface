@@ -150,7 +150,81 @@ async def typical_move(db, ticker_id, symbol: str, held: set[str]) -> dict | Non
     sample = [(d, float(m)) for d, m in rows if d not in mismatch]
     if not sample:
         return None
-    return {"pct": round(sum(abs(m) for _, m in sample) / len(sample), 1), "n": len(sample), "as_of": sample[-1][0], "dates": [d for d, _ in sample]}
+    return {"pct": round(sum(abs(m) for _, m in sample) / len(sample), 1), "n": len(sample), "as_of": sample[-1][0], "dates": [d for d, _ in sample],
+            "last": {"date": sample[-1][0], "move": round(sample[-1][1], 1)}}
+
+
+async def last_report(db, ticker_id, typical: dict | None, today: date) -> dict | None:
+    """The last report's 1-day move when it is settled: the latest earnings event before today has its stored move in the typical
+    sample. A report whose move is not stored yet (or was left out of the sample) returns None, and step 6 asks about an
+    ordinary day instead."""
+    if not typical:
+        return None
+    latest = (await db.execute(text("SELECT max(event_date) FROM events WHERE ticker_id = :t AND event_type = 'earnings' AND event_date < :d"),
+                               {"t": ticker_id, "d": today})).scalar()
+    return typical["last"] if latest and typical["last"]["date"] == latest else None
+
+
+def ordinary_move(series: list[tuple[date, float]], report_days: set[date], sessions: int = YEAR_SESSIONS) -> float | None:
+    """Pure: the mean absolute close-to-close move over the last `sessions` sessions, report sessions left out (one decimal)."""
+    recent = series[-sessions - 1:]
+    moves = [abs(c / pc - 1) * 100 for (_, pc), (d, c) in zip(recent, recent[1:]) if pc > 0 and d not in report_days]
+    if len(moves) < sessions // 2:
+        return None
+    return round(sum(moves) / len(moves), 1)
+
+
+async def last_close(db, symbol: str) -> dict | None:
+    """The latest stored raw close (price_bars_shadow), with its date."""
+    r = (await db.execute(text("SELECT date, close FROM price_bars_shadow WHERE symbol = :s AND close IS NOT NULL ORDER BY date DESC LIMIT 1"), {"s": symbol})).first()
+    return {"date": r[0], "close": float(r[1])} if r and r[1] else None
+
+
+DIVIDEND_YEAR_DAYS = 365
+
+
+async def dividend_yield(db, symbol: str, close: dict | None) -> dict | None:
+    """Dividends with ex-dates in the year to the latest close (stored on the Intrinio bars), over that close. None with no
+    dividend in the year."""
+    if not close:
+        return None
+    rows = (await db.execute(text("""SELECT date, dividend FROM price_bars_shadow WHERE symbol = :s AND dividend > 0 AND date > :a AND date <= :b ORDER BY date"""),
+                             {"s": symbol, "a": close["date"] - timedelta(days=DIVIDEND_YEAR_DAYS), "b": close["date"]})).all()
+    return dividend_cell([(d, float(v)) for d, v in rows], close)
+
+
+def dividend_cell(rows: list[tuple[date, float]], close: dict) -> dict | None:
+    """Pure: Compare's dividend yield cell from the year's ex-dates and the close."""
+    from app.services.briefing import fmt_date
+    if not rows or close["close"] <= 0:
+        return None
+    total = sum(v for _, v in rows)
+    return {"value": f"{total / close['close'] * 100:,.1f}%", "as_of": f"{len(rows)} dividends in the year to the {fmt_date(close['date'])} close",
+            "pct": round(total / close["close"] * 100, 2)}
+
+
+async def ffo_figures(db, symbol: str) -> dict | None:
+    """A trust's shown FFO per share quarters (ffo_quarters, state 'ok', from the eps-display branch's FFO readers) when that
+    table exists, as {"latest", "ttm"} (services/walkthrough_data.ffo_view); None before it is merged or with no quarter shown."""
+    if not (await db.execute(text("SELECT to_regclass('public.ffo_quarters')"))).scalar():
+        return None
+    rows = [(r[0], float(r[1])) for r in (await db.execute(text(
+        "SELECT period_end, ffo_per_share FROM ffo_quarters WHERE symbol = :s AND state = 'ok' AND ffo_per_share IS NOT NULL ORDER BY period_end"), {"s": symbol})).all()]
+    return ffo_view(rows)
+
+
+def ffo_view(rows: list[tuple[date, float]]) -> dict | None:
+    """Pure: the latest shown quarter against the same quarter a year earlier, and the last four when they are consecutive."""
+    if not rows:
+        return None
+    end, value = rows[-1]
+    ago = next((v for d, v in rows if 350 <= (end - d).days <= 380), None)
+    latest = {"end": end, "value": value, "growth_pct": round((value / ago - 1) * 100, 1) if ago and ago > 0 else None, "year_ago": ago}
+    four = rows[-4:]
+    ttm = None
+    if len(four) == 4 and all(80 <= (b[0] - a[0]).days <= 100 for a, b in zip(four, four[1:])):
+        ttm = {"end": end, "sum": round(sum(v for _, v in four), 4)}
+    return {"latest": latest, "ttm": ttm}
 
 
 async def implied_move(db, symbol: str, report_date: date, today: date) -> dict | None:

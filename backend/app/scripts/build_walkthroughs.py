@@ -35,7 +35,7 @@ async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: 
     """The 10-K readings (segments, risk factors) and margins, reusing a stored reading of the same 10-K."""
     from app.scripts.compute_pe import company_facts_merged
     from app.services.edgar_client import PREDECESSOR_CIKS
-    from app.services import margins as M, risk_factors as R, segments as S
+    from app.services import fiscal_periods as F, margins as M, risk_factors as R, segments as S
     out = dict(stored or {})
     cik = await edgar.get_cik(sym)
     ciks = [c for c in [cik] + PREDECESSOR_CIKS.get(sym, []) if c]
@@ -51,9 +51,12 @@ async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: 
         out["risks"] = {**_jsonable(rk), "version": R.RISK_FACTORS_VERSION}
     periodic = latest_periodic(await edgar.get_submissions(cik)) if cik else None
     m = out.get("margins") or {}
-    if cik and (m.get("periodic") != periodic or m.get("version") != M.MARGINS_VERSION or not m.get("periodic")):
+    p = out.get("periods") or {}
+    if cik and (m.get("periodic") != periodic or m.get("version") != M.MARGINS_VERSION or not m.get("periodic")
+                or p.get("periodic") != periodic or p.get("version") != F.FISCAL_PERIODS_VERSION):
         facts = await asyncio.wait_for(company_facts_merged(edgar, cik, sym), SEC_SECONDS)
         out["margins"] = {**_jsonable(M.margins(facts, sector, today)), "version": M.MARGINS_VERSION, "periodic": periodic}
+        out["periods"] = {"map": F.period_map(facts), "version": F.FISCAL_PERIODS_VERSION, "periodic": periodic}
     return out
 
 
@@ -86,6 +89,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     """Pure over the stored data and readings: {payload, steps_shown, story_facts}."""
     from app.services.briefing import short_name
     from app.services.fact_holds import holds_for
+    from app.services.fiscal_periods import quarter_label
     from app.services.fomc_calendar import decision_days
     from app.services import walkthrough_data as D
     from app.thresholds import MARKET_DAY_MIN_SPY_PCT
@@ -93,16 +97,20 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     t = u["tickers"][sym]
     name = short_name(re.sub(r"\s*\([^)]*\)\s*$", "", t["name"] or ""), sym) or sym     # "Clorox Company (The)", "Kimco Realty Corporation (HC)"
     sector = t["sector"]
+    reit = W.is_reit(sector, t["industry"])
     merger = u["mergers"].get(sym)
     held = set(await holds_for(db, sym))
+    periods = (src.get("periods") or {}).get("map") or {}
     seg = _dates(src.get("segments"), "start", "end", "filed")
     risks = _dates(src.get("risks"), "filed")
     m = _dates(src.get("margins"), "now_start", "now_end", "then_end", "filed_on")
     actions = u["actions"].get(sym, [])
-    s1 = W.step_business(name, u["profiles"].get(sym), seg, merger)
+    ffo = await D.ffo_figures(db, sym) if reit else None
+    close = await D.last_close(db, sym)
+    s1 = W.step_business(name, u["profiles"].get(sym), seg, merger, periods)
     growth_rows = u["growth"].get(sym)
-    s2 = W.step_growth(name, growth_rows, sector, True)
-    s3 = W.step_margins(name, m, actions)
+    s2 = W.step_growth(name, growth_rows, sector, True, periods, reit, ffo)
+    s3 = W.step_margins(name, m, actions, periods)
     rdays = await D.report_days(db, t["id"])
     stock = u["closes"].get(sym, [])
     moves = D.biggest_moves(stock, u["spy"], rdays, MARKET_DAY_MIN_SPY_PCT)
@@ -110,8 +118,11 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     snap = u["pe"].get(sym)
     if snap and "pe" in held:
         snap = None
-    series = await D.pe_series(db, sym, u["splits"].get(sym, []), actions, today) if snap and snap["status"] == "ok" else []
-    s5 = W.step_valuation(name, sector, snap, series, u["pe_sector"].get(sector), True)
+    if reit:
+        s5 = W.step_valuation_reit(name, ffo, close, periods)
+    else:
+        series = await D.pe_series(db, sym, u["splits"].get(sym, []), actions, today) if snap and snap["status"] == "ok" else []
+        s5 = W.step_valuation(name, sector, snap, series, u["pe_sector"].get(sector), True, periods)
     ne = u["next"].get(sym) if "report_date" not in held else None
     timing = None
     implied = None
@@ -120,19 +131,20 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
                                    {"t": t["id"], "d": ne.date})).scalar()
         implied = None if "implied_move" in held else await D.implied_move(db, sym, ne.date, today)
     typical = await D.typical_move(db, t["id"], sym, held)
+    last = await D.last_report(db, t["id"], typical, today)
     fed = next(iter(decision_days(today, today + timedelta(days=400))), None)
-    s6 = W.step_upcoming(name, ne, timing, implied, typical, fed)
+    s6 = W.step_upcoming(name, ne, timing, implied, typical, fed, last, D.ordinary_move(stock, rdays) if typical and not last else None)
     s7 = W.step_risks(name, risks, merger)
     steps = [s1, s2, s3, s4, s5, s6, s7]
-    ttm = W.ttm_growth([r for r in growth_rows or [] if r["metric"] == "revenue"])
-    stock_1y = D.change([(d, v) for d, v in stock], D.YEAR_SESSIONS) if s4["status"] != "absent" else None
-    row = W.compare_row(name, sym, steps, seg, ttm[2] if ttm else None, m, stock_1y[0] if stock_1y else None,
-                        float(snap["pe"]) if snap and snap["status"] == "ok" and snap.get("pe") is not None else None,
-                        ne.date if ne and ne.date else None, bool(ne and ne.confirmation == "confirmed"))
+    fl = (ffo or {}).get("latest")
+    ffo_cell = ({"value": W.signed(fl["growth_pct"]), "as_of": f"{quarter_label(periods, fl['end'])}, against a year earlier"}
+                if fl and fl.get("growth_pct") is not None else None)
+    row = W.compare_row(name, sym, steps, reit=reit, ffo_growth=ffo_cell, dividend=await D.dividend_yield(db, sym, close))
     as_of = max([d for d, _ in u["spy"][-1:]] or [today])
-    payload = {"version": W.WALKTHROUGH_VERSION, "symbol": sym, "name": name, "sector": sector, "industry": t["industry"], "minutes": W.MINUTES,
+    payload = {"version": W.WALKTHROUGH_VERSION, "symbol": sym, "name": name, "sector": sector, "industry": t["industry"], "reit": reit, "minutes": W.MINUTES,
                "as_of": as_of.isoformat(), "steps": steps, "compare": row, "market_cap": t["market_cap"]}
-    story_facts = {"name": name, "sector": sector, "description": (s1["sentences"][0] if s1["status"] != "absent" and u["profiles"].get(sym) else None),
+    story_facts = {"name": name, "sector": sector, "industry": t["industry"],
+                   "description": (s1["sentences"][0] if s1["status"] != "absent" and u["profiles"].get(sym) else None),
                    "steps": {s["key"]: {"numbers": s["numbers"], "sentences": s["sentences"]} for s in (s1, s2, s3) if s["status"] != "absent"},
                    "risks": [{"n": r["n"], "heading": r["heading"], "body": r["body"]} for r in (risks or {}).get("risks", [])] if s7["status"] != "absent" else [],
                    "risk_filed": (risks or {}).get("filed").isoformat() if s7["status"] != "absent" and risks and risks.get("filed") else None}
@@ -185,7 +197,7 @@ async def run(argv: list[str]) -> int:
     if story and write:
         spent = await WS.run_stories(built, today)
     else:
-        WS.reuse_stories(built)
+        await WS.reuse_stories(built)
     if write:
         async with ScriptSessionLocal() as db:
             for sym, b in built.items():

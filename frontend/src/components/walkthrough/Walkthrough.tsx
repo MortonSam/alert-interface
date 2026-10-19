@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Ticker } from "@/lib/api";
 import { matchTickers } from "@/lib/tickerSearch";
 import {
-  fetchCompare, knownLine, learn, readLearned,
+  compareLine, factFor, fetchCompare, fetchWalkthrough, learn, learnedElsewhere, readLearned,
   type CompareResult, type Learned, type WalkCheck, type WalkIdea, type WalkStep, type Walkthrough,
 } from "@/lib/walkthrough";
 import { WALK_COPY as T } from "@/lib/walkthroughCopy";
@@ -24,12 +24,15 @@ export function screenParam(s: Screen): string {
   return s.kind === "step" ? String(s.i + 1) : s.kind;
 }
 
-function IdeaBox({ idea, short }: { idea: WalkIdea; short: string | null }) {
+function IdeaBox({ idea, known }: { idea: WalkIdea; known: { from: string; line: string } | null }) {
   return (
     <aside className="mt-6 rounded-xl border border-border bg-muted/40 px-4 py-3.5">
       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{T.idea}</p>
-      {short ? (
-        <p className="mt-1.5 text-sm text-foreground/90">{short}</p>
+      {known ? (
+        <>
+          <p className="mt-1.5 text-sm font-semibold text-foreground">{T.knownFrom(idea.title, known.from)}</p>
+          <p className="mt-1 text-sm leading-relaxed text-foreground/85">{known.line}</p>
+        </>
       ) : (
         <>
           <p className="mt-1.5 text-sm font-semibold text-foreground">{idea.title}</p>
@@ -86,8 +89,10 @@ function QuickCheck({ check }: { check: WalkCheck }) {
   );
 }
 
-function StepScreen({ step, w, learned }: { step: WalkStep; w: Walkthrough; learned: Learned }) {
-  const short = step.idea ? knownLine(w.known_concept_line, step.idea, learned, w.symbol, w.name) : null;
+function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrough; learned: Learned; others: Record<string, Walkthrough | null> }) {
+  const from = learnedElsewhere(step.idea, learned, w.symbol);
+  const line = from && step.idea ? compareLine(factFor(others[from.symbol] ?? null, step.idea.concept), step.fact) : null;
+  const known = from && line ? { from: others[from.symbol]?.name ?? from.name, line } : null;
   return (
     <div>
       <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight text-foreground">{step.question}</h2>
@@ -126,7 +131,7 @@ function StepScreen({ step, w, learned }: { step: WalkStep; w: Walkthrough; lear
           {step.chart?.kind === "pe_range" && <PeRangeChart chart={step.chart} />}
         </>
       )}
-      {step.idea && <IdeaBox idea={step.idea} short={short} />}
+      {step.idea && <IdeaBox idea={step.idea} known={known} />}
       {step.status !== "absent" && step.check && <QuickCheck key={step.key} check={step.check} />}
       {(step.deeper.length > 0 || step.source) && step.status !== "absent" && (
         <details className="mt-6 group">
@@ -155,7 +160,7 @@ function SummaryScreen({ w, onCompare, onAsk, onClose }: { w: Walkthrough; onCom
       <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight">{T.summaryTitle(w.name)}</h2>
       <ol className="mt-5 space-y-2.5 font-display text-[17px] leading-relaxed">
         {w.summary.known.map((k) => (
-          <li key={k.n} className={`flex gap-3 ${k.shown ? "text-foreground/90" : "text-muted-foreground"}`}>
+          <li key={k.n} className="flex gap-3 text-foreground/90">
             <span className="font-sans text-xs text-muted-foreground pt-1.5 w-4 shrink-0">{k.n}</span>
             <span><Explained text={k.line} /></span>
           </li>
@@ -221,7 +226,7 @@ function CompareScreen({ w, other, setOther }: { w: Walkthrough; other: string |
         {w.compare_choices.map((c) => (
           <button key={c.symbol} type="button" onClick={() => setOther(c.symbol)}
             className={`tap rounded-full border px-3.5 py-1.5 text-sm ${other === c.symbol ? "border-primary text-foreground bg-primary/10" : "border-border text-foreground/85 hover:border-foreground/30"}`}>
-            {c.kind === "rival" ? T.rivalChoice(c.name, c.basis) : T.rulerChoice(c.name)}
+            {c.kind === "rival" ? T.rivalChoice(c.name, c.label) : T.rulerChoice(c.name)}
           </button>
         ))}
       </div>
@@ -275,7 +280,7 @@ function CompareScreen({ w, other, setOther }: { w: Walkthrough; other: string |
             </tbody>
           </table>
           {data.story && <p className="mt-5 font-display text-[17px] leading-relaxed text-foreground/90"><Explained text={data.story} /></p>}
-          <IdeaBox idea={data.idea} short={null} />
+          <IdeaBox idea={data.idea} known={null} />
         </>
       )}
     </div>
@@ -287,6 +292,16 @@ export default function WalkthroughOverlay({ w, initial, onClose, onScreen }: {
 }) {
   const [screen, setScreen] = useState<Screen>(initial);
   const learnedAtOpen = useRef<Learned>(readLearned());           // "The idea" stays whole for concepts first learned on this walk
+  // the walkthroughs of stocks a concept was learned on, for the line comparing them with this one (from the API, never stored here)
+  const [others, setOthers] = useState<Record<string, Walkthrough | null>>({});
+  useEffect(() => {
+    const syms = [...new Set(Object.values(learnedAtOpen.current).map((l) => l.symbol))].filter((s) => s !== w.symbol);
+    let live = true;
+    Promise.all(syms.map((s) => fetchWalkthrough(s).then((r) => [s, r] as const))).then((pairs) => {
+      if (live) setOthers(Object.fromEntries(pairs));
+    });
+    return () => { live = false; };
+  }, [w.symbol]);
   const scroller = useRef<HTMLDivElement>(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
   const total = w.steps.length;
@@ -366,7 +381,7 @@ export default function WalkthroughOverlay({ w, initial, onClose, onScreen }: {
           ))}
         </div>
         <div ref={scroller} data-walk-scroll className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 pt-5 pb-6">
-          {step && <StepScreen key={step.key} step={step} w={w} learned={learnedAtOpen.current} />}
+          {step && <StepScreen key={step.key} step={step} w={w} learned={learnedAtOpen.current} others={others} />}
           {screen.kind === "summary" && <SummaryScreen w={w} onCompare={() => go({ kind: "compare", with: w.compare_choices[0]?.symbol ?? null })} onAsk={onAsk} onClose={onClose} />}
           {screen.kind === "compare" && <CompareScreen w={w} other={screen.with} setOther={(s) => go({ kind: "compare", with: s })} />}
         </div>

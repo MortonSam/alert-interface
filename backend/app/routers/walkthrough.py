@@ -26,19 +26,29 @@ router = APIRouter(tags=["walkthrough"])
 
 
 def gate(payload: dict, growth_on: bool, pe_on: bool) -> dict:
-    """Pure: the payload as served: growth and the P/E replaced by their in-review line while their flag is off."""
+    """Pure: the payload as served: growth and the P/E replaced by their in-review line while their flag is off (a real estate
+    trust's price to FFO is not a P/E and stays). Step 7's check never points at a figure the flags hide."""
     out = copy.deepcopy(payload)
     name = out["name"]
+    reit = bool(out.get("reit"))
+    hidden = set()
     for i, s in enumerate(out["steps"]):
         if s["key"] == "growth" and not growth_on:
             out["steps"][i] = W.step_growth(name, None, out.get("sector"), False)
-        if s["key"] == "valuation" and not pe_on:
+            hidden.add("growth")
+        if s["key"] == "valuation" and not pe_on and not reit:
             out["steps"][i] = W.step_valuation(name, out.get("sector"), None, [], None, False)
+            hidden.add("valuation")
     rows = out["compare"]["rows"]
-    if not growth_on:
+    if "growth" in hidden:
         rows["growth"] = None
-    if not pe_on:
-        rows["pe"] = None
+    if "valuation" in hidden:
+        rows["valuation"] = None
+    risks = next(s for s in out["steps"] if s["key"] == "risks")
+    gone = {s.get("point") for s in payload["steps"] if s["key"] in hidden} - {None}
+    if risks.get("check") and gone & set(risks["check"]["options"]):
+        headings = {int(k): v for k, v in (risks.get("headings") or {}).items()}
+        risks["check"] = W.risk_check(name, risks.get("risks") or [], headings, out["steps"])
     out["summary"] = W.summary(name, out["steps"])
     return out
 
@@ -62,7 +72,7 @@ async def compare(a: str = Query(..., max_length=10), b: str = Query(..., max_le
         raise HTTPException(status_code=404, detail="No walkthrough for one of these stocks")
     story = (await db.execute(text("SELECT sentence FROM ivy_compare_stories WHERE symbol = :a AND other = :b"), {"a": pa["symbol"], "b": pb["symbol"]})).scalar()
     title, idea = W.COMPARE_IDEA
-    return {"a": pa["compare"], "b": pb["compare"], "rows": [{"key": k, "label": label} for k, label in W.COMPARE_ROWS], "missing": W.COMPARE_MISSING,
+    return {"a": pa["compare"], "b": pb["compare"], "rows": W.compare_rows(pa["compare"], pb["compare"]), "missing": W.COMPARE_MISSING,
             "story": story, "idea": {"concept": "comparing", "title": title, "text": idea}}
 
 
@@ -81,11 +91,12 @@ async def walkthrough(symbol: str, db: AsyncSession = Depends(get_db), admin: bo
     from app.services.briefing import short_name
     choices = []
     if rival:
+        me = tickers.get(p["symbol"]) or {}
         choices.append({"kind": "rival", "symbol": rival["symbol"], "name": short_name(tickers[rival["symbol"]]["name"], rival["symbol"]), "basis": rival["basis"],
-                        "rule": RIVAL_RULE})
+                        "label": W.another(me.get("industry") if rival["basis"] == "sub-industry" else None, me.get("sector")), "rule": RIVAL_RULE})
     if ruler in have and ruler in tickers:
         choices.append({"kind": "ruler", "symbol": ruler, "name": short_name(tickers[ruler]["name"], ruler)})
-    return {**p, "known_concept_line": W.KNOWN_CONCEPT_LINE, "compare_choices": choices, "ask_enabled": bool(settings.ask_ivy_enabled or admin)}
+    return {**p, "compare_choices": choices, "ask_enabled": bool(settings.ask_ivy_enabled or admin)}
 
 
 @router.get("/walkthrough-featured")
