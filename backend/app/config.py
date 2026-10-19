@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     news_intraday_enabled: bool = True
     # Revenue and EPS growth against the same quarter a year earlier (services/growth, growth_figures). Off in production; computed locally only.
     growth_enabled: bool = False
+    # Ivy's walkthrough and Compare (routers/walkthrough). Off in production until Sam approves its wording; the admin token sees it.
+    # The nightly builds the walkthroughs either way.
+    ivy_walkthrough_enabled: bool = False
     # The options chain every page reads (services/options_source): "courier" (the default) or "intrinio", with the courier as the
     # fallback. A Railway variable; switching is an env change and a redeploy, never a code change.
     options_primary_source: str = "courier"

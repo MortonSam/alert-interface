@@ -348,3 +348,20 @@ def test_nightly_cost_guards_compare_sentences_and_margins_change_only_with_fili
     assert WS.compare_fingerprint(a, b) != WS.compare_fingerprint(side(sells={"value": "NAND"}), b)
     subs = {"filings": {"recent": {"form": ["8-K", "10-Q", "10-K"], "accessionNumber": ["a1", "a2", "a3"]}}}
     assert latest_periodic(subs) == "a2"
+
+
+def test_the_walkthrough_is_hidden_until_its_flag_or_the_admin_token():
+    import pytest
+    from fastapi import HTTPException
+    from app.config import settings
+    from app.routers.walkthrough import _shown
+    old = settings.ivy_walkthrough_enabled
+    try:
+        settings.ivy_walkthrough_enabled = False
+        with pytest.raises(HTTPException):
+            _shown(admin=False)
+        _shown(admin=True)
+        settings.ivy_walkthrough_enabled = True
+        _shown(admin=False)
+    finally:
+        settings.ivy_walkthrough_enabled = old

@@ -4,6 +4,7 @@
     GET /walkthrough/compare?a=MU&b=AAPL      both stocks' rows side by side, Ivy's sentence for the pair when one was verified
     GET /walkthrough-featured                 the home page's stock, chosen nightly by walkthrough_compare.FEATURED_RULE
 
+IVY_WALKTHROUGH_ENABLED (off in production until the wording is approved) hides all three from everyone but the admin token.
 GROWTH_ENABLED and PE_ENABLED apply here (gate), at serve time: while one is off its step is the honest in-review line, its
 Compare row is blank and the summary marks it. Nothing here calls a model or fetches a price.
 """
@@ -47,8 +48,15 @@ async def _payload(db: AsyncSession, symbol: str) -> dict | None:
     return gate(row, settings.growth_enabled, settings.pe_enabled) if row else None
 
 
+def _shown(admin: bool) -> None:
+    if not (settings.ivy_walkthrough_enabled or admin):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 @router.get("/walkthrough/compare")
-async def compare(a: str = Query(..., max_length=10), b: str = Query(..., max_length=10), db: AsyncSession = Depends(get_db)) -> dict:
+async def compare(a: str = Query(..., max_length=10), b: str = Query(..., max_length=10), db: AsyncSession = Depends(get_db),
+                  admin: bool = Depends(is_admin)) -> dict:
+    _shown(admin)
     pa, pb = await _payload(db, a), await _payload(db, b)
     if not pa or not pb:
         raise HTTPException(status_code=404, detail="No walkthrough for one of these stocks")
@@ -61,6 +69,7 @@ async def compare(a: str = Query(..., max_length=10), b: str = Query(..., max_le
 @router.get("/walkthrough/{symbol}")
 async def walkthrough(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict:
     from app.services.walkthrough_compare import RIVAL_RULE, rival_for, ruler_for
+    _shown(admin)
     p = await _payload(db, symbol)
     if not p:
         raise HTTPException(status_code=404, detail=f"No walkthrough for {symbol.upper()}")
@@ -80,7 +89,9 @@ async def walkthrough(symbol: str, db: AsyncSession = Depends(get_db), admin: bo
 
 
 @router.get("/walkthrough-featured")
-async def featured(db: AsyncSession = Depends(get_db)) -> dict:
+async def featured(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict:
+    if not (settings.ivy_walkthrough_enabled or admin):
+        return {"symbol": None, "name": None, "rule": None, "date": None}
     raw = (await db.execute(text("SELECT value, updated_at FROM system_metadata WHERE key = 'ivy_featured'"))).first()
     pick = json.loads(raw[0]) if raw and raw[0] else {}
     sym = pick.get("symbol")

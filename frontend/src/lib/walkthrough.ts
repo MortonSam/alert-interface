@@ -64,7 +64,10 @@ export interface Featured { symbol: string | null; name: string | null; rule: st
 
 async function getJson<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`/api/v1${path}`);
+    // the admin token (a browser with preview on) sees the walkthrough while IVY_WALKTHROUGH_ENABLED is off
+    let token: string | null = null;
+    try { token = window.localStorage.getItem("admin_token"); } catch { /* private mode */ }
+    const res = await fetch(`/api/v1${path}`, token ? { headers: { "X-Admin-Token": token } } : undefined);
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
