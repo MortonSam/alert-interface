@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.database import AsyncSessionLocal
 from app.scripts.validate_data import ERROR, PASS, check_reports_have_evidence
 from app.services.earnings_calendar import same_release_stale
-from app.services.earnings_release import states_per_share_results
+from app.services.earnings_release import is_results_release, says_results_not_final, states_per_share_results
 from app.services.edgar_client import document_names
 
 pytestmark = pytest.mark.xdist_group(name="false_reports")
@@ -28,6 +28,30 @@ def test_per_share_results_decide_an_item_202_filing():
     assert states_per_share_results("Adjusted EPS of $2.10 compared with revenue of $4.2 billion")
     assert states_per_share_results("FFO per diluted share was $1.12")
     assert not states_per_share_results("repurchased shares at a weighted average per share price of $259.93")   # no results word near
+
+
+ABBV_2026_10_05 = ("Item 2.02 Results of Operations and Financial Condition Reported GAAP earnings and adjusted non-GAAP earnings for the third "
+                   "quarter of 2026 are expected to include acquired IPR&D and milestones expense of $216 million on a pre-tax basis, representing an "
+                   "unfavorable impact of $0.11 to both GAAP diluted earnings per share and adjusted non-GAAP diluted earnings per share. Results for the "
+                   "quarter ended September 30, 2026 have not been finalized and are subject to our financial statement closing procedures.")
+REGN_2026_10_06 = ("Item 2.02. Results of Operations and Financial Condition. Regeneron currently expects that its financial results calculated in "
+                   "accordance with U.S. generally accepted accounting principles and its non-GAAP financial results for the third quarter 2026 will "
+                   "include an acquired in-process research and development charge of approximately $22 million on a pre-tax basis. The acquired IPR&D "
+                   "charge is expected to negatively impact each of GAAP and non-GAAP net income per diluted share for the third quarter 2026 by "
+                   "approximately $0.18. Regeneron\u2019s results for the third quarter 2026 have not been finalized and are subject to Regeneron\u2019s "
+                   "financial statement closing procedures.")
+
+
+def test_an_item_202_filing_whose_results_are_not_final_is_never_a_report():
+    # AbbVie's and Regeneron's acquired IPR&D notices state per-share figures, yet say the quarter's results are not final
+    for cover in (ABBV_2026_10_05, REGN_2026_10_06):
+        assert states_per_share_results(cover) and says_results_not_final(cover)
+        assert not is_results_release([cover])
+        assert not is_results_release([cover, EARNINGS])          # the guidance exhibit beside the cover does not make it a release
+    assert is_results_release(["AbbVie issued a press release announcing its financial results for the quarter ended September 30, 2026.", EARNINGS])
+    assert not says_results_not_final(EARNINGS)
+    assert not says_results_not_final("as if the Merger had been completed on September 27, 2025. The allocation has not been finalized.")
+    assert not is_results_release([DELIVERIES])
 
 
 def test_every_exhibit_keeps_releases_whose_names_start_with_r():
