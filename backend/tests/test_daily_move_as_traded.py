@@ -13,6 +13,18 @@ SYM = "ZZTX"
 BARS = [("2026-10-07", 24.47, 1.0), ("2026-10-08", 24.87, 1.0), ("2026-10-09", 22.18, 0.988841978287093)]   # AT&T's stored bars
 
 
+class _Oct9(date):
+    """The snapshot below is dated Oct 9, 2026; rv_store serves a snapshot only within _FRESHNESS_DAYS of today, so the test pins today."""
+    @classmethod
+    def today(cls):
+        return date(2026, 10, 9)
+
+
+@pytest.fixture(autouse=True)
+def _pin_today(monkeypatch):
+    monkeypatch.setattr(rv_store, "date", _Oct9)
+
+
 async def _seed(dominant_date="2026-10-09"):
     async with ScriptSessionLocal() as s:
         await s.execute(text("DELETE FROM price_bars_shadow WHERE symbol = :s"), {"s": SYM})
