@@ -1608,8 +1608,8 @@ def chains_start_delay_minutes(started_iso: str | None) -> float | None:
 
 
 async def check_pricing_cards(session) -> CheckResult:
-    """Ivy v3's pricing cards (services/pricing_desk): ERROR when a stored card breaks a band (band_problems) or carries an old computation
-    version; WARN when a stock with a report inside the window and a serving chain has no card from last night."""
+    """Ivy v3's pricing cards (services/pricing_desk): ERROR when a stored card breaks a band (band_problems) or, for a report still to
+    come, carries an old computation version; WARN when a stock with a report inside the window and a serving chain has no card from last night."""
     import json as _json
     from app.services.options_source import resolve
     from app.services.pricing_desk import PRICING_COMPUTATION_VERSION, REPORT_WINDOW_DAYS, band_problems
@@ -1621,13 +1621,16 @@ async def check_pricing_cards(session) -> CheckResult:
         except (TypeError, ValueError):
             continue
     errors = []
+    today = date.today()
     for sym, card in sorted(cards.items()):
-        if card.get("computation_version") != PRICING_COMPUTATION_VERSION:
+        # a card whose report has passed is kept for settlement and never rebuilt (scripts/pricing_desk.CARD_KEEP_DAYS): its version is
+        # the one it was priced under, so only its bands are judged (the 19 version-2 cards of Oct 19-20 when version 3 shipped)
+        upcoming = not card.get("report_date") or date.fromisoformat(card["report_date"]) >= today
+        if upcoming and card.get("computation_version") != PRICING_COMPUTATION_VERSION:
             errors.append(f"{sym}: computed by version {card.get('computation_version')}, current is {PRICING_COMPUTATION_VERSION}")
         errors += [f"{sym}: {p}" for p in band_problems(card)]
     if errors:
         return CheckResult("pricing_cards", ERROR, f"{len(errors)} pricing card figure(s) outside their bands or on an old version", errors[:30])
-    today = date.today()
     due = (await session.execute(text("""SELECT DISTINCT t.symbol FROM tickers t JOIN events e ON e.ticker_id = t.id WHERE t.is_active AND e.event_type = 'earnings'
         AND e.unresolved_since IS NULL AND e.event_date BETWEEN :a AND :b ORDER BY 1"""), {"a": today, "b": today + timedelta(days=REPORT_WINDOW_DAYS)})).scalars().all()
     fresh_since = datetime.now(timezone.utc) - timedelta(hours=30)

@@ -136,3 +136,28 @@ def test_settlement_closes_each_leg_at_the_post_report_quotes_or_intrinsic():
     assert settle_structure("long_call", entry, {100.0: {"call": {"bid": 8.0, "ask": 8.4}}}, 108.0) == pytest.approx((800 - 320) / 320 * 100)   # sold at the bid
     assert settle_structure("long_call", entry, None, 108.0) == pytest.approx((800 - 320) / 320 * 100)                                       # no quote: intrinsic at the close
     assert settle_structure("long_call", entry, None, None) is None
+
+
+@pytest.mark.asyncio
+async def test_a_card_whose_report_has_passed_is_judged_on_its_bands_not_its_version():
+    """Version 3 shipped on Oct 20, 2026: the 19 cards of the Oct 19-20 reports are kept for settlement and never rebuilt, so their
+    version 2 is not an error; an upcoming report's card on an old version still is."""
+    import json as _json
+    from datetime import timedelta as _td
+    past = {"report_date": (date.today() - _td(days=1)).isoformat(), "computation_version": 2, "implied_move_pct": 6.1, "typical_move_pct": 4.0,
+            "p_beyond_implied": 0.3, "structures": {}}
+    upcoming = {**past, "report_date": (date.today() + _td(days=2)).isoformat()}
+
+    class _Rows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def all(self):
+            return self.rows
+
+    class _S:
+        async def execute(self, *_a, **_k):
+            return _Rows([("pricing_card:ZZOLD", _json.dumps(past)), ("pricing_card:ZZNEW", _json.dumps(upcoming))])
+
+    r = await check_pricing_cards(_S())
+    assert r.level == ERROR and r.rows == ["ZZNEW: computed by version 2, current is 3"]
