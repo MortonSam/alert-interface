@@ -37,7 +37,7 @@ describe("the One rule paragraph", () => {
       "That edge is small, and most of it came in 2023 (59.6% against 51.5%). Since then it has been about a point. " +
       "Those years chose the rule as much as tested it, so the only test that counts is the live record, kept nightly since Sep 15, 2026 and public at launch. A small edge you will be able to check beats a large one you can't. " +
       "Before she buys anything, Ivy checks what the options market is pricing. If the implied move is more than 1.2 times the stock's usual earnings move, she refuses. " +
-      "Every pick carries its receipt, with the number of comparable setups, the base rate, the expected move, and what the options were pricing. She makes no bearish calls. The data has not earned them yet.",
+      "Every pick carries its receipt, with the number of comparable setups, the base rate, the typical move after reports, and what the options were pricing. She makes no bearish calls. The data has not earned them yet.",
     );
   });
 

@@ -13,8 +13,13 @@ export const BACK_TO_CHART = "Back to the chart";
 /** A report picked on the chart: its date, and a count so picking the same report again scrolls to it again. */
 export interface PickedReport { date: string; n: number }
 
-/** How long a picked card stays highlighted, in milliseconds. */
-export const PICK_HIGHLIGHT_MS = 1600;
+/** A picked card stays highlighted until the visitor clicks or taps anywhere else (Sam, 2026-10-20: no timed fade). True when a
+ * click clears it: not one on the highlighted card itself, and not the pick's own click the page already swallowed (defaultPrevented). */
+export function clickClearsPick(e: { defaultPrevented: boolean; target: EventTarget | null }, litDate: string): boolean {
+  if (e.defaultPrevented) return false;
+  const el = e.target instanceof Element ? e.target.closest("[data-event-date]") : null;
+  return el?.getAttribute("data-event-date") !== litDate;
+}
 
 /** "smooth" unless the visitor asked for reduced motion. */
 export function smoothScroll(): ScrollBehavior {

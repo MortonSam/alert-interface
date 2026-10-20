@@ -13,6 +13,8 @@ function files(dir: string): string[] {
   });
 }
 const SOURCES = ["app", "components", "lib"].flatMap((d) => files(join(SRC, d))).map((p) => ({ p: p.slice(SRC.length + 1), src: readFileSync(p, "utf8") }));
+// the home page and its sections restored to commit cc81a74 (Sam, 2026-10-20): its underlines and statement-h2 headings are his
+const HOME_RESTORED = new Set(["app/page.tsx", "components/LatestVerifiedNote.tsx", "app/ticker-grid.tsx"]);
 const code = (src: string) => src.split("\n").map((l, i) => ({ l, i: i + 1 })).filter(({ l }) => !/^\s*(\/\/|\*|\/\*)/.test(l));
 
 describe("one date format", () => {
@@ -43,7 +45,7 @@ describe("one date format", () => {
 
 describe("one underline style", () => {
   it("no page or component carries an underline class; explanations use .explain-term", () => {
-    const hits = SOURCES.filter(({ p }) => p.endsWith(".tsx")).flatMap(({ p, src }) => code(src)
+    const hits = SOURCES.filter(({ p }) => p.endsWith(".tsx") && !HOME_RESTORED.has(p)).flatMap(({ p, src }) => code(src)
       .filter(({ l }) => /className=[^>]*(?<![-\w])(?:hover:)?underline(?:-offset-\d|\b)(?!-)/.test(l) || /decoration-dotted|decoration-(?:solid|dashed)/.test(l))
       .map(({ l, i }) => `${p}:${i}: ${l.trim().slice(0, 100)}`));
     expect(hits).toEqual([]);
@@ -54,8 +56,8 @@ describe("one underline style", () => {
 
 describe("one type scale", () => {
   it("every h1 is display and every heading h2 is headline or display", () => {
-    const h1 = SOURCES.flatMap(({ p, src }) => [...src.matchAll(/<h1 className="([^"]*)"/g)].filter((m) => !/\btext-display\b|\bopen-h1\b/.test(m[1])).map((m) => `${p}: h1 ${m[1]}`));
-    const h2 = SOURCES.flatMap(({ p, src }) => [...src.matchAll(/<h2 className="([^"]*)"/g)]
+    const h1 = SOURCES.filter(({ p }) => !HOME_RESTORED.has(p)).flatMap(({ p, src }) => [...src.matchAll(/<h1 className="([^"]*)"/g)].filter((m) => !/\btext-display\b|\bopen-h1\b/.test(m[1])).map((m) => `${p}: h1 ${m[1]}`));
+    const h2 = SOURCES.filter(({ p }) => !HOME_RESTORED.has(p)).flatMap(({ p, src }) => [...src.matchAll(/<h2 className="([^"]*)"/g)]
       .filter((m) => !/uppercase/.test(m[1]) && !/\btext-(?:headline|display)\b/.test(m[1])).map((m) => `${p}: h2 ${m[1]}`));
     expect([...h1, ...h2]).toEqual([]);
     expect(readFileSync(join(SRC, "../tailwind.config.ts"), "utf8")).toMatch(/display: \[[^\]]*\][\s\S]*headline: \[[\s\S]*body: \[[\s\S]*small: \[/);

@@ -7,7 +7,7 @@ import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api"
 import { fmtMarketCap } from "@/lib/utils";
 import { SHARE_CLASS, gridEarningsLine } from "@/lib/earningsSource";
 
-import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
+import { fmtDate as fmtOneDate } from "@/lib/dates";
 const PAGE_SIZE = 24;
 
 function fmtAgo(iso: string): string {
@@ -268,7 +268,7 @@ export function TickerGrid() {
         {isFiltered && (
           <button
             onClick={clearFilters}
-            className="hover:text-foreground"
+            className="hover:text-foreground underline underline-offset-2"
           >
             Clear filters
           </button>
@@ -281,7 +281,7 @@ export function TickerGrid() {
           <p className="text-sm text-muted-foreground mb-3">
             No tickers match your filters.
           </p>
-          <button onClick={clearFilters} className="text-sm font-medium text-foreground">
+          <button onClick={clearFilters} className="text-sm text-primary hover:underline">
             Clear filters
           </button>
         </div>

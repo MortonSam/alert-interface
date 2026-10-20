@@ -27,10 +27,10 @@ export function SiteCounters({ initial = null }: { initial?: SiteStats | null })
   if (!rows.length) return <CountersUnavailable />;
   return (
     <div className="counters w-full" style={{ "--num-em": numEm(rows.map((r) => r.value.toLocaleString("en-US"))) } as React.CSSProperties}>
-    <div className="counters-grid w-full text-left" data-testid="counters">
+    <div className="counters-grid w-full text-center" data-testid="counters">
       {rows.map((row) => (
         <div key={row.key} className="min-w-0">
-          <CountUp value={row.value} title={row.title ? row.title + stale : undefined} className="stat-number font-display font-bold text-foreground tabular-nums block whitespace-nowrap" />
+          <CountUp value={row.value} title={row.title ? row.title + stale : undefined} className="stat-number font-display font-bold text-primary tabular-nums block whitespace-nowrap" />
           <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-3`}>{row.label}</p>
         </div>
       ))}
@@ -43,10 +43,10 @@ export function SiteCounters({ initial = null }: { initial?: SiteStats | null })
 export function CountersUnavailable() {
   return (
     <div className="counters w-full">
-    <div className="counters-grid w-full text-left" data-counters="unavailable">
+    <div className="counters-grid w-full text-center" data-counters="unavailable">
       {COUNTER_LABELS.map((row) => (
         <div key={row.key} className="min-w-0">
-          <span title={UNAVAILABLE_TITLE} className="stat-number font-display font-bold text-foreground tabular-nums block whitespace-nowrap">—</span>
+          <span title={UNAVAILABLE_TITLE} className="stat-number font-display font-bold text-primary tabular-nums block whitespace-nowrap">—</span>
           <p className={`font-mono text-[10px] uppercase tracking-[.08em] text-muted-foreground mt-3`}>{row.label}</p>
         </div>
       ))}

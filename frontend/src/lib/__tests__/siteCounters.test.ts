@@ -52,13 +52,13 @@ describe("the counters never touch", () => {
     expect(COUNTER_CSS).toContain(`@container (min-width: ${COUNTER_LAYOUT.fourAcrossMinPx}px)`);
     expect(COUNTER_CSS).toContain("container-type: inline-size");
     expect(COUNTER_CSS).toContain("font-variant-numeric: tabular-nums");
-    expect(page).toContain('"w-full max-w-5xl mx-auto px-4 sm:px-8 text-left"');
+    expect(page).toContain('"w-full max-w-5xl mx-auto px-4 sm:px-8"');
     const src = read("components/SiteCounters.tsx");
     expect(src).toContain('className="counters w-full"');
-    expect(src).toContain('className="counters-grid w-full text-left"');
+    expect(src).toContain('className="counters-grid w-full text-center"');
     expect(src).toContain('"--num-em": numEm(');
     expect(src).not.toContain("whitespace-nowrap`");                       // labels wrap inside their column, never into the next
-    const section = page.match(/<section className="([^"]*)">\s*<div className=\{HOME_COL\}>\s*<p className="home-label">By the numbers<\/p>\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
+    const section = page.match(/<section className="([^"]*)">\s*\{\/\*[^*]*\*\/\}\s*<div className="w-full max-w-5xl mx-auto px-4 sm:px-8">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
     expect(section).toContain("screen-section");
     expect(section).toContain("flex items-center");
   });

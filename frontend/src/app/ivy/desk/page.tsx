@@ -134,7 +134,7 @@ export default function IvyDeskPage() {
   // v2 batch if any row has a verdict
   const isV2 = activity.rows.some((r) => r.verdict != null);
   const columns = isV2
-    ? ["Symbol", "Reports", "Momentum", "History", "Expected", "Implied", "Verdict"]
+    ? ["Symbol", "Reports", "Momentum", "History", "Typical move after reports", "Implied", "Verdict"]
     : ["Symbol", "Reports", "Earnings", "Analyst", "Momentum", "Verdict"];
 
   return (

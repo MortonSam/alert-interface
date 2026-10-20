@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { HistoricalReaction } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { BACK_TO_CHART, PICK_HIGHLIGHT_MS, smoothScroll, type PickedReport } from "@/lib/evidenceViews";
+import { BACK_TO_CHART, clickClearsPick, smoothScroll, type PickedReport } from "@/lib/evidenceViews";
 import { fmtMove, reportCards, whyItMoved, type TypicalMove } from "@/lib/reportCards";
 
 const FIRST_SHOWN = 8;
 
 /** Newest-first report cards; tapping one opens its line built from stored facts. A report picked on the chart (`picked`) shows
- * every card if it is past the first FIRST_SHOWN, scrolls to its card and highlights it for PICK_HIGHLIGHT_MS; `onBack` adds the
+ * every card if it is past the first FIRST_SHOWN, scrolls to its card and highlights it until the next click or tap anywhere else; `onBack` adds the
  * way back to the chart. */
 export function ReportCards({ reactions, typical, picked = null, onBack }: {
   reactions: HistoricalReaction[]; typical: TypicalMove | null; picked?: PickedReport | null; onBack?: () => void;
@@ -30,9 +30,14 @@ export function ReportCards({ reactions, typical, picked = null, onBack }: {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-event-date="${picked.date}"]`);
     el?.scrollIntoView({ block: "center", behavior: smoothScroll() });
     setLit(picked.date);
-    const t = window.setTimeout(() => setLit(null), PICK_HIGHLIGHT_MS);
-    return () => window.clearTimeout(t);
   }, [picked, pickedAt]);
+
+  useEffect(() => {
+    if (!lit) return;
+    const clear = (e: MouseEvent) => { if (clickClearsPick(e, lit)) setLit(null); };
+    document.addEventListener("click", clear, true);
+    return () => document.removeEventListener("click", clear, true);
+  }, [lit]);
 
   return (
     <div data-testid="report-cards">

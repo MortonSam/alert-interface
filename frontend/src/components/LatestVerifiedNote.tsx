@@ -9,8 +9,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, type LatestVerifiedNote as Note } from "@/lib/api";
 import { noteFacts, verificationLine } from "@/lib/latestNote";
+import { fmtDate as fmtOneDate } from "@/lib/dates";
 
-import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 const RATING_CLASS: Record<string, string> = {
   bullish: "bg-success/10 text-success border-success/25",
   neutral: "bg-cool/10 text-cool border-cool/25",
@@ -28,15 +28,15 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
   const verified = verificationLine(note.verification_summary);
   const generated = fmtOneDate(note.generated_at);
   return (
-    <section className={`w-full max-w-5xl mx-auto px-4 sm:px-8 py-12 sm:py-24 text-left ${className}`}>
-      <div className="mb-12">
-        <p className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground mb-6">
+    <section className={`max-w-3xl mx-auto px-4 sm:px-8 py-12 sm:py-24 ${className}`}>
+      <div className="text-center mb-12">
+        <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
           See it in action
         </p>
-        <h2 className="text-display font-display font-bold text-foreground max-w-[20ch]">
+        <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
           The latest verified note
         </h2>
-        <p className="text-sm text-muted-foreground mt-4 max-w-lg">
+        <p className="text-sm text-muted-foreground mt-4 max-w-lg mx-auto">
           Rendered from the note on file: its own figures, its own words, and what the second model found.
         </p>
       </div>
@@ -50,7 +50,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
       <div className="px-6 py-5 space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Link href={`/tickers/${note.symbol}`} className="font-sans text-2xl font-bold text-foreground hover:opacity-80 transition-colors">
+            <Link href={`/tickers/${note.symbol}`} className="font-sans text-2xl font-bold text-foreground hover:text-primary transition-colors">
               {note.symbol}
             </Link>
             {note.company_name && <p className="text-sm text-muted-foreground">{note.company_name}</p>}
@@ -82,7 +82,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
         {verified && <p className="font-mono text-[11px] text-muted-foreground">{verified}</p>}
       </div>
       <div className="flex justify-center py-4 border-t border-border">
-        <Link href={`/tickers/${note.symbol}`} className="text-xs text-muted-foreground hover:text-foreground">
+        <Link href={`/tickers/${note.symbol}`} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
           Read the full note for {note.symbol}
         </Link>
       </div>

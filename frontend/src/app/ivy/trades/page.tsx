@@ -258,7 +258,7 @@ function PickCard({
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
             {pick.receipt.expected_pct != null && (
-              <span>expected |5d| {(pick.receipt.expected_pct as number).toFixed(1)}%</span>
+              <span><Explained text="typical move after reports " />{(pick.receipt.expected_pct as number).toFixed(1)}%</span>
             )}
             {pick.receipt.implied_pct != null && (
               <span>implied {(pick.receipt.implied_pct as number).toFixed(1)}%</span>

@@ -322,7 +322,8 @@ describe("the Evidence switch", () => {
     const cards = readFileSync(join(__dirname, "../../components/ticker/ReportCards.tsx"), "utf8");
     expect(cards).toContain("const showAll = all || pickedAt >= FIRST_SHOWN;");        // a picked report past the first eight shows them all
     expect(cards).toContain('scrollIntoView({ block: "center"');
-    expect(cards).toContain("PICK_HIGHLIGHT_MS");
+    expect(cards).toContain("clickClearsPick(e, lit)");
+    expect(cards).not.toContain("setTimeout");                                    // no timed fade
     expect(cards).toContain("{BACK_TO_CHART}");
   });
 });

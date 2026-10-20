@@ -102,7 +102,7 @@ export function oneRuleParagraph(rule: IvyRule, backtest: IvyBacktest | null): s
   const gate =
     ` Before she buys anything, Ivy checks what the options market is pricing. If the implied move is more than ` +
     `${rule.implied_move_multiple} times the stock's usual earnings move, she refuses. Every pick carries its receipt, ` +
-    `with the number of comparable setups, the base rate, the expected move, and what the options were pricing. ` +
+    `with the number of comparable setups, the base rate, the typical move after reports, and what the options were pricing. ` +
     `She makes no bearish calls. The data has not earned them yet.`;
 
   return setup + tested + gate;
@@ -234,6 +234,6 @@ export function limitLines(rule: IvyRule): string[] {
     "No bearish calls. The data has not earned them yet.",
     "Picks are never deleted or re-dated; settlement only fills in the outcome",
     ledgerRecordSentence(rule),
-    "Every pick carries its receipt: comparable setups, the base rate, the expected move, and what the options were pricing",
+    "Every pick carries its receipt: comparable setups, the base rate, the typical move after reports, and what the options were pricing",
   ];
 }

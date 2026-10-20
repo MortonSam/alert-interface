@@ -5,7 +5,7 @@ import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
-import { fmtDollars, fmtMovePct, fmtRange } from "@/lib/optionFactFormat";
+import { fmtDollars, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, intradayBarsLine, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
@@ -64,6 +64,7 @@ import { CHART_PERIODS, DIRECTION_STYLE, PERIOD_LABELS, fmtChange, hasBars, open
 import { ReportCards } from "@/components/ticker/ReportCards";
 import { averageMoveLine, storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
+import { optionsDetailsLine } from "@/lib/optionsDetailsLine";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
 import { EVIDENCE_VIEWS, smoothScroll, type EvidenceView, type PickedReport } from "@/lib/evidenceViews";
@@ -2523,8 +2524,10 @@ export default function TickerPage() {
             const hist = expectedMove.historical_stats;
             const pricedAt = priceLabel(facts, fmtTimestamp);
             const drift = priceDriftNote(facts, quote?.price);
+            const lead = optionsDetailsLine(emPct, facts.expiration_used, expectedMove.report_move?.pct, expectedMove.report_move_state);
             return (
               <div className="mb-8">
+                {lead && <p className="text-base text-foreground/85 mb-4" data-testid="options-details-lead">{lead}</p>}
                 {facts.source === "read" && pricedAt && (
                   <p className="text-[11px] font-mono text-muted-foreground/70 mb-2">
                     From Ivy&apos;s Read: {pricedAt}{facts.chain_date ? ` · options data as of ${fmtOneDate(facts.chain_date) ?? facts.chain_date}` : ""}
@@ -2538,11 +2541,7 @@ export default function TickerPage() {
                     {" "}<Explained text="The implied range, straddle and breakevens need a current price and are not shown." />
                   </p>
                 )}
-                {emPct != null ? (
-                  <p className="text-6xl font-bold tabular-nums tracking-tight">
-                    <ExplainTip term="expected move" metric="expected_move" symbol={upperSymbol}>{fmtMovePct(emPct)}</ExplainTip>
-                  </p>
-                ) : (
+                {emPct == null && (
                   <>
                     <p className="text-2xl font-semibold text-muted-foreground">
                       <Explained text="Implied move unavailable" />
