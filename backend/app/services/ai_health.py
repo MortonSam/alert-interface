@@ -67,6 +67,8 @@ async def record_failure(method: str, exc: BaseException) -> dict:
     _log.error("Anthropic API call failed: %s (%s, status %s): %s", entry["feature"], entry["kind"], entry["status"], entry["message"])
     first = False
     try:
+        from app.services.prod_key_guard import check_production_key
+        check_production_key()                   # a dev-key run never writes production's record (2026-10-20, services/prod_key_guard)
         from app.database import ScriptSessionLocal
         from app.services.system_metadata_service import get_value, set_value
         async with ScriptSessionLocal() as s:
