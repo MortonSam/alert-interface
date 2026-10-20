@@ -46,7 +46,7 @@ async def test_the_latest_verified_note_is_the_newest_verified_complete_one_with
             assert r.status_code == 200, r.text
             body = r.json()
             assert (body["symbol"], body["company_name"], body["rating"]) == (SYM, "Note Test Inc.", "neutral")
-            assert body["stats"]["eps_actual"] == 2.01 and body["stats"]["beat_count"] is None and body["stats"]["latest_move_1d"] is None   # no beat rate or past move (note_valuation)
+            assert body["stats"]["eps_actual"] is None and "eps_sec" in body["stats"] and body["stats"]["beat_count"] is None and body["stats"]["latest_move_1d"] is None   # no beat rate or past move (note_valuation)
             assert [h["lead"] for h in body["highlights"]] == ["Services revenue grew", "Beats"]
             assert body["verification_summary"] == {"supported": 1, "unsupported": 0, "contradicted": 0}
             assert body["verified_at"].startswith(VERIFIED.isoformat()[:19])

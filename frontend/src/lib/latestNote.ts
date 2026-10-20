@@ -24,14 +24,7 @@ export function noteFacts(stats: StructuredNoteStats | null): NoteFact[] {
   if (!stats) return [];
   const out: NoteFact[] = [];
   if (stats.market_cap != null) out.push({ label: "Market cap", value: fmtCap(stats.market_cap) });
-  if (stats.eps_actual != null) {
-    const sub = stats.eps_estimate != null
-      ? `vs $${stats.eps_estimate.toFixed(2)} est${stats.eps_beat_pct != null ? ` \u00B7 ${stats.eps_beat_pct > 0 ? "+" : ""}${stats.eps_beat_pct.toFixed(1)}%` : ""}`
-      : undefined;
-    out.push({ label: "EPS", value: `$${stats.eps_actual.toFixed(2)}`, sub });
-  }
-  if (stats.beat_count != null && stats.total_quarters != null) out.push({ label: "EPS beats", value: `${stats.beat_count}/${stats.total_quarters}`, sub: "quarters" });
-  if (stats.latest_move_1d != null) out.push({ label: "Latest move", value: stats.latest_move_1d, sub: `post-earnings 1d${stats.latest_outcome ? ` \u00B7 ${stats.latest_outcome}` : ""}` });
+  if (stats.eps_sec != null) out.push({ label: "EPS", value: `$${stats.eps_sec.toFixed(2)}` });   // SEC diluted EPS, as the note's text
   return out.slice(0, 3);
 }
 

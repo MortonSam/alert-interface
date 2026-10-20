@@ -20,6 +20,7 @@ from statistics import median
 from zoneinfo import ZoneInfo
 
 from app.services.dates import fmt_days_in
+from app.services.ffo import DERIVED_NOTE
 from app.services.trading_calendar import is_trading_day, last_session_before, nth_trading_day_after
 
 NY = ZoneInfo("America/New_York")
@@ -322,29 +323,43 @@ def year_ago_clause(y: dict) -> str:
     return y["eps_line"]
 
 
+def year_ago_with(y: dict) -> str | None:
+    """Pure: W6's clause after the report date, "with EPS of $2.46, up 127.8% from $1.08 a year ago", or "with EPS of $2.39, with no
+    figure from the same quarter a year earlier on file"; None for a held FFO quarter (its line is a sentence of its own)."""
+    if y.get("sec_eps") is None:
+        return None
+    m = y.get("measure") or "EPS"
+    clause = year_ago_clause(y)
+    return f"with {m} of {clause[len(m) + 1:]}" if clause.startswith(f"{m} ") else clause
+
+
 def reported_clause(*, today: date, event_date: date, timing: str | None = None, eps_actual: float | None = None, eps_estimate: float | None = None,
                     outcome: str | None = None, pct_change_1d: float | None = None, bars_through: date | None = None,
                     year_ago: dict | None = None) -> tuple[str, list[dict], list[date]]:
     """"Reported <date> <timing>: EPS $a against a $e estimate, a beat; the stock moved +x% the next session." The EPS clause is
     omitted without an actual; the move clause reads "the move settles at today's close" while the second bar is missing.
     `year_ago` (services/licensed_estimates.year_ago_fields, given when LICENSED_ESTIMATES is off) replaces the estimate clause
-    with the quarter's EPS from SEC filings against the same quarter a year earlier."""
+    with the quarter's EPS from SEC filings against the same quarter a year earlier, in W6's two sentences (Block 2 wording):
+    "Reported Aug 26, 2026 after the close, with EPS of $2.46, up 127.8% from $1.08 a year ago. The stock moved +8.7% the next session."
+    """
     inputs = [_input("report date", fmt_date(event_date), event_date, "earnings calendar"), _input("report timing", timing or "unknown", event_date, "earnings calendar, report timing")]
     head = f"Reported {fmt_date(event_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "")
     clauses: list[str] = []
+    first = head
     if year_ago is not None:
         ffo = year_ago.get("measure") == "FFO per share"
         if year_ago.get("sec_eps") is not None:
-            clauses.append(year_ago_clause(year_ago))
+            first = f"{head}, {year_ago_with(year_ago)}"
             if ffo:
-                inputs.append(_input("FFO per share", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "Nareit FFO per diluted share for the quarter, from the earnings release, read twice and cross-checked against XBRL"))
+                inputs.append(_input("FFO per share", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "Nareit FFO per diluted share for the quarter, from the earnings release, checked against the company's SEC filings"
+                                     + (DERIVED_NOTE if DERIVED_NOTE in (year_ago.get("eps_line") or "") else "")))      # W8: AMT and PLD
             else:
                 inputs.append(_input("EPS (SEC filings)", fmt_money(year_ago["sec_eps"]), year_ago["sec_eps_period_end"], "GAAP diluted EPS for the quarter, from SEC filings"))
             if year_ago.get("year_ago_eps") is not None:
                 inputs.append(_input("FFO per share a year earlier" if ffo else "EPS a year earlier", fmt_money(year_ago["year_ago_eps"]), year_ago["year_ago_period_end"],
                                      "the same quarter a year earlier, from its earnings release" if ffo else "the same quarter a year earlier, from SEC filings"))
         elif year_ago.get("eps_line"):
-            clauses.append(year_ago["eps_line"])           # a held FFO quarter: the sentence says it is held
+            first = f"{head}. {year_ago['eps_line'].rstrip('.')}"      # a held FFO quarter: the sentence says it is held
     elif eps_actual is not None and eps_estimate is not None:
         word = {"beat": "a beat", "miss": "a miss", "meet": "a match"}.get(outcome or "", None)
         clauses.append(f"EPS {fmt_money(eps_actual)} against a {fmt_money(eps_estimate)} estimate" + (f", {word}" if word else ""))
@@ -367,6 +382,9 @@ def reported_clause(*, today: date, event_date: date, timing: str | None = None,
     else:
         clauses.append(f"the move (close {fmt_date(base_date)} to close {fmt_date(after_date)}) is not yet on file")
         inputs.append(_input("newest daily bar", fmt_date(bars_through) if bars_through else "none", bars_through, "daily closes"))
+    if year_ago is not None:                          # W6: the report and its EPS in one sentence, the move in the next
+        move = clauses[-1]
+        return f"{first}. {move[0].upper()}{move[1:]}.", inputs, [event_date]
     return f"{head}: " + "; ".join(clauses) + ".", inputs, [event_date]
 
 

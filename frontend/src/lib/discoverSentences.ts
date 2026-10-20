@@ -144,12 +144,15 @@ export function fmtMove(pct: number): string {
 
 /** The results: "Beat estimates; moved -6.3% on the 1-day reaction; its typical beat moves +2.7%". */
 export function justReportedSentence(item: JustReportedItem): string {
-  const move = item.insight
+  const insight = item.insight && !ESTIMATE_WORDS.test(item.insight) ? item.insight : null;   // never a beat, miss or estimate
+  const move = insight
     ?? (item.pct_change_1d != null ? `moved ${fmtMove(item.pct_change_1d)} on the 1-day reaction` : null);
   // LICENSED_ESTIMATES off (lib/licensedEstimates): the reported EPS against a year earlier leads, never a beat or miss
   const lead = estimatesShown(item) ? (OUTCOME_LEAD[item.outcome] ?? OUTCOME_LEAD.unknown) : (item.eps_line ?? NO_SEC_EPS_LEAD);
   return join([lead, move, ivClause(item.vol_regime)]);
 }
+
+const ESTIMATE_WORDS = /\b(beat|beats|miss|missed|misses|met|estimates?|surprise)\b/i;
 
 export const NO_SEC_EPS_LEAD = "Reported, with no EPS figure from SEC filings yet";
 

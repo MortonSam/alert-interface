@@ -13,7 +13,7 @@ import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, in
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
 import { analystSampleLabel, analystSampleFooter, hasAnalystSignal, streetPulseLine } from "@/lib/analystSample";
-import { EARNINGS_MARKER_DASH, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
+import { EARNINGS_MARKER_DASH, EARNINGS_MARKER_ENCODING, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTapAway } from "@/lib/useTapAway";
@@ -61,7 +61,7 @@ import { activeSection } from "@/lib/sectionSpy";
 import StructuredNoteView from "@/components/StructuredNoteView";
 import { CHART_PERIODS, DIRECTION_STYLE, PERIOD_LABELS, fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, type ChartPeriod } from "@/lib/priceHeader";
 import { ReportCards } from "@/components/ticker/ReportCards";
-import { storedTypical, typicalMove } from "@/lib/reportCards";
+import { averageMoveLine, storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
@@ -405,12 +405,7 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
       style={flipLeft ? { transform: "translateX(calc(-100% - 16px))" } : undefined}
     >
       <p className="font-medium">{formatEventDate(d.date)}</p>
-      {!isFed && (d.epsLine !== undefined
-        ? <p className="text-muted-foreground">{d.epsLine ?? "No EPS figure from SEC filings for this report."}</p>
-        : <p className="capitalize text-muted-foreground">{d.outcome}</p>)}
-      {!isFed && d.epsActual != null && d.epsEstimate != null && (
-        <p><Explained text="EPS $" />{parseFloat(d.epsActual).toFixed(2)} vs est ${parseFloat(d.epsEstimate).toFixed(2)}</p>
-      )}
+      {!isFed && <p className="text-muted-foreground">{d.epsLine ?? "No EPS figure from SEC filings for this report."}</p>}
       {d.pct1d != null ? (
         <p className={cn(d.pct1d >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
           {windowText.tooltip1d}: {d.pct1d > 0 ? "+" : ""}{d.pct1d.toFixed(2)}%
@@ -430,7 +425,7 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
 function ReactionChart({ reactions, mode = "earnings" }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed" }) {
   const tapAway = useTapAway();
   const isFed = mode === "fed";
-  const noOutcome = isFed || (reactions.length > 0 && !estimatesShown(reactions[0]));   // estimates off: direction only, as on Fed days
+  const noOutcome = true;     // direction only: no EPS outcome is encoded anywhere (Block 2, 2026-10-20)
   const data = useMemo(() => {
     const chronological = [...reactions].sort((a, b) => a.event_date.localeCompare(b.event_date));
     const recent = chronological.slice(-20);
@@ -438,11 +433,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
       date: r.event_date,
       pct1d: r.pct_change_1d != null ? parseFloat(r.pct_change_1d) : null,
       pct5d: r.pct_change_5d != null ? parseFloat(r.pct_change_5d) : null,
-      outcome: r.outcome,
-      epsEstimate: r.eps_estimate,
-      epsActual: r.eps_actual,
-      epsSurprise: r.eps_surprise_pct,
-      ...(estimatesShown(r) ? {} : { epsLine: r.eps_line ?? null }),   // estimates off: the year-ago line in place of the outcome
+      epsLine: r.eps_line ?? null,      // the year-ago line; no outcome, estimate or surprise is shown
     }));
   }, [reactions]);
 
@@ -485,7 +476,7 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
           <Tooltip active={tapAway.tooltipActive} content={<ReactionChartTooltip mode={mode} />} />
           <Bar dataKey="pct1d" radius={[2, 2, 0, 0]}>
             {data.map((entry, i) => {
-              const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, entry.outcome, noOutcome);
+              const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, "unknown", noOutcome);
               return <Cell key={i} {...cell} />;
             })}
           </Bar>
@@ -715,7 +706,7 @@ function ReactionsTable({ reactions, mode = "earnings" }: { reactions: Historica
     });
   }, [filtered, sort]);
 
-  const hasRevenue = reactions.some((r) => r.revenue_actual != null && r.revenue_estimate != null);
+  const hasRevenue = estimatesShown(null) && reactions.some((r) => r.revenue_actual != null && r.revenue_estimate != null);   // a revenue beat or miss is never shown (Block 2)
 
   function pluralOutcome(key: OutcomeFilter, n: number): string {
     if (key === "all")  return `All (${n})`;
@@ -1001,15 +992,8 @@ function PriceChartTooltip({
       <p className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">${p.close.toFixed(2)}</p>
       {marker && (
         <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 mt-1 space-y-0.5">
-          <p style={{ color: earningsMarkerColor(marker.outcome) }} className="font-medium capitalize">
-            {marker.outcome === "unknown" || marker.outcome === "no_reported_figure" ? "Earnings" : `Earnings ${marker.outcome}`}
-          </p>
+          <p style={{ color: earningsMarkerColor() }} className="font-medium">{EARNINGS_MARKER_ENCODING.report.label}</p>
           {marker.eps_line && <p className="text-zinc-500 dark:text-zinc-400">{marker.eps_line}</p>}
-          {marker.eps_estimate != null && marker.eps_actual != null && (
-            <p className="text-zinc-500 dark:text-zinc-400">
-              <Explained text="EPS: " />{marker.eps_actual.toFixed(2)} vs {marker.eps_estimate.toFixed(2)} est.
-            </p>
-          )}
           {marker.pct_change_1d != null && (
             <p className={cn(
               "font-medium",
@@ -1222,7 +1206,7 @@ function PriceChart({
             )}
             {/* Earnings markers */}
             {earningsMarkers.map((mk) => {
-              const color = earningsMarkerColor(mk.outcome);
+              const color = earningsMarkerColor();
               return (
                 <ReferenceLine
                   key={mk.date}
@@ -1257,8 +1241,8 @@ function PriceChart({
             )}
             {earningsMarkers.length > 0 && (
               <span className="flex items-center gap-1.5">
-                <Explained text={estimatesShown(chartData) ? "Earnings dates, colored by EPS outcome:" : "Earnings dates:"} />
-                <EncodingLegend items={earningsMarkerLegend(estimatesShown(chartData))} />
+                <Explained text="Earnings dates:" />
+                <EncodingLegend items={earningsMarkerLegend()} />
               </span>
             )}
           </div>
@@ -2104,8 +2088,6 @@ export default function TickerPage() {
               }
             }
             // Priced-in insight from backend
-            const pricedIn = reactionSummary?.priced_in ?? null;
-            const pricingNote = pricedIn?.label ?? null;
             const showContextStrip = displayEvent.event_type === "earnings" && conditionalEarnings?.has_sufficient_history && reactionSummary;
 
             return (
@@ -2150,68 +2132,16 @@ export default function TickerPage() {
                   </div>
                 </div>
 
-                {showContextStrip && estimatesShown(conditionalEarnings) && (() => {
-                  const ce = conditionalEarnings!;
-                  const beatHasAvg = (ce.beat_count ?? 0) >= 3 && ce.avg_1d_on_beat != null;
-                  const missHasAvg = (ce.miss_count ?? 0) >= 3 && ce.avg_1d_on_miss != null;
-                  return (
-                    <div className="mt-3 pt-3 border-t">
-                      {reactionSummary?.mixed_versions && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
-                          Earnings reaction figures are being recomputed under a corrected definition.
-                        </p>
-                      )}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Earnings track record</p>
-                          <p className="text-sm font-semibold tabular-nums">
-                            Beat {ce.beat_count} of {ce.total_quarters}
-                          </p>
-                          {ce.basis_excluded_note && (
-                            <p className="text-[11px] text-muted-foreground">{ce.basis_excluded_note}</p>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-                            {beatHasAvg ? <ExplainTip term="1d move">Avg move on beats</ExplainTip> : <ExplainTip term="beat">Beats</ExplainTip>}
-                          </p>
-                          {beatHasAvg ? (
-                            <p className="text-sm font-semibold tabular-nums">
-                              {ce.avg_1d_on_beat! > 0 ? "+" : ""}{ce.avg_1d_on_beat!.toFixed(2)}%
-                            </p>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">
-                              {ce.beat_count} in {ce.total_quarters} quarters
-                            </p>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
-                            {missHasAvg ? <ExplainTip term="1d move">Avg move on misses</ExplainTip> : <ExplainTip term="miss">Misses</ExplainTip>}
-                          </p>
-                          {missHasAvg ? (
-                            <p className="text-sm font-semibold tabular-nums">
-                              {ce.avg_1d_on_miss! > 0 ? "+" : ""}{ce.avg_1d_on_miss!.toFixed(2)}%
-                            </p>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">
-                              {ce.miss_count} in {ce.total_quarters} quarters
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      {pricingNote && (reactionSummary!.beat_count ?? 0) >= 3 && (
-                        <p className="text-xs mt-2 text-muted-foreground">
-                          <Explained text="Stock fell on its 1-day reaction in " />{reactionSummary!.beat_but_dropped_count} of {reactionSummary!.beat_count} beats
-                          {reactionSummary!.beat_but_dropped_rate_pct != null && ` (${reactionSummary!.beat_but_dropped_rate_pct.toFixed(0)}%)`}.
-                          {" "}<ExplainTip term="priced in">{pricingNote}</ExplainTip>
-                          {pricedIn?.rule && <span className="text-xs ml-1">({pricedIn.rule})</span>}
-                          {reactionSummary!.basis_excluded_note && <span className="text-xs ml-1">({reactionSummary!.basis_excluded_note})</span>}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })()}
+                {showContextStrip && averageMoveLine(reactionSummary?.avg_1d) && (
+                  <div className="mt-3 pt-3 border-t">
+                    {reactionSummary?.mixed_versions && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                        Earnings reaction figures are being recomputed under a corrected definition.
+                      </p>
+                    )}
+                    <p className="text-sm" data-testid="average-move-line">{averageMoveLine(reactionSummary?.avg_1d)}</p>
+                  </div>
+                )}
               </div>
             );
           })()}

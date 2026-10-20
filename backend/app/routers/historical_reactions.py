@@ -109,6 +109,11 @@ async def _sector_peer_aggregate(
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
+def signed_mean(moves: list[float]) -> float | None:
+    """Pure: W7's figure, the arithmetic mean of the signed next-day moves, to two places; None with none."""
+    return round(sum(moves) / len(moves), 2) if moves else None
+
 @router.get("/summary", response_model=ReactionSummaryRead)
 async def get_reaction_summary(
     symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
@@ -173,6 +178,7 @@ async def get_reaction_summary(
     miss_1d = [float(r.pct_change_1d) for r in misses]
 
     avg_abs_1d  = round(sum(abs(v) for v in all_1d)  / len(all_1d),  2)
+    avg_1d      = signed_mean(all_1d)
     avg_1d_beat = round(sum(beat_1d) / len(beat_1d), 2) if beat_1d else None
     avg_1d_miss = round(sum(miss_1d) / len(miss_1d), 2) if miss_1d else None
 
@@ -211,6 +217,7 @@ async def get_reaction_summary(
         avg_1d_on_beat=avg_1d_beat,
         avg_1d_on_miss=avg_1d_miss,
         avg_abs_1d=avg_abs_1d,
+        avg_1d=avg_1d,
         basis_excluded=basis_excluded,
         basis_excluded_note=excluded_note(basis_excluded),
         sector_avg_abs_1d=sector_avg,

@@ -217,16 +217,15 @@ describe("row sentences", () => {
     expect(page).toContain("title={tapeReceipt(item)}");
   });
 
-  it("just reported: the outcome, then the move against its typical one", () => {
+  it("just reported: the year-ago line, then the move; never a beat, miss or estimate", () => {
     const j: JustReportedItem = {
       ...base, symbol: "RPTD", event_date: "2026-09-25", pct_change_1d: -6.3, outcome: "beat",
       insight: "Moved -6.3% on the 1-day reaction; its typical beat moves +2.7%", vol_regime: null,
+      eps_line: "EPS $1.10, up 10.0% from $1.00 a year ago",
     };
-    expect(justReportedSentence(j)).toBe("Beat estimates; moved -6.3% on the 1-day reaction; its typical beat moves +2.7%");
-    expect(justReportedSentence({ ...j, outcome: "miss", insight: null, pct_change_1d: 4.25 })).toBe(
-      "Missed estimates; moved +4.3% on the 1-day reaction");
-    expect(justReportedSentence({ ...j, outcome: "unknown", insight: null, pct_change_1d: null })).toBe(
-      "Reported; beat or miss not recorded");
+    expect(justReportedSentence(j)).toBe("EPS $1.10, up 10.0% from $1.00 a year ago; moved -6.3% on the 1-day reaction");
+    expect(justReportedSentence({ ...j, outcome: "miss", insight: null, pct_change_1d: 4.25, eps_line: null })).toBe(
+      "Reported, with no EPS figure from SEC filings yet; moved +4.3% on the 1-day reaction");
   });
 
   it("every outcome the API sends has words", () => {

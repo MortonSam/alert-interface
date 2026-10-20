@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { HistoricalReaction, TickerChart, TickerQuote } from "@/lib/api";
 import { fmtChange, hasBars, openingPeriod, periodChange, quoteTimeLine, sessionOn, DIRECTION_STYLE } from "@/lib/priceHeader";
 import type { MarketSession, MarketSessionDay } from "@/lib/api";
-import { epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
+import { averageMoveLine, epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
 import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type ReportMoveFacts, type VerdictInput } from "@/lib/optionsVerdict";
 import { comparisonParts } from "@/lib/moveComparison";
 import { EVIDENCE_VIEWS } from "@/lib/evidenceViews";
@@ -124,39 +124,41 @@ describe("the quote's time line follows the exchange calendar at every hour", ()
 });
 
 describe("report cards match the stored rows", () => {
-  it("newest first, each figure the API's value", () => {
-    const cards = reportCards(NVDA_ROWS);
+  it("newest first, each figure the API's value, the EPS line against a year earlier", () => {
+    const cards = reportCards(NVDA_ROWS.map((r, i) => ({ ...r, eps_line: i ? "EPS $2.22, up 111.4% from $1.05 a year ago" : null })));
     expect(cards.map((c) => c.eventDate)).toEqual(["2026-08-26", "2026-05-20"]);
     const c = cards[0];
     expect(c.date).toBe("Aug 26, 2026");
     expect(c.timing).toBe("After the close");
-    expect(c.eps).toBe("EPS $2.22 against a $2.09 estimate, beat by 6.2%");
+    expect(c.eps).toBe("EPS $2.22, up 111.4% from $1.05 a year ago");
     expect(c.moves.map((m) => m.value)).toEqual([8.738, 5.3038, 7.0352]);
     expect(c.moves.map((m) => fmtMove(m.value!))).toEqual(["+8.7%", "+5.3%", "+7.0%"]);
   });
-  it("the surprise size follows the verb, so no size ever takes an article (never \"a 8.0% beat\")", () => {
-    const beat = epsLine(row({ outcome: "beat", eps_actual: "1.08", eps_estimate: "1.00", eps_surprise_pct: 8.0, eps_surprise_display_pct: 8.0 })).eps!;
-    const miss = epsLine(row({ outcome: "miss", eps_actual: "0.92", eps_estimate: "1.00", eps_surprise_pct: -8.0, eps_surprise_display_pct: -8.0 })).eps!;
-    expect(beat).toBe("EPS $1.08 against a $1.00 estimate, beat by 8.0%");
-    expect(miss).toBe("EPS $0.92 against a $1.00 estimate, missed by 8.0%");
-    for (const s of [beat, miss]) expect(s).not.toMatch(/\ban? [\d.]+%/);
+  it("no card shows an estimate, a beat, a miss or a surprise, even from a row that carries them", () => {
+    for (const r of [...NVDA_ROWS, VMRK_ROW]) {
+      const c = reportCards([r])[0];
+      expect(`${c.eps ?? ""} ${c.epsAbsent ?? ""} ${whyItMoved(r, typicalMove(NVDA_SUMMARY))?.text ?? ""}`).not.toMatch(/\b(beat|miss|missed|met|estimate|surprise)/i);
+    }
   });
-
-  it("a report without a judged EPS figure shows the absence, never a beat or miss", () => {
+  it("a report without an EPS line shows the absence", () => {
     const c = reportCards([VMRK_ROW])[0];
     expect(c.eps).toBeNull();
-    expect(c.epsAbsent).toBe("No EPS figure is on file for this report.");
-    expect(epsLine(row({ outcome: "beat", eps_actual: "1", eps_estimate: "0.9", outcome_reason: "EPS basis unclear" })).epsAbsent).toBe("EPS basis unclear");
+    expect(c.epsAbsent).toBe("No EPS figure from SEC filings for this report.");
+    expect(epsLine(row({ eps_line: "EPS $0.31, down 3.0% from $0.32 a year ago" })).eps).toBe("EPS $0.31, down 3.0% from $0.32 a year ago");
   });
-  it("the tapped line uses only stored facts and leaves missing parts out", () => {
+  it("the tapped line is the move, from stored facts only, and leaves missing parts out", () => {
     const typical = typicalMove(NVDA_SUMMARY)!;
     const w = whyItMoved(NVDA_ROWS[1], typical)!;
-    expect(w.text).toBe("EPS beat the estimate by 6.2%. The stock rose 8.7% over the first trading day after the report, more than its typical 6.5% move.");
+    expect(w.text).toBe("The stock rose 8.7% over the first trading day after the report, more than its typical 6.5% move.");
     expect(w.comparison).toBe(compareMoves(8.7, 6.5));
     expect(w.receipt).toBe("Typical move is the average size of the first-day move across 21 reports through Aug 26, 2026.");
     expect(whyItMoved(VMRK_ROW, null)!.text).toBe("The stock was unchanged over the first trading day after the report.");
-    expect(whyItMoved(row({ outcome: "miss", eps_actual: "1", eps_estimate: "1.2", eps_surprise_pct: -16.7 }), typical)!.text).toBe("EPS missed the estimate by 16.7%.");
-    expect(whyItMoved(row({}), typical)).toBeNull();
+    expect(whyItMoved(row({ outcome: "miss", eps_actual: "1", eps_estimate: "1.2", eps_surprise_pct: -16.7 }), typical)).toBeNull();
+  });
+  it("W7: the average move after past reports is the signed mean, with its sign", () => {
+    expect(averageMoveLine(1.2)).toBe("After past reports, the stock moved +1.2% the next day on average.");
+    expect(averageMoveLine(-0.04)).toBe("After past reports, the stock moved 0.0% the next day on average.");
+    expect(averageMoveLine(null)).toBeNull();
   });
   it("a typical move needs the minimum sample before any card compares with it", () => {
     expect(typicalMove({ ...NVDA_SUMMARY, total_quarters: MOVE_MIN_REPORTS - 1 })).toBeNull();
@@ -297,10 +299,9 @@ describe("preview state (2026-10-14): the report-move verdict, price uncolored, 
     expect(page).toContain('"text-4xl font-bold tabular-nums tracking-tight text-foreground" data-testid="header-price"');
     expect(page).toContain("data-testid=\"header-change\"");
   });
-  it("met is a different mark from no EPS data", () => {
-    expect(EARNINGS_MARKER_ENCODING.meet.color).not.toBe(EARNINGS_MARKER_ENCODING.unknown.color);
-    const met = earningsMarkerLegend().find((l) => l.label.includes("EPS met"))!;
-    expect(met.label).toBe("EPS met");
+  it("every report is the one neutral Earnings date mark, so a settling report is never labelled no EPS data", () => {
+    expect(Object.values(EARNINGS_MARKER_ENCODING).map((v) => v.label)).toEqual(["Earnings date"]);
+    expect(earningsMarkerLegend().map((l) => l.label)).toEqual(["Earnings date"]);
   });
 });
 

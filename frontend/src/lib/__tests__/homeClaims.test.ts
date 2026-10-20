@@ -21,13 +21,13 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(writtenBeforeLabel(null)).toBeNull();
     const ticker = read("app/tickers/[symbol]/page.tsx");
     expect(ticker.match(/writtenBeforeLabel\(note\.report_since\) && \(/g)?.length).toBe(2);   // both note headers label an older note
+    // the EPS is the SEC diluted figure the API sets as served (eps_sec); no vendor actual, estimate, beat count or past move (Block 2)
     const facts = noteFacts({ market_cap: 4.3e12, eps_actual: 2.01, eps_estimate: 1.94, eps_beat_pct: 3.6, beat_count: 18, total_quarters: 20,
-      revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "+3.56%", latest_outcome: "beat", latest_quarter_date: null });
-    expect(facts.map((f) => [f.label, f.value])).toEqual([["Market cap", "$4.30T"], ["EPS", "$2.01"], ["EPS beats", "18/20"]]);
-    expect(facts[1].sub).toBe("vs $1.94 est \u00B7 +3.6%");
+      revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "+3.56%", latest_outcome: "beat", latest_quarter_date: null, eps_sec: 1.98 });
+    expect(facts.map((f) => [f.label, f.value, f.sub])).toEqual([["Market cap", "$4.30T", undefined], ["EPS", "$1.98", undefined]]);
     expect(noteFacts({ market_cap: null, eps_actual: null, eps_estimate: null, eps_beat_pct: null, beat_count: null, total_quarters: null,
-      revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "-2.10%", latest_outcome: null, latest_quarter_date: null })
-      .map((f) => f.label)).toEqual(["Latest move"]);
+      revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "-2.10%", latest_outcome: null, latest_quarter_date: null }))
+      .toEqual([]);
     expect(noteFacts(null)).toEqual([]);
     expect(verificationLine({ supported: 12, unsupported: 1, contradicted: 0 })).toBe("13 claims checked: 12 supported, 1 unsupported, 0 contradicted");
     expect(verificationLine(null)).toBeNull();

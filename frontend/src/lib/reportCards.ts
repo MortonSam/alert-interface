@@ -1,8 +1,7 @@
 // The Evidence section's report cards: one per stored earnings reaction, newest first. Each card states the report date and
-// timing, one line for EPS against the estimate, and the 1-, 3- and 5-day moves. Tapping a card opens a line built only from
+// timing, one line for EPS against the same quarter a year earlier, and the 1-, 3- and 5-day moves. Tapping a card opens a line built only from
 // the same row's stored facts and the stock's typical earnings move from the reaction summary; a missing fact leaves its part out.
 import type { HistoricalReaction, ReactionSummary } from "@/lib/api";
-import { EPS_SURPRISE_PCT_CAP } from "@/lib/thresholds";
 import { compareMoves, MOVE_MIN_REPORTS, type MoveComparison } from "@/lib/optionsVerdict";
 import { fmtDay } from "@/lib/tickerDates";
 
@@ -26,37 +25,12 @@ const num = (v: string | number | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** The outcome the row's stored figures support, or null: a beat, miss or meet needs a stored actual and estimate and no basis reason. */
-export function judgedOutcome(r: HistoricalReaction): "beat" | "miss" | "meet" | null {
-  if (r.outcome_reason || r.basis_mismatch) return null;
-  if (num(r.eps_actual) == null || num(r.eps_estimate) == null) return null;
-  return r.outcome === "beat" || r.outcome === "miss" || r.outcome === "meet" ? r.outcome : null;
-}
+const NO_EPS = "No EPS figure from SEC filings for this report.";
 
-/** The surprise size in words: "17.1%", "$0.06" when the estimate is near zero, "more than 999%" past the cap. Null when none. */
-export function surpriseSize(r: HistoricalReaction): string | null {
-  if (r.eps_surprise_pct == null) {
-    const d = r.eps_surprise_dollars;
-    return d == null ? null : `$${Math.abs(d).toFixed(2)}`;
-  }
-  const capped = r.eps_surprise_capped ?? Math.abs(r.eps_surprise_pct) > EPS_SURPRISE_PCT_CAP;
-  if (capped) return `more than ${EPS_SURPRISE_PCT_CAP}%`;
-  const shown = r.eps_surprise_display_pct ?? r.eps_surprise_pct;
-  return `${Math.abs(shown).toFixed(1)}%`;
-}
-
-const NO_EPS = "No EPS figure is on file for this report.";
-
-/** "EPS $0.41 against a $0.35 estimate, beat by 17.1%" (never "a 8.0% beat": the size follows the verb, so no article depends on it) */
+/** The card's EPS line: the reported figure against the same quarter a year earlier (the API's eps_line, "EPS $2.22, up 111.4% from
+ * $1.05 a year ago"). No estimate, beat, miss or surprise is shown anywhere (Block 2, 2026-10-20). */
 export function epsLine(r: HistoricalReaction): { eps: string | null; epsAbsent: string | null } {
-  const outcome = judgedOutcome(r);
-  if (!outcome) return { eps: null, epsAbsent: r.outcome_reason ?? NO_EPS };
-  const a = num(r.eps_actual)!, e = num(r.eps_estimate)!;
-  const base = `EPS $${a.toFixed(2)} against a $${e.toFixed(2)} estimate`;
-  if (outcome === "meet") return { eps: `${base}, in line`, epsAbsent: null };
-  const size = surpriseSize(r);
-  if (!size) return { eps: `${base}, a ${outcome}`, epsAbsent: null };
-  return { eps: `${base}, ${outcome === "beat" ? "beat" : "missed"} by ${size}`, epsAbsent: null };
+  return r.eps_line ? { eps: r.eps_line, epsAbsent: null } : { eps: null, epsAbsent: NO_EPS };
 }
 
 export function reportCard(r: HistoricalReaction): ReportCard {
@@ -113,16 +87,10 @@ const COMPARE_WORDS: Record<MoveComparison, string> = {
 export interface WhyLine { text: string; comparison: MoveComparison | null; receipt: string | null }
 
 /** The tapped card's line, from stored facts only:
- *  "EPS beat the estimate by 17.1%. The stock fell 3.6% over the first trading day after the report, less than its typical 8.7% move."
- * Each sentence appears only when its facts are stored. Null when nothing is. */
+ *  "The stock fell 3.6% over the first trading day after the report, less than its typical 8.7% move."
+ * Null when the move is not on file. */
 export function whyItMoved(r: HistoricalReaction, typical: TypicalMove | null): WhyLine | null {
   const parts: string[] = [];
-  const outcome = judgedOutcome(r);
-  if (outcome) {
-    const size = surpriseSize(r);
-    if (outcome === "meet") parts.push("EPS matched the estimate.");
-    else parts.push(size ? `EPS ${outcome === "beat" ? "beat" : "missed"} the estimate by ${size}.` : `EPS ${outcome === "beat" ? "beat" : "missed"} the estimate.`);
-  }
   const move = num(r.pct_change_1d);
   let comparison: MoveComparison | null = null;
   let receipt: string | null = null;
@@ -140,4 +108,10 @@ export function whyItMoved(r: HistoricalReaction, typical: TypicalMove | null): 
     parts.push(`${sentence}.`);
   }
   return parts.length ? { text: parts.join(" "), comparison, receipt } : null;
+}
+
+/** W7 (Block 2 wording): "After past reports, the stock moved +1.2% the next day on average." The figure is the API's avg_1d, the
+ * mean of the signed next-day moves (backend routers/historical_reactions.signed_mean). Null when there is none. */
+export function averageMoveLine(avg1d: number | null | undefined): string | null {
+  return avg1d == null ? null : `After past reports, the stock moved ${fmtMove(avg1d)} the next day on average.`;
 }

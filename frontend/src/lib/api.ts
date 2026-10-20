@@ -163,6 +163,7 @@ export interface ReactionSummary {
   avg_1d_on_beat: number | null;
   avg_1d_on_miss: number | null;
   avg_abs_1d: number | null;
+  avg_1d?: number | null;              // W7: the mean of the signed next-day moves
   sector_avg_abs_1d: number | null;
   sector_peer_count: number;
   sector_as_of: string | null;
@@ -340,6 +341,7 @@ export interface StructuredNoteStats {
   latest_move_1d: string | null;
   latest_outcome: "beat" | "miss" | "meet" | null;
   latest_quarter_date: string | null;
+  eps_sec?: number | null;              // SEC diluted EPS for latest_quarter_date's quarter, set as served (the figure the text uses)
   unavailable_reason?: string | null;   // why beat_count/total_quarters are null (price history excluded)
 }
 

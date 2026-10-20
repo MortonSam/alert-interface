@@ -23,10 +23,12 @@ from app.services.valuation import QUARTER_DAYS
 
 FFO_COMPUTATION_VERSION = 1
 FFO_GAP_PCT = 5.0                   # an XBRL cross-check further off than this holds the release figure
+FFO_AGREED_GAP_PCT = 15.0           # Sam's rule (2026-10-20): a figure both readers agree on to the cent, its quote verbatim in the
+                                    # release, is shown while XBRL is within this; without that agreement FFO_GAP_PCT holds
 MEASURE = "FFO per share"
 HELD_LINE = "FFO per share for this quarter is held because the release's figure and the one computed from the company's filings differ by {gap:.1f}%."
 UNREAD_LINE = "FFO per share for this quarter is held because the two readings of its earnings release do not agree."
-DERIVED_NOTE = " (the release's Nareit FFO over its diluted shares)"   # after a figure the release states only in total (AMT, PLD)
+DERIVED_NOTE = " (calculated from the release's total FFO and diluted shares)"   # W8: after a figure the release states only in total (AMT, PLD)
 NONE_REASON = "the release and its exhibits mention no FFO"        # a REIT whose every report says this keeps EPS (WY)
 MODEL_WINDOW = 1500                 # characters kept either side of each FFO mention for the model (the verbatim check reads the whole exhibit)
 MODEL_MAX_CHARS = 40_000
@@ -422,16 +424,19 @@ def xbrl_ffo_quarters(facts: dict) -> dict[date, dict]:
     return out
 
 
-def cross_check(ffo: float, xbrl: dict | None) -> tuple[str, float | None, str]:
-    """Pure: (state, gap in percent, reason) for an agreed release figure against the XBRL computation."""
+def cross_check(ffo: float, xbrl: dict | None, agreed_verbatim: bool = False) -> tuple[str, float | None, str]:
+    """Pure: (state, gap in percent, reason) for a release figure against the XBRL computation. `agreed_verbatim`: both readers agree
+    to the cent and the quote is verbatim in the release (decide_ffo returned it), so the figure is shown within FFO_AGREED_GAP_PCT;
+    otherwise within FFO_GAP_PCT."""
+    limit = FFO_AGREED_GAP_PCT if agreed_verbatim else FFO_GAP_PCT
     if not xbrl:
         return "ok", None, "both readers agree; XBRL cross-check unavailable (the filing tags no quarterly net income, depreciation and diluted shares for this quarter)"
     x = xbrl["ffo_per_share"]
     if not x:
         return "ok", None, "both readers agree; XBRL cross-check unavailable (zero computed)"
     gap = abs(ffo / x - 1) * 100
-    if gap > FFO_GAP_PCT:
-        return "held", round(gap, 2), f"release {ffo:.2f} against {x:.2f} from XBRL ({', '.join(xbrl['tags'])}), {gap:.1f}% apart, over {FFO_GAP_PCT:.0f}%"
+    if gap > limit:
+        return "held", round(gap, 2), f"release {ffo:.2f} against {x:.2f} from XBRL ({', '.join(xbrl['tags'])}), {gap:.1f}% apart, over {limit:.0f}%"
     return "ok", round(gap, 2), f"both readers agree; XBRL {x:.2f} within {gap:.1f}%"
 
 

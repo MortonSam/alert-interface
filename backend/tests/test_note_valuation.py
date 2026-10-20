@@ -20,7 +20,7 @@ def test_multiples_are_withheld_while_pe_is_off_and_market_cap_figures_always():
     s, v, c = served(NOTE, VER, "Tesla trades at a P/E of 180. Deliveries rose.", valuation_shown=False)
     assert [p["lead"] for p in s["highlights"]] == ["Revenue grew"] and s["watch"] == [] and len(s["risks"]) == 1
     assert s["bottom_line"] == "Results improved."
-    assert s["stats"]["market_cap"] is None and s["stats"]["eps_actual"] == 0.31
+    assert s["stats"]["market_cap"] is None and s["stats"]["eps_actual"] is None      # vendor EPS dropped as served (Block 2)
     assert s["financials"] == {"gross_margin": 0.41}
     assert [x["claim"] for x in v["claims"]] == ["Revenue rose 12%"]
     assert normalize_verification(v)["summary"] == {"supported": 1, "unsupported": 0, "contradicted": 0}
@@ -44,7 +44,7 @@ def test_no_beat_rate_and_no_move_after_past_reports_in_the_stats_strip():
     assert {x.split(": ")[1] for x in leaks(raw, None, None, False)} == {"beat_count", "latest_move_1d"}
     s, _, _ = served(raw, None, None, False)
     assert all(s["stats"][k] is None for k in PAST_REPORT_STATS)
-    assert s["stats"]["eps_actual"] == 0.33 and s["stats"]["eps_estimate"] == 0.54      # the latest quarter's EPS stays
+    assert s["stats"]["eps_actual"] is None and s["stats"]["eps_estimate"] is None      # vendor figures go; the router sets eps_sec (Block 2)
     assert leaks(s, None, None, False) == []
     # a note whose beats were unavailable must not draw an "EPS beats" cell with its reason either
     s, _, _ = served({**raw, "stats": {"beat_count": None, "unavailable_reason": "no estimates on file"}}, None, None, False)

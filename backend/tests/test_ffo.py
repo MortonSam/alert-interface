@@ -63,6 +63,7 @@ def test_xbrl_ffo_is_net_income_plus_depreciation_and_impairments_less_gains_ove
     assert F.cross_check(1.07, x)[0] == "ok"
     state, gap, reason = F.cross_check(1.07, F.xbrl_ffo_quarters(_facts(330e6, 500e6, 20e6, None, 925e6))[date(2026, 6, 30)])
     assert state == "held" and gap > F.FFO_GAP_PCT and "over 5%" in reason          # (330 + 500 - 20) / 925 = 0.8757: 22% apart
+    assert F.cross_check(1.07, F.xbrl_ffo_quarters(_facts(330e6, 500e6, 20e6, None, 925e6))[date(2026, 6, 30)], agreed_verbatim=True)[0] == "held"   # past 15% too
     assert F.cross_check(1.07, None)[0] == "ok"                                      # no tags: the agreed reading stands, said in the reason
 
 
@@ -156,7 +157,7 @@ def test_the_verbatim_check_reads_curly_quotes_as_straight_and_the_release_reads
 
 def test_a_derived_figure_says_so_and_an_unread_quarter_says_why_it_is_held():
     pairs = [{**p, "measure": F.MEASURE, "note": F.DERIVED_NOTE} for p in year_ago_pairs([(date(2025, 6, 30), 1.63), (date(2026, 6, 30), 2.68)])]
-    assert eps_line(pairs[0]) == "FFO per share $2.68 (the release's Nareit FFO over its diluted shares), up 64.4% from $1.63 a year ago"
+    assert eps_line(pairs[0]) == "FFO per share $2.68 (calculated from the release's total FFO and diluted shares), up 64.4% from $1.63 a year ago"
     ya = YearAgo(pairs, {date(2026, 3, 31): {"period_end": date(2026, 3, 31), "measure": F.MEASURE, "held_line": F.UNREAD_LINE}})
     assert ya.for_report(date(2026, 4, 28))["eps_line"] == ("FFO per share for this quarter is held because the two readings of its earnings "
                                                             "release do not agree.")

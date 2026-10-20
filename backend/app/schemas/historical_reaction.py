@@ -84,6 +84,7 @@ class ReactionSummaryRead(BaseModel):
     avg_1d_on_beat: float | None
     avg_1d_on_miss: float | None
     avg_abs_1d: float | None                # average |pct_change_1d| across all quarters
+    avg_1d: float | None = None             # W7: the mean of the signed next-day moves (never a median, never the mean of absolute moves)
     sector_avg_abs_1d: float | None         # same metric across sector peers (None if <5 peers)
     sector_peer_count: int                  # distinct peer tickers used for sector avg
     sector_as_of: str | None = None         # ISO date of sector peer snapshot

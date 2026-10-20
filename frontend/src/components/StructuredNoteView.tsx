@@ -473,90 +473,10 @@ export default function StructuredNoteView({
     );
   }
 
-  if (stats.eps_actual != null) {
-    const beatSub =
-      stats.eps_estimate != null && stats.eps_beat_pct != null
-        ? `vs ${stats.eps_estimate.toFixed(2)}e \u00b7 ${stats.eps_beat_pct > 0 ? "+" : ""}${stats.eps_beat_pct.toFixed(1)}%`
-        : stats.eps_estimate != null
-          ? `vs ${stats.eps_estimate.toFixed(2)}e`
-          : undefined;
-    const beatColor =
-      stats.eps_beat_pct != null
-        ? stats.eps_beat_pct > 0
-          ? "text-sky-500"            // a beat is not "up" (DESIGN.md): blue and amber, as the chart's markers
-          : stats.eps_beat_pct < 0
-            ? "text-amber-500"
-            : undefined
-        : undefined;
-    statCells.push(
-      <StatCell
-        key="eps"
-        label="EPS"
-        value={`$${stats.eps_actual.toFixed(2)}`}
-        sub={beatSub}
-        subColor={beatColor}
-      />,
-    );
-  }
-
-  if (stats.revenue_actual != null) {
-    const beatSub =
-      stats.revenue_estimate != null && stats.revenue_beat_pct != null
-        ? `vs ${fmtRevenue(stats.revenue_estimate)}e \u00b7 ${stats.revenue_beat_pct > 0 ? "+" : ""}${stats.revenue_beat_pct.toFixed(1)}%`
-        : stats.revenue_estimate != null
-          ? `vs ${fmtRevenue(stats.revenue_estimate)}e`
-          : undefined;
-    const beatColor =
-      stats.revenue_beat_pct != null
-        ? stats.revenue_beat_pct > 0
-          ? "text-sky-500"
-          : stats.revenue_beat_pct < 0
-            ? "text-amber-500"
-            : undefined
-        : undefined;
-    statCells.push(
-      <StatCell
-        key="rev"
-        label="Revenue"
-        value={fmtRevenue(stats.revenue_actual)}
-        sub={beatSub}
-        subColor={beatColor}
-      />,
-    );
-  }
-
-  if (stats.beat_count == null && stats.unavailable_reason) {
-    statCells.push(
-      <StatCell key="beats" label="EPS beats" value="—" sub={stats.unavailable_reason} />,
-    );
-  }
-
-  if (stats.beat_count != null && stats.total_quarters != null) {
-    statCells.push(
-      <StatCell
-        key="beats"
-        label="EPS beats"
-        value={`${stats.beat_count}/${stats.total_quarters}`}
-        sub={stats.basis_excluded ? `quarters beat, of those covered; ${stats.basis_excluded} excluded (EPS basis unclear)` : "quarters beat, of those covered"}
-      />,
-    );
-  }
-
-  if (stats.latest_move_1d != null) {
-    const pos = isPositive(stats.latest_move_1d);
-    const neg = isNegative(stats.latest_move_1d);
-    statCells.push(
-      <StatCell
-        key="move"
-        label="Latest Move"
-        value={
-          <span className={cn(pos && "text-success", neg && "text-destructive")}>
-            {stats.latest_move_1d}
-          </span>
-        }
-        sub={`post-earnings 1d${stats.latest_outcome ? ` \u00b7 ${stats.latest_outcome}` : ""}`}
-      />,
-    );
+  // The strip's EPS is the SEC diluted figure for the note's quarter (backend services/note_valuation.with_sec_eps), the figure its
+  // text uses; no vendor actual, estimate, surprise, beat count or past move is shown (Block 2, 2026-10-20)
+  if (stats.eps_sec != null) {
+    statCells.push(<StatCell key="eps" label="EPS" value={`$${stats.eps_sec.toFixed(2)}`} />);
   }
 
   return (

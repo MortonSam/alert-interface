@@ -1772,13 +1772,33 @@ async def check_note_served_clean(session) -> CheckResult:
     return CheckResult("note_served_clean", PASS, f"{len(rows)} complete notes served with no multiple{'' if not shown else ' check (P/E shown)'} and no market cap figure")
 
 
+
+async def check_note_eps_agrees(session) -> CheckResult:
+    """ERROR when a complete research note, as served, shows one EPS in its stats strip (eps_sec, SEC diluted EPS for the strip's
+    quarter) and states another in its text (services/note_valuation.eps_disagreement; TSLA showed $0.33 beside "$0.32 diluted")."""
+    from app.config import settings
+    from app.services.note_valuation import eps_disagreement, served, with_sec_eps
+    rows = (await session.execute(text("""SELECT t.symbol, n.structured_content, n.verification, n.content FROM research_notes n
+        JOIN tickers t ON t.id = n.ticker_id WHERE n.status = 'complete'"""))).all()
+    bad, compared = [], 0
+    for r in rows:
+        sc, _v, c = served(r.structured_content, r.verification, r.content, bool(settings.pe_enabled))
+        sc = await with_sec_eps(session, r.symbol, sc)
+        why = eps_disagreement(sc, c)
+        compared += 1
+        if why:
+            bad.append(f"{r.symbol}: {why}")
+    if bad:
+        return CheckResult("note_eps_agrees", ERROR, f"{len(bad)} served note(s) show one EPS in the strip and another in the text", bad[:20])
+    return CheckResult("note_eps_agrees", PASS, f"{compared} complete notes: strip EPS and text agree")
+
 FFO_BAND = (-5.0, 50.0)          # a quarter's FFO per share outside this is a misread (the largest REIT quarterly FFO is near $10)
 
 
 async def check_ffo_quarters(session) -> CheckResult:
     """ERROR when a shown FFO quarter (ffo_quarters state 'ok') is outside FFO_BAND, carries an XBRL gap over FFO_GAP_PCT (it should
     be held), or belongs to a ticker that is not a REIT; PASS with the counts by state."""
-    from app.services.ffo import FFO_GAP_PCT, is_reit
+    from app.services.ffo import FFO_AGREED_GAP_PCT as FFO_GAP_PCT, is_reit   # every shown quarter is an agreed, verbatim reading
     if (await session.execute(text("SELECT to_regclass('ffo_quarters')"))).scalar() is None:
         return CheckResult("ffo_quarters", PASS, "No ffo_quarters table yet")
     rows = (await session.execute(text("""SELECT f.symbol, f.period_end, f.ffo_per_share, f.state, f.xbrl_gap_pct, t.sector, t.industry
@@ -3763,6 +3783,7 @@ CHECKS = [
     check_live_api_budget,
     check_market_beside_bands,
     check_note_served_clean,
+    check_note_eps_agrees,
     check_ffo_quarters,
     check_pending_deal_price_band,
     check_pinned_without_deal,

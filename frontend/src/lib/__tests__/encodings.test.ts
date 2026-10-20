@@ -44,7 +44,12 @@ describe("payoff chart", () => {
 });
 
 describe("price-chart earnings markers", () => {
-  it("has one swatch per distinct look and names every outcome", () => {
+  it("is one neutral mark, Earnings date, for every report (no outcome is encoded)", () => {
+    expect(Object.keys(EARNINGS_MARKER_ENCODING)).toEqual(["report"]);
+    expect(earningsMarkerLegend()).toEqual([{ key: "#9ca3af", label: "Earnings date", swatch: { kind: "line", color: "#9ca3af", dashed: true } }]);
+    expect(earningsMarkerColor()).toBe(EARNINGS_MARKER_ENCODING.report.color);
+  });
+  it("has one swatch per distinct look and names every entry", () => {
     const legend = earningsMarkerLegend();
     const looks = new Set(Object.values(EARNINGS_MARKER_ENCODING).map((v) => v.color));
     expect(legend.length).toBe(looks.size);
@@ -52,14 +57,12 @@ describe("price-chart earnings markers", () => {
     for (const v of Object.values(EARNINGS_MARKER_ENCODING)) expect(text).toContain(v.label);
     for (const l of legend) { expect(l.swatch.kind).toBe("line"); expect(l.swatch.dashed).toBe(true); }
   });
-  it("unknown outcomes fall back to the no-data color", () => {
-    expect(earningsMarkerColor("something_new")).toBe(EARNINGS_MARKER_ENCODING.unknown.color);
-  });
   it("the ticker page has no hand-written marker colors or legend text", () => {
     const src = read("app/tickers/[symbol]/page.tsx");
     expect(src).not.toContain("OUTCOME_DOT_COLOR");
     expect(src).not.toContain("green = beat");
-    expect(src).toContain("earningsMarkerLegend(estimatesShown(chartData))");      // the plain mark when estimates are withheld
+    expect(src).toContain("earningsMarkerLegend()");
+    expect(src).not.toMatch(/no EPS data|colored by EPS outcome/);
   });
 });
 

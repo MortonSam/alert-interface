@@ -102,7 +102,7 @@ async def run(argv: list[str]) -> int:
                 elif pe is None:
                     row["reason"] = f"{note}; the release states no quarter end"
                 else:
-                    state, gap, why = F.cross_check(figure, xbrl.get(pe))
+                    state, gap, why = F.cross_check(figure, xbrl.get(pe), agreed_verbatim=True)   # decide_ffo returns only an agreed, verbatim figure
                     row.update(ffo=figure, state=state, how=hit["how"], gap=gap, xbrl=(xbrl.get(pe) or {}).get("ffo_per_share"), reason=why)
                 rows.append(row)
                 print(f"  {sym} {rd} (quarter {pe}): {row['state']}, {('%.2f' % row['ffo']) if row['ffo'] is not None else '-'}; {row['reason']}")
@@ -142,7 +142,7 @@ def coverage(rows: list[dict], reits: list[str], cost: float) -> str:
     none = [s for s, rs in by.items() if not any(r["state"] == "ok" for r in rs)]
     misses = "\n".join(f"- {s}: latest report {rs[-1]['report_date']} {rs[-1]['state']}, {rs[-1]['reason']}" if rs else f"- {s}: no report in the window"
                         for s, rs in by.items() if not rs or rs[-1]["state"] != "ok")
-    return (f"FFO coverage: {len(reits)} REITs, {len(rows)} reports; {n['ok']} shown, {n['held']} held (XBRL gap over {F.FFO_GAP_PCT:.0f}%), "
+    return (f"FFO coverage: {len(reits)} REITs, {len(rows)} reports; {n['ok']} shown, {n['held']} held (XBRL gap over {F.FFO_AGREED_GAP_PCT:.0f}%), "
             f"{n['unread']} unread (held, the readers disagree), {n['none']} naming no FFO; latest quarter shown for {len(latest_ok)} of {len(reits)}; "
             f"no quarter shown for {len(none)} ({', '.join(none) or 'none'}); model cost ${cost:.2f}\n\nLatest quarter not shown:\n{misses or '- none'}"
             "\n\n| Symbol | Report | Quarter | State | FFO/share | How | XBRL | Gap | Reason |\n|---|---|---|---|---|---|---|---|---|")

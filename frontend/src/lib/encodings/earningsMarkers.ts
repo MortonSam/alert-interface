@@ -1,39 +1,21 @@
-// Earnings markers on the price chart: a dashed vertical line per report,
-// colored by EPS outcome (not by direction; the reaction bars below use direction). Green and red mean up and down alone
-// (DESIGN.md), so a beat is blue and a miss amber.
-import type { EarningsOutcome } from "@/lib/api";
+// Earnings markers on the price chart: a dashed vertical line per report, one neutral mark for every report (Block 2, 2026-10-20).
+// No outcome is encoded (no estimate is shown anywhere), so a report still settling is the same mark as any other, never "no EPS
+// data". The price line keeps its green and red for up and down.
 import type { LegendItem } from "./types";
 
 export const EARNINGS_MARKER_ENCODING = {
-  beat:    { label: "EPS beat",        color: "#38bdf8" },
-  miss:    { label: "EPS miss",        color: "#f59e0b" },
-  meet:    { label: "EPS met",         color: "#a78bfa" },   // its own mark: "met" is a judged outcome, never the same look as no data
-  unknown: { label: "no EPS data",     color: "#9ca3af" },
-  no_reported_figure: { label: "no EPS data", color: "#9ca3af" },   // the same mark as unknown: a report with no figure to judge it by
-} as const satisfies Record<EarningsOutcome, { label: string; color: string }>;
+  report: { label: "Earnings date", color: "#9ca3af" },
+} as const;
 
 export const EARNINGS_MARKER_DASH = "3 3";
 
-// LICENSED_ESTIMATES off (lib/licensedEstimates): every marker is the same mark, a report date with no outcome
-export const EARNINGS_MARKER_PLAIN = { label: "Earnings date", color: EARNINGS_MARKER_ENCODING.unknown.color } as const;
-
-export function earningsMarkerColor(outcome: EarningsOutcome | string): string {
-  return (EARNINGS_MARKER_ENCODING as Record<string, { color: string }>)[outcome]?.color ?? EARNINGS_MARKER_ENCODING.unknown.color;
+export function earningsMarkerColor(): string {
+  return EARNINGS_MARKER_ENCODING.report.color;
 }
 
-/** One swatch per distinct look: unknown and no_reported_figure share gray, so they share an entry, and each label is named
- * once in it (they carry the same words). With estimates off, one entry: the plain mark. */
-export function earningsMarkerLegend(estimates = true): LegendItem[] {
-  if (!estimates) {
-    return [{ key: EARNINGS_MARKER_PLAIN.color, label: EARNINGS_MARKER_PLAIN.label, swatch: { kind: "line", color: EARNINGS_MARKER_PLAIN.color, dashed: true } }];
-  }
-  const byColor = new Map<string, string[]>();
-  for (const [, v] of Object.entries(EARNINGS_MARKER_ENCODING)) {
-    const labels = byColor.get(v.color) ?? [];
-    if (!labels.includes(v.label)) labels.push(v.label);          // "no EPS data" once, though two outcomes carry it
-    byColor.set(v.color, labels);
-  }
-  return [...byColor.entries()].map(([color, labels]) => ({
-    key: color, label: labels.join(" / "), swatch: { kind: "line", color, dashed: true },
+/** The legend, from the encoding: one entry, the mark it names. */
+export function earningsMarkerLegend(): LegendItem[] {
+  return Object.values(EARNINGS_MARKER_ENCODING).map((v) => ({
+    key: v.color, label: v.label, swatch: { kind: "line", color: v.color, dashed: true },
   }));
 }

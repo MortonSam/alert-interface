@@ -172,6 +172,10 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
 async def note_for_reader(db, note: ResearchNote, admin: bool) -> ResearchNoteRead:
     """_note_for_reader, plus the date the company reported again after the note was written (None while it is current)."""
     read = _note_for_reader(note, admin)
+    if read.structured_content:
+        from app.services.note_valuation import with_sec_eps
+        symbol = (await db.execute(select(Ticker.symbol).where(Ticker.id == note.ticker_id))).scalar()
+        read = read.model_copy(update={"structured_content": await with_sec_eps(db, symbol, read.structured_content)})
     return read.model_copy(update={"report_since": await report_since(db, note.ticker_id, note.generated_at)})
 
 
@@ -216,6 +220,8 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
         sc, ver = filter_note(sc, ver)
         sc = sc or {}
     sc, verification, _ = served(sc, ver, None, bool(settings.pe_enabled))
+    from app.services.note_valuation import with_sec_eps
+    sc = await with_sec_eps(db, symbol, sc) or {}
     return LatestVerifiedNoteRead(
         symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
         rating=sc.get("rating"), stats=sc.get("stats"), highlights=list(sc.get("highlights") or [])[:2],
