@@ -1818,7 +1818,7 @@ async def check_growth_fresh(session) -> CheckResult:
         return CheckResult("growth_fresh", PASS, "No growth_figures table yet")
     rows = (await session.execute(text("""
         SELECT t.symbol, max(e.event_date) AS reported FROM tickers t JOIN events e ON e.ticker_id = t.id
-        WHERE t.is_active AND e.event_type = 'earnings' AND e.event_date BETWEEN CURRENT_DATE - 45 AND CURRENT_DATE - :d
+        WHERE t.is_active AND e.event_type = 'earnings' AND e.event_date BETWEEN CURRENT_DATE - 45 AND CURRENT_DATE - CAST(:d AS integer)
           AND (e.is_confirmed OR e.eps_actual IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM growth_figures g WHERE g.symbol = t.symbol AND g.computed_at::date >= e.event_date)
           AND NOT EXISTS (SELECT 1 FROM growth_disagreements x WHERE x.symbol = t.symbol AND x.logged_at::date >= e.event_date)
