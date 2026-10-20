@@ -11,6 +11,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.schemas.event import EventCreate, EventRead, EventUpdate
+from app.services.personal_use import dates_licensed_only
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -45,7 +46,8 @@ async def upcoming_events(
         q = q.where(Event.event_type == event_type)
 
     result = await db.execute(q)
-    return licensed_dates(list(result.scalars().all()))
+    from app.services.personal_use import withheld_event
+    return licensed_dates([e for e in result.scalars().all() if not withheld_event(e)])
 
 
 def licensed_dates(events: list[Event]) -> list[Event]:
@@ -53,7 +55,7 @@ def licensed_dates(events: list[Event]) -> list[Event]:
     agreed on, is not shown; the Catalysts row shows the expected window from SEC filings instead (next_earnings)."""
     from app.config import settings
     from app.services.earnings_calendar import company_confirmed
-    if not settings.licensed_dates_only:
+    if not dates_licensed_only():
         return events
     return [e for e in events if e.event_type != EventType.EARNINGS or company_confirmed(e.is_confirmed, e.confirmation_note)]
 
@@ -76,7 +78,8 @@ async def list_events(
     if to_date:
         q = q.where(Event.event_date <= to_date)
     result = await db.execute(q)
-    return list(result.scalars().all())
+    from app.services.personal_use import withheld_event
+    return [e for e in result.scalars().all() if not withheld_event(e)]
 
 
 @router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])

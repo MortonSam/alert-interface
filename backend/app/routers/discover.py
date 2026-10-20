@@ -389,7 +389,10 @@ async def _batch_vol_regime(
 async def _batch_analyst_stats(
     db: AsyncSession, symbols: list[str],
 ) -> dict[str, dict]:
-    """Batch-fetch analyst reaction stats for symbols.
+    """
+    from app.services.personal_use import shown
+    if not shown():                         # analyst actions come from Finnhub and Yahoo, personal use only
+        return {}Batch-fetch analyst reaction stats for symbols.
 
     Returns {symbol: {upgrade_count, downgrade_count, avg_1d_downgrade, ...}}.
     """
@@ -428,7 +431,8 @@ async def _batch_buy_share_delta(
 
     Returns {symbol: {buy_share, delta, total}}.
     """
-    if not symbols:
+    from app.services.personal_use import shown
+    if not symbols or not shown():          # Finnhub recommendation trends are personal use only
         return {}
 
     # Get ticker_ids for the symbols

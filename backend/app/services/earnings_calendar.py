@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from app.services.dates import fmt_day
+from app.services.personal_use import dates_licensed_only
 
 NEAR_DAYS = 3                        # candidates this close from different sources are the same report (same day: they agree)
 SAME_REPORT_DAYS = 60                # two dates closer than this are the same quarterly report; quarters are ~91 days apart
@@ -253,11 +254,11 @@ def company_confirmed(is_confirmed: bool, note: str | None) -> bool:
 
 
 def shown_level(is_confirmed: bool, note: str | None, unresolved_since: date | None, licensed_only: bool | None = None) -> str | None:
-    """The level a page may show. With LICENSED_DATES_ONLY (settings.licensed_dates_only) a vendor's date is never shown: the level is
+    """The level a page may show. With LICENSED_DATES_ONLY (services/personal_use.dates_licensed_only) a vendor's date is never shown: the level is
     "confirmed" for a company-confirmed date and None (no date) for anything else; otherwise level_of."""
     if licensed_only is None:
         from app.config import settings
-        licensed_only = settings.licensed_dates_only
+        licensed_only = dates_licensed_only()
     if not licensed_only:
         return level_of(is_confirmed, unresolved_since)
     return "confirmed" if company_confirmed(is_confirmed, note) else None

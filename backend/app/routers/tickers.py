@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from app.auth import get_draft_caller, is_admin, require_admin, _get_admin_token
 from app.config import settings
-from app.services import live_data
+from app.services import live_data, personal_use
 from app.database import get_db
 from app.models.event import Event
 from app.services.dates import fmt_days_in   # Ivy's written text dates any ISO day "Oct 23, 2026" as served
@@ -574,6 +574,8 @@ async def get_company_news(
     symbol or a distinctive token of the company name.
     """
     sym = symbol.upper()
+    if not personal_use.shown():          # Finnhub company news is personal use only (services/personal_use)
+        return NewsRead(items=[])
 
     cached = news_cache.get(sym)
     if cached is not None:

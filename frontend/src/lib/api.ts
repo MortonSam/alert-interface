@@ -1218,7 +1218,7 @@ export interface SiteStats {
   licensed_daily_prices_as_of: string | null;
   earnings_reports_measured: number;         // earnings reactions with a stored 1-day move
   earnings_reports_as_of: string | null;
-  analyst_reactions_measured: number;        // analyst actions with a stored 1-day move
+  analyst_reactions_measured: number | null; // analyst actions with a stored 1-day move; null while personal-use data is held
   analyst_reactions_as_of: string | null;
 }
 

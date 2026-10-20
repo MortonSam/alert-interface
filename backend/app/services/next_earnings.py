@@ -16,6 +16,7 @@ from app.models.enums import EventType
 from app.models.event import Event
 from app.models.ticker import Ticker
 from app.services.earnings_calendar import company_confirmed, level_of
+from app.services.personal_use import dates_licensed_only
 
 UNRESOLVED_SHOWN_DAYS = 45   # an unresolved estimate older than this is no longer "expected around"
 EXPECTED_WINDOW = "expected_window"   # the confirmation level of a name with no company-confirmed date and a window from its filings
@@ -66,7 +67,7 @@ async def batch_next_earnings(session: AsyncSession, ticker_ids: list, today: da
         return {}
     today = today or date.today()
     from app.config import settings
-    licensed_only = settings.licensed_dates_only
+    licensed_only = dates_licensed_only()
     tickers = (await session.execute(select(Ticker.id, Ticker.symbol, Ticker.earnings_checked_at).where(Ticker.id.in_(ticker_ids)))).all()
     out = {t.id: NextEarnings(checked_at=t.earnings_checked_at) for t in tickers}
     symbol_of = {t.id: t.symbol for t in tickers}

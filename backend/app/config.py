@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # only when the company's own words confirmed it (services/report_date_reader, the announcement paths); every other name
     # shows an expected window from its past report dates in SEC filings (services/report_windows). Ivy already picks confirmed only.
     licensed_dates_only: bool = False         # LICENSED_DATES_ONLY
+    # PERSONAL_USE_DATA_SHOWN (Block 2, 2026-10-20): Finnhub's free plan and Yahoo are personal use only. Off (the default): nothing
+    # that rests on them is displayed (services/personal_use: quotes from the stored Intrinio close, company news, analyst data, the
+    # Finnhub market cap, vendor calendar dates, the Yahoo forward ex-dividend date). Stays off until Sam's go.
+    personal_use_data_shown: bool = False
     # The free-text question box under the question strip (services/ask_ivy). Off in production until launched; on locally.
     ask_ivy_enabled: bool = False
     live_data_enabled: bool = False           # LIVE_DATA_ENABLED: delayed Intrinio quotes and intraday chart bars shown to visitors (services/live_data)

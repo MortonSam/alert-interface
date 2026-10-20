@@ -151,6 +151,9 @@ class FinnhubClient:
         if self.priority != VISITOR:
             return await self._request("GET", "/quote", params={"symbol": symbol})
         from app.services.quote_fallback import stored_close_quote
+        from app.services import personal_use
+        if not personal_use.shown():      # Finnhub's free plan is personal use only: a visitor sees the stored Intrinio close
+            return await stored_close_quote(symbol)
         try:
             q = await asyncio.wait_for(self._request("GET", "/quote", params={"symbol": symbol}), QUOTE_WAIT_SECONDS)
             if q.get("c") and q.get("t"):

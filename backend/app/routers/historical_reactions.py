@@ -309,6 +309,9 @@ async def get_analyst_detail(
 ) -> AnalystDetailRead:
     """All analyst action reactions for a ticker, including null moves."""
     sym = symbol.upper()
+    from app.services import personal_use
+    if not personal_use.shown():                # analyst actions come from Finnhub and Yahoo, personal use only
+        return AnalystDetailRead(rows=[], total_with_moves=0, total_all=0)
 
     ticker = await db.scalar(select(Ticker).where(Ticker.symbol == sym))
     if not ticker:
@@ -510,6 +513,15 @@ async def get_analyst_reaction_stats(
     sym = symbol.upper()
     excluded_reason = await exclusion_reason(db, sym)
     deal = await deal_for(db, sym)
+    from app.services import personal_use
+    if not personal_use.shown():                # analyst actions come from Finnhub and Yahoo, personal use only
+        return AnalystReactionStatsRead(
+            symbol=sym, computed_at=None,
+            upgrade_count=0, upgrade_sessions=0, avg_1d_upgrade=None, median_1d_upgrade=None,
+            avg_5d_upgrade=None, upgrade_5d_continuation_pct=None, upgrade_5d_sample=0,
+            downgrade_count=0, downgrade_sessions=0, avg_1d_downgrade=None, median_1d_downgrade=None,
+            avg_5d_downgrade=None, downgrade_5d_continuation_pct=None, downgrade_5d_sample=0,
+        )
     if deal:                        # a pending cash deal: no move statistics on analyst actions
         return AnalystReactionStatsRead(
             symbol=sym, computed_at=None,
