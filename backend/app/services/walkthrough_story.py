@@ -19,7 +19,7 @@ from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
 
-STORY_VERSION = 10                     # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
+STORY_VERSION = 11                     # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
                                        # 6 (same day): step 1's story never sizes its lines; no "doubled"; no comparison with companies the evidence doesn't name
                                        # 7 (same day): no "whether", "keeps climbing" or "holding up" outside step 7
                                        # 8 (same day): "revenue", never "sales", for banks and insurers; "does" says what it sells or makes, never slogans;
@@ -30,6 +30,8 @@ STORY_VERSION = 10                     # 5 (2026-10-19): no "sensitive to", "exp
                                        #   only (version 9's rule); "term" explains in general what a term or product shown on the step is or does, with no
                                        #   figure, cause or forecast, verified against Item 1 of the 10-K on step 1 and the step's facts plus general
                                        #   definitions on steps 2 and 3 (term_problems, the verifier's rule)
+                                       # 11 (2026-10-20): a term sentence never defines the concept its step's idea box explains (IDEA_TERMS:
+                                       #   segments, growth and earnings per share, margins); only a term the box doesn't cover
 SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|reflect\w*|result of|owing to|information (?:shown|here|given)|"
                          r"not (?:described|stated|shown|mentioned)|shown here|the (?:evidence|facts)|the data(?!\s+cent)|tends? to|(?:is|are|isn't|not|no) available|no description|not been (?:described|stated|shown)|described here|a fraction)\b", re.I)
 # Sam's rule (2026-10-19): no model sentence says what the company is sensitive or exposed to, and only step 7 names risks or what
@@ -54,6 +56,13 @@ SALES_WORD = re.compile(r"\bsales?\b", re.I)                                  # 
 CAUSE_WORDS = re.compile(r"(?<![\w-])(?:because|since|so|therefore|thus|hence|leads? to|led to|caus\w*|boost\w*|hurts?|explains? why)(?![\w-])", re.I)
 COMPANY_WORDS = re.compile(r"\b(?:the company|this company|the firm|this firm|the business|its (?:sales|revenue|profits?|earnings|margins?|customers|results))\b", re.I)
 STEP_KINDS = ("company", "term")
+# Sam's rule (2026-10-20): a term sentence never defines what its step's "The idea" box already explains (walkthrough.IDEAS: segments
+# on step 1, growth and earnings per share on step 2, margins on step 3); it is only for a term the box doesn't cover (DRAM, NAND, Compute)
+IDEA_TERMS = {
+    "business": re.compile(r"\b(?:segments?|10-K|annual report)\b", re.I),
+    "growth": re.compile(r"\b(?:growth|grow\w*|year[- ]over[- ]year|same quarter|seasonal\w*|earnings per share|EPS)\b", re.I),
+    "margins": re.compile(r"\b(?:margins?|gross profit|profit margin|slice)\b", re.I),
+}
 TERM_ROLES = re.compile(r"(?:customers?|clients?|tenants?|consumers?|devices?|businesses)", re.I)
 MULTIPLES = re.compile(r"\b(?:doubl\w*|tripl\w*|quadrupl\w*|halv\w*|tenfold|\w+fold)\b", re.I)    # a figure in words
 MODEL_SECONDS = 60
@@ -145,6 +154,9 @@ def term_problems(key: str, sentence: str, facts: dict, term: str) -> list[str]:
         out.append(f"does not name the term it explains: {term}")
     if key == "business" and not facts.get("business"):
         out.append("a term sentence on step 1 with no Item 1 text to check it against")
+    m = IDEA_TERMS[key].search(term) if term and key in IDEA_TERMS else None
+    if m:
+        out.append(f"defines what the step's idea box already explains: {m.group(0)}")
     m = SHARE_WORDS.search(sentence)
     if m:
         out.append(f"states a share of the business: {m.group(0)}")
@@ -211,7 +223,9 @@ WRITE
   kind "term": it explains in general terms what a term or product named in that step's own lines is or does (for example, what DRAM
   is, or what gross margin measures), and says nothing about this company: not its name, its figures, its customers or its results.
   The term must appear word for word in that step's own [step] lines (a line name, a measure, a label), never one found only in the
-  [does] or [business term] lines: give it exactly as the step's lines show it, and use it in the sentence. On "business" the explanation must be true to the
+  [does] or [business term] lines: give it exactly as the step's lines show it, and use it in the sentence. The page already explains
+  segments on "business", growth and earnings per share on "growth" and margins on "margins": never explain those or a kind of them
+  (gross margin, profit margin, sales growth); explain only a term or product the step shows beyond them (a product line, a segment's name). On "business" the explanation must be true to the
   [business term] Item 1 text; on "growth" and "margins" it must be a standard definition. No figure, no cause, no forecast.
   Either kind describes what is: no risks, nothing the company is sensitive or exposed to, nothing about what may happen next.
   For "growth", never compare how fast two figures grew. For "business", a term sentence may say what its biggest line is or does in plain words, never how
@@ -336,7 +350,7 @@ RULES
   only in the [does] lines, another step's lines or the risk factors is "unsupported" for it, however true (a market, a customer group,
   a product line, a share of the business).
 - A sentence marked [explains the term "..."] explains in general terms what that term is or does. It is "unsupported" if the term is
-  not in that step's own lines, if it states a figure, a cause or a forecast, or if it says anything about this company. On business,
+  not in that step's own lines, if it explains segments, growth, earnings per share or a margin (the page explains those already), if it states a figure, a cause or a forecast, or if it says anything about this company. On business,
   the explanation must be confirmed by the [business term] line (Item 1 of its 10-K). On growth or margins, it must be confirmed by that
   step's own lines or be a standard, widely used definition of the term (the only outside knowledge allowed).
 - A comparison with other companies or an industry ("few companies match", "unlike its peers") is "unsupported" unless the evidence names them.

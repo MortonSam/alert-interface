@@ -894,7 +894,7 @@ def test_case_b_a_term_sentence_explains_what_its_step_shows():
     assert S.step_problems("business", dram, facts, term) == [] and S.output_problems(dram, S.STORY_WORDS, "business") == []
     assert S.step_problems("business", dram, facts) == []                         # true to step 1's lines as a company sentence too
     gm = "Gross margin measures how much of each sales dollar is left after the direct cost of making what was sold."
-    assert S.step_problems("margins", gm, facts, {"kind": "term", "term": "gross margin"}) == []
+    assert any("idea box" in x for x in S.step_problems("margins", gm, facts, {"kind": "term", "term": "gross margin"}))   # version 11
     assert S.output_problems(gm, S.STORY_WORDS, "margins") == []
     # a figure, a cause or a forecast
     assert S.output_problems("DRAM is a memory chip that holds 64 gigabits of data.", S.STORY_WORDS, "business")
@@ -915,7 +915,7 @@ def test_case_b_a_term_sentence_explains_what_its_step_shows():
     prompt = S.verification_prompt(facts, [("business", dram)], d["kinds"])
     assert 'business [explains the term "DRAM"]' in prompt and "[business term] From Item 1, Business" in prompt and "standard, widely used definition" in prompt
     assert 'kind "term"' in S.build_prompt(facts) and 'kind "company"' in S.build_prompt(facts)
-    assert S.STORY_VERSION == 10
+    assert S.STORY_VERSION == 11
 
 
 @pytest.mark.asyncio
@@ -958,3 +958,29 @@ def test_a_term_sentence_may_name_a_generic_party_and_a_drive():
     f2 = {"name": "Micron Technology", "business": "NAND", "steps": {"business": {"numbers": [], "sentences": [], "deeper": [{"label": "NAND Products", "value": "24%"}]}}}
     assert S.term_problems("business", "NAND Products are memory that keeps data without power, used in solid state drives.", f2, "NAND Products") == []
     assert S.term_problems("business", "NAND Products are memory sold into data centers.", f2, "NAND Products")
+
+
+def test_a_term_sentence_never_defines_what_the_idea_box_explains():
+    """Sam's reviewer (2026-10-20): a case (b) sentence that defines the same concept as the step's "The idea" box (gross margin, profit
+    margin, growth) is dropped; case (b) is only for a term the box doesn't cover (DRAM, NAND, Compute, Asset & Wealth Management)."""
+    from app.services import walkthrough_story as S
+    from app.services.walkthrough import IDEAS
+
+    def facts(key, label):
+        return {"name": "Example Corp", "business": "Item 1 text", "steps": {key: {"numbers": [], "sentences": [], "deeper": [{"label": label, "value": "1"}]}}}
+    for key, term, sentence in (("margins", "Gross margin", "Gross margin is the share of each sales dollar left after the direct cost of goods."),
+                                ("margins", "Profit margin", "Profit margin is the part of each sales dollar kept as profit."),
+                                ("margins", "Operating margin", "Operating margin is what is left of each sales dollar after running costs."),
+                                ("growth", "Sales growth", "Sales growth is how much sales rose against the same quarter a year earlier."),
+                                ("growth", "Earnings per share", "Earnings per share is the profit divided across every share."),
+                                ("business", "Segments", "Segments are the parts a company reports its sales in.")):
+        p = S.term_problems(key, sentence, facts(key, term), term)
+        assert any("idea box" in x for x in p), (key, term, p)
+    for key, term, sentence in (("business", "DRAM", "DRAM is the memory computers use to run programs."),
+                                ("business", "Compute", "Compute is the processing power used to run software."),
+                                ("business", "Asset & Wealth Management", "Asset & Wealth Management means investing money on behalf of clients."),
+                                ("business", "NAND", "NAND is memory that keeps data without power.")):
+        assert S.term_problems(key, sentence, facts(key, term), term) == [], term
+    # the idea each step's box explains is the one the rule names
+    assert {"segments", "growth", "margins"} <= set(IDEAS) and S.STORY_STEPS == ("business", "growth", "margins")
+    assert "never explain those" in S.build_prompt(facts("margins", "Gross margin")) and "the page explains those already" in S.verification_prompt(facts("margins", "x"), [])
