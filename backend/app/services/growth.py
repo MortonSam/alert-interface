@@ -12,7 +12,7 @@ import re
 from datetime import date, timedelta
 
 from app.services.valuation import (
-    ACTION_VERBS, EPS_FACT_MAX, QUARTER_DAYS, YEAR_DAYS, _current_column, drop_renames_explained, header_order, split_factor,
+    ACTION_VERBS, EPS_FACT_MAX, QUARTER_DAYS, YEAR_DAYS, _current_column, current_column, drop_renames_explained, header_order, split_factor,
 )
 
 GROWTH_VERSION = 1
@@ -155,8 +155,11 @@ def _prose_revenue(flat: str) -> dict | None:
             prev = flat[max(0, m.start() - 30):m.start()]
             if _SEGMENT_BEFORE.search(prev.rstrip()) and not re.search(r"(?:^|[.;:•\n])\s*$", prev):
                 continue                         # a capitalised word right before "revenue" names a segment or product
-        context = flat[max(0, m.start() - 160):m.end() + 40]
-        if re.search(r"guidance|outlook|expect|full[- ]year|fiscal[- ]year|year[- ]to[- ]date|twelve months|annual", context, re.I):
+        # its own sentence (GS: "Net revenues were $ 56.24 billion ... for the first nine months of 2026" follows the quarter's sentence)
+        left = max(flat.rfind(". ", 0, m.start()), flat.rfind("•", 0, m.start()), 0)
+        right = min([i for i in (flat.find(". ", m.end()), flat.find("•", m.end())) if i >= 0] or [len(flat)])
+        context = flat[left:right]
+        if re.search(r"guidance|outlook|expect|full[- ]year|fiscal[- ]year|year[- ]to[- ]date|twelve months|nine months|six months|for the year|year ended|annual", context, re.I):
             continue
         near = flat[max(0, m.start() - 60):m.start()]
         if re.search(r"\bfiscal\s+(?:year\s+)?(?:20)?\d{2}\b|\bFY\s?'?\d{2}\b|\b20\d{2}\s*$", near, re.I) and not re.search(r"quarter|\bQ[1-4]\b", near, re.I):
@@ -167,34 +170,83 @@ def _prose_revenue(flat: str) -> dict | None:
     return None
 
 
-def parse_release_revenue(text: str) -> dict | None:
-    """Pure: the quarter's revenue from an earnings release's income statement: the first row labelled total net revenue, total
-    revenues, net revenues, net sales, revenues or sales (in that order of preference) carrying at least two amounts, never a cost
-    line ("cost of revenues") or a percentage; the current column per the heading before the row (valuation.header_order). Returns
-    {value (in dollars when the table states its unit), raw, scale, how, evidence} or None."""
-    if not text:
-        return None
-    flat = re.sub(r"\s+", " ", text)
-    prose = _prose_revenue(flat)
-    if prose:
-        return prose
+# Block 2 (2026-10-20): the release reader took a segment's line for total revenue in 2,045 of 2,182 growth disagreements (Agilent:
+# XBRL $1.878 billion against a segment's "revenue of $746 million"). The company's revenue is read from, in order: the consolidated
+# statement of income or operations (A, CMCSA); a consolidating statement's last column, the consolidated entity (EXC's ComEd, PECO,
+# BGE, PHI, Other, Exelon); a company-level sentence whose own sentence names no year (GS); and any other table whose nearest heading
+# names the quarter, never the year (PG's "Fiscal Year ... Net Sales $87.0" before "Fourth Quarter ... Net Sales $21.2").
+_STATEMENT = re.compile(r"(?<!table of contents )(?:condensed\s+)?consolidated\s+statements?\s+of\s+(?:income|operations|earnings)\b", re.I)
+_CONSOLIDATING = re.compile(r"consolidating\s+statements?\s+of\s+(?:income|operations|earnings)\b", re.I)
+STATEMENT_REACH = 2500            # a statement's revenue row sits within this many characters after its heading
+_ANNUAL_HEAD = re.compile(r"fiscal\s+year|year\s+ended|twelve\s+months|full[- ]year", re.I)
+_QUARTER_HEAD = re.compile(r"quarter|three\s+months|\d{1,2}\s+weeks|\bQ[1-4]\b|\b[1-4]Q\d\d\b", re.I)
+_ROW_AMOUNT = re.compile(r"\(?\$?\s?\d[\d,]*(?:\.\d+)?\)?(?!\s*%)(?![\d.,])")
+
+
+def _annual_heading(before: str) -> bool:
+    """Pure: the nearest period heading in the 400 characters before a row names a year, not a quarter."""
+    w = before[-400:]
+    a = [m.end() for m in _ANNUAL_HEAD.finditer(w)]
+    q = [m.end() for m in _QUARTER_HEAD.finditer(w)]
+    return bool(a) and (not q or max(a) > max(q))
+
+
+def _row_amounts(flat: str, at: int) -> list[str]:
+    run = re.split(r"[A-Za-z]{2,}", flat[at:at + 300], maxsplit=1)[0]
+    return [m.group(0).strip() for m in _ROW_AMOUNT.finditer(run) if re.search(r"\d", m.group(0))]
+
+
+def _table_revenue(flat: str, lo: int, hi: int, how_suffix: str = "", last_column: bool = False, skip_annual: bool = True) -> dict | None:
+    """Pure: the first revenue row between lo and hi (labels in _REV_LABELS' order of preference), its current column."""
+    region = flat[lo:hi]
     for label in _REV_LABELS:
         pat = re.compile(rf"(?<![A-Za-z])(?<!of\s)(?<!cost\sof\s)({label})(?:\s*\(\w\))?[:\s]+{_AMOUNT}(?!\s*%)\s+{_AMOUNT}(?!\s*%)", re.I)
-        for m in pat.finditer(flat):
-            before = flat[max(0, m.start() - 40):m.start()].lower()
-            if re.search(r"cost\s+of\s*$|of\s*$|growth\s*$|per\s*$", before) or re.search(r"guidance|outlook", flat[max(0, m.start() - 200):m.start()], re.I):
+        for m in pat.finditer(region):
+            at = lo + m.start()
+            before = flat[max(0, at - 40):at].lower()
+            if re.search(r"cost\s+of\s*$|of\s*$|growth\s*$|per\s*$|percentage\s+of\s+total\s*$", before) or re.search(r"guidance|outlook", flat[max(0, at - 200):at], re.I):
                 continue
-            first, second = m.group(2), m.group(3)
-            raw = second if header_order(flat, m.start()) == "prior-first" else first
+            if skip_annual and _annual_heading(flat[:at]):
+                continue
+            amounts = _row_amounts(flat, lo + m.start(2))
+            if last_column and amounts:
+                raw = amounts[-1]
+            else:
+                idx = current_column(flat[:at], len(amounts))
+                raw = amounts[idx] if idx is not None and idx < len(amounts) else (m.group(3) if header_order(flat, at) == "prior-first" else m.group(2))
+            raw = raw.replace("$", "").strip()
             scale_m = None
-            for sm in _SCALE.finditer(flat[:m.start()]):
+            for sm in _SCALE.finditer(flat[:at]):
                 scale_m = sm
             unit = (scale_m.group(1) or scale_m.group(2)).lower() if scale_m else None
             factor = {"thousands": 1e3, "millions": 1e6, "billions": 1e9}.get(unit, None)
-            num = float(raw.replace(",", "").replace("$", "").strip("()"))
-            return {"raw": raw, "value": num * factor if factor else None, "number": num, "scale": unit, "how": m.group(1).lower(),
-                    "evidence": flat[max(0, m.start() - 10):m.end() + 10]}
+            num = float(raw.replace(",", "").strip("()"))
+            return {"raw": raw, "value": num * factor if factor else None, "number": num, "scale": unit, "how": m.group(1).lower() + how_suffix,
+                    "evidence": flat[max(0, at - 10):lo + m.end() + 10]}
     return None
+
+
+def parse_release_revenue(text: str) -> dict | None:
+    """Pure: the quarter's company-level revenue from an earnings release, from (in order) the consolidated statement of income or
+    operations, a consolidating statement's consolidated (last) column, a company-level revenue sentence, or another table whose
+    heading names the quarter. Never a cost line ("cost of revenues"), a percentage, a segment's or subsidiary's line, or the year's.
+    The current column per the heading before the row (valuation.current_column, then header_order). Returns {value (in dollars when
+    the table states its unit), raw, scale, how, evidence} or None."""
+    if not text:
+        return None
+    flat = re.sub(r"\s+", " ", text)
+    for st in _STATEMENT.finditer(flat):
+        hit = _table_revenue(flat, st.end(), min(len(flat), st.end() + STATEMENT_REACH), ", consolidated statement", skip_annual=False)
+        if hit:
+            return hit
+    for st in _CONSOLIDATING.finditer(flat):
+        hit = _table_revenue(flat, st.end(), min(len(flat), st.end() + STATEMENT_REACH), ", consolidating statement, consolidated column", last_column=True, skip_annual=False)
+        if hit:
+            return hit
+    prose = _prose_revenue(flat)
+    if prose:
+        return prose
+    return _table_revenue(flat, 0, len(flat))
 
 
 def revenue_agrees(xbrl: float, release: dict) -> bool:
@@ -203,7 +255,7 @@ def revenue_agrees(xbrl: float, release: dict) -> bool:
     raw = release["raw"].strip("()$ ")
     decimals = len(raw.split(".")[1]) if "." in raw else 0
     for factor in ([{"thousands": 1e3, "millions": 1e6, "billions": 1e9}[release["scale"]]] if release.get("scale") in ("thousands", "millions", "billions") else [1, 1e3, 1e6, 1e9]):
-        if abs(release["number"] * factor - xbrl) <= 0.5 * factor * 10 ** -decimals + 1:
+        if abs(release["number"] * factor - xbrl) <= factor * 10 ** -decimals + 1:      # one unit of the release's last digit (BSX 5,286 against XBRL $5.2854B, rounded differently)
             return True
     return False
 

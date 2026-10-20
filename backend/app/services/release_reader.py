@@ -10,7 +10,7 @@ import re
 from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
-from app.services.valuation import basic_only_label, header_order, states_diluted_eps
+from app.services.valuation import _COMPARISON_CUE, basic_only_label, current_column, header_order, states_diluted_eps
 
 MODEL = "claude-sonnet-4-6"
 MAX_CHARS = 120_000                 # an exhibit beyond this is cut (the figure sits in the first pages); the cut is noted
@@ -32,7 +32,15 @@ The figure wanted is GAAP diluted earnings per share for the most recent quarter
 - the total, never continuing operations alone;
 - a loss is negative (a figure written "$(0.35)" is -0.35);
 - in a table, the current quarter's column is the one its heading names: some releases list the prior year's column first (a heading
-  "2025 2026 Change" puts the current quarter second), so read the heading, never assume the first number.
+  "2025 2026 Change" puts the current quarter second, "3Q25 2Q26 3Q26" puts it third), so read the heading, never assume the first number;
+- a release that reports a month and the quarter (a heading "September Quarter": the month's columns first, then the quarter's) or the
+  year to date before the quarter ("Nine Months Ended ... Three Months Ended") states the quarter's figure in the quarter's columns, never
+  the month's or the year to date's: in "September Quarter 2026 2025 Change 2026 2025 Change ... $ 1.08 $ 0.52 109 % $ 4.37 $ 4.45" the
+  quarter's figure is 4.37, the third number;
+- in a block headed "Diluted:" with continuing and discontinued operations lines, the figure is the block's total line (net earnings);
+- a per-share figure in a table whose share count is diluted ("Average diluted equivalent common shares") is diluted EPS, even when its
+  own row reads "Per share available to common shareholders";
+- the quote is one row or one sentence only, never two rows joined.
 Copy the quote exactly as the text reads it (one sentence, or one table row with its label and numbers); never paraphrase. If the release
 states no such figure, return eps null and quote null. The report date is {report_date}.
 
@@ -155,14 +163,17 @@ def verify_quote(exhibit_text: str, quote: str | None, eps: float | None, column
     if basic_only_label(_label_and_numbers(q)[0]) and states_diluted_eps(exhibit_text):
         problems.append(BASIC_ROW)
     figures = _PER_SHARE_FIGURE.findall(_label_and_numbers(q)[1])
-    if eps is not None and len(figures) >= 2:
+    if eps is not None and len(figures) >= 2 and not compared_sentence(q, eps):
         if column is None:
             problems.append("a row of several figures without the column read")
         elif not 1 <= column <= len(figures) or abs(_amount(figures[column - 1]) - abs(eps)) > 0.005:
             problems.append(f"column {column} does not hold {eps:+.2f}")
         if columns and _norm(columns) not in flat:
             problems.append(HEADING_NOT_VERBATIM)
-        order = (header_order(exhibit_text[:row_at]) if row_at is not None else None) or (header_order(columns) if columns else None)
+        cur = current_column(exhibit_text[:row_at], len(figures)) if row_at is not None else None
+        order = None if cur is not None else ((header_order(exhibit_text[:row_at]) if row_at is not None else None) or (header_order(columns) if columns else None))
+        if cur is not None and column is not None and column != cur + 1:
+            problems.append(f"the heading names column {cur + 1} as the quarter's but column {column} was read")
         if order:
             if order == "prior-first" and column == 1:
                 problems.append("the heading lists the prior year first but column 1 was read")
@@ -171,8 +182,45 @@ def verify_quote(exhibit_text: str, quote: str | None, eps: float | None, column
     return problems
 
 
+_SENTENCE_FIGURE = re.compile(r"\b(?:was|were|of|totaled|reached)\s+\$?\s?\(?-?\d")
+
+
+def compared_sentence(quote: str, eps: float) -> bool:
+    """Pure: the quote is a sentence stating the figure first and a prior period's after a comparison ("Net earnings per diluted share was
+    $0.86, compared with $0.82 for the same period in 2025.", PLD 2026-10-15): no column applies, the figure is the first amount."""
+    q = re.sub(r"\s+", " ", quote or "")
+    m = _SENTENCE_FIGURE.search(q)
+    if not m:
+        return False
+    figs = _PER_SHARE_FIGURE.findall(q[m.start():])
+    return bool(figs) and abs(_amount(figs[0]) - abs(eps)) <= 0.005 and bool(_COMPARISON_CUE.search(q[m.end():]))
+
+
 def _amount(s: str) -> float:
     return abs(float(s.replace(",", "").strip("()-")))
+
+
+def in_diluted_block(exhibit_text: str, quote: str | None) -> bool:
+    """Pure: the quoted row sits under a "Diluted:" heading, after the block's "Basic:" lines (CARR's "Diluted: Continuing operations ...
+    Discontinued operations ... Net earnings (loss) $ 0.60 $ 0.68 ...", 2026-07-28): the row is diluted EPS though its own label says so
+    only through the heading."""
+    flat, idx = _norm_map(exhibit_text or "")
+    nq = _norm(quote)
+    at = flat.find(nq) if nq else -1
+    if at < 0:
+        return False
+    head = flat[max(0, at - 260):at]
+    d = head.rfind("diluted:")
+    return d >= 0 and "basic:" not in head[d:]
+
+
+def in_diluted_share_table(exhibit_text: str, quote: str | None) -> bool:
+    """Pure: the quoted per-share row sits in a table whose share count is diluted ("Average diluted equivalent common shares" within
+    the next 800 characters, PGR 2026-10-14), so the row is diluted EPS."""
+    flat = re.sub(r"\s+", " ", exhibit_text or "")
+    q = re.sub(r"\s+", " ", quote or "").strip()
+    at = flat.find(q) if q else -1
+    return at >= 0 and bool(re.search(r"average\s+diluted\s+(?:equivalent\s+)?common\s+shares", flat[at:at + len(q) + 800], re.I))
 
 
 def diluted_row(quote: str | None) -> bool:
@@ -203,7 +251,8 @@ def decide(pattern: dict | None, model: dict | None, exhibit_text: str) -> tuple
     p_text = f"pattern {p:+.2f} ({pattern['how']})" if pattern else "pattern read nothing"
     m_text = (f"model {m:+.2f}" if m is not None else "model read nothing") + (f' "{(model or {}).get("quote") or ""}"'[:120] if model and model.get("quote") else "")
     heading_note = ""
-    eps_row = diluted_row(model.get("quote")) or (basic_row(model.get("quote")) and not states_diluted_eps(exhibit_text))
+    eps_row = (diluted_row(model.get("quote")) or in_diluted_block(exhibit_text, model.get("quote")) or in_diluted_share_table(exhibit_text, model.get("quote"))
+               or (basic_row(model.get("quote")) and not states_diluted_eps(exhibit_text)))
     if problems == [HEADING_NOT_VERBATIM] and p is not None and m is not None and p == m and eps_row:
         # the column order came from the exhibit's own heading, both readers read the same figure exactly, and the row is diluted EPS,
         # or basic EPS in a release that states no diluted EPS anywhere: the model's paraphrased heading alone is a note, not a

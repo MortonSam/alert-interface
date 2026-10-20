@@ -46,7 +46,8 @@ _ROW = re.compile(rf"(?<![A-Za-z-])(?:GAAP\s+)?diluted\s+(?:net\s+)?(?:earnings|
 _ROW2 = re.compile(rf"earnings\s+per\s+(?:ordinary\s+|common\s+)?share(?:\s*\(EPS\))?[^A-Za-z]{{0,20}}basic[^A-Za-z]{{0,40}}diluted\s*\$?\s?(\(?-?\d{{1,4}}(?:,\d{{3}})*\.\d{{1,2}}\)?)", re.I)
 # a figure whose own clause carries one of these is never GAAP EPS (CRL's "non-GAAP earnings per share of $3.02", FRT's "Nareit FFO ... $1.88 per diluted share")
 _NON_GAAP_NEAR = re.compile(r"non-?\s?gaap|adjusted|pro\s?forma|excluding|\bcore\b|operating (?:income|earnings|eps)|underlying|normali[sz]ed|\bffo\b|funds from operations"
-                            r"|comparable (?:eps|earnings|net income|diluted|income)", re.I)
+                            r"|comparable (?:eps|earnings|net income|diluted|income)"
+                            r"|contribution\s+to", re.I)       # a segment's "contribution to total CFG Diluted EPS $0.16" is not the company's EPS (Block 2)
 # a figure labelled as the year's is never the quarter's (SMCI's "for fiscal year 2026 was $2.5 billion, or $3.63 per diluted share", CAH's "GAAP diluted EPS was $7.23"
 # in the fiscal-year paragraph); a clause that also names a quarter is left to the other rules
 _ANNUAL_LABEL = re.compile(r"fiscal[- ]year|full[- ]year|year[- ]ended|twelve[- ]months|12[- ]months|year[- ]to[- ]date|\bannual\b|six[- ]months|nine[- ]months|first[- ]half|half[- ]year", re.I)
@@ -102,7 +103,7 @@ _DILUTED_HEADER_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)\s+p
 _GAAP_MILLION_PER_SHARE = re.compile(rf"(?:GAAP\s+(?:net\s+)?(?:income|earnings)|(?:reported\s+)?earnings\s+\(GAAP\))\s+of\s+\$\s?[\d.,]+\s+(?:million|billion),?\s+or\s+{_DNUM}\s+per\s+(?:diluted\s+)?share", re.I)
 _GAAP_PAREN_PER_SHARE = re.compile(rf"(?:reported\s+)?earnings\s+\(GAAP\)\s+of\s+{_DNUM}\s+per\s+share", re.I)
 _GAAP_EPS_CHANGE = re.compile(rf"GAAP(?:\s+\d)?\s+(?:diluted\s+)?(?:EPS|earnings\s+per\s+share(?:\s+\(EPS\))?)\s+(?:increased|decreased|grew|fell|rose|declined|was\s+(?:up|down))\s+[\d.]+%?\s+to\s+{_DNUM}", re.I)   # a footnote mark after GAAP (CAH)
-_EPS_WERE = re.compile(rf"(?<![A-Za-z-])earnings\s+per\s+(?:diluted\s+)?share\s+(?:were|was)\s+{_DNUM}", re.I)   # "earnings per diluted share was $0.97" (FRT)
+_EPS_WERE = re.compile(rf"(?<![A-Za-z-])earnings\s+per\s+(?:diluted\s+|common\s+)?share(?:\s+\(EPS\))?\s+(?:were|was)\s+{_DNUM}", re.I)   # "earnings per diluted share was $0.97" (FRT)
 _ROW_FOOTNOTE = re.compile(rf"(?<![A-Za-z-])diluted\s+net\s+income\s+per\s+share\s+\d\s+\$\s?{_NUM}", re.I)
 _ROW_PER_DILUTED = re.compile(rf"(?<![A-Za-z-])(?:net\s+income|earnings)\s+per\s+diluted\s+share:?\s*(?:•\s*)?\$?\s?{_NUM}(?:\s+GAAP)?", re.I)
 _ROW_POTENTIAL = re.compile(rf"GAAP\s+diluted\s+net\s+income\s+per\s+potential\s+common\s+share\s*\$?\s?{_NUM}", re.I)
@@ -213,9 +214,58 @@ def header_order(text: str, before: int | None = None) -> str | None:
     return "prior-first" if years[0] < years[1] else "current-first"
 
 
+# Block 2 (2026-10-20), the readings left unread by the Oct 13 to 16 bank and insurer releases:
+_Q_CELL = re.compile(r"\b([1-4])Q\s?'?(\d\d)\b|\bQ([1-4])\s*(?:FY)?\s*'?(\d{2}|20\d\d)\b", re.I)
+_YTD_THEN_QUARTER = re.compile(r"(?:nine|six|twelve)[\s-]+months?\s+(?:ended|period)[^.$]{0,80}?(?:three[\s-]+months?\s+(?:ended|period)|quarter\s+ended)", re.I)   # FAST: "Nine Months Ended ... Three Months Ended", "Nine-month Period Three-month Period"
+_MONTH_THEN_QUARTER = re.compile(r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+Quarter\b")   # PGR
+_ROW_FIGURE = re.compile(r"\(?-?\$?\s?\d{0,4}(?:,\d{3})*\.\d{2}\)?(?!\s*%)(?!\d)")
+GROUP_REACH = 1500                # a ytd-then-quarter or month-then-quarter heading sits within this many characters before its row
+
+
+def row_figures(after: str) -> list[str]:
+    """Pure: the per-share amounts (two decimals, never a percent) of a table row, from its first figure up to the next label."""
+    run = re.split(r"[A-Za-z]{2,}", after, maxsplit=1)[0]
+    return [m.group(0) for m in _ROW_FIGURE.finditer(run) if re.search(r"\d", m.group(0))]
+
+
+def current_column(before: str, n_figures: int) -> int | None:
+    """Pure: the 0-based column of the current quarter in a row of `n_figures` per-share amounts, from the heading in `before` (the text
+    before the row), or None when the heading does not decide it (the caller keeps header_order's rule):
+      - quarter-label cells ("3Q25 2Q26 3Q26", "Q3 2026 Q2 2026 Q3 2025"): the first cell of the latest quarter (STT's current quarter
+        is the third column; USB's "3Q26 2Q26 3Q25" the first);
+      - a year-to-date or month group before the quarter's ("Nine Months Ended ... Three Months Ended", FAST; "September Quarter",
+        PGR's month then quarter): the quarter group's first column, the row split evenly between the two groups."""
+    flat = re.sub(r"\s+", " ", before or "")
+    window = flat[-HEADER_REACH:]
+    runs: list[list[tuple[int, int]]] = []
+    prev_end = None
+    for m in _Q_CELL.finditer(window):
+        q = int(m.group(1) or m.group(3)); y = int(m.group(2) or m.group(4)); y += 2000 if y < 100 else 0
+        if prev_end is not None and _CELL_GAP.match(window[prev_end:m.start()]):
+            runs[-1].append((y, q))
+        else:
+            runs.append([(y, q)])
+        prev_end = m.end()
+    runs = [r for r in runs if len(r) >= 2 and len(set(r)) >= 2]
+    if runs:
+        cells = runs[-1]
+        idx = cells.index(max(cells))
+        return idx if idx < n_figures else None
+    near = flat[-GROUP_REACH:]
+    if n_figures >= 2 and n_figures % 2 == 0 and (_YTD_THEN_QUARTER.search(near) or _MONTH_THEN_QUARTER.search(near)):
+        return n_figures // 2
+    return None
+
+
 def _current_column(flat: str, hit: re.Match, how: str) -> tuple[str, str]:
-    """Pure: (the figure's text, how) for a table row: the first number unless the heading before the row lists the prior year first
-    and a second number follows (Ford's "2025 2026 Change" tables), in which case the second number is the current quarter's."""
+    """Pure: (the figure's text, how) for a table row: the column current_column names from the heading before the row; else the first
+    number unless the heading before the row lists the prior year first and a second number follows (Ford's "2025 2026 Change" tables),
+    in which case the second number is the current quarter's."""
+    if "row" in how or "block" in how or "column" in how:
+        figs = row_figures(flat[hit.start(1):hit.start(1) + 240])
+        idx = current_column(flat[:hit.start()], len(figs))
+        if idx is not None and figs:
+            return figs[idx], how + (f", column {idx + 1}" if idx else "")
     if not ("row" in how or "block" in how or "column" in how) or header_order(flat, hit.start()) != "prior-first":
         return hit.group(1), how
     nxt = _NEXT_NUM.match(flat[hit.end(1):])
@@ -292,6 +342,9 @@ def _previous_sentence(flat: str, sentence_start: int) -> str:
     return head[left + 1:] if left >= 0 else head[-300:]
 
 
+_FOR_THE_QUARTER = re.compile(r"\s*for\s+the\s+(?:first|second|third|fourth|\d{1,2}(?:st|nd|rd|th)|fiscal\s+\w+)\s+(?:fiscal\s+)?quarter\b", re.I)
+
+
 def is_annual_figure(flat: str, start: int, end: int, figure_at: int | None = None) -> bool:
     """Pure: the figure is labelled as the year's, never the quarter's: the text before it in its own sentence or bullet carries a
     fiscal-year, full-year, year-ended, twelve-months or year-to-date label and no quarter word; or it carries neither and the sentence
@@ -299,12 +352,27 @@ def is_annual_figure(flat: str, start: int, end: int, figure_at: int | None = No
     # only the text before the figure labels it: in a flattened table the next table's "Year Ended" header follows the row (ACN);
     # `figure_at` is the number's position, since a match may start at its subject ("Net income for fiscal year 2026 was ..., or $3.26")
     before, _ = _sentence_around(flat, figure_at if figure_at is not None else start, end)
-    if _QUARTER_WORD.search(before):
-        return False
+    if _QUARTER_WORD.search(before) or _FOR_THE_QUARTER.match(flat[end:end + 60]):
+        return False                # GS: "Diluted earnings per common share (EPS) was $ 17.01 for the third quarter of 2026", after a nine-months sentence
     if _ANNUAL_LABEL.search(before):
         return True
     prev = _previous_sentence(flat, (figure_at if figure_at is not None else start) - len(before))
     return bool(_ANNUAL_LABEL.search(prev)) and not _QUARTER_WORD.search(prev)
+
+
+_DOT_LEADER = re.compile(r"(?:\s?\.){4,}")
+_GLUED_FOOTNOTE = re.compile(r"\b(EPS|[Ss]hare)\d(?:,\d)*(?=[\s$])|(\(EPS\))\s\d(?:,\d)*(?=\s+(?:was|were|of)\b)")
+
+
+def clean_labels(flat: str) -> str:
+    """Pure: a flattened exhibit with the label marks that hide a row from its figure removed (Block 2): dot leaders (UNH's "common
+    shareholders (a) ...... $4.56") and footnote numbers glued to the label (GS's "Diluted EPS1,2 $ 17.01")."""
+    return _GLUED_FOOTNOTE.sub(lambda m: m.group(1) or m.group(2), _DOT_LEADER.sub(" ", flat))      # GS's release: "(EPS) 1 was $ 17.01"
+
+
+# PGR's month-and-quarter release: "Per share available to common shareholders $ 1.08 $ 0.52 109 % $ 4.37 $ 4.45 (2) %", in a table whose
+# share count is "Average diluted equivalent common shares": the per-share figure is diluted EPS; the quarter's group is the second
+_PER_SHARE_AVAILABLE_ROW = re.compile(rf"(?<![A-Za-z-])per\s+share\s+available\s+to\s+common\s+shareholders\s*\$?\s?{_NUM}(?=.{{0,800}}?average\s+diluted\s+(?:equivalent\s+)?common\s+shares)", re.I | re.S)
 
 
 def parse_release_eps(text: str, report_date: date | None = None) -> dict | None:
@@ -321,7 +389,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
     or None when no GAAP diluted figure can be read."""
     if not text:
         return None
-    flat = re.sub(r"\s+", " ", text)
+    flat = clean_labels(re.sub(r"\s+", " ", text))
     period_end = release_period_end(flat, report_date)
     has_diluted = states_diluted_eps(flat)
     for hit in _PROSE.finditer(flat):
@@ -339,7 +407,8 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
                 (_GAAP_MILLION_PER_SHARE, "GAAP earnings, or per share", 12), (_GAAP_PAREN_PER_SHARE, "reported earnings (GAAP) per share", 12), (_GAAP_EPS_CHANGE, "GAAP EPS change sentence", 12),
                 (_ROW_FOOTNOTE, "diluted net income per share row (footnote)", 12), (_ROW_POTENTIAL, "GAAP diluted per potential common share", 12), (_ROW_PER_DILUTED, "per diluted share row", 12),
                 (_REPORTED_VS_NONGAAP, "reported EPS against a non-GAAP measure", 12), (_BASIC_AND_DILUTED_BASIS, "basic and diluted basis sentence", 12), (_EPS_WERE, "EPS were sentence", 12),
-                (_PER_DILUTED, "per diluted share", 80), (_EPS_BESIDE_CORE_ROW, "EPS row beside a core EPS row", 12), (_PER_SHARE, "per share net income sentence", 12))
+                (_PER_DILUTED, "per diluted share", 80), (_EPS_BESIDE_CORE_ROW, "EPS row beside a core EPS row", 12), (_PER_SHARE, "per share net income sentence", 12),
+                (_PER_SHARE_AVAILABLE_ROW, "per share available row, diluted share count", 12))
     for pattern, how, back in attempts:
         for hit in pattern.finditer(flat):
             if _DOLLAR_TOTAL_AFTER.match(flat[hit.end(1):hit.end(1) + 12]):
