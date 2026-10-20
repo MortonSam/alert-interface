@@ -146,7 +146,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     story_facts = {"name": name, "sector": sector, "industry": t["industry"], "noun": noun,
                    "description": (s1["sentences"][0] if s1["status"] != "absent" and u["profiles"].get(sym) else None),
                    "business": ((risks or {}).get("business") or None) if s1["status"] != "absent" and not W.predates(merger, (risks or {}).get("filed")) else None,
-                   "steps": {s["key"]: {"numbers": list(s["numbers"]), "sentences": list(s["sentences"])} for s in (s1, s2, s3) if s["status"] != "absent"},
+                   "steps": {s["key"]: {"numbers": list(s["numbers"]), "sentences": list(s["sentences"]), "deeper": list(s["deeper"])} for s in (s1, s2, s3) if s["status"] != "absent"},
                    "risks": [{"n": r["n"], "heading": r["heading"], "body": r["body"]} for r in (risks or {}).get("risks", [])] if s7["status"] != "absent" else [],
                    "risk_filed": (risks or {}).get("filed").isoformat() if s7["status"] != "absent" and risks and risks.get("filed") else None}
     return {"payload": json.loads(json.dumps(payload, default=str)), "steps_shown": W.steps_shown(steps), "story_facts": story_facts, "as_of": as_of}

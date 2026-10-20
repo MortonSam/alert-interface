@@ -6,6 +6,8 @@ import json
 import re
 from datetime import date, timedelta
 
+import pytest
+
 from app.services import fiscal_periods as F
 from app.services import margins as M
 from app.services import risk_factors as R
@@ -354,6 +356,20 @@ def test_risk_check_offers_business_results_only():
     assert W.risk_check("Micron", [{"n": 9, "sentence": "Hackers could break in."}], {9: "Cybersecurity"}, steps) is None      # no fallback question
     steps[0]["status"] = "absent"
     assert W.risk_check("Micron", risks, {1: "Volatility in average selling prices"}, steps) is None   # three business results or no check
+
+
+def test_summary_line_seven_names_the_risk_step_seven_featured():
+    """MU (2026-10-19): step 7 asked about the competition risk while the summary named a different one."""
+    steps, pts = _risk_steps()
+    risks = [{"n": 3, "sentence": "Hackers could break into its systems."}, {"n": 5, "sentence": "Micron competes against large rivals including Samsung."}]
+    heads = {3: "Cybersecurity", 5: "Competition"}
+    st = W.with_risk_story(W._step(7, status="partial", sentences=["x."], source={"label": "Item 1A of its 10-K, filed Oct 9, 2026", "url": None}),
+                           "Micron Technology", risks, heads, steps)
+    assert st["check"] and "Samsung" in st["check"]["question"]
+    assert st["summary"] == "Its annual report names risks, among them that Micron competes against large rivals including Samsung."
+    st = W.with_risk_story(W._step(7, status="partial", sentences=["x."], source={"label": "Item 1A of its 10-K, filed Oct 9, 2026", "url": None}),
+                           "Micron Technology", risks[:1] + [{"n": 6, "sentence": "Floods could close a plant."}], {3: "Cybersecurity", 6: "Natural disasters"}, steps)
+    assert st["check"] is None and st["summary"].endswith("that hackers could break into its systems.")      # no check: the first risk shown
 
 
 def test_every_check_is_free_of_colons_em_dashes_and_plus_signs():
@@ -821,3 +837,49 @@ def test_a_compare_sentence_names_only_rows_its_table_shows():
 
 def test_a_sentence_without_a_full_stop_fails():
     assert "does not end with a full stop" in WS.output_problems("Micron makes its own memory chips while AMD designs chips that others manufacture for it", WS.STORY_WORDS)
+
+
+def test_a_step_story_states_only_what_its_step_shows():
+    """Sam's rule (2026-10-19), the Compare rule for step stories: MU step 2's "with the data center market now making up the bulk of
+    revenue" rests on the description and step 1, not on anything step 2 shows."""
+    from app.services import walkthrough_story as S
+    facts = {"name": "Micron Technology", "description": "Micron sells memory chips to customers including data center operators.",
+             "steps": {"business": {"numbers": [{"label": "From DRAM Products", "value": "75.6%", "as_of": "Fiscal 2026"}], "sentences": ["Micron sells memory."],
+                                    "deeper": [{"label": "DRAM Products", "value": "75.6%", "as_of": "Fiscal 2026"}, {"label": "NAND Products", "value": "23.9%", "as_of": "Fiscal 2026"}]},
+                       "growth": {"numbers": [{"label": "Sales growth", "value": "+379.3%", "as_of": "Fiscal Q4 2026"}], "sentences": ["Sales rose."],
+                                  "deeper": [{"label": "Sales, fiscal Q4 2026", "value": "$37.4 billion", "as_of": "Ended Sep 3, 2026"}]}}}
+    bad = "Micron's sales climbed sharply this year, with the data center market now making up the bulk of revenue."
+    p = S.step_problems("growth", bad, facts)
+    assert any("data center" in x for x in p) and any("making up" in x for x in p)
+    assert any("DRAM Products" in x for x in S.step_problems("growth", "Sales of DRAM products climbed sharply.", facts))
+    assert S.step_problems("growth", "Micron's sales climbed sharply over the year.", facts) == []
+    assert S.step_problems("business", "Micron's DRAM products are fast working memory.", facts) == []          # step 1 shows its lines
+    assert S.step_problems("does", bad, facts) == []                                                           # "does" has its own evidence
+    lines = S.step_lines(facts, "growth")
+    assert "[growth] Go deeper, Sales, fiscal Q4 2026: $37.4 billion (Ended Sep 3, 2026)" in lines
+    prompt = S.verification_prompt(facts, [("growth", "x.")])
+    assert "may state only facts in that step's own lines" in prompt and "[does] Company description" in prompt
+    assert S.STORY_VERSION == 9
+
+
+@pytest.mark.asyncio
+async def test_the_rewrite_round_never_shows_more_than_three_risks():
+    """MU (2026-10-19) showed four risks: round 1 kept two, the rewrite added two more."""
+    import json as _json
+    from app.services import walkthrough_story as S
+    drafts = [{"risks": [{"n": 1, "sentence": "Prices for its chips have swung widely."}, {"n": 2, "sentence": "Rivals are large."},
+                         {"n": 3, "sentence": "It is exposed to trade rules."}]},
+              {"risks": [{"n": 3, "sentence": "Trade rules differ across countries."}, {"n": 4, "sentence": "A few customers buy most of its chips."}]}]
+
+    class Fake:
+        async def generate_walkthrough(self, prompt, max_tokens=900):
+            return {"content": _json.dumps(drafts.pop(0)), "model_used": "x", "input_tokens": 0, "output_tokens": 0}
+
+        async def verify_walkthrough(self, prompt):
+            ids = re.findall(r"^(risk:\d+): ", prompt, re.M)
+            return {"content": _json.dumps({"verdicts": [{"id": i, "status": "supported", "reason": "ok"} for i in ids]}), "model_used": "x", "input_tokens": 0, "output_tokens": 0}
+
+    facts = {"name": "Micron", "risks": [{"n": n, "heading": "h", "body": "b"} for n in range(1, 6)]}
+    out = await S.story_for(facts, client=Fake())
+    assert [i for i in out["sentences"] if i.startswith("risk:")] == ["risk:1", "risk:2", "risk:3"]
+    assert {"id": "risk:4", "reason": "over the 3 risks shown"} in out["dropped"]

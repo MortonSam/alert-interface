@@ -19,11 +19,13 @@ from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
 
-STORY_VERSION = 8                      # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
+STORY_VERSION = 9                      # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
                                        # 6 (same day): step 1's story never sizes its lines; no "doubled"; no comparison with companies the evidence doesn't name
                                        # 7 (same day): no "whether", "keeps climbing" or "holding up" outside step 7
                                        # 8 (same day): "revenue", never "sales", for banks and insurers; "does" says what it sells or makes, never slogans;
                                        #   step 2's story never says how much profit each sale earns (its check's answer); the opening of the 10-K's Item 1 as evidence
+                                       # 9 (same day): a step's story states only facts that step shows, on screen or in its Go deeper rows (the Compare
+                                       #   rule): the description, Item 1 and other steps are evidence for "does" alone (step_problems, the verifier's rule)
 SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|reflect\w*|result of|owing to|information (?:shown|here|given)|"
                          r"not (?:described|stated|shown|mentioned)|shown here|the (?:evidence|facts)|the data(?!\s+cent)|tends? to|(?:is|are|isn't|not|no) available|no description|not been (?:described|stated|shown)|described here|a fraction)\b", re.I)
 # Sam's rule (2026-10-19): no model sentence says what the company is sensitive or exposed to, and only step 7 names risks or what
@@ -37,6 +39,12 @@ GIVEAWAY = {"business": re.compile(r"\b(?:depend\w*|reli\w*|concentrat\w*|divers
             "growth": re.compile(r"\b(?:faster|slower|outpac\w*|outgr\w*|accelerat\w*|decelerat\w*|speed\w*|slow\w*|lag\w*|kept pace|in step|"
                                  r"each (?:sale|dollar)|per sale|(?:more|less) profit|profitab\w*)\b", re.I),
             "margins": re.compile(r"\b(?:pricing power|competition|competitive|costs? (?:fell|rose|dropped|climbed)|lower costs|rising costs|swing|swung|cycl\w*|volatil\w*|steady|stable|barely)\b", re.I)}
+# Sam's rule (2026-10-19, MU step 2 "with the data center market now making up the bulk of revenue"): a step's story states only what
+# that step shows. step_problems rejects a share of the business, a market or customer group, or a named line the step doesn't show.
+SHARE_WORDS = re.compile(r"\b(?:mak(?:es?|ing) up|accounts? for|accounting for|bulk|majority|most of|share of|portion of)\b", re.I)
+MARKET_WORDS = re.compile(r"\b(?:data cent(?:er|re)s?|cloud|artificial intelligence|AI|automotive|cars?|mobile|smartphones?|phones?|PCs?|personal computers?|"
+                          r"gaming|consumers?|enterprises?|businesses|governments?|hyperscal\w*|industrial|servers?|networking|devices?|customers?|clients?|"
+                          r"tenants?|retail|wholesale|international|overseas|abroad|China|Europe|Asia)\b", re.I)
 SALES_WORD = re.compile(r"\bsales?\b", re.I)                                  # a bank or an insurer has revenue, never sales
 MULTIPLES = re.compile(r"\b(?:doubl\w*|tripl\w*|quadrupl\w*|halv\w*|tenfold|\w+fold)\b", re.I)    # a figure in words
 MODEL_SECONDS = 60
@@ -63,20 +71,50 @@ def _client():
     return AnthropicClient(timeout=MODEL_SECONDS, max_retries=1)
 
 
+def step_lines(facts: dict, key: str) -> list[str]:
+    """What one step shows: its figures, its sentences and its Go deeper rows, each tagged [key]."""
+    st = (facts.get("steps") or {}).get(key)
+    if not st:
+        return []
+    return ([f"[{key}] {n['label']}: {n['value']} ({n['as_of']})" for n in st["numbers"]] + [f"[{key}] {x}" for x in st["sentences"]]
+            + [f"[{key}] Go deeper, {d['label']}: {d['value']}" + (f" ({d['as_of']})" if d.get("as_of") else "") for d in st.get("deeper") or []])
+
+
 def fact_lines(facts: dict) -> list[str]:
     lines = []
     if facts.get("industry"):
-        lines.append(f"Sub-industry: {facts['industry']}")
+        lines.append(f"[does] Sub-industry: {facts['industry']}")
     if facts.get("description"):
-        lines.append(f"Company description: {facts['description']}")
+        lines.append(f"[does] Company description: {facts['description']}")
     if facts.get("business"):
-        lines.append(f"From Item 1, Business, of its 10-K: {facts['business']}")
-    for key, st in (facts.get("steps") or {}).items():
-        for n in st["numbers"]:
-            lines.append(f"[{key}] {n['label']}: {n['value']} ({n['as_of']})")
-        for s in st["sentences"]:
-            lines.append(f"[{key}] {s}")
+        lines.append(f"[does] From Item 1, Business, of its 10-K: {facts['business']}")
+    for key in (facts.get("steps") or {}):
+        lines += step_lines(facts, key)
     return lines
+
+
+def step_problems(key: str, sentence: str, facts: dict) -> list[str]:
+    """Pure: a step's story naming what that step doesn't show (a share of the business, a market or customer group, a named line),
+    though the description, Item 1 or another step may hold it. Only steps' stories: "does" and the risks have their own evidence."""
+    if key not in STORY_STEPS:
+        return []
+    own = " ".join(step_lines(facts, key))
+    out = []
+    for rx, what in ((SHARE_WORDS, "a share of the business"), (MARKET_WORDS, "a market or customer group")):
+        for m in rx.finditer(sentence):
+            if not re.search(rf"\b{re.escape(m.group(0))}\b", own, re.I):
+                out.append(f"states {what} this step doesn't show: {m.group(0)}")
+                break
+    lines_named = {d["label"] for d in ((facts.get("steps") or {}).get("business") or {}).get("deeper") or []}
+    for label in sorted(lines_named):
+        words = [w for w in re.findall(r"[A-Za-z][\w&-]+", label) if w.lower() not in GENERIC_LINE_WORDS]
+        if words and all(re.search(rf"\b{re.escape(w)}\b", sentence, re.I) for w in words) and not all(re.search(rf"\b{re.escape(w)}\b", own, re.I) for w in words):
+            out.append(f"names a line this step doesn't show: {label}")
+    return out
+
+
+GENERIC_LINE_WORDS = {"products", "product", "services", "service", "segment", "business", "unit", "other", "and", "the", "of", "total",
+                      "company", "description", "group", "solutions", "revenue", "sales"}
 
 
 def risk_lines(facts: dict, limit: int = RISKS_SHOWN_TO_MODEL, body: int = BODY_TO_MODEL, only: set[int] | None = None) -> list[str]:
@@ -112,13 +150,15 @@ RISK FACTORS FROM ITEM 1A OF ITS 10-K (filed {facts.get('risk_filed') or 'n/a'})
 {redo_block}
 WRITE
 - For each of {', '.join(k for k in want if k not in ('risks', 'does')) or 'no step'}: ONE sentence of at most {STORY_WORDS} words that helps a newcomer see why the figures for that step matter
-  for this company, using only the facts and the risk factors above. It adds meaning, it does not repeat the figures. It describes
+  for this company, stating only facts in that step's own [step] lines (its figures, its sentences and its Go deeper rows). A fact that
+  is only in the [does] lines, another step's lines or the risk factors may not appear in it, however true: no market, customer group,
+  product line or share of the business that step doesn't show. It adds meaning, it does not repeat the figures. It describes
   what is: no risks, nothing the company is sensitive or exposed to, nothing about what may happen next.
   For "growth", never compare how fast two figures grew. For "business", say what its biggest line is or does in plain words, never how
   big any line is or how much the company depends on it (no most, bulk, majority, share, main).
   For "margins", never say what the change in its margin points to (pricing, costs, competition) or call it a swing or a cycle.
 - For "does": ONE sentence of at most {STORY_WORDS} words saying in plain words what the company does, what it sells or makes and to
-  whom, using only the facts and the risk factors above (begin with the company's name). No marketing words, no slogans, nothing about
+  whom, using only the [does] and [business] lines above (begin with the company's name). No marketing words, no slogans, nothing about
   the index it belongs to or how it describes itself.{revenue_rule}
 - For "risks": choose up to {MAX_RISKS} of the risk factors that matter most for understanding this business, and say each in ONE plain sentence of
   at most {RISK_WORDS} words, true to its heading and text, with no detail that is not in them.
@@ -215,6 +255,9 @@ RULES
 - A sentence whose id is not risk:N is "unsupported" if it says what the company is sensitive or exposed to, names a risk, or says what
   may, could or will happen next. Only risk:N sentences may name risks, and only the company's own.
 - A "does" sentence must say only what the company does, sells or makes, as the evidence states it.
+- A sentence whose id is business, growth or margins may state only facts in that step's own lines (tagged [business], [growth] or
+  [margins]: its figures, its sentences and its Go deeper rows). A claim found only in the [does] lines, another step's lines or the
+  risk factors is "unsupported" for it, however true (a market, a customer group, a product line, a share of the business).
 - A comparison with other companies or an industry ("few companies match", "unlike its peers") is "unsupported" unless the evidence names them.
 - "unsupported": it claims something about this company the evidence does not confirm.
 - "contradicted": it conflicts with the evidence.
@@ -257,7 +300,7 @@ async def story_for(facts: dict, *, client=None) -> dict:
         failed: dict[str, str] = {}
         clean = []
         for i, s in drafted:
-            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "sales")
+            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "sales") + step_problems(i, s, facts)
             if p:
                 failed[i] = "; ".join(p)
                 verdicts[i] = {"status": "rejected", "reason": failed[i], "round": rnd, "draft": s}
@@ -281,6 +324,10 @@ async def story_for(facts: dict, *, client=None) -> dict:
         for i, r in failed.items():
             key = "risks" if i.startswith("risk:") else i
             redo[key] = (redo.get(key, "") + f" {i}: {r}").strip()
+    extra = [i for i in kept if i.startswith("risk:")][MAX_RISKS:]      # the rewrite round adds to the first round's risks: never more than MAX_RISKS
+    for i in extra:
+        kept.pop(i)
+        dropped.append({"id": i, "reason": f"over the {MAX_RISKS} risks shown"})
     return {"version": STORY_VERSION, "sentences": kept, "verdicts": verdicts, "dropped": dropped, "cost_usd": round(cost, 4)}
 
 

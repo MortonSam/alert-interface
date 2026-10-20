@@ -648,20 +648,30 @@ def step_risks(name: str, risks: dict | None, merger: dict | None) -> dict:
     return st
 
 
-def risk_check(name: str, risk_sentences: list[dict], headings: dict[int, str], steps: list[dict], noun: str = "sales") -> dict | None:
-    """Pure: step 7's check. The first shown risk that maps (walkthrough_checks.risk_target) to a business result this walkthrough
-    shows, and whose sentence doesn't name that result's measure, asks which result it would hit most directly; the options are
-    this walkthrough's business results (walkthrough_checks.RISK_OPTION_STEPS), all three shown. Otherwise no check."""
+def featured_risk(risk_sentences: list[dict], headings: dict[int, str], steps: list[dict]) -> tuple[dict, str] | None:
+    """Pure: the risk step 7's check asks about, with the business result it maps to: the first shown risk that maps
+    (walkthrough_checks.risk_target) to a business result this walkthrough shows, and whose sentence doesn't name that result's
+    measure. None when the walkthrough doesn't show all of walkthrough_checks.RISK_OPTION_STEPS or no risk maps."""
     by_key = {s["key"]: s for s in steps if s["status"] != "absent" and s.get("point") and s["key"] in C.RISK_OPTION_STEPS}
     if len(by_key) < len(C.RISK_OPTION_STEPS):
         return None
     for r in risk_sentences:
         target = C.risk_target(headings.get(r["n"], ""), r["sentence"])
-        if not target or C.RISK_GIVEAWAY[target].search(r["sentence"]):
-            continue
-        decoys = [by_key[k]["point"] for k in C.RISK_OPTION_STEPS if k != target]
-        return C.risk_check(name, r["sentence"], by_key[target]["point"], decoys, noun)
+        if target and not C.RISK_GIVEAWAY[target].search(r["sentence"]):
+            return r, target
     return None
+
+
+def risk_check(name: str, risk_sentences: list[dict], headings: dict[int, str], steps: list[dict], noun: str = "sales") -> dict | None:
+    """Pure: step 7's check. The featured risk (featured_risk) asks which result it would hit most directly; the options are this
+    walkthrough's business results (walkthrough_checks.RISK_OPTION_STEPS), all three shown. Otherwise no check."""
+    f = featured_risk(risk_sentences, headings, steps)
+    if f is None:
+        return None
+    r, target = f
+    by_key = {s["key"]: s for s in steps if s["status"] != "absent" and s.get("point") and s["key"] in C.RISK_OPTION_STEPS}
+    decoys = [by_key[k]["point"] for k in C.RISK_OPTION_STEPS if k != target]
+    return C.risk_check(name, r["sentence"], by_key[target]["point"], decoys, noun)
 
 
 def lead_lower(sentence: str, name: str) -> str:
@@ -686,7 +696,10 @@ def with_risk_story(step: dict, name: str, risk_sentences: list[dict], headings:
     step["gap"] = None
     step["headings"] = {r["n"]: (headings or {}).get(r["n"], "") for r in risk_sentences}      # the shown risks' Item 1A headings, for the check's mapping at serve time
     step["check"] = risk_check(name, risk_sentences, headings or {}, steps or [], noun)
-    step["summary"] = f"Its annual report names risks, among them that {lead_lower(risk_sentences[0]['sentence'], name)}"
+    # the summary's line names the risk step 7 featured: the one its check asks about, else the first one shown (Sam, 2026-10-19)
+    f = featured_risk(risk_sentences, headings or {}, steps or []) if step["check"] else None
+    lead = f[0] if f else risk_sentences[0]
+    step["summary"] = f"Its annual report names risks, among them that {lead_lower(lead['sentence'], name)}"
     return step
 
 
