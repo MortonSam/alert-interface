@@ -12,6 +12,7 @@ Intrinio spin-off row dated within a week of the filing's date. "other" (cash de
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from datetime import date, timedelta
 
@@ -52,8 +53,18 @@ def spinner_symbol(spinner: str, by_name: dict[str, str]) -> str | None:
     return None
 
 
+_SHARE_CLASS = re.compile(r"\bclass\s+[a-c]\b|\bcommon\s+(?:stock|units?)\b", re.I)
+
+
+def counterparty_name(name: str | None) -> str | None:
+    """Pure: the counterparty as recorded, or None when the reading is a share class, never a company (an older scan recorded CHTR's
+    2026 merger with \"Company Class B\", read from \"Company Class B Common Stock\" in the merger agreement's definitions)."""
+    return None if not name or _SHARE_CLASS.search(name) else name
+
+
 async def record(session, ticker: Ticker, kind: str, day: date, name: str | None, accession: str) -> str:
     """Record an action as record_corporate_action does, with the filing as its receipt; returns what happened."""
+    name = counterparty_name(name)
     existing = (await session.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.OTHER, Event.event_date == day))).scalars().all()
     if any((e.metadata_ or {}).get("corporate_action") == kind for e in existing):
         return "already recorded"
@@ -64,6 +75,9 @@ async def record(session, ticker: Ticker, kind: str, day: date, name: str | None
 
 async def attach_name(session, ticker: Ticker, day: date, name: str, accession: str) -> bool:
     """Attach the counterparty's name to an Intrinio spin-off row dated within MATCH_SPIN_DAYS of the filing's date."""
+    name = counterparty_name(name)
+    if name is None:
+        return False
     rows = (await session.execute(select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.SPIN_OFF,
                                                       Event.event_date.between(day - timedelta(days=MATCH_SPIN_DAYS), day + timedelta(days=MATCH_SPIN_DAYS))))).scalars().all()
     changed = False

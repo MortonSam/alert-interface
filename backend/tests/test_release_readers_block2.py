@@ -115,3 +115,11 @@ def test_a_figure_followed_by_for_the_quarter_is_the_quarters_after_a_nine_month
     text = ("Net revenues were $ 56.24 billion and net earnings were $ 17.55 billion for the first nine months of 2026. " + GS_RELEASE.split("2026. ", 1)[1])
     hit = parse_release_eps("for the third quarter ended September 30, 2026. " + text, date(2026, 10, 13))
     assert hit["eps"] == 17.01 and hit["how"] == "EPS were sentence"
+
+
+def test_a_share_class_is_never_a_merger_counterparty():
+    from app.scripts.scan_corporate_actions import counterparty_name
+    assert counterparty_name("Company Class B") is None                                   # CHTR, an older scan of 0001140361-26-033909
+    assert counterparty_name("Charter Class C Common Stock") is None
+    assert counterparty_name("Liberty Broadband Corporation and Cox Enterprises, Inc. (Cox Communications, LLC)") \
+        == "Liberty Broadband Corporation and Cox Enterprises, Inc. (Cox Communications, LLC)"
