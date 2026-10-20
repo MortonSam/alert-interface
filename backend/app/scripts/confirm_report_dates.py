@@ -1,7 +1,8 @@
 """Confirm earnings dates from the companies' own words (services/report_date_reader): every 8-K exhibit of the last DAYS days,
 every press release we ingest (Finnhub company news, one call per ticker, and the stored news_stories) and the company's IR feed
-items are read by the pattern reader; where it names a
-date the model reads the same passage, and a date counts only when both agree and it is in the future. Dry run by default:
+items are read by the pattern reader. Every quote it finds is classed (report_date_reader.classify_quote): a release date in the
+company's own words, a call date only, or third-party text. Only the first is read by the model and can confirm or change a date,
+and only when both readers agree on a future date; a call date leaves the date estimated, third-party text is ignored. Dry run by default:
 prints what each active ticker's stored date is, what the readers found and what a write would do. Writes only with --write AND
 CONFIRMATION_READER_WRITE=true in the environment (the nightly step passes --write; the variable holds it until Sam's go).
 
@@ -215,8 +216,18 @@ async def main(argv: list[str]) -> int:
                     # Goldman Sachs BDC's is not Goldman Sachs', and an article about PNC confirms nothing for the banks it mentions
                     if d["kind"] == "press release" and not names_issuer(d.get("headline") or d["text"], t.get("name") or sym):
                         continue
-                    hit = R.read_report_date(d["text"], today)
+                    release = R.read_release_date(d["text"], today)
+                    hit = release or R.read_report_date(d["text"], today)
                     if hit is None or hit.day in seen_days:
+                        continue
+                    cls = R.classify_quote(d["kind"], d["text"], hit.sentence, hit.day, sym, today)
+                    if cls != "release":            # a call date or someone else's words: recorded, never read further, never written
+                        kind, target = classify(hit.day, stored.get(sym, []))
+                        found.append({"symbol": sym, "date": hit.day.isoformat(), "timing": hit.timing, "source_kind": d["kind"], "reference": d["reference"],
+                                      "published": d["published"], "quote": hit.sentence[:300], "class": cls, "readers": "not read: " + cls.replace("_", " "),
+                                      "confirmed": False, "would": "nothing", "stored": target["event_date"].isoformat() if target else None,
+                                      "read_at": now.isoformat(), "computation_version": R.READER_VERSION})
+                        print(f"  {sym}: {d['kind']} {d['published']} -> {hit.day}; {cls}, changes nothing", flush=True)
                         continue
                     seen_days.add(hit.day)
                     model = None
@@ -230,7 +241,7 @@ async def main(argv: list[str]) -> int:
                     day, note = R.decide(hit, model, d["text"], today)
                     kind, target = classify(hit.day, stored.get(sym, []))
                     rec = {"symbol": sym, "date": hit.day.isoformat(), "timing": hit.timing, "source_kind": d["kind"], "reference": d["reference"], "published": d["published"],
-                           "quote": hit.sentence[:300], "readers": note, "confirmed": day is not None, "would": kind, "stored": target["event_date"].isoformat() if target else None,
+                           "quote": hit.sentence[:300], "class": cls, "readers": note, "confirmed": day is not None, "would": kind, "stored": target["event_date"].isoformat() if target else None,
                            "read_at": now.isoformat(), "computation_version": R.READER_VERSION}
                     found.append(rec)
                     if day is None and model is not None:
@@ -238,7 +249,7 @@ async def main(argv: list[str]) -> int:
                     if day is not None:
                         by_kind[kind] = by_kind.get(kind, 0) + 1
                         cal_note = R.confirmation_note(d["kind"], d["reference"], d["published"], hit.sentence[:200])
-                        if write:
+                        if write and cls == "release":       # the writer takes nothing else (classify_quote)
                             did = await write_confirmation(t["id"], sym, day, hit.timing, cal_note, rec, stored.get(sym, []), now)
                             rec["written"] = did
                     print(f"  {sym}: {d['kind']} {d['published']} -> {hit.day} ({hit.timing}); {note}; would {kind}" + (f" (stored {target['event_date']})" if target else ""), flush=True)

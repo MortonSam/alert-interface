@@ -20,7 +20,8 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-READER_VERSION = 1
+READER_VERSION = 2                   # 2 (2026-10-20): every quote is classed (QUOTE_CLASSES); only a release date in the company's own words confirms
+QUOTE_CLASSES = ("release", "call_only", "third_party")
 HORIZON_DAYS = 120                   # a results date further out than this is not a scheduled report
 
 _MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
@@ -127,13 +128,79 @@ def read_report_date(text: str, today: date) -> ReadDate | None:
     return first
 
 
+# ── what a quote is (Sam, 2026-10-20) ──────────────────────────────────────────
+# Only a release date in the company's own words confirms or changes a date. A call date alone leaves it estimated (Tyler's call
+# was Oct 29 with its release after the close on Oct 28; Veralto's Oct 30 with the release Oct 29), and text the company didn't
+# issue is ignored (a preview: "Gallagher (AJG) is back in focus as the insurer prepares to report", "says Jefferies" on Biogen).
+
+_RELEASE_VERB = re.compile(r"\b(?:post|posts|report|reports|release|releases|released|announce|announces|publish|publishes|published|issue|issues|issued)\b"
+                           r"|\bearnings\s+release\b|\bpress\s+release\b", re.I)
+_CALL_WORDS = re.compile(r"\b(?:conference\s+call|call|webcast|webcasts|discuss|host|hosts|hold|holds|teleconference|audio)\b", re.I)
+# a wire release carries its dateline ("PLANO, Texas, October 13, 2026--", "(GLOBE NEWSWIRE) --", "/PRNewswire/ --")
+_WIRE = re.compile(r"\b(?:Business\s*Wire|GLOBE\s*NEWSWIRE|PR\s*Newswire|/PRNewswire/|ACCESSWIRE|Newsfile|EQS-News|Marketwired)\b"
+                   r"|(?:^|(?<=\.\s))[A-Z][A-Z .'-]+,(?:\s+[A-Z][A-Za-z.]+,)?\s+(?:[A-Z][a-z]{2,8}\.?)\s+\d{1,2},\s+\d{4}\s*(?:--|—|-\s)", re.M)
+# a writer other than the company: a preview, an analyst's note, a report about the report
+_THIRD_PARTY = re.compile(r"\b(?:analysts?\s+(?:expect|are\s+expecting|expecting|estimate|forecast|polled|surveyed)|consensus|is\s+expected\s+to\s+(?:report|post|announce)|"
+                          r"are\s+expected\s+to\s+(?:report|post)|says\s+[A-Z]|according\s+to|preview|back\s+(?:in|on)\s+(?:focus|investors|the\s+radar)|"
+                          r"investors[’']\s+radar|prepares?\s+to\s+report|is\s+set\s+to\s+report|ahead\s+of\s+(?:its|the)\s+(?:report|earnings)|Wall\s+Street|"
+                          r"Zacks|price\s+target|EPS\s+estimate|per\s+share\s+estimate)\b", re.I)
+
+
+def company_issued(source_kind: str, text: str, symbol: str) -> bool:
+    """Pure: the text is the company's own. Its 8-K exhibits and its IR feed are; a press release carried by Finnhub or the stored
+    news is when it reads as wire copy (a wire dateline, or the company named with its own exchange tag, "(NYSE: ABT)") and reads as
+    nobody else's (no preview or analyst phrasing). The issuer's name in the headline is checked before this (names_issuer)."""
+    if source_kind in ("8-K exhibit", "IR feed"):
+        return True
+    t = text or ""
+    if _THIRD_PARTY.search(t):
+        return False
+    tag = re.search(rf"\((?:NYSE|NASDAQ|Nasdaq|NYSE\s+American|Cboe\s+BZX|TSX)[^)]*?:\s*{re.escape(symbol)}\b", t)
+    return bool(_WIRE.search(t) or tag)
+
+
+def sentence_class(sentence: str, day: date, today: date) -> str:
+    """Pure: "release" when a release verb leads to the date with no call or webcast words between them ("will report results ...
+    after the market closes on Monday, October 26, 2026", "plans to issue a press release ... on Thursday, October 29, 2026"),
+    else "call_only" ("will host a conference call to discuss its third-quarter 2026 results at 10 a.m. Central time, Thursday, Nov. 5")."""
+    for m in _DATE.finditer(sentence):
+        if _to_date(m, today) != day:
+            continue
+        before = sentence[:m.start()]
+        verbs = list(_RELEASE_VERB.finditer(before))
+        for v in reversed(verbs):                       # the release verb nearest the date
+            if not _CALL_WORDS.search(before[v.end():]):
+                return "release"
+    return "call_only"
+
+
+def classify_quote(source_kind: str, text: str, sentence: str, day: date, symbol: str, today: date) -> str:
+    """Pure: one of QUOTE_CLASSES for a sentence the reader found."""
+    if not company_issued(source_kind, text, symbol):
+        return "third_party"
+    return sentence_class(sentence, day, today)
+
+
+def read_release_date(text: str, today: date) -> ReadDate | None:
+    """Pure: the first sentence read_report_date accepts whose date is a release date (sentence_class); a company text that names
+    its call first and its release after ("will discuss ... on a call Thursday, October 29. The related press release will be issued
+    after the market closes on Wednesday, October 28, 2026.") gives the release."""
+    flat = sentences(text)
+    for i in range(len(flat)):
+        hit = read_report_date(" ".join(flat[i:i + 1]), today)
+        if hit and sentence_class(hit.sentence, hit.day, today) == "release":
+            return hit
+    return None
+
+
 # ── the model as the second reader ───────────────────────────────────────────
 
 PROMPT = """You are reading text a public company published (an SEC 8-K exhibit, a press release or an investor-relations item).
 Return JSON only, no prose: {{"date": "<YYYY-MM-DD or null>", "timing": "<bmo|amc|unknown>", "quote": "<the one sentence, copied verbatim, that states when the company will report its quarterly results>"}}
 The date wanted is the calendar day the company says it will post, report, release or announce its quarterly (or full-year) financial
 results. Never a period end ("quarter ended September 30"), never a conference-call-only sentence without results, never a date in the
-past of {today}. timing is "bmo" when the sentence says before the market opens (or a clock time before 9:30 a.m. Eastern), "amc" when after
+past of {today}. Never the date of a conference call or webcast: if the text gives only a call date and not the day the results
+themselves come out, return date null and quote null. timing is "bmo" when the sentence says before the market opens (or a clock time before 9:30 a.m. Eastern), "amc" when after
 the close (or at or after 4:00 p.m. Eastern), else "unknown". If no such sentence exists, return date null and quote null. Copy the sentence
 exactly; never paraphrase.
 
@@ -198,6 +265,8 @@ def decide(pattern: ReadDate | None, model: dict | None, text: str, today: date)
     m_text = f"model {m.isoformat()} ({model.get('timing')})" if m else "model read nothing"
     if m and problems:
         return None, f"{p_text}; {m_text}; model quote rejected: {'; '.join(problems)}"
+    if m and sentence_class(model["quote"], m, today) != "release":
+        return None, f"{p_text}; {m_text}; model quote names a call, not the release"
     if p and m and p == m:
         if p <= today:
             return None, f"both readers {p.isoformat()}, not in the future"
