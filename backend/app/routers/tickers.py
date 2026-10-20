@@ -18,6 +18,7 @@ from app.config import settings
 from app.services import live_data
 from app.database import get_db
 from app.models.event import Event
+from app.services.dates import fmt_days_in   # Ivy's written text dates any ISO day "Oct 23, 2026" as served
 from app.models.iv_history import COURIER_SOURCE, IVHistory
 from app.services.options_source import no_options_note
 from app.models.rv_snapshot import RVSnapshot
@@ -1440,7 +1441,7 @@ async def get_options_read(
     if cached:
         spread_pp_cached = cached.get("iv_rv_spread_pp")
         return OptionsReadRead(
-            symbol=sym, content=cached["content"], facts=cached["facts"], fact_values=cached.get("fact_values"),
+            symbol=sym, content=fmt_days_in(cached["content"]), facts=cached["facts"], fact_values=cached.get("fact_values"),
             model_used=cached["model_used"], generated_at=cached["generated_at"],
             cached=True, as_of=cached["generated_at"], chain_date=chain_date,
             iv_rv_spread_pp=spread_pp_cached,
@@ -1690,7 +1691,7 @@ STRICT RULES:
         print(f"[options-read] Cache write failed for {sym}: {redact(exc)}", flush=True)
 
     return OptionsReadRead(
-        symbol=sym, content=gen["content"], facts=facts, fact_values=fact_values,
+        symbol=sym, content=fmt_days_in(gen["content"]), facts=facts, fact_values=fact_values,
         model_used=gen["model_used"], generated_at=generated_at,
         cached=False, as_of=generated_at, chain_date=chain_date, regenerated_for=stale_fact,
         iv_rv_spread_pp=iv_rv_spread_pp,
@@ -1726,7 +1727,7 @@ async def get_explain(
         try:
             c = json.loads(cached_raw)
             return ExplainRead(
-                symbol=sym, metric=metric, content=c["content"], facts=c["facts"],
+                symbol=sym, metric=metric, content=fmt_days_in(c["content"]), facts=c["facts"],
                 model_used=c["model_used"], generated_at=c["generated_at"],
                 cached=True, as_of=as_of,
             )
@@ -1959,7 +1960,7 @@ Keep it grounded in the numbers. 40-70 words.\
         print(f"[explain] Cache write failed for {sym}/{metric}: {redact(exc)}", flush=True)
 
     return ExplainRead(
-        symbol=sym, metric=metric, content=gen["content"], facts=facts,
+        symbol=sym, metric=metric, content=fmt_days_in(gen["content"]), facts=facts,
         model_used=gen["model_used"], generated_at=generated_at,
         cached=False, as_of=as_of,
     )

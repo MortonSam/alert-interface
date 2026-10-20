@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta
 from statistics import median
 from zoneinfo import ZoneInfo
 
+from app.services.dates import fmt_days_in
 from app.services.trading_calendar import is_trading_day, last_session_before, nth_trading_day_after
 
 NY = ZoneInfo("America/New_York")
@@ -275,7 +276,7 @@ def reader_note(note: str | None) -> str | None:
         return None
     for pat, plain in _VENDOR_NOTES:
         note = pat.sub(plain, note)
-    return note
+    return fmt_days_in(note)       # a note the nightly wrote before 2026-10-19 carries ISO days ("the last report was 2026-07-22")
 
 
 def evidence_phrase(note: str | None) -> str | None:

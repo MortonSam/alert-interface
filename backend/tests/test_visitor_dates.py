@@ -34,3 +34,20 @@ def test_the_sentences_fixed_on_2026_10_16_read_the_one_format():
     assert expiry_caveat("2026-11-20", "2026-10-20").startswith("Nearest available expiration (Nov 20, 2026) is 31 days after the Oct 20, 2026 earnings date.")
     assert null_iv_reason(None, 900.0, "2026-10-16") == "no implied volatility on the ATM strike for expiration Oct 16, 2026"
     assert fmt_days_in("no implied volatility on the ATM strike for expiration 2026-10-16") == "no implied volatility on the ATM strike for expiration Oct 16, 2026"
+
+
+def test_ivys_written_text_is_served_with_the_one_format():
+    """Ivy's Read and the metric explanations are written by a model from facts that carry ISO days ("The 2026-12-18 expiration falls
+    64 calendar days after ..."); every served content runs through fmt_days_in, cached or new."""
+    src = (APP / "routers" / "tickers.py").read_text()
+    served = re.findall(r"content=([^,\n]+),", src)
+    written = [c for c in served if "content" in c and c != '""']
+    assert len(written) == 4 and all(c.startswith("fmt_days_in(") for c in written), written
+    assert fmt_days_in("The 2026-12-18 expiration falls 64 calendar days after the 2026-10-15 earnings date") == \
+        "The Dec 18, 2026 expiration falls 64 calendar days after the Oct 15, 2026 earnings date"
+
+
+def test_a_calendar_note_written_before_the_format_reads_in_it():
+    from app.services.briefing import reader_note
+    assert reader_note("the last report was 2026-07-22, so a quarterly report would usually be due around 2026-10-21") == \
+        "the last report was Jul 22, 2026, so a quarterly report would usually be due around Oct 21, 2026"
