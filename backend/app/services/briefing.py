@@ -488,12 +488,22 @@ def happening_sentence(symbol: str, *, stock: dict | None = None, reported: dict
     today = (reported or upcoming or {}).get("today") or date.today()
     dates = [d for p in parts for d in p[2] if d <= today]          # an as-of is when we knew, never a report day still ahead
     rule = (f"The stock: the latest quote dated by its last trade, against its 52-week high (the highest close over {WINDOW_52W_DAYS} days; within {NEAR_HIGH_PCT}% reads near) and the "
-            f"first close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, the EPS on the event row against "
-            f"the estimate (actual above estimate is a beat) and the 1-day move from the daily bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "
+            f"first close {WINDOW_3M_DAYS} days back. Then one of, in order: through {REACTION_WINDOW_SESSIONS} sessions after a report, {_reported_rule()} "
+            f"and the 1-day move from the daily bars through the seeder's window; else a report within {NEXT_SOON_DAYS} days; "
             f"else the largest daily move of the last {BIG_MOVE_SESSIONS} sessions off earnings dates when it is at least {BIG_MOVE_MULTIPLE} times the median absolute daily "
             f"move of the past year, with no cause stated; else the next report within {NEXT_WITHIN_DAYS} days. A report comes from the earnings calendar, with the report move "
             "(the part of the options' expected move that belongs to the report alone) against the mean absolute 1-day move after past reports, the sentence Discover states.")
     return _sentence("happening", text, rule, max(dates) if dates else None, inputs)
+
+
+def _reported_rule() -> str:
+    """The rule's words for the reported clause, as the clause is built: with LICENSED_ESTIMATES off (W6) the reported EPS from SEC
+    filings against the same quarter a year earlier; no estimate or beat is named then (Block 2: the Overview's method still said
+    "actual above estimate is a beat" on every ticker page after stage 1)."""
+    from app.services.licensed_estimates import licensed
+    if licensed():
+        return "the EPS on the event row against the estimate (actual above estimate is a beat)"
+    return "the reported EPS from SEC filings against the same quarter a year earlier"
 
 
 def paragraph(sentences: list[dict]) -> str:
