@@ -12,8 +12,9 @@ from app.models.put_call_snapshot import PutCallSnapshot
 
 
 @pytest.mark.asyncio
-async def test_put_call_matches_stored_snapshot():
-    """Endpoint values must come from the stored PutCallSnapshot row."""
+async def test_put_call_matches_stored_snapshot(monkeypatch):
+    """Endpoint values must come from the stored PutCallSnapshot row. The endpoint serves a snapshot within 3 days of today, so the test
+    pins today to the snapshot's own date (it failed on every branch from 2026-10-20 00:00 UTC, four days after the copied Oct 16 row)."""
     sym = "AAPL"
 
     # Read the latest stored snapshot for this symbol
@@ -27,6 +28,15 @@ async def test_put_call_matches_stored_snapshot():
 
     if snap is None:
         pytest.skip(f"No put_call_snapshot for {sym}")
+
+    from datetime import date
+    from app.routers import tickers
+
+    class _SnapDay(date):
+        @classmethod
+        def today(cls):
+            return snap.snapshot_date
+    monkeypatch.setattr(tickers, "date", _SnapDay)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
