@@ -2,14 +2,14 @@
 name them. expiration_used keeps the nearest one.
 
 Revision ID: f3c4d5e6f7a8
-Revises: e1f2a3b4c5d6
+Revises: f2a3b4c5d6e7
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "f3c4d5e6f7a8"
-down_revision = "e1f2a3b4c5d6"
+down_revision = "f2a3b4c5d6e7"   # after eps-display's ffo_quarters (Block 2: both first branched from e1f2a3b4c5d6)
 branch_labels = None
 depends_on = None
 
