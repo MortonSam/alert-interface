@@ -30,7 +30,7 @@ export function counterRows(stats: SiteStats | null): CounterRow[] {
       title: [PRICES_HOVER, insightAsOfLine(stats.licensed_daily_prices_as_of)].filter(Boolean).join(" · ") },
     { key: "earnings", value: stats.earnings_reports_measured, label: label("earnings"), title: insightAsOfLine(stats.earnings_reports_as_of) },
     { key: "analyst", value: stats.analyst_reactions_measured, label: label("analyst"), title: insightAsOfLine(stats.analyst_reactions_as_of) },
-  ];
+  ].filter((r): r is CounterRow => r.value != null);      // a count the API withholds (personal-use source, backend services/personal_use) is left out
 }
 
 

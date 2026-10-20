@@ -215,7 +215,9 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
             inputs.append(_input("index membership", "S&P 500", gics_as_of, "the nightly S&P 500 constituent list"))
         if gics_as_of:
             dates.append(gics_as_of)
-    mv = market_value_words(quote_price * shares_outstanding) if market_value_agrees(quote_price, shares_outstanding, market_cap) else None
+    from app.services.personal_use import shown
+    # the shares outstanding and the market cap on file are Finnhub's (personal use only): no market value while that data is held
+    mv = market_value_words(quote_price * shares_outstanding) if shown() and market_value_agrees(quote_price, shares_outstanding, market_cap) else None
     if mv and quote_ts and shares_as_of:
         bits.append(f"worth about {mv}")
         t = fmt_quote_time(quote_ts)

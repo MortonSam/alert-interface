@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class TickerBase(BaseModel):
@@ -40,6 +40,12 @@ class TickerExit(BaseModel):
 
 class TickerRead(TickerBase):
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("market_cap")
+    def _market_cap(self, v: int | None) -> int | None:
+        """The market cap on file is Finnhub's (personal use only): withheld while that data is held (services/personal_use)."""
+        from app.services.personal_use import shown
+        return v if shown() else None
 
     id: uuid.UUID
     next_earnings_date: date | None = None

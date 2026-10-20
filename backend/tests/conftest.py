@@ -36,3 +36,5 @@ def _licensed_estimates_on(monkeypatch):
     that mode. test_licensed_estimates also checks the default itself is off."""
     from app.config import settings
     monkeypatch.setattr(settings, "licensed_estimates", True)
+    # PERSONAL_USE_DATA_SHOWN defaults off (services/personal_use); the suite runs with it on, and test_personal_use checks it off
+    monkeypatch.setattr(settings, "personal_use_data_shown", True)

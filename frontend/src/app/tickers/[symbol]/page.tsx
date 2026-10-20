@@ -2222,7 +2222,8 @@ export default function TickerPage() {
             </div>
           )}
           {analystActionsStatus === "done" && analystStatsStatus === "done" && (
-            recentAnalystActions.length > 0 || analystStats != null
+            // withheld analyst data (backend services/personal_use) comes back as no actions and zero counts: no section at all
+            recentAnalystActions.length > 0 || (analystStats != null && analystStats.upgrade_count + analystStats.downgrade_count > 0)
           ) && (
             <div className="border-t pt-6 mt-6 mb-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-3">Street Pulse</p>

@@ -53,7 +53,10 @@ def dataset_ages(step_outcomes: dict, last_success: dict[str, str | None], prima
         from app.config import settings
         primary = settings.options_primary_source
     out = {}
+    from app.services.personal_use import shown
     for name, steps in datasets_for(primary).items():
+        if name == "analyst" and not shown():       # analyst data is withheld while personal-use data is held: no "as of" line
+            continue
         stamps = [_parse(last_success.get(s)) for s in steps]
         failed = [s for s in steps if (step_outcomes.get(s) or {}).get("exit") not in (0,)]
         at = min(stamps) if stamps and all(stamps) else None

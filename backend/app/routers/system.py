@@ -111,6 +111,9 @@ async def get_site_stats(db: AsyncSession = Depends(get_db)) -> dict:
     prices = (await db.execute(text("SELECT count(*), max(date) FROM price_bars_shadow"))).one()
     earnings_n, earnings_as_of = await measured("earnings")
     analyst_n, analyst_as_of = await measured("analyst_action")
+    from app.services.personal_use import shown
+    if not shown():                              # analyst actions come from Finnhub and Yahoo: the counter is withheld
+        analyst_n, analyst_as_of = None, None
     return {
         "option_contracts_captured": contracts,
         "option_contracts_as_of": contracts_as_of,
