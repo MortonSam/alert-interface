@@ -32,6 +32,16 @@ def test_typical_move_shrinks_toward_the_sector_and_fills_sit_at_the_real_bid_an
     assert P.p_beyond(np.array([0.5, 1.5, -2.0, 0.1] * 60), 0.04, 0.045) == pytest.approx(0.5)            # |z| τ > 4.5%: the 1.5 and -2.0 of each four
 
 
+def test_the_implied_move_is_the_straddles_time_value_when_the_stock_sits_between_strikes():
+    """CMS, Oct 19, 2026 (production): spot $67.37 between the $65 and $70 strikes. The $65 straddle's $4.83 mid read as a 7.16% move
+    and p_beyond_implied fell to 0.023, under validate's 0.05 floor; $2.37 of that mid is the $65 call's intrinsic value."""
+    cms = {65.0: {"call": {"bid": 2.8, "ask": 4.6}, "put": {"bid": 0.35, "ask": 1.9}}, 70.0: {"call": {"bid": 0.55, "ask": 0.75}, "put": {"bid": 2.1, "ask": 4.7}}}
+    atm, im = P.implied_move(cms, 67.37)
+    assert atm == 65.0 and im == pytest.approx((3.7 + 1.125 - 2.37) / 67.37) and round(im * 100, 2) == 3.64
+    assert P.implied_move({100: {"call": {"bid": 0.0, "ask": 0.1}, "put": {"bid": 9.9, "ask": 10.0}}}, 90.0) is None     # no time value left
+    assert P.PRICING_COMPUTATION_VERSION == 3
+
+
 def test_each_structure_prices_from_the_chain_with_known_numbers():
     assert P.implied_move(CHAIN, 100.0) == (100, pytest.approx(0.061))      # (3.1 + 3.0) / 100
     tau, z = 0.04, np.zeros(300)                                                # a stock that never moves: every long structure loses its cost, the condor keeps its credit
@@ -61,7 +71,7 @@ def test_the_verdict_and_the_bands():
     assert P.band_problems(card) == []
     bad = {**card, "typical_move_pct": 55.0, "structures": {"long_call": {"ev_per_100": 400.0, "ev_per_100_full_spread": -47.0}}}
     assert P.band_problems(bad) == ["typical_move_pct=55.0 outside [0.5, 40.0]", "long_call.ev_per_100=400.0 outside [-100.0, 300.0]"]
-    assert P.PRICING_COMPUTATION_VERSION == 2 and check_pricing_cards in CHECKS
+    assert P.PRICING_COMPUTATION_VERSION == 3 and check_pricing_cards in CHECKS
     cleared = {"long_call": {"ev_per_100_full_spread": 4.0}, "iron_condor": {"ev_per_100_full_spread": -3.0}}
     assert P.verdict_for(cleared) == ("no_edge", None) and P.POSSIBLE_EDGE_EARNED is False          # not earned on held-out data: no card says possible edge
     assert P.verdict_for(cleared, earned=True) == ("possible_edge", "long_call")
@@ -94,7 +104,7 @@ async def test_a_built_card_is_stored_served_behind_the_flag_and_judged_by_valid
                       expiration="2026-10-17", spot=100.0, odds=odds, today=today, computed_at=datetime.now(timezone.utc))
     assert isinstance(card, dict), card
     assert card["implied_move_pct"] == 6.1 and card["prior_n"] == 2 and len(card["prior_moves"]) == 2 and set(card["structures"]) == set(P.STRUCTURES)
-    assert card["horizon_sessions"] == 5 and card["computation_version"] == 2 and card["pooled_move_to_expiry_pct"] > card["typical_move_pct"]   # the wider distribution
+    assert card["horizon_sessions"] == 5 and card["computation_version"] == 3 and card["pooled_move_to_expiry_pct"] > card["typical_move_pct"]   # the wider distribution
     assert isinstance(P.build_card(symbol=sym, report_date=date(2026, 10, 15), report_confirmation="confirmed", chain=chain, chain_date="2026-10-09", chain_source="intrinio",
                                    expiration="2026-10-17", spot=100.0, odds=P.Odds([{**r, "moves": {}} for r in reactions]), today=today), str)   # no horizon pool: no card, never the 1-day pool
     assert card["verdict"] in ("no_edge", "possible_edge") and card["typical_move_pct"] == pytest.approx(round((2 * 5.5 + 6 * 4.5) / 8, 2), abs=0.05)   # own 5.5% over 2 reports against the sector's 4.5%

@@ -18,6 +18,7 @@ Applied at serve time to stored notes (routers/research_notes), so no stored not
 from __future__ import annotations
 
 import re
+from datetime import date, timedelta
 
 VALUATION = re.compile(
     r"\bP\s?/\s?E\b|\bPE ratio|price[- /]to[- ]earnings|price/earnings|earnings multiple|\bmultiples?\b|\bEV\s?/\s?(?:EBITDA|sales|revenue)"
@@ -29,9 +30,11 @@ OVERVIEW_STATS = ("market_cap",)
 PAST_REPORT_STATS = ("beat_count", "total_quarters", "quarters_with_data", "quarters_without_data", "basis_excluded", "unavailable_reason",
                      "latest_move_1d", "latest_outcome")
 VENDOR_STATS = ("eps_estimate", "eps_actual", "eps_beat_pct", "revenue_estimate", "revenue_actual", "revenue_beat_pct")
-# the note's own statement of the quarter's EPS: "Diluted EPS of $0.32", "EPS was $1.24", "$0.32 diluted"; a trailing, annual or
+# the note's own statement of the quarter's EPS: "Diluted EPS of $0.32", "EPS was $1.24", "Diluted EPS for the quarter ended June 27,
+# 2026 was $2.02", "$0.32 diluted"; a trailing, annual or
 # half-year figure is not the quarter's
-TEXT_EPS = re.compile(r"(?<![\w-])(?:diluted )?EPS (?:of|was|at|came in at|reached|rose to|fell to) (-?)\$(\d+\.\d{2})|(-?)\$(\d+\.\d{2}) (?:per )?diluted", re.I)
+TEXT_EPS = re.compile(r"(?<![\w-])(?:diluted )?EPS (?:for the (?:quarter|three months) ended [A-Za-z]{3,9}\.? \d{1,2},? \d{4},? )?(?:of|was|at|came in at|reached|rose to|fell to) (-?)\$(\d+\.\d{2})"
+                      r"|(-?)\$(\d+\.\d{2}) (?:per )?diluted", re.I)
 NOT_QUARTER = re.compile(r"(?:trailing|four[- ]quarters?|last\s+four\s+quarters|twelve[- ]months?|full[- ]year|annual|first[- ]half|half[- ]year|TTM"
                          r"|nine[- ]months?|six[- ]months?|year[- ]to[- ]date)[\w ,-]{0,24}$", re.I)      # "Over the trailing four quarters, EPS of $1.08"
 _SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
@@ -89,6 +92,65 @@ def text_eps(texts: list[str]) -> float | None:
     return None
 
 
+_MON = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+QUARTER_ENDED = re.compile(rf"quarter (?:ended|ending) {_MON} (\d{{1,2}}),? (\d{{4}})", re.I)
+QUARTER_LABEL = re.compile(r"\b(?:Q([1-4])|(first|second|third|fourth)[- ]quarter)(?: of)?(?: fiscal)? (?:FY ?)?(\d{4})\b", re.I)
+_ORDINAL = {"first": 1, "second": 2, "third": 3, "fourth": 4}
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+QUARTER_END_DAYS = 7           # "the quarter ended June 27, 2026" is the strip's quarter when within this many days of its period end
+QUARTER_LABEL_DAYS = 45        # "Q2 2026" is the strip's quarter when its calendar quarter ends this close to the period end
+
+
+def named_quarter(sentence: str) -> tuple[date, bool] | None:
+    """Pure: the first quarter a sentence names, as (the day it ended, False) for "the quarter ended June 27, 2026", or (its calendar
+    quarter's last day, True) for "Q1 2026" or "first quarter of 2026"; None when it names none."""
+    hits = []
+    for m in QUARTER_ENDED.finditer(sentence):
+        try:
+            hits.append((m.start(), date(int(m.group(3)), _MONTHS.index(m.group(1)[:3].lower()) + 1, int(m.group(2))), False))
+        except ValueError:
+            continue
+    for m in QUARTER_LABEL.finditer(sentence):
+        n = int(m.group(1)) if m.group(1) else _ORDINAL[m.group(2).lower()]
+        year = int(m.group(3))
+        hits.append((m.start(), date(year, 12, 31) if n == 4 else date(year, 3 * n + 1, 1) - timedelta(days=1), True))
+    if not hits:
+        return None
+    _, day, label = min(hits, key=lambda h: h[0])
+    return day, label
+
+
+def same_quarter(named, period_end) -> bool:
+    """Pure: a named quarter (named_quarter) is the quarter that ended on `period_end`."""
+    day, label = named
+    return abs((day - period_end).days) <= (QUARTER_LABEL_DAYS if label else QUARTER_END_DAYS)
+
+
+def _sentence_around(t: str, start: int, end: int) -> str:
+    """The sentence holding t[start:end], up to its end."""
+    begin = max([t.rfind("\n", 0, start) + 1] + [m.end() for m in _SENTENCES.finditer(t, 0, start)])
+    stop = next((m.start() for m in _SENTENCES.finditer(t, end)), len(t))
+    nl = t.find("\n", end)
+    return t[begin:min(stop, nl) if nl >= 0 else stop]
+
+
+def quarter_text_eps(texts: list[str], period_end) -> float | None:
+    """Pure: the first quarterly EPS figure the text states for the quarter that ended on `period_end`: a figure whose sentence names
+    another quarter is skipped (META's "Diluted EPS of $10.44 in Q1 2026" beside a strip showing Q2), one that names none is taken
+    as the latest quarter's."""
+    for t in texts:
+        t = t or ""
+        for m in TEXT_EPS.finditer(t):
+            if NOT_QUARTER.search(t[max(0, m.start() - 40):m.start()]):
+                continue
+            named = named_quarter(_sentence_around(t, m.start(), m.end()))
+            if named is not None and not same_quarter(named, period_end):
+                continue
+            sign, digits = (m.group(1), m.group(2)) if m.group(2) else (m.group(3), m.group(4))
+            return -float(digits) if sign else float(digits)
+    return None
+
+
 def note_texts(structured: dict | None, content: str | None) -> list[str]:
     """Pure: a served note's prose in reading order (the markdown content when present, else its points and Bottom Line)."""
     if content:
@@ -99,23 +161,29 @@ def note_texts(structured: dict | None, content: str | None) -> list[str]:
                                                     for p in (structured.get(sec) or [])]
 
 
-def eps_disagreement(structured: dict | None, content: str | None) -> str | None:
-    """Pure: why a served note's strip EPS and its text disagree, or None."""
+def eps_disagreement(structured: dict | None, content: str | None, period_end=None) -> str | None:
+    """Pure: why a served note's strip EPS and its text disagree, or None. With the strip quarter's `period_end`, only a figure the text
+    states for that quarter is compared (quarter_text_eps)."""
     st = (structured or {}).get("stats") if isinstance((structured or {}).get("stats"), dict) else None
     strip = st.get("eps_sec") if st else None
-    said = text_eps(note_texts(structured, content))
+    texts = note_texts(structured, content)
+    said = text_eps(texts) if period_end is None else quarter_text_eps(texts, period_end)
     if strip is None or said is None or round(float(strip), 2) == round(said, 2):
         return None
     return f"strip EPS ${float(strip):.2f}, text ${said:.2f}"
 
 
-async def sec_eps_for(db, symbol: str, quarter_date: str | None) -> float | None:
-    """The GAAP diluted EPS from SEC filings (eps_quarters) for the quarter a report on `quarter_date` announced, or None."""
+async def sec_quarter_for(db, symbol: str, quarter_date: str | None) -> dict | None:
+    """The quarter a report on `quarter_date` announced, {period_end, eps, ...} from SEC filings (eps_quarters), or None."""
     if not quarter_date:
         return None
-    from datetime import date as _date
     from app.services.eps_year_ago import load_quarters, quarter_for_report, year_ago_pairs
-    pair = quarter_for_report(year_ago_pairs(await load_quarters(db, symbol)), _date.fromisoformat(str(quarter_date)[:10]))
+    return quarter_for_report(year_ago_pairs(await load_quarters(db, symbol)), date.fromisoformat(str(quarter_date)[:10]))
+
+
+async def sec_eps_for(db, symbol: str, quarter_date: str | None) -> float | None:
+    """The GAAP diluted EPS from SEC filings (eps_quarters) for the quarter a report on `quarter_date` announced, or None."""
+    pair = await sec_quarter_for(db, symbol, quarter_date)
     return pair["eps"] if pair else None
 
 

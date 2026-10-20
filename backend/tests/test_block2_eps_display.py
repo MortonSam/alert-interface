@@ -6,7 +6,7 @@ from app.services import briefing as B
 from app.services import ffo as F
 from app.services import licensed_estimates as LE
 from app.services.eps_year_ago import year_ago_pairs
-from app.services.note_valuation import eps_disagreement, served, text_eps
+from app.services.note_valuation import eps_disagreement, named_quarter, quarter_text_eps, same_quarter, served, text_eps
 
 
 def _ya(quarters, day):
@@ -64,6 +64,34 @@ def test_the_note_text_eps_is_the_quarters_and_a_strip_that_disagrees_is_named()
     strip = lambda v: {"stats": {"eps_sec": v}}
     assert eps_disagreement(strip(0.32), TSLA_TEXT) is None
     assert eps_disagreement(strip(0.33), TSLA_TEXT) == "strip EPS $0.33, text $0.32"
+
+
+META_TEXT = ("- **Sequential EPS recovery after prior weakness:** Diluted EPS of $10.44 in Q1 2026 represented a 62.4% increase versus Q1 2025, "
+             "a sharp reversal from the 82.6% year-over-year decline posted in Q3 2025.")
+AAPL_TEXT = ("- **Accelerating EPS growth:** Diluted EPS for the quarter ended June 27, 2026 was $2.02, up 28.7% from $1.57 a year earlier. "
+             "Over the trailing four quarters, diluted EPS of $8.71 compares to $6.59 over the prior four quarters, a 32.2% year-over-year gain.")
+MU_TEXT = ("- **Accelerating quarterly EPS trajectory:** Diluted EPS rose from $4.60 in the quarter ended November 2025, to $12.07, then $24.67, "
+           "and then $32.99 in the most recent quarter. Over the trailing four quarters, diluted EPS of $74.33 compares to $7.59 in the prior "
+           "four-quarter period, a gain of 879.3%.")
+
+
+def test_the_note_check_compares_figures_for_the_same_quarter_only():
+    """Production's notes, 2026-10-20: META's text names Q1 2026 while its strip shows Q2 (a correct figure, flagged); AAPL's and MU's
+    trailing figures are not the quarter's."""
+    from datetime import date
+    q2 = date(2026, 6, 30)
+    assert named_quarter("Diluted EPS of $10.44 in Q1 2026 represented") == (date(2026, 3, 31), True)
+    assert named_quarter("for the quarter ended June 27, 2026 was $2.02") == (date(2026, 6, 27), False)
+    assert named_quarter("in the fourth quarter of 2025") == (date(2025, 12, 31), True) and named_quarter("EPS of $1.00") is None
+    assert not same_quarter((date(2026, 3, 31), True), q2) and same_quarter((date(2026, 6, 27), False), date(2026, 6, 27))
+    assert eps_disagreement({"stats": {"eps_sec": 6.18}}, META_TEXT, q2) is None                     # Q1's figure, never against Q2's strip
+    assert eps_disagreement({"stats": {"eps_sec": 6.18}}, META_TEXT) == "strip EPS $6.18, text $10.44"   # without the quarter, as before
+    assert eps_disagreement({"stats": {"eps_sec": 10.40}}, META_TEXT, date(2026, 3, 31)) == "strip EPS $10.40, text $10.44"
+    assert quarter_text_eps([AAPL_TEXT], date(2026, 6, 27)) == 2.02
+    assert eps_disagreement({"stats": {"eps_sec": 2.02}}, AAPL_TEXT, date(2026, 6, 27)) is None
+    assert eps_disagreement({"stats": {"eps_sec": 1.99}}, AAPL_TEXT, date(2026, 6, 27)) == "strip EPS $1.99, text $2.02"
+    assert eps_disagreement({"stats": {"eps_sec": 32.99}}, MU_TEXT, date(2026, 9, 3)) is None
+    assert eps_disagreement({"stats": {"eps_sec": 0.33}}, TSLA_TEXT, q2) == "strip EPS $0.33, text $0.32"   # Q2 2026 named: compared
 
 
 def test_a_served_note_drops_every_vendor_figure_from_the_strip():

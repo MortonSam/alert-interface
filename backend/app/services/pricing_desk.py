@@ -24,7 +24,8 @@ from datetime import date, datetime, timezone
 
 import numpy as np
 
-PRICING_COMPUTATION_VERSION = 2       # 2 (2026-10-12): expected payoff over the move to expiry, not the 1-day move
+PRICING_COMPUTATION_VERSION = 3       # 2 (2026-10-12): expected payoff over the move to expiry, not the 1-day move; 3 (2026-10-20): the
+                                      # implied move is the straddle's time value, without the in-the-money leg's intrinsic value
 MAX_HORIZON = 10                      # sessions from the chain date to the expiry that the distribution is built for; further expiries use this
 SHRINK_K = 6
 MIN_PRIOR = 2
@@ -157,15 +158,21 @@ def nearest(strikes: list[float], target: float) -> float | None:
 
 
 def implied_move(quotes: dict[float, dict], spot: float) -> tuple[float, float] | None:
-    """(ATM strike, the straddle mid over spot) at the strike nearest spot, or None without a priced pair."""
+    """(ATM strike, the straddle's time value over spot) at the strike nearest spot, or None without a priced pair. The straddle's
+    mid less the intrinsic value of its in-the-money leg (|spot - strike|): with strikes $5 apart and the stock between them, the
+    whole straddle counts the in-the-money call or put as move (CMS on Oct 19, 2026: spot $67.37, the $65 straddle's $4.83 mid read
+    as a 7.16% move, $2.37 of it the call's intrinsic value; its time value is 3.64%)."""
     strikes = sorted(quotes)
     atm = nearest(strikes, spot)
     if atm is None:
         return None
     cm, pm = fill(quotes[atm]["call"], "buy", 0.0), fill(quotes[atm]["put"], "buy", 0.0)
-    if cm is None or pm is None or cm + pm <= 0:
+    if cm is None or pm is None:
         return None
-    return atm, (cm + pm) / spot
+    time_value = cm + pm - abs(spot - atm)
+    if time_value <= 0:
+        return None
+    return atm, time_value / spot
 
 
 def structure_legs(name: str, quotes: dict[float, dict], spot: float, im: float, tau: float) -> list[dict] | None:

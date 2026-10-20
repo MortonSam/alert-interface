@@ -1775,16 +1775,20 @@ async def check_note_served_clean(session) -> CheckResult:
 
 async def check_note_eps_agrees(session) -> CheckResult:
     """ERROR when a complete research note, as served, shows one EPS in its stats strip (eps_sec, SEC diluted EPS for the strip's
-    quarter) and states another in its text (services/note_valuation.eps_disagreement; TSLA showed $0.33 beside "$0.32 diluted")."""
+    quarter) and states another in its text for the same quarter (services/note_valuation.eps_disagreement; TSLA showed $0.33 beside
+    "$0.32 diluted"). A figure the text gives for another quarter is not compared (META's "Diluted EPS of $10.44 in Q1 2026" beside a
+    strip showing Q2's $6.18)."""
     from app.config import settings
-    from app.services.note_valuation import eps_disagreement, served, with_sec_eps
+    from app.services.note_valuation import eps_disagreement, sec_quarter_for, served, with_sec_eps
     rows = (await session.execute(text("""SELECT t.symbol, n.structured_content, n.verification, n.content FROM research_notes n
         JOIN tickers t ON t.id = n.ticker_id WHERE n.status = 'complete'"""))).all()
     bad, compared = [], 0
     for r in rows:
         sc, _v, c = served(r.structured_content, r.verification, r.content, bool(settings.pe_enabled))
         sc = await with_sec_eps(session, r.symbol, sc)
-        why = eps_disagreement(sc, c)
+        st = (sc or {}).get("stats") if isinstance((sc or {}).get("stats"), dict) else {}
+        pair = await sec_quarter_for(session, r.symbol, st.get("latest_quarter_date"))
+        why = eps_disagreement(sc, c, pair["period_end"] if pair else None)
         compared += 1
         if why:
             bad.append(f"{r.symbol}: {why}")
@@ -3200,8 +3204,9 @@ async def check_pending_repairs(session) -> CheckResult:
 
 async def check_chain_shadow(session) -> CheckResult:
     """Judges the stored shadow nights (chain_shadow:{date}, written by the Options chains step as it stores each
-    night's Intrinio chains and compares the front expiry with the courier's). One query. WARN until MIN_NIGHTS nights
-    exist, then ERROR unless the last MIN_NIGHTS all pass the retirement criteria."""
+    night's Intrinio chains and compares the front expiry with the courier's). One query. It tracks whether the courier can be
+    retired, not data a visitor sees, so it never fails the step: WARN until MIN_NIGHTS nights exist, and WARN with the failing
+    criteria (chain_shadow.evaluate's message and rows, unchanged) unless the last MIN_NIGHTS all pass them (Sam, 2026-10-20)."""
     import json as _json
     from app.services.chain_shadow import MIN_NIGHTS, evaluate
     raws = (await session.execute(select(SystemMetadata.value).where(SystemMetadata.key.like("chain_shadow:%")))).scalars().all()
@@ -3212,7 +3217,7 @@ async def check_chain_shadow(session) -> CheckResult:
         except (ValueError, KeyError, TypeError):
             continue
     v = evaluate(nights, MIN_NIGHTS)
-    level = {"pass": PASS, "warn": WARN, "error": ERROR}[v.level]
+    level = {"pass": PASS, "warn": WARN, "error": WARN}[v.level]
     return CheckResult("chain_shadow", level, v.message, v.rows)
 
 

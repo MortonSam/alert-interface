@@ -195,6 +195,39 @@ def test_each_retirement_criterion_fails_the_week_on_its_own():
     assert f"{IMPLIED_MOVE_TOLERANCE_PP}" == "0.3" and MIN_NIGHTS == 7
 
 
+class _Rows:
+    def __init__(self, values):
+        self.values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.values
+
+
+class _Session:
+    def __init__(self, values):
+        self.values = values
+
+    async def execute(self, *_a, **_k):
+        return _Rows(self.values)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_week_is_a_warning_with_the_same_message_and_rows_never_an_error():
+    """chain_shadow tracks whether the courier can be retired, not data a visitor sees (Sam, 2026-10-20): the check never fails the step."""
+    days = [f"2026-10-{d:02d}" for d in range(1, 8)]
+    nights = [clean_night(d) for d in days[:-1]] + [clean_night(days[-1], implied_move_within_tolerance=370, implied_move_share=0.925)]
+    v = evaluate(nights)
+    assert v.level == "error"
+    result = await check_chain_shadow(_Session([json.dumps({"totals": n}) for n in nights]))
+    assert result.level == WARN and result.level != ERROR
+    assert result.message == v.message and result.rows == v.rows
+    ok = await check_chain_shadow(_Session([json.dumps({"totals": clean_night(d)}) for d in days]))
+    assert ok.level == PASS
+
+
 # ── wiring ────────────────────────────────────────────────────────────────────
 
 def test_the_step_runs_before_validate_with_room_to_wait_and_the_check_is_registered():
