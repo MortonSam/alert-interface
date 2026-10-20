@@ -41,6 +41,8 @@ class AnthropicClient:
             kwargs["timeout"] = timeout
         if max_retries is not None:
             kwargs["max_retries"] = max_retries
+        from app.services.prod_key_guard import check_production_key
+        check_production_key()          # production's database only with production's environment and key (services/prod_key_guard)
         self._client = AsyncAnthropic(api_key=settings.anthropic_api_key, **kwargs)
 
     async def _create(self, method: str, **kwargs):

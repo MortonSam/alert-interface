@@ -19,6 +19,8 @@ async def run() -> int:
     from app.config import settings
     from app.database import ScriptSessionLocal
     from app.services.system_metadata_service import set_value
+    from app.services.prod_key_guard import check_production_key
+    check_production_key()              # production's key check only with production's key (services/prod_key_guard)
     result = {"at": datetime.now(timezone.utc).isoformat(), "model": H.CHECK_MODEL, "ok": False, "status": None, "error": None}
     try:
         msg = await AsyncAnthropic(api_key=settings.anthropic_api_key).messages.create(

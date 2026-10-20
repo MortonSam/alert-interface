@@ -59,6 +59,11 @@ A bug visible to visitors (a broken page, a wrong number, a missing section) is 
 
 Large production writes (a whole-table reread, a reseed, anything that touches hundreds of rows) run on Railway (`railway run` or the console), never from the Mac through the public proxy: from here they crawl at about one ticker a minute and a dropped connection leaves a half-written run. From the Mac, production is read-only (dry runs, `list_*`, validate, SELECTs); every `--write` waits for Sam's typed go for that exact command.
 
+A job against production run from the Mac uses production's own environment and Anthropic key, never the dev `.env`: run it with
+`backend/ops/prod_run.sh python -m app.scripts.<job> ...` (the alert-interface service's variables through `railway run`, the database
+through the public proxy). `services/prod_key_guard` refuses a model call on production's database without that environment
+(`RAILWAY_ENVIRONMENT_NAME=production`), so a dev-key run stops before it reads or writes anything.
+
 ## Visual Fixes
 
 A fix to layout, scrolling or anything visual is verified in real Chrome (puppeteer-core driving the installed Chrome) at about 1170 x 1300 CSS pixels, Sam's window, plus 1440 x 900 and 1920 x 1080, with real wheel events for scrolling (never by measuring positions alone), with a screenshot at every stop checked as complete and centered, before and after the fix, locally and then on the live page after the deploy.
