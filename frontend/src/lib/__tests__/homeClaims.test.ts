@@ -68,7 +68,8 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(home).toContain("export const revalidate = 300;");                                      // server-rendered and revalidated
     const { STATS_REVALIDATE_SECONDS } = await import("@/lib/siteStats");
     expect(STATS_REVALIDATE_SECONDS).toBe(300);                                                      // the literal Next needs and the constant the fetch uses agree
-    expect(home).toContain("font-variant-numeric: tabular-nums");
+    expect(home).toContain("${COUNTER_CSS}");
+    expect((await import("@/lib/siteCounters")).COUNTER_CSS).toContain("font-variant-numeric: tabular-nums");
     expect(home).not.toMatch(/stat-number[^}]*border|since 2011|Analyst actions since/);
     const block = read("components/SiteCounters.tsx");
     expect(block).toContain("api.system.stats()");

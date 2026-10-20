@@ -10,7 +10,7 @@ import type { MarketSession, MarketSessionDay } from "@/lib/api";
 import { averageMoveLine, epsLine, fmtMove, reportCards, typicalMove, storedTypical, whyItMoved } from "@/lib/reportCards";
 import { compareMoves, MOVE_LESS_RATIO, MOVE_MIN_REPORTS, MOVE_MORE_RATIO, optionsVerdict, type ReportMoveFacts, type VerdictInput } from "@/lib/optionsVerdict";
 import { comparisonParts } from "@/lib/moveComparison";
-import { EVIDENCE_VIEWS } from "@/lib/evidenceViews";
+import { BACK_TO_CHART, EVIDENCE_VIEWS } from "@/lib/evidenceViews";
 import { EARNINGS_MARKER_ENCODING, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -306,11 +306,23 @@ describe("preview state (2026-10-14): the report-move verdict, price uncolored, 
 });
 
 describe("the Evidence switch", () => {
-  it("has two views, Reports first and the default, and no fold left behind", () => {
-    expect(EVIDENCE_VIEWS.map((v) => v.label)).toEqual(["Reports", "Chart"]);
+  it("has two views, Chart first and the default, and no fold left behind", () => {
+    expect(EVIDENCE_VIEWS.map((v) => v.label)).toEqual(["Chart", "Reports"]);
     const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
     expect(page).toContain("useState<EvidenceView>(EVIDENCE_VIEWS[0].key)");
     expect(page).not.toContain("Distribution and peer comparison");
     expect(page).toContain('data-testid="evidence-switch"');
+  });
+  it("a report picked on the chart opens Reports at its card, and Reports then offers the way back", () => {
+    const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(page).toContain("<ReactionChart reactions={reactions} onPick={(date) => {");
+    expect(page).toMatch(/setEvidenceView\("reports"\);\s*setPickedReport/);
+    expect(page).toContain("picked={pickedReport}");
+    expect(BACK_TO_CHART).toBe("Back to the chart");
+    const cards = readFileSync(join(__dirname, "../../components/ticker/ReportCards.tsx"), "utf8");
+    expect(cards).toContain("const showAll = all || pickedAt >= FIRST_SHOWN;");        // a picked report past the first eight shows them all
+    expect(cards).toContain('scrollIntoView({ block: "center"');
+    expect(cards).toContain("PICK_HIGHLIGHT_MS");
+    expect(cards).toContain("{BACK_TO_CHART}");
   });
 });

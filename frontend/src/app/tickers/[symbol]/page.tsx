@@ -17,7 +17,7 @@ import { EARNINGS_MARKER_DASH, EARNINGS_MARKER_ENCODING, earningsMarkerColor, ea
 import EncodingLegend from "@/components/EncodingLegend";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTapAway } from "@/lib/useTapAway";
-import { yearLabel, yearTicks } from "@/lib/chartAxis";
+import { impliedBand, yearLabel, yearTicks } from "@/lib/chartAxis";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { NoLongerTrades } from "@/components/ticker/NoLongerTrades";
 import Link from "next/link";
@@ -65,7 +65,7 @@ import { averageMoveLine, storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
-import { EVIDENCE_VIEWS, type EvidenceView } from "@/lib/evidenceViews";
+import { EVIDENCE_VIEWS, smoothScroll, type EvidenceView, type PickedReport } from "@/lib/evidenceViews";
 import { fmtDay, fmtDayUnix, nyClock } from "@/lib/tickerDates";
 
 // Extracted components
@@ -422,8 +422,19 @@ function ReactionChartTooltip({ active, payload, mode, coordinate, viewBox }: { 
   );
 }
 
-function ReactionChart({ reactions, mode = "earnings" }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed" }) {
+/** The report whose column is under a click or tap on the reaction chart: its bar, the empty space above or below it, or its date
+ * beneath. The columns are the bars' full-height backgrounds, in data order; reading the pointer's own position works the same for
+ * a mouse and a touch, where the chart's hover state can still name the previous tap. */
+function pickedColumn(root: HTMLElement, x: number, y: number, data: { date: string }[]): string | null {
+  const cols = [...root.querySelectorAll(".recharts-bar-background-rectangle")].map((el) => el.getBoundingClientRect());
+  const i = cols.findIndex((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom + 28);   // 28px: the date row beneath
+  return i >= 0 ? data[i]?.date ?? null : null;
+}
+
+function ReactionChart({ reactions, mode = "earnings", onPick }: { reactions: HistoricalReaction[]; mode?: "earnings" | "fed"; onPick?: (date: string) => void }) {
   const tapAway = useTapAway();
+  const onPickRef = useRef(onPick);
+  onPickRef.current = onPick;
   const isFed = mode === "fed";
   const noOutcome = true;     // direction only: no EPS outcome is encoded anywhere (Block 2, 2026-10-20)
   const data = useMemo(() => {
@@ -451,10 +462,51 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
     return result;
   }, [data]);
 
+  // A report is picked on pointerup, at the point the pointer went down, by native capture listeners on the wrapper: they run
+  // before anything inside the chart can stop the event, a click is not dispatched when the chart re-renders its hovered bar
+  // between press and release, and a touch's click is moved by the browser's touch adjustment. A drag or scroll (moved more than
+  // 10px, or cancelled) picks nothing; after a pick, the touch's compatibility click is cancelled so it cannot land on a card.
+  const pickable = !!onPick && data.length > 0;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  useEffect(() => {
+    const el = tapAway.ref.current;
+    if (!pickable || !el) return;
+    let down: { x: number; y: number } | null = null;
+    let picked = false;
+    const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+    const onCancel = () => { down = null; };
+    const onUp = (e: PointerEvent) => {
+      const at = down;
+      down = null;
+      if (!at || Math.hypot(e.clientX - at.x, e.clientY - at.y) > 10) return;
+      const d = pickedColumn(el, at.x, at.y, dataRef.current);
+      if (d) {
+        picked = true;
+        // the press's own click, if the browser still sends one, would land on the card that replaced the chart: swallow it
+        const swallow = (c: MouseEvent) => { c.stopPropagation(); c.preventDefault(); };
+        document.addEventListener("click", swallow, { capture: true, once: true });
+        window.setTimeout(() => document.removeEventListener("click", swallow, true), 700);
+        onPickRef.current?.(d);
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => { if (picked) { picked = false; e.preventDefault(); } };
+    el.addEventListener("pointerdown", onDown, true);
+    el.addEventListener("pointerup", onUp, true);
+    el.addEventListener("pointercancel", onCancel, true);
+    el.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
+    return () => {
+      el.removeEventListener("pointerdown", onDown, true);
+      el.removeEventListener("pointerup", onUp, true);
+      el.removeEventListener("pointercancel", onCancel, true);
+      el.removeEventListener("touchend", onTouchEnd, true);
+    };
+  }, [pickable, tapAway.ref]);
+
   if (data.length === 0) return null;
 
   return (
-    <div className="mb-4" ref={tapAway.ref}>
+    <div className={cn("mb-4", onPick && "[&_.recharts-surface]:cursor-pointer")} ref={tapAway.ref} data-testid={onPick ? "reaction-chart-pickable" : undefined}>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
@@ -474,7 +526,8 @@ function ReactionChart({ reactions, mode = "earnings" }: { reactions: Historical
           />
           <ReferenceLine y={0} stroke="hsl(var(--border))" />
           <Tooltip active={tapAway.tooltipActive} content={<ReactionChartTooltip mode={mode} />} />
-          <Bar dataKey="pct1d" radius={[2, 2, 0, 0]}>
+          {/* with onPick, each report's full-height column (a transparent background) is what pickedColumn finds under a click or tap */}
+          <Bar dataKey="pct1d" radius={[2, 2, 0, 0]} background={onPick ? { fill: "transparent" } : undefined}>
             {data.map((entry, i) => {
               const { directionKey: _d, outcomeKey: _o, ...cell } = barCellStyle(entry.pct1d, "unknown", noOutcome);
               return <Cell key={i} {...cell} />;
@@ -1071,14 +1124,17 @@ function PriceChart({
 
   const fiveYearTicks = useMemo(() => (lineData.length > 1 ? yearTicks(lineData[0].epochMs, lineData[lineData.length - 1].epochMs) : undefined), [lineData]);
 
+  // the implied-move band spans the last bar to its expiration only (lib/chartAxis.impliedBand); the axes reach far enough to hold it
+  const band = useMemo(() => impliedBand(lineData.length ? lineData[lineData.length - 1].epochMs : null, impliedExpiration,
+                                         impliedRangeLow, impliedRangeHigh, isIntraday), [lineData, impliedExpiration, impliedRangeLow, impliedRangeHigh, isIntraday]);
   const yDomain = useMemo<[number, number]>(() => {
     if (lineData.length === 0) return [0, 1];
-    const closes = lineData.map((d) => d.close);
+    const closes = lineData.map((d) => d.close).concat(band ? [band.y1, band.y2] : []);
     const mn = Math.min(...closes);
     const mx = Math.max(...closes);
     const pad = (mx - mn) * 0.05 || mx * 0.01;
     return [mn - pad, mx + pad];
-  }, [lineData]);
+  }, [lineData, band]);
 
   const selector = (
     <div className="flex gap-1 mb-3" role="group" aria-label="Chart period">
@@ -1149,7 +1205,7 @@ function PriceChart({
             <XAxis
               dataKey={isIntraday ? "idx" : "epochMs"}
               type={isIntraday ? "category" : "number"}
-              domain={isIntraday ? undefined : ["dataMin", "dataMax"]}
+              domain={isIntraday ? undefined : ["dataMin", band ? band.x2 : "dataMax"]}
               tickFormatter={(val) => {
                 if (isIntraday) {
                   const pt = lineData[val as number];
@@ -1193,10 +1249,12 @@ function PriceChart({
               />
             )}
             {/* Implied range shading */}
-            {impliedRangeLow != null && impliedRangeHigh != null && (
+            {band && (
               <ReferenceArea
-                y1={impliedRangeLow}
-                y2={impliedRangeHigh}
+                x1={band.x1}
+                x2={band.x2}
+                y1={band.y1}
+                y2={band.y2}
                 fill="hsl(var(--primary))"
                 fillOpacity={0.06}
                 stroke="hsl(var(--primary))"
@@ -1230,10 +1288,10 @@ function PriceChart({
       {intradayBarsLine(chartData.bars_basis, chartData.bars_through, chartData.delay_minutes) && (
         <p className="text-xs text-muted-foreground mt-1">{intradayBarsLine(chartData.bars_basis, chartData.bars_through, chartData.delay_minutes)}</p>
       )}
-        {!isIntraday && (earningsMarkers.length > 0 || (impliedRangeLow != null && impliedRangeHigh != null) || chartLastBar) && (
+        {!isIntraday && (earningsMarkers.length > 0 || band || chartLastBar) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[10px] text-muted-foreground px-1">
             {chartLastBar && <span>Last bar {fmtOneDate(chartLastBar) ?? chartLastBar}</span>}
-            {impliedRangeLow != null && impliedRangeHigh != null && (
+            {band && (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-4 h-2.5 rounded-sm border border-dashed" style={{ borderColor: "hsl(var(--primary))", backgroundColor: "hsl(var(--primary))", opacity: 0.25 }} />
                 Shaded band: range implied by {impliedChainDate ? `the ${fmtOneDate(impliedChainDate) ?? impliedChainDate} options data` : "the options data on file"}{impliedExpiration ? ` for options expiring ${fmtOneDate(impliedExpiration) ?? impliedExpiration}` : ""}
@@ -1423,6 +1481,7 @@ export default function TickerPage() {
 
   const [historyView, setHistoryView] = useState<"earnings" | "fed">("earnings");
   const [evidenceView, setEvidenceView] = useState<EvidenceView>(EVIDENCE_VIEWS[0].key);
+  const [pickedReport, setPickedReport] = useState<PickedReport | null>(null);   // a report picked on the chart (lib/evidenceViews)
   const [fomcReactions, setFomcReactions] = useState<HistoricalReaction[]>([]);
   const [fomcStatus, setFomcStatus] = useState<SectionStatus>("loading");
 
@@ -2348,14 +2407,14 @@ export default function TickerPage() {
           {/* Earnings view */}
           {reactionStatus === "done" && reactions.length > 0 && historyView === "earnings" && (
             <>
-              {/* A two-way switch at the top: Reports (the tap-a-report cards, newest first, the default) or Chart (the
-                  reaction chart, distribution, peers and the table) */}
+              {/* A two-way switch at the top: Chart (the reaction chart, distribution, peers and the table, the default) or
+                  Reports (the tap-a-report cards, newest first) */}
               <div className="mb-6 inline-flex rounded-full bg-muted p-1" role="group" aria-label="Evidence view" data-testid="evidence-switch">
                 {EVIDENCE_VIEWS.map((v) => (
                   <button
                     key={v.key}
                     type="button"
-                    onClick={() => setEvidenceView(v.key)}
+                    onClick={() => { setEvidenceView(v.key); setPickedReport(null); }}
                     aria-pressed={evidenceView === v.key}
                     data-testid={`evidence-switch-${v.key}`}
                     className={cn(
@@ -2368,10 +2427,18 @@ export default function TickerPage() {
                 ))}
               </div>
               {evidenceView === "reports" ? (
-                <ReportCards reactions={reactions} typical={typicalMove(reactionSummary)} />
+                <ReportCards reactions={reactions} typical={typicalMove(reactionSummary)} picked={pickedReport}
+                  onBack={pickedReport ? () => {
+                    setPickedReport(null);
+                    setEvidenceView("chart");
+                    requestAnimationFrame(() => document.getElementById("evidence")?.scrollIntoView({ block: "start", behavior: smoothScroll() }));
+                  } : undefined} />
               ) : (
                 <div data-testid="evidence-chart">
-                  <ReactionChart reactions={reactions} />
+                  <ReactionChart reactions={reactions} onPick={(date) => {
+                    setEvidenceView("reports");
+                    setPickedReport((p) => ({ date, n: (p?.n ?? 0) + 1 }));
+                  }} />
                   {reactionSummary && reactionSummary.total_quarters >= 3 && (
                     <HistoryInsightsPanel s={reactionSummary} ce={conditionalEarnings} sectorPeers={sectorPeers} />
                   )}

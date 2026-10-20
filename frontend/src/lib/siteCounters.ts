@@ -35,30 +35,38 @@ export function counterRows(stats: SiteStats | null): CounterRow[] {
 
 
 // ── Layout model ───────────────────────────────────────────────────────────────
-// The counters row's geometry, stated once. SiteCounters.tsx and page.tsx carry the same numbers as Tailwind classes and
-// a clamp() rule; __tests__/siteCounters.test.ts asserts those strings match this model and that four 7-character
-// numbers never overlap at 1024, 1280 and 1440 pixels. Glyph widths are the display face's measured averages.
+// The counters row's geometry, stated once (2026-10-20: at 1440 the four figures ran together, "154,237671,7349,932", because
+// the old model took the row as 1024px when max-w-5xl includes its 32px side padding, so 60px figures overflowed 228px columns).
+// The row is a size container: the grid is four across only when the row is at least FOUR_ACROSS_MIN_PX wide, otherwise 2x2,
+// columns are GAP_PX apart, and each figure's size is the column width over the longest figure's width in ems (--num-em, set by
+// SiteCounters from the values shown), capped at FONT_MAX_PX, so a figure always fits its column. page.tsx's CSS carries these
+// numbers (tested); __tests__/siteCounters.test.ts holds the geometry at 360 to 1920 and the real-Chrome check measures it.
 
 export const COUNTER_LAYOUT = {
-  containerMax: 1024,        // max-w-5xl: the home page's one column (DESIGN.md)
+  containerMax: 1024,        // max-w-5xl on the home column, padding included
   sidePadding: { base: 16, sm: 32 },   // px-4 sm:px-8 on that column
-  columns: { base: 2, sm: 2, lg: 4 },  // grid-cols-2 lg:grid-cols-4: two by two on a phone
-  breakpoints: { sm: 640, lg: 1024 },
-  gapX: 16,                  // gap-x-4
-  font: { min: 36, vw: 4.2, max: 60 },   // clamp(36px, 4.2vw, 60px) on .stat-number
+  breakpoints: { sm: 640 },
+  gapPx: 48,                 // column-gap on .counters-grid
+  fourAcrossMinPx: 800,      // the row's own width (container query) from which four columns fit
+  fontMaxPx: 60,
   digitEm: 0.631,            // tabular digit advance in the display face (Newsreader 600), measured in Chrome at 60px
   commaEm: 0.241,
-  label: { fontPx: 10, trackingEm: 0.08 },   // text-[10px] tracking-[.08em], mono
+  safety: 1.06,              // the figure's width in ems is padded by this before sizing, so rounding never makes it touch
+  label: { fontPx: 10, trackingEm: 0.08 },   // text-[10px] tracking-[.08em], mono; labels wrap inside their column
   monoCharEm: 0.6,
 } as const;
 
-export const STAT_NUMBER_CLAMP = `clamp(${COUNTER_LAYOUT.font.min}px, ${COUNTER_LAYOUT.font.vw}vw, ${COUNTER_LAYOUT.font.max}px)`;
+/** The longest figure's width in ems, padded: the --num-em the CSS divides the column by. */
+export function numEm(texts: string[]): number {
+  const em = (t: string) => [...t].reduce((a, ch) => a + (ch === "," || ch === "." ? COUNTER_LAYOUT.commaEm : COUNTER_LAYOUT.digitEm), 0);
+  return Number((Math.max(1, ...texts.map(em)) * COUNTER_LAYOUT.safety).toFixed(3));
+}
 
 export interface CounterGeometry {
   columns: number;
   columnWidth: number;
   fontSize: number;
-  /** Each number's horizontal box [left, right] within the row, centered in its column. */
+  /** Each number's horizontal box [left, right] within the row, left-aligned in its column. */
   boxes: Array<[number, number]>;
 }
 
@@ -73,20 +81,23 @@ export function labelWidth(text: string): number {
   return text.length * (fontPx * COUNTER_LAYOUT.monoCharEm + fontPx * trackingEm);
 }
 
-/** The row at a viewport width: columns, column width, font size and each number's box. Pure. */
+/** The row's own width at a viewport width: the home column's content box. */
+export function rowWidth(viewport: number): number {
+  const L = COUNTER_LAYOUT;
+  const padding = viewport >= L.breakpoints.sm ? L.sidePadding.sm : L.sidePadding.base;
+  return Math.min(L.containerMax, viewport) - 2 * padding;
+}
+
+/** The row at a viewport width, as the CSS lays it out: columns, column width, font size and each number's box. Pure. */
 export function counterGeometry(viewport: number, numbers: string[]): CounterGeometry {
   const L = COUNTER_LAYOUT;
-  const columns = viewport >= L.breakpoints.lg ? L.columns.lg : viewport >= L.breakpoints.sm ? L.columns.sm : L.columns.base;
-  const padding = viewport >= L.breakpoints.sm ? L.sidePadding.sm : L.sidePadding.base;
-  const rowWidth = Math.min(L.containerMax, viewport - 2 * padding);
-  const columnWidth = (rowWidth - L.gapX * (columns - 1)) / columns;
-  const fontSize = Math.min(L.font.max, Math.max(L.font.min, (L.font.vw / 100) * viewport));
+  const row = rowWidth(viewport);
+  const columns = row >= L.fourAcrossMinPx ? 4 : 2;
+  const columnWidth = (row - L.gapPx * (columns - 1)) / columns;
+  const fontSize = Math.min(L.fontMaxPx, columnWidth / numEm(numbers));
   const boxes = numbers.map((n, i) => {
-    const col = i % columns;
-    const left = col * (columnWidth + L.gapX);
-    const w = numberWidth(n, fontSize);
-    const start = left + (columnWidth - w) / 2;
-    return [start, start + w] as [number, number];
+    const left = (i % columns) * (columnWidth + L.gapPx);
+    return [left, left + numberWidth(n, fontSize)] as [number, number];
   });
   return { columns, columnWidth, fontSize, boxes };
 }
@@ -95,3 +106,18 @@ export function counterGeometry(viewport: number, numbers: string[]): CounterGeo
 export function boxesOverlap(a: [number, number], b: [number, number]): boolean {
   return a[0] < b[1] && b[0] < a[1];
 }
+
+/** The page's CSS for the row, from the model. */
+export const COUNTER_CSS = `
+        .counters { container-type: inline-size; }
+        .counters-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: ${COUNTER_LAYOUT.gapPx}px; row-gap: 40px; }
+        .stat-number {
+          font-size: min(${COUNTER_LAYOUT.fontMaxPx}px, calc((100cqw - ${COUNTER_LAYOUT.gapPx}px) / 2 / var(--num-em, 4.3)));
+          line-height: 1;
+          letter-spacing: -.01em;
+          font-variant-numeric: tabular-nums;
+        }
+        @container (min-width: ${COUNTER_LAYOUT.fourAcrossMinPx}px) {
+          .counters-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+          .stat-number { font-size: min(${COUNTER_LAYOUT.fontMaxPx}px, calc((100cqw - ${3 * COUNTER_LAYOUT.gapPx}px) / 4 / var(--num-em, 4.3))); }
+        }`;

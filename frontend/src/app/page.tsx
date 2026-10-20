@@ -4,6 +4,7 @@ import { HeroSearchButton } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
 import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
 import { SiteCounters } from "@/components/SiteCounters";
+import { COUNTER_CSS } from "@/lib/siteCounters";
 import { fetchSiteStatsServer } from "@/lib/siteStats";
 import { IvyStatLine } from "@/components/IvyStatLine";
 import { IvyMark } from "@/components/IvyMark";
@@ -43,12 +44,7 @@ export default async function Home() {
         @media (prefers-reduced-motion: reduce) {
           .open-heron, .open-line, .open-rest, .open-cue { animation: none; }
         }
-        .stat-number {
-          font-size: clamp(36px, 4.2vw, 60px);   /* seven counter characters fit a quarter column from 1024px up */
-          line-height: 1;
-          letter-spacing: -.01em;
-          font-variant-numeric: tabular-nums;
-        }
+        ${COUNTER_CSS}
         .home-label { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .16em; color: hsl(var(--muted-foreground)); margin-bottom: 24px; }
       `}</style>
 

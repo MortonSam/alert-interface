@@ -1,28 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HistoricalReaction } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { BACK_TO_CHART, PICK_HIGHLIGHT_MS, smoothScroll, type PickedReport } from "@/lib/evidenceViews";
 import { fmtMove, reportCards, whyItMoved, type TypicalMove } from "@/lib/reportCards";
 
 const FIRST_SHOWN = 8;
 
-/** Newest-first report cards; tapping one opens its line built from stored facts. */
-export function ReportCards({ reactions, typical }: { reactions: HistoricalReaction[]; typical: TypicalMove | null }) {
+/** Newest-first report cards; tapping one opens its line built from stored facts. A report picked on the chart (`picked`) shows
+ * every card if it is past the first FIRST_SHOWN, scrolls to its card and highlights it for PICK_HIGHLIGHT_MS; `onBack` adds the
+ * way back to the chart. */
+export function ReportCards({ reactions, typical, picked = null, onBack }: {
+  reactions: HistoricalReaction[]; typical: TypicalMove | null; picked?: PickedReport | null; onBack?: () => void;
+}) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [all, setAll] = useState(false);
+  const [lit, setLit] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const cards = reportCards(reactions);
   const byId = new Map(reactions.map((r) => [r.id, r]));
-  const shown = all ? cards : cards.slice(0, FIRST_SHOWN);
+  const pickedAt = picked ? cards.findIndex((c) => c.eventDate === picked.date) : -1;
+  const showAll = all || pickedAt >= FIRST_SHOWN;
+  const shown = showAll ? cards : cards.slice(0, FIRST_SHOWN);
+
+  useEffect(() => {
+    if (!picked || pickedAt < 0) return;
+    if (pickedAt >= FIRST_SHOWN) setAll(true);
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-event-date="${picked.date}"]`);
+    el?.scrollIntoView({ block: "center", behavior: smoothScroll() });
+    setLit(picked.date);
+    const t = window.setTimeout(() => setLit(null), PICK_HIGHLIGHT_MS);
+    return () => window.clearTimeout(t);
+  }, [picked, pickedAt]);
 
   return (
     <div data-testid="report-cards">
-      <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {onBack && (
+        // sticky under the header and section nav, so it stays in reach after the jump to a card far down the list
+        <div className="sticky top-[8.5rem] sm:top-28 z-10 mb-4 -mx-1">
+          <button type="button" onClick={onBack} data-testid="back-to-chart"
+            className="tap rounded-full border border-border bg-background/95 px-4 py-1.5 text-sm font-medium text-foreground/85 shadow-sm backdrop-blur hover:text-foreground transition-colors">
+            {BACK_TO_CHART}
+          </button>
+        </div>
+      )}
+      <ul ref={listRef} className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {shown.map((c) => {
           const why = whyItMoved(byId.get(c.id)!, typical);
           const open = openId === c.id;
           return (
-            <li key={c.id}>
+            <li key={c.id} data-event-date={c.eventDate}>
               <button
                 type="button"
                 aria-expanded={why ? open : undefined}
@@ -31,6 +59,7 @@ export function ReportCards({ reactions, typical }: { reactions: HistoricalReact
                 className={cn(
                   "w-full rounded-lg border bg-card px-4 py-3.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
                   open ? "border-primary/70" : "border-border hover:border-foreground/30",
+                  lit === c.eventDate && "ring-2 ring-primary ring-offset-2 ring-offset-background",
                   !why && "cursor-default",
                 )}
                 data-testid="report-card"
@@ -70,10 +99,10 @@ export function ReportCards({ reactions, typical }: { reactions: HistoricalReact
       {cards.length > FIRST_SHOWN && (
         <button
           type="button"
-          onClick={() => setAll((a) => !a)}
+          onClick={() => setAll(!showAll)}
           className="tap mt-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          {all ? "Show the latest 8 reports" : `Show all ${cards.length} reports`}
+          {showAll ? "Show the latest 8 reports" : `Show all ${cards.length} reports`}
         </button>
       )}
     </div>
