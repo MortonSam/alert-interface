@@ -16,7 +16,10 @@ from sqlalchemy import text
 
 from app.services.growth import YEAR_AGO_DAYS, growth_words
 
-REPORT_LAG_DAYS = (1, 120)      # a report announces the quarter that ended this many days before it
+# a report announces the quarter that ended this many days before it. 95, not 120 (2026-10-20): with the new quarter not on file yet,
+# 120 days reached back to the previous quarter, so JPM's Oct 13 report showed Q2's $7.70 (Jun 30, 105 days earlier) and PLD's Oct 15
+# report Q2's FFO $1.70; a quarterly report comes well inside 95 days of its quarter's end, the next quarter's end never
+REPORT_LAG_DAYS = (1, 95)
 NO_YEAR_AGO = "No EPS figure from the same quarter a year earlier is on file."
 
 
@@ -62,6 +65,14 @@ def eps_line(pair: dict | None) -> str | None:
 
 
 async def load_quarters(db, symbol: str) -> list[tuple[date, float]]:
+    """GAAP diluted EPS per quarter from XBRL (eps_quarters), and for a quarter XBRL does not hold yet, the figure read from its earnings
+    release where both readers agreed (release_eps, diluted basis, with the quarter's end): XBRL lags a report by weeks (JPM's Q3 2026,
+    reported Oct 13, is $5.57 in its release and not yet in XBRL)."""
     rows = (await db.execute(text("""SELECT DISTINCT ON (period_end) period_end, eps FROM eps_quarters WHERE symbol = :s AND eps IS NOT NULL
         ORDER BY period_end, filed_on DESC NULLS LAST"""), {"s": symbol})).all()
-    return [(r.period_end, float(r.eps)) for r in rows]
+    out = {r.period_end: float(r.eps) for r in rows}
+    rel = (await db.execute(text("""SELECT DISTINCT ON (period_end) period_end, diluted_eps_gaap FROM release_eps WHERE symbol = :s
+        AND eps_basis = 'diluted' AND diluted_eps_gaap IS NOT NULL AND period_end IS NOT NULL ORDER BY period_end, report_date DESC"""), {"s": symbol})).all()
+    for r in rel:
+        out.setdefault(r.period_end, float(r.diluted_eps_gaap))
+    return sorted(out.items())
