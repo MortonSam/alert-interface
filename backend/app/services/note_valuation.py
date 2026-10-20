@@ -32,7 +32,8 @@ VENDOR_STATS = ("eps_estimate", "eps_actual", "eps_beat_pct", "revenue_estimate"
 # the note's own statement of the quarter's EPS: "Diluted EPS of $0.32", "EPS was $1.24", "$0.32 diluted"; a trailing, annual or
 # half-year figure is not the quarter's
 TEXT_EPS = re.compile(r"(?<![\w-])(?:diluted )?EPS (?:of|was|at|came in at|reached|rose to|fell to) (-?)\$(\d+\.\d{2})|(-?)\$(\d+\.\d{2}) (?:per )?diluted", re.I)
-NOT_QUARTER = re.compile(r"(?:trailing|four-quarter|twelve-month|full[- ]year|annual|first[- ]half|half[- ]year|TTM|nine[- ]month|year[- ]to[- ]date)[\w -]{0,20}$", re.I)
+NOT_QUARTER = re.compile(r"(?:trailing|four[- ]quarters?|last\s+four\s+quarters|twelve[- ]months?|full[- ]year|annual|first[- ]half|half[- ]year|TTM"
+                         r"|nine[- ]months?|six[- ]months?|year[- ]to[- ]date)[\w ,-]{0,24}$", re.I)      # "Over the trailing four quarters, EPS of $1.08"
 _SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 
