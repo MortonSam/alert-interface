@@ -59,6 +59,7 @@ TSLA_TEXT = ("## Key Risks\n- **Earnings per share declining year over year** Di
 def test_the_note_text_eps_is_the_quarters_and_a_strip_that_disagrees_is_named():
     assert text_eps([TSLA_TEXT]) == 0.32
     assert text_eps(["trailing four-quarter diluted EPS of $1.08"]) is None
+    assert text_eps(["Over the trailing four quarters, EPS of $1.08 is 35.7% lower."]) is None          # a dev note, 2026-10-20
     assert text_eps(["earned $1.24 per diluted share"]) == 1.24 and text_eps(["net income of $1.24 billion"]) is None
     strip = lambda v: {"stats": {"eps_sec": v}}
     assert eps_disagreement(strip(0.32), TSLA_TEXT) is None
