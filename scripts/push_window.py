@@ -7,6 +7,9 @@
                                                 # runs during a production refresh, which only a push waits for
     python3 scripts/push_window.py --ref=SHA    # push that commit of HEAD's history to main (git push origin SHA:main): an earlier deploy
 
+After a push to main the gate waits for Railway to run the pushed commit (scripts/deploy_check.py) and exits 1, loudly, when it
+does not: on 2026-10-20 two pushes started no Railway deployment and nothing said so. --no-deploy-check skips the wait.
+
 In order, each read by its exit code directly (never through a pipe): the no-push window (16:00 to 16:45 America/New_York on
 weekdays, when the chain courier is loading production), the full backend suite in the backend container, the full frontend
 suite, the frontend production build with the dev server stopped before it and restarted after it, and only then git push.
@@ -273,7 +276,16 @@ def main(argv: list[str]) -> int:
     if "--no-push" in argv:
         print("--no-push: every step passed; nothing pushed" + (f" (and a push now would wait: {why})" if why else ""))
         return 0
-    return _run(push_command(argv), ROOT)
+    rc = _run(push_command(argv), ROOT)
+    if rc != 0 or "--no-deploy-check" in argv or any(a.startswith("--branch=") for a in argv):
+        return rc
+    import deploy_check                     # Railway must run the commit just pushed, or the gate fails loudly
+    return deploy_check.main([pushed_sha(argv)])
+
+
+def pushed_sha(argv: list[str]) -> str:
+    ref = next((a.split("=", 1)[1] for a in argv if a.startswith("--ref=")), "HEAD")
+    return subprocess.run(["git", "rev-parse", ref], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
 
 
 if __name__ == "__main__":
