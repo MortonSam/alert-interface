@@ -858,8 +858,64 @@ def test_a_step_story_states_only_what_its_step_shows():
     lines = S.step_lines(facts, "growth")
     assert "[growth] Go deeper, Sales, fiscal Q4 2026: $37.4 billion (Ended Sep 3, 2026)" in lines
     prompt = S.verification_prompt(facts, [("growth", "x.")])
-    assert "may state only facts in that step's own lines" in prompt and "[does] Company description" in prompt
-    assert S.STORY_VERSION == 9
+    assert "states something about this company and may state only facts" in prompt and "[does] Company description" in prompt
+    assert S.STORY_VERSION >= 9
+
+
+def _mu_story_facts() -> dict:
+    return {"name": "Micron Technology", "description": "Micron sells memory chips to customers including data center operators.",
+            "business": "Micron is a world leader in memory and storage. Our DRAM products are dynamic random access memory that computers, servers and "
+                        "smartphones use to run programs and hold data in real time, and our NAND products store data when power is off.",
+            "steps": {"business": {"numbers": [{"label": "From DRAM Products", "value": "75.6%", "as_of": "Fiscal 2026"}], "sentences": ["Micron sells memory."],
+                                   "deeper": [{"label": "DRAM Products", "value": "75.6%", "as_of": "Fiscal 2026"}, {"label": "NAND Products", "value": "23.9%", "as_of": "Fiscal 2026"}]},
+                      "growth": {"numbers": [{"label": "Sales growth", "value": "+379.3%", "as_of": "Fiscal Q4 2026"}], "sentences": ["Sales rose."], "deeper": []},
+                      "margins": {"numbers": [{"label": "Keeps per $1 now (gross margin)", "value": "81¢", "as_of": "Fiscal Q4 2026"}], "sentences": ["It keeps 81¢."], "deeper": []}}}
+
+
+def test_case_a_a_company_sentence_still_uses_only_its_steps_facts():
+    """Sam's two cases (2026-10-19, version 10): (a) a sentence about this company states only its step's facts, whatever kind it claims."""
+    from app.services import walkthrough_story as S
+    facts = _mu_story_facts()
+    bad = "Micron's sales climbed sharply this year, with the data center market now making up the bulk of revenue."
+    assert S.step_problems("growth", bad, facts, {"kind": "company"})
+    assert S.step_problems("growth", bad, facts)                                               # no kind given: a company sentence
+    labelled = S.step_problems("growth", bad, facts, {"kind": "term", "term": "Sales growth"})  # calling it a term doesn't help
+    assert any("share" in x for x in labelled) and any("this company" in x for x in labelled)
+    assert S.step_problems("growth", "Micron's sales climbed sharply over the year.", facts, {"kind": "company"}) == []
+
+
+def test_case_b_a_term_sentence_explains_what_its_step_shows():
+    """(b) a general explanation of a term or product the step shows: verified against Item 1 on step 1, the step's facts plus general
+    definitions on steps 2 and 3, and never a figure, a cause or a forecast."""
+    from app.services import walkthrough_story as S
+    facts = _mu_story_facts()
+    dram = "DRAM is the memory type that computers use to run programs and process data in real time."
+    term = {"kind": "term", "term": "DRAM"}
+    assert S.step_problems("business", dram, facts, term) == [] and S.output_problems(dram, S.STORY_WORDS, "business") == []
+    assert S.step_problems("business", dram, facts) == []                         # true to step 1's lines as a company sentence too
+    gm = "Gross margin measures how much of each sales dollar is left after the direct cost of making what was sold."
+    assert S.step_problems("margins", gm, facts, {"kind": "term", "term": "gross margin"}) == []
+    assert S.output_problems(gm, S.STORY_WORDS, "margins") == []
+    # a figure, a cause or a forecast
+    assert S.output_problems("DRAM is a memory chip that holds 64 gigabits of data.", S.STORY_WORDS, "business")
+    assert any("cause" in x for x in S.step_problems("business", "DRAM prices rose because demand grew.", facts, term))
+    assert S.output_problems("DRAM is memory that will be in short supply.", S.STORY_WORDS, "business")
+    # the term must be on its step, named in the sentence, and step 1 needs Item 1 to check it against
+    assert any("doesn't show" in x for x in S.step_problems("growth", dram, facts, term))
+    assert any("does not name" in x for x in S.step_problems("business", "It is fast working memory for computers.", facts, term))
+    assert any("Item 1" in x for x in S.step_problems("business", dram, {**facts, "business": None}, term))
+    assert any("this company" in x for x in S.step_problems("business", "DRAM is the memory Micron sells to computer makers.", facts, term))
+    # a market word must be in the step's lines or, on step 1, Item 1's text
+    assert S.step_problems("business", "DRAM is the fast memory that servers and smartphones use to run programs.", facts, term) == []
+    assert any("market" in x for x in S.step_problems("business", "DRAM is the fast memory used in cars.", facts, term))
+    # the draft carries its kind; the verifier sees it, and the Item 1 line is tagged for step 1's terms
+    d = S.parse_draft('{"business": {"kind": "term", "term": "DRAM", "sentence": "' + dram + '"}, "growth": {"kind": "company", "sentence": "Sales rose."}, "margins": "Old shape."}')
+    assert d["kinds"] == {"business": {"kind": "term", "term": "DRAM"}, "growth": {"kind": "company"}, "margins": {"kind": "company"}}
+    assert S.items(d, set())[0] == ("business", dram)
+    prompt = S.verification_prompt(facts, [("business", dram)], d["kinds"])
+    assert 'business [explains the term "DRAM"]' in prompt and "[business term] From Item 1, Business" in prompt and "standard, widely used definition" in prompt
+    assert 'kind "term"' in S.build_prompt(facts) and 'kind "company"' in S.build_prompt(facts)
+    assert S.STORY_VERSION == 10
 
 
 @pytest.mark.asyncio
@@ -883,3 +939,22 @@ async def test_the_rewrite_round_never_shows_more_than_three_risks():
     out = await S.story_for(facts, client=Fake())
     assert [i for i in out["sentences"] if i.startswith("risk:")] == ["risk:1", "risk:2", "risk:3"]
     assert {"id": "risk:4", "reason": "over the 3 risks shown"} in out["dropped"]
+
+
+def test_a_verdict_echoing_the_term_mark_still_matches_its_sentence():
+    """The first version-10 run (2026-10-19) lost every term verdict: the verifier returned the id with its mark."""
+    from app.services import walkthrough_story as S
+    v = S.parse_verdicts('{"verdicts": [{"id": "margins [explains the term \\"gross margin\\"]", "status": "supported", "reason": "r"}, {"id": "risk:3", "status": "supported"}]}')
+    assert set(v) == {"margins", "risk:3"} and v["margins"]["status"] == "supported"
+    assert S.term_problems("business", "Full Self-Driving is a driver assistance system.", {"name": "Tesla", "business": "x", "steps": {"business": {"numbers": [], "sentences": ["Full Self-Driving"], "deeper": []}}}, "Full Self-Driving") == []
+
+
+def test_a_term_sentence_may_name_a_generic_party_and_a_drive():
+    """The second version-10 run (2026-10-19): MU's NAND sentence failed on "solid state drives" (read as a cause) and TSLA's leasing
+    sentence on "a customer" (read as a market)."""
+    from app.services import walkthrough_story as S
+    f = {"name": "Tesla", "business": "Tesla designs and sells electric vehicles.", "steps": {"business": {"numbers": [], "sentences": [], "deeper": [{"label": "Automotive Leasing", "value": "2%"}]}}}
+    assert S.term_problems("business", "Automotive Leasing is an arrangement where a customer pays to use a vehicle for a set period.", f, "Automotive Leasing") == []
+    f2 = {"name": "Micron Technology", "business": "NAND", "steps": {"business": {"numbers": [], "sentences": [], "deeper": [{"label": "NAND Products", "value": "24%"}]}}}
+    assert S.term_problems("business", "NAND Products are memory that keeps data without power, used in solid state drives.", f2, "NAND Products") == []
+    assert S.term_problems("business", "NAND Products are memory sold into data centers.", f2, "NAND Products")

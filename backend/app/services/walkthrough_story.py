@@ -19,13 +19,17 @@ from datetime import date
 
 from app.services.research_cost import estimate_cost_usd
 
-STORY_VERSION = 9                      # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
+STORY_VERSION = 10                     # 5 (2026-10-19): no "sensitive to", "exposed to" or what may happen next outside step 7; no answer to a step's check; "does"
                                        # 6 (same day): step 1's story never sizes its lines; no "doubled"; no comparison with companies the evidence doesn't name
                                        # 7 (same day): no "whether", "keeps climbing" or "holding up" outside step 7
                                        # 8 (same day): "revenue", never "sales", for banks and insurers; "does" says what it sells or makes, never slogans;
                                        #   step 2's story never says how much profit each sale earns (its check's answer); the opening of the 10-K's Item 1 as evidence
                                        # 9 (same day): a step's story states only facts that step shows, on screen or in its Go deeper rows (the Compare
                                        #   rule): the description, Item 1 and other steps are evidence for "does" alone (step_problems, the verifier's rule)
+                                       # 10 (same day): two kinds of step sentence. "company" states something about this company from its step's facts
+                                       #   only (version 9's rule); "term" explains in general what a term or product shown on the step is or does, with no
+                                       #   figure, cause or forecast, verified against Item 1 of the 10-K on step 1 and the step's facts plus general
+                                       #   definitions on steps 2 and 3 (term_problems, the verifier's rule)
 SPECULATION = re.compile(r"\b(?:likely|probably|perhaps|presumably|suggests? that|appears? to|seems? to|because|due to|thanks to|driven by|reflect\w*|result of|owing to|information (?:shown|here|given)|"
                          r"not (?:described|stated|shown|mentioned)|shown here|the (?:evidence|facts)|the data(?!\s+cent)|tends? to|(?:is|are|isn't|not|no) available|no description|not been (?:described|stated|shown)|described here|a fraction)\b", re.I)
 # Sam's rule (2026-10-19): no model sentence says what the company is sensitive or exposed to, and only step 7 names risks or what
@@ -46,6 +50,11 @@ MARKET_WORDS = re.compile(r"\b(?:data cent(?:er|re)s?|cloud|artificial intellige
                           r"gaming|consumers?|enterprises?|businesses|governments?|hyperscal\w*|industrial|servers?|networking|devices?|customers?|clients?|"
                           r"tenants?|retail|wholesale|international|overseas|abroad|China|Europe|Asia)\b", re.I)
 SALES_WORD = re.compile(r"\bsales?\b", re.I)                                  # a bank or an insurer has revenue, never sales
+# a "term" sentence explains, it never argues: no cause, and nothing about this company (its name or "the company")
+CAUSE_WORDS = re.compile(r"(?<![\w-])(?:because|since|so|therefore|thus|hence|leads? to|led to|caus\w*|boost\w*|hurts?|explains? why)(?![\w-])", re.I)
+COMPANY_WORDS = re.compile(r"\b(?:the company|this company|the firm|this firm|the business|its (?:sales|revenue|profits?|earnings|margins?|customers|results))\b", re.I)
+STEP_KINDS = ("company", "term")
+TERM_ROLES = re.compile(r"(?:customers?|clients?|tenants?|consumers?|devices?|businesses)", re.I)
 MULTIPLES = re.compile(r"\b(?:doubl\w*|tripl\w*|quadrupl\w*|halv\w*|tenfold|\w+fold)\b", re.I)    # a figure in words
 MODEL_SECONDS = 60
 CALL_SECONDS = 150
@@ -87,17 +96,20 @@ def fact_lines(facts: dict) -> list[str]:
     if facts.get("description"):
         lines.append(f"[does] Company description: {facts['description']}")
     if facts.get("business"):
-        lines.append(f"[does] From Item 1, Business, of its 10-K: {facts['business']}")
+        lines.append(f"[does] [business term] From Item 1, Business, of its 10-K: {facts['business']}")
     for key in (facts.get("steps") or {}):
         lines += step_lines(facts, key)
     return lines
 
 
-def step_problems(key: str, sentence: str, facts: dict) -> list[str]:
+def step_problems(key: str, sentence: str, facts: dict, kind: dict | None = None) -> list[str]:
     """Pure: a step's story naming what that step doesn't show (a share of the business, a market or customer group, a named line),
-    though the description, Item 1 or another step may hold it. Only steps' stories: "does" and the risks have their own evidence."""
+    though the description, Item 1 or another step may hold it. Only steps' stories: "does" and the risks have their own evidence.
+    kind {"kind": "term", "term": ...} is a general explanation of a term the step shows: term_problems instead."""
     if key not in STORY_STEPS:
         return []
+    if (kind or {}).get("kind") == "term":
+        return term_problems(key, sentence, facts, kind.get("term") or "")
     own = " ".join(step_lines(facts, key))
     out = []
     for rx, what in ((SHARE_WORDS, "a share of the business"), (MARKET_WORDS, "a market or customer group")):
@@ -110,6 +122,46 @@ def step_problems(key: str, sentence: str, facts: dict) -> list[str]:
         words = [w for w in re.findall(r"[A-Za-z][\w&-]+", label) if w.lower() not in GENERIC_LINE_WORDS]
         if words and all(re.search(rf"\b{re.escape(w)}\b", sentence, re.I) for w in words) and not all(re.search(rf"\b{re.escape(w)}\b", own, re.I) for w in words):
             out.append(f"names a line this step doesn't show: {label}")
+    return out
+
+
+def _has(word: str, text: str) -> bool:
+    return bool(re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text, re.I))
+
+
+def term_problems(key: str, sentence: str, facts: dict, term: str) -> list[str]:
+    """Pure: a "term" sentence (Sam's case b, 2026-10-19) explains in general terms what a term or product shown on its step is or
+    does. The term must be in the step's own lines and in the sentence; the sentence states no share, no cause and nothing about this
+    company (a figure or a forecast already fails output_problems). A market or customer word must be in the step's lines or, on step 1,
+    in the Item 1 text the verifier checks it against. Step 1 needs that Item 1 text to be verified at all."""
+    term = " ".join(term.split())
+    own = " ".join(step_lines(facts, key))
+    out = []
+    if not term:
+        out.append("a term sentence names no term")
+    elif not _has(term, own):
+        out.append(f"explains a term this step doesn't show: {term}")
+    elif not _has(term, sentence):
+        out.append(f"does not name the term it explains: {term}")
+    if key == "business" and not facts.get("business"):
+        out.append("a term sentence on step 1 with no Item 1 text to check it against")
+    m = SHARE_WORDS.search(sentence)
+    if m:
+        out.append(f"states a share of the business: {m.group(0)}")
+    m = CAUSE_WORDS.search(sentence)
+    if m:
+        out.append(f"a term sentence states a cause: {m.group(0)}")
+    first = (facts.get("name") or "").split()[0] if facts.get("name") else ""
+    m = COMPANY_WORDS.search(sentence)
+    if (first and _has(first, sentence)) or m:
+        out.append(f"a term sentence states something about this company: {m.group(0) if m else first}")
+    allowed = own + (" " + (facts.get("business") or "") if key == "business" else "")
+    for m in MARKET_WORDS.finditer(sentence):
+        if TERM_ROLES.fullmatch(m.group(0)):
+            continue                                    # a definition's generic party ("a customer pays to use a vehicle") is no market
+        if not _has(m.group(0), allowed) and not _has(m.group(0), term):
+            out.append(f"names a market or customer group its evidence doesn't show: {m.group(0)}")
+            break
     return out
 
 
@@ -133,7 +185,9 @@ def build_prompt(facts: dict, redo: dict | None = None) -> str:
         want["risks"] = f"up to {MAX_RISKS} items"
     if redo:
         want = {k: v for k, v in want.items() if k in redo}
-    shape = ", ".join(f'"{k}": ' + ('[{"n": <risk number>, "sentence": "..."}]' if k == "risks" else '"..."') for k in want)
+    shape = ", ".join(f'"{k}": ' + ('[{"n": <risk number>, "sentence": "..."}]' if k == "risks" else
+                                     '{"kind": "company" or "term", "term": "<only for kind term, the term exactly as the step shows it>", "sentence": "..."}'
+                                     if k in STORY_STEPS else '"..."') for k in want)
     redo_block = ""
     if redo:
         redo_block = "\nYOUR LAST DRAFT FAILED THESE CHECKS. Write each again so it passes:\n" + "\n".join(f"- {k}: {v}" for k, v in redo.items()) + "\n"
@@ -149,12 +203,18 @@ RISK FACTORS FROM ITEM 1A OF ITS 10-K (filed {facts.get('risk_filed') or 'n/a'})
 {chr(10).join(risk_lines(facts)) or '(none)'}
 {redo_block}
 WRITE
-- For each of {', '.join(k for k in want if k not in ('risks', 'does')) or 'no step'}: ONE sentence of at most {STORY_WORDS} words that helps a newcomer see why the figures for that step matter
-  for this company, stating only facts in that step's own [step] lines (its figures, its sentences and its Go deeper rows). A fact that
-  is only in the [does] lines, another step's lines or the risk factors may not appear in it, however true: no market, customer group,
-  product line or share of the business that step doesn't show. It adds meaning, it does not repeat the figures. It describes
-  what is: no risks, nothing the company is sensitive or exposed to, nothing about what may happen next.
-  For "growth", never compare how fast two figures grew. For "business", say what its biggest line is or does in plain words, never how
+- For each of {', '.join(k for k in want if k not in ('risks', 'does')) or 'no step'}: ONE sentence of at most {STORY_WORDS} words that helps a newcomer, of one of two kinds.
+  kind "company": it states something about this company (a figure's meaning, a trend, a comparison), using only facts in that step's
+  own [step] lines (its figures, its sentences and its Go deeper rows). A fact that is only in the [does] lines, another step's lines
+  or the risk factors may not appear in it, however true: no market, customer group, product line or share of the business that step
+  doesn't show. It adds meaning, it does not repeat the figures.
+  kind "term": it explains in general terms what a term or product named in that step's own lines is or does (for example, what DRAM
+  is, or what gross margin measures), and says nothing about this company: not its name, its figures, its customers or its results.
+  The term must appear word for word in that step's own [step] lines (a line name, a measure, a label), never one found only in the
+  [does] or [business term] lines: give it exactly as the step's lines show it, and use it in the sentence. On "business" the explanation must be true to the
+  [business term] Item 1 text; on "growth" and "margins" it must be a standard definition. No figure, no cause, no forecast.
+  Either kind describes what is: no risks, nothing the company is sensitive or exposed to, nothing about what may happen next.
+  For "growth", never compare how fast two figures grew. For "business", a term sentence may say what its biggest line is or does in plain words, never how
   big any line is or how much the company depends on it (no most, bulk, majority, share, main).
   For "margins", never say what the change in its margin points to (pricing, costs, competition) or call it a swing or a cycle.
 - For "does": ONE sentence of at most {STORY_WORDS} words saying in plain words what the company does, what it sells or makes and to
@@ -177,9 +237,19 @@ def parse_draft(content: str) -> dict:
     except ValueError:
         d = {}
     out: dict = {}
+    kinds = {}
     for k in STORY_STEPS + SUMMARY_KEYS:
-        if isinstance(d.get(k), str) and d[k].strip():
-            out[k] = " ".join(d[k].split())
+        v = d.get(k)
+        if k in STORY_STEPS and isinstance(v, dict):
+            if isinstance(v.get("sentence"), str) and v["sentence"].strip() and v.get("kind") in STEP_KINDS:
+                out[k] = " ".join(v["sentence"].split())
+                kinds[k] = {"kind": v["kind"], "term": " ".join(str(v.get("term") or "").split())} if v["kind"] == "term" else {"kind": "company"}
+        elif isinstance(v, str) and v.strip():
+            out[k] = " ".join(v.split())
+            if k in STORY_STEPS:
+                kinds[k] = {"kind": "company"}
+    if kinds:
+        out["kinds"] = kinds
     risks = []
     for r in d.get("risks") or []:
         if isinstance(r, dict) and isinstance(r.get("sentence"), str) and str(r.get("n", "")).isdigit():
@@ -236,9 +306,15 @@ def items(draft: dict, risk_ns: set[int]) -> list[tuple[str, str]]:
     return out
 
 
-def verification_prompt(facts: dict, drafted: list[tuple[str, str]]) -> str:
+def verification_prompt(facts: dict, drafted: list[tuple[str, str]], kinds: dict | None = None) -> str:
     chosen = {int(i.split(":")[1]) for i, _ in drafted if i.startswith("risk:")}
-    return f"""You are a rigorous fact-checker. Check each sentence below against the evidence ONLY. Use no outside knowledge.
+    kinds = kinds or {}
+
+    def label(i: str) -> str:
+        k = kinds.get(i) or {}
+        return f'{i} [explains the term "{k.get("term")}"]' if k.get("kind") == "term" else i
+    return f"""You are a rigorous fact-checker. Check each sentence below against the evidence ONLY. Use no outside knowledge, except the one
+case the rules allow (a standard definition of a term on growth or margins).
 
 EVIDENCE 1, FIGURES AND THE COMPANY DESCRIPTION for {facts['name']}:
 {chr(10).join(fact_lines(facts)) or '(none)'}
@@ -247,7 +323,7 @@ EVIDENCE 2, RISK FACTORS FROM ITEM 1A OF ITS 10-K:
 {chr(10).join(risk_lines(facts, body=1500, only=chosen)) or '(none)'}
 
 SENTENCES:
-{chr(10).join(f'{i}: {s}' for i, s in drafted)}
+{chr(10).join(f'{label(i)}: {s}' for i, s in drafted)}
 
 RULES
 - "supported": every factual claim is confirmed by the evidence. A sentence with id risk:N must be true to RISK N's heading and text. A general
@@ -255,15 +331,20 @@ RULES
 - A sentence whose id is not risk:N is "unsupported" if it says what the company is sensitive or exposed to, names a risk, or says what
   may, could or will happen next. Only risk:N sentences may name risks, and only the company's own.
 - A "does" sentence must say only what the company does, sells or makes, as the evidence states it.
-- A sentence whose id is business, growth or margins may state only facts in that step's own lines (tagged [business], [growth] or
-  [margins]: its figures, its sentences and its Go deeper rows). A claim found only in the [does] lines, another step's lines or the
-  risk factors is "unsupported" for it, however true (a market, a customer group, a product line, a share of the business).
+- A sentence whose id is business, growth or margins (with no term named) states something about this company and may state only facts
+  in that step's own lines (tagged [business], [growth] or [margins]: its figures, its sentences and its Go deeper rows). A claim found
+  only in the [does] lines, another step's lines or the risk factors is "unsupported" for it, however true (a market, a customer group,
+  a product line, a share of the business).
+- A sentence marked [explains the term "..."] explains in general terms what that term is or does. It is "unsupported" if the term is
+  not in that step's own lines, if it states a figure, a cause or a forecast, or if it says anything about this company. On business,
+  the explanation must be confirmed by the [business term] line (Item 1 of its 10-K). On growth or margins, it must be confirmed by that
+  step's own lines or be a standard, widely used definition of the term (the only outside knowledge allowed).
 - A comparison with other companies or an industry ("few companies match", "unlike its peers") is "unsupported" unless the evidence names them.
 - "unsupported": it claims something about this company the evidence does not confirm.
 - "contradicted": it conflicts with the evidence.
 - Bias toward "unsupported" when in doubt.
 
-Return JSON only: {{"verdicts": [{{"id": "...", "status": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}"""
+Return JSON only, each id exactly as given before any [ ] mark: {{"verdicts": [{{"id": "...", "status": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}"""
 
 
 def parse_verdicts(content: str) -> dict[str, dict]:
@@ -272,7 +353,8 @@ def parse_verdicts(content: str) -> dict[str, dict]:
         rows = json.loads(m.group(0)).get("verdicts") or [] if m else []
     except ValueError:
         rows = []
-    return {str(r.get("id")): {"status": r.get("status"), "reason": r.get("reason")} for r in rows if isinstance(r, dict)}
+    # the id alone: a verifier that echoes a term mark ('business [explains the term "DRAM"]') still matches
+    return {re.split(r"[\s\[(]", str(r.get("id")).strip(), maxsplit=1)[0]: {"status": r.get("status"), "reason": r.get("reason")} for r in rows if isinstance(r, dict)}
 
 
 async def _call(fn, prompt: str) -> tuple[str, float | None]:
@@ -291,28 +373,31 @@ async def story_for(facts: dict, *, client=None) -> dict:
     dropped: list[dict] = []
     cost = 0.0
     redo: dict | None = None
+    kinds: dict = {}
     for rnd in (1, 2):
         content, c = await _call(lambda p: client.generate_walkthrough(p, max_tokens=900), build_prompt(facts, redo))
         cost += c or 0.0
-        drafted = [(i, s) for i, s in items(parse_draft(content), risk_ns) if i not in kept]
+        draft = parse_draft(content)
+        kinds = {**kinds, **draft.get("kinds", {})} if rnd == 2 else draft.get("kinds", {})
+        drafted = [(i, s) for i, s in items(draft, risk_ns) if i not in kept]
         if rnd == 2:
             drafted = [(i, s) for i, s in drafted if (i if not i.startswith("risk:") else "risks") in (redo or {})]
         failed: dict[str, str] = {}
         clean = []
         for i, s in drafted:
-            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "sales") + step_problems(i, s, facts)
+            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "sales") + step_problems(i, s, facts, kinds.get(i))
             if p:
                 failed[i] = "; ".join(p)
-                verdicts[i] = {"status": "rejected", "reason": failed[i], "round": rnd, "draft": s}
+                verdicts[i] = {"status": "rejected", "reason": failed[i], "round": rnd, "draft": s, **kinds.get(i, {})}
             else:
                 clean.append((i, s))
         if clean:
-            vcontent, vc = await _call(client.verify_walkthrough, verification_prompt(facts, clean))
+            vcontent, vc = await _call(client.verify_walkthrough, verification_prompt(facts, clean, kinds))
             cost += vc or 0.0
             vs = parse_verdicts(vcontent)
             for i, s in clean:
                 v = vs.get(i) or {"status": "unsupported", "reason": "no verdict returned"}
-                verdicts[i] = {**v, "round": rnd, "draft": s}
+                verdicts[i] = {**v, "round": rnd, "draft": s, **kinds.get(i, {})}
                 if v.get("status") == "supported":
                     kept[i] = s
                 else:
