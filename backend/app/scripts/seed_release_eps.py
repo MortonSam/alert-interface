@@ -39,7 +39,7 @@ LOOKBACK_DAYS = 45
 MATCH_DAYS = 5          # the 8-K is filed within this many days of the report
 
 
-_SUPPLEMENT = re.compile(r"financial supplement|supplemental (?:financial )?(?:information|data|package)|supplemental|presentation|slides|earnings call", re.I)
+_SUPPLEMENT = re.compile(r"financial supplement|supplemental (?:financial )?(?:information|data|package)|supplemental|presenta|slides|earnings call", re.I)   # "presenta": EDGAR cuts names (CFG's a3q26earningspresentatio.htm, STT's stt3q26earningspresentat.htm)
 
 
 def exhibit_candidates(texts: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -49,8 +49,12 @@ def exhibit_candidates(texts: list[tuple[str, str]]) -> list[tuple[str, str]]:
     press = [d for d in docs if re.search(r"ex(?:hibit)?[-_.]?99|99[-_.]?[1-9]|ex99", d[0].lower())]
     # among the EX-99s, a financial supplement or slide deck (DLR files its supplement as EX-99.1 and the release as EX-99.2) reads after
     # the release: the release states the quarter's EPS in one row, the supplement spreads five quarters across the page
-    press = sorted(press, key=lambda d: 1 if _SUPPLEMENT.search(d[0].lower()) or _SUPPLEMENT.search(d[1][:3000].lower()) else 0)
-    rest = sorted((d for d in docs if d not in press), key=lambda x: -len(x[1]))
+    # the document's own title sits in its opening (GS's presentation "Third Quarter 2026 Earnings Results Presentation" at ~700 characters);
+    # further in, a release names its own presentation ("the earnings presentation ... on our website"), so only the opening counts
+    supplement = lambda d: 1 if _SUPPLEMENT.search(d[0].lower()) or _SUPPLEMENT.search(d[1][:1500].lower()) else 0
+    press = sorted(press, key=supplement)
+    # the rest by length, a supplement or presentation after the release (GS files both without an EX-99 name; its presentation is longer)
+    rest = sorted((d for d in docs if d not in press), key=lambda x: (supplement(x), -len(x[1])))
     return press + rest
 
 

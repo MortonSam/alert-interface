@@ -70,4 +70,4 @@ def test_the_flag_defaults_off_and_the_route_reads_it():
     src = (Path(__file__).parent.parent / "app" / "routers" / "growth.py").read_text()
     assert "if not (settings.growth_enabled or admin):" in src
     refresh = (Path(__file__).parent.parent / "app" / "scripts" / "refresh.py").read_text()
-    assert "compute_growth" not in refresh                                                   # computed locally only until approved
+    assert '"app.scripts.compute_growth", "--due", "--write"' in refresh                   # Block 2: computed nightly; shown only with the flag

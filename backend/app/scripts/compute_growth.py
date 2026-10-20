@@ -1,9 +1,11 @@
 """Quarterly revenue and GAAP diluted EPS growth against the same quarter a year earlier (services/growth), for the last four
 reported quarters. Two readers must agree for each figure: XBRL as first filed, and the quarter's own earnings release (Item 2.02
-8-K) or, failing that, the later filing's restated comparative. Disagreements are logged to growth_disagreements; with --write the
-agreed figures go to growth_figures. Not in the nightly: computed locally until GROWTH_ENABLED is approved.
+8-K) or, failing that, the later filing's restated comparative. Disagreements are logged to growth_disagreements (a recomputed
+symbol's earlier ones are replaced, so the table holds the current readings); with --write the agreed figures go to growth_figures.
+The nightly runs --due --write (Block 2, 2026-10-20); what visitors see stays behind GROWTH_ENABLED.
 
 Usage: python -m app.scripts.compute_growth --symbols=MU,MSFT [--write]
+       python -m app.scripts.compute_growth --due --write      # the nightly: every ticker that reported since its figures were computed
 """
 from __future__ import annotations
 
@@ -22,6 +24,28 @@ from app.services.edgar_client import PREDECESSOR_CIKS, EdgarClient
 from app.services.redact import redact
 
 RELEASE_AFTER_DAYS = (10, 75)     # a quarter's earnings release is filed this many days after the quarter ends
+DUE_LOOKBACK_DAYS = 45            # --due: a report in this many days with no figures computed since it, or no figures at all
+STEP_LABEL = "Growth (XBRL and 8-K releases)"
+
+# the release reading that outranks another, when two exhibits both read: the consolidated statement's row, a company-level sentence,
+# then any other table (Block 2: a supplement's first "net revenue" row may be a segment's, JPM's Consumer & Community Banking)
+def _rank(rev: dict) -> int:
+    how = rev.get("how") or ""
+    return 0 if "consolidated statement" in how or "consolidating statement" in how else (1 if how == "revenue sentence" else 2)
+
+
+async def due_symbols(s, today: date) -> list[str]:
+    """Active tickers with a report in the last DUE_LOOKBACK_DAYS and no growth figures computed since it, plus any with none at all."""
+    return list((await s.execute(text("""
+        SELECT t.symbol FROM tickers t
+        LEFT JOIN (SELECT symbol, max(computed_at) AS at FROM growth_figures GROUP BY symbol) g ON g.symbol = t.symbol
+        LEFT JOIN (SELECT symbol, max(logged_at) AS at FROM growth_disagreements GROUP BY symbol) d ON d.symbol = t.symbol
+        WHERE t.is_active AND (
+            (g.at IS NULL AND d.at IS NULL)
+            OR EXISTS (SELECT 1 FROM events e WHERE e.ticker_id = t.id AND e.event_type = 'earnings' AND e.event_date <= :t
+                       AND e.event_date >= :since AND (e.is_confirmed OR e.eps_actual IS NOT NULL)
+                       AND e.event_date >= COALESCE(greatest(g.at, d.at)::date, DATE '1900-01-01')))
+        ORDER BY t.symbol"""), {"t": today, "since": today - timedelta(days=DUE_LOOKBACK_DAYS)})).scalars().all())
 
 
 async def _release(edgar: EdgarClient, cik: str, records: list[dict], end: date, cache: dict) -> dict:
@@ -43,7 +67,7 @@ async def _release(edgar: EdgarClient, cik: str, records: list[dict], end: date,
             r = G.parse_release_revenue(body)
             # the company-level revenue sentence in any exhibit outranks a table row (a supplement's first "net revenue" row may be
             # a segment's: JPM's Consumer & Community Banking)
-            if r and (rev is None or (r["how"] == "revenue sentence" and rev["how"] != "revenue sentence")):
+            if r and (rev is None or _rank(r) < _rank(rev)):
                 rev = r
         if eps is not None or rev is not None:
             return {"eps": eps, "revenue": rev, "filed": filed, "accession": key}
@@ -55,7 +79,12 @@ async def run(argv: list[str]) -> int:
     only = next((a.split("=", 1)[1] for a in argv if a.startswith("--symbols=")), "")
     symbols = [s.strip().upper() for s in only.split(",") if s.strip()]
     async with ScriptSessionLocal() as s:
-        if not symbols:
+        if "--due" in argv:
+            symbols = await due_symbols(s, date.today())
+            print(f"{STEP_LABEL}: {len(symbols)} ticker(s) due", flush=True)
+            if not symbols:
+                return 0
+        elif not symbols:
             symbols = list((await s.execute(text("SELECT symbol FROM tickers WHERE is_active ORDER BY symbol"))).scalars().all())
         sectors = dict((await s.execute(text("SELECT symbol, sector FROM tickers WHERE symbol = ANY(:s)"), {"s": symbols})).all())
         splits: dict[str, list] = {}
@@ -173,6 +202,8 @@ async def run(argv: list[str]) -> int:
                     ON CONFLICT ON CONSTRAINT uq_growth_symbol_metric_period DO UPDATE SET year_ago_end = EXCLUDED.year_ago_end, value = EXCLUDED.value,
                     year_ago_value = EXCLUDED.year_ago_value, growth_pct = EXCLUDED.growth_pct, phrase = EXCLUDED.phrase, held_reason = EXCLUDED.held_reason,
                     readers = EXCLUDED.readers, tag = EXCLUDED.tag, version = EXCLUDED.version, computed_at = now()"""), {k: v for k, v in r.items() if k != "release"})
+            done = sorted({r["symbol"] for r in rows_out} | {d[0] for d in disagreements})
+            await s.execute(text("DELETE FROM growth_disagreements WHERE symbol = ANY(:s)"), {"s": done})   # the current readings only
             for d in disagreements:
                 await s.execute(text("INSERT INTO growth_disagreements (symbol, metric, period_end, detail) VALUES (:a, :b, :c, :d)"), {"a": d[0], "b": d[1], "c": d[2], "d": d[3]})
             await s.commit()

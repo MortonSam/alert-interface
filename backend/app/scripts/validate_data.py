@@ -1792,6 +1792,57 @@ async def check_note_eps_agrees(session) -> CheckResult:
         return CheckResult("note_eps_agrees", ERROR, f"{len(bad)} served note(s) show one EPS in the strip and another in the text", bad[:20])
     return CheckResult("note_eps_agrees", PASS, f"{compared} complete notes: strip EPS and text agree")
 
+
+GROWTH_COVERAGE_MIN = 0.60       # share of active tickers with an agreed revenue growth quarter, below which validate warns
+GROWTH_STALE_DAYS = 10           # a report this many days old should have figures computed since (the nightly runs compute_growth --due)
+GROWTH_DISAGREE_MAX = 0.25       # share of revenue readings that disagree, above which validate warns
+
+
+async def check_growth_coverage(session) -> CheckResult:
+    """WARN when fewer than GROWTH_COVERAGE_MIN of active tickers have an agreed revenue growth quarter (growth_figures, both readers
+    agree on the quarter and its year-ago quarter); PASS with the count. GROWTH_ENABLED decides what visitors see, not this."""
+    if (await session.execute(text("SELECT to_regclass('growth_figures')"))).scalar() is None:
+        return CheckResult("growth_coverage", PASS, "No growth_figures table yet")
+    total = (await session.execute(text("SELECT count(*) FROM tickers WHERE is_active"))).scalar() or 0
+    covered = (await session.execute(text("""SELECT count(DISTINCT g.symbol) FROM growth_figures g JOIN tickers t ON t.symbol = g.symbol
+        WHERE t.is_active AND g.metric = 'revenue' AND g.growth_pct IS NOT NULL"""))).scalar() or 0
+    share = covered / total if total else 0.0
+    msg = f"{covered} of {total} active tickers have an agreed revenue growth quarter ({share:.0%})"
+    return CheckResult("growth_coverage", WARN if share < GROWTH_COVERAGE_MIN else PASS, msg)
+
+
+async def check_growth_fresh(session) -> CheckResult:
+    """WARN listing active tickers that reported GROWTH_STALE_DAYS or more ago (within the --due lookback) with no growth figures or
+    disagreements computed since the report: the nightly compute_growth --due should have read them."""
+    if (await session.execute(text("SELECT to_regclass('growth_figures')"))).scalar() is None:
+        return CheckResult("growth_fresh", PASS, "No growth_figures table yet")
+    rows = (await session.execute(text("""
+        SELECT t.symbol, max(e.event_date) AS reported FROM tickers t JOIN events e ON e.ticker_id = t.id
+        WHERE t.is_active AND e.event_type = 'earnings' AND e.event_date BETWEEN CURRENT_DATE - 45 AND CURRENT_DATE - :d
+          AND (e.is_confirmed OR e.eps_actual IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM growth_figures g WHERE g.symbol = t.symbol AND g.computed_at::date >= e.event_date)
+          AND NOT EXISTS (SELECT 1 FROM growth_disagreements x WHERE x.symbol = t.symbol AND x.logged_at::date >= e.event_date)
+        GROUP BY t.symbol ORDER BY t.symbol"""), {"d": GROWTH_STALE_DAYS})).all()
+    if rows:
+        return CheckResult("growth_fresh", WARN, f"{len(rows)} ticker(s) reported {GROWTH_STALE_DAYS}+ days ago with no growth reading since",
+                           [f"{r.symbol} reported {r.reported}" for r in rows[:20]])
+    return CheckResult("growth_fresh", PASS, "Every ticker that reported in the last 45 days has a growth reading since its report")
+
+
+async def check_growth_disagreements(session) -> CheckResult:
+    """WARN when more than GROWTH_DISAGREE_MAX of the current revenue readings disagree (growth_disagreements against growth_figures),
+    with examples; disagreements are never shown, so this watches the readers, not the page."""
+    if (await session.execute(text("SELECT to_regclass('growth_disagreements')"))).scalar() is None:
+        return CheckResult("growth_disagreements", PASS, "No growth_disagreements table yet")
+    bad = (await session.execute(text("SELECT count(*) FROM growth_disagreements WHERE metric = 'revenue'"))).scalar() or 0
+    good = (await session.execute(text("SELECT count(*) FROM growth_figures WHERE metric = 'revenue'"))).scalar() or 0
+    share = bad / (bad + good) if bad + good else 0.0
+    msg = f"{bad} revenue disagreement(s) against {good} agreed figures ({share:.0%})"
+    if share > GROWTH_DISAGREE_MAX:
+        ex = (await session.execute(text("SELECT symbol, period_end, detail FROM growth_disagreements WHERE metric = 'revenue' ORDER BY logged_at DESC LIMIT 10"))).all()
+        return CheckResult("growth_disagreements", WARN, msg, [f"{r.symbol} {r.period_end}: {r.detail}" for r in ex])
+    return CheckResult("growth_disagreements", PASS, msg)
+
 FFO_BAND = (-5.0, 50.0)          # a quarter's FFO per share outside this is a misread (the largest REIT quarterly FFO is near $10)
 
 
@@ -3796,6 +3847,9 @@ CHECKS = [
     check_market_beside_bands,
     check_note_served_clean,
     check_note_eps_agrees,
+    check_growth_coverage,
+    check_growth_fresh,
+    check_growth_disagreements,
     check_ffo_quarters,
     check_pending_deal_price_band,
     check_pinned_without_deal,

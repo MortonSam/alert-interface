@@ -74,6 +74,7 @@ STEPS: list[tuple[str, list[str]]] = [
     # completed spin-offs, mergers and share-exchange acquisitions from new 8-K Item 2.01 filings, before the P/E judges its windows
     ("Corporate actions (8-K Item 2.01)", ["python", "-m", "app.scripts.scan_corporate_actions", "--recent=45", "--write"]),
     ("Trailing P/E",                   ["python", "-m", "app.scripts.compute_pe", "--write"]),
+    ("Growth (XBRL and 8-K releases)",  ["python", "-m", "app.scripts.compute_growth", "--due", "--write"]),   # shown only with GROWTH_ENABLED
     ("Analyst recommendations (Finnhub)",    ["python", "-m", "app.scripts.refresh_recommendations"]),
     ("Discover news (Finnhub)",              ["python", "-m", "app.scripts.refresh_news"]),
     ("Macro calendar (seed_macro)",           ["python", "-m", "app.scripts.seed_macro"]),
@@ -118,6 +119,7 @@ STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 
 STEP_TIMEOUTS: dict[str, int] = {
     "Refresh profiles (Finnhub)": 300,
+    "Growth (XBRL and 8-K releases)": 3600,      # --due; the first night reads every active ticker's facts and releases (about 40 minutes)
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
