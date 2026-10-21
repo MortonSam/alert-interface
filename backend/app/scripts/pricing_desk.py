@@ -116,6 +116,34 @@ async def upsert_verdict(s, card: dict, today: date) -> None:
         row.legs = legs
 
 
+def orphans(cards: list[tuple[str, str, date]], verdicts: list[tuple[object, str, date]], reports: dict[str, set[date]]) -> tuple[list[str], list[object]]:
+    """Pure: the cards (by key) and unsettled verdicts (by id) priced for a report date that is no longer a stored earnings date of
+    their stock: the date moved after they were priced (2026-10-21: CB's Oct 21 card after its date became Oct 20, VMRK's after
+    Oct 21 became Nov 4). Such a card would show a report that isn't on file and fail validate on its old version, and such a
+    verdict would be settled against a session that wasn't its report; both are dropped."""
+    return ([k for k, sym, d in cards if d not in reports.get(sym, set())],
+            [i for i, sym, d in verdicts if d not in reports.get(sym, set())])
+
+
+async def drop_orphans(s) -> tuple[list[str], list[str]]:
+    """Remove orphans() from the store; returns (card keys, "SYM report_date" of each dropped verdict)."""
+    cards = [(k, k.split(":", 1)[1], date.fromisoformat(d)) for k, d in (await s.execute(text(
+        "SELECT key, value::json->>'report_date' FROM system_metadata WHERE key LIKE 'pricing_card:%'"))).all() if d]
+    verdicts = [(r.id, r.symbol, r.report_date) for r in (await s.execute(select(PricingVerdict).where(PricingVerdict.settled_at.is_(None)))).scalars().all()]
+    syms = sorted({x[1] for x in cards} | {x[1] for x in verdicts})
+    reports: dict[str, set[date]] = {}
+    for sym, d in (await s.execute(text("""SELECT t.symbol, e.event_date FROM events e JOIN tickers t ON t.id = e.ticker_id
+            WHERE e.event_type = 'earnings' AND t.symbol = ANY(:s)"""), {"s": syms})).all():
+        reports.setdefault(sym, set()).add(d)
+    gone_cards, gone_ids = orphans(cards, verdicts, reports)
+    if gone_cards:
+        await s.execute(text("DELETE FROM system_metadata WHERE key = ANY(:k)"), {"k": gone_cards})
+    dropped = [f"{sym} {d.isoformat()}" for i, sym, d in verdicts if i in set(gone_ids)]
+    if gone_ids:
+        await s.execute(delete(PricingVerdict).where(PricingVerdict.id.in_(gone_ids)))
+    return gone_cards, dropped
+
+
 async def settle(s, today: date) -> tuple[int, list[str]]:
     """Fill the settled columns of every unsettled row whose report has passed and whose post-report chain or close is stored."""
     rows = (await s.execute(select(PricingVerdict).where(PricingVerdict.settled_at.is_(None), PricingVerdict.report_date < today))).scalars().all()
@@ -193,15 +221,18 @@ async def main(argv: list[str]) -> int:
         gone = [k for k, d in old if d and date.fromisoformat(d) < today - timedelta(days=CARD_KEEP_DAYS)]
         if gone:
             await s.execute(text("DELETE FROM system_metadata WHERE key = ANY(:k)"), {"k": gone})
+        moved_cards, moved_verdicts = await drop_orphans(s)        # before settling: a report that moved is never settled
         settled, waiting = await settle(s, today)
         await s.commit()
     reasons = {}
     for v in skipped.values():
         reasons[v[:50]] = reasons.get(v[:50], 0) + 1
     print(f"{STEP_LABEL}: {len(cands)} report(s) in {REPORT_WINDOW_DAYS} days, {cards} card(s) ({verdicts}), {len(skipped)} skipped {reasons}, {settled} verdict(s) settled, "
-          f"{len(waiting)} waiting, {len(gone)} old card(s) removed, version {PRICING_COMPUTATION_VERSION}")
+          f"{len(waiting)} waiting, {len(gone)} old card(s) removed, {len(moved_cards)} card(s) and {len(moved_verdicts)} verdict(s) of moved reports dropped "
+          f"{moved_verdicts}, version {PRICING_COMPUTATION_VERSION}")
     await record_step_fields(STEP_LABEL, {"reports": len(cands), "cards": cards, "verdicts": verdicts, "skipped": skipped, "settled": settled, "waiting": waiting[:30],
-                                          "removed": len(gone), "version": PRICING_COMPUTATION_VERSION, "error": None})
+                                          "removed": len(gone), "moved_cards": moved_cards, "moved_verdicts": moved_verdicts,
+                                          "version": PRICING_COMPUTATION_VERSION, "error": None})
     return 0
 
 

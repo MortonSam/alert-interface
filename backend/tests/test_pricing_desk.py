@@ -161,3 +161,19 @@ async def test_a_card_whose_report_has_passed_is_judged_on_its_bands_not_its_ver
 
     r = await check_pricing_cards(_S())
     assert r.level == ERROR and r.rows == ["ZZNEW: computed by version 2, current is 3"]
+
+
+def test_a_card_or_verdict_for_a_report_date_that_moved_is_dropped_not_settled():
+    """2026-10-21: validate failed on CB's and VMRK's Oct 21 cards (version 2). CB's date became Oct 20 and VMRK's Nov 4 after they
+    were priced, so neither was a candidate again; their unsettled verdicts (and OMC's, PNR's, VRT's, ITW's) would have been settled
+    against sessions that were not their reports."""
+    from app.scripts.pricing_desk import orphans
+    d = date.fromisoformat
+    cards = [("pricing_card:CB", "CB", d("2026-10-21")), ("pricing_card:VMRK", "VMRK", d("2026-10-21")), ("pricing_card:NFLX", "NFLX", d("2026-10-20"))]
+    verdicts = [(1, "CB", d("2026-10-21")), (2, "VMRK", d("2026-10-21")), (3, "NFLX", d("2026-10-20")), (4, "ZZNONE", d("2026-10-22"))]
+    reports = {"CB": {d("2026-10-20"), d("2027-02-01")}, "VMRK": {d("2026-11-04")}, "NFLX": {d("2026-10-20")}}
+    assert orphans(cards, verdicts, reports) == (["pricing_card:CB", "pricing_card:VMRK"], [1, 2, 4])
+    import inspect
+    from app.scripts import pricing_desk as PD
+    src = inspect.getsource(PD.main)
+    assert src.index("await drop_orphans(s)") < src.index("await settle(s, today)")          # never settled first
