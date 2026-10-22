@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import ScriptSessionLocal
-from app.scripts.validate_data import CHECKS, check_live_api_budget, check_live_quote_age, check_live_quote_sanity, live_price_outliers, live_quote_stale
+from app.scripts.validate_data import CHECKS, check_live_api_budget, check_live_quote_age, check_live_quote_sanity, live_price_outliers, live_quote_contradiction, live_quote_stale
 from app.services import live_data as L
 from app.services.cadence import quote_cadence
 from app.services.quote_fallback import BASIS_LABELS
@@ -72,7 +72,28 @@ def test_the_validate_rules():
     assert not live_quote_stale(None, ny(2026, 10, 12, 18, 0))                                          # closed: no stall to report
     quotes = {"AAPL": {"c": 340.0}, "CTVA": {"c": 13.9}, "BAD": {"c": 50.0}}
     closes = {"AAPL": 336.6, "CTVA": 77.6, "BAD": 100.0}
-    assert live_price_outliers(quotes, closes, acted={"CTVA"}) == ["BAD: delayed 50.00 against the last close 100.00 (-50%)"]
+    assert live_price_outliers(quotes, closes, acted={"CTVA"}) == [
+        "BAD: delayed 50.00 against the last close 100.00 (-50%), no day range or previous close in the quote to support it"]
+
+
+def test_a_large_move_is_an_error_only_when_the_quote_contradicts_itself():
+    # MRNA on 2026-10-22, as production stored it at 18:20 UTC: down 26% on leaked trial data, inside its own day range, its
+    # previous close the stored 245.81
+    mrna = {"c": 182.81, "d": -63.0, "dp": -25.6296, "h": 241.09, "l": 180.89, "o": 240.125, "pc": 245.81, "basis": "delayed"}
+    assert live_quote_contradiction(mrna, 245.81) is None
+    assert live_price_outliers({"MRNA": mrna}, {"MRNA": 245.81}, acted=set()) == []
+    # a wrong last price: outside the quote's own range
+    assert live_price_outliers({"MRNA": {**mrna, "c": 18.28}}, {"MRNA": 245.81}, acted=set()) == [
+        "MRNA: delayed 18.28 against the last close 245.81 (-93%), outside its own day range 180.89 to 241.09"]
+    # a quote for another session or another security: its previous close is not the stored close
+    other = {"c": 50.0, "h": 52.0, "l": 49.0, "pc": 51.0}
+    assert live_price_outliers({"X": other}, {"X": 100.0}, acted=set()) == [
+        "X: delayed 50.00 against the last close 100.00 (-50%), its previous close 51.00 is not the stored close"]
+    assert live_quote_contradiction({**mrna, "pc": 245.81 * 1.004}, 245.81) is None                    # within the tolerance
+    assert live_quote_contradiction({**mrna, "h": None}, 245.81) == "no day range or previous close in the quote to support it"
+    # a corporate action still exempts it, and a move under the threshold is never checked
+    assert live_price_outliers({"X": other}, {"X": 100.0}, acted={"X"}) == []
+    assert live_price_outliers({"X": {"c": 90.0}}, {"X": 100.0}, acted=set()) == []
 
 
 @pytest.mark.asyncio

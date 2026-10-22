@@ -1665,7 +1665,8 @@ async def check_chains_step_start(session) -> CheckResult:
     return CheckResult("chains_step_start", PASS, f"{label} started at {at} New York, {delay:.0f} minutes after its 03:05 schedule")
 
 
-LIVE_SANITY_PCT = 20.0            # a delayed quote this far from the last stored close, with no corporate action since, is wrong
+LIVE_SANITY_PCT = 20.0            # a delayed quote this far from the last stored close is checked against itself (live_quote_contradiction)
+LIVE_PREV_CLOSE_TOL_PCT = 0.5     # the quote's own previous close within this of the stored close: both name the same session's close
 LIVE_ACTION_LOOKBACK_DAYS = 7
 
 
@@ -1677,13 +1678,32 @@ def live_quote_stale(status_at: datetime | None, now: datetime) -> bool:
     return status_at is None or (now - status_at).total_seconds() > QUOTE_MAX_AGE_MINUTES * 60
 
 
+def live_quote_contradiction(rec: dict, close: float) -> str | None:
+    """Pure: why a quote contradicts itself, or None. Its last price must sit inside its own day's low-high range, and its own
+    previous close must match the stored close within LIVE_PREV_CLOSE_TOL_PCT; a quote missing any of those can't be checked and
+    counts as a contradiction. A real large move (MRNA on 2026-10-22: 182.81 inside 180.89 to 241.09, previous close 245.81 as
+    stored) passes; a wrong price does not."""
+    px, lo, hi, pc = rec.get("c"), rec.get("l"), rec.get("h"), rec.get("pc")
+    if not (lo and hi and pc):
+        return "no day range or previous close in the quote to support it"
+    if not lo <= px <= hi:
+        return f"outside its own day range {lo:.2f} to {hi:.2f}"
+    if abs(pc - close) / close * 100 > LIVE_PREV_CLOSE_TOL_PCT:
+        return f"its previous close {pc:.2f} is not the stored close"
+    return None
+
+
 def live_price_outliers(quotes: dict[str, dict], closes: dict[str, float], acted: set[str], pct: float = LIVE_SANITY_PCT) -> list[str]:
-    """Pure: symbols whose delayed price sits more than `pct` from the last stored close with no recorded corporate action."""
+    """Pure: symbols whose delayed price sits more than `pct` from the last stored close with no recorded corporate action and
+    the quote contradicts itself (live_quote_contradiction). A large move alone is not an error: on 2026-10-22 MRNA fell 26% on
+    leaked trial data and the old rule called the true price wrong."""
     out = []
     for sym, rec in sorted(quotes.items()):
         c, px = closes.get(sym), rec.get("c")
         if c and px and sym not in acted and abs(px - c) / c * 100 > pct:
-            out.append(f"{sym}: delayed {px:.2f} against the last close {c:.2f} ({(px - c) / c * 100:+.0f}%)")
+            why = live_quote_contradiction(rec, c)
+            if why:
+                out.append(f"{sym}: delayed {px:.2f} against the last close {c:.2f} ({(px - c) / c * 100:+.0f}%), {why}")
     return out
 
 
@@ -1714,7 +1734,8 @@ async def check_live_quote_age(session) -> CheckResult:
 
 async def check_live_quote_sanity(session) -> CheckResult:
     """ERROR when a stored delayed quote sits more than LIVE_SANITY_PCT from the ticker's last stored close with no corporate action
-    (a split, spin-off or merger on its events) in the last LIVE_ACTION_LOOKBACK_DAYS: a wrong price, never shown as right."""
+    (a split, spin-off or merger on its events) in the last LIVE_ACTION_LOOKBACK_DAYS and the quote contradicts itself
+    (live_quote_contradiction): a wrong price, never shown as right."""
     import json as _json
     from app.services.live_data import QUOTES_KEY
     from app.services.system_metadata_service import get_value
@@ -1728,8 +1749,8 @@ async def check_live_quote_sanity(session) -> CheckResult:
         WHERE (e.event_type = 'split' OR e.metadata ? 'corporate_action') AND e.event_date >= CURRENT_DATE - CAST(:d AS integer)"""), {"d": int(LIVE_ACTION_LOOKBACK_DAYS)})).scalars().all())
     bad = live_price_outliers(quotes, closes, acted)
     if bad:
-        return CheckResult("live_quote_sanity", ERROR, f"{len(bad)} delayed quote(s) more than {LIVE_SANITY_PCT:.0f}% from the last stored close with no corporate action", bad[:20])
-    return CheckResult("live_quote_sanity", PASS, f"{len(quotes)} delayed quotes within {LIVE_SANITY_PCT:.0f}% of their last stored close")
+        return CheckResult("live_quote_sanity", ERROR, f"{len(bad)} delayed quote(s) more than {LIVE_SANITY_PCT:.0f}% from the last stored close with no corporate action, contradicting themselves", bad[:20])
+    return CheckResult("live_quote_sanity", PASS, f"{len(quotes)} delayed quotes within {LIVE_SANITY_PCT:.0f}% of their last stored close or consistent with their own day range and previous close")
 
 
 SPY_DAILY_MOVE_BAND_PCT = 12.0         # SPY's largest one-day move since 1993 is about 11%: a stored move past this is a bad close
