@@ -5,10 +5,9 @@ import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
-import { fmtDollars, fmtRange } from "@/lib/optionFactFormat";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, impliedSpanPhrase, intradayBarsLine, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, intradayBarsLine, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
@@ -64,7 +63,7 @@ import { CHART_PERIODS, DIRECTION_STYLE, PERIOD_LABELS, fmtChange, hasBars, open
 import { ReportCards } from "@/components/ticker/ReportCards";
 import { averageMoveLine, storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
-import { optionsDetailsLine } from "@/lib/optionsDetailsLine";
+import { optionsFigures } from "@/lib/optionsDetailsLine";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
 import { EVIDENCE_VIEWS, smoothScroll, type EvidenceView, type PickedReport } from "@/lib/evidenceViews";
@@ -2524,10 +2523,27 @@ export default function TickerPage() {
             const hist = expectedMove.historical_stats;
             const pricedAt = priceLabel(facts, fmtTimestamp);
             const drift = priceDriftNote(facts, quote?.price);
-            const lead = optionsDetailsLine(emPct, facts.expiration_used, expectedMove.report_move?.pct, expectedMove.report_move_state);
+            const figures = optionsFigures({
+              totalPct: emPct, totalDollars: emDol, expiration: facts.expiration_used,
+              reportPct: expectedMove.report_move?.pct, reportState: expectedMove.report_move_state,
+              low, high, atmStrike: facts.atm_strike, chainDate: facts.chain_date ?? expectedMove.chain_date,
+            });
             return (
               <div className="mb-8">
-                {lead && <p className="text-base text-foreground/85 mb-4" data-testid="options-details-lead">{lead}</p>}
+                {figures && (
+                  <div className="mb-4" data-testid="options-details-figures">
+                    <div className={cn("grid gap-6", figures.report && "sm:grid-cols-2")}>
+                      {[figures.total, figures.report].filter((x): x is NonNullable<typeof x> => x != null).map((n) => (
+                        <div key={n.label}>
+                          <p className="font-sans text-[30px] sm:text-[36px] font-semibold leading-none tracking-tight text-foreground">{n.value}</p>
+                          {n.sub && <p className="mt-1.5 text-[15px] text-foreground/85">{n.sub}</p>}
+                          <p className="mt-0.5 text-[13px] text-muted-foreground">{n.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {figures.detail && <p className="mt-3 text-xs text-muted-foreground" data-testid="options-details-detail"><Explained text={figures.detail} /></p>}
+                  </div>
+                )}
                 {facts.source === "read" && pricedAt && (
                   <p className="text-[11px] font-mono text-muted-foreground/70 mb-2">
                     From Ivy&apos;s Read: {pricedAt}{facts.chain_date ? ` · options data as of ${fmtOneDate(facts.chain_date) ?? facts.chain_date}` : ""}
@@ -2553,30 +2569,9 @@ export default function TickerPage() {
                     )}
                   </>
                 )}
-                {emDol != null && (
-                  <p className="text-xl text-muted-foreground mt-1 tabular-nums">
-                    {fmtDollars(emDol)} <ExplainTip term="implied move">implied move</ExplainTip>
-                  </p>
-                )}
-                {low != null && high != null && (
-                  <p className="text-sm mt-3">
-                    <span className="text-muted-foreground"><ExplainTip term="implied range">Implied range</ExplainTip></span>{" "}
-                    <span className="font-semibold tabular-nums">{fmtRange(low, high)}</span>
-                  </p>
-                )}
-                {emPct != null && impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date) && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date)}
-                  </p>
-                )}
                 {emPct != null && expiryCaveat(facts.expiration_used, facts.next_earnings_date) && (
                   <p className="text-sm text-muted-foreground mt-1">
                     {expiryCaveat(facts.expiration_used, facts.next_earnings_date)}
-                  </p>
-                )}
-                {emDol != null && facts.atm_strike != null && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    <ExplainTip term="atm">ATM</ExplainTip> {fmtDollars(facts.atm_strike)} <ExplainTip term="straddle">straddle</ExplainTip> at {fmtDollars(emDol)}
                   </p>
                 )}
                 {oneDayHistoryLine(hist) && (

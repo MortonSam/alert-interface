@@ -132,7 +132,9 @@ describe("priced from the options data, the stock now from its quote (audit item
     const ticker = read("app/tickers/[symbol]/page.tsx");
     expect(ticker).not.toMatch(/above implied|above_expected|below_expected/);
     expect(ticker).toContain("oneDayHistoryLine(hist)");
-    expect(ticker).toContain("impliedSpanPhrase(facts.expiration_used, expectedMove.span_days, facts.chain_date ?? expectedMove.chain_date)");
+    // Details' figures are dated by the expiration and the options data (lib/optionsDetailsLine), never the request time
+    expect(ticker).toContain("expiration: facts.expiration_used");
+    expect(ticker).toContain("chainDate: facts.chain_date ?? expectedMove.chain_date");
     expect(read("lib/api.ts")).not.toMatch(/above_expected|below_expected/);
   });
 });
