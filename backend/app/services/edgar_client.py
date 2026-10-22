@@ -25,6 +25,7 @@ SUBMISSIONS_CACHE_H = 6           # a filing index is reread after this long: fr
 MIN_INTERVAL_S = 0.125            # at most 8 requests a second to the SEC (its limit is 10)
 RETRY_DELAYS_S = (2.0, 5.0, 15.0) # after a 429 without a Retry-After header
 _last_request_at = 0.0
+_pace_locks: "weakref.WeakKeyDictionary" = None   # one asyncio.Lock per running loop, made on first use
 
 
 def backoff_delay(attempt: int, retry_after: str | None) -> float | None:
@@ -84,13 +85,18 @@ class EdgarClient:
     async def _paced_get(self, client: httpx.AsyncClient, url: str, **kw) -> httpx.Response:
         """One SEC request at the paced rate; a 429 waits and retries up to len(RETRY_DELAYS_S) times, then raises."""
         import asyncio as _asyncio
-        global _last_request_at
+        import weakref
+        global _last_request_at, _pace_locks
+        if _pace_locks is None:
+            _pace_locks = weakref.WeakKeyDictionary()
+        lock = _pace_locks.setdefault(_asyncio.get_running_loop(), _asyncio.Lock())
         attempt = 0
         while True:
-            wait = MIN_INTERVAL_S - (time.time() - _last_request_at)
-            if wait > 0:
-                await _asyncio.sleep(wait)
-            _last_request_at = time.time()
+            async with lock:                       # requests made at once (compute_growth's workers) still go out one per interval
+                wait = MIN_INTERVAL_S - (time.time() - _last_request_at)
+                if wait > 0:
+                    await _asyncio.sleep(wait)
+                _last_request_at = time.time()
             resp = await client.get(url, **kw)
             if resp.status_code != 429:
                 return resp
