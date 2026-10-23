@@ -64,6 +64,7 @@ import { ReportCards } from "@/components/ticker/ReportCards";
 import { averageMoveLine, storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
 import { optionsFigures } from "@/lib/optionsDetailsLine";
+import { ROW_LABELS, ivRowValue, rvRowValue, spreadRowValue } from "@/lib/optionsRows";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
 import { EVIDENCE_VIEWS, smoothScroll, type EvidenceView, type PickedReport } from "@/lib/evidenceViews";
@@ -2592,7 +2593,6 @@ export default function TickerPage() {
             const windowDays = realizedVol?.window_days ?? 20;
             const dataError = realizedVol?.data_error ?? false;
             const spread = shown.iv_rv_spread_pp;
-            const spreadLabeled = optionsRead?.spread_labeled ?? null;
             const pcRatio = putCall?.ratio ?? null;
 
             // IV-RV spread consistency check
@@ -2617,29 +2617,29 @@ export default function TickerPage() {
 
             return (
               <div className="space-y-2 mb-6">
-                {/* IV row */}
-                <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                {/* IV row (plain words, lib/optionsRows) */}
+                <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 gap-x-6 py-1.5 border-b border-border/40" data-testid="iv-row">
                   <span className="text-sm text-muted-foreground">
-                    <ExplainTip term="iv">IV</ExplainTip>
+                    <ExplainTip term="iv">{ROW_LABELS.iv}</ExplainTip>
                   </span>
-                  <span className="font-mono text-sm font-medium tabular-nums">
+                  <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">
                     {ivVal != null
-                      ? <>{(ivVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1"><Explained text="(ATM, nearest expiry ≥7d out" />{ivAsOf ? `, ${fmtOneDate(ivAsOf) ?? ivAsOf}` : ""})</span></>
+                      ? ivRowValue(ivVal, ivAsOf ? (fmtOneDate(ivAsOf) ?? ivAsOf) : null)
                       : <span className="text-muted-foreground" title={ivUnavailableReason(shown, realizedVol, rvStatus)}>
-                          <Explained text="IV unavailable" /><span className="block text-xs font-sans font-normal">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
+                          <Explained text="IV unavailable" /><span className="block text-xs">{ivUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
                   </span>
                 </div>
                 {/* RV row */}
-                <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 gap-x-6 py-1.5 border-b border-border/40" data-testid="rv-row">
                   <span className="text-sm text-muted-foreground">
-                    <ExplainTip term="rv">RV</ExplainTip>
+                    <ExplainTip term="rv">{ROW_LABELS.rv}</ExplainTip>
                   </span>
-                  <span className="font-mono text-sm font-medium tabular-nums">
+                  <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">
                     {rvVal != null
-                      ? <>{(rvVal * 100).toFixed(1)}% <span className="text-muted-foreground text-xs ml-1">({windowDays}-day lookback{realizedVol?.as_of ? `, as of ${fmtOneDate(realizedVol.as_of.slice(0, 10))}` : ""})</span></>
+                      ? rvRowValue(rvVal, windowDays, realizedVol?.as_of ? fmtOneDate(realizedVol.as_of.slice(0, 10)) : null)
                       : <span className="text-muted-foreground" title={rvUnavailableReason(shown, realizedVol, rvStatus)}>
-                          <Explained text="RV unavailable" /><span className="block text-xs font-sans font-normal">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
+                          <Explained text="RV unavailable" /><span className="block text-xs">{rvUnavailableReason(shown, realizedVol, rvStatus)}</span>
                         </span>}
                   </span>
                 </div>
@@ -2647,24 +2647,16 @@ export default function TickerPage() {
                 {(() => {
                   const why = spreadUnavailableReason(shown, realizedVol, rvStatus, showSpread && spread != null);
                   return why ? (
-                    <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                      <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>IV - RV spread</ExplainTip></span>
-                      <span className="text-xs text-muted-foreground text-right max-w-[60%]">{why}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 gap-x-6 py-1.5 border-b border-border/40">
+                      <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>{ROW_LABELS.spread}</ExplainTip></span>
+                      <span className="text-xs text-muted-foreground sm:text-right sm:max-w-[65%]">{why}</span>
                     </div>
                   ) : null;
                 })()}
                 {showSpread && spread != null && (
-                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
-                    <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>IV - RV spread</ExplainTip></span>
-                    <span className="font-mono text-sm font-medium tabular-nums">
-                      {spread > 0 ? "+" : ""}{spread.toFixed(1)}pp
-                      {spreadLabeled && (
-                        <>
-                          <span className="text-muted-foreground"> {spreadLabeled.label}</span>
-                          <span className="text-muted-foreground text-xs ml-1">({spreadLabeled.rule})</span>
-                        </>
-                      )}
-                    </span>
+                  <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 gap-x-6 py-1.5 border-b border-border/40" data-testid="spread-row">
+                    <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>{ROW_LABELS.spread}</ExplainTip></span>
+                    <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">{spreadRowValue(spread)}</span>
                   </div>
                 )}
                 {rvRk != null && rvLabeled && (
