@@ -23,7 +23,10 @@ from datetime import date
 READER_VERSION = 3                   # 2 (2026-10-20): every quote is classed (QUOTE_CLASSES); only a release date in the company's own words confirms
                                      # 3 (2026-10-26): the company's IR events feed and event pages are read; exchange tags with a name or a second
                                      # symbol, "today announced it will release" and "after the New York Stock Exchange closes" are read; a model quote
-                                     # that carries the timing in the sentence after the date sentence stands with that sentence (Visa, Kraft Heinz)
+                                     # that carries the timing in the sentence after the date sentence stands with that sentence (Visa, Kraft Heinz);
+                                     # a call at or after 4:00 p.m. Eastern confirms that day, after the close (Sam, 2026-10-26: EVENING_CALL_CONFIRMS)
+EVENING_CALL_CONFIRMS = True         # Sam, 2026-10-26: a company's call after the close (4:00 p.m. ET or later) puts its report that day, after the
+                                     # close; a morning call alone still confirms nothing (Tyler's and Veralto's followed a release the evening before)
 QUOTE_CLASSES = ("release", "call_only", "third_party")
 HORIZON_DAYS = 120                   # a results date further out than this is not a scheduled report
 
@@ -180,15 +183,21 @@ def exchange_tagged(text: str, symbol: str) -> bool:
 def sentence_class(sentence: str, day: date, today: date) -> str:
     """Pure: "release" when a release verb leads to the date with no call or webcast words between them ("will report results ...
     after the market closes on Monday, October 26, 2026", "plans to issue a press release ... on Thursday, October 29, 2026"),
-    else "call_only" ("will host a conference call to discuss its third-quarter 2026 results at 10 a.m. Central time, Thursday, Nov. 5")."""
+    else "call_only" ("will host a conference call to discuss its third-quarter 2026 results at 10 a.m. Central time, Thursday, Nov. 5").
+    A call the sentence puts at or after 4:00 p.m. Eastern (or "after the market close") is "release" with EVENING_CALL_CONFIRMS: the
+    results come out that day, after the close ("1:30pm Pacific Time (4:30pm Eastern Time)", Alphabet; "5:00 p.m. ET", Amazon)."""
+    named = False
     for m in _DATE.finditer(sentence):
         if _to_date(m, today) != day:
             continue
+        named = True
         before = sentence[:m.start()]
         verbs = list(_RELEASE_VERB.finditer(before))
         for v in reversed(verbs):                       # the release verb nearest the date
             if not _CALL_WORDS.search(before[v.end():]):
                 return "release"
+    if named and EVENING_CALL_CONFIRMS and _CALL_WORDS.search(sentence) and timing_of(sentence) == "amc":
+        return "release"
     return "call_only"
 
 
@@ -222,8 +231,9 @@ PROMPT = """You are reading text a public company published (an SEC 8-K exhibit,
 Return JSON only, no prose: {{"date": "<YYYY-MM-DD or null>", "timing": "<bmo|amc|unknown>", "quote": "<the one sentence, copied verbatim, that names the date on which the company will report its quarterly results; the sentence with the date, even when the timing is in another sentence>"}}
 The date wanted is the calendar day the company says it will post, report, release or announce its quarterly (or full-year) financial
 results. Never a period end ("quarter ended September 30"), never a conference-call-only sentence without results, never a date in the
-past of {today}. Never the date of a conference call or webcast: if the text gives only a call date and not the day the results
-themselves come out, return date null and quote null. timing is "bmo" when the sentence says before the market opens (or a clock time before 9:30 a.m. Eastern), "amc" when after
+past of {today}. If the text gives only a conference call or webcast and no day for the results themselves: when the call starts at or
+after 4:00 p.m. Eastern (or after the market close), the results come out that day after the close, so return the call's date with timing
+"amc" and quote the call sentence; when it starts earlier or gives no time, return date null and quote null. timing is "bmo" when the sentence says before the market opens (or a clock time before 9:30 a.m. Eastern), "amc" when after
 the close (or at or after 4:00 p.m. Eastern), else "unknown". If no such sentence exists, return date null and quote null. Copy the sentence
 exactly; never paraphrase.
 
@@ -306,7 +316,7 @@ def decide(pattern: ReadDate | None, model: dict | None, text: str, today: date)
         problems = verify_quote(text, model["quote"], m)
     m_text = f"model {m.isoformat()} ({model.get('timing')})" if m else "model read nothing"
     if m and problems:
-        return None, f"{p_text}; {m_text}; model quote rejected: {'; '.join(problems)}"
+        return None, f"{p_text}; {m_text}; model quote rejected: {'; '.join(problems)} (quoted: {(model.get('quote') or '')[:120]})"
     if m and sentence_class(model["quote"], m, today) != "release":
         return None, f"{p_text}; {m_text}; model quote names a call, not the release"
     if p and m and p == m:

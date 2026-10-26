@@ -40,13 +40,14 @@ def test_apple_names_its_results_on_its_own_events_feed():
     assert company_confirmed(True, note)
 
 
-def test_nvidia_has_announced_nothing_and_its_call_notice_would_not_confirm():
+def test_nvidia_has_announced_nothing_and_its_evening_call_notice_will_confirm():
     # NVIDIA's events feed on 2026-10-26 is empty, and nothing in its 8-Ks or the wire names a date: Nov 17 is a vendor's estimate
     assert F.earnings_events(F.parse_items(NVIDIA_EVENTS, ""), TODAY) == []
-    # its notice names only the call (2025's wording, the date moved a year): a call date alone stays an expected window (Sam, 2026-10-20)
+    # its notice names only the call (2025's wording, the date moved a year); the call is after the close, so it confirms the day
+    # (Sam, 2026-10-26)
     nvda = ("NVIDIA Sets Conference Call for Third Quarter Financial Results. NVIDIA will host a conference call on Wednesday, November 18, "
             "2026, at 2 p.m. PT (5 p.m. ET) to discuss its financial results for the third quarter of fiscal year 2027.")
-    assert read("IR feed", nvda, "NVDA")[:2] == ("call_only", date(2026, 11, 18))
+    assert read("IR feed", nvda, "NVDA") == ("release", date(2026, 11, 18), "amc")
 
 
 def test_the_shipped_sources_stand_in_for_an_empty_ir_feeds_table():
@@ -103,10 +104,7 @@ def test_company_releases_on_their_own_feeds():
     assert read("IR feed", ba, "BA")[:2] == ("release", date(2026, 10, 27))
     duk = "Duke Energy to announce third-quarter 2026 financial results on Nov. 5"
     assert read("IR events", duk, "DUK")[:2] == ("release", date(2026, 11, 5))
-    # Alphabet's own notice names only its 4:30pm call: estimated, like Booking's (test_report_date_classes)
-    googl = ("Alphabet Inc. (NASDAQ: GOOG, GOOGL) will hold its quarterly conference call to discuss third quarter 2026 financial results on "
-             "Wednesday, October 28, at 1:30pm Pacific Time (4:30pm Eastern Time).")
-    assert read("IR feed", googl, "GOOGL")[0] == "call_only"
+
 
 
 def test_previews_stay_someone_elses_words():
@@ -156,3 +154,45 @@ def test_a_quote_with_the_releases_own_quotation_marks_still_parses():
     khc = "PITTSBURGH & CHICAGO, October 12, 2026--" + got["quote"]
     assert R.decide(R.read_release_date(khc, TODAY), got, khc, TODAY)[0] == date(2026, 11, 4)
     assert R.parse_model_json('{"date": null, "timing": "unknown", "quote": null}') == {"date": None, "timing": "unknown", "quote": None}
+
+
+# Sam, 2026-10-26: a company's call after the close (4:00 p.m. ET or later) confirms the report that day, after the close; a morning call
+# alone still does not
+
+def test_alphabets_evening_call_confirms_its_day():
+    googl = ("(October 6, 2026) – Alphabet Inc. (NASDAQ: GOOG, GOOGL) will hold its quarterly conference call to discuss third quarter 2026 "
+             "financial results on Wednesday, October 28, at 1:30pm Pacific Time (4:30pm Eastern Time).")
+    assert read("IR feed", googl, "GOOGL") == ("release", date(2026, 10, 28), "amc")
+    assert read("IR feed", googl, "GOOG")[:2] == ("release", date(2026, 10, 28))
+    model = {"date": date(2026, 10, 28), "timing": "amc", "quote": googl.split("– ", 1)[1]}
+    assert R.decide(R.read_release_date(googl, TODAY), model, googl, TODAY)[0] == date(2026, 10, 28)
+
+
+def test_amazons_evening_call_and_its_own_news_feed_confirm_its_day():
+    amzn = ("Amazon.com, Inc. (NASDAQ: AMZN) will hold a conference call to discuss its third quarter 2026 financial results on Thursday, "
+            "October 29, 2026, at 2:00 p.m. PT/5:00 p.m. ET.")
+    assert read("press release", amzn, "AMZN") == ("release", date(2026, 10, 29), "amc")
+    # its own news feed (aboutamazon.com/rss), under a title that announces nothing; read in its own words (MAX_FEED_ITEMS)
+    feed_item = ("Some of Amazon's Q3 2026 announcements, from new devices to AI breakthroughs. Amazon will announce financial results for its "
+                 "third quarter on October 29. Here's a look at what the company has been up to.")
+    assert not F.looks_like_announcement("Some of Amazon's Q3 2026 announcements, from new devices to AI breakthroughs")
+    assert read("IR feed", feed_item, "AMZN")[:2] == ("release", date(2026, 10, 29))
+    seeded = F.seeded_sources()
+    assert seeded["AMZN"] == {"press": "https://www.aboutamazon.com/rss", "events": "https://ir.aboutamazon.com/rss/event.aspx"}
+
+
+def test_microsofts_own_release_on_its_news_site():
+    msft = ("Microsoft announces quarterly earnings release date. REDMOND, Wash. — Oct. 7, 2026 — Microsoft Corp. will publish fiscal year 2027 "
+            "first-quarter financial results after the close of the market on Wednesday, Oct. 28, 2026, on the Microsoft Investor Relations website.")
+    assert read("IR feed", msft, "MSFT") == ("release", date(2026, 10, 28), "amc")
+    assert F.looks_like_announcement("Microsoft announces quarterly earnings release date")
+    assert F.seeded_sources()["MSFT"]["press"].startswith("https://news.microsoft.com/source/")
+
+
+def test_morning_calls_still_confirm_nothing():
+    for text_, sym in (("Veralto will webcast its third quarter 2026 earnings conference call on Friday, October 30, 2026, beginning at 7:30 a.m. ET.", "VLTO"),
+                       ("Ameren Corp. will discuss Third Quarter 2026 earnings in a conference call at 9 a.m. Central time (10 a.m. Eastern time) on Friday, Nov. 6, 2026.", "AEE"),
+                       ("Tyler Technologies will discuss its third quarter 2026 results during a conference call and webcast on Thursday, October 29, 2026.", "TYL"),
+                       ("Lead Co. will hold a conference call to discuss its third quarter 2026 results on Thursday, October 29, 2026 at 3:00 p.m. ET.", "LEAD")):
+        assert read("IR feed", text_, sym)[0] == "call_only", text_
+    assert R.EVENING_CALL_CONFIRMS is True

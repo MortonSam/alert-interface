@@ -55,6 +55,10 @@
 "events": "https://ir.ameriprise.com/rss/event.aspx",
 "press": "https://ir.ameriprise.com/rss/pressrelease.aspx"
 },
+"AMZN": {
+"events": "https://ir.aboutamazon.com/rss/event.aspx",
+"press": "https://www.aboutamazon.com/rss"
+},
 "ANET": {
 "events": "https://investors.arista.com/rss/event.aspx",
 "press": "https://investors.arista.com/rss/pressrelease.aspx"
@@ -610,6 +614,10 @@
 "MPC": {
 "events": "https://ir.marathonpetroleum.com/rss/event.aspx",
 "press": "https://ir.marathonpetroleum.com/rss/pressrelease.aspx"
+},
+"MSFT": {
+"events": null,
+"press": "https://news.microsoft.com/source/?s=quarterly+earnings+release+date&feed=rss2"
 },
 "MTD": {
 "events": "https://investor.mt.com/rss/event.aspx",

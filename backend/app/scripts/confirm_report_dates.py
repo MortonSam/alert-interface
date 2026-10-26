@@ -45,6 +45,7 @@ WRITE_VAR = "CONFIRMATION_READER_WRITE"
 MAX_FILINGS_PER_TICKER = 6
 TICKER_TIMEOUT_S = 120            # a ticker's filings, its feed, or one model read, before the run moves on (the 2026-10-12 dry run stalled at one filer)
 MAX_FEED_PAGES = 4
+MAX_FEED_ITEMS = 25               # a feed's items read in their own words (title and description), newest first
 EVIDENCE_KEY = "report_confirmation:{sym}:{day}"
 
 
@@ -127,11 +128,19 @@ async def feed_texts(http: httpx.AsyncClient, feed_url: str, issuer: str | None,
     if not body:
         return []
     out = []
-    for it in F.candidates(F.parse_items(body, feed_url), issuer, symbol)[:MAX_FEED_PAGES]:
+    items = F.parse_items(body, feed_url)
+    cands = F.candidates(items, issuer, symbol)[:MAX_FEED_PAGES]
+    for it in cands:
         page = await F.fetch_allowed(http, it.get("link") or "") if it.get("link") else None
         t = F.clean(page) if page else ""
         out.append({"kind": "IR feed", "reference": it.get("link") or feed_url, "published": (it.get("pubDate") or it.get("published") or "")[:10] or "?",
                     "text": f"{it.get('title', '')}. {t or it.get('description', '')}"})
+    # every other item's own words, without following its link: Amazon's "Some of Amazon's Q3 2026 announcements ..." says "Amazon will
+    # announce financial results for its third quarter on October 29" under a title that announces nothing
+    for it in items[:MAX_FEED_ITEMS]:
+        if it in cands:
+            continue
+        out.append({"kind": "IR feed", "reference": it.get("link") or feed_url, "published": (it.get("published") or "")[:16] or "?", "text": it.get("text") or ""})
     return out
 
 

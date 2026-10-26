@@ -33,9 +33,10 @@ def test_call_dates_leave_the_date_estimated():
     apa = ("Third-quarter 2026 earnings call APA will host a conference call to discuss its third-quarter 2026 results at 10 a.m. Central "
            "time, Thursday, Nov. 5.")
     assert cls("8-K exhibit", apa, "APA") == ("call_only", date(2026, 11, 5))
+    # Booking's call is at 4:30 p.m. ET: after the close, which confirms the day since Sam's decision of 2026-10-26 (test_report_date_sources_2026_10_26)
     bkng = ("Booking Holdings (NASDAQ: BKNG) announced today that it intends to hold a conference call to discuss its third quarter 2026 "
             "financial results on Tuesday, November 3 at 4:30 p.m. ET.")
-    assert cls("press release", bkng, "BKNG")[0] == "call_only"
+    assert cls("press release", bkng, "BKNG")[0] == "release"
 
 
 def test_a_release_date_in_the_companys_own_words_confirms():
