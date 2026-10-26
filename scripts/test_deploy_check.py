@@ -6,13 +6,29 @@ import deploy_check as D
 
 STATUS = {"environments": {"edges": [{"node": {"serviceInstances": {"edges": [
     {"node": {"serviceName": "Postgres", "activeDeployments": [{"meta": {}}]}},
-    {"node": {"serviceName": "alert-interface", "activeDeployments": [{"meta": {"commitHash": "e236e6da71124a5cedd5941c99283ad5c092c041"}}]}}]}}}]}}
+    {"node": {"serviceName": "alert-interface", "activeDeployments": [{"status": "SUCCESS", "meta": {"commitHash": "e236e6da71124a5cedd5941c99283ad5c092c041"}}]}}]}}}]}}
+
+
+def status_with(*deployments):
+    return {"environments": {"edges": [{"node": {"serviceInstances": {"edges": [
+        {"node": {"serviceName": "alert-interface", "activeDeployments": [{"status": st, "meta": {"commitHash": c}} for st, c in deployments]}}]}}}]}}
 
 
 class DeployCheck(unittest.TestCase):
     def test_reads_the_services_running_commit_and_the_pushed_commits_deployment(self):
         self.assertEqual(D.running_commit(STATUS), "e236e6da71124a5cedd5941c99283ad5c092c041")
         self.assertIsNone(D.running_commit({}))
+
+    def test_a_deployment_still_building_is_not_running(self):
+        # 2026-10-26: Railway listed 7618922 as active while BUILDING; 35669b2 was serving
+        building = status_with(("BUILDING", "7618922c00"), ("SUCCESS", "35669b2200"))
+        self.assertEqual(D.running_commit(building, sha="7618922c"), "35669b2200")
+        self.assertEqual(D.verdict("7618922c", D.running_commit(building, sha="7618922c"), {"status": "BUILDING"}, 60)[0], "wait")
+        self.assertIsNone(D.running_commit(status_with(("DEPLOYING", "7618922c00"))))
+        # both serving while the old one drains: the pushed one counts
+        draining = status_with(("SUCCESS", "35669b2200"), ("SUCCESS", "7618922c00"))
+        self.assertEqual(D.running_commit(draining, sha="7618922c"), "7618922c00")
+        self.assertEqual(D.verdict("7618922c", D.running_commit(draining, sha="7618922c"), None, 60)[0], "ok")
         deps = [{"status": "BUILDING", "meta": {"commitHash": "55aeb08abc"}}, {"status": "SUCCESS", "meta": {"commitHash": "e236e6da7"}}]
         self.assertEqual(D.latest_for(deps, "55aeb08")["status"], "BUILDING")
         self.assertIsNone(D.latest_for(deps, "f77172a"))

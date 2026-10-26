@@ -26,18 +26,21 @@ IN_PROGRESS = ("QUEUED", "INITIALIZING", "BUILDING", "DEPLOYING", "WAITING")
 FAILED = ("FAILED", "CRASHED")
 
 
-def running_commit(status: dict, service: str = SERVICE) -> str | None:
-    """Pure: the commit of the service's active deployment in `railway status --json`."""
+def running_commit(status: dict, service: str = SERVICE, sha: str | None = None) -> str | None:
+    """Pure: the commit the service is serving in `railway status --json`: an active deployment whose status is SUCCESS, the pushed
+    `sha` first when two overlap while the old one drains. Railway also lists a deployment still BUILDING or DEPLOYING as active
+    (2026-10-26: the check said 7618922 was running while it was building and 35669b2 served every request), so those never count."""
+    serving: list[str] = []
     for env in (status.get("environments") or {}).get("edges") or []:
         for si in ((env.get("node") or {}).get("serviceInstances") or {}).get("edges") or []:
             n = si.get("node") or {}
             if n.get("serviceName") != service:
                 continue
             for d in n.get("activeDeployments") or []:
-                sha = (d.get("meta") or {}).get("commitHash")
-                if sha:
-                    return sha
-    return None
+                commit = (d.get("meta") or {}).get("commitHash")
+                if commit and d.get("status") == "SUCCESS":
+                    serving.append(commit)
+    return next((c for c in serving if sha and c.startswith(sha)), serving[0] if serving else None)
 
 
 def latest_for(deployments: list[dict], sha: str) -> dict | None:
@@ -79,7 +82,7 @@ def main(argv: list[str]) -> int:
         except (subprocess.SubprocessError, ValueError, OSError) as exc:
             status, deployments = {}, []
             print(f"deploy check: Railway unreadable ({type(exc).__name__}), retrying", flush=True)
-        state, msg = verdict(sha, running_commit(status), latest_for(deployments, sha), time.time() - t0)
+        state, msg = verdict(sha, running_commit(status, SERVICE, sha), latest_for(deployments, sha), time.time() - t0)
         if state == "ok":
             print(msg, flush=True)
             return 0
