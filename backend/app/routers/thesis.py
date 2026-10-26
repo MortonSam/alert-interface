@@ -505,6 +505,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     rv_row = await get_latest_rv(db, sym)
     current_rv: float | None = float(rv_row.rv_20d) if rv_row is not None and rv_row.rv_20d is not None else None
     rv_rank: float | None = float(rv_row.rv_rank) if rv_row is not None and rv_row.rv_rank is not None else None
+    # the fact grid's figure (2026-10-26): the share of days, beside the rank, which still feeds Ivy's own rules unchanged
+    rv_percentile: float | None = float(rv_row.rv_percentile) if rv_rank is not None and rv_row.rv_percentile is not None else None
     if rv_row is None:
         # The same price history feeds 20-day momentum; without a servable
         # snapshot it is stale or wrong, so momentum is absent too.
@@ -568,6 +570,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "atm_iv": atm_iv,
         "current_rv": current_rv,
         "rv_rank": rv_rank,
+        "rv_percentile": rv_percentile,
         "iv_rv_spread_pp": iv_rv_spread_pp,
         "vol_regime": vol_regime,
         "rv_raw": rv_raw,
@@ -777,6 +780,7 @@ async def _run_draft_generation(
         "atm_iv_pct":                round(atm_iv * 100, 1) if atm_iv else None,
         "rv_20d_pct":                round(current_rv * 100, 1) if current_rv else None,
         "rv_rank":                   rv_rank,
+        "rv_percentile":             data.get("rv_percentile"),
         "iv_rv_spread_pp":           iv_rv_spread_pp,
         "fact_reasons":              fact_absence_reasons(atm_iv, current_rv, rv_rank, iv_rv_spread_pp, data.get("chosen_exp"), data.get("chain_last_trade")),
         "vol_regime":                vol_regime,

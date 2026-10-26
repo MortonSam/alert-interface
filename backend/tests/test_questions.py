@@ -124,14 +124,18 @@ def test_7_usual_move_is_evergreen_past_eight_reports():
 
 
 def test_8_volatile_now_ranks_against_the_stocks_own_year_and_needs_eight_sessions():
-    q = Q.q_volatile_now(name="Micron Technology", symbol="MU", rv_20d=0.4153, rv_rank=70.5, sample_days=252, as_of=date(2026, 10, 5))
+    q = Q.q_volatile_now(name="Micron Technology", symbol="MU", rv_20d=0.4153, rv_percentile=70.5, sample_days=252, as_of=date(2026, 10, 5))
     assert q["question"] == "Is Micron Technology more volatile than usual right now?"
     assert q["data"] == "MU's realized volatility over the last 20 sessions is 41.5% annualized, more active than 70% of its own 20-day windows over the past year."
     assert_clean(q)
-    quiet = Q.q_volatile_now(name="X", symbol="X", rv_20d=0.20, rv_rank=20.0, sample_days=252, as_of=T)
+    quiet = Q.q_volatile_now(name="X", symbol="X", rv_20d=0.20, rv_percentile=20.0, sample_days=252, as_of=T)
     assert "quieter than 80%" in quiet["data"]
     assert "cause" not in quiet["idea"] and "because" not in quiet["idea"].split("so")[0]
-    assert Q.q_volatile_now(name="X", symbol="X", rv_20d=0.2, rv_rank=50.0, sample_days=Q.MIN_SESSIONS - 1, as_of=T) is None
+    assert Q.q_volatile_now(name="X", symbol="X", rv_20d=0.2, rv_percentile=50.0, sample_days=Q.MIN_SESSIONS - 1, as_of=T) is None
+    # the share is the percentile of windows, rounded down; never the rank (MRNA, Oct 23: rank 19.6, percentile 90.9)
+    mrna = Q.q_volatile_now(name="Moderna", symbol="MRNA", rv_20d=1.107, rv_percentile=90.9, sample_days=252, as_of=date(2026, 10, 23))
+    assert "more active than 90% of its own 20-day windows" in mrna["data"]
+    assert "quieter than 66%" in Q.q_volatile_now(name="X", symbol="X", rv_20d=0.2, rv_percentile=33.9, sample_days=252, as_of=T)["data"]
 
 
 def test_choose_keeps_catalog_order_and_four_at_most():

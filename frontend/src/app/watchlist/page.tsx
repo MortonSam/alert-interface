@@ -8,7 +8,7 @@ import { earningsProximity } from "@/lib/encodings/earningsProximity";
 import { datasetAgeLine, priceSourceLine, quoteAsOf } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { rvRankShort, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
+import { recentSwings, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
 import Tip from "@/components/Tip";
 import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
 import {
@@ -104,14 +104,13 @@ function ImpliedMoveCell({ data, status }: { data: BatchEnrichItem | null; statu
 
 function RVRankCell({ data, status }: { data: BatchEnrichItem | null; status: string }) {
   if (status === "loading") return <Skeleton w="w-12" />;
-  if (!data || data.rv_rank == null)
+  if (!data || data.rv_rank == null || data.rv_percentile == null)      // a held rank shows nothing, as on the ticker page
     return <span className="text-muted-foreground text-xs">n/a</span>;
-  const rank = data.rv_rank;
-  const { tag, colorClass } = rvRankShort(rank);
+  const { figure, tag, colorClass } = recentSwings(data.rv_percentile);
   return (
     <Tip text={RV_RANK_TIP_SHORT}>
       <span className="flex flex-col">
-        <span className="tabular-nums">{rank.toFixed(0)} · <span className={colorClass}>{tag}</span></span>
+        <span className="tabular-nums">{figure} · <span className={colorClass}>{tag}</span></span>
         {data.current_rv != null && (
           <span className="font-mono text-[10px] text-muted-foreground/60">
             <Explained text="RV " />{(data.current_rv * 100).toFixed(0)}<Explained text="% ann." />
@@ -660,7 +659,7 @@ export default function WatchlistPage() {
                       <th className="py-2.5 px-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         <Tip text={RV_RANK_TIP}>
                           <span className="border-b border-dotted border-muted-foreground/40 cursor-help">
-                            <Explained text="Realized-vol rank" />
+                            <Explained text="Recent swings vs. its past year" />
                           </span>
                         </Tip>
                       </th>
@@ -683,7 +682,7 @@ export default function WatchlistPage() {
 
                 <div className="px-4 py-3 bg-muted/20 border-t border-border">
                   <p className="text-[11px] text-muted-foreground/60">
-                    {priceSourceLine(health?.cadence)}<Explained text=". Implied move derived from near-term options straddle. RV rank: where this stock's current 20-day realized vol sits in its own trailing 1-year range (relative to itself, not absolute)." />
+                    {priceSourceLine(health?.cadence)}<Explained text=". Implied move derived from near-term options straddle. Recent swings: the share of its past year's days when it swung less than over the last 20 trading days (relative to itself, not absolute)." />
                   </p>
                 </div>
               </div>

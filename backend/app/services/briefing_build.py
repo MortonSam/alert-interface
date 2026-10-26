@@ -281,10 +281,11 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
     rv_row, _ = (None, None) if rv_hold or deal_held else await get_servable_rv(db, sym)
     if rv_hold and raw is not None:
         raw.update(rv_hold=rv_hold)
-    if rv_row is not None and rv_row.rv_20d is not None and rv_row.rv_rank is not None:
+    # the rank stays the hold's gate (a held rank shows nothing); the figure and the word are the percentile of days, as the page's row
+    if rv_row is not None and rv_row.rv_20d is not None and rv_row.rv_rank is not None and rv_row.rv_percentile is not None:
         if raw is not None:
-            raw.update(rv={"rv_20d": float(rv_row.rv_20d), "rv_rank": float(rv_row.rv_rank), "as_of": rv_row.as_of_date})
-        cands.append(Q.q_volatile_now(name=name, symbol=sym, rv_20d=float(rv_row.rv_20d), rv_rank=float(rv_row.rv_rank), sample_days=int(rv_row.sample_days or 0), as_of=rv_row.as_of_date))
+            raw.update(rv={"rv_20d": float(rv_row.rv_20d), "rv_rank": float(rv_row.rv_rank), "rv_percentile": float(rv_row.rv_percentile), "as_of": rv_row.as_of_date})
+        cands.append(Q.q_volatile_now(name=name, symbol=sym, rv_20d=float(rv_row.rv_20d), rv_percentile=float(rv_row.rv_percentile), sample_days=int(rv_row.sample_days or 0), as_of=rv_row.as_of_date))
     # 9. trailing P/E against its history and its sector (evergreen; only a stored, fresh snapshot). Behind the PE_ENABLED flag: while it is
     #    off the snapshot is never read here, so neither the strip nor Ask Ivy (whose facts come from this function's candidates and `raw`) sees a P/E.
     from app.config import settings

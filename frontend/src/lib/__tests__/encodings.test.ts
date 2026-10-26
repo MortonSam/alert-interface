@@ -77,13 +77,14 @@ describe("RV tier", () => {
   it("one function serves the watchlist and Build; the tape words its rows from its own tiers", () => {
     expect(rvRankShort(92).tag).toBe(rvTier(92).label);
     const discover = read("app/discover/page.tsx") + read("lib/discoverSentences.ts");
-    expect(discover).toContain("tapeVolatilityClause(item.rv_rank)");
+    expect(discover).toContain("tapeVolatilityClause(item.rv_percentile, item.rv_rank)");
     expect(discover).not.toMatch(/[^r]rvTier\(|discoverRvTier/);
     expect(read("lib/utils.ts")).not.toMatch(/rank < (25|70|90)/);
-    expect(tapeVolatilityClause(TAPE_CHOPPIEST_RANK)).toBe("Its last month has been its choppiest in a year.");
-    expect(tapeVolatilityClause(TAPE_CHOPPIEST_RANK - 0.5)).toBe("Its last month has been one of its choppiest in a year.");
-    expect(tapeVolatilityClause(TAPE_ONE_OF_CHOPPIEST_RANK)).toBe("Its last month has been one of its choppiest in a year.");
-    expect(tapeVolatilityClause(TAPE_ONE_OF_CHOPPIEST_RANK - 0.5)).toBe("Its last month has been choppier than most of its past year.");
+    // "its choppiest" only when today is the year's busiest (rank 100); "one of" and "most" from the percentile of days
+    expect(tapeVolatilityClause(99.6, TAPE_CHOPPIEST_RANK)).toBe("Its last month has been its choppiest in a year.");
+    expect(tapeVolatilityClause(99.6, TAPE_CHOPPIEST_RANK - 0.5)).toBe("Its last month has been one of its choppiest in a year.");
+    expect(tapeVolatilityClause(TAPE_ONE_OF_CHOPPIEST_RANK, 60)).toBe("Its last month has been one of its choppiest in a year.");
+    expect(tapeVolatilityClause(TAPE_ONE_OF_CHOPPIEST_RANK - 0.5, 99)).toBe("Its last month has been choppier than most of its past year.");
   });
   it("legend covers every tier and states its rule", () => {
     expectLegendCovers(rvTierLegend(), Object.keys(RV_TIER_ENCODING));

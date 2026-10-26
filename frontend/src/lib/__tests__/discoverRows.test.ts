@@ -139,26 +139,26 @@ describe("row sentences", () => {
 
   it("the tape: words only, the volatility tier, the options clause, then the report date at its level", () => {
     const u: UnusuallyActiveItem = {
-      ...base, symbol: "VOLT", rv_rank: 99.4, rv_20d: 0.62, tier: "extreme", insight: null, vol_regime: null,
+      ...base, symbol: "VOLT", rv_rank: 100, rv_percentile: 99.6, rv_20d: 0.62, tier: "extreme", insight: null, vol_regime: null,
       iv_rv_spread_pp: -7.2, atm_iv: 0.548, iv_date: "2026-09-28",
       earnings_date: "2026-10-21", earnings_source: "edgar", earnings_checked_at: TODAY_CHECK,
       earnings_confirmation: "confirmed", earnings_note: "confirmed: 8-K Item 7.01 filed 2026-09-15",
     };
     expect(unusuallyActiveSentence(u, NOW)).toBe(
       "Its last month has been its choppiest in a year. Options are pricing a calmer month ahead. Reports Oct 21, 2026 (confirmed by the company).");
-    expect(unusuallyActiveSentence({ ...u, rv_rank: TAPE_ONE_OF_CHOPPIEST_RANK, iv_rv_spread_pp: TAPE_OPTIONS_BAND_PP + 0.1 }, NOW)).toBe(
+    expect(unusuallyActiveSentence({ ...u, rv_rank: 80, rv_percentile: TAPE_ONE_OF_CHOPPIEST_RANK, iv_rv_spread_pp: TAPE_OPTIONS_BAND_PP + 0.1 }, NOW)).toBe(
       "Its last month has been one of its choppiest in a year. Options are pricing an even bumpier month ahead. Reports Oct 21, 2026 (confirmed by the company).");
     expect(unusuallyActiveSentence({ ...u, rv_rank: TAPE_CHOPPIEST_RANK - 0.6, iv_rv_spread_pp: TAPE_OPTIONS_BAND_PP }, NOW)).toBe(
       "Its last month has been one of its choppiest in a year. Options are pricing about the same. Reports Oct 21, 2026 (confirmed by the company).");
     // no fresh chain: no options clause; an estimate says so; two calendars agreeing are not the company
-    expect(unusuallyActiveSentence({ ...u, rv_rank: DISCOVER_ELEVATED_RV, iv_rv_spread_pp: null, iv_date: null, earnings_confirmation: "estimated", earnings_source: "finnhub" }, NOW)).toBe(
+    expect(unusuallyActiveSentence({ ...u, rv_rank: 99, rv_percentile: DISCOVER_ELEVATED_RV, iv_rv_spread_pp: null, iv_date: null, earnings_confirmation: "estimated", earnings_source: "finnhub" }, NOW)).toBe(
       "Its last month has been choppier than most of its past year. Reports around Oct 21, 2026 (estimated).");
     expect(unusuallyActiveSentence({ ...u, earnings_note: "confirmed: Finnhub and Yahoo Finance agree" }, NOW)).toContain("(confirmed by two calendars).");
     expect(unusuallyActiveSentence({ ...u, earnings_date: null }, NOW)).toBe(
       "Its last month has been its choppiest in a year. Options are pricing a calmer month ahead.");
     // the figures are the hover
     const receipt = tapeReceipt(u, NOW);
-    expect(receipt).toContain("RV rank 99 of 100 against its own past year; 20-day realized volatility 62.0%");
+    expect(receipt).toContain("Swinging more than on 99% of days in the past year; 20-day realized volatility 62.0%");
     expect(receipt).toContain("Implied volatility 54.8% from the Sep 28, 2026 chain, 7.2 points below realized");
     expect(receipt).toContain("Reports Oct 21, 2026 (confirmed by the company)");
   });

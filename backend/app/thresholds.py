@@ -166,7 +166,7 @@ DISCOVER_ELEVATED_RV = 85  # retrieval filter
 # The Tape's words (Discover "Unusually active"): rank at or above TAPE_CHOPPIEST_RANK reads "its choppiest in a year", at or above
 # TAPE_ONE_OF_CHOPPIEST_RANK "one of its choppiest", below it "choppier than most of its past year". Implied volatility more than
 # TAPE_OPTIONS_BAND_PP points from realized reads as "a calmer" or "an even bumpier" month ahead; inside the band, "about the same".
-TAPE_CHOPPIEST_RANK = 99
+TAPE_CHOPPIEST_RANK = 100       # rank 100: today is the year's busiest; TAPE_ONE_OF_CHOPPIEST_RANK applies to rv_percentile (2026-10-26)
 TAPE_ONE_OF_CHOPPIEST_RANK = 95
 TAPE_OPTIONS_BAND_PP = 5
 # The expected-move caveat: an expiry more than this many days after the earnings date carries the "covers the full period" note.

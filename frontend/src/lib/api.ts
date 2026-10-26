@@ -701,6 +701,7 @@ export interface UnusuallyActiveItem {
   sector: string | null;
   industry: string | null;
   rv_rank: number;
+  rv_percentile?: number | null;   // share of the past year's days with lower realized volatility: the tape's words and figure
   rv_20d: number;
   tier: "extreme" | "elevated";
   insight: string | null;
@@ -802,6 +803,7 @@ export interface BatchEnrichItem {
   expected_move_pct: number | null;
   earnings_date: string | null;
   rv_rank: number | null;
+  rv_percentile?: number | null;   // share of the past year's days with lower realized volatility: the watchlist column's figure
   current_rv: number | null;
   quote_state?: "ok" | "stale" | "no_data";
   quote_reason?: string | null;
@@ -968,6 +970,7 @@ export interface ThesisDraftRead {
     atm_iv_pct: number | null;
     rv_20d_pct: number | null;
     rv_rank: number | null;
+    rv_percentile?: number | null;   // the fact grid's figure: the share of the past year's days with lower realized volatility
     iv_rv_spread_pp: number | null;
     primary_strikes: ThesisDraftStrike[];
     secondary_strikes: ThesisDraftStrike[];

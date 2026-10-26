@@ -10,6 +10,8 @@ six event questions, so every stock with at least MIN_REPORTS reports shows at l
 """
 from __future__ import annotations
 
+import math
+
 from datetime import date
 
 from app.services.briefing import TIMING_PHRASE, _input, fmt_date, fmt_money, fmt_pct, last_reports, plural, short_name
@@ -168,20 +170,24 @@ def q_usual_move(*, name: str, symbol: str, typical_abs: float, n_reports: int, 
 
 
 # 8 ─────────────────────────────────────────────────────────────────────────────
-def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_rank: float, sample_days: int, as_of: date) -> dict | None:
-    """Evergreen: the current 20-day realized volatility against the stock's own past year."""
+def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_percentile: float, sample_days: int, as_of: date) -> dict | None:
+    """Evergreen: the current 20-day realized volatility against the stock's own past year. The share is rv_percentile (the share of
+    the past year's 20-day windows with lower realized volatility), never rv_rank (where today sits between the year's lowest and
+    highest, which is not a share of windows; until 2026-10-26 this sentence read the rank as one). Rounded down, so "more active
+    than" and "quieter than" stay true."""
     if sample_days < MIN_SESSIONS:
         return None
     rv = fmt_pct(rv_20d * 100, signed=False)
-    share = f"{rv_rank:.0f}%" if rv_rank >= 50 else f"{100 - rv_rank:.0f}%"
-    phrase = f"more active than {share}" if rv_rank >= 50 else f"quieter than {share}"
+    more = rv_percentile >= 50
+    share = f"{math.floor(rv_percentile)}%" if more else f"{math.floor(100 - rv_percentile)}%"
+    phrase = f"more active than {share}" if more else f"quieter than {share}"
     data = f"{symbol}'s realized volatility over the last 20 sessions is {rv} annualized, {phrase} of its own 20-day windows over the past year."
     idea = ("Realized volatility measures how much a stock actually moved from one close to the next; a stock is only \"volatile\" relative to its own "
             "normal, so the comparison that matters is with its own past year.")
-    inputs = [_input("20-day realized volatility", rv, as_of, "realized volatility over 20 sessions, annualized"), _input("share of past-year windows", share, as_of, f"volatility rank, {rv_rank:.0f}"),
-              _input("sessions in the past year", sample_days, as_of, "volatility rank, sessions in its sample")]
+    inputs = [_input("20-day realized volatility", rv, as_of, "realized volatility over 20 sessions, annualized"), _input("share of past-year windows", share, as_of, f"volatility percentile, {rv_percentile:.1f}"),
+              _input("sessions in the past year", sample_days, as_of, "volatility percentile, sessions in its sample")]
     return _q("volatile_now", f"Is {name} more volatile than usual right now?", data, idea, inputs, as_of,
-              f"The latest servable realized-volatility snapshot with at least {MIN_SESSIONS} sessions; the rank is the percentile of the current 20-day value among the past year's windows.")
+              f"The latest servable realized-volatility snapshot with at least {MIN_SESSIONS} sessions; the share is the percentile of the current 20-day value among the past year's windows, rounded down.")
 
 
 # 9 ─────────────────────────────────────────────────────────────────────────────

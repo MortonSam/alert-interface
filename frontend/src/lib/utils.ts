@@ -13,17 +13,21 @@ export function rvRankShort(rank: number): { tag: string; colorClass: string; ru
   return { tag: tier.label, colorClass: tier.className, rule: tier.rule };
 }
 
-/** Tooltip text explaining what RV rank means. */
+/** Tooltip for the recent-swings figure: the share of days (rv_percentile), as the ticker page's RV rank row states it (2026-10-26). */
 export const RV_RANK_TIP =
-  "Where this stock\u2019s current 20-day volatility sits within its OWN past year. " +
-  "A high rank means it\u2019s more volatile lately than usual for this stock \u2014 " +
-  "NOT that it\u2019s a volatile stock overall. A steady name can rank high if " +
-  "it\u2019s currently choppier than normal.";
+  "The share of days in this stock\u2019s OWN past year when it was swinging less than it has over the last 20 trading days. " +
+  "A high share means it\u2019s choppier lately than usual for this stock \u2014 NOT that it\u2019s a volatile stock overall.";
 
-/** Shorter per-row version of the RV rank tooltip. */
+/** Shorter per-row version. */
 export const RV_RANK_TIP_SHORT =
-  "How volatile this stock is right now vs. its own past year. " +
-  "High = choppier than usual for THIS stock, not volatile in absolute terms.";
+  "Swinging more than on this share of its past year\u2019s days; the word is the band the ticker page uses.";
+
+/** The recent-swings cell: "62% of days" and its band, from rv_percentile rounded down (lib/optionsRows.rankRowValue's rule). */
+export function recentSwings(percentile: number): { figure: string; tag: string; colorClass: string } {
+  const shown = Math.floor(percentile);
+  const { tag, colorClass } = rvRankShort(shown);
+  return { figure: `${shown}% of days`, tag, colorClass };
+}
 
 /** Format market cap to 2 decimal places ($1.23T, $45.67B, $850M style). */
 export function fmtMarketCap(n: number | null): string {

@@ -91,14 +91,15 @@ def test_normalization_folds_ticker_name_stopwords_and_synonyms():
 
 def test_word_facts_come_from_the_strips_numbers_with_the_shared_thresholds():
     raw = {"report_view": {"state": "ok", "rep": 9.0, "move_comparison": "more than usual", "chain_date": date(2026, 10, 5)}, "typical_abs": 7.0, "quote_price": 1045.56,
-           "bars": {"high_52w": 1213.37, "high_52w_date": date(2026, 6, 25), "last_close": 1063.96}, "rv": {"rv_20d": 0.47, "rv_rank": 12.0, "as_of": date(2026, 10, 5)},
+           "bars": {"high_52w": 1213.37, "high_52w_date": date(2026, 6, 25), "last_close": 1063.96}, "rv": {"rv_20d": 0.47, "rv_rank": 12.0, "rv_percentile": 12.0, "as_of": date(2026, 10, 5)},
            "last_report": {"event_date": date(2026, 9, 30), "timing": "amc", "move_pct": 3.0, "outcome": "beat"},
            "next_report": {"date": date(2026, 12, 16), "confirmation": "estimated", "note": None, "source": "finnhub", "timing": "amc"},
            "dividend": {"ex_date": date(2026, 10, 14), "declared_on": date(2026, 9, 30)}}
     w = {f["id"]: f["value"] for f in A.word_facts(raw)}
     assert w["implied_vs_typical"] == "more than usual" and w["last_move_vs_typical"] == "less than usual"           # the report move's own words; 3 over 7, services/move_comparison
     assert w["price_vs_52_week_high"] == "below" and w["52_week_high_date"] == "Jun 25, 2026"
-    assert w["volatility_vs_year"] == "quiet" and A.volatility_word(80) == "elevated" and A.volatility_word(50) == "normal"
+    assert w["volatility_vs_year"] == "quiet" and A.volatility_word(80) == "elevated" and A.volatility_word(50) == "normal" \
+        and A.volatility_word(90.9) == "extreme" and A.volatility_word(69.9) == "normal" and A.volatility_word(24.9) == "quiet"   # the page's row bands
     assert w["last_report_outcome"] == "beat" and w["last_report_direction"] == "rose" and w["last_report_timing"] == "after the close"
     assert w["next_report_status"] == "estimated" and w["next_report_timing"] == "after the close" and w["dividend_status"] == "declared"
     assert A.word_facts({}) == []

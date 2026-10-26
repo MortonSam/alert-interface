@@ -146,6 +146,7 @@ class BatchEnrichRead(BaseModel):
     expected_move_pct: float | None = None
     earnings_date: str | None = None
     rv_rank: float | None = None
+    rv_percentile: float | None = None   # share of the past year's days with lower realized volatility: the watchlist's figure
     current_rv: float | None = None
     inactive: bool = False
     quote_state: str = "ok"           # ok | stale | no_data; price fields are null unless ok

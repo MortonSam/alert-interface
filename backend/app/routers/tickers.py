@@ -530,10 +530,13 @@ async def batch_enrich(
 
             # — Realized vol from precomputed snapshot ————————————————————————
             rv_rank: float | None = None
+            rv_percentile: float | None = None
             current_rv: float | None = None
             rv_row = rv_rows.get(sym)
             if rv_row is not None:
                 rv_rank = float(rv_row.rv_rank) if rv_row.rv_rank is not None and sym not in held_deals else None
+                # the column's figure and band (2026-10-26): the share of days, shown only while the rank itself is
+                rv_percentile = float(rv_row.rv_percentile) if rv_rank is not None and rv_row.rv_percentile is not None else None
                 current_rv = float(rv_row.rv_20d) if rv_row.rv_20d is not None else None
 
             return BatchEnrichRead(
@@ -548,6 +551,7 @@ async def batch_enrich(
                 expected_move_pct=em_pct,
                 earnings_date=earnings_str,
                 rv_rank=rv_rank,
+                rv_percentile=rv_percentile,
                 current_rv=current_rv,
             )
 

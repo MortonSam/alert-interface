@@ -53,3 +53,17 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
     }
   });
 });
+
+describe("every recent-swings display reads the percentile of days (2026-10-26)", () => {
+  it("the watchlist and Build a Trade show the share of days and the row's band", async () => {
+    const { recentSwings } = await import("@/lib/utils");
+    expect(recentSwings(73.0)).toMatchObject({ figure: "73% of days", tag: "elevated" });
+    expect(recentSwings(90.9)).toMatchObject({ figure: "90% of days", tag: "extreme" });
+    expect(recentSwings(69.9).tag).toBe("normal");
+    const src = (p: string) => readFileSync(join(__dirname, "../..", p), "utf8");
+    expect(src("app/watchlist/page.tsx")).toContain("recentSwings(data.rv_percentile)");
+    expect(src("app/build/page.tsx")).toContain("recentSwings(fb.rv_percentile)");
+    expect(src("app/watchlist/page.tsx") + src("app/build/page.tsx")).not.toMatch(/rv_rank\.toFixed|Realized-vol rank/);
+    expect(src("lib/discoverSentences.ts")).not.toMatch(/RV rank \$\{/);
+  });
+});

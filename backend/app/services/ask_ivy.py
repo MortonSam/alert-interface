@@ -23,6 +23,10 @@ pauses for the day once the site's estimated spend reaches settings.ask_ivy_dail
 """
 from __future__ import annotations
 
+import math
+
+from app.thresholds import RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL
+
 import asyncio
 import hashlib
 import json
@@ -71,8 +75,6 @@ PLACEHOLDER_RUN = re.compile(r"(?:\{fact:[a-z0-9_]+\}\s*[,;|]\s*){3,}\{fact:")  
 TABLE_MARK = re.compile(r"\||\t")
 ROW_START = re.compile(r"^\s*(?:\{fact:[a-z0-9_]+\}|[A-Z][a-z]{2} \d{1,2}|[+\-−±]?\$?\d)[^A-Za-z\n]*[,|\t]", re.M)   # a line that is a row of figures
 SPEND_KEY = "ask_ivy_spend"                 # system_metadata "{SPEND_KEY}:{YYYY-MM-DD}" holds the day's estimated spend in USD
-RV_ELEVATED_RANK = 80                       # 20-day realized volatility at or above this percentile of its own year is "elevated"
-RV_QUIET_RANK = 20                          # at or below this percentile, "quiet"
 
 ASK_POLICY = LimitPolicy(prefix="ask_ivy", per_ip_hour=10, per_ip_day=30, global_day=1500, admin_bypasses_global=False,
                          per_ip_hour_message="Ivy answers up to {n} questions an hour per visitor; try again after {at}.",
@@ -455,13 +457,12 @@ def number_facts(sentences: list[dict], questions: list[dict]) -> list[dict]:
     return list(facts.values())
 
 
-def volatility_word(rv_rank: float) -> str:
-    """Pure: the stock's 20-day realized volatility against its own past year, in a word."""
-    if rv_rank >= RV_ELEVATED_RANK:
-        return "elevated"
-    if rv_rank <= RV_QUIET_RANK:
-        return "quiet"
-    return "normal"
+def volatility_word(rv_percentile: float) -> str:
+    """Pure: the stock's 20-day realized volatility against its own past year, in the word the page's RV rank row prints: the band of
+    the percentile of days, rounded down, by thresholds.rv_rank_label's cutoffs (quiet, normal, elevated, extreme). Until 2026-10-26
+    this read rv_rank against cutoffs of its own."""
+    from app.thresholds import rv_rank_label
+    return rv_rank_label(math.floor(rv_percentile)).label
 
 
 def word_facts(raw: dict) -> list[dict]:
@@ -483,8 +484,9 @@ def word_facts(raw: dict) -> list[dict]:
             out.append(_fact("52_week_high_date", "52-week high date", B.fmt_date(bars["high_52w_date"]), bars["high_52w_date"], "daily closes, the day of the highest close"))
     rv = raw.get("rv")
     if rv:
-        out.append(_fact("volatility_vs_year", "20-day realized volatility against the stock's own past year", volatility_word(rv["rv_rank"]), rv["as_of"],
-                         f"volatility rank: at or above the {RV_ELEVATED_RANK}th percentile is elevated, at or below the {RV_QUIET_RANK}th quiet", "word"))
+        out.append(_fact("volatility_vs_year", "20-day realized volatility against the stock's own past year", volatility_word(rv["rv_percentile"]), rv["as_of"],
+                         f"share of the past year's days with lower volatility: under {RV_RANK_NORMAL}% quiet, {RV_RANK_ELEVATED}% or more elevated, "
+                         f"{RV_RANK_EXTREME}% or more extreme, else normal", "word"))
     last = raw.get("last_report")
     if last:
         if last.get("timing") in B.TIMING_PHRASE:

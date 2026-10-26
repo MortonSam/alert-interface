@@ -175,9 +175,9 @@ export function suggestionSentence(item: SuggestionItem, now: Date = new Date())
  * (lib/thresholds TAPE_*), then the options clause when a fresh chain exists; one dominating session or a corporate action that
  * holds the rank replaces both; then the report date at its level. The source and check time are in the hover.
  */
-export function tapeVolatilityClause(rank: number): string {
-  if (rank >= TAPE_CHOPPIEST_RANK) return "Its last month has been its choppiest in a year.";
-  if (rank >= TAPE_ONE_OF_CHOPPIEST_RANK) return "Its last month has been one of its choppiest in a year.";
+export function tapeVolatilityClause(percentile: number, rank: number): string {
+  if (rank >= TAPE_CHOPPIEST_RANK) return "Its last month has been its choppiest in a year.";      // today is the year's busiest
+  if (percentile >= TAPE_ONE_OF_CHOPPIEST_RANK) return "Its last month has been one of its choppiest in a year.";
   return "Its last month has been choppier than most of its past year.";
 }
 
@@ -207,7 +207,7 @@ export function unusuallyActiveSentence(item: UnusuallyActiveItem, _now: Date = 
     const spy = spyBeside(item.spy_move_pct);
     parts.push(`Its last month looks choppy mostly because of one big ${kind} on ${fmtEarningsDate(item.dominant_date)}${spy ? `, ${spy}` : ""}.`);
   } else {
-    parts.push(tapeVolatilityClause(item.rv_rank));
+    if (item.rv_percentile != null) parts.push(tapeVolatilityClause(item.rv_percentile, item.rv_rank));
     if (item.iv_rv_spread_pp != null && item.iv_date) parts.push(tapeOptionsClause(item.iv_rv_spread_pp));
   }
   parts.push(tapeReportClause(item));
@@ -220,7 +220,7 @@ function pct(fraction: number): string {
 
 /** The row's hover: the figures behind the words. */
 export function tapeReceipt(item: UnusuallyActiveItem, now: Date = new Date()): string {
-  const lines = [`RV rank ${Math.round(item.rv_rank)} of 100 against its own past year; 20-day realized volatility ${pct(item.rv_20d)}`];
+  const lines = [`${item.rv_percentile != null ? `Swinging more than on ${Math.floor(item.rv_percentile)}% of days in the past year` : "Against its past year: not compared"}; 20-day realized volatility ${pct(item.rv_20d)}`];
   if (item.rank_hold_reason) lines.push(`Rank held: ${item.rank_hold_reason}`);
   if (item.iv_rv_note) lines.push(`${upperFirst(item.iv_rv_note)}; implied against realized not compared`);
   else if (item.iv_rv_spread_pp != null && item.atm_iv != null && item.iv_date) {

@@ -52,6 +52,8 @@ export const MARKET_DAY_MIN_SPY_PCT = 1.0;
 export const MARKET_DAY_MIN_SHARE = 0.7;
 
 // ── Discover tape words ────────────────────────────────────────────
-export const TAPE_CHOPPIEST_RANK = 99;
+// "its choppiest in a year" only at rank 100 (today is the year's busiest: rv_rank is the position between the year's lowest and highest);
+// "one of its choppiest" from the percentile of days (rv_percentile), as every other share on the site (2026-10-26)
+export const TAPE_CHOPPIEST_RANK = 100;
 export const TAPE_ONE_OF_CHOPPIEST_RANK = 95;
 export const TAPE_OPTIONS_BAND_PP = 5;

@@ -22,6 +22,7 @@ from app.thresholds import (
     DISCOVER_IV_RICH_PP, DISCOVER_IV_CHEAP_PP,
     DISCOVER_EXTREME_RV, DISCOVER_ELEVATED_RV,
     discover_rv_tier,
+    rv_rank_label,
 )
 from app.database import get_db
 from app.models.analyst_recommendation import AnalystRecommendation
@@ -148,8 +149,9 @@ class UnusuallyActiveItem(BaseModel):
     sector: str | None = None
     industry: str | None = None
     rv_rank: float
+    rv_percentile: float | None = None   # share of the past year's days with lower realized volatility: the tape's words and figure
     rv_20d: float
-    tier: str  # "extreme" or "elevated"
+    tier: str  # "extreme" or "elevated": the RV rank row's band of rv_percentile
     insight: str | None = None  # e.g. "IV rich +12pp — options expensive vs realized"
     vol_regime: str | None = None
     iv_rv_note: str | None = None
@@ -1069,7 +1071,8 @@ async def unusually_active(
     limit: int = Query(12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> UnusuallyActiveResponse:
-    """Tickers with elevated realized volatility vs. their own history (rv_rank >= 85)."""
+    """Tickers swinging more than on DISCOVER_ELEVATED_RV% of their own past year's days (rv_percentile, 2026-10-26; rv_rank, the
+    position between the year's lowest and highest, chose them before). A held rank still keeps a ticker off the tape."""
     max_date_result = await db.execute(
         sa.text("SELECT max(as_of_date) FROM rv_snapshots WHERE status = 'ok'")
     )
@@ -1078,14 +1081,15 @@ async def unusually_active(
         return UnusuallyActiveResponse(items=[])
 
     stmt = sa.text("""
-        SELECT r.symbol, t.name, t.sector, t.industry, r.rv_rank, r.rv_20d
+        SELECT r.symbol, t.name, t.sector, t.industry, r.rv_rank, r.rv_percentile, r.rv_20d
         FROM rv_snapshots r
         JOIN tickers t ON t.symbol = r.symbol AND t.is_active = true
         WHERE r.as_of_date = :latest_date
           AND r.symbol NOT IN (SELECT symbol FROM pending_deals WHERE status = 'active')   -- a pending cash deal leaves the tape
           AND r.status = 'ok'
-          AND r.rv_rank >= :min_rank
-        ORDER BY r.rv_rank DESC
+          AND r.rv_rank IS NOT NULL
+          AND r.rv_percentile >= :min_rank
+        ORDER BY r.rv_percentile DESC, r.rv_rank DESC
         LIMIT :limit
     """)
     result = await db.execute(stmt, {"latest_date": latest_date, "limit": limit, "min_rank": DISCOVER_ELEVATED_RV})
@@ -1104,8 +1108,9 @@ async def unusually_active(
             sector=row.sector,
             industry=row.industry,
             rv_rank=float(row.rv_rank),
+            rv_percentile=float(row.rv_percentile),
             rv_20d=float(row.rv_20d),
-            tier=discover_rv_tier(float(row.rv_rank)).label,
+            tier=rv_rank_label(math.floor(float(row.rv_percentile))).label,   # the ticker page's RV rank row band, on the same percentile
             insight=_unusually_active_insight(vol_data.get(row.symbol), row.symbol),
             vol_regime=vol_data.get(row.symbol, {}).get("vol_regime"),
             iv_rv_note=vol_data.get(row.symbol, {}).get("iv_rv_note"),
