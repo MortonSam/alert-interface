@@ -20,7 +20,7 @@ from app.services.basis_exclusion import basis_mismatch_dates
 from app.services.eps_actuals import eps_outcome
 from app.services.trading_calendar import nth_trading_day_after
 from app.services.implied_move import implied_move_allowed
-from app.services.next_earnings import NextEarnings, next_earnings_for
+from app.services.next_earnings import EXPECTED_WINDOW, NextEarnings, next_earnings_for
 from app.services.report_move import report_move_view
 from app.services.fact_holds import holds_for
 from app.services.price_history_exclusion import is_excluded
@@ -153,6 +153,9 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
                 if implied_move_allowed(ne.confirmation) else {}                    # never priced against an estimate
             upcoming = {"today": today, "next_date": ne.date, "confirmation": ne.confirmation, "note": ne.note, "source": ne.source,
                         "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "report_view": view}
+        elif ne.confirmation == EXPECTED_WINDOW and ne.window_center and 0 <= (ne.window_center - today).days <= B.NEXT_WITHIN_DAYS:
+            # no company-confirmed date: the window from its past report dates, in Sam's words, never a vendor's estimate
+            upcoming = {"today": today, "next_date": ne.window_center, "confirmation": EXPECTED_WINDOW, "source": ne.window_source}
         exclude = set()
         for d in earnings_dates:
             exclude.add(d); exclude.add(nth_trading_day_after(d, 1))

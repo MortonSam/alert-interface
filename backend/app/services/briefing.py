@@ -448,6 +448,10 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     sentence (services/report_move.report_move_view), word for word the one the verdict, Discover and the strip state; when the
     options do not separate a report move, that sentence."""
     days = (next_date - today).days
+    if confirmation == "expected_window":
+        from app.services.next_earnings import expected_window_line
+        return (expected_window_line(next_date) + ".", [_input("expected report day", fmt_date(next_date), today,
+                "the window from its past report dates in SEC filings (services/report_windows)")], [])
     conf = confidence_phrase(confirmation)
     text = f"Reports {fmt_date(next_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "") + ", " + ("today" if days == 0 else plural(days, "day away", "days away"))
     text += f" ({conf})" if conf else ""

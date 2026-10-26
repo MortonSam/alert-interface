@@ -29,7 +29,7 @@ import { IvyMark } from "@/components/IvyMark";
 import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
 import { NO_DRAFT_NOT_CHARGED, ivyDecisionSentence } from "@/lib/ivyOutcomes";
 import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
-import { cardEarningsNote, noDateLine } from "@/lib/earningsSource";
+import { cardEarningsNote, expectedWindowLine, noDateLine } from "@/lib/earningsSource";
 import { matchTickers } from "@/lib/tickerSearch";
 import { ESTIMATE_NOTE, NO_IMPLIED_MOVE, NO_IMPLIED_VOL, chancePastBreakeven, estimateReceipt, fmtDollars, gainAtImpliedMove, impliedMoveLabel, payoffRange, stretchLine, type DebitTrade } from "@/lib/tradeMath";
 import PayoffSimulator from "@/components/PayoffSimulator";
@@ -490,7 +490,9 @@ function DraftDisplay({
             {fb.implied_range_low != null && fb.implied_range_high != null ? `$${fb.implied_range_low.toFixed(2)} - $${fb.implied_range_high.toFixed(2)}` : absentCell(fb, "implied_range_low", "no priced ATM straddle on the chain")}
           </span>
         </span>
-        <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>
+        {fb.earnings_confirmation === "expected_window" && fb.earnings_window_center ? (
+          <span className="text-foreground">{expectedWindowLine(fb.earnings_window_center)}</span>
+        ) : <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>}
         <span>
           One-day earnings move, avg ±:{" "}
           <span className="font-mono text-foreground">{fb.hist_avg_abs_move_pct != null ? `${fb.hist_avg_abs_move_pct.toFixed(2)}%` : absentCell(fb, "hist_avg_abs_move_pct", "no earnings reactions with a one-day move on file")}</span>

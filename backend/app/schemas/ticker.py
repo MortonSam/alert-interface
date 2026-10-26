@@ -56,6 +56,7 @@ class TickerRead(TickerBase):
     # with LICENSED_DATES_ONLY and no company-confirmed date: the expected window from the company's past report dates in SEC filings
     next_earnings_window_start: date | None = None
     next_earnings_window_end: date | None = None
+    next_earnings_window_center: date | None = None   # "Next report expected around {center}, ..." (lib/earningsSource.expectedWindowLine)
     next_earnings_window_source: str | None = None
     next_earnings_window_computed_at: str | None = None
     deal_note: str | None = None                     # a pending cash deal (services/pending_deals): the visitor note; the page shows plain price facts below it

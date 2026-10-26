@@ -16,7 +16,7 @@ Wording column: "none" means the element disappears or keeps its existing approv
 | ticker Overview | "worth about $5.3 trillion" | quote × shares outstanding, shares from the Finnhub profile; agreement check against the Finnhub market cap | Hidden (the clause is left out) | none |
 | ticker Overview | Company description | Intrinio company profile | Kept (licensed) | unchanged |
 | ticker Overview, sector line | GICS sector and sub-industry | S&P 500 constituent list | Kept | unchanged |
-| ticker header, Catalysts, Overview, Discover, Build a Trade | Next report date and "confirmed (two calendars agree)" / "estimated (Finnhub)" | Finnhub and Yahoo calendars (personal use); company confirmations from 8-Ks and IR pages | Replaced: LICENSED_DATES_ONLY behaviour (services/personal_use.dates_licensed_only): a date only when the company's own words confirmed it, otherwise the expected window from past report dates in SEC filings | **Needs wording**: the frontend has no line for the `expected_window` level, so on this branch such a date falls through to the "estimated" line. Held; see decisions |
+| ticker header, Catalysts, Overview, Discover, Build a Trade | Next report date and "confirmed (two calendars agree)" / "estimated (Finnhub)" | Finnhub and Yahoo calendars (personal use); company confirmations from 8-Ks and IR pages | Replaced: LICENSED_DATES_ONLY behaviour (services/personal_use.dates_licensed_only): a date only when the company's own words confirmed it, otherwise the expected window from past report dates in SEC filings | Sam's wording (2026-10-26), verbatim: "Next report expected around {Nov 4, 2026}, based on its past report dates (not yet confirmed by the company)", from the window's centre, on every one of these surfaces (lib/earningsSource.expectedWindowLine; backend next_earnings.EXPECTED_WINDOW_LINE for Overview) |
 | ticker header | "Analyst data as of 20h ago" | Finnhub recommendations, Finnhub/Yahoo upgrades and downgrades | Hidden (the analyst dataset is dropped from /health's datasets, so the line is never built) | none |
 | ticker Catalysts | Street Pulse: analyst actions (firm, grade, target), upgrade/downgrade reaction stats | Finnhub/Yahoo analyst actions; reactions computed on Intrinio bars | Hidden (analyst-detail and analyst-stats return empty; the section is not drawn) | none |
 | ticker Catalysts | Analyst action events in the event list | Finnhub/Yahoo | Hidden (events endpoints drop them) | none |
@@ -43,9 +43,8 @@ Wording column: "none" means the element disappears or keeps its existing approv
 1. **Past report dates** (every reaction row, chart marker and count of "earnings reactions measured"): the dates were first taken
    from Finnhub and Yahoo calendars. Each is checkable against the company's Item 2.02 8-K (SEC), and catch_up_reports already
    reads those. Options: keep (a date is a public fact the company filed), or backfill each from its 8-K and drop any it cannot match.
-2. **The expected-window line**: with vendor dates held, a name without a company-confirmed date gets an expected window from its
-   SEC filing history (services/report_windows). No approved wording renders that level; it currently falls through to "estimated".
-   Wording needed before this branch can ship.
+2. **The expected-window line**: decided 2026-10-26. Sam's sentence renders the level everywhere; test_expected_window_wording checks
+   that no response a page reads carries "estimated (Finnhub)" or "estimated (Yahoo Finance)" while PERSONAL_USE_DATA_SHOWN is off.
 3. **Market value in the Overview**: it can return from licensed inputs (Intrinio close × SEC dei:EntityCommonStockSharesOutstanding);
    not built tonight.
 4. **Quotes in market hours** with LIVE_DATA_ENABLED off: visitors would see the previous close until LIVE_DATA_ENABLED is on (stage 6).
@@ -60,3 +59,9 @@ Wording column: "none" means the element disappears or keeps its existing approv
 - Frontend: the counters row filters a withheld count; Street Pulse is not drawn with no actions and no counts; 406 tests pass.
 - The preview frontend reads production's API, which does not have this branch's backend, so the preview shows only the frontend
   side until a backend deploy.
+
+## Recorded 2026-10-26
+
+- Intrinio confirmed in writing on Oct 21, 2026 that sending its data to the AI is fine.
+- Sam will not buy Intrinio's analyst or calendar add-ons: analyst data stays withheld and report dates stay company-confirmed or the expected window.
+- Street Pulse stays hidden at launch.

@@ -59,3 +59,16 @@ async def test_a_visitor_quote_is_the_stored_intrinio_close_while_held(monkeypat
     monkeypatch.setattr(client, "_request", no_request)
     assert (await client.get_quote("NVDA"))["basis"] == "close"
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_discover_withholds_analyst_stats_while_held(monkeypatch):
+    """The first version put this guard inside _batch_analyst_stats's docstring, where it never ran (found 2026-10-26)."""
+    from app.database import ScriptSessionLocal
+    from app.routers.discover import _batch_analyst_stats, _batch_buy_share_delta
+    monkeypatch.setattr(settings, "personal_use_data_shown", False)
+
+    class NoQuery:
+        async def execute(self, *a, **k):
+            raise AssertionError("analyst data was read while held")
+    assert await _batch_analyst_stats(NoQuery(), ["NVDA"]) == {} and await _batch_buy_share_delta(NoQuery(), ["NVDA"]) == {}

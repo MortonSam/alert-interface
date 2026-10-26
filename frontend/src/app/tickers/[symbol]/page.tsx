@@ -1,7 +1,7 @@
 "use client";
 
 import Explained from "@/components/Explained";
-import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
+import { eventConfirmationBadge, expectedWindowLine, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
@@ -2014,7 +2014,7 @@ export default function TickerPage() {
           </div>
 
           <p className="text-sm text-muted-foreground mt-5" data-testid="next-earnings-line">
-            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note)}
+            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note, undefined, ticker.next_earnings_window_center)}
           </p>
 
           {/* "Why now" strip */}
@@ -2097,6 +2097,11 @@ export default function TickerPage() {
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
         <section id="catalysts" className="border-t pt-16 pb-10 sm:pb-24 scroll-mt-28">
           <SectionKicker index="02" label="Catalysts" />
+
+          {/* No company-confirmed date: the expected window from its past report dates, in place of a vendor's estimate */}
+          {ticker.next_earnings_confirmation === "expected_window" && ticker.next_earnings_window_center && (
+            <p className="text-sm text-foreground/85 mb-4" data-testid="catalysts-expected-window">{expectedWindowLine(ticker.next_earnings_window_center)}</p>
+          )}
 
           {/* 1. HERO — Next Catalyst */}
           {eventStatus === "loading" && (

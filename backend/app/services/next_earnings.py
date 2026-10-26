@@ -20,6 +20,12 @@ from app.services.personal_use import dates_licensed_only
 
 UNRESOLVED_SHOWN_DAYS = 45   # an unresolved estimate older than this is no longer "expected around"
 EXPECTED_WINDOW = "expected_window"   # the confirmation level of a name with no company-confirmed date and a window from its filings
+# Sam's approved words for that level (2026-10-26), verbatim; frontend lib/earningsSource.expectedWindowLine is the same template (tested)
+EXPECTED_WINDOW_LINE = "Next report expected around {date}, based on its past report dates (not yet confirmed by the company)"
+
+
+def expected_window_line(center: date) -> str:
+    return EXPECTED_WINDOW_LINE.format(date=center.strftime("%b %-d, %Y"))
 
 
 @dataclass
@@ -31,6 +37,7 @@ class NextEarnings:
     checked_at: datetime | None = None
     window_start: date | None = None   # with LICENSED_DATES_ONLY and no company-confirmed date: the expected window (services/report_windows)
     window_end: date | None = None
+    window_center: date | None = None  # the projected report day the window is built around: "expected around" names it
     window_source: str | None = None
     window_computed_at: str | None = None
 
@@ -105,6 +112,7 @@ async def attach_windows(session: AsyncSession, out: dict, symbol_of: dict, toda
             continue
         ne = out[tid]
         ne.confirmation, ne.window_start, ne.window_end = EXPECTED_WINDOW, date.fromisoformat(w["start"]), date.fromisoformat(w["end"])
+        ne.window_center = date.fromisoformat(w["center"]) if w.get("center") else None
         ne.window_source, ne.window_computed_at = w.get("source"), w.get("computed_at")
 
 
