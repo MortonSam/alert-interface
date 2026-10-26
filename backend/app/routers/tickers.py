@@ -796,14 +796,16 @@ async def _report_move_fields(db: AsyncSession, sym: str, today: date, held_fact
     if {"implied_move", "report_date"} & set(held_facts):
         return held
     ev = (await db.execute(
-        select(Event.event_date, Event.is_confirmed, Event.unresolved_since).join(Ticker, Ticker.id == Event.ticker_id)
+        select(Event.event_date, Event.is_confirmed, Event.unresolved_since, Event.confirmation_note).join(Ticker, Ticker.id == Event.ticker_id)
         .where(Ticker.symbol == sym, Event.event_type == "earnings", Event.event_date >= today)
         .order_by(Event.event_date).limit(1)
     )).first()
     if ev is None or not implied_move_allowed(level_of(ev.is_confirmed, ev.unresolved_since)):
         return held
     v = await report_move_view(db, sym, ev.event_date, today, held_facts)
-    out = {**held, "report_move_state": v["state"], "report_move": v["report_move"], "comparison": v["comparison"]}
+    from app.services.earnings_calendar import company_confirmed
+    out = {**held, "report_move_state": v["state"], "report_move": v["report_move"], "comparison": v["comparison"],
+           "report_confirmed": company_confirmed(ev.is_confirmed, ev.confirmation_note)}     # Ivy's Read states the report share only on this
     if "pct" not in v:                  # the page says why (Discover shows only the case the options themselves cause)
         return out
     return {**out, "report_move_pct": v["pct"], "typical_move_pct": v["typical_move_pct"], "typical_n": v["typical_n"],

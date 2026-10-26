@@ -154,6 +154,8 @@ def short_name(name: str | None, symbol: str | None = None) -> str | None:
         return DISPLAY_NAMES[symbol.upper()]
     if not name:
         return None
+    import re as _re
+    name = _re.sub(r"\s*\((?:The|HC)\)\s*$", "", name)      # "Goldman Sachs Group, Inc. (The)", "Kimco Realty Corporation (HC)"
     words = name.replace(",", " ").split()
     while len(words) > 1 and words[-1].lower().rstrip(".") in NAME_SUFFIXES:
         words.pop()
