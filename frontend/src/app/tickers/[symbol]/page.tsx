@@ -2166,7 +2166,7 @@ export default function TickerPage() {
                       Past
                     </span>
                   )}
-                  {(!isPast || !pastHasReport) && displayEvent.event_type === "earnings" && (
+                  {(!isPast || !pastHasReport) && displayEvent.event_type === "earnings" && eventConfirmationBadge(displayEvent) && (
                     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground" data-testid="event-confirmation">
                       {eventConfirmationBadge(displayEvent)}
                     </span>

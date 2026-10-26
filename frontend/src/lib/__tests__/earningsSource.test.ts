@@ -69,6 +69,16 @@ describe("confirmation levels, NKE on Sep 29, 2026", () => {
     expect(eventConfirmationBadge({ is_confirmed: true, source: "finnhub" })).toBe("Confirmed");
     expect(eventConfirmationBadge({ is_confirmed: false, source: "yfinance" })).toBe("Estimated");
   });
+  it("a report date that has passed never reads Estimated (CMS's Jul 30 in Catalysts)", () => {
+    const OCT26 = new Date(2026, 9, 26, 10, 0);
+    expect(eventConfirmationBadge({ is_confirmed: false, source: "yfinance", event_date: "2026-07-30" }, OCT26)).toBeNull();
+    expect(eventConfirmationBadge({ is_confirmed: false, source: "yfinance", event_date: "2026-10-26" }, OCT26)).toBe("Estimated");
+    expect(eventConfirmationBadge({ is_confirmed: true, source: "edgar", event_date: "2026-07-30" }, OCT26)).toBe("Confirmed");
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const page = readFileSync(join(__dirname, "../..", "app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(page).toMatch(/displayEvent\.event_type === "earnings" && eventConfirmationBadge\(displayEvent\) && \(/);
+  });
   it("cards carry the level too", () => {
     expect(cardEarningsNote("2026-09-28", "finnhub", CHECKED, "expected_unconfirmed", null, NOW)).toBe("Earnings expected around Sep 28, 2026; not confirmed");
     expect(cardEarningsNote("2026-10-01", "yfinance", CHECKED, "confirmed", "confirmed: Finnhub and Yahoo Finance agree", NOW)).toBe("Earnings Oct 1, 2026, confirmed (two calendars agree)");

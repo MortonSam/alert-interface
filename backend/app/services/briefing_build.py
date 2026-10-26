@@ -253,11 +253,15 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         cands.append(Q.q_upgrades(name=name, symbol=sym, upgrades_30d=len(ups), upgrade_sessions=stats["upgrade_sessions"] or 0, median_1d=float(stats["median_1d_upgrade"]),
                                   continuation_pct=_f(stats["upgrade_5d_continuation_pct"]), sample_5d=stats["upgrade_5d_sample"] or 0,
                                   stats_as_of=stats["computed_at"].date() if stats["computed_at"] else None, newest_upgrade=max(ups, default=None)))
-    # 6. an ex-dividend date (hidden entirely while the dividend amount is held)
+    # 6. an ex-dividend date (hidden entirely while the dividend amount is held). A forward date from Yahoo is personal-use data and is
+    # read only while PERSONAL_USE_DATA_SHOWN is on (services/personal_use.withheld_event, as Catalysts filters it): AES's "Estimated,
+    # as of Oct 13, 2026" on the question strip was Yahoo's date
+    from app.services.personal_use import shown as personal_use_shown
     exd = None if "dividend_amount" in held else (await db.execute(text("""
         SELECT event_date, (metadata->>'dividend_amount')::float AS amount, metadata->>'basis' AS basis, (metadata->>'declared_on')::date AS declared_on,
                metadata->>'declaration_accession' AS accession, COALESCE(updated_at, created_at)::date AS stored_on FROM events
-        WHERE ticker_id = :t AND event_type = 'ex_dividend' AND event_date >= :today ORDER BY event_date LIMIT 1"""), {"t": ticker.id, "today": today})).mappings().first()
+        WHERE ticker_id = :t AND event_type = 'ex_dividend' AND event_date >= :today AND (:yahoo_ok OR source IS DISTINCT FROM 'yfinance')
+        ORDER BY event_date LIMIT 1"""), {"t": ticker.id, "today": today, "yahoo_ok": personal_use_shown()})).mappings().first()
     if exd and raw is not None:
         raw.update(dividend={"ex_date": exd["event_date"], "declared_on": exd["declared_on"]})
     if exd:

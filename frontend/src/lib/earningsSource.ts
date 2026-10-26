@@ -106,15 +106,22 @@ export function nextEarningsLine(
   return `Next earnings ${fmtEarningsDate(date)}, estimated (${checked})`;
 }
 
-/** The badge on an event: "Confirmed", "Estimated", or "Expected, date not confirmed". Never "Past" without a report, never a vendor. */
+/** The badge on an event: "Confirmed", "Estimated", or "Expected, date not confirmed". Never "Past" without a report, never a vendor.
+ * A date that has passed is never "Estimated" (Sam, 2026-10-26: CMS's Jul 30 in Catalysts): null, and the page shows no badge. */
 export function eventConfirmationBadge(ev: {
   is_confirmed: boolean;
   unresolved_since?: string | null;
   source?: string | null;
-}): string {
+  event_date?: string | null;
+}, now: Date = new Date()): string | null {
   if (ev.unresolved_since) return "Expected, date not confirmed";
   if (ev.is_confirmed) return "Confirmed";
+  if (ev.event_date && ev.event_date.slice(0, 10) < localIso(now)) return null;
   return "Estimated";
+}
+
+function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** The whole card note: the dated line, or the no-date line, never blank. */
