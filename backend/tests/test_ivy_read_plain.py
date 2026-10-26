@@ -96,3 +96,22 @@ def test_write_read_rewrites_then_passes_or_serves_nothing():
     assert bad["result"] == "failed" and bad["content"] is None and bad["problems"]
     unverified = asyncio.run(P.write_read(NVDA, client=FakeClient([GOOD] * P.ROUNDS, verdict="unsupported")))
     assert unverified["result"] == "failed" and unverified["problems"][0].startswith("sentence 1 is unsupported")
+
+
+def test_no_sentence_restates_an_earlier_one():
+    # the Oct 26 draft for NVDA: sentence 2 only restated sentence 1
+    filler = ("Options on NVIDIA are pricing in a move of \u00b18.9% ($19.65 either way) by Nov 20, 2026. That percentage covers both upward "
+              "and downward movement from the current price, so it describes a symmetric range rather than a directional forecast. "
+              "Lately the stock has been calmer than usual for it.")
+    no_report = {**NVDA, "report_pct": None, "typical_pct": None, "comparison": None}
+    assert P.restatements(filler, no_report) == [2]
+    assert any("sentence 2 restates" in p for p in P.read_problems(filler, no_report))
+    assert P.restatements(GOOD, NVDA) == []
+    assert P.lines_stated("About 4.4% of that comes from the Nov 17, 2026 report, less than the 6.5% the stock has moved on a typical report.", NVDA) == {"B", "C"}
+    assert P.lines_stated("Options expect about the same swing the stock has shown lately.", NVDA) == {"E"}
+
+
+def test_no_expected_move_means_no_read_and_no_model_call():
+    cms = {**NVDA, "total_pct": None, "total_dollars": None}
+    r = asyncio.run(P.write_read(cms, client=FakeClient([])))       # the fake has no drafts: any call would fail
+    assert r["result"] == "no_move" and r["content"] is None and r["attempts"] == 0

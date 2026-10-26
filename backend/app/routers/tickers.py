@@ -1621,7 +1621,7 @@ async def get_options_read(
     # ── Plain English from the page's own facts (services/ivy_read_plain): the Details figures above, the verdict's report move
     #    and typical move, and the rows' band words; written, checked and verified, never served when it fails ──
     from app.services.fact_holds import holds_for
-    from app.services.ivy_read_plain import READ_FAILED_CHECKS, page_facts, write_read
+    from app.services.ivy_read_plain import READ_FAILED_CHECKS, READ_NO_MOVE, page_facts, write_read
     report_fields = await _report_move_fields(db, sym, today, sorted(await holds_for(db, sym)))
     plain_facts = page_facts(symbol=sym, name=ticker_name, fact_values=fact_values, report=report_fields)
     print(f"[options-read] Generating for {sym} | facts: {json.dumps(plain_facts, default=str)}", flush=True)
@@ -1629,6 +1629,8 @@ async def get_options_read(
         written = await write_read(plain_facts)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Options read generation failed: {redact(exc)}")
+    if written["result"] == "no_move":
+        return absent(READ_NO_MOVE, "no expected move")
     if written["result"] != "passed":
         return absent(READ_FAILED_CHECKS, "; ".join(written["problems"]))
     gen = {"content": written["content"], "model_used": written["model"]}

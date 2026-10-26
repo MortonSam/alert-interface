@@ -30,6 +30,8 @@ MAX_WORDS = 90
 ROUNDS = 3
 CALL_SECONDS = 90
 READ_FAILED_CHECKS = "Ivy's Read for today's options data did not pass its checks"
+# draft wording, held for Sam: no expected move (the Details panel says "Implied move unavailable"), so nothing to lead with
+READ_NO_MOVE = "Today's options data gives no expected move, so there is no read"
 
 # The words a newcomer can't read; each is allowed only in a sentence that also explains it (JARGON_GLOSS)
 JARGON = {
@@ -123,11 +125,15 @@ def fact_lines(f: dict) -> dict[str, str]:
 def build_prompt(f: dict) -> str:
     lines = fact_lines(f)
     shown = "\n".join(f"{k}. {v}" for k, v in lines.items())
-    order = ["Sentence 1 states line A: what the options expect, in percent and dollars, and by when."]
+    order = ["Sentence 1 states line A: what the options expect, in percent and dollars, and by when. It may say in a few words that the"
+             " move could go either way; no other sentence explains or repeats line A."]
     if "B" in lines:
-        order.append("Sentence 2 states line B" + (" and compares it with line C." if "C" in lines else "."))
+        order.append("The next sentence states line B" + (" and compares it with line C, in the same sentence." if "C" in lines else "."))
+    if "E" in lines:
+        order.append("If you use line E, it is one sentence after that.")
     if "D" in lines:
-        order.append("The last sentence says, from line D, whether the stock has been calmer or busier than usual lately.")
+        order.append("The last sentence states line D: whether the stock has been calmer or busier than usual lately.")
+    n = 1 + ("B" in lines) + ("D" in lines)
     return f"""You are Ivy, writing a short note about {f['name']} ({f['symbol']}) options for someone who has never traded options.
 Teach in plain, calm English, the way the site's walkthrough does: no greeting, no exclamation, no slang.
 
@@ -137,6 +143,8 @@ THE PAGE'S OWN FACTS (copy every figure exactly as written here; use no other nu
 WRITE
 - At most {MAX_SENTENCES} sentences and {MAX_WORDS} words, as one short paragraph. No lists, headings or dashes.
 {chr(10).join('- ' + o for o in order)}
+- Every sentence states a fact from a line that no earlier sentence used. Never explain, rephrase or expand an earlier sentence: with
+  nothing new to say, stop. With these lines that is {n} sentence{'s' if n > 1 else ''}, or {n + 1} with line E.
 - Line E says whether options look pricey or cheap against the stock's recent swings. You may leave it out. If you use it, say
   exactly what it says and why; never call options expensive, pricey or cheap when it says "about the same".
 - Write every date exactly as the lines do ("Nov 20, 2026"), and the move with the ± sign as line A does.
@@ -166,6 +174,41 @@ _NEGATION = re.compile(r"\b(?:not|no|neither|nor|never|far from|isn't|aren't|was
 def _says(pat: str, text: str) -> bool:
     """A band word `text` asserts: a match not negated by the four words before it ("neither cheap nor rich", "far from extreme")."""
     return any(not _NEGATION.search(text[:m.start()]) for m in re.finditer(pat, text or "", re.I))
+
+
+_SPREAD_WORDS = r"\b(?:pricey|cheap|expensive|points? (?:more|less)|about the same swing|in line with|same (?:swing|amount)|lines up)\b"
+
+
+def lines_stated(sentence: str, f: dict) -> set[str]:
+    """Pure: which fact lines (A to E) a sentence states: its figures, or its words for D and E."""
+    nums, out = _numbers(sentence), set()
+    a_figs = {f"{f['total_pct'] * 100:.1f}"} if f.get("total_pct") is not None else set()
+    if f.get("total_dollars") is not None:
+        a_figs.add(f"{f['total_dollars']:.2f}")
+    if a_figs & nums:
+        out.add("A")
+    if f.get("report_pct") is not None and f"{f['report_pct'] * 100:.1f}" in nums:
+        out.add("B")
+    if f.get("typical_pct") and f"{f['typical_pct']:.1f}" in nums:
+        out.add("C")
+    lately = re.search(_BUSIER, sentence, re.I) or re.search(_CALMER, sentence, re.I) or re.search(r"\bas (?:busy|much) as usual\b|\busual\b", sentence, re.I)
+    if lately and not re.search(r"\btypical report\b", sentence, re.I):
+        out.add("D")
+    if re.search(_SPREAD_WORDS, sentence, re.I):
+        out.add("E")
+    return out
+
+
+def restatements(text: str, f: dict) -> list[int]:
+    """Pure: the 1-based numbers of the sentences that state no line an earlier sentence had not (a restatement or a filler)."""
+    seen: set[str] = set()
+    out = []
+    for i, s in enumerate(sentences(text), 1):
+        new = lines_stated(s, f) - seen
+        if not new:
+            out.append(i)
+        seen |= lines_stated(s, f)
+    return out
 
 
 def band_contradictions(text: str, f: dict) -> list[str]:
@@ -235,6 +278,8 @@ def read_problems(text: str, f: dict) -> list[str]:
         out.append("it leaves out the typical report move (line C)")
     if "D" in lines and not (re.search(_BUSIER, ss[-1], re.I) or re.search(_CALMER, ss[-1], re.I) or re.search(r"\b(?:usual|normal)\b", ss[-1], re.I)):
         out.append("its last sentence does not say whether the stock has been calmer or busier than usual (line D)")
+    for i in restatements(text, f):
+        out.append(f"sentence {i} restates an earlier sentence: it states no fact the earlier sentences had not")
     out += band_contradictions(text, f)
     return list(dict.fromkeys(out))
 
@@ -289,6 +334,9 @@ async def write_read(f: dict, *, client=None) -> dict:
         from app.services.anthropic_client import AnthropicClient
         client = AnthropicClient()
     out = {"result": "failed", "content": None, "problems": [], "verdicts": {}, "attempts": 0, "model": None, "cost_usd": 0.0, "drafts": []}
+    if "A" not in fact_lines(f):             # no expected move: the read would have nothing true to lead with (CMS, 2026-10-26)
+        out.update(result="no_move", problems=["no expected move in the page's facts"])
+        return out
 
     def charge(gen: dict) -> None:
         out["cost_usd"] += estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0
