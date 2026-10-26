@@ -124,3 +124,14 @@ def test_a_quote_with_no_year_takes_the_coming_date_not_the_models_guess():
     # a quote that does give a different year still disagrees
     other = "Boeing will release its third quarter 2027 results on October 27, 2027."
     assert R.decide(hit, {"date": date(2027, 10, 27), "timing": "unknown", "quote": other}, ba + " " + other, TODAY)[0] is None
+
+
+def test_a_date_two_calendars_agreed_on_takes_the_companys_evidence():
+    # Costco, 2026-10-26: stored Dec 10 "confirmed: Finnhub and Yahoo Finance agree"; its events feed names Dec 10. It was "already"
+    # confirmed and kept the vendor note, so the page (company-confirmed dates only) still had no date
+    vendor = {"event_date": date(2026, 12, 10), "is_confirmed": True, "confirmation_note": "confirmed: Finnhub and Yahoo Finance agree"}
+    assert C.classify(date(2026, 12, 10), [vendor])[0] == "confirms"
+    assert C.classify(date(2026, 12, 9), [vendor])[0] == "changes"
+    company = {**vendor, "confirmation_note": "confirmed: events feed via IR 2026-12-10: Q1 2027 Earnings Results"}
+    assert C.classify(date(2026, 12, 10), [company])[0] == "already"
+    assert C.classify(date(2026, 12, 9), [company])[0] == "contradicts"

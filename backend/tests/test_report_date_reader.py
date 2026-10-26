@@ -77,7 +77,7 @@ def test_the_calendar_note_reads_as_the_page_expects_and_the_write_is_double_gat
     assert R.confirmation_note("press release", "https://x", "2026-10-02", "q").startswith("confirmed: press release via Finnhub news 2026-10-02: q")
     assert R.confirmation_note("IR feed", "https://ir.example/x", "2026-10-02", "q").startswith("confirmed: press release via IR feed 2026-10-02 https://ir.example/x: q")
     assert not writes_allowed(["--write"], {}) and not writes_allowed([], {"CONFIRMATION_READER_WRITE": "true"}) and writes_allowed(["--write"], {"CONFIRMATION_READER_WRITE": "true"})
-    stored = [{"event_date": date(2026, 10, 21), "is_confirmed": False}, {"event_date": date(2027, 1, 27), "is_confirmed": True}]
+    stored = [{"event_date": date(2026, 10, 21), "is_confirmed": False}, {"event_date": date(2027, 1, 27), "is_confirmed": True, "confirmation_note": "confirmed: 8-K Item 8.01 filed 2026-12-01: q"}]
     assert classify(date(2026, 10, 21), stored)[0] == "confirms"
     assert classify(date(2026, 10, 22), stored)[0] == "changes"
     assert classify(date(2027, 1, 28), stored)[0] == "contradicts"

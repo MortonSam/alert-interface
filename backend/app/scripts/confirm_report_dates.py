@@ -170,13 +170,16 @@ def classify(day: date, stored: list[dict]) -> tuple[str, dict | None]:
     """Pure: what a write would do against the ticker's stored future dates: 'confirms' (the same day, estimated), 'already'
     (confirmed on that day), 'changes' (an estimated date within SAME_REPORT_DAYS moves), 'contradicts' (a confirmed date within
     SAME_REPORT_DAYS differs), or 'new' (nothing stored for that report)."""
+    from app.services.earnings_calendar import company_confirmed
     same = next((e for e in stored if e["event_date"] == day), None)
     if same:
-        return ("already" if same["is_confirmed"] else "confirms"), same
+        # a date confirmed only by two calendars agreeing (Costco, Broadcom, Home Depot) takes the company's evidence: a page shows
+        # only a company-confirmed date
+        return ("already" if company_confirmed(same["is_confirmed"], same.get("confirmation_note")) else "confirms"), same
     near = [e for e in stored if abs((e["event_date"] - day).days) < SAME_REPORT_DAYS]
     if near:
         e = min(near, key=lambda x: abs((x["event_date"] - day).days))
-        return ("contradicts" if e["is_confirmed"] else "changes"), e
+        return ("contradicts" if company_confirmed(e["is_confirmed"], e.get("confirmation_note")) else "changes"), e
     return "new", None
 
 
