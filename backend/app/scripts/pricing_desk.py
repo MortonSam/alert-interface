@@ -77,7 +77,8 @@ async def load_odds(s) -> Odds:
                 if i + h < len(ds):
                     moves[h] = cs[i + h] / cs[i] - 1
         r["moves"] = moves
-    return Odds(rows)
+    sectors = {sym: sec for sym, sec in (await s.execute(text("SELECT symbol, sector FROM tickers"))).all()}
+    return Odds(rows, sectors)
 
 
 async def candidates(s, today: date, only: set[str] | None) -> list[dict]:

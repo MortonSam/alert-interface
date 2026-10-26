@@ -177,3 +177,15 @@ def test_a_card_or_verdict_for_a_report_date_that_moved_is_dropped_not_settled()
     from app.scripts import pricing_desk as PD
     src = inspect.getsource(PD.main)
     assert src.index("await drop_orphans(s)") < src.index("await settle(s, today)")          # never settled first
+
+
+def test_a_stock_with_no_reactions_of_its_own_reads_its_sectors_history():
+    """FDXF (a new spin-off) and TWLO on 2026-10-26: no stored reactions, so their sector was never learned and the card was skipped
+    with "not enough sector history"; the sector now comes from the tickers table."""
+    today = date(2026, 10, 26)
+    reactions = [{"symbol": f"S{i}", "sector": "Industrials", "event_date": date(2024, 1, 1) + timedelta(days=7 * i), "pct_change_1d": 2.0 + (i % 3)}
+                 for i in range(P.MIN_SECTOR + 5)]
+    assert P.Odds(reactions).tau("FDXF", today) is None                                    # the old behaviour: "Unknown" has no history
+    tau = P.Odds(reactions, {"FDXF": "Industrials"}).tau("FDXF", today)
+    assert tau is not None and abs(tau - np.mean([abs(r["pct_change_1d"]) / 100 for r in reactions])) < 1e-12   # the sector's mean, no own reports
+    assert P.Odds(reactions, {"S0": "Energy"}).sector_of["S0"] == "Industrials"            # a stock's own reactions keep their sector

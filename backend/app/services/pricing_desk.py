@@ -54,10 +54,12 @@ BANDS = {"implied_move_pct": (0.5, 60.0), "typical_move_pct": (0.5, 40.0), "p_be
 class Odds:
     """Expanding-window statistics over the stored earnings reactions: for a date d, only reports before d count."""
 
-    def __init__(self, reactions: list[dict]):
+    def __init__(self, reactions: list[dict], sectors: dict[str, str | None] | None = None):
         self.by_stock: dict[str, list[tuple[date, float]]] = defaultdict(list)
         self.by_sector: dict[str, list[tuple[date, float]]] = defaultdict(list)
-        self.sector_of: dict[str, str] = {}
+        # every ticker's sector from the tickers table, so a stock with no stored reactions of its own still reads its sector's history
+        # (2026-10-26: FDXF, a new spin-off, and TWLO had none and fell under "Unknown", and no card was built for either)
+        self.sector_of: dict[str, str] = {sym: sec for sym, sec in (sectors or {}).items() if sec}
         self.pools: dict[int, list[tuple[date, float]]] = defaultdict(list)     # horizon h -> (date, move_h / tau)
         for r in sorted(reactions, key=lambda r: r["event_date"]):
             sym, d, m = r["symbol"], r["event_date"], float(r["pct_change_1d"]) / 100
