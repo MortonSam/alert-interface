@@ -1,7 +1,6 @@
 "use client";
 
 import Explained from "@/components/Explained";
-import { rvTier } from "@/lib/encodings/rvTier";
 import { eventConfirmationBadge, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
@@ -64,7 +63,7 @@ import { ReportCards } from "@/components/ticker/ReportCards";
 import { averageMoveLine, storedTypical, typicalMove } from "@/lib/reportCards";
 import { optionsVerdict } from "@/lib/optionsVerdict";
 import { optionsFigures } from "@/lib/optionsDetailsLine";
-import { ROW_LABELS, ivRowValue, rvRowValue, spreadRowValue } from "@/lib/optionsRows";
+import { ROW_LABELS, ivRowValue, rankRowValue, rvRowValue, spreadRowValue } from "@/lib/optionsRows";
 import { OptionsVerdictView } from "@/components/ticker/OptionsVerdict";
 import { Fold } from "@/components/ticker/Fold";
 import { EVIDENCE_VIEWS, smoothScroll, type EvidenceView, type PickedReport } from "@/lib/evidenceViews";
@@ -2588,8 +2587,8 @@ export default function TickerPage() {
             const ivVal = shown.atm_iv;
             const ivAsOf = shown.atm_iv_as_of;
             const rvVal = shown.rv_20d;
-            const rvRk = shown.rv_rank;
-            const rvLabeled = rvRk != null ? rvTier(rvRk) : null;   // label follows the shown rank
+            const rvRk = shown.rv_rank;                 // null while the rank is held (rv_hold): the row stays hidden then
+            const rvPct = shown.rv_percentile ?? null;  // the row's figure and band: a share of days (lib/optionsRows.rankRowValue)
             const windowDays = realizedVol?.window_days ?? 20;
             const dataError = realizedVol?.data_error ?? false;
             const spread = shown.iv_rv_spread_pp;
@@ -2612,8 +2611,6 @@ export default function TickerPage() {
             }
 
             if (ivVal == null && rvVal == null && rvRk == null && spread == null && pcRatio == null && !putCall) return null;
-
-            const rvColor = rvLabeled?.className ?? "text-muted-foreground";
 
             return (
               <div className="space-y-2 mb-6">
@@ -2659,14 +2656,13 @@ export default function TickerPage() {
                     <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">{spreadRowValue(spread)}</span>
                   </div>
                 )}
-                {rvRk != null && rvLabeled && (
-                  <div className="flex items-baseline justify-between py-1.5 border-b border-border/40">
+                {rvRk != null && rvPct != null && (
+                  <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 gap-x-6 py-1.5 border-b border-border/40" data-testid="rank-row">
                     <span className="text-sm text-muted-foreground">
-                      <ExplainTip term="rv rank" metric="rv_rank" symbol={upperSymbol}>RV rank</ExplainTip>
+                      <ExplainTip term="rv rank">{ROW_LABELS.rank}</ExplainTip>
                     </span>
-                    <span className="font-mono text-sm font-medium tabular-nums">
-                      {rvRk.toFixed(1)} <span className={rvColor}>{rvLabeled.label}</span>
-                      <span className="text-muted-foreground text-xs ml-1">({rvLabeled.rule}{realizedVol?.as_of ? `; as of ${fmtOneDate(realizedVol.as_of.slice(0, 10))}` : ""})</span>
+                    <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">
+                      {rankRowValue(rvPct, realizedVol?.as_of ? fmtOneDate(realizedVol.as_of.slice(0, 10)) : null)}
                     </span>
                   </div>
                 )}

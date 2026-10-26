@@ -24,6 +24,7 @@ export interface OptionFactValues {
   atm_iv_reason?: string | null;   // why atm_iv is null, from iv_store; null when IV is present
   rv_20d: number | null;
   rv_rank: number | null;
+  rv_percentile?: number | null;   // % of the past year's days with lower RV: the RV rank row's figure and band (lib/optionsRows)
   rv_reason?: string | null;     // why rv_20d is null, from rv_store; null when RV is present
   rv_as_of?: string | null;      // snapshot date the RV came from
   iv_rv_spread_pp: number | null;
@@ -68,6 +69,7 @@ export function displayedOptionFacts(
     rv_reason: realizedVol?.reason ?? null,
     rv_as_of: realizedVol?.as_of ?? null,
     rv_rank: realizedVol?.rv_rank ?? null,
+    rv_percentile: realizedVol?.rv_percentile ?? null,
     iv_rv_spread_pp: realizedVol?.iv_rv_spread_pp ?? null,
   };
 }

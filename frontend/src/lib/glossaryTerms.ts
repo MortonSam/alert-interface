@@ -13,7 +13,7 @@ export const TERMS: GlossaryTerm[] = [
     match: ["option contract"] },
   { key: "realized-volatility", term: "Realized volatility (RV)", explanation: "How much the stock has actually swung lately, measured from its daily closes and written as a yearly figure.",
     match: ["RV", "realized vol", "realized volatility"] },
-  { key: "rv-rank", term: "RV rank", explanation: "Where the stock's recent swings sit between the calmest and the busiest they have been in the past year, from 0 at the calmest to 100 at the busiest.",
+  { key: "rv-rank", term: "RV rank", explanation: "The share of days in the past year when the stock was swinging less than it has been lately.",
     match: ["RV rank", "Realized-vol rank"] },
   { key: "session", term: "Session (trading day)", explanation: "One day the stock market is open; weekends and market holidays are not counted. A 20-day window means the last 20 such days, roughly one calendar month.",
     match: ["20-day window"] },

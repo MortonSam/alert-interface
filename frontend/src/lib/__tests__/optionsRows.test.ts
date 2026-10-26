@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { ROW_LABELS, TRADING_DAYS_PER_YEAR, dailyPct, ivRowValue, rvRowValue, spreadRowValue } from "@/lib/optionsRows";
+import { ROW_LABELS, TRADING_DAYS_PER_YEAR, dailyPct, ivRowValue, rankRowValue, rvRowValue, spreadRowValue } from "@/lib/optionsRows";
+import { RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL } from "@/lib/thresholds";
 import { SPREAD_CHEAP_PP, SPREAD_RICH_PP } from "@/lib/thresholds";
 import GLOSSARY from "@/lib/glossary";
 
@@ -20,17 +21,29 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
     expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2)).toBe(`Options expect ${(-(SPREAD_CHEAP_PP - 3.2)).toFixed(1)} points less swing than the stock has shown lately, so they look cheap`);
     for (const x of [3.2, SPREAD_RICH_PP, SPREAD_CHEAP_PP, 0, -3.2]) expect(spreadRowValue(x)).toBe("Options expect about the same swing the stock has shown lately");
   });
+  it("the RV rank row, verbatim, from the percentile of days with its band by the same cutoffs", () => {
+    expect(ROW_LABELS.rank).toBe("Recent swings against its past year");
+    expect(rankRowValue(62.4, "Oct 19, 2026")).toBe("It is swinging more than on 62% of days in the past year, which counts as normal (as of Oct 19, 2026)");
+    // MRNA on 2026-10-22: rank 12.3 (quiet by the old reading) but percentile 73.0, more than on 73% of days
+    expect(rankRowValue(73.0, null)).toBe("It is swinging more than on 73% of days in the past year, which counts as elevated");
+    // rounded down, so the band always matches the figure shown
+    expect(rankRowValue(RV_RANK_ELEVATED - 0.4, null)).toContain(`${RV_RANK_ELEVATED - 1}% of days in the past year, which counts as normal`);
+    expect(rankRowValue(RV_RANK_EXTREME, null)).toContain("counts as extreme");
+    expect(rankRowValue(RV_RANK_NORMAL - 1, null)).toContain("counts as quiet");
+  });
   it("no colons, pp, ≥ or monospace in the rows", () => {
-    const texts = [...Object.values(ROW_LABELS), ivRowValue(0.412, "Oct 19, 2026"), rvRowValue(0.38, 20, null), spreadRowValue(20), spreadRowValue(-20), spreadRowValue(0)];
+    const texts = [...Object.values(ROW_LABELS), ivRowValue(0.412, "Oct 19, 2026"), rvRowValue(0.38, 20, null), spreadRowValue(20), spreadRowValue(-20), spreadRowValue(0), rankRowValue(62, "Oct 19, 2026")];
     for (const t of texts) expect(t).not.toMatch(/:|\bpp\b|≥/);
     const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
-    for (const id of ["iv-row", "rv-row", "spread-row"]) {
+    for (const id of ["iv-row", "rv-row", "spread-row", "rank-row"]) {
       const at = page.indexOf(`data-testid="${id}"`);
       expect(at).toBeGreaterThan(0);
       const row = page.slice(page.lastIndexOf("<div", at), page.indexOf("</div>", at));
       expect(row).not.toMatch(/font-mono|tabular-nums/);
     }
     expect(page).not.toContain("IV - RV spread</ExplainTip>");
+    expect(page).not.toContain("RV rank</ExplainTip>");
+    expect(page).toContain("rankRowValue(rvPct,");
   });
   it("each term has one plain sentence in the glossary", () => {
     for (const k of ["iv", "rv", "iv/rv spread", "rv rank"]) {
