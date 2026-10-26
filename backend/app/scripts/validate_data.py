@@ -952,6 +952,35 @@ async def check_refused_earnings_dates(session) -> CheckResult:
                        f"in {REFUSAL_WINDOW_DAYS} days (repair_refused_dates)", details)
 
 
+async def check_options_read_bands(session) -> CheckResult:
+    """ERROR when a cached Ivy's Read for a fresh chain contradicts the page's band words (services/ivy_read_plain.band_contradictions):
+    options called pricey or cheap where the spread row says about the same (or the other way), the stock called busier or calmer
+    than its RV rank band, or the report move compared with the typical move differently from the verdict. The read's own facts are
+    the ones it was written from (plain_facts); an older read carries only its fact block, so its report comparison is not checked."""
+    import json as _json
+    from app.services import chain_store
+    from app.services.ivy_read_plain import band_contradictions, page_facts
+    from app.services.options_read_gate import OPTIONS_READ_CACHE_VERSION
+    rows = (await session.execute(text("SELECT key, value FROM system_metadata WHERE key LIKE :p"),
+                                  {"p": f"options_read:{OPTIONS_READ_CACHE_VERSION}:%"})).all()
+    details, n = [], 0
+    for key, value in rows:
+        _, _, symbol, chain_date = key.split(":", 3)
+        if not chain_store.is_fresh(chain_date):
+            continue
+        try:
+            c = _json.loads(value)
+        except (TypeError, ValueError):
+            continue
+        n += 1
+        facts = c.get("plain_facts") or page_facts(symbol=symbol, name=symbol, fact_values=c.get("fact_values") or {}, report=None)
+        for problem in band_contradictions(c.get("content") or "", facts):
+            details.append(f"{symbol}: {problem}")
+    if details:
+        return CheckResult("options_read_bands", ERROR, f"{len(details)} contradiction(s) between Ivy's Read and the page's band words", details[:30])
+    return CheckResult("options_read_bands", PASS, f"{n} cached read(s) for a fresh chain agree with the page's band words")
+
+
 async def check_cached_reads_stale(session) -> CheckResult:
     """WARN listing cached Ivy's Reads that carry a null fact while that fact is servable now.
 
@@ -3915,6 +3944,7 @@ CHECKS = [
     check_put_call_per_side_guard,
     # Options-read coverage
     check_options_read_coverage,
+    check_options_read_bands,
     # Duplicate reactions
     check_duplicate_earnings_reactions,
     # Security records: one Intrinio record per ticker per date, FIGI unchanged

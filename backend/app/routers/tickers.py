@@ -1618,86 +1618,30 @@ async def get_options_read(
     }
     facts: dict = format_facts(sym, ticker_name, fact_values)
 
-    # Earnings window note — a full pre-written sentence so the model can't miscalculate
-    if expiration_spans_earnings and days_exp_past_earnings is not None:
-        earnings_window_note = (
-            f"The {chosen_exp} expiration falls {days_exp_past_earnings} calendar days "
-            f"after the {earnings_str} earnings date, so the implied move covers the full "
-            f"period through expiration, not just the earnings reaction."
-        )
-    else:
-        earnings_window_note = "(unavailable, expiration does not span the next earnings date)"
-
-    # ── Prompt ────────────────────────────────────────────────────────────────
-    prompt = f"""\
-You are a senior options trader narrating what you see on the screen for {sym} ({ticker_name}).
-Write exactly 2-4 tight sentences of interpretive prose for a sophisticated reader of a financial research tool.
-
-INJECTED FACTS: use ONLY these exact strings verbatim for every number you state.
-Do NOT derive, approximate, recompute, or restate any figure differently from what appears below.
-If a fact says "(unavailable)", omit that thread entirely. Do not guess or fabricate.
-
---- FACT BLOCK ---
-Symbol / Company:           {sym} / {ticker_name}
-Current price:              {facts["current_price"]}
-
-EXPECTED MOVE (options-implied, ATM straddle):
-  Implied move:             {facts["expected_move_pct"]} ({facts["expected_move_dollars"]}) by {facts["expiration_date"]} ({facts["days_to_expiration"]} calendar days)
-  Implied price range:      {facts["implied_range"]}
-  ATM strike / ATM IV:      {facts["atm_strike"]} / {facts["atm_iv"]}
-
-EARNINGS CONTEXT:
-  Next earnings date:       {facts["next_earnings_date"]}
-  Expiration spans earnings:{facts["expiration_spans_earnings"]}
-  Earnings window note:     {earnings_window_note}
-
-VOLATILITY:
-  20-day realized vol:      {facts["realized_vol_20d"]}
-  RV rank (0-100):          {facts["rv_rank"]}   [0=lowest in past year, 100=highest]
-  RV percentile:            {facts["rv_percentile"]}   [{facts["rv_percentile"]}% of the past {facts["rv_sample_days"]} trading days had lower realized vol]
-  1-yr RV range:            {facts["rv_1yr_range"]}
-  IV - RV spread:           {facts["iv_rv_spread"]}   [positive = options pricing more vol than recently delivered; negative = options cheap vs realized]
-
-HISTORICAL EARNINGS (from actual past reactions):
-  Avg absolute 1-day move:  {facts["avg_earnings_1d_move"]}
-  Based on:                 {facts["earnings_sample_size"]} past earnings events
---- END FACT BLOCK ---
-
-STRICT RULES:
-1. Every number you write MUST be copied verbatim from the fact block. No rounding, reformatting, or paraphrasing of figures.
-2. Write PROSE ONLY. No bullets, headers, lists, or markdown. No em dashes.
-3. Cover these threads in a natural flow across 2-4 sentences:
-   a. What the market is pricing: state the implied move, implied range, and expiration.
-   b. The vol context: connect the RV rank and the IV-RV spread. Is implied vol historically cheap or rich vs what the stock has recently delivered? Be specific about what this looks like from each side of the trade.
-   c. If expiration spans earnings (True): use the earnings window note verbatim or paraphrase it, noting the expiration extends past earnings.
-   d. If available: briefly note the historical average earnings-day move for comparison.
-4. You MAY describe the setup descriptively from a premium-seller or premium-buyer perspective, but NO trade recommendations, no "you should buy/sell," no price targets.
-5. Omit any thread where the fact says "(unavailable)".
-6. Do NOT add disclaimers or caveats. The UI handles that.
-7. Target 60-100 words. Be specific and grounded; no generic filler.\
-"""
-
-    print(f"[options-read] Generating for {sym} | facts: {json.dumps(facts, indent=2)}", flush=True)
-
-    # ── Generate ──────────────────────────────────────────────────────────────
-    client = AnthropicClient()
+    # ── Plain English from the page's own facts (services/ivy_read_plain): the Details figures above, the verdict's report move
+    #    and typical move, and the rows' band words; written, checked and verified, never served when it fails ──
+    from app.services.fact_holds import holds_for
+    from app.services.ivy_read_plain import READ_FAILED_CHECKS, page_facts, write_read
+    report_fields = await _report_move_fields(db, sym, today, sorted(await holds_for(db, sym)))
+    plain_facts = page_facts(symbol=sym, name=ticker_name, fact_values=fact_values, report=report_fields)
+    print(f"[options-read] Generating for {sym} | facts: {json.dumps(plain_facts, default=str)}", flush=True)
     try:
-        gen = await client.generate_options_read(prompt)
+        written = await write_read(plain_facts)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Options read generation failed: {redact(exc)}")
+    if written["result"] != "passed":
+        return absent(READ_FAILED_CHECKS, "; ".join(written["problems"]))
+    gen = {"content": written["content"], "model_used": written["model"]}
 
     generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
-    print(
-        f"[options-read] {sym}: {gen['input_tokens']} in / {gen['output_tokens']} out tokens",
-        flush=True,
-    )
+    print(f"[options-read] {sym}: passed in {written['attempts']} round(s), ${written['cost_usd']:.4f}", flush=True)
 
     # ── Cache by chain snapshot date ──────────────────────────────────────────
     try:
         await _set_meta(db, cache_key, json.dumps({
             "content": gen["content"], "facts": facts, "fact_values": fact_values,
             "model_used": gen["model_used"], "generated_at": generated_at,
-            "iv_rv_spread_pp": iv_rv_spread_pp,
+            "iv_rv_spread_pp": iv_rv_spread_pp, "plain_facts": plain_facts, "verdicts": written["verdicts"],
         }))
         await db.commit()
     except Exception as exc:
