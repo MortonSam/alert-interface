@@ -8,7 +8,7 @@ from app.services import ivy_read_plain as P
 # NVDA as production showed it on 2026-10-22: Details ±8.9% / $19.65 by Nov 20, about 4.4% from the Nov 17 report, typical 6.5%
 # over 21 reports ("less than usual"), spread +8.8 points (the row: about the same), RV rank 11.4 (quiet)
 NVDA_VALUES = {"expected_move_pct": 0.0886, "expected_move_dollars": 19.65, "expiration_used": "2026-11-20", "chain_date": "2026-10-21",
-               "iv_rv_spread_pp": 8.8, "rv_rank": 11.4}
+               "iv_rv_spread_pp": 8.8, "rv_rank": 11.4, "rv_percentile": 4.4}
 NVDA_REPORT = {"report_move_state": "ok", "report_move_pct": 0.044, "report_move": {"report_date": "2026-11-17"},
                "typical_move_pct": 6.5, "typical_n": 21, "move_comparison": "less than usual"}
 NVDA = P.page_facts(symbol="NVDA", name="NVIDIA Corporation", fact_values=NVDA_VALUES, report=NVDA_REPORT)
@@ -29,6 +29,10 @@ def test_the_facts_and_band_words_are_the_pages_own():
     assert P.fact_lines({**NVDA, "spread_pp": 82.7, "spread_word": "pricey"})["E"] == \
         "Options expect 82.7 points more swing than the stock has shown lately, so they look pricey."
     assert P.spread_word(10.1) == "pricey" and P.spread_word(10.0) == "about the same" and P.spread_word(-10.1) == "cheap"
+    # the band is the percentile's, like the page's row (MRNA, Oct 23: rank 19.6 but more than on 90% of days)
+    mrna = P.page_facts(symbol="MRNA", name="Moderna", fact_values={**NVDA_VALUES, "rv_rank": 19.6, "rv_percentile": 90.9}, report=None)
+    assert mrna["swing_band"] == "extreme" and mrna["lately"] == "much busier than usual"
+    assert P.page_facts(symbol="X", name="X", fact_values={**NVDA_VALUES, "rv_rank": None}, report=None)["swing_band"] is None
     no_report = P.page_facts(symbol="X", name="X", fact_values=NVDA_VALUES, report={"report_move_state": "not_separated"})
     assert set(P.fact_lines(no_report)) == {"A", "D", "E"}
     prompt = P.build_prompt(NVDA)

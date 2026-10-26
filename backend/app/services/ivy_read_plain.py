@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from datetime import date
 
@@ -79,8 +80,10 @@ def page_facts(*, symbol: str, name: str, fact_values: dict, report: dict | None
     """Pure: the read's facts from the page's own values. `fact_values` is the options read's fact block (the Details figures and
     rows read it); `report` is the expected-move endpoint's report fields (routers/tickers._report_move_fields)."""
     report = report or {}
-    rank = fact_values.get("rv_rank")
-    band = rv_rank_label(rank).label if rank is not None else None
+    # the RV rank row's band (frontend lib/optionsRows.rankRowValue, 2026-10-26): the percentile of days, rounded down, by the rank
+    # cutoffs; hidden, like the row, while the rank itself is held
+    rank, pctl = fact_values.get("rv_rank"), fact_values.get("rv_percentile")
+    band = rv_rank_label(math.floor(pctl)).label if rank is not None and pctl is not None else None
     rpct = report.get("report_move_pct") if report.get("report_move_state") == "ok" else None
     rm = report.get("report_move") or {}
     return {
