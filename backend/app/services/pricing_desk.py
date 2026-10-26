@@ -24,6 +24,8 @@ from datetime import date, datetime, timezone
 
 import numpy as np
 
+from app.services.implied_move import MAX_STRADDLE_SPREAD_PCT, straddle_spread_pct
+
 PRICING_COMPUTATION_VERSION = 3       # 2 (2026-10-12): expected payoff over the move to expiry, not the 1-day move; 3 (2026-10-20): the
                                       # implied move is the straddle's time value, without the in-the-money leg's intrinsic value
 MAX_HORIZON = 10                      # sessions from the chain date to the expiry that the distribution is built for; further expiries use this
@@ -276,6 +278,9 @@ def verdict_for(structures: dict[str, dict], earned: bool = POSSIBLE_EDGE_EARNED
     return VERDICT_NO_EDGE, None
 
 
+WIDE_QUOTES_REASON = "the at-the-money straddle's quotes are too wide"
+
+
 def build_card(*, symbol: str, report_date: date, report_confirmation: str | None, chain: dict, chain_date: str | None, chain_source: str | None,
                expiration: str, spot: float, odds: Odds, today: date, computed_at: datetime | None = None) -> dict | str:
     """The card, or the reason none could be built (a string)."""
@@ -286,6 +291,9 @@ def build_card(*, symbol: str, report_date: date, report_confirmation: str | Non
     if im is None:
         return "no priced at-the-money pair"
     atm, implied = im
+    wide = straddle_spread_pct(quotes[atm]["call"], quotes[atm]["put"])
+    if wide is not None and wide > MAX_STRADDLE_SPREAD_PCT:            # the page pauses its expected move on the same rule (Sam, 2026-10-26)
+        return f"{WIDE_QUOTES_REASON} ({wide:.0f}% of its mid, above {MAX_STRADDLE_SPREAD_PCT:.0f}%)"
     tau = odds.tau(symbol, today)
     if not tau:
         return "not enough sector history for a typical move"

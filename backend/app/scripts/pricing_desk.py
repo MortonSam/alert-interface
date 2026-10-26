@@ -20,8 +20,8 @@ from sqlalchemy import delete, select, text
 from app.database import ScriptSessionLocal
 from app.models.pricing_verdict import PricingVerdict
 from app.services import chain_store
-from app.services.pricing_desk import (PRICING_COMPUTATION_VERSION, REPORT_WINDOW_DAYS, STEP_LABEL, STRUCTURES, Odds, build_card, card_key, dumps, fill,
-                                       intrinsic)
+from app.services.pricing_desk import (PRICING_COMPUTATION_VERSION, REPORT_WINDOW_DAYS, STEP_LABEL, STRUCTURES, WIDE_QUOTES_REASON, Odds, build_card,
+                                       card_key, dumps, fill, intrinsic)
 from app.services.step_outcomes import record_step_fields
 from app.services.system_metadata_service import set_value
 from app.services.trading_calendar import is_trading_day
@@ -126,6 +126,12 @@ def orphans(cards: list[tuple[str, str, date]], verdicts: list[tuple[object, str
             [i for i, sym, d in verdicts if d not in reports.get(sym, set())])
 
 
+async def drop_card(s, sym: str, report_date: date) -> None:
+    """Remove a stock's stored card and its unsettled verdict row for that report (a card this night would not build)."""
+    await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": card_key(sym)})
+    await s.execute(delete(PricingVerdict).where(PricingVerdict.symbol == sym, PricingVerdict.report_date == report_date, PricingVerdict.settled_at.is_(None)))
+
+
 async def drop_orphans(s) -> tuple[list[str], list[str]]:
     """Remove orphans() from the store; returns (card keys, "SYM report_date" of each dropped verdict)."""
     cards = [(k, k.split(":", 1)[1], date.fromisoformat(d)) for k, d in (await s.execute(text(
@@ -200,7 +206,10 @@ async def main(argv: list[str]) -> int:
                 card = build_card(symbol=sym, report_date=rd, report_confirmation="confirmed" if c["is_confirmed"] else "estimated", chain=chain, chain_date=str(chain_date)[:10],
                                   chain_source=chain_store.chain_source(chain), expiration=exp, spot=spot, odds=odds, today=today)
                 if isinstance(card, str):
-                    skipped[sym] = card; continue
+                    skipped[sym] = card
+                    if card.startswith(WIDE_QUOTES_REASON):        # an earlier night's card on these quotes is not served either
+                        await drop_card(s, sym, rd)
+                    continue
                 for n in STRUCTURES:                                  # settlement needs the expiry beside the legs
                     if card["structures"].get(n):
                         for L in card["structures"][n]["legs"]:

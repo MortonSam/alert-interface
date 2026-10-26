@@ -107,6 +107,14 @@ async def test_a_built_card_is_stored_served_behind_the_flag_and_judged_by_valid
     assert card["horizon_sessions"] == 5 and card["computation_version"] == 3 and card["pooled_move_to_expiry_pct"] > card["typical_move_pct"]   # the wider distribution
     assert isinstance(P.build_card(symbol=sym, report_date=date(2026, 10, 15), report_confirmation="confirmed", chain=chain, chain_date="2026-10-09", chain_source="intrinio",
                                    expiration="2026-10-17", spot=100.0, odds=P.Odds([{**r, "moves": {}} for r in reactions]), today=today), str)   # no horizon pool: no card, never the 1-day pool
+    # the page's rule (implied_move.MAX_STRADDLE_SPREAD_PCT): an at-the-money straddle quoted wider than 100% of its mid builds no card (Sam, 2026-10-26;
+    # LNT's was 139%); here the $100 call and put at 1.0 / 5.2 and 1.0 / 5.0, 8.2 over a 6.1 mid, 134%
+    wide = {**chain, "calls": [dict(r, bid=1.0, ask=5.2) if r["strike"] == 100 else r for r in chain["calls"]],
+            "puts": [dict(r, bid=1.0, ask=5.0) if r["strike"] == 100 else r for r in chain["puts"]]}
+    why = P.build_card(symbol=sym, report_date=date(2026, 10, 15), report_confirmation="confirmed", chain=wide, chain_date="2026-10-09", chain_source="intrinio",
+                       expiration="2026-10-17", spot=100.0, odds=odds, today=today)
+    assert why == "the at-the-money straddle's quotes are too wide (134% of its mid, above 100%)"
+    assert P.straddle_spread_pct(chain["calls"][2], chain["puts"][2]) < P.MAX_STRADDLE_SPREAD_PCT     # the seeded chain's own straddle is not
     assert card["verdict"] in ("no_edge", "possible_edge") and card["typical_move_pct"] == pytest.approx(round((2 * 5.5 + 6 * 4.5) / 8, 2), abs=0.05)   # own 5.5% over 2 reports against the sector's 4.5%
     async with ScriptSessionLocal() as s:
         try:
@@ -122,7 +130,11 @@ async def test_a_built_card_is_stored_served_behind_the_flag_and_judged_by_valid
                 monkeypatch.setattr(settings, "ivy_desk_v3_enabled", True)
                 assert (await c.get(f"/api/v1/tickers/{sym}/pricing-card")).json()["verdict"] == card["verdict"]
                 assert (await c.get("/api/v1/ivy/verdicts")).status_code == 200                                             # the ledger gate answers (empty or rows), never errors
-            assert P.band_problems(card) == [], P.band_problems(card)                                                      # the seeded card is inside every band
+            assert P.band_problems(card) == [], P.band_problems(card)
+            from app.scripts.pricing_desk import drop_card
+            await drop_card(s, sym, date(2026, 10, 15)); await s.commit()                                                # a night that skips it on wide quotes
+            assert (await s.execute(text("SELECT 1 FROM system_metadata WHERE key = :k"), {"k": card_key(sym)})).first() is None
+            await set_value(s, card_key(sym), dumps(card)); await s.commit()                                                      # the seeded card is inside every band
             r = await check_pricing_cards(s)
             assert r.level in (PASS, "warn") or not any(x.startswith(sym + ":") for x in r.rows), (r.level, r.rows[:3])
         finally:
