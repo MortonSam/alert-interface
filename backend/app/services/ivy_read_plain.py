@@ -26,8 +26,12 @@ from datetime import date
 from app.services.move_comparison import COMPARISON_WORDS
 from app.thresholds import SPREAD_CHEAP_PP, SPREAD_RICH_PP, rv_rank_label
 
-READ_PLAIN_VERSION = 2           # 2 (2026-10-26): typical move and the more/less/same swing line required; report share only on a company-confirmed date
-MAX_SENTENCES = 4
+READ_PLAIN_VERSION = 3           # 2 (2026-10-26): typical move and the more/less/same swing line required; report share only on a company-confirmed date
+                                 # 3 (Sam, 2026-10-26 evening): the span sentence (line S), line D's words, line B ends with the comparison
+MAX_SENTENCES = 5                # A, S, C, E, D without a report share; A, B, E, D with one
+SPAN_TRADING_DAYS = 2            # Sam (2026-10-26): an expiration more than this many trading days after the report covers more than the report
+SPAN = "That covers every trading day until then"
+SPAN_TAIL = ", not just the report day"
 MAX_WORDS = 100
 ROUNDS = 3
 CALL_SECONDS = 90
@@ -100,6 +104,7 @@ def page_facts(*, symbol: str, name: str, fact_values: dict, report: dict | None
     band = rv_rank_label(math.floor(pctl)).label if rank is not None and pctl is not None else None
     rpct = report.get("report_move_pct") if report.get("report_move_state") == "ok" and report.get("report_confirmed") else None
     rm = report.get("report_move") or {}
+    comparison = report.get("move_comparison") if rpct is not None else None
     typical, typical_n = (report.get("typical_move_pct"), report.get("typical_n")) if rpct is not None else (None, None)
     if typical is None and fact_values.get("avg_earnings_1d_move_pct") is not None and (fact_values.get("earnings_sample_size") or 0) >= MIN_TYPICAL_N:
         typical, typical_n = fact_values["avg_earnings_1d_move_pct"], fact_values["earnings_sample_size"]
@@ -109,7 +114,8 @@ def page_facts(*, symbol: str, name: str, fact_values: dict, report: dict | None
         "expiration": fact_values.get("expiration_used"), "chain_date": fact_values.get("chain_date"),
         "report_pct": rpct, "report_date": rm.get("report_date") if rpct is not None else None,
         "typical_pct": typical, "typical_n": typical_n,
-        "comparison": report.get("move_comparison") if rpct is not None else None,
+        "comparison": comparison,
+        "span": span_line(rpct, report.get("report_confirmed"), fact_values.get("next_earnings_date"), fact_values.get("expiration_used")),
         "rv_rank": rank, "swing_band": band, "lately": LATELY.get(band) if band else None,
         "spread_pp": fact_values.get("iv_rv_spread_pp"), "spread_word": spread_word(fact_values.get("iv_rv_spread_pp")),
     }
@@ -118,21 +124,43 @@ def page_facts(*, symbol: str, name: str, fact_values: dict, report: dict | None
 MIN_TYPICAL_N = 3          # the Details line shows the one-day history from 3 reports (frontend lib/freshness.oneDayHistoryLine)
 
 
+def _trading_days_after(start: date, end: date) -> int:
+    from datetime import timedelta
+    from app.services.trading_calendar import is_trading_day
+    return sum(is_trading_day(start + timedelta(days=i)) for i in range(1, (end - start).days + 1))
+
+
+def span_line(report_pct, confirmed, report_date, expiration) -> str | None:
+    """Pure: line S (Sam, 2026-10-26), said when the read has no report share and the move is not the report's alone: no
+    company-confirmed date, or an expiration more than SPAN_TRADING_DAYS trading days after it. "Not just the report day" only when a
+    report date falls on or before the expiration."""
+    if report_pct is not None or not expiration:
+        return None
+    exp = date.fromisoformat(str(expiration)[:10])
+    rd = date.fromisoformat(str(report_date)[:10]) if report_date else None
+    if confirmed and rd and rd <= exp and _trading_days_after(rd, exp) <= SPAN_TRADING_DAYS:
+        return None
+    return SPAN + (SPAN_TAIL if rd and rd <= exp else "") + "."
+
+
 def fact_lines(f: dict) -> dict[str, str]:
     """The lines the model copies figures from, keyed A to E. A line is absent when its fact is."""
     out: dict[str, str] = {}
     if f.get("total_pct") is not None and f.get("expiration"):
         dol = f" (${f['total_dollars']:.2f})" if f.get("total_dollars") is not None else ""
         out["A"] = f"Options price a move of ±{f['total_pct'] * 100:.1f}%{dol} by {_day(f['expiration'])}."
+        if f.get("span"):
+            out["S"] = f["span"]
     if f.get("report_pct") is not None:
         on = f" on {_day(f['report_date'])}" if f.get("report_date") else ""
-        out["B"] = f"About {f['report_pct'] * 100:.1f}% of that comes from the report{on}."
-    if f.get("typical_pct"):
+        out["B"] = f"About {f['report_pct'] * 100:.1f}% of that move comes from the report{on}."
+        if f.get("typical_pct") and f.get("comparison") in COMPARISON_WORDS:     # Sam (2026-10-26): B ends with the page's comparison word
+            out["B"] = out["B"][:-1] + (f", {COMPARISON_WORDS[f['comparison']]} its typical first-day move of {f['typical_pct']:.1f}%"
+                                        f" over {f['typical_n']} reports.")
+    if f.get("typical_pct") and not ("B" in out and f.get("comparison") in COMPARISON_WORDS):
         out["C"] = f"On its past report days the stock has moved {f['typical_pct']:.1f}% on the first day on average, over {f['typical_n']} reports."
-        if "B" in out and f.get("comparison") in COMPARISON_WORDS:
-            out["C"] = out["C"][:-1] + f"; the report move is {COMPARISON_WORDS[f['comparison']]} that."
     if f.get("lately"):
-        out["D"] = f"Lately the stock has been {f['lately']} for it, against its past year."
+        out["D"] = f"Lately it has been {f['lately']} compared with its past year."
     if f.get("spread_word"):
         out["E"] = f"Options expect {SWING[f['spread_word']]} the stock has shown lately."
     return out
@@ -143,15 +171,17 @@ def build_prompt(f: dict) -> str:
     shown = "\n".join(f"{k}. {v}" for k, v in lines.items())
     order = ["Sentence 1 states line A: what the options expect, in percent and dollars, and by when. Nothing else: no sentence explains"
              " or repeats line A, and none says the move could go up or down."]
+    if "S" in lines:
+        order.append("The next sentence is line S, word for word.")
     if "B" in lines:
-        order.append("The next sentence states line B and line C together" if "C" in lines else "The next sentence states line B.")
-    elif "C" in lines:
+        order.append("The next sentence is line B, word for word, ending with its comparison" if "typical" in lines["B"] else "The next sentence states line B.")
+    if "C" in lines:
         order.append("The next sentence states line C: the stock's typical first-day move on its report days.")
     if "E" in lines:
         order.append("The next sentence states line E: whether options expect more, less or about the same swing as the stock has shown lately.")
     if "D" in lines:
-        order.append("The last sentence states line D: whether the stock has been calmer or busier than usual lately.")
-    n = 1 + bool({"B", "C"} & set(lines)) + ("E" in lines) + ("D" in lines)
+        order.append("The last sentence is line D, word for word.")
+    n = len(lines)
     return f"""You are Ivy, writing a short note about {f['name']} ({f['symbol']}) options for someone who has never traded options.
 Teach in plain, calm English, the way the site's walkthrough does: no greeting, no exclamation, no slang.
 
@@ -217,6 +247,8 @@ def lines_stated(sentence: str, f: dict) -> set[str]:
         out.add("D")
     if spread:
         out.add("E")
+    if SPAN.lower()[5:] in sentence.lower():          # "covers every trading day until then"
+        out.add("S")
     return out
 
 
@@ -304,14 +336,21 @@ def read_problems(text: str, f: dict) -> list[str]:
             out.append("it does not lead with what options expect in percent and dollars and by when (line A)")
     if "B" in lines and f"{f['report_pct'] * 100:.1f}" not in _numbers(text):
         out.append("it leaves out how much of the move is the report (line B)")
-    if "C" in lines and f"{f['typical_pct']:.1f}" not in _numbers(text):
+    if "S" in lines and not any(lines["S"][5:-1].lower() in s.lower() for s in ss[:2]):
+        out.append(f'it does not say, right after the move, "{lines["S"]}" (line S)')
+    if "B" in lines and "typical" in lines["B"]:
+        bs = [s for s in ss if f"{f['report_pct'] * 100:.1f}" in _numbers(s)]
+        tail = lines["B"].split(", ", 1)[-1][:-1]
+        if not bs or "of that move comes from the report" not in bs[0] or not bs[0].rstrip(".").endswith(tail):
+            out.append(f'its report sentence is not line B\'s form, ending "{tail}" (line B)')
+    if f.get("typical_pct") and f"{f['typical_pct']:.1f}" not in _numbers(text):
         out.append("it leaves out the typical report move (line C)")
     if "E" in lines and not any("E" in lines_stated(s, f) for s in ss):
         out.append("it leaves out whether options expect more, less or about the same swing as the stock has shown lately (line E)")
     if f.get("name") and f["name"] not in text:
         out.append(f'it does not call the company "{f["name"]}"')
-    if "D" in lines and not (re.search(_BUSIER, ss[-1], re.I) or re.search(_CALMER, ss[-1], re.I) or re.search(r"\b(?:usual|normal)\b", ss[-1], re.I)):
-        out.append("its last sentence does not say whether the stock has been calmer or busier than usual (line D)")
+    if "D" in lines and f"{f['lately']} compared with its past year" not in ss[-1]:
+        out.append(f'its last sentence is not line D: "{lines["D"]}"')
     for i in restatements(text, f):
         out.append(f"sentence {i} restates an earlier sentence: it states no fact the earlier sentences had not")
     out += band_contradictions(text, f)
@@ -333,7 +372,7 @@ SENTENCES:
 RULES
 - "supported": every figure, date and claim in it is stated in the facts, with the same meaning. Plain-English rewording of a fact is fine.
 - "contradicted": it conflicts with a fact, including calling options pricey, expensive or cheap, saying they expect more or less swing than line E says, saying the
-  stock has been busier or calmer than line D says, or comparing the report move with the typical move differently from line C.
+  stock has been busier or calmer than line D says, or comparing the report move with the typical move differently from line B.
 - "unsupported": it says anything the facts do not state: a cause, a forecast, a figure, advice, what buyers or sellers do, or a judgment
   of whether the options are worth buying or selling.
 - Bias toward "unsupported" when in doubt.

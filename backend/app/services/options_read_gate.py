@@ -15,7 +15,7 @@ from app.services.price_freshness import QuoteState, assess_quote
 
 # Bumped when the conditions for generating a read change, so older reads are not reused.
 # v4: reads need a fresh chain and a fresh quote.
-OPTIONS_READ_CACHE_VERSION = "v6"   # v5: plain-English reads (services/ivy_read_plain); v4 reads are the trader's note; v6: READ_PLAIN_VERSION 2
+OPTIONS_READ_CACHE_VERSION = "v7"   # v5: plain-English reads (services/ivy_read_plain); v4 reads are the trader's note; v6: READ_PLAIN_VERSION 2; v7: 3
 
 
 def cache_key(symbol: str, chain_date: str) -> str:

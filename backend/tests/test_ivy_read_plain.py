@@ -8,7 +8,7 @@ from app.services import ivy_read_plain as P
 # NVDA as production showed it on 2026-10-22: Details ±8.9% / $19.65 by Nov 20, about 4.4% from the Nov 17 report, typical 6.5%
 # over 21 reports ("less than usual"), spread +8.8 points (the row: about the same), RV rank 11.4 (quiet)
 NVDA_VALUES = {"expected_move_pct": 0.0886, "expected_move_dollars": 19.65, "expiration_used": "2026-11-20", "chain_date": "2026-10-21",
-               "iv_rv_spread_pp": 8.8, "rv_rank": 11.4, "rv_percentile": 4.4}
+               "iv_rv_spread_pp": 8.8, "rv_rank": 11.4, "rv_percentile": 4.4, "next_earnings_date": "2026-11-17"}
 NVDA_REPORT = {"report_move_state": "ok", "report_move_pct": 0.044, "report_move": {"report_date": "2026-11-17"},
                "typical_move_pct": 6.5, "typical_n": 21, "move_comparison": "less than usual", "report_confirmed": True}
 NVDA = P.page_facts(symbol="NVDA", name="NVIDIA Corporation", fact_values=NVDA_VALUES, report=NVDA_REPORT)
@@ -16,9 +16,9 @@ OLD_NVDA = ("The market is pricing an implied move of ±8.9% (±$19.65) into the
             "$241.62 off a current price of $221.97. With 20-day realized vol sitting at just 25.1%, an RV rank of 11.4, and an IV-RV spread "
             "of +8.8pp, implied vol at 33.9% looks historically rich relative to what the stock has recently delivered, giving premium "
             "sellers a statistical edge on current conditions.")
-GOOD = ("Options on NVIDIA price a move of ±8.9% ($19.65) by Nov 20, 2026. About 4.4% of that comes from the Nov 17, 2026 report, "
-        "less than the 6.5% the stock has moved on the first day of a typical report. Options expect about the same swing as the stock has "
-        "shown lately. Lately the stock has been calmer than usual for it.")
+GOOD = ("Options on NVIDIA price a move of ±8.9% ($19.65) by Nov 20, 2026. About 4.4% of that move comes from the report on Nov 17, 2026, "
+        "less than its typical first-day move of 6.5% over 21 reports. Options expect about the same swing as the stock has "
+        "shown lately. Lately it has been calmer than usual compared with its past year.")
 
 
 def test_the_facts_and_band_words_are_the_pages_own():
@@ -26,15 +26,18 @@ def test_the_facts_and_band_words_are_the_pages_own():
     lines = P.fact_lines(NVDA)
     assert NVDA["name"] == "NVIDIA"                       # the page's short name (briefing.short_name)
     assert lines["A"] == "Options price a move of ±8.9% ($19.65) by Nov 20, 2026."
-    assert lines["B"] == "About 4.4% of that comes from the report on Nov 17, 2026."
-    assert lines["C"] == "On its past report days the stock has moved 6.5% on the first day on average, over 21 reports; the report move is less than that."
+    # Sam (2026-10-26 evening): Sherwin-Williams' form, ending with the page's comparison word against the typical first-day move
+    assert lines["B"] == "About 4.4% of that move comes from the report on Nov 17, 2026, less than its typical first-day move of 6.5% over 21 reports."
+    assert "C" not in lines and "S" not in lines
+    assert lines["D"] == "Lately it has been calmer than usual compared with its past year."
     assert lines["E"] == "Options expect about the same swing as the stock has shown lately."
     assert P.fact_lines({**NVDA, "spread_pp": 82.7, "spread_word": "pricey"})["E"] == "Options expect more swing than the stock has shown lately."
     assert P.fact_lines({**NVDA, "spread_pp": -12.0, "spread_word": "cheap"})["E"] == "Options expect less swing than the stock has shown lately."
     # the report share only on a company-confirmed date (Sam, 2026-10-26); the typical move then comes from the Details line
     vendor = P.page_facts(symbol="NVDA", name="NVIDIA Corporation", fact_values={**NVDA_VALUES, "avg_earnings_1d_move_pct": 6.6, "earnings_sample_size": 20},
                           report={**NVDA_REPORT, "report_confirmed": False})
-    assert set(P.fact_lines(vendor)) == {"A", "C", "D", "E"}
+    assert set(P.fact_lines(vendor)) == {"A", "S", "C", "D", "E"}
+    assert P.fact_lines(vendor)["S"] == "That covers every trading day until then, not just the report day."
     assert P.fact_lines(vendor)["C"] == "On its past report days the stock has moved 6.6% on the first day on average, over 20 reports."
     assert P.page_facts(symbol="O", name="Realty Income Corporation", fact_values=NVDA_VALUES, report=None)["name"] == "Realty Income"
     assert P.page_facts(symbol="JPM", name="JPMorgan Chase & Co.", fact_values=NVDA_VALUES, report=None)["name"] == "JPMorgan Chase"
@@ -49,7 +52,7 @@ def test_the_facts_and_band_words_are_the_pages_own():
     assert mrna["swing_band"] == "extreme" and mrna["lately"] == "much busier than usual"
     assert P.page_facts(symbol="X", name="X", fact_values={**NVDA_VALUES, "rv_rank": None}, report=None)["swing_band"] is None
     no_report = P.page_facts(symbol="X", name="X", fact_values=NVDA_VALUES, report={"report_move_state": "not_separated"})   # no typical in its values
-    assert set(P.fact_lines(no_report)) == {"A", "D", "E"}
+    assert set(P.fact_lines(no_report)) == {"A", "S", "D", "E"}
     prompt = P.build_prompt(NVDA)
     assert "never traded options" in prompt and lines["A"] in prompt and "Never use: IV, RV" in prompt
 
@@ -86,7 +89,9 @@ def test_order_length_and_advice_rules():
     assert any("mentions advice" in p for p in P.read_problems(GOOD.replace("Lately", "You should know that lately"), NVDA))
     assert any("month in full" in p for p in P.read_problems(GOOD.replace("Nov 20, 2026", "November 20, 2026"), NVDA))
     assert any("where its facts come from" in p for p in P.read_problems(GOOD.replace("Lately", "The page says lately"), NVDA))
-    assert any("leaves out the typical" in p for p in P.read_problems(GOOD.replace(", less than the 6.5% the stock has moved on the first day of a typical report", ""), NVDA))
+    assert any("leaves out the typical" in p for p in P.read_problems(GOOD.replace(", less than its typical first-day move of 6.5% over 21 reports", ""), NVDA))
+    assert any("line B" in p for p in P.read_problems(GOOD.replace("less than its typical first-day move of 6.5% over 21 reports", "while it has moved 6.5% over 21 reports"), NVDA))
+    assert any("not line D" in p for p in P.read_problems(GOOD.replace("Lately it has been calmer than usual compared with its past year", "Lately the stock has been calmer than usual for it"), NVDA))
     assert any("line E" in p for p in P.read_problems(GOOD.replace(" Options expect about the same swing as the stock has shown lately.", ""), NVDA))
     assert any('call the company "NVIDIA"' in p for p in P.read_problems(GOOD.replace("on NVIDIA", "on NVIDIA Corporation").replace("NVIDIA Corporation", "Nvidia Corp"), NVDA))
 
@@ -127,12 +132,13 @@ def test_no_sentence_restates_an_earlier_one():
     # the Oct 26 draft for NVDA: sentence 2 only restated sentence 1
     filler = ("Options on NVIDIA are pricing in a move of \u00b18.9% ($19.65) by Nov 20, 2026. That percentage covers both upward "
               "and downward movement from the current price, so it describes a symmetric range rather than a directional forecast. "
-              "Lately the stock has been calmer than usual for it.")
-    no_report = {**NVDA, "report_pct": None, "typical_pct": None, "comparison": None}
+              "Lately it has been calmer than usual compared with its past year.")
+    no_report = {**NVDA, "report_pct": None, "typical_pct": None, "comparison": None, "span": None}
     assert P.restatements(filler, no_report) == [2]
     assert any("sentence 2 restates" in p for p in P.read_problems(filler, no_report))
     assert P.restatements(GOOD, NVDA) == []
-    assert P.lines_stated("About 4.4% of that comes from the Nov 17, 2026 report, less than the 6.5% the stock has moved on a typical report.", NVDA) == {"B", "C"}
+    assert P.lines_stated("About 4.4% of that move comes from the report on Nov 17, 2026, less than its typical first-day move of 6.5% over 21 reports.", NVDA) == {"B", "C"}
+    assert P.lines_stated("That covers every trading day until then, not just the report day.", NVDA) == {"S"}
     assert P.lines_stated("Options expect about the same swing as the stock has shown lately.", NVDA) == {"E"}
     assert P.lines_stated("Options expect more swing than the stock has shown lately.", NVDA) == {"E"}
 
@@ -141,3 +147,24 @@ def test_no_expected_move_means_no_read_and_no_model_call():
     cms = {**NVDA, "total_pct": None, "total_dollars": None}
     r = asyncio.run(P.write_read(cms, client=FakeClient([])))       # the fake has no drafts: any call would fail
     assert r["result"] == "no_move" and r["content"] is None and r["attempts"] == 0
+
+
+def test_the_span_sentence_when_the_move_is_not_the_reports_alone():
+    # Sam (2026-10-26 evening): no report share and an expiration more than 2 trading days after the report, or no confirmed date
+    tail = "That covers every trading day until then, not just the report day."
+    assert P.span_line(None, False, "2026-11-17", "2026-11-20") == tail                  # no confirmed date (NVDA today)
+    assert P.span_line(None, True, "2026-10-27", "2026-11-20") == tail                   # confirmed, 18 trading days after (SHW-like, not separated)
+    assert P.span_line(None, True, "2026-10-27", "2026-10-30") == tail                   # Tue report, Fri expiration: 3 trading days
+    assert P.span_line(None, True, "2026-10-28", "2026-10-30") is None                   # Wed report, Fri expiration: 2 trading days
+    assert P.span_line(None, True, "2026-11-25", "2026-11-30") is None                   # Thanksgiving: Fri 27 and Mon 30, 2 trading days
+    assert P.span_line(0.058, True, "2026-10-27", "2026-11-20") is None                  # the report share says it instead
+    assert P.span_line(None, False, None, "2026-11-20") == "That covers every trading day until then."     # no report before then
+    assert P.span_line(None, False, "2026-12-15", "2026-11-20") == "That covers every trading day until then."
+    vendor = {**NVDA, "report_pct": None, "report_date": None, "comparison": None, "typical_pct": 6.5, "span": tail}
+    good = ("Options on NVIDIA price a move of ±8.9% ($19.65) by Nov 20, 2026. " + tail + " On its past report days, NVIDIA has moved 6.5% on "
+            "the first day on average, over 21 reports. Options expect about the same swing as the stock has shown lately. "
+            "Lately it has been calmer than usual compared with its past year.")
+    assert P.read_problems(good, vendor) == []
+    assert any("line S" in p for p in P.read_problems(good.replace(tail + " ", ""), vendor))
+    assert any("line S" in p for p in P.read_problems(good.replace(" not just the report day", " not only the report"), vendor))
+    assert "line S, word for word" in P.build_prompt(vendor)
