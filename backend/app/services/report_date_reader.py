@@ -242,7 +242,15 @@ def parse_model_json(content: str) -> dict | None:
     try:
         d = json.loads(m.group(0))
     except ValueError:
-        return None
+        # the model copies the release's own quotation marks unescaped ("The Kraft Heinz Company (NYSE: KHC) ("Kraft Heinz") will
+        # release ..."): the fields are read by position, the quote running to the object's last quotation mark
+        body = m.group(0)
+        date_m = re.search(r'"date"\s*:\s*(?:"([^"]*)"|null)', body)
+        timing_m = re.search(r'"timing"\s*:\s*"([^"]*)"', body)
+        quote_m = re.search(r'"quote"\s*:\s*(?:"(.*)"|null)\s*\}\s*$', body, re.S)
+        if not date_m:
+            return None
+        d = {"date": date_m.group(1), "timing": timing_m.group(1) if timing_m else None, "quote": quote_m.group(1) if quote_m else None}
     try:
         day = date.fromisoformat(str(d.get("date"))[:10]) if d.get("date") else None
     except ValueError:

@@ -142,3 +142,17 @@ def test_a_to_announce_title_on_the_companys_feed_is_followed():
         assert F.looks_like_announcement(title), title
     for title in ("ServiceNow Announces Third Quarter 2026 Financial Results", "Duke Energy reports third-quarter 2026 financial results"):
         assert not F.looks_like_announcement(title), title
+
+
+def test_a_quote_with_the_releases_own_quotation_marks_still_parses():
+    # Kraft Heinz and Invitation Homes, 2026-10-26: the model copied the release's quotation marks unescaped, the JSON did not
+    # parse, and the reading counted as "model read nothing"
+    raw = ('```json\n{"date": "2026-11-04", "timing": "bmo", "quote": "The Kraft Heinz Company (NYSE: KHC) ("Kraft Heinz") will release its '
+           'third quarter 2026 financial results on Wednesday, Nov. 4, 2026."}\n```')
+    got = R.parse_model_json(raw)
+    assert got["date"] == date(2026, 11, 4) and got["timing"] == "bmo"
+    assert got["quote"] == ('The Kraft Heinz Company (NYSE: KHC) ("Kraft Heinz") will release its third quarter 2026 financial results on '
+                            'Wednesday, Nov. 4, 2026.')
+    khc = "PITTSBURGH & CHICAGO, October 12, 2026--" + got["quote"]
+    assert R.decide(R.read_release_date(khc, TODAY), got, khc, TODAY)[0] == date(2026, 11, 4)
+    assert R.parse_model_json('{"date": null, "timing": "unknown", "quote": null}') == {"date": None, "timing": "unknown", "quote": None}
