@@ -33,8 +33,9 @@ _STRIP = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.S | re.I)
 # a title that says the company will report, release or announce results, or has set the date or call for them
 ANNOUNCE_TITLE = re.compile(r"\b(?:to (?:report|release|announce|host|hold)|announces?|schedules?|sets?|confirms?|invites?|details)\b.{0,80}"
                             r"\b(?:results|earnings|conference call|webcast)\b|\b(?:earnings|results) (?:release|call|conference call|webcast) (?:date|details)\b", re.I)
-# a results release itself, or a dividend notice, is not an announcement of a results date
-NOT_ANNOUNCEMENT = re.compile(r"(?<!to )\breports\b|\bdividend\b|\bdeclares?\b|\bfinancial results for\b|\bannounces? (?:first|second|third|fourth)[- ]quarter (?:(?:fiscal )?\d{4} )?(?:financial )?results\b(?! (?:date|call|webcast|conference))", re.I)
+# a results release itself, or a dividend notice, is not an announcement of a results date; "X to Announce Third Quarter 2026 Financial
+# Results on October 28" is (ServiceNow's feed, 2026-10-26: the title was turned away and the date never read)
+NOT_ANNOUNCEMENT = re.compile(r"(?<!to )\breports\b|\bdividend\b|\bdeclares?\b|\bfinancial results for\b|(?<!to )\bannounces? (?:first|second|third|fourth)[- ]quarter (?:(?:fiscal )?\d{4} )?(?:financial )?results\b(?! (?:date|call|webcast|conference))", re.I)
 
 _ROBOTS: dict[str, robotparser.RobotFileParser] = {}
 

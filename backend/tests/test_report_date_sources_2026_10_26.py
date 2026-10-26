@@ -135,3 +135,10 @@ def test_a_date_two_calendars_agreed_on_takes_the_companys_evidence():
     company = {**vendor, "confirmation_note": "confirmed: events feed via IR 2026-12-10: Q1 2027 Earnings Results"}
     assert C.classify(date(2026, 12, 10), [company])[0] == "already"
     assert C.classify(date(2026, 12, 9), [company])[0] == "contradicts"
+
+
+def test_a_to_announce_title_on_the_companys_feed_is_followed():
+    for title in ("ServiceNow to Announce Third Quarter 2026 Financial Results on October 28", "Duke Energy to announce third-quarter 2026 financial results on Nov. 5"):
+        assert F.looks_like_announcement(title), title
+    for title in ("ServiceNow Announces Third Quarter 2026 Financial Results", "Duke Energy reports third-quarter 2026 financial results"):
+        assert not F.looks_like_announcement(title), title
