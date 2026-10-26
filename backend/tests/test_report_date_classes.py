@@ -71,4 +71,4 @@ def test_the_model_cannot_confirm_a_call_and_only_the_release_class_is_written()
     assert day is None and "names a call" in note
     src = inspect.getsource(C.main)
     assert 'if write and cls == "release":' in src and 'if cls != "release":' in src
-    assert R.READER_VERSION == 2 and R.QUOTE_CLASSES == ("release", "call_only", "third_party")
+    assert R.READER_VERSION == 3 and R.QUOTE_CLASSES == ("release", "call_only", "third_party")

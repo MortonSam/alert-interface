@@ -76,6 +76,27 @@ def earnings_events(items: list[dict], today: date) -> list[dict]:
     return out
 
 
+def results_event(title: str) -> bool:
+    """Pure: an events-feed title that names the results themselves, not a call or webcast about them: Apple's "FY 26 Fourth Quarter
+    Results", Amphenol's "3rd Quarter 2026 Earnings", Costco's "Q1 2027 Earnings Results". The company's own calendar puts its results
+    on that day, which is a release date; "Q3 2026 Earnings Conference Call" or "Earnings Results Webcast" names a call (Sam, 2026-10-20:
+    a call date alone leaves a date estimated), and its event page is read instead."""
+    return bool(EARNINGS_EVENT.search(title)) and not NOT_EARNINGS_EVENT.search(title) and not re.search(r"\b(?:call|webcast|conference|teleconference|audio|discussion)\b", title, re.I)
+
+
+SOURCES_FILE = __import__("pathlib").Path(__file__).resolve().parent.parent / "data" / "ir_sources.json"
+
+
+def seeded_sources() -> dict[str, dict]:
+    """{symbol: {"press": url | None, "events": url | None}}: the company IR feeds found from the Mac (scripts/discover_ir_feeds and the
+    events probe, 2026-10-26), shipped with the code so production reads them whether or not its ir_feeds table has rows (it had none)."""
+    import json
+    try:
+        return json.loads(SOURCES_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def event_timing(body: str, day: date) -> str:
     """Pure: amc, bmo or unknown from the channel's lastBuildDate when it falls on `day` (Q4 sets it to the first event's start time)."""
     m = _BUILD_DATE.search(body or "")

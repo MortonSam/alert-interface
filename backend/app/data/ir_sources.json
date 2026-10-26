@@ -1,0 +1,974 @@
+{
+"AAPL": {
+"events": "https://investor.apple.com/rss/event.aspx",
+"press": null
+},
+"ABNB": {
+"events": "https://investors.airbnb.com/rss/event.aspx",
+"press": "https://investors.airbnb.com/rss/pressrelease.aspx"
+},
+"ACGL": {
+"events": "https://ir.archgroup.com/rss/event.aspx",
+"press": "https://ir.archgroup.com/rss/pressrelease.aspx"
+},
+"ACN": {
+"events": null,
+"press": "https://investor.accenture.com/rss.xml"
+},
+"ADM": {
+"events": "https://investors.adm.com/rss/event.aspx",
+"press": "https://investors.adm.com/rss/pressrelease.aspx"
+},
+"ADP": {
+"events": "https://investors.adp.com/rss/event.aspx",
+"press": "https://investors.adp.com/rss/pressrelease.aspx"
+},
+"AEP": {
+"events": null,
+"press": "https://aep.com/news/rss"
+},
+"AFL": {
+"events": "https://investors.aflac.com/rss/event.aspx",
+"press": "https://investors.aflac.com/rss/pressrelease.aspx"
+},
+"AIZ": {
+"events": "https://ir.assurant.com/rss/event.aspx",
+"press": "https://ir.assurant.com/rss/pressrelease.aspx"
+},
+"AJG": {
+"events": "https://investor.ajg.com/rss/event.aspx",
+"press": "https://investor.ajg.com/rss/pressrelease.aspx"
+},
+"ALB": {
+"events": "https://investors.albemarle.com/rss/event.aspx",
+"press": "https://investors.albemarle.com/rss/pressrelease.aspx"
+},
+"ALLE": {
+"events": null,
+"press": "https://investor.allegion.com/rss/news-releases.xml"
+},
+"AMD": {
+"events": null,
+"press": "https://ir.amd.com/rss/news-releases.xml"
+},
+"AMP": {
+"events": "https://ir.ameriprise.com/rss/event.aspx",
+"press": "https://ir.ameriprise.com/rss/pressrelease.aspx"
+},
+"ANET": {
+"events": "https://investors.arista.com/rss/event.aspx",
+"press": "https://investors.arista.com/rss/pressrelease.aspx"
+},
+"APH": {
+"events": "https://investors.amphenol.com/rss/event.aspx",
+"press": "https://investors.amphenol.com/rss/pressrelease.aspx"
+},
+"APP": {
+"events": "https://investors.applovin.com/rss/event.aspx",
+"press": "https://investors.applovin.com/rss/pressrelease.aspx"
+},
+"APTV": {
+"events": "https://ir.aptiv.com/rss/event.aspx",
+"press": "https://ir.aptiv.com/rss/pressrelease.aspx"
+},
+"ARE": {
+"events": "https://investor.are.com/rss/event.aspx",
+"press": "https://investor.are.com/rss/pressrelease.aspx"
+},
+"AVY": {
+"events": "https://investors.averydennison.com/rss/event.aspx",
+"press": "https://investors.averydennison.com/rss/pressrelease.aspx"
+},
+"AWK": {
+"events": "https://ir.amwater.com/rss/event.aspx",
+"press": "https://ir.amwater.com/rss/pressrelease.aspx"
+},
+"AXP": {
+"events": "https://ir.americanexpress.com/rss/event.aspx",
+"press": "https://ir.americanexpress.com/rss/pressrelease.aspx"
+},
+"BA": {
+"events": "https://investors.boeing.com/rss/event.aspx",
+"press": "https://investors.boeing.com/rss/pressrelease.aspx"
+},
+"BAX": {
+"events": "https://investor.baxter.com/rss/event.aspx",
+"press": "https://investor.baxter.com/rss/pressrelease.aspx"
+},
+"BBY": {
+"events": "https://investors.bestbuy.com/rss/event.aspx",
+"press": "https://investors.bestbuy.com/rss/pressrelease.aspx"
+},
+"BE": {
+"events": "https://investor.bloomenergy.com/rss/event.aspx",
+"press": "https://investor.bloomenergy.com/rss/pressrelease.aspx"
+},
+"BEN": {
+"events": "https://investors.franklinresources.com/rss/event.aspx",
+"press": "https://investors.franklinresources.com/rss/pressrelease.aspx"
+},
+"BF-B": {
+"events": "https://investors.brown-forman.com/rss/event.aspx",
+"press": "https://investors.brown-forman.com/rss/pressrelease.aspx"
+},
+"BG": {
+"events": null,
+"press": "https://investors.bunge.com/rss.xml"
+},
+"BKNG": {
+"events": "https://ir.bookingholdings.com/rss/event.aspx",
+"press": "https://ir.bookingholdings.com/rss/pressrelease.aspx"
+},
+"BKR": {
+"events": "https://investors.bakerhughes.com/rss/event.aspx",
+"press": "https://investors.bakerhughes.com/rss/pressrelease.aspx"
+},
+"BLK": {
+"events": "https://ir.blackrock.com/rss/event.aspx",
+"press": "https://ir.blackrock.com/rss/pressrelease.aspx"
+},
+"BMY": {
+"events": "https://investors.bms.com/rss/event.aspx",
+"press": "https://investors.bms.com/rss/pressrelease.aspx"
+},
+"BRO": {
+"events": null,
+"press": "https://investor.bbinsurance.com/rss/news-releases.xml"
+},
+"BSX": {
+"events": null,
+"press": "https://investors.bostonscientific.com/rss.xml"
+},
+"BX": {
+"events": "https://ir.blackstone.com/rss/event.aspx",
+"press": "https://www.blackstone.com/news/rss"
+},
+"CAH": {
+"events": "https://ir.cardinalhealth.com/rss/event.aspx",
+"press": "https://ir.cardinalhealth.com/rss/pressrelease.aspx"
+},
+"CAT": {
+"events": "https://investors.caterpillar.com/rss/event.aspx",
+"press": "https://investors.caterpillar.com/rss/pressrelease.aspx"
+},
+"CB": {
+"events": "https://investors.chubb.com/rss/event.aspx",
+"press": "https://investors.chubb.com/rss/pressrelease.aspx"
+},
+"CBOE": {
+"events": "https://ir.cboe.com/rss/event.aspx",
+"press": "https://ir.cboe.com/rss/pressrelease.aspx"
+},
+"CBRE": {
+"events": null,
+"press": "https://ir.cbre.com/rss/pressrelease.aspx"
+},
+"CDNS": {
+"events": "https://investor.cadence.com/rss/event.aspx",
+"press": "https://investor.cadence.com/rss/pressrelease.aspx"
+},
+"CDW": {
+"events": "https://investor.cdw.com/rss/event.aspx",
+"press": "https://investor.cdw.com/rss/pressrelease.aspx"
+},
+"CF": {
+"events": "https://investors.cfindustries.com/rss/event.aspx",
+"press": "https://investors.cfindustries.com/rss/pressrelease.aspx"
+},
+"CFG": {
+"events": null,
+"press": "https://investor.citizensbank.com/rss.xml"
+},
+"CHD": {
+"events": "https://investors.churchdwight.com/rss/event.aspx",
+"press": "https://investors.churchdwight.com/rss/pressrelease.aspx"
+},
+"CHRW": {
+"events": "https://investor.chrobinson.com/rss/event.aspx",
+"press": "https://investor.chrobinson.com/rss/pressrelease.aspx"
+},
+"CIEN": {
+"events": "https://investor.ciena.com/rss/event.aspx",
+"press": "https://investor.ciena.com/rss/pressrelease.aspx"
+},
+"CLX": {
+"events": "https://investors.thecloroxcompany.com/rss/event.aspx",
+"press": "https://investors.thecloroxcompany.com/rss/pressrelease.aspx"
+},
+"CMI": {
+"events": null,
+"press": "https://investor.cummins.com/rss/news-releases.xml"
+},
+"CMS": {
+"events": "https://www.cmsenergy.com/rss/event.aspx",
+"press": "https://www.cmsenergy.com/rss/pressrelease.aspx"
+},
+"COIN": {
+"events": "https://investor.coinbase.com/rss/event.aspx",
+"press": "https://investor.coinbase.com/rss/pressrelease.aspx"
+},
+"COR": {
+"events": "https://investor.cencora.com/rss/event.aspx",
+"press": "https://investor.cencora.com/rss/pressrelease.aspx"
+},
+"COST": {
+"events": "https://investor.costco.com/rss/event.aspx",
+"press": "https://investor.costco.com/rss/pressrelease.aspx"
+},
+"CPT": {
+"events": "https://investors.camdenliving.com/rss/event.aspx",
+"press": "https://investors.camdenliving.com/rss/pressrelease.aspx"
+},
+"CRH": {
+"events": null,
+"press": "https://crh.com/feed"
+},
+"CRM": {
+"events": "https://investor.salesforce.com/rss/event.aspx",
+"press": "https://investor.salesforce.com/rss/pressrelease.aspx"
+},
+"CSCO": {
+"events": "https://investor.cisco.com/rss/event.aspx",
+"press": "https://investor.cisco.com/rss/pressrelease.aspx"
+},
+"CSX": {
+"events": "https://investors.csx.com/rss/event.aspx",
+"press": "https://investors.csx.com/rss/pressrelease.aspx"
+},
+"CTSH": {
+"events": "https://investors.cognizant.com/rss/event.aspx",
+"press": "https://investors.cognizant.com/rss/pressrelease.aspx"
+},
+"CVNA": {
+"events": null,
+"press": "https://investors.carvana.com/rss/news-releases.xml"
+},
+"CVS": {
+"events": "https://investors.cvshealth.com/rss/event.aspx",
+"press": "https://investors.cvshealth.com/rss/pressrelease.aspx"
+},
+"D": {
+"events": "https://investors.dominionenergy.com/rss/event.aspx",
+"press": "https://investors.dominionenergy.com/rss/pressrelease.aspx"
+},
+"DAL": {
+"events": "https://ir.delta.com/rss/event.aspx",
+"press": "https://ir.delta.com/rss/pressrelease.aspx"
+},
+"DASH": {
+"events": "https://ir.doordash.com/rss/event.aspx",
+"press": "https://ir.doordash.com/rss/pressrelease.aspx"
+},
+"DDOG": {
+"events": "https://datadoghq.com/rss/event.aspx",
+"press": "https://datadoghq.com/rss/news-releases.xml"
+},
+"DE": {
+"events": "https://investor.deere.com/rss/event.aspx",
+"press": "https://investor.deere.com/rss/pressrelease.aspx"
+},
+"DGX": {
+"events": "https://ir.questdiagnostics.com/rss/event.aspx",
+"press": "https://ir.questdiagnostics.com/rss/pressrelease.aspx"
+},
+"DHI": {
+"events": null,
+"press": "https://investor.drhorton.com/rss.xml"
+},
+"DHR": {
+"events": null,
+"press": "https://danaher.com/rss.xml"
+},
+"DIS": {
+"events": "https://investors.thewaltdisneycompany.com/rss/event.aspx",
+"press": "https://investors.thewaltdisneycompany.com/rss/pressrelease.aspx"
+},
+"DOC": {
+"events": "https://ir.healthpeak.com/rss/event.aspx",
+"press": "https://ir.healthpeak.com/rss/pressrelease.aspx"
+},
+"DOW": {
+"events": "https://investors.dow.com/rss/event.aspx",
+"press": "https://investors.dow.com/rss/pressrelease.aspx"
+},
+"DRI": {
+"events": "https://investor.darden.com/rss/event.aspx",
+"press": "https://investor.darden.com/rss/pressrelease.aspx"
+},
+"DUK": {
+"events": "https://investors.duke-energy.com/rss/event.aspx",
+"press": "https://investors.duke-energy.com/rss/pressrelease.aspx"
+},
+"DVA": {
+"events": null,
+"press": "https://investors.davita.com/feed"
+},
+"DVN": {
+"events": "https://investors.devonenergy.com/rss/event.aspx",
+"press": "https://investors.devonenergy.com/rss/pressrelease.aspx"
+},
+"DXCM": {
+"events": "https://investors.dexcom.com/rss/event.aspx",
+"press": "https://investors.dexcom.com/rss/pressrelease.aspx"
+},
+"EBAY": {
+"events": "https://investors.ebayinc.com/rss/event.aspx",
+"press": "https://investors.ebayinc.com/rss/pressrelease.aspx"
+},
+"ECL": {
+"events": "https://investor.ecolab.com/rss/event.aspx",
+"press": "https://investor.ecolab.com/rss/pressrelease.aspx"
+},
+"EIX": {
+"events": null,
+"press": "https://edison.com/rss.xml"
+},
+"ELV": {
+"events": "https://ir.elevancehealth.com/rss/event.aspx",
+"press": "https://ir.elevancehealth.com/rss/pressrelease.aspx"
+},
+"EQIX": {
+"events": null,
+"press": "https://investor.equinix.com/rss/news-releases.xml"
+},
+"EQT": {
+"events": "https://ir.eqt.com/rss/event.aspx",
+"press": "https://ir.eqt.com/rss/pressrelease.aspx"
+},
+"ESS": {
+"events": "https://investors.essexapartmenthomes.com/rss/event.aspx",
+"press": "https://investors.essexapartmenthomes.com/rss/pressrelease.aspx"
+},
+"ETR": {
+"events": "https://investors.entergy.com/rss/event.aspx",
+"press": "https://investors.entergy.com/rss/pressrelease.aspx"
+},
+"EW": {
+"events": "https://ir.edwards.com/rss/event.aspx",
+"press": "https://ir.edwards.com/rss/pressrelease.aspx"
+},
+"EXPD": {
+"events": null,
+"press": "https://investor.expeditors.com/rss.xml"
+},
+"EXPE": {
+"events": "https://ir.expediagroup.com/rss/event.aspx",
+"press": "https://ir.expediagroup.com/rss/pressrelease.aspx"
+},
+"EXR": {
+"events": "https://ir.extraspace.com/rss/event.aspx",
+"press": "https://ir.extraspace.com/rss/pressrelease.aspx"
+},
+"FAST": {
+"events": "https://investor.fastenal.com/rss/event.aspx",
+"press": "https://investor.fastenal.com/rss/pressrelease.aspx"
+},
+"FCX": {
+"events": "https://investors.fcx.com/rss/event.aspx",
+"press": "https://investors.fcx.com/rss/pressrelease.aspx"
+},
+"FDX": {
+"events": "https://investors.fedex.com/rss/event.aspx",
+"press": "https://investors.fedex.com/rss/pressrelease.aspx"
+},
+"FE": {
+"events": "https://investors.firstenergycorp.com/rss/event.aspx",
+"press": "https://investors.firstenergycorp.com/rss/pressrelease.aspx"
+},
+"FERG": {
+"events": "https://corporate.ferguson.com/rss/event.aspx",
+"press": "https://corporate.ferguson.com/rss/pressrelease.aspx"
+},
+"FFIV": {
+"events": "https://investors.f5.com/rss/event.aspx",
+"press": "https://investors.f5.com/rss/pressrelease.aspx"
+},
+"FITB": {
+"events": "https://ir.53.com/rss/event.aspx",
+"press": "https://ir.53.com/rss/pressrelease.aspx"
+},
+"FLEX": {
+"events": "https://investors.flex.com/rss/event.aspx",
+"press": "https://investors.flex.com/rss/pressrelease.aspx"
+},
+"FSLR": {
+"events": "https://investor.firstsolar.com/rss/event.aspx",
+"press": "https://investor.firstsolar.com/rss/pressrelease.aspx"
+},
+"GE": {
+"events": null,
+"press": "https://www.ge.com/news/rss.xml"
+},
+"GEV": {
+"events": null,
+"press": "https://gevernova.com/rss.xml"
+},
+"GILD": {
+"events": "https://investors.gilead.com/rss/event.aspx",
+"press": "https://investors.gilead.com/rss/pressrelease.aspx"
+},
+"GIS": {
+"events": "https://investors.generalmills.com/rss/event.aspx",
+"press": "https://investors.generalmills.com/rss/pressrelease.aspx"
+},
+"GLW": {
+"events": "https://investor.corning.com/rss/event.aspx",
+"press": "https://investor.corning.com/rss/pressrelease.aspx"
+},
+"GOOG": {
+"events": "https://abc.xyz/rss/event.aspx",
+"press": "https://abc.xyz/rss/pressrelease.aspx"
+},
+"GOOGL": {
+"events": "https://abc.xyz/rss/event.aspx",
+"press": "https://abc.xyz/rss/pressrelease.aspx"
+},
+"GRMN": {
+"events": "https://investors.garmin.com/rss/event.aspx",
+"press": "https://investors.garmin.com/rss/pressrelease.aspx"
+},
+"HBAN": {
+"events": null,
+"press": "https://ir.huntington.com/rss.xml"
+},
+"HCA": {
+"events": "https://investor.hcahealthcare.com/rss/event.aspx",
+"press": "https://investor.hcahealthcare.com/rss/pressrelease.aspx"
+},
+"HD": {
+"events": null,
+"press": "https://ir.homedepot.com/rss/news-releases.xml"
+},
+"HIG": {
+"events": "https://ir.thehartford.com/rss/event.aspx",
+"press": "https://ir.thehartford.com/rss/pressrelease.aspx"
+},
+"HON": {
+"events": null,
+"press": "https://investor.honeywell.com/rss/news-releases.xml"
+},
+"HPE": {
+"events": null,
+"press": "https://investors.hpe.com/rss/news.xml"
+},
+"HPQ": {
+"events": "https://investor.hp.com/rss/event.aspx",
+"press": "https://investor.hp.com/rss/pressrelease.aspx"
+},
+"HRL": {
+"events": "https://investor.hormelfoods.com/rss/event.aspx",
+"press": "https://investor.hormelfoods.com/rss/pressrelease.aspx"
+},
+"HSIC": {
+"events": "https://investor.henryschein.com/rss/event.aspx",
+"press": "https://investor.henryschein.com/rss/pressrelease.aspx"
+},
+"IEX": {
+"events": "https://investors.idexcorp.com/rss/event.aspx",
+"press": "https://investors.idexcorp.com/rss/pressrelease.aspx"
+},
+"INCY": {
+"events": null,
+"press": "https://incyte.com/rss.xml"
+},
+"IP": {
+"events": null,
+"press": "https://internationalpaper.com/rss.xml"
+},
+"IQV": {
+"events": "https://ir.iqvia.com/rss/event.aspx",
+"press": "https://ir.iqvia.com/rss/pressrelease.aspx"
+},
+"IR": {
+"events": "https://investors.irco.com/rss/event.aspx",
+"press": "https://investors.irco.com/rss/pressrelease.aspx"
+},
+"IRM": {
+"events": "https://investors.ironmountain.com/rss/event.aspx",
+"press": "https://investors.ironmountain.com/rss/pressrelease.aspx"
+},
+"ITW": {
+"events": "https://investor.itw.com/rss/event.aspx",
+"press": "https://investor.itw.com/rss/pressrelease.aspx"
+},
+"JBHT": {
+"events": null,
+"press": "https://investor.jbhunt.com/rss/news.xml"
+},
+"JBL": {
+"events": "https://investors.jabil.com/rss/event.aspx",
+"press": "https://investors.jabil.com/rss/pressrelease.aspx"
+},
+"JCI": {
+"events": "https://investors.johnsoncontrols.com/rss/event.aspx",
+"press": "https://investors.johnsoncontrols.com/rss/pressrelease.aspx"
+},
+"JNJ": {
+"events": "https://investor.jnj.com/rss/event.aspx",
+"press": "https://investor.jnj.com/rss/pressrelease.aspx"
+},
+"KDP": {
+"events": null,
+"press": "https://keurigdrpepper.com/feed"
+},
+"KEY": {
+"events": "https://investor.key.com/rss/event.aspx",
+"press": "https://investor.key.com/rss/pressrelease.aspx"
+},
+"KEYS": {
+"events": "https://investor.keysight.com/rss/event.aspx",
+"press": "https://investor.keysight.com/rss/pressrelease.aspx"
+},
+"KIM": {
+"events": null,
+"press": "https://investors.kimcorealty.com/rss/pressrelease.aspx"
+},
+"KMI": {
+"events": "https://ir.kindermorgan.com/rss/event.aspx",
+"press": "https://ir.kindermorgan.com/rss/pressrelease.aspx"
+},
+"KVUE": {
+"events": "https://investor.jnj.com/rss/event.aspx",
+"press": "https://investor.jnj.com/rss/pressrelease.aspx"
+},
+"L": {
+"events": "https://ir.loews.com/rss/event.aspx",
+"press": "https://ir.loews.com/rss/pressrelease.aspx"
+},
+"LDOS": {
+"events": null,
+"press": "https://leidos.com/rss.xml"
+},
+"LEN": {
+"events": null,
+"press": "https://investors.lennar.com/rss/events.xml"
+},
+"LH": {
+"events": null,
+"press": "https://labcorp.com/rss.xml"
+},
+"LHX": {
+"events": "https://investors.l3harris.com/rss/event.aspx",
+"press": "https://investors.l3harris.com/rss/pressrelease.aspx"
+},
+"LITE": {
+"events": "https://investor.lumentum.com/rss/event.aspx",
+"press": "https://investor.lumentum.com/rss/pressrelease.aspx"
+},
+"LNT": {
+"events": "https://investors.alliantenergy.com/rss/event.aspx",
+"press": "https://investors.alliantenergy.com/rss/pressrelease.aspx"
+},
+"LULU": {
+"events": null,
+"press": "https://investor.lululemon.com/rss.xml"
+},
+"LVS": {
+"events": "https://investor.sands.com/rss/event.aspx",
+"press": "https://investor.sands.com/rss/pressrelease.aspx"
+},
+"LYB": {
+"events": "https://investors.lyondellbasell.com/rss/event.aspx",
+"press": "https://investors.lyondellbasell.com/rss/pressrelease.aspx"
+},
+"MA": {
+"events": "https://investor.mastercard.com/rss/event.aspx",
+"press": "https://investor.mastercard.com/rss/pressrelease.aspx"
+},
+"MAA": {
+"events": "https://ir.maac.com/rss/event.aspx",
+"press": "https://ir.maac.com/rss/pressrelease.aspx"
+},
+"MAS": {
+"events": "https://investor.masco.com/rss/event.aspx",
+"press": "https://investor.masco.com/rss/pressrelease.aspx"
+},
+"MCK": {
+"events": "https://investor.mckesson.com/rss/event.aspx",
+"press": "https://investor.mckesson.com/rss/pressrelease.aspx"
+},
+"MCO": {
+"events": "https://ir.moodys.com/rss/event.aspx",
+"press": "https://ir.moodys.com/rss/pressrelease.aspx"
+},
+"MET": {
+"events": "https://investor.metlife.com/rss/event.aspx",
+"press": "https://investor.metlife.com/rss/pressrelease.aspx"
+},
+"MMM": {
+"events": null,
+"press": "https://investors.3m.com/rss/pressrelease.aspx"
+},
+"MO": {
+"events": "https://investor.altria.com/rss/event.aspx",
+"press": "https://investor.altria.com/rss/pressrelease.aspx"
+},
+"MOS": {
+"events": "https://investors.mosaicco.com/rss/event.aspx",
+"press": "https://investors.mosaicco.com/rss/pressrelease.aspx"
+},
+"MPC": {
+"events": "https://ir.marathonpetroleum.com/rss/event.aspx",
+"press": "https://ir.marathonpetroleum.com/rss/pressrelease.aspx"
+},
+"MTD": {
+"events": "https://investor.mt.com/rss/event.aspx",
+"press": "https://investor.mt.com/rss/pressrelease.aspx"
+},
+"MU": {
+"events": "https://investors.micron.com/rss/event.aspx",
+"press": "https://investors.micron.com/rss/pressrelease.aspx"
+},
+"NDSN": {
+"events": "https://investors.nordson.com/rss/event.aspx",
+"press": "https://investors.nordson.com/rss/pressrelease.aspx"
+},
+"NEE": {
+"events": null,
+"press": "https://investor.nexteraenergy.com/rss/news-releases.xml"
+},
+"NEM": {
+"events": "https://investors.newmont.com/rss/event.aspx",
+"press": "https://investors.newmont.com/rss/pressrelease.aspx"
+},
+"NFLX": {
+"events": "https://ir.netflix.com/rss/event.aspx",
+"press": "https://ir.netflix.com/rss/pressrelease.aspx"
+},
+"NI": {
+"events": "https://investors.nisource.com/rss/event.aspx",
+"press": "https://investors.nisource.com/rss/pressrelease.aspx"
+},
+"NKE": {
+"events": null,
+"press": "https://investors.nike.com/rss/pressrelease.aspx"
+},
+"NOW": {
+"events": "https://investor.servicenow.com/rss/event.aspx",
+"press": "https://investor.servicenow.com/rss/pressrelease.aspx"
+},
+"NTAP": {
+"events": "https://investors.netapp.com/rss/event.aspx",
+"press": "https://investors.netapp.com/rss/pressrelease.aspx"
+},
+"NUE": {
+"events": "https://investors.nucor.com/rss/event.aspx",
+"press": "https://investors.nucor.com/rss/pressrelease.aspx"
+},
+"NVDA": {
+"events": "https://investor.nvidia.com/rss/event.aspx",
+"press": "https://investor.nvidia.com/rss/pressrelease.aspx"
+},
+"NWS": {
+"events": null,
+"press": "https://newscorp.com/feed"
+},
+"NWSA": {
+"events": null,
+"press": "https://newscorp.com/feed"
+},
+"O": {
+"events": null,
+"press": "https://realtyincome.com/rss.xml"
+},
+"ODFL": {
+"events": null,
+"press": "https://ir.odfl.com/news/rss"
+},
+"ORCL": {
+"events": "https://investor.oracle.com/rss/event.aspx",
+"press": "https://investor.oracle.com/rss/pressrelease.aspx"
+},
+"P": {
+"events": "https://investor.purestorage.com/rss/event.aspx",
+"press": "https://investor.purestorage.com/rss/pressrelease.aspx"
+},
+"PAYX": {
+"events": null,
+"press": "https://paychex.com/rss.xml"
+},
+"PCAR": {
+"events": "https://investors.paccar.com/rss/event.aspx",
+"press": "https://investors.paccar.com/rss/pressrelease.aspx"
+},
+"PEG": {
+"events": "https://investor.pseg.com/rss/event.aspx",
+"press": "https://investor.pseg.com/rss/pressrelease.aspx"
+},
+"PFE": {
+"events": "https://investors.pfizer.com/rss/event.aspx",
+"press": "https://investors.pfizer.com/rss/pressrelease.aspx"
+},
+"PG": {
+"events": "https://www.pginvestor.com/rss/event.aspx",
+"press": "https://www.pginvestor.com/rss/pressrelease.aspx"
+},
+"PGR": {
+"events": "https://investors.progressive.com/rss/event.aspx",
+"press": "https://investors.progressive.com/rss/pressrelease.aspx"
+},
+"PH": {
+"events": null,
+"press": "https://investors.parker.com/rss/news-releases.xml"
+},
+"PHM": {
+"events": "https://pultegroup.com/rss/event.aspx",
+"press": "https://pultegroup.com/rss/pressrelease.aspx"
+},
+"PLD": {
+"events": null,
+"press": "https://investors.prologis.com/press-releases/rss"
+},
+"PNW": {
+"events": "https://www.pinnaclewest.com/rss/event.aspx",
+"press": "https://www.pinnaclewest.com/rss/pressrelease.aspx"
+},
+"PODD": {
+"events": "https://investors.insulet.com/rss/event.aspx",
+"press": "https://investors.insulet.com/rss/pressrelease.aspx"
+},
+"PPG": {
+"events": "https://investor.ppg.com/rss/event.aspx",
+"press": "https://investor.ppg.com/rss/pressrelease.aspx"
+},
+"PRU": {
+"events": null,
+"press": "https://investor.prudential.com/news/rss"
+},
+"PSA": {
+"events": "https://investors.publicstorage.com/rss/event.aspx",
+"press": "https://investors.publicstorage.com/rss/pressrelease.aspx"
+},
+"PTC": {
+"events": "https://investor.ptc.com/rss/event.aspx",
+"press": "https://investor.ptc.com/rss/pressrelease.aspx"
+},
+"Q": {
+"events": null,
+"press": "https://ir.qnityelectronics.com/press-releases/rss"
+},
+"QCOM": {
+"events": "https://investor.qualcomm.com/rss/event.aspx",
+"press": "https://investor.qualcomm.com/rss/pressrelease.aspx"
+},
+"RDDT": {
+"events": "https://investors.redditinc.com/rss/event.aspx",
+"press": "https://investors.redditinc.com/rss/pressrelease.aspx"
+},
+"RF": {
+"events": "https://ir.regions.com/rss/event.aspx",
+"press": "https://ir.regions.com/rss/pressrelease.aspx"
+},
+"RMD": {
+"events": null,
+"press": "https://investors.resmed.com/rss/pressrelease.aspx"
+},
+"RVTY": {
+"events": null,
+"press": "https://perkinelmer.com/rss.xml"
+},
+"SBAC": {
+"events": "https://ir.sbasite.com/rss/event.aspx",
+"press": "https://ir.sbasite.com/rss/pressrelease.aspx"
+},
+"SBUX": {
+"events": "https://investor.starbucks.com/rss/event.aspx",
+"press": "https://investor.starbucks.com/rss/pressrelease.aspx"
+},
+"SHW": {
+"events": "https://investors.sherwin-williams.com/rss/event.aspx",
+"press": "https://investors.sherwin-williams.com/rss/pressrelease.aspx"
+},
+"SJM": {
+"events": "https://investors.jmsmucker.com/rss/event.aspx",
+"press": "https://investors.jmsmucker.com/rss/pressrelease.aspx"
+},
+"SKYD": {
+"events": null,
+"press": "https://paramount.com/rss.xml"
+},
+"SMCI": {
+"events": "https://ir.supermicro.com/rss/event.aspx",
+"press": "https://ir.supermicro.com/rss/pressrelease.aspx"
+},
+"SNPS": {
+"events": "https://investor.synopsys.com/rss/event.aspx",
+"press": "https://investor.synopsys.com/rss/pressrelease.aspx"
+},
+"SPGI": {
+"events": "https://investor.spglobal.com/rss/event.aspx",
+"press": "https://investor.spglobal.com/rss/pressrelease.aspx"
+},
+"SRE": {
+"events": null,
+"press": "https://sempra.com/rss.xml"
+},
+"STLD": {
+"events": null,
+"press": "https://stld.steeldynamics.com/feed"
+},
+"STT": {
+"events": "https://investors.statestreet.com/rss/event.aspx",
+"press": "https://investors.statestreet.com/rss/pressrelease.aspx"
+},
+"STX": {
+"events": "https://investors.seagate.com/rss/event.aspx",
+"press": "https://investors.seagate.com/rss/pressrelease.aspx"
+},
+"SWK": {
+"events": "https://ir.stanleyblackanddecker.com/rss/event.aspx",
+"press": "https://ir.stanleyblackanddecker.com/rss/pressrelease.aspx"
+},
+"SYK": {
+"events": "https://investors.stryker.com/rss/event.aspx",
+"press": "https://investors.stryker.com/rss/pressrelease.aspx"
+},
+"T": {
+"events": null,
+"press": "https://investors.att.com/rss.xml"
+},
+"TECH": {
+"events": null,
+"press": "https://investors.bio-techne.com/news/rss"
+},
+"TEL": {
+"events": "https://investors.te.com/rss/event.aspx",
+"press": "https://investors.te.com/rss/pressrelease.aspx"
+},
+"TKO": {
+"events": "https://investor.tkogrp.com/rss/event.aspx",
+"press": "https://investor.tkogrp.com/rss/pressrelease.aspx"
+},
+"TMO": {
+"events": "https://ir.thermofisher.com/rss/event.aspx",
+"press": "https://ir.thermofisher.com/rss/pressrelease.aspx"
+},
+"TRMB": {
+"events": "https://investor.trimble.com/rss/event.aspx",
+"press": "https://investor.trimble.com/rss/pressrelease.aspx"
+},
+"TRV": {
+"events": "https://investor.travelers.com/rss/event.aspx",
+"press": "https://investor.travelers.com/rss/pressrelease.aspx"
+},
+"TSCO": {
+"events": "https://ir.tractorsupply.com/rss/event.aspx",
+"press": "https://ir.tractorsupply.com/rss/pressrelease.aspx"
+},
+"TSLA": {
+"events": null,
+"press": "https://ir.tesla.com/rss.xml"
+},
+"TSN": {
+"events": null,
+"press": "https://tysonfoods.com/rss.xml"
+},
+"TT": {
+"events": "https://investors.tranetechnologies.com/rss/event.aspx",
+"press": "https://investors.tranetechnologies.com/rss/pressrelease.aspx"
+},
+"TTWO": {
+"events": null,
+"press": "https://ir.take2games.com/rss/news-releases.xml"
+},
+"TXT": {
+"events": "https://investor.textron.com/rss/event.aspx",
+"press": "https://investor.textron.com/rss/pressrelease.aspx"
+},
+"TYL": {
+"events": "https://investors.tylertech.com/rss/event.aspx",
+"press": "https://investors.tylertech.com/rss/pressrelease.aspx"
+},
+"UBER": {
+"events": "https://investor.uber.com/rss/event.aspx",
+"press": "https://investor.uber.com/rss/pressrelease.aspx"
+},
+"UDR": {
+"events": "https://ir.udr.com/rss/event.aspx",
+"press": "https://ir.udr.com/rss/pressrelease.aspx"
+},
+"UNP": {
+"events": null,
+"press": "https://up.com/news/rss.xml"
+},
+"URI": {
+"events": "https://investors.unitedrentals.com/rss/event.aspx",
+"press": "https://investors.unitedrentals.com/rss/pressrelease.aspx"
+},
+"USB": {
+"events": "https://ir.usbank.com/rss/event.aspx",
+"press": "https://ir.usbank.com/rss/pressrelease.aspx"
+},
+"VEEV": {
+"events": "https://ir.veeva.com/rss/event.aspx",
+"press": "https://ir.veeva.com/rss/pressrelease.aspx"
+},
+"VMRK": {
+"events": "https://investors.equityapartments.com/rss/event.aspx",
+"press": "https://investors.equityapartments.com/rss/pressrelease.aspx"
+},
+"VRSK": {
+"events": "https://investor.verisk.com/rss/event.aspx",
+"press": "https://investor.verisk.com/rss/pressrelease.aspx"
+},
+"VRT": {
+"events": "https://investors.vertiv.com/rss/event.aspx",
+"press": "https://investors.vertiv.com/rss/pressrelease.aspx"
+},
+"VTR": {
+"events": "https://ir.ventasreit.com/rss/event.aspx",
+"press": "https://ir.ventasreit.com/rss/pressrelease.aspx"
+},
+"WAT": {
+"events": "https://ir.waters.com/rss/event.aspx",
+"press": "https://ir.waters.com/rss/pressrelease.aspx"
+},
+"WBD": {
+"events": null,
+"press": "https://ir.corporate.discovery.com/rss/pressrelease.aspx"
+},
+"WDAY": {
+"events": "https://investor.workday.com/rss/event.aspx",
+"press": "https://investor.workday.com/rss/pressrelease.aspx"
+},
+"WEC": {
+"events": "https://investor.wecenergygroup.com/rss/event.aspx",
+"press": "https://investor.wecenergygroup.com/rss/pressrelease.aspx"
+},
+"WMB": {
+"events": null,
+"press": "https://williams.com/feed"
+},
+"WRB": {
+"events": "https://ir.berkley.com/rss/event.aspx",
+"press": "https://ir.berkley.com/rss/pressrelease.aspx"
+},
+"WSM": {
+"events": "https://ir.williams-sonomainc.com/rss/event.aspx",
+"press": "https://ir.williams-sonomainc.com/rss/pressrelease.aspx"
+},
+"XEL": {
+"events": "https://investors.xcelenergy.com/rss/event.aspx",
+"press": "https://investors.xcelenergy.com/rss/pressrelease.aspx"
+},
+"XYZ": {
+"events": "https://investors.block.xyz/rss/event.aspx",
+"press": "https://investors.block.xyz/rss/pressrelease.aspx"
+},
+"YUM": {
+"events": "https://investors.yum.com/rss/event.aspx",
+"press": "https://investors.yum.com/rss/pressrelease.aspx"
+},
+"ZBH": {
+"events": null,
+"press": "https://investor.zimmerbiomet.com/rss/news.xml"
+},
+"ZBRA": {
+"events": "https://investors.zebra.com/rss/event.aspx",
+"press": "https://investors.zebra.com/rss/pressrelease.aspx"
+},
+"ZTS": {
+"events": "https://investor.zoetis.com/rss/event.aspx",
+"press": "https://investor.zoetis.com/rss/pressrelease.aspx"
+}
+}

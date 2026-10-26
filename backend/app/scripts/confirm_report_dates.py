@@ -63,7 +63,17 @@ async def targets(only: set[str] | None) -> list[dict]:
         rows = (await s.execute(text("""SELECT t.id, t.symbol, t.name, f.feed_url FROM tickers t
             LEFT JOIN ir_feeds f ON f.symbol = t.symbol AND f.classification = 'press_releases' AND f.feed_url IS NOT NULL
             WHERE t.is_active ORDER BY t.symbol"""))).mappings().all()
-    return [dict(r) for r in rows if not only or r["symbol"] in only]
+    from app.services import ir_feeds as F
+    seeded = F.seeded_sources()
+    out = []
+    for r in rows:
+        if only and r["symbol"] not in only:
+            continue
+        t, seed = dict(r), seeded.get(r["symbol"]) or {}
+        t["feed_url"] = t["feed_url"] or seed.get("press")          # production's ir_feeds table was empty until 2026-10-26: the shipped list stands in
+        t["events_url"] = seed.get("events") or F.events_feed_url(t["feed_url"])
+        out.append(t)
+    return out
 
 
 async def stored_future(symbols: list[str], today: date) -> dict[str, list[dict]]:
@@ -123,6 +133,37 @@ async def feed_texts(http: httpx.AsyncClient, feed_url: str, issuer: str | None,
         out.append({"kind": "IR feed", "reference": it.get("link") or feed_url, "published": (it.get("pubDate") or it.get("published") or "")[:10] or "?",
                     "text": f"{it.get('title', '')}. {t or it.get('description', '')}"})
     return out
+
+
+async def events_texts(http: httpx.AsyncClient, events_url: str, today: date) -> tuple[list[dict], list[dict]]:
+    """(results events, documents) from the company's IR events feed. An upcoming event whose title names the results themselves
+    (ir_feeds.results_event: Apple's "FY 26 Fourth Quarter Results") is the company's own calendar putting its results on that day; an
+    event that names a call or webcast is read as a document, its description and its event page together, so that only a release
+    date in the company's words ("results will be released after the market closes on ...") confirms."""
+    from app.services import ir_feeds as F
+    body = await F.fetch_allowed(http, events_url)
+    if not body:
+        return [], []
+    results, docs = [], []
+    for ev in F.earnings_events(F.parse_items(body, events_url), today):
+        if (ev["day"] - today).days > R.HORIZON_DAYS:
+            continue
+        item = next((it for it in F.parse_items(body, events_url) if it.get("link") == ev["link"] and ev["title"] in it.get("title", "")), {})
+        description = (item.get("text") or "")[len(item.get("title") or ""):].strip(". ").strip()
+        if F.results_event(ev["title"]):
+            timing = R.timing_of(description) if description else "unknown"
+            results.append({**ev, "timing": timing if timing != "unknown" else F.event_timing(body, ev["day"]), "description": description,
+                            "published": (item.get("published") or "")[:16] or "?"})
+            continue
+        page = await F.fetch_allowed(http, ev["link"]) if ev["link"] else None
+        docs.append({"kind": "IR events", "reference": ev["link"] or events_url, "published": (item.get("published") or "")[:16] or "?",
+                     "text": f"{ev['title']}. {description} {F.clean(page) if page else ''}".strip()})
+    return results, docs
+
+
+def events_note(ev: dict) -> str:
+    """The calendar note for a results event on the company's events feed (earnings_calendar.COMPANY_NOTE_PREFIXES reads the prefix)."""
+    return f"confirmed: events feed via IR {ev['day'].isoformat()}: {ev['title'][:80]}" + (f" {ev['link']}" if ev.get("link") else "")
 
 
 def classify(day: date, stored: list[dict]) -> tuple[str, dict | None]:
@@ -205,8 +246,23 @@ async def main(argv: list[str]) -> int:
                         errors.append(f"{sym}: Finnhub news: {redact(exc)[:100]}")
                 if t.get("feed_url"):
                     docs += await asyncio.wait_for(feed_texts(http, t["feed_url"], t.get("name"), sym, today), TICKER_TIMEOUT_S)
-                docs_read += len(docs)
                 seen_days: set[date] = set()
+                if t.get("events_url"):
+                    results, event_docs = await asyncio.wait_for(events_texts(http, t["events_url"], today), TICKER_TIMEOUT_S)
+                    docs += event_docs
+                    for ev in results[:1]:                   # the nearest results event is the next report
+                        seen_days.add(ev["day"])
+                        kind, target = classify(ev["day"], stored.get(sym, []))
+                        rec = {"symbol": sym, "date": ev["day"].isoformat(), "timing": ev["timing"], "source_kind": "IR events", "reference": ev["link"] or t["events_url"],
+                               "published": ev["published"], "quote": ev["title"][:300], "class": "release", "readers": "results event on the company's events feed",
+                               "confirmed": True, "would": kind, "stored": target["event_date"].isoformat() if target else None,
+                               "read_at": now.isoformat(), "computation_version": R.READER_VERSION}
+                        found.append(rec)
+                        by_kind[kind] = by_kind.get(kind, 0) + 1
+                        if write:
+                            rec["written"] = await write_confirmation(t["id"], sym, ev["day"], ev["timing"], events_note(ev), rec, stored.get(sym, []), now)
+                        print(f"  {sym}: IR events {ev['day']} ({ev['timing']}); results event \"{ev['title'][:60]}\"; would {kind}", flush=True)
+                docs_read += len(docs)
                 if "--screen" in argv:                    # diagnosis: every results sentence with a future date, accepted or not
                     for d in docs:
                         for s in R.screen(d["text"], today):
@@ -214,7 +270,7 @@ async def main(argv: list[str]) -> int:
                 for d in docs:
                     # a press release counts only when its headline names the issuer: Ares Capital's release is not Ares Management's,
                     # Goldman Sachs BDC's is not Goldman Sachs', and an article about PNC confirms nothing for the banks it mentions
-                    if d["kind"] == "press release" and not names_issuer(d.get("headline") or d["text"], t.get("name") or sym):
+                    if d["kind"] == "press release" and not (names_issuer(d.get("headline") or d["text"], t.get("name") or sym) or R.exchange_tagged(d["text"], sym)):
                         continue
                     release = R.read_release_date(d["text"], today)
                     hit = release or R.read_report_date(d["text"], today)

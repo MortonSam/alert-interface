@@ -20,7 +20,10 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-READER_VERSION = 2                   # 2 (2026-10-20): every quote is classed (QUOTE_CLASSES); only a release date in the company's own words confirms
+READER_VERSION = 3                   # 2 (2026-10-20): every quote is classed (QUOTE_CLASSES); only a release date in the company's own words confirms
+                                     # 3 (2026-10-26): the company's IR events feed and event pages are read; exchange tags with a name or a second
+                                     # symbol, "today announced it will release" and "after the New York Stock Exchange closes" are read; a model quote
+                                     # that carries the timing in the sentence after the date sentence stands with that sentence (Visa, Kraft Heinz)
 QUOTE_CLASSES = ("release", "call_only", "third_party")
 HORIZON_DAYS = 120                   # a results date further out than this is not a scheduled report
 
@@ -37,8 +40,11 @@ _RESULTS = re.compile(r"\b(?:financial results|operating results|results|earning
 _PERIOD = re.compile(r"(?:quarter|period|year|months?|half|weeks?)\s+(?:ended|ending|end)|fiscal\s+year\s+(?:ended|ending)|as\s+of|"
                      r"(?:three|six|nine|twelve)\s+months\s+(?:ended|ending)|through\b", re.I)
 PERIOD_WINDOW = 40
-_AMC = re.compile(r"after\s+(?:the\s+)?(?:market|markets|trading)?\s*(?:close|closes|closing)|after\s+the\s+(?:closing\s+)?bell|following\s+the\s+(?:market\s+)?close|after\s+market\s+hours", re.I)
-_BMO = re.compile(r"before\s+(?:the\s+)?(?:market|markets|trading)?\s*(?:open|opens|opening)|before\s+the\s+(?:opening\s+)?bell|prior\s+to\s+(?:the\s+)?(?:market\s+)?open|pre-?market", re.I)
+_EXCHANGE = r"(?:New\s+York\s+Stock\s+Exchange|NYSE|Nasdaq(?:\s+Stock\s+Market)?|stock\s+market)"
+_AMC = re.compile(r"after\s+(?:the\s+)?(?:market|markets|trading)?\s*(?:close|closes|closing)|after\s+the\s+(?:closing\s+)?bell|following\s+the\s+(?:market\s+)?close|after\s+market\s+hours"
+                  rf"|after\s+the\s+{_EXCHANGE}\s+(?:closes|close)|after\s+the\s+close\s+of\s+(?:the\s+)?(?:market|trading|regular\s+trading|{_EXCHANGE})", re.I)
+_BMO = re.compile(r"before\s+(?:the\s+)?(?:market|markets|trading)?\s*(?:open|opens|opening)|before\s+the\s+(?:opening\s+)?bell|prior\s+to\s+(?:the\s+)?(?:market\s+)?open|pre-?market"
+                  rf"|before\s+the\s+{_EXCHANGE}\s+opens|before\s+the\s+(?:opening|open)\s+of\s+(?:the\s+)?(?:market|trading|{_EXCHANGE})", re.I)
 _CLOCK = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b", re.I)
 MARKET_OPEN, MARKET_CLOSE = (9, 30), (16, 0)
 
@@ -150,13 +156,25 @@ def company_issued(source_kind: str, text: str, symbol: str) -> bool:
     """Pure: the text is the company's own. Its 8-K exhibits and its IR feed are; a press release carried by Finnhub or the stored
     news is when it reads as wire copy (a wire dateline, or the company named with its own exchange tag, "(NYSE: ABT)") and reads as
     nobody else's (no preview or analyst phrasing). The issuer's name in the headline is checked before this (names_issuer)."""
-    if source_kind in ("8-K exhibit", "IR feed"):
+    if source_kind in COMPANY_SOURCES:
         return True
     t = text or ""
     if _THIRD_PARTY.search(t):
         return False
-    tag = re.search(rf"\((?:NYSE|NASDAQ|Nasdaq|NYSE\s+American|Cboe\s+BZX|TSX)[^)]*?:\s*{re.escape(symbol)}\b", t)
-    return bool(_WIRE.search(t) or tag)
+    return bool(_WIRE.search(t) or exchange_tagged(t, symbol) or _SELF_ANNOUNCED.search(t))
+
+
+COMPANY_SOURCES = ("8-K exhibit", "IR feed", "IR events")
+# the company speaking of itself: "Realty Income ... today announced it will release", "Ares Management Corporation announced today that it will report"
+_SELF_ANNOUNCED = re.compile(r"\b(?:today\s+announced|announced\s+today)\s+(?:that\s+)?(?:it|the\s+company)\s+(?:will|plans\s+to|intends\s+to)\s+"
+                             r"(?:release|report|announce|issue|post|publish)\b", re.I)
+
+
+def exchange_tagged(text: str, symbol: str) -> bool:
+    """Pure: the company named with its own exchange tag, as only its own release writes it: "(NYSE: ABT)", "(Realty Income, NYSE: O)",
+    "(Nasdaq: FOXA, FOX)", "(Cboe: CBOE)"."""
+    sym = re.escape(symbol.replace("-", "."))
+    return re.search(rf"\((?:[^()]{{0,60}}?[,;]\s*)?(?:NYSE|NASDAQ|Nasdaq|NYSE\s+American|Cboe(?:\s+BZX)?|TSX)\s*:\s*(?:[A-Z][A-Z.]{{0,5}},\s*)*{sym}\b", text or "") is not None
 
 
 def sentence_class(sentence: str, day: date, today: date) -> str:
@@ -189,6 +207,11 @@ def read_release_date(text: str, today: date) -> ReadDate | None:
     for i in range(len(flat)):
         hit = read_report_date(" ".join(flat[i:i + 1]), today)
         if hit and sentence_class(hit.sentence, hit.day, today) == "release":
+            if hit.timing == "unknown" and i + 1 < len(flat) and not _DATE.search(flat[i + 1]):
+                # the timing in the next sentence, in words only ("... on Tuesday, October 27, 2026. After market close, Visa will furnish the results")
+                nxt = flat[i + 1]
+                timing = "amc" if _AMC.search(nxt) else "bmo" if _BMO.search(nxt) else "unknown"
+                hit = ReadDate(hit.day, timing, hit.quarter, hit.sentence)
             return hit
     return None
 
@@ -196,7 +219,7 @@ def read_release_date(text: str, today: date) -> ReadDate | None:
 # ── the model as the second reader ───────────────────────────────────────────
 
 PROMPT = """You are reading text a public company published (an SEC 8-K exhibit, a press release or an investor-relations item).
-Return JSON only, no prose: {{"date": "<YYYY-MM-DD or null>", "timing": "<bmo|amc|unknown>", "quote": "<the one sentence, copied verbatim, that states when the company will report its quarterly results>"}}
+Return JSON only, no prose: {{"date": "<YYYY-MM-DD or null>", "timing": "<bmo|amc|unknown>", "quote": "<the one sentence, copied verbatim, that names the date on which the company will report its quarterly results; the sentence with the date, even when the timing is in another sentence>"}}
 The date wanted is the calendar day the company says it will post, report, release or announce its quarterly (or full-year) financial
 results. Never a period end ("quarter ended September 30"), never a conference-call-only sentence without results, never a date in the
 past of {today}. Never the date of a conference call or webcast: if the text gives only a call date and not the day the results
@@ -261,7 +284,18 @@ def decide(pattern: ReadDate | None, model: dict | None, text: str, today: date)
     if model is None:
         return None, f"{p_text}; no model reading"
     m = model.get("date")
+    if m and model.get("quote") and pattern and m != pattern.day and (m.month, m.day) == (pattern.day.month, pattern.day.day):
+        # a quote with no year ("Boeing to Release Third Quarter Results on October 27"): the model guessed one (2021, 2025, 2027);
+        # the date it names is the next such day, as the pattern reader reads it
+        named = [d for x in _DATE.finditer(model["quote"]) if not x.group(3) and (d := _to_date(x, today))]
+        if pattern.day in named:
+            m = pattern.day
+            model = {**model, "date": m}
     problems = verify_quote(text, model.get("quote"), m) if m else ["model read nothing"]
+    if m and problems and pattern and pattern.day == m and model.get("quote") and _norm(pattern.sentence + model["quote"]) in _norm(text):
+        # the model quoted the timing sentence that follows the date sentence: the two together are the company's words for the date
+        model = {**model, "quote": f"{pattern.sentence} {model['quote']}"}
+        problems = verify_quote(text, model["quote"], m)
     m_text = f"model {m.isoformat()} ({model.get('timing')})" if m else "model read nothing"
     if m and problems:
         return None, f"{p_text}; {m_text}; model quote rejected: {'; '.join(problems)}"
@@ -294,6 +328,8 @@ def confirmation_note(kind: str, reference: str, filed_or_published: str, quote:
     q = re.sub(r"\s+", " ", quote).strip()
     if kind == "8-K exhibit":
         return f"confirmed: 8-K {reference} filed {filed_or_published}: {q}"
+    if kind == "IR events":
+        return f"confirmed: events feed via IR {filed_or_published} {reference}: {q}"
     if kind == "IR feed":
         return f"confirmed: press release via IR feed {filed_or_published} {reference}: {q}"
     return f"confirmed: press release via Finnhub news {filed_or_published}: {q}"
