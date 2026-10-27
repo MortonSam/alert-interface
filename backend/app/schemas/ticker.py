@@ -93,6 +93,8 @@ class TickerChartRead(BaseModel):
     bars_basis: str | None = None        # "delayed" when the 1-day bars came from the live layer; the page labels them from this
     bars_through: str | None = None      # the newest bar's own time (ISO with offset) when bars_basis is set
     delay_minutes: int | None = None
+    session_date: str | None = None      # the 1-day chart's session (live_data.one_day_session); the page labels a past one with its date
+    session_is_today: bool | None = None
     licensed_estimates: bool = True      # LICENSED_ESTIMATES off: markers carry no estimate, actual or outcome, and eps_line instead
 
 

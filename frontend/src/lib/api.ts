@@ -448,6 +448,8 @@ export interface TickerChart {
   bars_basis?: string | null;         // "delayed" when the 1-day bars came from the live layer
   bars_through?: string | null;       // the newest bar's own time (ISO with offset)
   delay_minutes?: number | null;      // the source's stated delay, rendered by the page
+  session_date?: string | null;       // the 1-day chart's session (backend live_data.one_day_session)
+  session_is_today?: boolean | null;  // false: the last full session, shown until today's bars cover 30 minutes
 }
 
 export interface BatchQuote {

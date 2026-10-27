@@ -63,6 +63,14 @@ export function intradayBarsLine(barsBasis: string | null | undefined, barsThrou
   return `Bars through ${at}` + (delay ? `, ${delay}` : "");
 }
 
+/** The 1-day chart's label when it shows a past session (backend live_data.one_day_session): before the open, and until today's
+ *  delayed bars cover enough of the session, the chart is the last full session, named by its date. */
+export function oneDaySessionLine(sessionDate: string | null | undefined, isToday: boolean | null | undefined): string | null {
+  if (!sessionDate || isToday !== false) return null;
+  const day = fmtOneDate(sessionDate);
+  return day ? `Showing ${day}, the last full session` : null;
+}
+
 /** An ISO timestamp the same way. */
 export function fmtIsoDateTime(iso: string | null | undefined): string | null {
   return fmtDateTime(iso);

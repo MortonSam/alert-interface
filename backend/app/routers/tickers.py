@@ -639,12 +639,21 @@ async def get_ticker_chart(
     # The intraday periods (1d, 7d) come from Intrinio's bars for every visitor (since 2026-10-12; yfinance served them before), each
     # bar with its own time; every daily period from the stored shadow bars. A failed bars call returns an empty history, never a
     # stale series: the page says the chart is unavailable.
+    one_day_session: dict = {}
     if period in price_bars.INTRADAY_PERIODS:
-        session = live_data.latest_session(dt_datetime.now(tz=timezone.utc))
+        now = dt_datetime.now(tz=timezone.utc)
+        session = live_data.latest_session(now)
         prev = await loop.run_in_executor(None, price_bars.raw_closes_sync, sym, session - timedelta(days=10))
         prev_close = next((float(c) for d, c, *_ in reversed(prev) if d < session), None)
         if period == "1d":
             bars = await live_data.intraday_chart(sym, session, prev_close)
+            # until today's delayed bars cover MIN_TODAY_BAR_MINUTES, the last full session, labeled with its date (Sam, 2026-10-27)
+            shown, is_today = live_data.one_day_session(now, [p["date"] for p in (bars or {}).get("history", [])])
+            if shown != session:
+                session = shown
+                prev_close = next((float(c) for d, c, *_ in reversed(prev) if d < session), None)
+                bars = await live_data.intraday_chart(sym, session, prev_close)
+            one_day_session = {"session_date": session.isoformat(), "session_is_today": is_today}
         else:
             bars = await live_data.intraday_chart(sym, session, prev_close, start=session - timedelta(days=live_data.WEEK_SPAN_DAYS), interval=live_data.WEEK_INTERVAL)
         chart_result: dict = bars if bars else {"history": [], "start_price": prev_close}
@@ -745,6 +754,7 @@ async def get_ticker_chart(
         last_bar_date=hist.last_bar_date.isoformat() if hist.last_bar_date else None,
         bars_basis=live_data.DELAYED_BASIS if live_bars and live_bars["history"] else None,
         bars_through=live_bars.get("bars_through") if live_bars and live_bars["history"] else None,
+        **one_day_session,
         delay_minutes=live_data.DELAY_MINUTES if live_bars and live_bars["history"] else None,
     )
 

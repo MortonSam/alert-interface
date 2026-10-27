@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { QUOTE_BASIS_LABELS, datasetAgeLine, datasetsStale, delayPhrase, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, intradayBarsLine, nightlyWord, optionsCadencePhrase, optionsDataPhrase, premiumSourcePhrase, priceSourceLine, priceStateLine, priceAsOfPhrase, quoteAsOf } from "../freshness";
+import { QUOTE_BASIS_LABELS, datasetAgeLine, datasetsStale, delayPhrase, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, intradayBarsLine, nightlyWord, oneDaySessionLine, optionsCadencePhrase, optionsDataPhrase, premiumSourcePhrase, priceSourceLine, priceStateLine, priceAsOfPhrase, quoteAsOf } from "../freshness";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -153,5 +153,15 @@ describe("the live layer's delayed quotes", () => {
     expect(intradayBarsLine(null, "2026-10-12T12:45:00.000-04:00", 15)).toBeNull();
     const src = readFileSync(join(__dirname, "..", "freshness.ts"), "utf8");
     expect(src).not.toMatch(/15 min|delayed 15/);                                       // the figure comes from the record
+  });
+});
+
+describe("the 1-day chart at the open", () => {
+  it("names a past session by its date and says nothing when the chart is today", () => {
+    // backend live_data.one_day_session: at 9:49 AM the chart is the last full session; at 10:30 it is today
+    expect(oneDaySessionLine("2026-10-26", false)).toBe("Showing Oct 26, 2026, the last full session");
+    expect(oneDaySessionLine("2026-10-27", true)).toBeNull();
+    expect(oneDaySessionLine(null, false)).toBeNull();
+    expect(oneDaySessionLine("2026-10-26", undefined)).toBeNull();
   });
 });

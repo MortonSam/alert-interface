@@ -75,6 +75,24 @@ def latest_session(now: datetime) -> date:
     return last_session_before(local.date())
 
 
+MIN_TODAY_BAR_MINUTES = 30     # Sam (2026-10-27): the 1-day chart shows today once its delayed bars cover this much of the session
+CHART_BAR_MINUTES = 5          # CHART_INTERVAL in minutes
+
+
+def one_day_session(now: datetime, today_bar_times: list[str]) -> tuple[date, bool]:
+    """Pure: (the session the 1-day chart shows, whether it is today). Today once the market has opened and today's delayed bars cover
+    MIN_TODAY_BAR_MINUTES; before that the last full session, so the chart never opens on a few minutes of bars (9:49 AM: one bar)."""
+    from app.services.trading_calendar import last_session_before
+    session = latest_session(now)
+    today = now.astimezone(NY).date()
+    if session != today:
+        return session, False
+    on_today = [t for t in today_bar_times if str(t)[:10] == today.isoformat()]
+    if len(on_today) * CHART_BAR_MINUTES >= MIN_TODAY_BAR_MINUTES:
+        return today, True
+    return last_session_before(today), False
+
+
 def refresh_due(now: datetime, last_run: datetime | None) -> bool:
     """Pure: a refresh is due in market hours once QUOTE_REFRESH_SECONDS have passed since the last one."""
     if not market_open(now):

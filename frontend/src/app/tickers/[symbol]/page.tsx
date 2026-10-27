@@ -6,7 +6,7 @@ import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
-import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, intradayBarsLine, quoteAsOf, oneDayHistoryLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, intradayBarsLine, quoteAsOf, oneDayHistoryLine, oneDaySessionLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
 const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
@@ -1286,6 +1286,9 @@ function PriceChart({
             />
           </LineChart>
         </ResponsiveContainer>
+      {period === "1d" && oneDaySessionLine(chartData.session_date, chartData.session_is_today) && (
+        <p className="text-xs text-muted-foreground mt-1">{oneDaySessionLine(chartData.session_date, chartData.session_is_today)}</p>
+      )}
       {intradayBarsLine(chartData.bars_basis, chartData.bars_through, chartData.delay_minutes) && (
         <p className="text-xs text-muted-foreground mt-1">{intradayBarsLine(chartData.bars_basis, chartData.bars_through, chartData.delay_minutes)}</p>
       )}
