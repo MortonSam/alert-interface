@@ -1401,10 +1401,7 @@ async def get_options_read(
     db: AsyncSession = Depends(get_db),
     token: str | None = Depends(_get_admin_token),
 ) -> OptionsReadRead:
-    """AI-generated 2–4 sentence interpretive read synthesizing vol/options data.
-
-    Every number is precomputed server-side and injected as an authoritative string.
-    The model narrates; it does not calculate. Cached by chain snapshot date
+    """Ivy's Read: the page's approved lines from its own facts (services/ivy_read_plain), no model call. Cached by chain snapshot date
     (chain_last_trade) in system_metadata so reads survive UTC midnight rollovers.
 
     Cache hits are served without authentication. On cache miss, admin token is
@@ -1463,7 +1460,7 @@ async def get_options_read(
             spread_labeled=_to_options_lr(spread_label(spread_pp_cached)),
         )
 
-    # ── No cache (or stale) — gate AI generation behind admin token; an unset token admits nobody ──
+    # ── No cache (or stale) — building a read is gated behind the admin token (the nightly warm step); an unset token admits nobody ──
     if not settings.admin_token or token != settings.admin_token:
         if stale_fact:
             return absent(stale_reason(stale_fact), f"stale cached read ({stale_fact} servable now), no admin token")
@@ -1621,7 +1618,7 @@ async def get_options_read(
     facts: dict = format_facts(sym, ticker_name, fact_values)
 
     # ── Plain English from the page's own facts (services/ivy_read_plain): the Details figures above, the verdict's report move
-    #    and typical move, and the rows' band words; written, checked and verified, never served when it fails ──
+    #    and typical move, and the rows' band words, as the approved lines with no model call; checked, never served when it fails ──
     from app.services.fact_holds import holds_for
     from app.services.ivy_read_plain import READ_FAILED_CHECKS, READ_NO_MOVE, page_facts, write_read
     report_fields = await _report_move_fields(db, sym, today, sorted(await holds_for(db, sym)))
@@ -1638,14 +1635,14 @@ async def get_options_read(
     gen = {"content": written["content"], "model_used": written["model"]}
 
     generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
-    print(f"[options-read] {sym}: passed in {written['attempts']} round(s), ${written['cost_usd']:.4f}", flush=True)
+    print(f"[options-read] {sym}: passed", flush=True)
 
     # ── Cache by chain snapshot date ──────────────────────────────────────────
     try:
         await _set_meta(db, cache_key, json.dumps({
             "content": gen["content"], "facts": facts, "fact_values": fact_values,
             "model_used": gen["model_used"], "generated_at": generated_at,
-            "iv_rv_spread_pp": iv_rv_spread_pp, "plain_facts": plain_facts, "verdicts": written["verdicts"],
+            "iv_rv_spread_pp": iv_rv_spread_pp, "plain_facts": plain_facts,
         }))
         await db.commit()
     except Exception as exc:

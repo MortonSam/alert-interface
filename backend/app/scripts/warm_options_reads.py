@@ -1,14 +1,15 @@
 """Warm the options-read cache for all active tickers.
 
-Hits the running backend over HTTP with the admin token, triggering
-generation for any ticker without a cached read for the current chain
+Hits the running backend over HTTP with the admin token, building the
+read for any ticker without a cached read for the current chain
 snapshot date.  Tickers with a fresh cache hit are skipped automatically.
 
-Uses claude-sonnet-4-6 (~$0.005/ticker).  509 tickers ~ $2.70 total.
+No model call (Sam, 2026-10-27): the read is the page's approved lines
+(services/ivy_read_plain), so a full rewrite costs nothing.
 
 This step must not fail the refresh pipeline.  Always exits 0;
-records generated/cached/failed counts and estimated cost in
-step_outcomes via system_metadata.  If zero reads are generated
+records generated/cached/failed counts and, for each stock with no
+read, the endpoint's reason, in step_outcomes via system_metadata.  If zero reads are generated
 despite active tickers, the outcome is recorded with reason and
 exit -2 (soft failure visible in /health but not aborting refresh).
 
@@ -36,9 +37,8 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
-TIMEOUT = 120.0          # single request timeout (generation can be slow)
-INTER_TICKER_DELAY = 1.0 # seconds between requests
-COST_PER_GENERATION = 0.005  # estimated Sonnet cost per generated read
+TIMEOUT = 120.0          # single request timeout
+INTER_TICKER_DELAY = 0.2 # seconds between requests (no model call behind them)
 
 # Collects diagnostic messages throughout the run for inclusion in step_outcomes.
 _diagnostics: list[str] = []
@@ -74,6 +74,7 @@ def _warm_one(
             "elapsed": elapsed,
             "error": None,
             "stale_fact": stale_fact,
+            "reason": None if data.get("available", True) is not False else (data.get("reason") or "no reason given"),
         }
     except Exception as exc:
         return {
@@ -96,7 +97,7 @@ def _get_active_symbols(client: httpx.Client, base: str) -> list[str]:
 def _record_warm_outcome(generated: int, cached: int, failed: int,
                          failed_symbols: list[str], total: int,
                          elapsed: float, *,
-                         reason: str | None = None) -> None:
+                         reason: str | None = None, no_read: dict[str, list[str]] | None = None) -> None:
     """Write warm outcome details to step_outcomes in system_metadata.
 
     exit codes in the outcome:
@@ -113,7 +114,6 @@ def _record_warm_outcome(generated: int, cached: int, failed: int,
             row = conn.execute(stmt, {"key": "step_outcomes"}).first()
         outcomes = json.loads(row[0]) if row else {}
 
-        estimated_cost = round(generated * COST_PER_GENERATION, 2)
         soft_fail = (generated == 0 and total > 0) or reason is not None
         outcome: dict = {
             "exit": -2 if soft_fail else 0,
@@ -124,7 +124,7 @@ def _record_warm_outcome(generated: int, cached: int, failed: int,
             "failed": failed,
             "failed_symbols": failed_symbols[:20],  # cap to avoid blob bloat
             "total": total,
-            "estimated_cost_usd": estimated_cost,
+            "no_read": {k: v[:30] for k, v in (no_read or {}).items()},     # the endpoint's reason: the symbols it gave it to
         }
         if reason:
             outcome["reason"] = reason
@@ -198,6 +198,7 @@ def main() -> int:
     cached = 0
     failed = 0
     failed_list: list[str] = []
+    no_read: dict[str, list[str]] = {}
 
     for i, sym in enumerate(symbols):
         result = _warm_one(client, base, token, sym)
@@ -218,18 +219,19 @@ def main() -> int:
             _diagnostics.append(f"{sym}: {err_msg}")
             print(f"  [{i+1}/{total}] {sym:<6} FAILED     ({elapsed:.1f}s) {err_msg}", flush=True)
         else:
-            print(f"  [{i+1}/{total}] {sym:<6} {tag:<10} ({elapsed:.1f}s)", flush=True)
+            no_read.setdefault(result.get("reason") or tag, []).append(sym)
+            print(f"  [{i+1}/{total}] {sym:<6} no read    ({elapsed:.1f}s) {result.get('reason') or ''}", flush=True)
 
         if i < total - 1:
             time.sleep(INTER_TICKER_DELAY)
 
     client.close()
     total_elapsed = time.monotonic() - t_start
-    estimated_cost = round(generated * COST_PER_GENERATION, 2)
 
     print(f"\n{'═' * 70}")
     print(f"  Generated: {generated}  |  Cached: {cached}  |  Failed: {failed}  |  Total: {total}")
-    print(f"  Estimated Sonnet cost: ${estimated_cost:.2f}")
+    for why, syms in sorted(no_read.items(), key=lambda x: -len(x[1])):
+        print(f"  No read ({len(syms)}): {why}: {', '.join(syms[:20])}")
     if failed_list:
         print(f"  Failed: {', '.join(failed_list[:20])}")
     print(f"  Elapsed: {total_elapsed:.0f}s")
@@ -244,7 +246,7 @@ def main() -> int:
 
     # Record detailed outcome in system_metadata
     _record_warm_outcome(generated, cached, failed, failed_list, total, total_elapsed,
-                         reason=reason)
+                         reason=reason, no_read=no_read)
 
     return 0  # never fail the pipeline
 

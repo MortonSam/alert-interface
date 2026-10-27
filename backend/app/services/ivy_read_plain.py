@@ -1,24 +1,22 @@
-"""Ivy's Read in plain English (Sam, 2026-10-22): a short note that teaches, like the walkthrough, not a trader's note.
+"""Ivy's Read in plain English, built from the page's own facts with no model call (Sam, 2026-10-27).
 
-At most MAX_SENTENCES sentences (Sam, 2026-10-26): what the options expect (percent, dollars, by when); with a company-confirmed report
-date, how much of that is the report; the stock's typical first-day report move; whether options expect more, less or about the same
-swing as the stock has shown lately; and whether the stock has been calmer or busier than usual lately. Each is required when the page
-has its fact, and no clause restates another ("meaning ...", "in either direction"). The company is called by the page's short name. Every figure and
-every label comes from the page's own facts (`page_facts`): the Details figures (expected move, report move), the verdict's typical
-move and comparison words (services/move_comparison), and the band words the Details rows print (thresholds.spread_label's cutoffs
-for the spread row, thresholds.rv_rank_label for the RV rank row).
+Each read is the approved lines in order, each present only when the page has its fact: the move (line A, with the company's
+short name); the span sentence (line S) when the move is not the report's alone; the report share in Sherwin-Williams' form (line B)
+on a company-confirmed date with a separated report move, else the typical first-day move (line C); whether options expect more,
+less or about the same swing as the stock has shown lately (line E); and whether the stock has been calmer or busier than usual
+(line D). Every figure and every label comes from the page's own facts (`page_facts`): the Details figures (expected move, report
+move), the verdict's typical move and comparison words (services/move_comparison), and the band words the Details rows print
+(thresholds.spread_label's cutoffs for the spread row, thresholds.rv_rank_label for the RV rank row).
 
     page_facts(...)            the facts and the band words, from the same values the page shows
-    build_prompt(facts)        the writing prompt, its figures pre-written as lines the model copies
-    read_problems(text, facts) every deterministic rule a read breaks (length, jargon, advice, figures, order)
+    fact_lines(facts)          the approved lines, keyed A, S, B, C, E, D
+    compose_read(facts)        the read: the lines in order
+    read_problems(text, facts) every deterministic rule a read breaks (length, jargon, advice, figures, order); run on every read
     band_contradictions(text, facts)  where a read contradicts the page's band words (also validate_data.check_options_read_bands)
-    verification_prompt / parse_verdicts  the claim verifier, one verdict per sentence
-    write_read(facts)          write, check and verify, ROUNDS rounds at most; a read that fails is never served
+    write_read(facts)          compose and check; a read that fails is never served
 """
 from __future__ import annotations
 
-import asyncio
-import json
 import math
 import re
 from datetime import date
@@ -26,15 +24,15 @@ from datetime import date
 from app.services.move_comparison import COMPARISON_WORDS
 from app.thresholds import SPREAD_CHEAP_PP, SPREAD_RICH_PP, rv_rank_label
 
-READ_PLAIN_VERSION = 3           # 2 (2026-10-26): typical move and the more/less/same swing line required; report share only on a company-confirmed date
+READ_PLAIN_VERSION = 4           # 2 (2026-10-26): typical move and the more/less/same swing line required; report share only on a company-confirmed date
                                  # 3 (Sam, 2026-10-26 evening): the span sentence (line S), line D's words, line B ends with the comparison
+                                 # 4 (Sam, 2026-10-27): the lines themselves, no model; line A names the company
 MAX_SENTENCES = 5                # A, S, C, E, D without a report share; A, B, E, D with one
 SPAN_TRADING_DAYS = 2            # Sam (2026-10-26): an expiration more than this many trading days after the report covers more than the report
 SPAN = "That covers every trading day until then"
 SPAN_TAIL = ", not just the report day"
 MAX_WORDS = 100
-ROUNDS = 3
-CALL_SECONDS = 90
+READ_MODEL = "deterministic"     # model_used on a cached read: built from the page's lines, no model
 READ_FAILED_CHECKS = "Ivy's Read for today's options data did not pass its checks"
 # Sam's approved words (2026-10-26), verbatim: no expected move (the Details panel says "Implied move unavailable"), so nothing to lead with
 READ_NO_MOVE = "Today's options data gives no expected move, so there is no read"
@@ -148,7 +146,7 @@ def fact_lines(f: dict) -> dict[str, str]:
     out: dict[str, str] = {}
     if f.get("total_pct") is not None and f.get("expiration"):
         dol = f" (${f['total_dollars']:.2f})" if f.get("total_dollars") is not None else ""
-        out["A"] = f"Options price a move of ±{f['total_pct'] * 100:.1f}%{dol} by {_day(f['expiration'])}."
+        out["A"] = f"Options on {f['name']} price a move of ±{f['total_pct'] * 100:.1f}%{dol} by {_day(f['expiration'])}."
         if f.get("span"):
             out["S"] = f["span"]
     if f.get("report_pct") is not None:
@@ -166,44 +164,13 @@ def fact_lines(f: dict) -> dict[str, str]:
     return out
 
 
-def build_prompt(f: dict) -> str:
+ORDER = ("A", "S", "B", "C", "E", "D")
+
+
+def compose_read(f: dict) -> str:
+    """Pure: the read, the page's lines in order (Sam, 2026-10-27)."""
     lines = fact_lines(f)
-    shown = "\n".join(f"{k}. {v}" for k, v in lines.items())
-    order = ["Sentence 1 states line A: what the options expect, in percent and dollars, and by when. Nothing else: no sentence explains"
-             " or repeats line A, and none says the move could go up or down."]
-    if "S" in lines:
-        order.append("The next sentence is line S, word for word.")
-    if "B" in lines:
-        order.append("The next sentence is line B, word for word, ending with its comparison" if "typical" in lines["B"] else "The next sentence states line B.")
-    if "C" in lines:
-        order.append("The next sentence states line C: the stock's typical first-day move on its report days.")
-    if "E" in lines:
-        order.append("The next sentence states line E: whether options expect more, less or about the same swing as the stock has shown lately.")
-    if "D" in lines:
-        order.append("The last sentence is line D, word for word.")
-    n = len(lines)
-    return f"""You are Ivy, writing a short note about {f['name']} ({f['symbol']}) options for someone who has never traded options.
-Teach in plain, calm English, the way the site's walkthrough does: no greeting, no exclamation, no slang.
-
-THE PAGE'S OWN FACTS (copy every figure exactly as written here; use no other number):
-{shown}
-
-WRITE
-- At most {MAX_SENTENCES} sentences and {MAX_WORDS} words, as one short paragraph. No lists, headings or dashes.
-{chr(10).join('- ' + o for o in order)}
-- Every line above is used, each once. Every sentence states a fact from a line that no earlier sentence used. Never explain,
-  rephrase or expand a sentence: no "meaning", no "in either direction", no "up or down", no "either way". With these lines that is
-  {n} sentence{'s' if n > 1 else ''}.
-- Call the company "{f['name']}", exactly so.
-- Say line E as it says it; never call options expensive, pricey or cheap.
-- Write every date exactly as the lines do ("Nov 20, 2026"), and the move with the ± sign as line A does.
-- Never mention "the page", these lines or where the facts come from.
-- Never use: IV, RV, implied volatility, realized volatility, vol, pp, ATM, at-the-money, straddle, premium, rich, edge.
-- No advice. Never say what anyone should do, never mention buyers or sellers of options, never call anything an opportunity or a
-  bet. Describe what the options expect, nothing more.
-- No dates, figures, causes or forecasts that the lines do not state.
-
-Output the note only."""
+    return " ".join(lines[k] for k in ORDER if k in lines)
 
 
 def sentences(text: str) -> list[str]:
@@ -357,81 +324,17 @@ def read_problems(text: str, f: dict) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def verification_prompt(f: dict, text: str) -> str:
-    lines = fact_lines(f)
-    numbered = "\n".join(f"s{i}: {s}" for i, s in enumerate(sentences(text), 1))
-    return f"""You are a rigorous fact-checker. Check each sentence of a short note about {f['name']} ({f['symbol']}) options against these facts ONLY.
-Use no outside knowledge.
-
-FACTS:
-{chr(10).join(f'{k}. {v}' for k, v in lines.items())}
-
-SENTENCES:
-{numbered}
-
-RULES
-- "supported": every figure, date and claim in it is stated in the facts, with the same meaning. Plain-English rewording of a fact is fine.
-- "contradicted": it conflicts with a fact, including calling options pricey, expensive or cheap, saying they expect more or less swing than line E says, saying the
-  stock has been busier or calmer than line D says, or comparing the report move with the typical move differently from line B.
-- "unsupported": it says anything the facts do not state: a cause, a forecast, a figure, advice, what buyers or sellers do, or a judgment
-  of whether the options are worth buying or selling.
-- Bias toward "unsupported" when in doubt.
-
-Return JSON only: {{"verdicts": [{{"id": "s1", "status": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}"""
-
-
-def parse_verdicts(content: str) -> dict[str, dict]:
-    m = re.search(r"\{.*\}", content or "", re.S)
-    try:
-        rows = (json.loads(m.group(0)).get("verdicts") or []) if m else []
-    except ValueError:
-        rows = []
-    return {str(r.get("id")).strip(): {"status": r.get("status"), "reason": r.get("reason")} for r in rows if isinstance(r, dict)}
-
-
-def verdict_problems(text: str, verdicts: dict[str, dict]) -> list[str]:
-    out = []
-    for i, s in enumerate(sentences(text), 1):
-        v = verdicts.get(f"s{i}")
-        if not v:
-            out.append(f"the verifier gave no verdict on sentence {i}")
-        elif v.get("status") != "supported":
-            out.append(f"sentence {i} is {v.get('status')}: {v.get('reason')}")
-    return out
-
-
-async def write_read(f: dict, *, client=None) -> dict:
-    """{result: passed|failed, content, problems, verdicts, attempts, model, cost_usd}. Writes nothing."""
-    from app.services.research_cost import estimate_cost_usd
-    if client is None:
-        from app.services.anthropic_client import AnthropicClient
-        client = AnthropicClient()
-    out = {"result": "failed", "content": None, "problems": [], "verdicts": {}, "attempts": 0, "model": None, "cost_usd": 0.0, "drafts": []}
+async def write_read(f: dict) -> dict:
+    """{result: passed|failed|no_move, content, problems, model}. No model call; the read is checked like any other and never
+    served when a check fails. Writes nothing."""
+    out = {"result": "failed", "content": None, "problems": [], "model": READ_MODEL}
     if "A" not in fact_lines(f):             # no expected move: the read would have nothing true to lead with (CMS, 2026-10-26)
         out.update(result="no_move", problems=["no expected move in the page's facts"])
         return out
-
-    def charge(gen: dict) -> None:
-        out["cost_usd"] += estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0
-
-    prompt, reasons = build_prompt(f), []
-    for attempt in range(1, ROUNDS + 1):
-        out["attempts"] = attempt
-        ask = prompt if attempt == 1 else (prompt + "\n\nYour previous note was rejected for these reasons: " + "; ".join(reasons)
-                                           + ". Rewrite it so none applies.")
-        gen = await asyncio.wait_for(client.generate_options_read(ask), CALL_SECONDS)
-        out["model"] = gen["model_used"]
-        charge(gen)
-        text = re.sub(r"\s+", " ", gen["content"]).strip()
-        out["drafts"].append(text)
-        reasons = read_problems(text, f)
-        if not reasons:
-            ver = await asyncio.wait_for(client.verify_research_note(verification_prompt(f, text)), CALL_SECONDS)
-            charge(ver)
-            out["verdicts"] = parse_verdicts(ver["content"])
-            reasons = verdict_problems(text, out["verdicts"])
-        if not reasons:
-            out.update(result="passed", content=text, problems=[])
-            return out
-        out["problems"] = reasons
+    text = compose_read(f)
+    problems = read_problems(text, f)
+    if problems:
+        out["problems"] = problems
+        return out
+    out.update(result="passed", content=text)
     return out

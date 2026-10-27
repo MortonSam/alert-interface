@@ -25,7 +25,7 @@ def test_the_facts_and_band_words_are_the_pages_own():
     assert NVDA["spread_word"] == "about the same" and NVDA["swing_band"] == "quiet" and NVDA["lately"] == "calmer than usual"
     lines = P.fact_lines(NVDA)
     assert NVDA["name"] == "NVIDIA"                       # the page's short name (briefing.short_name)
-    assert lines["A"] == "Options price a move of ±8.9% ($19.65) by Nov 20, 2026."
+    assert lines["A"] == "Options on NVIDIA price a move of ±8.9% ($19.65) by Nov 20, 2026."
     # Sam (2026-10-26 evening): Sherwin-Williams' form, ending with the page's comparison word against the typical first-day move
     assert lines["B"] == "About 4.4% of that move comes from the report on Nov 17, 2026, less than its typical first-day move of 6.5% over 21 reports."
     assert "C" not in lines and "S" not in lines
@@ -53,8 +53,6 @@ def test_the_facts_and_band_words_are_the_pages_own():
     assert P.page_facts(symbol="X", name="X", fact_values={**NVDA_VALUES, "rv_rank": None}, report=None)["swing_band"] is None
     no_report = P.page_facts(symbol="X", name="X", fact_values=NVDA_VALUES, report={"report_move_state": "not_separated"})   # no typical in its values
     assert set(P.fact_lines(no_report)) == {"A", "S", "D", "E"}
-    prompt = P.build_prompt(NVDA)
-    assert "never traded options" in prompt and lines["A"] in prompt and "Never use: IV, RV" in prompt
 
 
 def test_the_old_trader_note_breaks_the_rules():
@@ -106,26 +104,39 @@ def test_restating_clauses_are_banned():
     assert not any('"volatility"' in p for p in P.read_problems(explained, NVDA))
 
 
-class FakeClient:
-    def __init__(self, drafts, verdict="supported"):
-        self.drafts, self.verdict = list(drafts), verdict
-
-    async def generate_options_read(self, prompt):
-        return {"content": self.drafts.pop(0), "model_used": "claude-sonnet-5-5", "input_tokens": 10, "output_tokens": 10}
-
-    async def verify_research_note(self, prompt):
-        n = len(re.findall(r"^s\d+: ", prompt, re.M))
-        rows = [{"id": f"s{i}", "status": self.verdict, "reason": "x"} for i in range(1, n + 1)]
-        return {"content": json.dumps({"verdicts": rows}), "model_used": "claude-opus-5-5", "input_tokens": 10, "output_tokens": 10}
+def test_the_read_is_the_pages_lines_in_order_with_no_model():
+    # Sam (2026-10-27): no model call; the read is the approved lines, each present when the page has its fact
+    r = asyncio.run(P.write_read(NVDA))
+    assert r == {"result": "passed", "content": GOOD, "problems": [], "model": "deterministic"}
+    assert P.compose_read(NVDA) == GOOD
+    bad = {**NVDA, "name": "NVIDIA", "spread_word": "pricey", "lately": "busier than usual"}    # facts that contradict their own bands
+    assert asyncio.run(P.write_read(bad))["result"] == "failed"
 
 
-def test_write_read_rewrites_then_passes_or_serves_nothing():
-    ok = asyncio.run(P.write_read(NVDA, client=FakeClient([OLD_NVDA, GOOD])))
-    assert ok["result"] == "passed" and ok["content"] == GOOD and ok["attempts"] == 2
-    bad = asyncio.run(P.write_read(NVDA, client=FakeClient([OLD_NVDA] * P.ROUNDS)))
-    assert bad["result"] == "failed" and bad["content"] is None and bad["problems"]
-    unverified = asyncio.run(P.write_read(NVDA, client=FakeClient([GOOD] * P.ROUNDS, verdict="unsupported")))
-    assert unverified["result"] == "failed" and unverified["problems"][0].startswith("sentence 1 is unsupported")
+def test_every_combination_of_facts_composes_a_read_that_passes_every_check():
+    """The band-contradiction check and a per-sentence fact check (each sentence is one of the page's lines, word for word) over
+    every combination the page can hand the read."""
+    n = 0
+    for confirmed in (True, False):
+        for comparison in ("more than usual", "less than usual", "about its usual", None):
+            for spread_pp in (14.0, 0.0, -14.0, None):
+                for pctl in (10.0, 50.0, 85.0, 95.0, None):
+                    for typical in ((6.5, 21), (None, 0)):
+                        for exp, nxt in (("2026-11-20", "2026-11-17"), ("2026-11-20", "2026-11-19"), ("2026-11-20", None), ("2026-11-20", "2026-12-15")):
+                            for dollars in (19.65, None):
+                                values = {**NVDA_VALUES, "expected_move_dollars": dollars, "expiration_used": exp, "next_earnings_date": nxt,
+                                          "iv_rv_spread_pp": spread_pp, "rv_percentile": pctl, "avg_earnings_1d_move_pct": typical[0], "earnings_sample_size": typical[1]}
+                                report = {**NVDA_REPORT, "report_confirmed": confirmed, "move_comparison": comparison,
+                                          "report_move": {"report_date": nxt}} if comparison else {"report_move_state": "not_separated", "report_confirmed": confirmed}
+                                f = P.page_facts(symbol="NVDA", name="NVIDIA Corporation", fact_values=values, report=report)
+                                r = asyncio.run(P.write_read(f))
+                                assert r["result"] == "passed", (values, report, r["problems"])
+                                lines = P.fact_lines(f)
+                                assert P.band_contradictions(r["content"], f) == []
+                                assert [s for s in P.sentences(r["content"])] == [lines[k] for k in P.ORDER if k in lines]
+                                assert P.sentences(r["content"])[0].startswith("Options on NVIDIA price a move of ±")
+                                n += 1
+    assert n == 2 * 4 * 4 * 5 * 2 * 4 * 2
 
 
 def test_no_sentence_restates_an_earlier_one():
@@ -143,10 +154,10 @@ def test_no_sentence_restates_an_earlier_one():
     assert P.lines_stated("Options expect more swing than the stock has shown lately.", NVDA) == {"E"}
 
 
-def test_no_expected_move_means_no_read_and_no_model_call():
+def test_no_expected_move_means_no_read():
     cms = {**NVDA, "total_pct": None, "total_dollars": None}
-    r = asyncio.run(P.write_read(cms, client=FakeClient([])))       # the fake has no drafts: any call would fail
-    assert r["result"] == "no_move" and r["content"] is None and r["attempts"] == 0
+    r = asyncio.run(P.write_read(cms))
+    assert r["result"] == "no_move" and r["content"] is None
 
 
 def test_the_span_sentence_when_the_move_is_not_the_reports_alone():
@@ -167,4 +178,4 @@ def test_the_span_sentence_when_the_move_is_not_the_reports_alone():
     assert P.read_problems(good, vendor) == []
     assert any("line S" in p for p in P.read_problems(good.replace(tail + " ", ""), vendor))
     assert any("line S" in p for p in P.read_problems(good.replace(" not just the report day", " not only the report"), vendor))
-    assert "line S, word for word" in P.build_prompt(vendor)
+    assert P.compose_read({**vendor, "name": "NVIDIA"}).split(". ")[1] + "." == tail
