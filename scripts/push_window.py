@@ -46,6 +46,10 @@ STEPS: list[tuple[str, list[str], Path]] = [
     # every validate check once, read only, on alertdb_validate (the schema with a small fixture loaded): a check whose query Postgres
     # cannot run fails here instead of in the nightly (app/scripts/validate_smoke)
     ("validate smoke", ["docker", "compose", "exec", "-T", "backend", "python", "-m", "app.scripts.validate_smoke", "--url", VALIDATE_DB_ASYNC], ROOT),
+    # a research note end to end, generated, verified and read as a visitor would, for five stocks on the test copy with the dev key
+    # (Sam, 2026-10-27: BNY's notes failed for a week unseen); nothing is stored (app/scripts/note_smoke)
+    ("note check", ["docker", "compose", "exec", "-T", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",
+                    "backend", "python", "-m", "app.scripts.note_smoke", "--symbols=BNY,NVDA,O,PTC,VYLR"], ROOT),
     # host-side tests (the gate's own, and the courier wrapper under the Mac's /bin/bash 3.2, which the container's bash cannot stand in for)
     ("host tests", [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"], ROOT),
     ("frontend tests", ["npx", "vitest", "run"], FRONTEND),

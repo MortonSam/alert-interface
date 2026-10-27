@@ -1,5 +1,6 @@
 "use client";
 
+import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 import { eventConfirmationBadge, expectedWindowLine, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
@@ -1582,7 +1583,7 @@ export default function TickerPage() {
       })
       .catch((e: unknown) => {
         if (e instanceof ApiError && e.status === 404) { setTickerStatus("missing"); }
-        else { setTickerError(e instanceof Error ? e.message : String(e)); setTickerStatus("error"); }
+        else { setTickerError(visitorMessage(e)); setTickerStatus("error"); }
       });
   }, [upperSymbol]);
 
@@ -1606,7 +1607,7 @@ export default function TickerPage() {
         setEvents([...evts].sort((a, b) => a.event_date.localeCompare(b.event_date)));
         setEventStatus("done");
       })
-      .catch((e: Error) => { setEventError(e.message); setEventStatus("error"); });
+      .catch((e: Error) => { setEventError(visitorMessage(e)); setEventStatus("error"); });
   }, [upperSymbol]);
 
   // Catalyst redesign fetches
@@ -1683,7 +1684,7 @@ export default function TickerPage() {
     api.reactions
       .list({ symbol: upperSymbol, event_type: "earnings" })
       .then((rows) => { setReactions(rows); setReactionStatus("done"); })
-      .catch((e: Error) => { setReactionError(e.message); setReactionStatus("error"); });
+      .catch((e: Error) => { setReactionError(visitorMessage(e)); setReactionStatus("error"); });
     api.reactions
       .summary(upperSymbol)
       .then(setReactionSummary)
@@ -1856,12 +1857,12 @@ export default function TickerPage() {
       setNoteStatus("done");
     } catch (e: unknown) {
       if (e instanceof ApiError && (e.status === 429 || e.status === 403 || e.status === 409)) {
-        setGenerateRefusal(e.message);   // the API's own sentence: the limit and when it lifts, owner-only, or a note that exists
+        setGenerateRefusal(visitorMessage(e));   // the API's own sentence: the limit and when it lifts, owner-only, or a note that exists
         return;
       }
       setNote((prev) =>
         prev
-          ? { ...prev, status: "failed", error: e instanceof Error ? e.message : "Unknown error" }
+          ? { ...prev, status: "failed", error: visitorMessage(e, "Ivy couldn't write this note right now. Try again in a few minutes.") }
           : null,
       );
     }

@@ -1,4 +1,5 @@
 "use client";
+import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 
 import { IvyMark } from "@/components/IvyMark";
@@ -31,7 +32,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
       setAnswer(res.answer);
       try { posthog.capture("question_asked", { ticker: symbol, covered: res.answer.inputs.length > 0, cached: res.cached }); } catch { /* analytics never breaks the page */ }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Ivy couldn't answer just now.");
+      setError(visitorMessage(err, "Ivy couldn't answer just now. Try again in a few minutes."));
     } finally {
       setBusy(false);
     }

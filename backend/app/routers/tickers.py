@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
+from app.services import user_errors
 from app.auth import get_draft_caller, is_admin, require_admin, _get_admin_token
 from app.config import settings
 from app.services import live_data, personal_use
@@ -280,7 +281,8 @@ async def get_ticker_quote(symbol: str, db: AsyncSession = Depends(get_db), admi
                 loop.run_in_executor(None, price_bars.daily_closes_sync, sym, "1mo"),
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Quote fetch failed: {redact(exc)}")
+            await user_errors.record("quote", exc, sym)
+            raise HTTPException(status_code=502, detail=user_errors.plain("quote"))
         finally:
             await finnhub.close()
 
@@ -778,7 +780,8 @@ async def _guarded_price(sym: str, db: AsyncSession | None = None, admin: bool =
     try:
         raw = await finnhub.get_quote(sym)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {redact(exc)}")
+        await user_errors.record("data", exc, sym)
+        raise HTTPException(status_code=502, detail=user_errors.plain("data"))
     finally:
         await finnhub.close()
     price = float(raw.get("c") or 0) or None
@@ -1481,7 +1484,8 @@ async def get_options_read(
     try:
         quote = await finnhub.get_quote(sym)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Data fetch failed: {redact(exc)}")
+        await user_errors.record("data", exc, sym)
+        raise HTTPException(status_code=502, detail=user_errors.plain("data"))
     finally:
         await finnhub.close()
 
@@ -1637,7 +1641,8 @@ async def get_options_read(
     try:
         written = await write_read(plain_facts)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Options read generation failed: {redact(exc)}")
+        await user_errors.record("options_read", exc, sym)
+        raise HTTPException(status_code=502, detail=user_errors.plain("options_read"))
     if written["result"] == "no_move":
         return absent(READ_NO_MOVE, "no expected move")
     if written["result"] != "passed":
@@ -1882,7 +1887,8 @@ Keep it grounded in the numbers. 40-70 words.\
     try:
         gen = await client.generate_explain(prompt)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Explain generation failed: {redact(exc)}")
+        await user_errors.record("explain", exc, sym)
+        raise HTTPException(status_code=502, detail=user_errors.plain("explain"))
 
     generated_at = dt_datetime.now(tz=timezone.utc).isoformat()
     print(f"[explain] {sym}/{metric}: {gen['input_tokens']} in / {gen['output_tokens']} out tokens", flush=True)
@@ -2141,6 +2147,7 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
         await refund_use(db, A.ASK_TICKER_POLICY, f"{ip}|{pack['symbol']}", charged_t)
         await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=False, verdict="failed", answer=None,
                              model=None, input_tokens=None, output_tokens=None, cost=None, cached=False, ip_hash=A.ip_hash(ip))
+        await user_errors.record("ask_ivy", exc, pack["symbol"])
         raise HTTPException(status_code=503, detail="Ivy couldn't answer just now; nothing was charged to your limit.") from exc
     await A.add_spend(db, result.get("cost"))
     await A.log_question(db, symbol=pack["symbol"], question=question, normalized=normalized, key=key, covered=result["covered"] != "no" and result["verdict"] in ("verified", "partly_dropped", "fallback"),

@@ -156,6 +156,8 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     data["structured_content"], verification, data["content"] = served(data.get("structured_content"), raw_verification,
                                                                        data.get("content"), data["valuation_shown"])
     data["verification"] = normalize_verification(verification)
+    if data.get("error"):                        # every reader, the owner too: the stored exception text is the digest's, not the page's
+        data["error"] = visitor_failure_reason(note)
     read = ResearchNoteRead.model_validate(data)
     if admin:
         return read.model_copy(update={"verification_failed": failed})
@@ -180,10 +182,10 @@ async def note_for_reader(db, note: ResearchNote, admin: bool) -> ResearchNoteRe
 
 
 def visitor_failure_reason(note: ResearchNote) -> str:
-    """Why a failed generation produced nothing, in a sentence without the exception text."""
-    if note.error and "timed out" in note.error.lower():
-        return "Generation timed out before a note was produced. Your limit was not charged."
-    return "Generation failed before a note was produced. Your limit was not charged."
+    """Why a failed generation produced nothing: Sam's plain sentence (services/user_errors), never the exception text, which the
+    digest carries."""
+    from app.services.user_errors import plain
+    return plain("research_note")
 
 
 HOME_NOTE_FRESH_DAYS = 14     # the home page shows a note only if it was verified this recently; otherwise the section is hidden

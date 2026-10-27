@@ -1,4 +1,4 @@
-import { ApiError } from "./api";
+import { ApiError, UNEXPECTED_MESSAGE } from "./api";
 
 /**
  * What a visitor reads when a request fails. The API writes its refusals as sentences for visitors
@@ -6,7 +6,7 @@ import { ApiError } from "./api";
  * is shown as it came. Anything else (a network failure, a body that was not a sentence) shows the
  * caller's plain fallback: no exception text, no status code, no JSON reaches the page.
  */
-export function visitorMessage(err: unknown, fallback: string): string {
+export function visitorMessage(err: unknown, fallback: string = UNEXPECTED_MESSAGE): string {
   if (err instanceof ApiError && err.message && !/^API \d{3}/.test(err.message)) return err.message;
   return fallback;
 }

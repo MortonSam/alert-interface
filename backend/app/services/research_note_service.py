@@ -127,7 +127,7 @@ PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount o
   1d move avg/max/min : {s['avg_1d']} / {s['max_1d']} / {s['min_1d']}  (n={s['total']})
   3d move avg/max/min : {s['avg_3d']} / {s['max_3d']} / {s['min_3d']}
   5d move avg/max/min : {s['avg_5d']} / {s['max_5d']} / {s['min_5d']}
-  Most recent quarter ({s['latest_date']}, {s['latest_outcome'].upper()}):
+  Most recent quarter ({s['latest_date']}, {(s.get('latest_outcome') or 'unknown').upper()}):
     EPS estimate {s['latest_eps_est']} → actual {s['latest_eps_act']}
     1d {s['latest_1d']}  |  3d {s['latest_3d']}  |  5d {s['latest_5d']}\
 """
@@ -280,8 +280,8 @@ def _build_generation_prompt(
     market_cap = _format_market_cap(ticker.market_cap)
 
     if filing and sections:
-        mda   = sections.get("mda", "").strip()
-        risks = sections.get("risk_factors", "").strip()
+        mda   = (sections.get("mda") or "").strip()
+        risks = (sections.get("risk_factors") or "").strip()
         filing_block = (
             f"RECENT FILING: {filing['form_type']} filed {filing['filing_date']}\n"
             f"--- MD&A EXCERPT ---\n{mda or '(not extracted)'}\n"
@@ -399,14 +399,12 @@ def _serialize_structured_note(structured: dict, ticker: Ticker) -> str:
     for item in structured["risks"]:
         lines.append(f"- **{item['lead']}:** {item['detail']}")
 
-    stats = structured.get("stats", {})
+    stats = structured.get("stats") or {}
     if stats.get("latest_quarter_date"):
-        lines += [
-            "",
-            "---",
-            f"*Most recent quarter: {stats['latest_quarter_date']}"
-            f" ({stats.get('latest_outcome', 'N/A').upper()})*",
-        ]
+        # LICENSED_ESTIMATES off withholds the outcome (licensed_estimates.strip_fields keeps the key as None): the date alone (BNY,
+        # 2026-10-27: "'NoneType' object has no attribute 'upper'" failed every note with an earnings history)
+        outcome = stats.get("latest_outcome")
+        lines += ["", "---", f"*Most recent quarter: {stats['latest_quarter_date']}" + (f" ({outcome.upper()})" if outcome else "") + "*"]
 
     return "\n".join(lines)
 
@@ -419,8 +417,8 @@ def _build_verification_prompt(
     ticker: "Ticker",
 ) -> str:
     if filing and sections:
-        mda   = sections.get("mda", "").strip()
-        risks = sections.get("risk_factors", "").strip()
+        mda   = (sections.get("mda") or "").strip()
+        risks = (sections.get("risk_factors") or "").strip()
         filing_block = (
             f"FILING: {filing['form_type']} filed {filing['filing_date']}\n"
             f"--- MD&A ---\n{mda or '(not extracted)'}\n"
@@ -771,6 +769,8 @@ async def run_research_note_background(
 
         except Exception as exc:
             print(f"Research note generation failed for {symbol}: {exc!r}", flush=True)
+            from app.services import user_errors
+            await user_errors.record("research_note", exc, symbol)          # the digest gets the real error; the note says PLAIN
             now = datetime.now(timezone.utc)
             await db.execute(
                 update(ResearchNote)
@@ -807,6 +807,8 @@ async def run_research_note_background(
             await db.commit()
         except Exception as exc:
             print(f"Verification failed for {symbol}: {exc!r} — note withheld from visitors", flush=True)
+            from app.services import user_errors
+            await user_errors.record("research_verify", exc, symbol)
             now = datetime.now(timezone.utc)
             await db.execute(
                 update(ResearchNote)
@@ -854,10 +856,9 @@ async def verify_existing_note(
             note.content, filing, sections, reactions, ticker
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Verification failed: {redact(exc)}. Please try again.",
-        )
+        from app.services import user_errors
+        await user_errors.record("research_verify", exc, ticker.symbol)
+        raise HTTPException(status_code=502, detail=user_errors.plain("research_verify"))
 
     now = datetime.now(timezone.utc)
     note.verification       = verification

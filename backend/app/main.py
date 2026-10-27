@@ -33,11 +33,22 @@ app = FastAPI(
     title="Alert Interface API",
     description="Personal finance research tool: catalyst panel, watchlists, AI research.",
     version="0.1.0",
-    debug=settings.debug,
+    debug=False,          # never a traceback in a response, whatever DEBUG says (services/user_errors)
     lifespan=lifespan,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _unexpected_error(request: Request, exc: Exception):
+    """Any error no route handled: the plain sentence for the visitor, the real error for the digest (Sam, 2026-10-27)."""
+    from fastapi.responses import JSONResponse
+    from app.services import user_errors
+    await user_errors.record("unexpected", exc, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": user_errors.plain("unexpected")})
+
+
+app.add_exception_handler(Exception, _unexpected_error)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(

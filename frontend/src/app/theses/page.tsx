@@ -1,5 +1,6 @@
 "use client";
 
+import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 import { volRegime } from "@/lib/encodings/volRegime";
 import { useEffect, useRef, useState } from "react";
@@ -313,7 +314,7 @@ function ResolveForm({
       const updated = await api.theses.resolve(thesis.id, payload);
       onResolved(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to resolve");
+      setError(visitorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -414,9 +415,9 @@ function ThesisCard({
       await api.theses.delete(thesis.id);
       onDeleted(thesis.id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = visitorMessage(err);
       // 404 means it's already gone — remove from UI anyway
-      if (msg.includes("404")) {
+      if (err instanceof ApiError && err.status === 404) {
         onDeleted(thesis.id);
       } else {
         setDeleting(false);

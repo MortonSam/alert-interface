@@ -1,5 +1,6 @@
 "use client";
 
+import { visitorMessage } from "@/lib/errors";
 import { datasetAgeLine, datasetsStale, freshnessLine } from "@/lib/freshness";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
@@ -60,7 +61,7 @@ export function TickerGrid() {
     api.tickers
       .list()
       .then(setTickers)
-      .catch((e: Error) => setError(e.message))
+      .catch((e: Error) => setError(visitorMessage(e)))
       .finally(() => setLoading(false));
     api.system.status().then(setSystemStatus).catch(() => null);
   }, []);

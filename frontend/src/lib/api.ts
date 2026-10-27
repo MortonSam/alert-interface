@@ -17,6 +17,21 @@ class ApiError extends Error {
 }
 export { ApiError };
 
+// No visitor ever sees a raw error (Sam, 2026-10-27): the API's own plain sentence (backend services/user_errors) when it sends one,
+// else these; never a status code, a JSON body or a proxy's HTML page.
+export const UNEXPECTED_MESSAGE = "Something went wrong on our side. Try again in a few minutes.";
+export const UNREACHABLE_MESSAGE = "The site couldn't be reached. Try again in a few minutes.";
+
+export async function errorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === "string" && body.detail.trim()) return body.detail;
+  } catch {
+    /* not JSON: a proxy's page */
+  }
+  return UNEXPECTED_MESSAGE;
+}
+
 function _adminToken(): string | null {
   if (typeof window === "undefined") return null; // SSR guard
   return localStorage.getItem("admin_token");
@@ -27,21 +42,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["X-Admin-Token"] = token;
 
-  const res = await fetch(`${BASE}${path}`, {
-    headers,
-    ...init,
-  });
-  if (!res.ok) {
-    let message: string;
-    try {
-      const body = await res.json();
-      message = typeof body.detail === "string" ? body.detail : `API ${res.status}: ${JSON.stringify(body)}`;
-    } catch {
-      const text = await res.text().catch(() => res.statusText);
-      message = `API ${res.status}: ${text}`;
-    }
-    throw new ApiError(res.status, message);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers,
+      ...init,
+    });
+  } catch {
+    throw new ApiError(0, UNREACHABLE_MESSAGE);
   }
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
   if (res.status === 204 || res.headers.get("content-length") === "0") {
     return undefined as T;
   }

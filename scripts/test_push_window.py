@@ -49,9 +49,11 @@ class Gate(unittest.TestCase):
         self.assertFalse(gate([("backend tests", 2)])[0])
 
     def test_the_steps_are_the_two_suites_and_the_build(self):
-        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "validate smoke", "host tests", "frontend tests", "frontend build"])
+        self.assertEqual([name for name, _, _ in STEPS], ["backend tests", "validate smoke", "note check", "host tests", "frontend tests", "frontend build"])
         for _, cmd, _ in STEPS:
             self.assertNotIn("|", " ".join(cmd))                  # exit codes are read directly, never through a pipe
+        note = next(c for n, c, _ in STEPS if n == "note check")
+        self.assertIn("--symbols=BNY,NVDA,O,PTC,VYLR", note)           # a research note end to end on the test copy (Sam, 2026-10-27)
 
 
 class LaneTests(unittest.TestCase):
@@ -80,7 +82,7 @@ class LaneTests(unittest.TestCase):
             push_command(["--branch=main"])
 
     def test_the_full_lane_runs_the_host_tests_beside_the_backend_suite(self):
-        self.assertEqual([n for n, _, _ in foreground_steps("full")], ["validate smoke", "host tests", "frontend tests", "frontend build"])
+        self.assertEqual([n for n, _, _ in foreground_steps("full")], ["validate smoke", "note check", "host tests", "frontend tests", "frontend build"])
         self.assertEqual([n for n, _, _ in foreground_steps("frontend")], ["frontend tests", "frontend build"])
         host = next(c for n, c, _ in STEPS if n == "host tests")
         self.assertEqual(host[1:], ["-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])   # picks up test_courier_wrapper.py

@@ -1,5 +1,6 @@
 "use client";
 
+import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 import SignedOutNotice from "@/components/SignedOutNotice";
 import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
@@ -376,11 +377,10 @@ export default function WatchlistPage() {
       setAddInput("");
       setAddStatus("idle");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
       setAddError(
-        msg.includes("409") || msg.includes("unique")
+        e instanceof ApiError && e.status === 409
           ? `${sym} is already in this watchlist.`
-          : `Failed to add ${sym}.`
+          : `${sym} couldn't be added right now. Try again in a few minutes.`
       );
       setAddStatus("idle");
     }

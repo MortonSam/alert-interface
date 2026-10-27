@@ -109,6 +109,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Chain parity (both sources)",    ["python", "-m", "app.scripts.check_chain_parity"]),
     ("Put/call ratio (Intrinio)",      ["python", "-m", "app.scripts.compute_put_call"]),
     ("Pricing desk (Ivy v3)",          ["python", "-m", "app.scripts.pricing_desk"]),
+    # three stocks' research notes end to end with production's key, a different three each night; a failure names this step in the
+    # digest (app/scripts/note_smoke, Sam 2026-10-27)
+    ("Research note check",            ["python", "-m", "app.scripts.note_smoke", "--rotate=3"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
@@ -372,6 +375,15 @@ def last_successful_nightly(raw_history: str | None) -> datetime | None:
     return best
 
 
+def user_errors_tail(now: datetime) -> str:
+    """" | visitor-facing errors (N): ..." for the New York day before the run (services/user_errors), or "" when there were none."""
+    from datetime import timedelta
+    from app.services.notify import capped_list
+    from app.services.user_errors import day_key, digest_lines
+    lines = digest_lines(_db_get(day_key(now - timedelta(days=1))))
+    return f" | {capped_list('visitor-facing errors', lines)}" if lines else ""
+
+
 def digest_fields(results: list[tuple[str, bool]], outcomes: dict, now: datetime) -> tuple[str, str]:
     """The morning digest's title and body from this run's results and the stored outcomes."""
     from app.services.dataset_freshness import courier_summary
@@ -476,6 +488,7 @@ def main(slot: str | None = None) -> int:
         from app.services.notify import notify_sync
         raw = _db_get("step_outcomes")
         title, body = digest_fields(results, json.loads(raw) if raw else {}, datetime.now(timezone.utc))
+        body += user_errors_tail(datetime.now(timezone.utc))
         print(f"  {title}: {body}")
         notify_sync(title, body, tags=("sunrise",))
     except Exception as exc:
