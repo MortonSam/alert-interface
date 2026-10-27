@@ -1326,6 +1326,11 @@ const BASE_SECTIONS = [
   { id: "options",   label: "OPTIONS" },
 ] as const;
 
+/** "01" to "05": a section's number is its place in the tab bar, so the kickers follow the order (Sam, 2026-10-27). */
+function sectionIndex(id: (typeof BASE_SECTIONS)[number]["id"]): string {
+  return String(BASE_SECTIONS.findIndex((s) => s.id === id) + 1).padStart(2, "0");
+}
+
 function SectionNav({ sections }: { sections: readonly { id: string; label: string }[] }) {
   const [active, setActive] = useState<string>("overview");
   const clickLockRef = useRef<string | null>(null);
@@ -2093,7 +2098,7 @@ export default function TickerPage() {
 
         {/* Overview kicker + briefing: templated sentences from stored rows, each with its receipt */}
         <div className="mt-10 mb-16">
-          <SectionKicker index="01" label="Overview" />
+          <SectionKicker index={sectionIndex("overview")} label="Overview" />
           {hasBriefing(briefing) && <Briefing sentences={briefing.sentences} />}
           {/* The question strip: up to four questions this stock's data raises, answered from stored rows */}
           <div data-slot="question-strip"><QuestionStrip symbol={upperSymbol} /></div>
@@ -2101,7 +2106,7 @@ export default function TickerPage() {
 
         {/* ── RESEARCH ────────────────────────────────────────────────── */}
         <section id="research" className="border-t pt-16 pb-24 scroll-mt-28">
-          <SectionKicker index="05" label="Research" />
+          <SectionKicker index={sectionIndex("research")} label="Research" />
 
           {noteStatus === "loading" && (
             <div className="animate-pulse space-y-3">
@@ -2388,7 +2393,7 @@ export default function TickerPage() {
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
         <section id="catalysts" className="border-t pt-16 pb-10 sm:pb-24 scroll-mt-28">
-          <SectionKicker index="02" label="Catalysts" />
+          <SectionKicker index={sectionIndex("catalysts")} label="Catalysts" />
 
           {/* No company-confirmed date: the expected window from its past report dates, in place of a vendor's estimate */}
           {ticker.next_earnings_confirmation === "expected_window" && ticker.next_earnings_window_center && (
@@ -2636,7 +2641,7 @@ export default function TickerPage() {
 
         {/* ── EVIDENCE ─────────────────────────────────────────────────── */}
         <section id="evidence" className="sm:border-t pt-2 sm:pt-16 pb-24 scroll-mt-28">
-          <SectionKicker index="03" label="Evidence" />
+          <SectionKicker index={sectionIndex("evidence")} label="Evidence" />
 
           {dealNote ? (
             <p className="text-sm text-muted-foreground" data-testid="evidence-deal-note">{dealNote}</p>
@@ -2771,7 +2776,7 @@ export default function TickerPage() {
 
         {/* ── OPTIONS ─────────────────────────────────────────────────── */}
         <section id="options" className="border-t pt-16 pb-24 scroll-mt-28">
-          <SectionKicker index="04" label="Options" />
+          <SectionKicker index={sectionIndex("options")} label="Options" />
 
           {/* Loading and failure stay outside the fold */}
           {bundleStatus === "loading" && (

@@ -20,4 +20,8 @@ describe("the ticker page's order", () => {
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
     expect(positions).toBeGreaterThan(at("options"));
   });
+  it("each section's number comes from its place in the tab bar, never typed", () => {
+    expect(page).not.toMatch(/<SectionKicker index="\d+"/);
+    for (const id of ORDER) expect(page).toContain(`<SectionKicker index={sectionIndex("${id}")}`);
+  });
 });
