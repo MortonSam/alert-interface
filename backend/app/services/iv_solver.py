@@ -12,7 +12,8 @@ from datetime import date, timedelta
 from scipy.optimize import brentq
 from scipy.stats import norm
 
-IV_SOLVER_VERSION = 2       # 2: solves read chains stored through services/chain_quality (adjusted and impossible quotes removed)
+IV_SOLVER_VERSION = 3       # 2: solves read chains stored through services/chain_quality (adjusted and impossible quotes removed)
+                             # 3 (2026-10-27): a mid below its leg's intrinsic value is no market, never solved
 
 DAY_COUNT = 365              # time to expiry is calendar days from the chain date to the expiry, over 365
 DIVIDEND_YIELD = 0.0         # no dividend term: the front expiry rarely spans an ex-date, and the error is below the vendor band
@@ -79,6 +80,12 @@ def implied_vol(kind: str, price: float | None, spot: float | None, strike: floa
         return Solve(None, "no spot or strike")
     if t <= 0:
         return Solve(None, "expiry is not after the chain date")
+    intrinsic = max(spot - strike, 0.0) if kind == "call" else max(strike - spot, 0.0)
+    if price < intrinsic:
+        # a listed (American) option never trades below what exercising it pays: the quote is stale or one-sided, not a market. The
+        # European price allows it, so it would solve to almost no volatility (PTC's $195 put on 2026-10-23: mid 0.775 with the stock
+        # at $193.80, $1.20 in the money, solved 1.9%, under the band, a month into Schneider Electric's $205 cash offer)
+        return Solve(None, f"mid {price:.4f} below the intrinsic value {intrinsic:.4f}: not a market")
     lo, hi = bs_price(kind, spot, strike, t, rate, IV_BRACKET_LOW), bs_price(kind, spot, strike, t, rate, IV_BRACKET_HIGH)
     if price <= lo:
         return Solve(None, f"mid {price:.4f} at or below the no-volatility price {lo:.4f}")

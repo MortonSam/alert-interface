@@ -54,6 +54,33 @@ def test_an_item_202_filing_whose_results_are_not_final_is_never_a_report():
     assert not is_results_release([DELIVERIES])
 
 
+# validate's five phantom reports (2026-10-27): Item 2.02 8-Ks with per-share figures that are not the quarter's results
+KMB_2026_10_15 = ("Exhibit 99.1 Kimberly-Clark Announces Preliminary Third Quarter 2026 Results and Provides Full Year 2026 Outlook Consistent with "
+                  "Previous Expectations Final Third Quarter and Nine Months results to be Released November 5, 2026. Adjusted Earnings per Share "
+                  "from Continuing Operations to grow high single digits on a constant-currency basis.")
+PRU_2026_10_15 = ("Item 7.01 Regulation FD Disclosure. Prudential Financial, Inc. (the \u201cCompany\u201d) is furnishing this Current Report to "
+                  "disclose (1) certain preliminary financial information regarding the quarter ended September 30, 2026. Net income per share "
+                  "is expected to be reduced by $0.40.")
+UDR_2026_10_21 = ("Item 2.02 Results of Operations and Financial Condition. On October 21, 2026, UDR, Inc. (the \u201cCompany\u201d) issued a press "
+                  "release announcing its preliminary financial results for the quarter ended September 30, 2026. Net income per diluted share was $0.12.")
+EMR_2026_10_13 = ("Item 2.02 Results of Operations and Financial Condition (Dollars in millions, except per share amounts) On October 13, 2026, "
+                  "Emerson Electric Co. announced that, effective for the fiscal year ended September 30, 2026, it has elected to change its method "
+                  "of accounting for actuarial gains and losses. Diluted earnings per share common stockholders: Earnings from continuing operations $1.08.")
+COR_2026_10_21 = ("Cencora now expects adjusted diluted earnings per share (EPS) to be at least $17.90. The updated financial expectations are based "
+                  "on information available as of today and other developments that may arise between the date of the news release and the time "
+                  "financial results for the full-year 2026 are finalized.")
+GD_RESULTS = ("Exhibit 99.1 General Dynamics Reports Third-Quarter 2016 Results. Net earnings were $844 million, $2.62 per diluted share. "
+              + "x" * 1200 + " EXHIBIT G PRELIMINARY FINANCIAL INFORMATION - (UNAUDITED) DOLLARS IN MILLIONS EXCEPT PER SHARE AMOUNTS")
+
+
+def test_a_preliminary_or_recast_filing_is_never_a_report():
+    for text in (KMB_2026_10_15, PRU_2026_10_15, UDR_2026_10_21, EMR_2026_10_13, COR_2026_10_21):
+        assert states_per_share_results(text), text[:60]
+        assert not is_results_release([text]), text[:60]
+        assert not is_results_release([text, EARNINGS]), text[:60]
+    assert is_results_release([GD_RESULTS])                 # "preliminary" in its tables, past the headline: still the results
+
+
 def test_every_exhibit_keeps_releases_whose_names_start_with_r():
     names = ["0001-index.html", "0001-index-headers.html", "R1.htm", "R12.htm", "gehc-20260729.htm", "release2q26earnings.htm",
              "rf-2026630xexhibit991.htm", "logo.jpg"]
@@ -85,3 +112,15 @@ async def test_validate_errors_on_a_confirmed_past_report_with_no_evidence():
         finally:
             await s.execute(text("DELETE FROM events WHERE ticker_id = :t AND event_type = 'earnings' AND event_date = :d"), {"t": tid, "d": day})
             await s.commit()
+
+
+def test_a_past_report_on_an_8k_alone_is_removed_once_the_company_confirms_the_real_date():
+    from app.services.earnings_calendar import edgar_only_report_superseded
+    note = "reported on 2026-10-15 per EDGAR (8-K Item 2.02)"
+    d = date(2026, 10, 15)
+    assert edgar_only_report_superseded(d, note, [], [], [date(2026, 11, 5)]) == date(2026, 11, 5)          # KMB: preliminary figures, real report Nov 5
+    assert edgar_only_report_superseded(d, note, [date(2026, 10, 15)], [], [date(2026, 11, 5)]) is None     # a reaction row stands on it
+    assert edgar_only_report_superseded(d, note, [], [date(2026, 10, 16)], [date(2026, 11, 5)]) is None     # an EPS actual says it was the report
+    assert edgar_only_report_superseded(d, note, [], [], [date(2027, 1, 20)]) is None                       # the next quarter's date, not this report's
+    assert edgar_only_report_superseded(d, "reported on 2026-10-15 per Finnhub (actual EPS)", [], [], [date(2026, 11, 5)]) is None
+    assert edgar_only_report_superseded(d, "confirmed: press release", [], [], [date(2026, 11, 5)]) is None

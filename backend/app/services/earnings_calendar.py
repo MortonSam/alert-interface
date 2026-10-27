@@ -275,6 +275,23 @@ SAME_RELEASE_LOOKBACK_DAYS = 45      # a confirmed date this recent or later may
 SAME_RELEASE_KEY_CHARS = 60          # notes are cut short when stored: the release is matched on this much of its evidence
 
 
+EDGAR_ONLY_NOTE = "per EDGAR (8-K Item 2.02"
+
+
+def edgar_only_report_superseded(event_date: date, confirmation_note: str | None, reaction_dates, actual_dates,
+                                 confirmed_future) -> date | None:
+    """Pure: the company-confirmed date that shows a past report stored on an 8-K Item 2.02 alone was not the report: no reaction
+    row and no EPS actual within EVIDENCE_DAYS of it, and the company confirmed a date for the same report within SAME_REPORT_DAYS
+    after it. 2026-10-27: EMR's Oct 13 (a pension accounting change), KMB's and PRU's Oct 15 and UDR's Oct 21 (preliminary figures)
+    and COR's Oct 21 (an outlook update) against their confirmed Nov 2 to Nov 5 reports. None when it stands."""
+    if EDGAR_ONLY_NOTE not in (confirmation_note or "") or not (confirmation_note or "").startswith("reported on"):
+        return None
+    if any(abs((d - event_date).days) <= EVIDENCE_DAYS for d in list(reaction_dates) + list(actual_dates)):
+        return None
+    later = [d for d in confirmed_future if 0 < (d - event_date).days < SAME_REPORT_DAYS]
+    return min(later) if later else None
+
+
 def same_release_stale(event_date: date, confirmation_note: str | None, announced: date, evidence: str, reaction_dates) -> bool:
     """Pure: a confirmed date stored from the same release that now confirms `announced` is stale when it is another date and no
     reaction row stands on it."""

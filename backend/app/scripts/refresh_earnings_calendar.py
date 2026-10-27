@@ -47,7 +47,7 @@ from app.models.enums import DataSource, EventType
 from app.models.event import Event
 from app.models.historical_reaction import HistoricalReaction
 from app.models.ticker import Ticker
-from app.services.earnings_calendar import (SAME_RELEASE_LOOKBACK_DAYS, same_release_stale,
+from app.services.earnings_calendar import (SAME_RELEASE_LOOKBACK_DAYS, same_release_stale, company_confirmed, edgar_only_report_superseded,
     CALENDAR_SOURCES, EDGAR_202_LOOKBACK_DAYS, SAME_REPORT_DAYS, SOURCE_LABELS, Candidate, FutureDate, PastResolution,
     StoredDate, beyond_calendar_reach, far_note, merge_future, resolve_past, standing_candidates,
 )
@@ -420,6 +420,20 @@ async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime
             await session.flush()
 
         actuals = sources["finnhub_actual"].get(sym, []) + sources["yfinance_reported"].get(sym, [])
+        # a past report stored on an 8-K alone that the company's own later date shows was not the report (preliminary figures, an
+        # outlook update, an accounting change) is removed (services/earnings_calendar.edgar_only_report_superseded)
+        company_dates = [e.event_date for e in (await session.execute(select(Event).where(
+            Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today))).scalars().all()
+            if company_confirmed(e.is_confirmed, e.confirmation_note)]
+        for e in (await session.execute(select(Event).where(
+                Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True),
+                Event.event_date < today, Event.event_date >= today - timedelta(days=SAME_REPORT_DAYS)))).scalars().all():
+            by = edgar_only_report_superseded(e.event_date, e.confirmation_note, reactions, actuals, company_dates)
+            if by:
+                plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; an 8-K alone stood for it, and the company confirmed {by.isoformat()} for the report")
+                await session.delete(e)
+        await session.flush()
+
         stored = list((await session.execute(
             select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today)
             .order_by(Event.event_date)

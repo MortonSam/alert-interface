@@ -33,7 +33,7 @@ def test_a_known_case_prices_and_solves_back_to_four_decimals():
 
 
 def test_the_assumptions_are_the_stated_constants():
-    assert IV_SOLVER_VERSION == 2 and DAY_COUNT == 365 and DIVIDEND_YIELD == 0.0
+    assert IV_SOLVER_VERSION == 3 and DAY_COUNT == 365 and DIVIDEND_YIELD == 0.0
     assert RATE_SERIES == "DTB3" and RATE_SCALE == 0.01 and RATE_MAX_AGE_SESSIONS == 5
     assert IV_BRACKET_LOW < IV_SANITY_MIN == 0.02 and IV_SANITY_MAX == 5.0 < IV_BRACKET_HIGH
     assert MIN_EXPIRY_DAYS == 7
@@ -44,7 +44,8 @@ def test_the_mid_needs_both_sides_quoted_and_the_solver_says_why_it_cannot_solve
     assert mid(5.0, 5.4) == 5.2
     assert mid(0, 5.4) is None and mid(5.0, None) is None and mid(5.4, 5.0) is None
     assert implied_vol("call", None, 100, 100, 0.1, 0.04).reason.startswith("no mid")
-    assert "no-volatility price" in implied_vol("call", 0.5, 100, 90, 0.1, 0.04).reason      # below intrinsic
+    assert "below the intrinsic value" in implied_vol("call", 0.5, 100, 90, 0.1, 0.04).reason      # below intrinsic
+    assert "no-volatility price" in implied_vol("call", 10.1, 100, 90, 0.1, 0.04).reason     # above intrinsic, under the discounted forward
     assert "at or above the price at" in implied_vol("call", 99.0, 100, 100, 0.1, 0.04).reason
     assert implied_vol("call", 5.0, 100, 100, 0.0, 0.04).reason.startswith("expiry is not after")
 
@@ -197,3 +198,25 @@ async def test_a_courier_row_and_a_solver_row_share_a_symbol_and_date_and_the_se
 
 # shares the ZZIV symbol with the other files of this group: one xdist worker runs them (scripts/push_window.py runs pytest -n auto --dist loadgroup)
 pytestmark = pytest.mark.xdist_group(name="iv")
+
+
+def test_a_mid_below_its_intrinsic_value_is_not_solved():
+    # PTC on 2026-10-23 (validate's iv_solver_band ERROR): the $195 put's mid 0.775 with the stock at $193.80 is under the $1.20 a holder
+    # gets by exercising; the European price let it solve to 1.9%. The call beside it still solves, so the ATM IV is the call's.
+    t = 28 / DAY_COUNT
+    put = implied_vol("put", 0.775, 193.80, 195.0, t, 0.0404)
+    assert put.iv is None and "below the intrinsic value 1.2000" in put.reason
+    call = implied_vol("call", 1.025, 193.80, 195.0, t, 0.0404)
+    assert call.iv is not None and IV_SANITY_MIN <= call.iv <= IV_SANITY_MAX
+    assert implied_vol("call", 4.0, 200.0, 195.0, t, 0.0404).iv is None          # a call under its $5 intrinsic value
+    assert implied_vol("put", 1.30, 193.80, 195.0, t, 0.0404).iv is not None      # at or above intrinsic: a market
+
+
+def test_an_older_stored_row_is_solved_again_from_its_own_inputs():
+    from app.scripts.solve_atm_iv import resolve_stored
+    # PTC's stored v2 row for 2026-10-23: call 0.060690, put 0.019089 (under the band), atm 0.039890
+    ptc = {"days_to_expiry": 28, "current_price": 193.80, "atm_strike": 195.0, "rate": 0.0404, "atm_call_mid": 1.025, "atm_put_mid": 0.775}
+    r = resolve_stored(ptc)
+    assert r["solved_put_iv"] is None and "below the intrinsic value" in r["atm_iv_reason"] and r["iv_version"] == IV_SOLVER_VERSION
+    assert r["solved_call_iv"] == pytest.approx(0.0607, abs=0.0005) and r["atm_iv"] == r["solved_call_iv"]
+    assert IV_SANITY_MIN <= r["atm_iv"] <= IV_SANITY_MAX

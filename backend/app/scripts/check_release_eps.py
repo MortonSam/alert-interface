@@ -5,7 +5,13 @@ compared: the annual weighted-average share count is not the quarter's, so after
 quarter's EPS (PANW, 112 million shares issued for CyberArk in February 2026: derived -0.46 against the stated -0.35). Such a
 row is recorded as not comparable (xbrl_note) with no XBRL figure and no flag.
 
-Every flagged row is re-judged on every run (a flagged PANW clears the night this rule ships), so the nightly needs no hand run.
+Every flagged row is re-judged on every run (a flagged PANW clears the night this rule ships), so the nightly needs no hand run; a
+flagged row that no longer matches a quarter goes back to awaiting its check.
+
+A release names its own quarter: with a stated period end only a quarter ending within END_TOLERANCE_DAYS of it matches, and
+without one only a quarter ending at most MAX_REPORT_LAG_DAYS before the report. DOW's and URI's Q2 2026 releases (2026-07-22/23)
+matched the year-ago Q3 2025 column of their Q3 2026 10-Qs (filed after the reports, ending ten months before them) while XBRL
+held no Q2 2026 quarter, and were flagged 0.99 vs 0.08 and 12.03 vs 10.91; XBRL's own nine months less Q1 and Q3 give 1.00 and 11.99.
 
     python -m app.scripts.check_release_eps                    # the nightly step: unchecked rows and flagged rows; prints and records every flag
     python -m app.scripts.check_release_eps --recheck-flagged  # the flagged rows alone
@@ -30,6 +36,7 @@ STEP_LABEL = "Release EPS vs XBRL"
 WRITES = WriteFailures(STEP_LABEL)
 WRITES = WriteFailures(STEP_LABEL)
 END_TOLERANCE_DAYS = 7
+MAX_REPORT_LAG_DAYS = 100     # a quarter ending longer than this before the report is not the quarter it reported
 NOT_COMPARABLE = ("XBRL holds this quarter only as a derived figure ({form} annual less three quarters, filed {filed}); "
                   "a release figure is compared only with a quarter XBRL reports directly")
 
@@ -37,10 +44,9 @@ NOT_COMPARABLE = ("XBRL holds this quarter only as a derived figure ({form} annu
 def _match(candidates: list[dict], period_end: date | None, report_date: date) -> dict | None:
     if period_end:
         near = [q for q in candidates if abs((q["end"] - period_end).days) <= END_TOLERANCE_DAYS]
-        if near:
-            return near[-1]
-    later = [q for q in candidates if q["end"] < report_date and q["filed"] >= report_date]
-    return later[-1] if later else None
+        return near[-1] if near else None
+    later = [q for q in candidates if q["end"] < report_date and q["filed"] >= report_date and (report_date - q["end"]).days <= MAX_REPORT_LAG_DAYS]
+    return max(later, key=lambda q: q["end"]) if later else None
 
 
 def matching_quarter(quarters: list[dict], period_end: date | None, report_date: date) -> dict | None:
@@ -81,7 +87,12 @@ async def run(recheck_flagged: bool = False) -> int:
                                             {"f": d["form"][:10], "n": note, "id": rid})
                             await s.commit()
                         continue
-                    pending += 1; continue
+                    pending += 1
+                    async with ScriptSessionLocal() as s:           # a flag on a quarter that no longer matches is withdrawn
+                        await s.execute(text("UPDATE release_eps SET xbrl_eps = NULL, xbrl_form = NULL, xbrl_checked_at = NULL, difference = NULL, flagged = false "
+                                             "WHERE id = :id AND flagged"), {"id": rid})
+                        await s.commit()
+                    continue
                 diff, flag = release_difference(float(rel), q["eps"])
                 checked += 1
                 print(f"  {sym} {report_date}: release {float(rel):+.2f} vs XBRL {q['eps']:+.2f} ({q['form']} filed {q['filed']}): difference {diff:+.4f}" + ("  FLAG" if flag else ""))

@@ -87,6 +87,12 @@ def test_release_against_xbrl_and_the_checkers_match():
     assert derived_only_match(panw, date(2026, 7, 31), date(2026, 8, 18)) is derived
     assert derived_only_match(MU_Q, date(2026, 7, 31), date(2026, 8, 18)) is None
     assert matching_quarter(MU_Q + [{**q(date(2026, 7, 31), -0.35, date(2026, 9, 10), form="10-K")}, derived], date(2026, 7, 31), date(2026, 8, 18))["eps"] == -0.35   # a direct figure wins
+    # DOW and URI (2026-10-27): XBRL held no Q2 2026 quarter, and the Q3 2026 10-Q (filed after the July reports) carries the year-ago
+    # Q3 2025 column; a quarter ending ten months before the report is never the one it reported, stated period end or not
+    dow = [q(date(2026, 3, 31), -0.74, date(2026, 4, 24)), q(date(2025, 9, 30), 0.08, date(2026, 10, 23)), q(date(2026, 9, 30), 0.62, date(2026, 10, 23))]
+    assert matching_quarter(dow, None, date(2026, 7, 23)) is None
+    assert matching_quarter(dow, date(2026, 6, 30), date(2026, 7, 22)) is None
+    assert matching_quarter(dow + [q(date(2026, 6, 30), 0.99, date(2026, 7, 31))], None, date(2026, 7, 23))["eps"] == 0.99
     assert exhibit_text([("form8k.htm", "x" * 600), ("a2026q4ex991-pressrelease.htm", "y" * 600)])[0] == "a2026q4ex991-pressrelease.htm"
 
 

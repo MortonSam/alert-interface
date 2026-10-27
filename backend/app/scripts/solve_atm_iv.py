@@ -9,6 +9,8 @@ stored first; the step fails closed when no rate within RATE_MAX_AGE_SESSIONS se
 on the ATM call and put mids. One iv_history row per ticker and chain date with iv_source "intrinio_mid",
 iv_version IV_SOLVER_VERSION, the inputs, both solved sides and the vendor's IVs beside them. A ticker whose ATM call
 or put mid is below MIN_ATM_MID (a nonstandard chain) gets no row and is named in the outcome under skipped_nonstandard.
+Every stored row of an older IV_SOLVER_VERSION is solved again from its own stored inputs (the mids, the close, the strike, the
+days and the rate), so a version's rule reaches the history too (v3, 2026-10-27: PTC's Oct 23 put, priced below its intrinsic value).
 
 Usage
 -----
@@ -28,7 +30,7 @@ from sqlalchemy import text
 from app.database import ScriptSessionLocal
 from app.models.iv_history import SOLVER_SOURCE
 from app.services import chain_store
-from app.services.iv_solver import IV_SOLVER_VERSION, MIN_ATM_MID, choose_expiration, nonstandard_mids, solve_atm
+from app.services.iv_solver import DAY_COUNT, IV_SOLVER_VERSION, MIN_ATM_MID, Solve, choose_expiration, implied_vol, nonstandard_mids, solve_atm
 from app.services.rates import fetch_series, rate_on, store_rates
 from app.services.step_outcomes import record_step_fields
 
@@ -99,6 +101,31 @@ def solve_target(sym: str, chain: dict, exp: str, chain_date: date, rate, rate_d
                    "vendor_call_iv": a.vendor_call_iv, "vendor_put_iv": a.vendor_put_iv, "vendor_iv": a.vendor_iv,
                    "rate": rate, "rate_date": rate_date, "days_to_expiry": a.days,
                    "_sides": sum(1 for x in (a.call, a.put) if x.iv is not None)}
+
+
+def resolve_stored(row: dict) -> dict:
+    """Pure: a stored solver row solved again from its own inputs under this IV_SOLVER_VERSION: the solved sides, their mean and
+    the reason, the way solve_atm and AtmSolve state them."""
+    t = (row["days_to_expiry"] or 0) / DAY_COUNT
+    spot, k, r = (float(row[c]) if row[c] is not None else None for c in ("current_price", "atm_strike", "rate"))
+    sides = {kind: implied_vol(kind, float(row[f"atm_{kind}_mid"]) if row[f"atm_{kind}_mid"] is not None else None, spot, k, t, r or 0.0)
+             if r is not None else Solve(None, "no rate") for kind in ("call", "put")}
+    ivs = [x.iv for x in sides.values() if x.iv is not None]
+    reason = "; ".join(f"{kind}: {x.reason}" for kind, x in sides.items() if x.iv is None) or None
+    return {"solved_call_iv": sides["call"].iv, "solved_put_iv": sides["put"].iv, "atm_iv": sum(ivs) / len(ivs) if ivs else None,
+            "atm_iv_reason": reason, "iv_version": IV_SOLVER_VERSION}
+
+
+async def restamp_older_rows() -> int:
+    """Solve every stored row of an older version again from its stored inputs; returns how many were rewritten."""
+    async with ScriptSessionLocal() as s:
+        rows = (await s.execute(text("""SELECT id, days_to_expiry, current_price, atm_strike, rate, atm_call_mid, atm_put_mid FROM iv_history
+            WHERE iv_source = :src AND (iv_version IS NULL OR iv_version < :v)"""), {"src": SOLVER_SOURCE, "v": IV_SOLVER_VERSION})).mappings().all()
+        for row in rows:
+            await s.execute(text("""UPDATE iv_history SET solved_call_iv = :solved_call_iv, solved_put_iv = :solved_put_iv, atm_iv = :atm_iv,
+                atm_iv_reason = :atm_iv_reason, iv_version = :iv_version WHERE id = :id"""), {**resolve_stored(dict(row)), "id": row["id"]})
+        await s.commit()
+    return len(rows)
 
 
 BATCH = 25      # chains loaded, solved and written per round trip; bounds memory to a few MB of chain JSON at a time
@@ -189,12 +216,13 @@ async def run(argv: list[str]) -> int:
             await s.commit()
         written += len(rows_out)
         await record_step_fields(STEP_LABEL, {"progress": {"done": min(i + BATCH, len(targets)), "of": len(targets)}})
+    restamped = await restamp_older_rows()
     rates_used = {d.isoformat(): f"{r.rate:.4%} ({r.rate_date.isoformat()})" for d, r in rates.items() if r.rate is not None}
     fields = {"tickers": len(targets), "written": written, "solved_both_sides": solved_both, "solved_one_side": solved_one, "unsolved": len(skipped),
               "unsolved_detail": dict(list(skipped.items())[:30]), "skipped_nonstandard": skipped_nonstandard,
               "skipped_stale": dict(list(skipped_stale.items())[:50]), "skipped_stale_count": len(skipped_stale),
               "rates_used": rates_used, "rates_stored": stored, "rate_fetch_error": rate_fetch_error, "iv_version": IV_SOLVER_VERSION,
-              "progress": {"done": len(targets), "of": len(targets)}, "batch": BATCH, "error": None}
+              "progress": {"done": len(targets), "of": len(targets)}, "batch": BATCH, "restamped": restamped, "error": None}
     print(f"{STEP_LABEL}: {len(targets)} ticker(s), {written} row(s) written (v{IV_SOLVER_VERSION}), both sides {solved_both}, one side {solved_one}, "
           f"unsolved {len(skipped)}, skipped as nonstandard (an ATM mid under ${MIN_ATM_MID:.2f}) {len(skipped_nonstandard)}, "
           f"refused as stale {len(skipped_stale)}; rates {rates_used}; "
