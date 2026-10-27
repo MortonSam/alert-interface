@@ -1636,6 +1636,16 @@ def chains_start_delay_minutes(started_iso: str | None) -> float | None:
     return round((local - scheduled).total_seconds() / 60, 1)
 
 
+def wide_quotes_reason(skip: str | None) -> str | None:
+    """Pure: the desk's wide-quote skip as the warning words it (Sam, 2026-10-27): "wide quotes (142% of mid)"; None for any other skip."""
+    import re
+    from app.services.pricing_desk import WIDE_QUOTES_REASON
+    if not skip or not skip.startswith(WIDE_QUOTES_REASON):
+        return None
+    m = re.search(r"\((\d+)% of its mid", skip)
+    return f"wide quotes ({m.group(1)}% of mid)" if m else "wide quotes"
+
+
 async def check_pricing_cards(session) -> CheckResult:
     """Ivy v3's pricing cards (services/pricing_desk): ERROR when a stored card breaks a band (band_problems) or, for a report still to
     come, carries an old computation version; WARN when a stock with a report inside the window and a serving chain has no card from last night."""
@@ -1663,6 +1673,9 @@ async def check_pricing_cards(session) -> CheckResult:
     due = (await session.execute(text("""SELECT DISTINCT t.symbol FROM tickers t JOIN events e ON e.ticker_id = t.id WHERE t.is_active AND e.event_type = 'earnings'
         AND e.unresolved_since IS NULL AND e.event_date BETWEEN :a AND :b ORDER BY 1"""), {"a": today, "b": today + timedelta(days=REPORT_WINDOW_DAYS)})).scalars().all()
     fresh_since = datetime.now(timezone.utc) - timedelta(hours=30)
+    from app.services.pricing_desk import STEP_LABEL as DESK_LABEL
+    from app.services.system_metadata_service import get_value
+    skipped = (_json.loads(await get_value(session, "step_outcomes") or "{}").get(DESK_LABEL) or {}).get("skipped") or {}
     missing = []
     for sym in due:
         card = cards.get(sym)
@@ -1670,7 +1683,8 @@ async def check_pricing_cards(session) -> CheckResult:
             continue
         if (await resolve(session, sym)).source is None:
             continue                                  # no serving chain: nothing to price, not a missing card
-        missing.append(f"{sym}: " + ("card from " + card["computed_at"][:16] if card else "no card") + " with a serving chain")
+        missing.append(f"{sym}: " + (wide_quotes_reason(skipped.get(sym)) or
+                                      ("card from " + card["computed_at"][:16] if card else "no card") + " with a serving chain"))
     if missing:
         return CheckResult("pricing_cards", WARN, f"{len(missing)} stock(s) reporting within {REPORT_WINDOW_DAYS} days have no card from last night", missing[:30])
     return CheckResult("pricing_cards", PASS, f"{len(cards)} pricing card(s), every figure inside its band, version {PRICING_COMPUTATION_VERSION}; {len(due)} report(s) due")

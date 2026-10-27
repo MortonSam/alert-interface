@@ -201,3 +201,10 @@ def test_a_stock_with_no_reactions_of_its_own_reads_its_sectors_history():
     tau = P.Odds(reactions, {"FDXF": "Industrials"}).tau("FDXF", today)
     assert tau is not None and abs(tau - np.mean([abs(r["pct_change_1d"]) / 100 for r in reactions])) < 1e-12   # the sector's mean, no own reports
     assert P.Odds(reactions, {"S0": "Energy"}).sector_of["S0"] == "Industrials"            # a stock's own reactions keep their sector
+
+
+def test_the_cards_warning_names_a_wide_quote_skip_as_wide_quotes():
+    # Sam (2026-10-27): CMS, FOX, MDLZ, UDR and HSIC were listed as "no card with a serving chain"
+    from app.scripts.validate_data import wide_quotes_reason
+    assert wide_quotes_reason("the at-the-money straddle's quotes are too wide (142% of its mid, above 100%)") == "wide quotes (142% of mid)"
+    assert wide_quotes_reason("no priced at-the-money pair") is None and wide_quotes_reason(None) is None
