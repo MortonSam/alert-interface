@@ -179,3 +179,24 @@ def test_the_span_sentence_when_the_move_is_not_the_reports_alone():
     assert any("line S" in p for p in P.read_problems(good.replace(tail + " ", ""), vendor))
     assert any("line S" in p for p in P.read_problems(good.replace(" not just the report day", " not only the report"), vendor))
     assert P.compose_read({**vendor, "name": "NVIDIA"}).split(". ")[1] + "." == tail
+
+
+def test_names_with_initials_and_listing_words_compose_reads_that_pass():
+    # the 15 reads that failed their checks on production's first deterministic run (2026-10-27): the splitter broke "Arthur J.
+    # Gallagher" and "Yum! Brands" into two sentences, and the listing's "Common Stock" stayed in the name
+    names = {"AJG": "Arthur J. Gallagher & Co.", "AOS": "A. O. Smith Corporation", "CHRW": "C.H. Robinson Worldwide, Inc.",
+             "DHI": "D.R. Horton, Inc.", "GWW": "W.W. Grainger, Inc.", "JBHT": "J.B. Hunt Transport Services, Inc.",
+             "PEP": "PepsiCo, Inc. Common Stock", "SJM": "J. M. Smucker", "TROW": "T. Rowe Price Group, Inc.", "USB": "U.S. Bancorp",
+             "WDAY": "Workday, Inc. Class A Common Stock", "WRB": "W. R. Berkley Corporation", "XEL": "Xcel Energy Inc. Common Stock",
+             "YUM": "Yum! Brands, Inc.", "PFG": "Principal Financial Group Inc Common Stock"}
+    short = {"PEP": "PepsiCo", "WDAY": "Workday", "XEL": "Xcel Energy", "PFG": "Principal Financial", "YUM": "Yum! Brands", "USB": "U.S. Bancorp"}
+    for sym, name in names.items():
+        for report in (NVDA_REPORT, {"report_move_state": "not_separated"}):
+            f = P.page_facts(symbol=sym, name=name, fact_values={**NVDA_VALUES, "avg_earnings_1d_move_pct": 6.5, "earnings_sample_size": 21}, report=report)
+            r = asyncio.run(P.write_read(f))
+            assert r["result"] == "passed", (sym, r["problems"])
+            assert P.sentences(r["content"], f["name"])[0] == P.fact_lines(f)["A"]
+            if sym in short:
+                assert f["name"] == short[sym], (sym, f["name"])
+    assert P.sentences("Options on Yum! Brands price a move. Lately it has been calm.", "Yum! Brands") == \
+        ["Options on Yum! Brands price a move.", "Lately it has been calm."]

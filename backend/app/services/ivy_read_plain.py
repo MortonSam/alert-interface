@@ -173,8 +173,15 @@ def compose_read(f: dict) -> str:
     return " ".join(lines[k] for k in ORDER if k in lines)
 
 
-def sentences(text: str) -> list[str]:
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+(?=[A-Z\"'(])", (text or "").strip()) if s.strip()]
+_SPLIT = re.compile(r"(?<=[.!?])(?<!\b[A-Z]\.)\s+(?=[A-Z\"'(])")     # never after an initial ("Arthur J. Gallagher", "U.S. Bancorp")
+
+
+def sentences(text: str, name: str | None = None) -> list[str]:
+    """The text's sentences. The company's own name is never split ("Yum! Brands", "W. R. Berkley"), nor is an initial."""
+    t = (text or "").strip()
+    if name and name in t:
+        t = t.replace(name, "\x00")
+    return [s.strip().replace("\x00", name or "") for s in _SPLIT.split(t) if s.strip()]
 
 
 _NUM = re.compile(r"(?<![\w.])\$?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?")
@@ -223,7 +230,7 @@ def restatements(text: str, f: dict) -> list[int]:
     """Pure: the 1-based numbers of the sentences that state no line an earlier sentence had not (a restatement or a filler)."""
     seen: set[str] = set()
     out = []
-    for i, s in enumerate(sentences(text), 1):
+    for i, s in enumerate(sentences(text, f.get("name")), 1):
         new = lines_stated(s, f) - seen
         if not new:
             out.append(i)
@@ -256,7 +263,7 @@ def band_contradictions(text: str, f: dict) -> list[str]:
         out.append(f"it says the stock has been calmer than usual where the page's band is {band}")
     if f.get("typical_pct") and f.get("comparison"):
         typ = f"{f['typical_pct']:.1f}"
-        for s in sentences(t):
+        for s in sentences(t, f.get("name")):
             if typ not in _numbers(s):
                 continue
             said = "more than usual" if _says(_MORE, s) else "less than usual" if _says(_LESS, s) else \
@@ -269,7 +276,7 @@ def band_contradictions(text: str, f: dict) -> list[str]:
 def read_problems(text: str, f: dict) -> list[str]:
     """Every deterministic rule the read breaks. Empty means it may go to the verifier."""
     out: list[str] = []
-    ss = sentences(text)
+    ss = sentences(text, f.get("name"))
     if not ss:
         return ["it is empty"]
     if len(ss) > MAX_SENTENCES:

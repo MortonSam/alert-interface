@@ -156,6 +156,8 @@ def short_name(name: str | None, symbol: str | None = None) -> str | None:
         return None
     import re as _re
     name = _re.sub(r"\s*\((?:The|HC)\)\s*$", "", name)      # "Goldman Sachs Group, Inc. (The)", "Kimco Realty Corporation (HC)"
+    # the listing's own words for the share line (2026-10-27: "PepsiCo, Inc. Common Stock", "Workday, Inc. Class A Common Stock")
+    name = _re.sub(r"\s+(?:Class\s+[A-Z]\s+)?(?:Common\s+(?:Stock|Shares)|Ordinary\s+Shares)\s*$", "", name, flags=_re.I)
     words = name.replace(",", " ").split()
     while len(words) > 1 and words[-1].lower().rstrip(".") in NAME_SUFFIXES:
         words.pop()
