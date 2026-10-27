@@ -1557,7 +1557,7 @@ export default function TickerPage() {
   const [verificationOpen, setVerificationOpen] = useState(false);
 
   const [news, setNews]               = useState<NewsResponse | null>(null);
-  const [newsStatus, setNewsStatus]   = useState<"loading" | "done" | "empty" | "error">("loading");
+  const [newsStatus, setNewsStatus]   = useState<"loading" | "done" | "empty" | "error" | "withheld">("loading");
   const [newsExpanded, setNewsExpanded] = useState(false);
 
   // Positions (theses)
@@ -1724,7 +1724,8 @@ export default function TickerPage() {
     api.tickers.news(upperSymbol)
       .then((data) => {
         setNews(data);
-        setNewsStatus(data.items.length > 0 ? "done" : "empty");
+        // withheld company news shows no block at all, and a source that could not be asked is never "no recent news" (Sam, 2026-10-27)
+        setNewsStatus(data.state === "withheld" ? "withheld" : data.state === "unavailable" ? "error" : data.items.length > 0 ? "done" : "empty");
       })
       .catch(() => setNewsStatus("error"));
   }, [upperSymbol]);
@@ -2322,73 +2323,6 @@ export default function TickerPage() {
               )}
             </div>
           )}
-          {/* Recent News */}
-          <div className="border-t pt-6 mt-8">
-            <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-4">Recent News</p>
-
-            {newsStatus === "loading" && (
-              <div className="space-y-3 animate-pulse">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 bg-muted rounded w-3/4" />
-                    <div className="h-3 bg-muted rounded w-1/2" />
-                  </div>
-                ))}
-              </div>
-            )}
-            {newsStatus === "empty" && (
-              <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
-            )}
-            {newsStatus === "error" && (
-              <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
-            )}
-            {newsStatus === "done" && news && (() => {
-              const visible = newsExpanded ? news.items : news.items.slice(0, 3);
-              const hasMore = news.items.length > 3;
-              return (
-                <div className="space-y-2">
-                  {visible.map((item) => (
-                    <div
-                      key={item.datetime + item.headline.slice(0, 20)}
-                      className="border-b border-border/40 py-3"
-                    >
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        data-third-party
-                        className="tap text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
-                      >
-                        {item.headline}
-                      </a>
-                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
-                        <span>{item.source}</span>
-                        <span>·</span>
-                        <span>{timeAgoUnix(item.datetime)}</span>
-                      </div>
-                      {item.summary && (
-                        <p data-third-party className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
-                          {item.summary}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                  {hasMore && (
-                    <button
-                      type="button"
-                      onClick={() => setNewsExpanded((o) => !o)}
-                      className="tap flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
-                    >
-                      <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
-                      {newsExpanded
-                        ? "Show less"
-                        : `Show ${news.items.length - 3} more stories`}
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
         </section>
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
@@ -3223,6 +3157,66 @@ export default function TickerPage() {
             </section>
           );
         })()}
+
+        {/* ── RECENT NEWS: the last thing on the page (Sam, 2026-10-27); hidden entirely while company news is withheld ── */}
+        {newsStatus !== "withheld" && newsStatus !== "loading" && (
+          <div className="border-t pt-10 pb-24">
+            <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-4">Recent News</p>
+
+            {newsStatus === "empty" && (
+              <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
+            )}
+            {newsStatus === "error" && (
+              <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
+            )}
+            {newsStatus === "done" && news && (() => {
+              const visible = newsExpanded ? news.items : news.items.slice(0, 3);
+              const hasMore = news.items.length > 3;
+              return (
+                <div className="space-y-2">
+                  {visible.map((item) => (
+                    <div
+                      key={item.datetime + item.headline.slice(0, 20)}
+                      className="border-b border-border/40 py-3"
+                    >
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-third-party
+                        className="tap text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
+                      >
+                        {item.headline}
+                      </a>
+                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
+                        <span>{item.source}</span>
+                        <span>·</span>
+                        <span>{timeAgoUnix(item.datetime)}</span>
+                      </div>
+                      {item.summary && (
+                        <p data-third-party className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
+                          {item.summary}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {hasMore && (
+                    <button
+                      type="button"
+                      onClick={() => setNewsExpanded((o) => !o)}
+                      className="tap flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
+                    >
+                      <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
+                      {newsExpanded
+                        ? "Show less"
+                        : `Show ${news.items.length - 3} more stories`}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
       </div>
     </main>

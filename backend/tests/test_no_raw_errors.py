@@ -101,3 +101,27 @@ def test_the_nightly_writes_missing_notes_first_then_failed_then_reported_since(
     assert G.MAX_PER_NIGHT == 170 and G.RESERVE_USD > 0
     assert ("Research notes (nightly)", ["python", "-m", "app.scripts.generate_notes"]) in refresh.STEPS
     assert refresh.STEP_TIMEOUTS["Research notes (nightly)"] == 3600
+
+
+@pytest.mark.asyncio
+async def test_withheld_news_says_withheld_and_a_failed_source_never_says_no_news(monkeypatch):
+    # Sam (2026-10-27): BNY's page said "No recent news in the last 48 hours" while company news was withheld
+    from app.main import app
+    from app.routers import tickers as T
+    from app.services import personal_use
+    monkeypatch.setattr(personal_use, "shown", lambda *a, **k: False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/v1/tickers/BNY/news")
+        assert r.json() == {"items": [], "state": "withheld"}
+        monkeypatch.setattr(personal_use, "shown", lambda *a, **k: True)
+        monkeypatch.setattr(T.news_cache, "get", lambda k: None)
+
+        async def down(*a, **k):
+            raise RuntimeError("finnhub 503")
+        monkeypatch.setattr(T.FinnhubClient, "get_company_news", down)
+        recorded = []
+        async def record(feature, exc, symbol=None):
+            recorded.append(feature)
+        monkeypatch.setattr(user_errors, "record", record)
+        r = await c.get("/api/v1/tickers/BNY/news")
+        assert r.json() == {"items": [], "state": "unavailable"} and recorded == ["data"]

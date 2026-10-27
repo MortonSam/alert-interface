@@ -486,6 +486,7 @@ export interface NewsItem {
 
 export interface NewsResponse {
   items: NewsItem[];
+  state?: "ok" | "withheld" | "unavailable";   // withheld: personal-use news is off, the page shows no news block
 }
 
 export interface TickerQuote {

@@ -581,7 +581,7 @@ async def get_company_news(
     """
     sym = symbol.upper()
     if not personal_use.shown():          # Finnhub company news is personal use only (services/personal_use)
-        return NewsRead(items=[])
+        return NewsRead(items=[], state="withheld")
 
     cached = news_cache.get(sym)
     if cached is not None:
@@ -598,8 +598,9 @@ async def get_company_news(
     finnhub = FinnhubClient(priority=VISITOR)
     try:
         raw = await finnhub.get_company_news(sym, from_date, to_date)
-    except Exception:
-        return NewsRead(items=[])
+    except Exception as exc:
+        await user_errors.record("data", exc, sym)
+        return NewsRead(items=[], state="unavailable")      # never "no recent news" when the source was not asked
     finally:
         await finnhub.close()
 

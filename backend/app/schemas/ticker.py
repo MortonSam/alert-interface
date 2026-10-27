@@ -1,6 +1,8 @@
 import uuid
 from datetime import date, datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
@@ -168,3 +170,6 @@ class NewsItem(BaseModel):
 
 class NewsRead(BaseModel):
     items: list[NewsItem]
+    # why the list is what it is (Sam, 2026-10-27): "ok" (asked, and these are the stories), "withheld" (company news is personal use
+    # only and PERSONAL_USE_DATA_SHOWN is off: the page shows no news block at all), "unavailable" (the source could not be asked)
+    state: Literal["ok", "withheld", "unavailable"] = "ok"
