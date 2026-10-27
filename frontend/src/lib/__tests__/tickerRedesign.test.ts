@@ -251,7 +251,11 @@ describe("the options verdict states the API's report move and never overstates"
   it("gives way to one plain line without a report date or a confirmed date; an older API shows the range alone", () => {
     const line = (o: Partial<VerdictInput>) => { const v = optionsVerdict({ ...NVDA_VERDICT, ...o }); return v.kind === "absent" ? v.line : null; };
     expect(line({ nextReport: null })).toBe("No upcoming report date is on file for NVDA, so there is no options verdict.");
-    expect(line({ confirmation: "estimated" })).toBe("NVDA hasn't confirmed its next report date, so there's no options verdict yet.");
+    // Sam (2026-10-27): with a date or a window the line names the company and the day the report is expected around
+    expect(line({ confirmation: "estimated", company: "NVIDIA" })).toBe("NVIDIA hasn't confirmed its next report date yet (expected around Nov 17, 2026), so there's no options verdict until it does.");
+    expect(line({ nextReport: null, confirmation: "expected_window", expectedAround: "2026-11-18", company: "NVIDIA" }))
+      .toBe("NVIDIA hasn't confirmed its next report date yet (expected around Nov 18, 2026), so there's no options verdict until it does.");
+    expect(line({ nextReport: null, confirmation: null, expectedAround: null })).toBe("No upcoming report date is on file for NVDA, so there is no options verdict.");
     const old = optionsVerdict({ ...NVDA_VERDICT, report: null });
     expect(old.kind === "verdict" && [old.sentence, old.band?.high]).toEqual([null, 247.32]);
     expect(line({ report: null, facts: { ...NVDA_VERDICT.facts, expected_move_pct: null } })).toBe("No usable options prices are on file for NVDA, so there is no options verdict.");

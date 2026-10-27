@@ -20,6 +20,9 @@ describe("the launch block (2026-10-12)", () => {
     expect(shortCompanyName("The Cigna Group")).toBe("Cigna");
     expect(shortCompanyName("Johnson & Johnson")).toBe("Johnson & Johnson");
     expect(shortCompanyName(null)).toBeNull();
+    expect(shortCompanyName("Goldman Sachs Group, Inc. (The)")).toBe("Goldman Sachs");
+    expect(shortCompanyName("PepsiCo, Inc. Common Stock")).toBe("PepsiCo");
+    expect(shortCompanyName("Workday, Inc. Class A Common Stock")).toBe("Workday");
   });
 
   it("records nothing before the visitor accepts analytics", () => {

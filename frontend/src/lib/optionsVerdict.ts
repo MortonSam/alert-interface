@@ -51,6 +51,8 @@ export interface VerdictInput {
   symbol: string;
   facts: VerdictFacts;
   nextReport: string | null;                     // the ticker's next report date
+  company?: string | null;                       // the company's short name (lib/companyName)
+  expectedAround?: string | null;                // with no company-confirmed date: the day the page says the report is expected around
   confirmation: string | null | undefined;       // its confirmation level; only "confirmed" is priced (services/implied_move.implied_move_allowed)
   report?: ReportMoveFacts | null;
   typical: { pct: number; reports: number; through: string | null } | null;   // the reaction summary's, for the receipt's date
@@ -82,9 +84,13 @@ const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
 export function optionsVerdict(v: VerdictInput): Verdict {
   const f = v.facts;
   const r = v.report ?? null;
-  if (!v.nextReport) return { kind: "absent", line: `No upcoming report date is on file for ${v.symbol}, so there is no options verdict.` };
-  if (v.confirmation !== "confirmed") {
-    return { kind: "absent", line: `${v.symbol} hasn't confirmed its next report date, so there's no options verdict yet.` };
+  if (!v.nextReport || v.confirmation !== "confirmed") {
+    // Sam's words (2026-10-27); the old line only when there is truly no date or window
+    const expected = v.expectedAround ?? (v.confirmation !== "confirmed" ? v.nextReport : null);
+    if (expected && fmtDay(expected)) {
+      return { kind: "absent", line: `${v.company || v.symbol} hasn't confirmed its next report date yet (expected around ${fmtDay(expected)}), so there's no options verdict until it does.` };
+    }
+    return { kind: "absent", line: `No upcoming report date is on file for ${v.symbol}, so there is no options verdict.` };
   }
   if (r?.heldFacts?.some((x) => x === "implied_move" || x === "report_date")) {
     return { kind: "absent", line: `The options figures for ${v.symbol} are on hold while we verify them.` };

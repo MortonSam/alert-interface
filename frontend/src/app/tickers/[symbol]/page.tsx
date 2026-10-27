@@ -6,6 +6,7 @@ import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
 import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
+import { shortCompanyName } from "@/lib/companyName";
 import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, intradayBarsLine, quoteAsOf, oneDayHistoryLine, oneDaySessionLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
@@ -2505,6 +2506,8 @@ export default function TickerPage() {
               },
               nextReport: ticker.next_earnings_date,
               confirmation: ticker.next_earnings_confirmation,
+              company: shortCompanyName(ticker.name, upperSymbol),
+              expectedAround: ticker.next_earnings_confirmation === "expected_window" ? ticker.next_earnings_window_center ?? null : null,
               report: expectedMove ? {
                 state: expectedMove.report_move_state, move: expectedMove.report_move, comparison: expectedMove.comparison,
                 moveComparison: expectedMove.move_comparison, typicalPct: expectedMove.typical_move_pct, typicalN: expectedMove.typical_n,
