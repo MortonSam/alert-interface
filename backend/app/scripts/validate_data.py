@@ -2799,6 +2799,69 @@ async def check_security_record_coverage(session) -> CheckResult:
     return CheckResult("security_record_coverage", PASS, f"Every active ticker resolves to exactly one record per date ({len(tickers)} tickers, {len(rows)} records)")
 
 
+NAME_FILLER = {"inc", "incorporated", "corp", "corporation", "co", "company", "companies", "ltd", "limited", "plc", "public", "llc", "lp",
+               "sa", "nv", "ag", "se", "the", "holdings", "holding", "group", "common", "stock", "shares", "ordinary", "class", "a", "b", "c",
+               "de", "del", "new", "and"}
+
+
+def name_words(name: str | None) -> list[str]:
+    """Pure: a company name's words, lower case, accents, punctuation, SEC's state of incorporation ("CORP /MA/", "INC/RI") and the
+    legal and listing words (NAME_FILLER) removed."""
+    import re
+    import unicodedata
+    t = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"\s*/\s*[a-z]{2,3}\s*/?\s*$", " ", t)
+    t = re.sub(r"[^a-z0-9]+", " ", t.replace("&", " and "))
+    t = re.sub(r"\b[a-z](?: [a-z]\b)+", lambda m: m.group(0).replace(" ", ""), t)     # initials run together: "n v" reads "nv", "d r" "dr"
+    return [w for w in t.split() if w not in NAME_FILLER]
+
+
+def name_key(name: str | None) -> str:
+    """Pure: the words in order, run together: "Amazon.com" and SEC's "AMAZON COM" both read "amazoncom", "O'Reilly" and "O REILLY"
+    both "oreilly"."""
+    return "".join(name_words(name))
+
+
+def names_match(a: str | None, b: str | None) -> bool:
+    """Pure: the same company name once punctuation, case, accents, legal suffixes, listing words and SEC's word order ("SMITH A O
+    CORP", "HORTON D R INC /DE/") are set aside."""
+    return name_key(a) == name_key(b) or sorted(name_words(a)) == sorted(name_words(b))
+
+
+def name_mismatches(stored: dict[str, str | None], sec_titles: dict[str, str]) -> list[str]:
+    """Pure: "SYM: stored ... vs SEC ..." for each ticker whose stored name is not SEC's company name for its CIK (names_match). A
+    ticker SEC does not list is not judged here."""
+    out = []
+    for sym, name in sorted(stored.items()):
+        title = sec_titles.get(sym) or sec_titles.get(sym.replace("-", ".")) or sec_titles.get(sym.replace("-", ""))
+        if title and not names_match(name, title):
+            out.append(f"{sym}: stored \"{name}\" vs SEC \"{title}\"")
+    return out
+
+
+async def check_ticker_name_matches_sec(session) -> CheckResult:
+    """ERROR when an active ticker's stored name is not SEC's company name for its CIK (2026-10-27: AXON was stored as "Axovant Sciences
+    Ltd. Common Shares", another company); WARN when SEC's ticker file cannot be read."""
+    import json as _json
+    from app.services.edgar_client import EdgarClient, _cache_path
+    try:
+        edgar = EdgarClient()
+        try:
+            await edgar.get_cik("AAPL")                  # loads or refreshes the cached company_tickers.json
+        finally:
+            await edgar.close()
+        data = _json.loads(_cache_path("company_tickers.json").read_text())
+    except Exception as exc:
+        return CheckResult("ticker_name_matches_sec", WARN, f"SEC's ticker file could not be read: {redact(exc)}")
+    titles = {str(e.get("ticker", "")).upper(): e.get("title") for e in data.values() if e.get("ticker") and e.get("title")}
+    stored = dict((await session.execute(text("SELECT symbol, name FROM tickers WHERE is_active"))).all())
+    bad = name_mismatches(stored, titles)
+    if bad:
+        return CheckResult("ticker_name_matches_sec", ERROR, f"{len(bad)} active ticker(s) whose stored name is not SEC's company name", bad)
+    judged = sum(1 for s in stored if titles.get(s) or titles.get(s.replace("-", ".")) or titles.get(s.replace("-", "")))
+    return CheckResult("ticker_name_matches_sec", PASS, f"Every stored name matches SEC's company name ({judged} of {len(stored)} active tickers listed by SEC)")
+
+
 async def check_figi_change(session) -> CheckResult:
     """ERROR when Intrinio's current FIGI for a ticker (figi_seen at the last refresh) differs from the stored one:
     the ticker now points at a different security and the record map needs a new row."""
@@ -3964,6 +4027,7 @@ CHECKS = [
     # Security records: one Intrinio record per ticker per date, FIGI unchanged
     check_security_record_coverage,
     check_figi_change,
+    check_ticker_name_matches_sec,
     # Chain shadow: Intrinio's EOD chain against the courier's, judged over a week
     check_chain_shadow,
     # IV solver: against the vendor, and within its own band
