@@ -118,7 +118,7 @@ async def test_anonymous_generate_within_limits_then_one_note_per_ticker_per_day
         # a failed note is no note: the visitor sees a plain reason, and may generate again
         await _set_note("failed", error="RuntimeError: upstream 500 boom")
         r = await c.get(f"/api/v1/research-notes?symbol={SYM}", headers=ANON)
-        assert r.json()["error"] == "Generation failed before a note was produced. Your limit was not charged."
+        assert r.json()["error"] == "Ivy couldn't write this note right now. Try again in a few minutes."   # services/user_errors (Sam, 2026-10-27)
         assert "boom" not in r.text
         r = await c.post("/api/v1/research-notes/generate", json={"symbol": SYM}, headers=ANON)
         assert r.status_code == 201 and len(ticker) == 2
