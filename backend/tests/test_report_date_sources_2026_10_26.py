@@ -218,8 +218,8 @@ def test_nvidias_two_day_listing_is_an_expected_day_never_a_confirmation():
     assert F.calendar_listings(F.parse_items(NVIDIA_LISTING.replace("11/16/2026 - 11/17/2026", "11/10/2026 - 11/17/2026"), ""), TODAY) == []   # a week is no report day
     assert F.calendar_listings(F.parse_items(NVIDIA_LISTING.replace("Financial Results", "Financial Results Conference Call"), ""), TODAY) == []   # a call
     from app.services.next_earnings import CALENDAR_SOURCE, expected_window_line
-    assert expected_window_line(date(2026, 11, 17), CALENDAR_SOURCE) == \
-        "Next report expected around Nov 17, 2026, from the company's own events calendar (not yet confirmed by the company)"
+    assert expected_window_line(date(2026, 11, 17), CALENDAR_SOURCE, "NVIDIA") == \
+        "Next report expected around Nov 17, 2026, per NVIDIA's events calendar (exact date and time not yet announced)"
     assert expected_window_line(date(2026, 11, 18)) == \
         "Next report expected around Nov 18, 2026, based on its past report dates (not yet confirmed by the company)"
 
@@ -238,9 +238,9 @@ async def test_the_calendar_day_takes_the_windows_place_on_every_page():
         async def execute(self, *a, **k):
             return SimpleNamespace(all=lambda: list(rows.items()))
     out = {1: NE.NextEarnings()}
-    await NE.attach_windows(Session(), out, {1: "NVDA"}, date(2026, 10, 27))
+    await NE.attach_windows(Session(), out, {1: "NVDA"}, date(2026, 10, 27), {1: "NVIDIA Corporation"})
     ne = out[1]
-    assert (ne.confirmation, ne.window_center, ne.window_source) == (NE.EXPECTED_WINDOW, date(2026, 11, 17), NE.CALENDAR_SOURCE)
+    assert (ne.confirmation, ne.window_center, ne.window_source, ne.window_company) == (NE.EXPECTED_WINDOW, date(2026, 11, 17), NE.CALENDAR_SOURCE, "NVIDIA")
     rows.pop(CALENDAR_KEY.format(sym="NVDA"))
     out = {1: NE.NextEarnings()}
     await NE.attach_windows(Session(), out, {1: "NVDA"}, date(2026, 10, 27))

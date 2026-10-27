@@ -447,7 +447,7 @@ def report_move_inputs(view: dict) -> list[dict]:
 
 
 def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = None, note: str | None = None, source: str | None = None,
-                    timing: str | None = None, report_view: dict | None = None) -> tuple[str, list[dict], list[date]]:
+                    timing: str | None = None, report_view: dict | None = None, company: str | None = None) -> tuple[str, list[dict], list[date]]:
     """"Reports <date> <timing>, <N> days away (confirmed by the company)." then, when the options give one, the report move's own
     sentence (services/report_move.report_move_view), word for word the one the verdict, Discover and the strip state; when the
     options do not separate a report move, that sentence."""
@@ -456,7 +456,7 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
         from app.services.next_earnings import CALENDAR_SOURCE, expected_window_line
         why = ("the company's own events calendar (scripts/confirm_report_dates)" if source == CALENDAR_SOURCE
                else "the window from its past report dates in SEC filings (services/report_windows)")
-        return (expected_window_line(next_date, source) + ".", [_input("expected report day", fmt_date(next_date), today, why)], [])
+        return (expected_window_line(next_date, source, company) + ".", [_input("expected report day", fmt_date(next_date), today, why)], [])
     conf = confidence_phrase(confirmation)
     text = f"Reports {fmt_date(next_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "") + ", " + ("today" if days == 0 else plural(days, "day away", "days away"))
     text += f" ({conf})" if conf else ""

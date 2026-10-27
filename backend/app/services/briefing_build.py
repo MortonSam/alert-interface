@@ -155,7 +155,8 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
                         "timing": ev_t if ev_t in B.TIMING_PHRASE else None, "report_view": view}
         elif ne.confirmation == EXPECTED_WINDOW and ne.window_center and 0 <= (ne.window_center - today).days <= B.NEXT_WITHIN_DAYS:
             # no company-confirmed date: the window from its past report dates, in Sam's words, never a vendor's estimate
-            upcoming = {"today": today, "next_date": ne.window_center, "confirmation": EXPECTED_WINDOW, "source": ne.window_source}
+            upcoming = {"today": today, "next_date": ne.window_center, "confirmation": EXPECTED_WINDOW, "source": ne.window_source,
+                        "company": ne.window_company}
         exclude = set()
         for d in earnings_dates:
             exclude.add(d); exclude.add(nth_trading_day_after(d, 1))

@@ -58,6 +58,7 @@ class TickerRead(TickerBase):
     next_earnings_window_end: date | None = None
     next_earnings_window_center: date | None = None   # "Next report expected around {center}, ..." (lib/earningsSource.expectedWindowLine)
     next_earnings_window_source: str | None = None
+    next_earnings_window_company: str | None = None   # with the company's calendar as the source: the name the line says
     next_earnings_window_computed_at: str | None = None
     deal_note: str | None = None                     # a pending cash deal (services/pending_deals): the visitor note; the page shows plain price facts below it
     exit: TickerExit | None = None                   # set by /by-symbol when the stock no longer trades and its kind has an approved line

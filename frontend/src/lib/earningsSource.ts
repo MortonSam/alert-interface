@@ -72,8 +72,9 @@ export type Confirmation = "confirmed" | "estimated" | "expected_unconfirmed" | 
 /** A report date with the expected_window level (no company-confirmed date; a window from the company's own past report dates in
  *  SEC filings, backend services/report_windows), in Sam's approved words (2026-10-26), verbatim. Every surface that prints a report
  *  date uses it for that level, so such a date never falls through to "estimated". */
-export function expectedWindowLine(center: string, source: string | null | undefined = null): string {
-  if (source === CALENDAR_SOURCE) return `Next report expected around ${fmtEarningsDate(center)}, from the company's own events calendar (not yet confirmed by the company)`;
+export function expectedWindowLine(center: string, source: string | null | undefined = null, company: string | null | undefined = null): string {
+  // Sam's words for a day from the company's own events calendar (2026-10-27), verbatim
+  if (source === CALENDAR_SOURCE && company) return `Next report expected around ${fmtEarningsDate(center)}, per ${company}'s events calendar (exact date and time not yet announced)`;
   return `Next report expected around ${fmtEarningsDate(center)}, based on its past report dates (not yet confirmed by the company)`;
 }
 
@@ -99,9 +100,10 @@ export function nextEarningsLine(
   now: Date = new Date(),
   windowCenter: string | null | undefined = null,
   windowSource: string | null | undefined = null,
+  windowCompany: string | null | undefined = null,
 ): string {
   const checked = checkedPhrase(checkedAt, now);
-  if (confirmation === "expected_window" && windowCenter) return expectedWindowLine(windowCenter, windowSource);
+  if (confirmation === "expected_window" && windowCenter) return expectedWindowLine(windowCenter, windowSource, windowCompany);
   if (!date) return noDateLine(checkedAt);
   if (confirmation === "expected_unconfirmed") {
     return `Next earnings expected around ${fmtEarningsDate(date)}; not confirmed (${checked})`;
@@ -140,8 +142,9 @@ export function cardEarningsNote(
   now: Date = new Date(),
   windowCenter: string | null | undefined = null,
   windowSource: string | null | undefined = null,
+  windowCompany: string | null | undefined = null,
 ): string {
-  if (confirmation === "expected_window" && windowCenter) return expectedWindowLine(windowCenter, windowSource);
+  if (confirmation === "expected_window" && windowCenter) return expectedWindowLine(windowCenter, windowSource, windowCompany);
   if (!date) return noDateLine(checkedAt);
   if (confirmation === "expected_unconfirmed") return `Earnings expected around ${fmtEarningsDate(date)}; not confirmed`;
   if (confirmation === "confirmed") return `Earnings ${fmtEarningsDate(date)}, confirmed (${confirmedBy(note, source)})`;
@@ -161,8 +164,9 @@ export function earningsSourceNote(
 /** The Browse the market card's earnings line: the date and whether it is confirmed or estimated, nothing else (no source, no
  *  check time, no press-release text). */
 export function gridEarningsLine(date: string | null | undefined, confirmation: Confirmation | string | null | undefined,
-                                 windowCenter: string | null | undefined = null, windowSource: string | null | undefined = null): string {
-  if (confirmation === "expected_window" && windowCenter) return expectedWindowLine(windowCenter, windowSource);
+                                 windowCenter: string | null | undefined = null, windowSource: string | null | undefined = null,
+                                 windowCompany: string | null | undefined = null): string {
+  if (confirmation === "expected_window" && windowCenter) return expectedWindowLine(windowCenter, windowSource, windowCompany);
   if (!date) return "No confirmed date yet";
   return `Earnings ${fmtEarningsDate(date)}, ${confirmation === "confirmed" ? "confirmed" : "estimated"}`;
 }

@@ -107,9 +107,10 @@ export function earningsClause(
   now: Date = new Date(),
   windowCenter: string | null | undefined = null,
   windowSource: string | null | undefined = null,
+  windowCompany: string | null | undefined = null,
 ): string {
   if (confirmation === "expected_window" && windowCenter) {
-    const line = expectedWindowLine(windowCenter, windowSource);
+    const line = expectedWindowLine(windowCenter, windowSource, windowCompany);
     return line[0].toLowerCase() + line.slice(1);       // a clause inside the card's sentence
   }
   if (!date) return noDateClause(checkedAt, now);
@@ -166,7 +167,7 @@ export const NO_SEC_EPS_LEAD = "Reported, with no EPS figure from SEC filings ye
 export function suggestionSentence(item: SuggestionItem, now: Date = new Date()): string {
   return join([
     item.insight,
-    earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now, item.earnings_window_center, item.earnings_window_source),
+    earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now, item.earnings_window_center, item.earnings_window_source, item.earnings_window_company),
     // no IV rich/cheap here, as on the calendar: the stock page carries the options comparison in words
   ]);
 }
@@ -189,7 +190,7 @@ export function tapeOptionsClause(spreadPp: number): string {
 }
 
 export function tapeReportClause(item: UnusuallyActiveItem): string | null {
-  if (item.earnings_confirmation === "expected_window" && item.earnings_window_center) return `${expectedWindowLine(item.earnings_window_center, item.earnings_window_source)}.`;
+  if (item.earnings_confirmation === "expected_window" && item.earnings_window_center) return `${expectedWindowLine(item.earnings_window_center, item.earnings_window_source, item.earnings_window_company)}.`;
   if (!item.earnings_date) return null;
   const when = fmtEarningsDate(item.earnings_date);
   if (item.earnings_confirmation === "confirmed") {
@@ -228,7 +229,7 @@ export function tapeReceipt(item: UnusuallyActiveItem, now: Date = new Date()): 
     const sign = item.iv_rv_spread_pp > 0 ? "above" : "below";
     lines.push(`Implied volatility ${pct(item.atm_iv)} from the ${fmtEarningsDate(item.iv_date)} chain, ${Math.abs(item.iv_rv_spread_pp).toFixed(1)} points ${sign} realized`);
   } else lines.push("No fresh options chain: implied volatility not compared");
-  lines.push(upperFirst(earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now, item.earnings_window_center, item.earnings_window_source)));
+  lines.push(upperFirst(earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now, item.earnings_window_center, item.earnings_window_source, item.earnings_window_company)));
   return lines.join("\n");
 }
 

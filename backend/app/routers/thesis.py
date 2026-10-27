@@ -393,6 +393,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     earnings_note: str | None = ne.note
     earnings_window_center: str | None = ne.window_center.isoformat() if ne.window_center else None   # with "expected_window"
     earnings_window_source: str | None = ne.window_source
+    earnings_window_company: str | None = ne.window_company
     earnings_shown: str | None = ne.date.isoformat() if ne.date else None     # what the fact grid prints, level and all
 
     reactions = (await db.execute(
@@ -539,6 +540,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "earnings_note": earnings_note,
         "earnings_window_center": earnings_window_center,
         "earnings_window_source": earnings_window_source,
+        "earnings_window_company": earnings_window_company,
         "earnings_shown": earnings_shown,
         "reactions": reactions,
         "hist_avg": hist_avg,
@@ -765,6 +767,7 @@ async def _run_draft_generation(
         "earnings_note":             data.get("earnings_note"),
         "earnings_window_center":    data.get("earnings_window_center"),
         "earnings_window_source":    data.get("earnings_window_source"),
+        "earnings_window_company":   data.get("earnings_window_company"),
         "expiration_used":           chosen_exp,
         "days_to_expiration":        days_to_exp,
         "span_days":                 span_days(options_as_of, chosen_exp),   # the window the implied move covers, from the chain's date

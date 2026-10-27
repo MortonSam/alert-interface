@@ -93,6 +93,7 @@ class SuggestionItem(BaseModel):
     earnings_confirmation: str | None = None   # "confirmed" | "estimated" | "expected_unconfirmed" | "expected_window"
     earnings_window_center: str | None = None  # with "expected_window": the day "Next report expected around" names
     earnings_window_source: str | None = None  # where that day comes from (next_earnings.CALENDAR_SOURCE names the company's calendar)
+    earnings_window_company: str | None = None  # with that source: the company the line names
     earnings_note: str | None = None
 
 
@@ -117,6 +118,7 @@ async def _batch_next_earnings(db: AsyncSession, symbols: list[str]) -> dict[str
             "earnings_note": ne.note,
             "earnings_window_center": ne.window_center.isoformat() if ne.window_center else None,
             "earnings_window_source": ne.window_source,
+            "earnings_window_company": ne.window_company,
         }
     return out
 
@@ -172,6 +174,7 @@ class UnusuallyActiveItem(BaseModel):
     earnings_confirmation: str | None = None   # "confirmed" | "estimated" | "expected_unconfirmed" | "expected_window"
     earnings_window_center: str | None = None  # with "expected_window": the day "Next report expected around" names
     earnings_window_source: str | None = None  # where that day comes from (next_earnings.CALENDAR_SOURCE names the company's calendar)
+    earnings_window_company: str | None = None  # with that source: the company the line names
     earnings_note: str | None = None
 
 

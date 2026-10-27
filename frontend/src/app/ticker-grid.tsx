@@ -346,7 +346,7 @@ export function TickerGrid() {
                     ) : null}
                   </div>
                   <div className={ticker.next_earnings_date ? "text-xs font-medium text-foreground/70 [overflow-wrap:anywhere]" : "text-[11px] text-muted-foreground/70"}>
-                    {gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation, ticker.next_earnings_window_center, ticker.next_earnings_window_source)}
+                    {gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation, ticker.next_earnings_window_center, ticker.next_earnings_window_source, ticker.next_earnings_window_company)}
                   </div>
                 </div>
               </Link>

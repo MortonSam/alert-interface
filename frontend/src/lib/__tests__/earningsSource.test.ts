@@ -35,7 +35,7 @@ describe("a ticker the calendar left without a date is never blank", () => {
     const { join } = require("node:path") as typeof import("node:path");
     const src = join(__dirname, "../..");
     const grid = readFileSync(join(src, "app/ticker-grid.tsx"), "utf8");
-    expect(grid).toContain("gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation, ticker.next_earnings_window_center, ticker.next_earnings_window_source)");   // date and status only (or the expected window)
+    expect(grid).toContain("gridEarningsLine(ticker.next_earnings_date, ticker.next_earnings_confirmation, ticker.next_earnings_window_center, ticker.next_earnings_window_source, ticker.next_earnings_window_company)");   // date and status only (or the expected window)
     expect(grid).not.toMatch(/\{ticker\.next_earnings_date && \(/);
     expect(grid).not.toMatch(/cardEarningsNote|noDateLine|checked/);
     expect(gridEarningsLine("2026-10-29", "estimated")).toBe("Earnings Oct 29, 2026, estimated");
@@ -47,7 +47,7 @@ describe("a ticker the calendar left without a date is never blank", () => {
     expect(build).toMatch(/fb\.earnings_date \? cardEarningsNote\([\s\S]{0,200}: noDateLine\(fb\.earnings_checked_at\)/);
     expect(build).not.toContain('fb.earnings_date ?? "n/a"');
     const discover = readFileSync(join(src, "lib/discoverSentences.ts"), "utf8");
-    expect((discover.match(/earningsClause\(item\.earnings_date, item\.earnings_source, item\.earnings_checked_at, item\.earnings_confirmation, item\.earnings_note, now, item\.earnings_window_center, item\.earnings_window_source\)/g) || []).length).toBe(2);
+    expect((discover.match(/earningsClause\(item\.earnings_date, item\.earnings_source, item\.earnings_checked_at, item\.earnings_confirmation, item\.earnings_note, now, item\.earnings_window_center, item\.earnings_window_source, item\.earnings_window_company\)/g) || []).length).toBe(2);
     expect(discover).toContain("if (!date) return noDateClause(checkedAt, now);");
   });
 });
@@ -110,14 +110,14 @@ describe("the expected-window level (Sam, 2026-10-26, verbatim)", () => {
   });
   it("names the company's own events calendar when the day comes from it (Sam, 2026-10-27: NVIDIA)", async () => {
     const { expectedWindowLine, CALENDAR_SOURCE } = await import("@/lib/earningsSource");
-    const line = "Next report expected around Nov 17, 2026, from the company's own events calendar (not yet confirmed by the company)";
-    expect(expectedWindowLine("2026-11-17", CALENDAR_SOURCE)).toBe(line);
-    expect(nextEarningsLine(null, null, null, "expected_window", null, new Date(), "2026-11-17", CALENDAR_SOURCE)).toBe(line);
-    expect(gridEarningsLine(null, "expected_window", "2026-11-17", CALENDAR_SOURCE)).toBe(line);
+    const line = "Next report expected around Nov 17, 2026, per NVIDIA's events calendar (exact date and time not yet announced)";
+    expect(expectedWindowLine("2026-11-17", CALENDAR_SOURCE, "NVIDIA")).toBe(line);
+    expect(nextEarningsLine(null, null, null, "expected_window", null, new Date(), "2026-11-17", CALENDAR_SOURCE, "NVIDIA")).toBe(line);
+    expect(gridEarningsLine(null, "expected_window", "2026-11-17", CALENDAR_SOURCE, "NVIDIA")).toBe(line);
     const { readFileSync } = await import("fs");
     const { join } = await import("path");
     const py = readFileSync(join(__dirname, "../../../../backend/app/services/next_earnings.py"), "utf8");
-    expect(py).toContain('CALENDAR_LINE = "Next report expected around {date}, from the company\'s own events calendar (not yet confirmed by the company)"');
+    expect(py).toContain('CALENDAR_LINE = "Next report expected around {date}, per {company}\'s events calendar (exact date and time not yet announced)"');
     expect(py).toContain(`CALENDAR_SOURCE = "${CALENDAR_SOURCE}"`);
   });
   it("is the backend's template too (services/next_earnings.EXPECTED_WINDOW_LINE)", async () => {
@@ -131,9 +131,9 @@ describe("the expected-window level (Sam, 2026-10-26, verbatim)", () => {
     const { join } = await import("path");
     const src = (p: string) => readFileSync(join(__dirname, "..", "..", p), "utf8");
     expect(src("app/ticker-grid.tsx")).toContain("ticker.next_earnings_window_center");
-    expect(src("app/tickers/[symbol]/page.tsx")).toContain("ticker.next_earnings_window_center, ticker.next_earnings_window_source)}");
+    expect(src("app/tickers/[symbol]/page.tsx")).toContain("ticker.next_earnings_window_center, ticker.next_earnings_window_source, ticker.next_earnings_window_company)}");
     expect(src("app/tickers/[symbol]/page.tsx")).toContain('data-testid="catalysts-expected-window"');
-    expect(src("app/build/page.tsx")).toContain("expectedWindowLine(fb.earnings_window_center, fb.earnings_window_source)");
+    expect(src("app/build/page.tsx")).toContain("expectedWindowLine(fb.earnings_window_center, fb.earnings_window_source, fb.earnings_window_company)");
     expect(src("app/ticker-grid.tsx")).toContain("ticker.next_earnings_window_source");
     expect(src("lib/discoverSentences.ts").match(/item\.earnings_window_source/g)?.length).toBeGreaterThanOrEqual(3);
     expect(src("lib/discoverSentences.ts").match(/item\.earnings_window_center/g)?.length).toBeGreaterThanOrEqual(3);

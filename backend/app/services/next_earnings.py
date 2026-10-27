@@ -27,11 +27,15 @@ EXPECTED_WINDOW_LINE = "Next report expected around {date}, based on its past re
 # a day from the company's own events calendar (Sam, 2026-10-27: NVIDIA's "11/16/2026 - 11/17/2026" results listing) takes the
 # window's place; its line names that source instead of past report dates (frontend lib/earningsSource.expectedWindowLine, tested)
 CALENDAR_SOURCE = "the company's own events calendar"
-CALENDAR_LINE = "Next report expected around {date}, from the company's own events calendar (not yet confirmed by the company)"
+# Sam's words (2026-10-27), verbatim
+CALENDAR_LINE = "Next report expected around {date}, per {company}'s events calendar (exact date and time not yet announced)"
 
 
-def expected_window_line(center: date, source: str | None = None) -> str:
-    return (CALENDAR_LINE if source == CALENDAR_SOURCE else EXPECTED_WINDOW_LINE).format(date=center.strftime("%b %-d, %Y"))
+def expected_window_line(center: date, source: str | None = None, company: str | None = None) -> str:
+    day = center.strftime("%b %-d, %Y")
+    if source == CALENDAR_SOURCE and company:
+        return CALENDAR_LINE.format(date=day, company=company)
+    return EXPECTED_WINDOW_LINE.format(date=day)
 
 
 @dataclass
@@ -45,6 +49,7 @@ class NextEarnings:
     window_end: date | None = None
     window_center: date | None = None  # the projected report day the window is built around: "expected around" names it
     window_source: str | None = None
+    window_company: str | None = None    # with CALENDAR_SOURCE: the company's short name the line names
     window_computed_at: str | None = None
 
     def as_api(self, prefix: str = "next_earnings_") -> dict:
@@ -81,9 +86,10 @@ async def batch_next_earnings(session: AsyncSession, ticker_ids: list, today: da
     today = today or date.today()
     from app.config import settings
     licensed_only = dates_licensed_only()
-    tickers = (await session.execute(select(Ticker.id, Ticker.symbol, Ticker.earnings_checked_at).where(Ticker.id.in_(ticker_ids)))).all()
+    tickers = (await session.execute(select(Ticker.id, Ticker.symbol, Ticker.name, Ticker.earnings_checked_at).where(Ticker.id.in_(ticker_ids)))).all()
     out = {t.id: NextEarnings(checked_at=t.earnings_checked_at) for t in tickers}
     symbol_of = {t.id: t.symbol for t in tickers}
+    name_of = {t.id: t.name for t in tickers}
     rows = (await session.execute(
         select(Event).where(
             Event.ticker_id.in_(ticker_ids), Event.event_type == EventType.EARNINGS,
@@ -98,11 +104,11 @@ async def batch_next_earnings(session: AsyncSession, ticker_ids: list, today: da
         ne = out.setdefault(tid, NextEarnings())
         ne.date, ne.source, ne.confirmation, ne.note = d, src, level, note
     if licensed_only:
-        await attach_windows(session, out, symbol_of, today)
+        await attach_windows(session, out, symbol_of, today, name_of)
     return out
 
 
-async def attach_windows(session: AsyncSession, out: dict, symbol_of: dict, today: date) -> None:
+async def attach_windows(session: AsyncSession, out: dict, symbol_of: dict, today: date, name_of: dict | None = None) -> None:
     """A name with no company-confirmed date shows its expected window from SEC filing dates, when one is stored and still ahead; a
     day its own events calendar lists (scripts/confirm_report_dates.CALENDAR_KEY) takes the window's place."""
     import json as _json
@@ -125,6 +131,8 @@ async def attach_windows(session: AsyncSession, out: dict, symbol_of: dict, toda
             ne.confirmation, ne.window_center = EXPECTED_WINDOW, date.fromisoformat(cal["day"])
             ne.window_start, ne.window_end = date.fromisoformat(cal["start"]), date.fromisoformat(cal["end"])
             ne.window_source, ne.window_computed_at = CALENDAR_SOURCE, cal.get("seen_on")
+            from app.services.briefing import short_name
+            ne.window_company = short_name((name_of or {}).get(tid), sym) or sym
             continue
         w = window_from_record(by_key.get(KEY.format(sym=sym)))
         if not w or date.fromisoformat(w["end"]) < today:
