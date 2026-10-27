@@ -1320,10 +1320,10 @@ function PriceChart({
 
 const BASE_SECTIONS = [
   { id: "overview",  label: "OVERVIEW" },
+  { id: "research",  label: "RESEARCH" },
   { id: "catalysts", label: "CATALYSTS" },
   { id: "evidence",  label: "EVIDENCE" },
   { id: "options",   label: "OPTIONS" },
-  { id: "research",  label: "RESEARCH" },
 ] as const;
 
 function SectionNav({ sections }: { sections: readonly { id: string; label: string }[] }) {
@@ -2098,6 +2098,293 @@ export default function TickerPage() {
           {/* The question strip: up to four questions this stock's data raises, answered from stored rows */}
           <div data-slot="question-strip"><QuestionStrip symbol={upperSymbol} /></div>
         </div>
+
+        {/* ── RESEARCH ────────────────────────────────────────────────── */}
+        <section id="research" className="border-t pt-16 pb-24 scroll-mt-28">
+          <SectionKicker index="05" label="Research" />
+
+          {noteStatus === "loading" && (
+            <div className="animate-pulse space-y-3">
+              <div className="h-4 bg-muted rounded w-1/3" />
+              <div className="h-4 bg-muted rounded w-full" />
+              <div className="h-4 bg-muted rounded w-5/6" />
+              <div className="h-4 bg-muted rounded w-2/3" />
+            </div>
+          )}
+
+          {noteStatus === "error" && (
+            <div className="py-6">
+              <p className="text-sm text-muted-foreground">Could not load research note. Try refreshing.</p>
+            </div>
+          )}
+
+          {noteStatus === "empty" && (
+            <div className="py-6 space-y-3">
+              <p className="text-sm text-muted-foreground">No research note yet for {upperSymbol}.</p>
+              {genPolicy && genPolicy.can_generate && (
+                <>
+                  <button
+                    onClick={() => void handleGenerate()}
+                    className="tap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Generate research note
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    Takes about {genPolicy.expected_wait_seconds[0]} to {genPolicy.expected_wait_seconds[1]} seconds.
+                    {genPolicy.public && genPolicy.per_ip_hour != null && (
+                      <> Limited to {genPolicy.per_ip_hour} per hour and {genPolicy.per_ip_day} per day per visitor, one note per stock per day.</>
+                    )}
+                  </p>
+                </>
+              )}
+              {genPolicy && !genPolicy.can_generate && genPolicy.owner_only_message && (
+                <p className="text-sm text-muted-foreground" data-testid="generation-owner-only">{genPolicy.owner_only_message}.</p>
+              )}
+              {generateRefusal && (
+                <Callout severity="caution">{generateRefusal}</Callout>
+              )}
+            </div>
+          )}
+
+          {noteStatus === "done" && note && note.status === "generating" && (
+            <div className="py-6 animate-pulse">
+              <p className="text-sm font-medium mb-1">Generating research note…</p>
+              <p className="text-xs text-muted-foreground">
+                Reading filings and earnings history
+                {genPolicy ? <>, usually {genPolicy.expected_wait_seconds[0]} to {genPolicy.expected_wait_seconds[1]} seconds</> : null}.
+                The note is verified by a second model before it is shown.
+              </p>
+            </div>
+          )}
+
+          {noteStatus === "done" && note && note.status === "verifying" && (
+            <div>
+              {note.source_filings.length === 0 && (
+                <Callout severity="caution" banner>
+                  <strong>Generated without SEC filing.</strong>{" "}
+                  This note is based on general knowledge and earnings history only, not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                </Callout>
+              )}
+              <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
+                <span>
+                  {writtenBeforeLabel(note.report_since) && (
+                    <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
+                  )}
+                  Generated {timeAgo(note.generated_at)}
+                  {note.source_filings.length > 0 && (
+                    <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
+                  )}
+                </span>
+              </div>
+              {note.structured_content ? (
+                <StructuredNoteView
+                  note={note.structured_content}
+                  symbol={upperSymbol}
+                  companyName={ticker?.name}
+                  sector={ticker?.sector}
+                  industry={ticker?.industry}
+                  valuationShown={note.valuation_shown === true}
+                />
+              ) : (
+                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
+                  <ReactMarkdown>{note.content}</ReactMarkdown>
+                </div>
+              )}
+              <div className="border-t px-6 py-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/40 border-t-muted-foreground animate-spin" />
+                Verifying claims against filings…
+              </div>
+            </div>
+          )}
+
+          {noteStatus === "done" && note && note.status === "failed" && (
+            <div className="space-y-3">
+              <Callout severity="caution" title="Generation failed">
+                {note.error || "An unknown error occurred."}
+              </Callout>
+              {generateRefusal && <Callout severity="caution">{generateRefusal}</Callout>}
+              {genPolicy?.can_generate ? (
+                <button
+                  onClick={() => void handleGenerate()}
+                  className="tap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Try Again
+                </button>
+              ) : (
+                <p className="text-sm text-muted-foreground">{genPolicy?.owner_only_message ?? OWNER_REGENERATES}</p>
+              )}
+            </div>
+          )}
+
+          {noteStatus === "done" && note && (note.status === "complete" || note.status === "verification_failed") && (
+            <div>
+              {note.verification_failed && (
+                <Callout severity="caution" banner>
+                  <strong>Verification failed.</strong>{" "}
+                  The second-model check did not complete for this note, so its claims are unchecked. Visitors cannot see it. Use Verify or Regenerate.
+                </Callout>
+              )}
+              {note.source_filings.length === 0 && (
+                <Callout severity="caution" banner>
+                  <strong>Generated without SEC filing.</strong>{" "}
+                  This note is based on general knowledge and earnings history only, not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
+                </Callout>
+              )}
+              {note.verification && note.verification.summary.contradicted > 0 && (
+                <Callout severity="alert" banner>
+                  <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
+                  See the verification section below for details.
+                </Callout>
+              )}
+              {noteStaleness?.stale && (
+                <div className="flex items-center justify-between px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
+                  <span>
+                    {noteStaleness.reason}. Last generated {fmtOneDate(note.generated_at)}.
+                  </span>
+                  {genPolicy?.can_regenerate && (
+                    <button
+                      onClick={handleRegenerate}
+                      className="font-medium hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
+                    >
+                      Regenerate
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
+                <span>
+                  {writtenBeforeLabel(note.report_since) && (
+                    <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
+                  )}
+                  Generated {timeAgo(note.generated_at)}
+                  {note.source_filings.length > 0 && (
+                    <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
+                  )}
+                </span>
+                {genPolicy?.can_regenerate && (
+                  <button
+                    onClick={handleRegenerate}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Regenerate
+                  </button>
+                )}
+              </div>
+              {note.structured_content ? (
+                <StructuredNoteView
+                  note={note.structured_content}
+                  symbol={upperSymbol}
+                  companyName={ticker?.name}
+                  sector={ticker?.sector}
+                  industry={ticker?.industry}
+                  valuationShown={note.valuation_shown === true}
+                />
+              ) : (
+                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
+                  <ReactMarkdown>{note.content}</ReactMarkdown>
+                </div>
+              )}
+              {note.verification ? (
+                <>
+                  <VerificationPanel
+                    verification={note.verification}
+                    verifiedAt={note.verified_at}
+                    open={verificationOpen}
+                    onToggle={() => setVerificationOpen(o => !o)}
+                  />
+                  <SourceFilingsRow filings={note.source_filings} />
+                </>
+              ) : (
+                <>
+                  <div className="border-t px-6 py-3 text-xs text-muted-foreground">
+                    Verification unavailable. Claims in this note have not been checked against source data.
+                    <button
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            const n = await api.researchNotes.verify(upperSymbol);
+                            setNote(n);
+                          } catch { /* ignore */ }
+                        })();
+                      }}
+                      className="ml-2 hover:text-foreground transition-colors"
+                    >
+                      Retry verification
+                    </button>
+                  </div>
+                  <SourceFilingsRow filings={note.source_filings} />
+                </>
+              )}
+            </div>
+          )}
+          {/* Recent News */}
+          <div className="border-t pt-6 mt-8">
+            <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-4">Recent News</p>
+
+            {newsStatus === "loading" && (
+              <div className="space-y-3 animate-pulse">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="h-4 bg-muted rounded w-3/4" />
+                    <div className="h-3 bg-muted rounded w-1/2" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {newsStatus === "empty" && (
+              <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
+            )}
+            {newsStatus === "error" && (
+              <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
+            )}
+            {newsStatus === "done" && news && (() => {
+              const visible = newsExpanded ? news.items : news.items.slice(0, 3);
+              const hasMore = news.items.length > 3;
+              return (
+                <div className="space-y-2">
+                  {visible.map((item) => (
+                    <div
+                      key={item.datetime + item.headline.slice(0, 20)}
+                      className="border-b border-border/40 py-3"
+                    >
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-third-party
+                        className="tap text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
+                      >
+                        {item.headline}
+                      </a>
+                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
+                        <span>{item.source}</span>
+                        <span>·</span>
+                        <span>{timeAgoUnix(item.datetime)}</span>
+                      </div>
+                      {item.summary && (
+                        <p data-third-party className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
+                          {item.summary}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {hasMore && (
+                    <button
+                      type="button"
+                      onClick={() => setNewsExpanded((o) => !o)}
+                      className="tap flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
+                    >
+                      <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
+                      {newsExpanded
+                        ? "Show less"
+                        : `Show ${news.items.length - 3} more stories`}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </section>
 
         {/* ── CATALYSTS ───────────────────────────────────────────────── */}
         <section id="catalysts" className="border-t pt-16 pb-10 sm:pb-24 scroll-mt-28">
@@ -2931,293 +3218,6 @@ export default function TickerPage() {
             </section>
           );
         })()}
-
-        {/* ── RESEARCH ────────────────────────────────────────────────── */}
-        <section id="research" className="border-t pt-16 pb-24 scroll-mt-28">
-          <SectionKicker index="05" label="Research" />
-
-          {noteStatus === "loading" && (
-            <div className="animate-pulse space-y-3">
-              <div className="h-4 bg-muted rounded w-1/3" />
-              <div className="h-4 bg-muted rounded w-full" />
-              <div className="h-4 bg-muted rounded w-5/6" />
-              <div className="h-4 bg-muted rounded w-2/3" />
-            </div>
-          )}
-
-          {noteStatus === "error" && (
-            <div className="py-6">
-              <p className="text-sm text-muted-foreground">Could not load research note. Try refreshing.</p>
-            </div>
-          )}
-
-          {noteStatus === "empty" && (
-            <div className="py-6 space-y-3">
-              <p className="text-sm text-muted-foreground">No research note yet for {upperSymbol}.</p>
-              {genPolicy && genPolicy.can_generate && (
-                <>
-                  <button
-                    onClick={() => void handleGenerate()}
-                    className="tap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    Generate research note
-                  </button>
-                  <p className="text-xs text-muted-foreground">
-                    Takes about {genPolicy.expected_wait_seconds[0]} to {genPolicy.expected_wait_seconds[1]} seconds.
-                    {genPolicy.public && genPolicy.per_ip_hour != null && (
-                      <> Limited to {genPolicy.per_ip_hour} per hour and {genPolicy.per_ip_day} per day per visitor, one note per stock per day.</>
-                    )}
-                  </p>
-                </>
-              )}
-              {genPolicy && !genPolicy.can_generate && genPolicy.owner_only_message && (
-                <p className="text-sm text-muted-foreground" data-testid="generation-owner-only">{genPolicy.owner_only_message}.</p>
-              )}
-              {generateRefusal && (
-                <Callout severity="caution">{generateRefusal}</Callout>
-              )}
-            </div>
-          )}
-
-          {noteStatus === "done" && note && note.status === "generating" && (
-            <div className="py-6 animate-pulse">
-              <p className="text-sm font-medium mb-1">Generating research note…</p>
-              <p className="text-xs text-muted-foreground">
-                Reading filings and earnings history
-                {genPolicy ? <>, usually {genPolicy.expected_wait_seconds[0]} to {genPolicy.expected_wait_seconds[1]} seconds</> : null}.
-                The note is verified by a second model before it is shown.
-              </p>
-            </div>
-          )}
-
-          {noteStatus === "done" && note && note.status === "verifying" && (
-            <div>
-              {note.source_filings.length === 0 && (
-                <Callout severity="caution" banner>
-                  <strong>Generated without SEC filing.</strong>{" "}
-                  This note is based on general knowledge and earnings history only, not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
-                </Callout>
-              )}
-              <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
-                <span>
-                  {writtenBeforeLabel(note.report_since) && (
-                    <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
-                  )}
-                  Generated {timeAgo(note.generated_at)}
-                  {note.source_filings.length > 0 && (
-                    <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
-                  )}
-                </span>
-              </div>
-              {note.structured_content ? (
-                <StructuredNoteView
-                  note={note.structured_content}
-                  symbol={upperSymbol}
-                  companyName={ticker?.name}
-                  sector={ticker?.sector}
-                  industry={ticker?.industry}
-                  valuationShown={note.valuation_shown === true}
-                />
-              ) : (
-                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
-                  <ReactMarkdown>{note.content}</ReactMarkdown>
-                </div>
-              )}
-              <div className="border-t px-6 py-3 flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/40 border-t-muted-foreground animate-spin" />
-                Verifying claims against filings…
-              </div>
-            </div>
-          )}
-
-          {noteStatus === "done" && note && note.status === "failed" && (
-            <div className="space-y-3">
-              <Callout severity="caution" title="Generation failed">
-                {note.error || "An unknown error occurred."}
-              </Callout>
-              {generateRefusal && <Callout severity="caution">{generateRefusal}</Callout>}
-              {genPolicy?.can_generate ? (
-                <button
-                  onClick={() => void handleGenerate()}
-                  className="tap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  Try Again
-                </button>
-              ) : (
-                <p className="text-sm text-muted-foreground">{genPolicy?.owner_only_message ?? OWNER_REGENERATES}</p>
-              )}
-            </div>
-          )}
-
-          {noteStatus === "done" && note && (note.status === "complete" || note.status === "verification_failed") && (
-            <div>
-              {note.verification_failed && (
-                <Callout severity="caution" banner>
-                  <strong>Verification failed.</strong>{" "}
-                  The second-model check did not complete for this note, so its claims are unchecked. Visitors cannot see it. Use Verify or Regenerate.
-                </Callout>
-              )}
-              {note.source_filings.length === 0 && (
-                <Callout severity="caution" banner>
-                  <strong>Generated without SEC filing.</strong>{" "}
-                  This note is based on general knowledge and earnings history only, not grounded in a current 10-Q or 10-K. Treat all claims with extra caution.
-                </Callout>
-              )}
-              {note.verification && note.verification.summary.contradicted > 0 && (
-                <Callout severity="alert" banner>
-                  <strong>Verification found {note.verification.summary.contradicted} contradicted claim{note.verification.summary.contradicted !== 1 ? "s" : ""}.</strong>{" "}
-                  See the verification section below for details.
-                </Callout>
-              )}
-              {noteStaleness?.stale && (
-                <div className="flex items-center justify-between px-6 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
-                  <span>
-                    {noteStaleness.reason}. Last generated {fmtOneDate(note.generated_at)}.
-                  </span>
-                  {genPolicy?.can_regenerate && (
-                    <button
-                      onClick={handleRegenerate}
-                      className="font-medium hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                    >
-                      Regenerate
-                    </button>
-                  )}
-                </div>
-              )}
-              <div className="flex items-center justify-between px-6 py-3 border-b text-xs text-muted-foreground">
-                <span>
-                  {writtenBeforeLabel(note.report_since) && (
-                    <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
-                  )}
-                  Generated {timeAgo(note.generated_at)}
-                  {note.source_filings.length > 0 && (
-                    <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
-                  )}
-                </span>
-                {genPolicy?.can_regenerate && (
-                  <button
-                    onClick={handleRegenerate}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Regenerate
-                  </button>
-                )}
-              </div>
-              {note.structured_content ? (
-                <StructuredNoteView
-                  note={note.structured_content}
-                  symbol={upperSymbol}
-                  companyName={ticker?.name}
-                  sector={ticker?.sector}
-                  industry={ticker?.industry}
-                  valuationShown={note.valuation_shown === true}
-                />
-              ) : (
-                <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
-                  <ReactMarkdown>{note.content}</ReactMarkdown>
-                </div>
-              )}
-              {note.verification ? (
-                <>
-                  <VerificationPanel
-                    verification={note.verification}
-                    verifiedAt={note.verified_at}
-                    open={verificationOpen}
-                    onToggle={() => setVerificationOpen(o => !o)}
-                  />
-                  <SourceFilingsRow filings={note.source_filings} />
-                </>
-              ) : (
-                <>
-                  <div className="border-t px-6 py-3 text-xs text-muted-foreground">
-                    Verification unavailable. Claims in this note have not been checked against source data.
-                    <button
-                      onClick={() => {
-                        void (async () => {
-                          try {
-                            const n = await api.researchNotes.verify(upperSymbol);
-                            setNote(n);
-                          } catch { /* ignore */ }
-                        })();
-                      }}
-                      className="ml-2 hover:text-foreground transition-colors"
-                    >
-                      Retry verification
-                    </button>
-                  </div>
-                  <SourceFilingsRow filings={note.source_filings} />
-                </>
-              )}
-            </div>
-          )}
-          {/* Recent News */}
-          <div className="border-t pt-6 mt-8">
-            <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground mb-4">Recent News</p>
-
-            {newsStatus === "loading" && (
-              <div className="space-y-3 animate-pulse">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 bg-muted rounded w-3/4" />
-                    <div className="h-3 bg-muted rounded w-1/2" />
-                  </div>
-                ))}
-              </div>
-            )}
-            {newsStatus === "empty" && (
-              <p className="text-sm text-muted-foreground">No recent news in the last 48 hours.</p>
-            )}
-            {newsStatus === "error" && (
-              <p className="text-sm text-muted-foreground">Couldn&apos;t load news right now.</p>
-            )}
-            {newsStatus === "done" && news && (() => {
-              const visible = newsExpanded ? news.items : news.items.slice(0, 3);
-              const hasMore = news.items.length > 3;
-              return (
-                <div className="space-y-2">
-                  {visible.map((item) => (
-                    <div
-                      key={item.datetime + item.headline.slice(0, 20)}
-                      className="border-b border-border/40 py-3"
-                    >
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        data-third-party
-                        className="tap text-sm font-medium text-foreground hover:text-cool transition-colors leading-snug"
-                      >
-                        {item.headline}
-                      </a>
-                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground/70">
-                        <span>{item.source}</span>
-                        <span>·</span>
-                        <span>{timeAgoUnix(item.datetime)}</span>
-                      </div>
-                      {item.summary && (
-                        <p data-third-party className="text-xs text-muted-foreground mt-1 sm:line-clamp-2 leading-relaxed">
-                          {item.summary}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                  {hasMore && (
-                    <button
-                      type="button"
-                      onClick={() => setNewsExpanded((o) => !o)}
-                      className="tap flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
-                    >
-                      <span className="text-[10px]">{newsExpanded ? "▲" : "▼"}</span>
-                      {newsExpanded
-                        ? "Show less"
-                        : `Show ${news.items.length - 3} more stories`}
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        </section>
 
       </div>
     </main>
