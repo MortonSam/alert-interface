@@ -453,9 +453,10 @@ def upcoming_clause(*, today: date, next_date: date, confirmation: str | None = 
     options do not separate a report move, that sentence."""
     days = (next_date - today).days
     if confirmation == "expected_window":
-        from app.services.next_earnings import expected_window_line
-        return (expected_window_line(next_date) + ".", [_input("expected report day", fmt_date(next_date), today,
-                "the window from its past report dates in SEC filings (services/report_windows)")], [])
+        from app.services.next_earnings import CALENDAR_SOURCE, expected_window_line
+        why = ("the company's own events calendar (scripts/confirm_report_dates)" if source == CALENDAR_SOURCE
+               else "the window from its past report dates in SEC filings (services/report_windows)")
+        return (expected_window_line(next_date, source) + ".", [_input("expected report day", fmt_date(next_date), today, why)], [])
     conf = confidence_phrase(confirmation)
     text = f"Reports {fmt_date(next_date)}" + (f" {TIMING_PHRASE[timing]}" if timing in TIMING_PHRASE else "") + ", " + ("today" if days == 0 else plural(days, "day away", "days away"))
     text += f" ({conf})" if conf else ""

@@ -2018,7 +2018,7 @@ export default function TickerPage() {
           </div>
 
           <p className="text-sm text-muted-foreground mt-5" data-testid="next-earnings-line">
-            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note, undefined, ticker.next_earnings_window_center)}
+            {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note, undefined, ticker.next_earnings_window_center, ticker.next_earnings_window_source)}
           </p>
 
           {/* "Why now" strip */}
@@ -2104,7 +2104,7 @@ export default function TickerPage() {
 
           {/* No company-confirmed date: the expected window from its past report dates, in place of a vendor's estimate */}
           {ticker.next_earnings_confirmation === "expected_window" && ticker.next_earnings_window_center && (
-            <p className="text-sm text-foreground/85 mb-4" data-testid="catalysts-expected-window">{expectedWindowLine(ticker.next_earnings_window_center)}</p>
+            <p className="text-sm text-foreground/85 mb-4" data-testid="catalysts-expected-window">{expectedWindowLine(ticker.next_earnings_window_center, ticker.next_earnings_window_source)}</p>
           )}
 
           {/* 1. HERO — Next Catalyst */}

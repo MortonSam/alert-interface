@@ -144,15 +144,16 @@ async def feed_texts(http: httpx.AsyncClient, feed_url: str, issuer: str | None,
     return out
 
 
-async def events_texts(http: httpx.AsyncClient, events_url: str, today: date) -> tuple[list[dict], list[dict]]:
+async def events_texts(http: httpx.AsyncClient, events_url: str, today: date) -> tuple[list[dict], list[dict], list[dict]]:
     """(results events, documents) from the company's IR events feed. An upcoming event whose title names the results themselves
     (ir_feeds.results_event: Apple's "FY 26 Fourth Quarter Results") is the company's own calendar putting its results on that day; an
     event that names a call or webcast is read as a document, its description and its event page together, so that only a release
-    date in the company's words ("results will be released after the market closes on ...") confirms."""
+    date in the company's words ("results will be released after the market closes on ...") confirms. The third list holds the
+    feed's results listings over a two-day range with no time (ir_feeds.calendar_listings): expected dates, never confirmations."""
     from app.services import ir_feeds as F
     body = await F.fetch_allowed(http, events_url)
     if not body:
-        return [], []
+        return [], [], []
     results, docs = [], []
     for ev in F.earnings_events(F.parse_items(body, events_url), today):
         if (ev["day"] - today).days > R.HORIZON_DAYS:
@@ -167,7 +168,25 @@ async def events_texts(http: httpx.AsyncClient, events_url: str, today: date) ->
         page = await F.fetch_allowed(http, ev["link"]) if ev["link"] else None
         docs.append({"kind": "IR events", "reference": ev["link"] or events_url, "published": (item.get("published") or "")[:16] or "?",
                      "text": f"{ev['title']}. {description} {F.clean(page) if page else ''}".strip()})
-    return results, docs
+    listings = [x for x in F.calendar_listings(F.parse_items(body, events_url), today) if (x["day"] - today).days <= R.HORIZON_DAYS]
+    return results, docs, listings
+
+
+CALENDAR_KEY = "company_calendar:{sym}"   # the company's own events calendar's expected report day (services/next_earnings reads it)
+
+
+async def store_calendar_listing(sym: str, listing: dict | None, today: date) -> None:
+    """Keep the nearest two-day listing as the ticker's expected day from its own calendar, or clear a stored one the feed no longer lists."""
+    import json
+    from app.services.system_metadata_service import set_value
+    async with ScriptSessionLocal() as s:
+        if listing is None:
+            await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": CALENDAR_KEY.format(sym=sym)})
+        else:
+            await set_value(s, CALENDAR_KEY.format(sym=sym), json.dumps({
+                "day": listing["day"].isoformat(), "start": listing["start"].isoformat(), "end": listing["end"].isoformat(),
+                "title": listing["title"][:200], "link": listing["link"], "seen_on": today.isoformat()}))
+        await s.commit()
 
 
 def events_note(ev: dict) -> str:
@@ -260,8 +279,12 @@ async def main(argv: list[str]) -> int:
                     docs += await asyncio.wait_for(feed_texts(http, t["feed_url"], t.get("name"), sym, today), TICKER_TIMEOUT_S)
                 seen_days: set[date] = set()
                 if t.get("events_url"):
-                    results, event_docs = await asyncio.wait_for(events_texts(http, t["events_url"], today), TICKER_TIMEOUT_S)
+                    results, event_docs, listings = await asyncio.wait_for(events_texts(http, t["events_url"], today), TICKER_TIMEOUT_S)
                     docs += event_docs
+                    if listings:
+                        print(f"  {sym}: IR events lists \"{listings[0]['title'][:60]}\" {listings[0]['start']} to {listings[0]['end']}: expected, not confirmed", flush=True)
+                    if write:
+                        await store_calendar_listing(sym, listings[0] if listings else None, today)
                     for ev in results[:1]:                   # the nearest results event is the next report
                         seen_days.add(ev["day"])
                         kind, target = classify(ev["day"], stored.get(sym, []))

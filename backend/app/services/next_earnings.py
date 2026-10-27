@@ -24,8 +24,14 @@ EXPECTED_WINDOW = "expected_window"   # the confirmation level of a name with no
 EXPECTED_WINDOW_LINE = "Next report expected around {date}, based on its past report dates (not yet confirmed by the company)"
 
 
-def expected_window_line(center: date) -> str:
-    return EXPECTED_WINDOW_LINE.format(date=center.strftime("%b %-d, %Y"))
+# a day from the company's own events calendar (Sam, 2026-10-27: NVIDIA's "11/16/2026 - 11/17/2026" results listing) takes the
+# window's place; its line names that source instead of past report dates (frontend lib/earningsSource.expectedWindowLine, tested)
+CALENDAR_SOURCE = "the company's own events calendar"
+CALENDAR_LINE = "Next report expected around {date}, from the company's own events calendar (not yet confirmed by the company)"
+
+
+def expected_window_line(center: date, source: str | None = None) -> str:
+    return (CALENDAR_LINE if source == CALENDAR_SOURCE else EXPECTED_WINDOW_LINE).format(date=center.strftime("%b %-d, %Y"))
 
 
 @dataclass
@@ -97,16 +103,29 @@ async def batch_next_earnings(session: AsyncSession, ticker_ids: list, today: da
 
 
 async def attach_windows(session: AsyncSession, out: dict, symbol_of: dict, today: date) -> None:
-    """A name with no company-confirmed date shows its expected window from SEC filing dates, when one is stored and still ahead."""
+    """A name with no company-confirmed date shows its expected window from SEC filing dates, when one is stored and still ahead; a
+    day its own events calendar lists (scripts/confirm_report_dates.CALENDAR_KEY) takes the window's place."""
+    import json as _json
     from sqlalchemy import text as _text
+    from app.scripts.confirm_report_dates import CALENDAR_KEY
     from app.services.report_windows import KEY, window_from_record
     need = {tid: symbol_of[tid] for tid, ne in out.items() if ne.date is None and tid in symbol_of}
     if not need:
         return
-    rows = (await session.execute(_text("SELECT key, value FROM system_metadata WHERE key = ANY(:k)"),
-                                  {"k": [KEY.format(sym=s) for s in need.values()]})).all()
+    keys = [KEY.format(sym=s) for s in need.values()] + [CALENDAR_KEY.format(sym=s) for s in need.values()]
+    rows = (await session.execute(_text("SELECT key, value FROM system_metadata WHERE key = ANY(:k)"), {"k": keys})).all()
     by_key = {k: v for k, v in rows}
     for tid, sym in need.items():
+        try:
+            cal = _json.loads(by_key.get(CALENDAR_KEY.format(sym=sym)) or "null")
+        except ValueError:
+            cal = None
+        if cal and date.fromisoformat(cal["day"]) >= today:
+            ne = out[tid]
+            ne.confirmation, ne.window_center = EXPECTED_WINDOW, date.fromisoformat(cal["day"])
+            ne.window_start, ne.window_end = date.fromisoformat(cal["start"]), date.fromisoformat(cal["end"])
+            ne.window_source, ne.window_computed_at = CALENDAR_SOURCE, cal.get("seen_on")
+            continue
         w = window_from_record(by_key.get(KEY.format(sym=sym)))
         if not w or date.fromisoformat(w["end"]) < today:
             continue

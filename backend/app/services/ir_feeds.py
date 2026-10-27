@@ -45,6 +45,8 @@ _ROBOTS: dict[str, robotparser.RobotFileParser] = {}
 EVENTS_FEED_PATH = "/rss/event.aspx"
 PRESS_FEED_PATH = "/rss/pressrelease.aspx"
 _EVENT_TITLE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*:\s*(.+?)\s*$")
+_EVENT_RANGE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*-\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*:\s*(.+?)\s*$")
+CALENDAR_RANGE_DAYS = 1      # a listing over two days ("11/16/2026 - 11/17/2026"); a longer range is no report day
 EARNINGS_EVENT = re.compile(r"\b(?:earnings|financial results|results)\b", re.I)
 NOT_EARNINGS_EVENT = re.compile(r"annual meeting|investor day|analyst day|shareholder|conference(?!\s+call)|presentation|dividend|roadshow|summit|sales results|monthly|same.store", re.I)
 _CALL_ONLY = re.compile(r"\b(?:call|webcast)\b", re.I)
@@ -74,6 +76,26 @@ def earnings_events(items: list[dict], today: date) -> list[dict]:
         title = m.group(4)
         if day >= today and EARNINGS_EVENT.search(title) and not NOT_EARNINGS_EVENT.search(title):
             out.append({"day": day, "title": title, "link": it.get("link") or ""})
+    return out
+
+
+def calendar_listings(items: list[dict], today: date) -> list[dict]:
+    """Pure: [{start, end, day, title, link}] for the feed's results events listed over a two-day range with no time (NVIDIA's
+    "11/16/2026 - 11/17/2026 : NVIDIA 3rd Quarter FY27 Financial Results", posted 2026-10-26). The company's own calendar puts its
+    results on one of those days: an expected date, never a confirmed one (Sam, 2026-10-27). `day`, the date a page names, is the
+    range's last day, the latest the listing allows."""
+    out = []
+    for it in items:
+        m = _EVENT_RANGE.match(it.get("title") or "")
+        if not m:
+            continue
+        try:
+            start, end = date(int(m.group(3)), int(m.group(1)), int(m.group(2))), date(int(m.group(6)), int(m.group(4)), int(m.group(5)))
+        except ValueError:
+            continue
+        title = m.group(7)
+        if end >= today and 0 < (end - start).days <= CALENDAR_RANGE_DAYS and results_event(title):
+            out.append({"start": start, "end": end, "day": end, "title": title, "link": it.get("link") or ""})
     return out
 
 

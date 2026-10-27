@@ -70,6 +70,7 @@ export interface Ticker {
   next_earnings_checked_at?: string | null;  // when the calendar refresh last asked Finnhub about this ticker
   next_earnings_confirmation?: "confirmed" | "estimated" | "expected_unconfirmed" | "expected_window" | null;
   next_earnings_window_center?: string | null;   // with "expected_window": the day "Next report expected around" names
+  next_earnings_window_source?: string | null;   // where that day comes from (lib/earningsSource.CALENDAR_SOURCE: the company's calendar)
   next_earnings_note?: string | null;        // why: "confirmed: Finnhub and Yahoo Finance agree", "estimated (Finnhub)"
   created_at: string;
   updated_at: string;
@@ -691,6 +692,7 @@ export interface SuggestionItem {
   earnings_confirmation?: string | null;
   earnings_note?: string | null;  // when Finnhub was last asked
   earnings_window_center?: string | null;
+  earnings_window_source?: string | null;
 }
 
 export interface SuggestionsResponse {
@@ -723,6 +725,7 @@ export interface UnusuallyActiveItem {
   earnings_confirmation?: string | null;
   earnings_note?: string | null;
   earnings_window_center?: string | null;
+  earnings_window_source?: string | null;
 }
 
 export interface NewsHeadline {
@@ -956,6 +959,7 @@ export interface ThesisDraftRead {
     earnings_confirmation?: string | null;
     earnings_note?: string | null;  // the fact grid says 'No confirmed date yet (Finnhub, checked <date>)' with it
     earnings_window_center?: string | null;
+    earnings_window_source?: string | null;
     expiration_used: string | null;
     days_to_expiration: number | null;
     expected_move_pct: number | null;      // percentage, e.g. 4.7

@@ -491,7 +491,7 @@ function DraftDisplay({
           </span>
         </span>
         {fb.earnings_confirmation === "expected_window" && fb.earnings_window_center ? (
-          <span className="text-foreground">{expectedWindowLine(fb.earnings_window_center)}</span>
+          <span className="text-foreground">{expectedWindowLine(fb.earnings_window_center, fb.earnings_window_source)}</span>
         ) : <span>Earnings: <span className="font-mono text-foreground">{fb.earnings_date ? cardEarningsNote(fb.earnings_date, fb.earnings_source, fb.earnings_checked_at, fb.earnings_confirmation, fb.earnings_note).replace(/^Earnings /, "") : noDateLine(fb.earnings_checked_at)}</span></span>}
         <span>
           One-day earnings move, avg ±:{" "}
