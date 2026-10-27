@@ -20,6 +20,11 @@ separate a report move and none is stated.
 Every IV is solved here (iv_solver.solve_atm) from the chains' own mids, spot (`underlying_price`, the close on the chain date) and
 the stored rate on that date. Any change to the formula or its inputs bumps REPORT_MOVE_VERSION.
 
+Separation (Sam, 2026-10-27, Realty Income: s2 19.62% against a floored base of 19.55%, "about 0.4% from the report"): a move is
+stated only when the report-holding expiration's IV sits more than MIN_SEPARATION_VOL above its reference, the earlier expiration's IV
+for the pair and the base volatility (the square root of the base as used) for the term method; closer than that, the report is inside
+the noise of the quotes and the state is NOT_SEPARATED.
+
 Stability: a term-method move over STEADY_RATIO times the typical move is stated only when the term move from the previous chain
 date for the same report (the history the nightly records, record_history) is within STEADY_TOLERANCE of it; otherwise every
 surface says the options don't give a steady read yet (state UNSTEADY), which is also what it says before a previous chain date
@@ -36,8 +41,10 @@ from app.services.chain_shadow import counts_for_report
 from app.services.trading_calendar import nth_trading_day_after
 from app.services.iv_solver import nonstandard_mids, solve_atm, time_to_expiry
 
-REPORT_MOVE_VERSION = 3       # 2: the pair only when it qualifies, else the first two expirations after the report
+REPORT_MOVE_VERSION = 4       # 2: the pair only when it qualifies, else the first two expirations after the report
                                # 3: the term method's base floored at the 20-day realized variance
+                               # 4: the report expiration more than MIN_SEPARATION_VOL above its reference, else not separated
+MIN_SEPARATION_VOL = 0.01      # one vol point (Sam, 2026-10-27)
 REPORT_SHARE = 0.80            # expected absolute move of a normal day, in standard deviations (sqrt(2/pi) = 0.798)
 PAIR_MIN_PRE_SESSIONS = 5      # the pair's pre-report expiration is at least this many trading days after the chain date
 PAIR_MAX_POST_DAYS = 21        # and its post-report expiration within this many calendar days of the report
@@ -59,6 +66,12 @@ STATED = (OK, NOT_SEPARATED, UNSTEADY)        # states whose sentence every surf
 STEADY_RATIO = 2.0             # a term move over this multiple of the typical move needs a steady previous chain date
 STEADY_TOLERANCE = 0.25        # the previous chain date's term move within this share of today's
 HISTORY_KEEP = 6               # chain dates kept per report in the history
+
+
+def separated(s2: float, reference: float) -> bool:
+    """Pure: the report expiration's IV is more than MIN_SEPARATION_VOL above its reference (the pair's earlier IV, or the term
+    method's base volatility). Rounded to 1e-9 so a gap of exactly one point is not separated."""
+    return round(s2 - reference, 9) > MIN_SEPARATION_VOL
 
 
 def report_move_pct(s1: float, s2: float, t2: float) -> float | None:
@@ -136,6 +149,7 @@ class ReportMove:
     raw_base_variance: float | None = None  # the forward variance before the floor
     rv_20d: float | None = None          # the serving 20-day realized volatility the floor read, None with no servable snapshot
     base_floored: bool | None = None     # the floor raised the base
+    within_noise: bool | None = None     # a move at the mids with the report expiration within MIN_SEPARATION_VOL of its reference
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -185,7 +199,7 @@ async def report_move(db, sym: str, report_date: date | str, today: date | None 
     if after is None or after.atm_iv is None:
         return ReportMove(NO_IV, after=after, report_date=rd)
     _, t2 = time_to_expiry(cd, date.fromisoformat(post_exp))
-    computed, mixed, no_iv = False, False, False
+    computed, mixed, no_iv, noise = False, False, False, False
     before = later = None
     t3 = base = raw = None
     rv = floored = None
@@ -198,6 +212,8 @@ async def report_move(db, sym: str, report_date: date | str, today: date | None 
         else:
             computed = True
             pct = report_move_pct(before.atm_iv, after.atm_iv, t2)
+            if pct is not None and not separated(after.atm_iv, before.atm_iv):
+                noise, pct = True, None
             if pct is not None:
                 return ReportMove(OK, pct=pct, e=pct / REPORT_SHARE, t2_years=t2, before=before, after=after, report_date=rd, method=PAIR)
     if later_exp is not None:
@@ -216,13 +232,15 @@ async def report_move(db, sym: str, report_date: date | str, today: date | None 
             base = floored_base(raw, rv) if raw is not None and raw > 0 else raw
             floored = raw is not None and raw > 0 and base > raw
             pct = term_move_pct(after.atm_iv, t2, later.atm_iv, t3, rv)
+            if pct is not None and not separated(after.atm_iv, math.sqrt(base)):
+                noise, pct = True, None
             if pct is not None:
                 return ReportMove(OK, pct=pct, e=pct / REPORT_SHARE, t2_years=t2, before=before, after=after, report_date=rd,
                                   method=TERM, later=later, t3_years=t3, base_variance=base, raw_base_variance=raw, rv_20d=rv,
                                   base_floored=floored)
     state = NOT_SEPARATED if computed else MIXED_DATES if mixed else NO_IV if no_iv else NO_LEGS
     return ReportMove(state, t2_years=t2, before=before, after=after, report_date=rd, later=later, t3_years=t3, base_variance=base,
-                      raw_base_variance=raw, rv_20d=rv, base_floored=floored)
+                      raw_base_variance=raw, rv_20d=rv, base_floored=floored, within_noise=noise or None)
 
 
 def history_key(sym: str, report_date: str) -> str:

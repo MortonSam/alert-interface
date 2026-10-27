@@ -106,7 +106,7 @@ async def test_report_move_solves_both_legs_and_carries_its_receipts(monkeypatch
     assert (rm.before.expiration, rm.after.expiration, rm.before.chain_date, rm.after.chain_date) == ("2026-10-23", "2026-10-30", "2026-10-14", "2026-10-14")
     assert abs(rm.t2_years - 16 / 365) < 1e-12
     assert abs(rm.pct - RM.report_move_pct(rm.before.atm_iv, rm.after.atm_iv, 16 / 365)) < 1e-12 and round(rm.pct * 100, 1) == 8.7
-    assert rm.method == RM.PAIR and rm.version == RM.REPORT_MOVE_VERSION == 3
+    assert rm.method == RM.PAIR and rm.version == RM.REPORT_MOVE_VERSION == 4
     assert set(rm.as_dict()) >= {"state", "pct", "e", "t2_years", "before", "after", "report_date", "version", "method", "later"}
 
 
@@ -431,3 +431,21 @@ async def test_the_history_keeps_the_newest_chain_dates_and_reads_the_one_before
                                                                                  "2026-10-12": {"pct": 0.1, "method": "term", "version": 2}}))
         assert await RM.previous_term_move(db, "ZZRM", "2026-10-30", "2026-10-14") is None     # a pair move or an older version never counts
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_a_report_expiration_within_one_vol_point_of_its_reference_is_not_separated(monkeypatch):
+    """Realty Income on 2026-10-26 (Sam, 2026-10-27): Nov 20 at 19.62%, Dec 18 at 19.42%, a 20-day swing of 19.55% flooring the base;
+    at the mids the term method gave "about 0.4% from the report". 19.62% is 0.07 points above the base: not separated."""
+    cd = date(2026, 10, 26)
+    chains = {"2026-11-20": _chain(57.43, 57.5, 0.1962, cd, "2026-11-20", 0.0404), "2026-12-18": _chain(57.43, 57.5, 0.1942, cd, "2026-12-18", 0.0404)}
+    _patch_store(monkeypatch, chains, "2026-11-20", rv=0.195495)
+    rm = await RM.report_move(None, "O", "2026-11-02", cd)
+    assert rm.state == RM.NOT_SEPARATED and rm.within_noise is True and rm.pct is None and rm.base_floored is True
+    assert RM.term_move_pct(rm.after.atm_iv, rm.t2_years, rm.later.atm_iv, rm.t3_years, 0.195495) is not None   # the mids alone give a move
+    # a report expiration 1.5 points above its base is stated
+    chains["2026-11-20"] = _chain(57.43, 57.5, 0.2105, cd, "2026-11-20", 0.0404)
+    clear = await RM.report_move(None, "O", "2026-11-02", cd)
+    assert clear.state == RM.OK and clear.within_noise is None
+    assert RM.separated(0.2056, 0.1955) and not RM.separated(0.2055, 0.1955) and not RM.separated(0.1962, 0.195495)
+    assert RM.MIN_SEPARATION_VOL == 0.01
