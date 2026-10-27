@@ -2828,11 +2828,19 @@ def names_match(a: str | None, b: str | None) -> bool:
     return name_key(a) == name_key(b) or sorted(name_words(a)) == sorted(name_words(b))
 
 
+# Names that differ from SEC's on purpose (Sam, 2026-10-27), each with why: {symbol: (the stored name, the reason)}
+NAME_EXCEPTIONS = {
+    "GE": ("GE Aerospace", "legal name General Electric Company, which trades as GE Aerospace since the 2024 separations; SEC still lists the legal name"),
+}
+
+
 def name_mismatches(stored: dict[str, str | None], sec_titles: dict[str, str]) -> list[str]:
     """Pure: "SYM: stored ... vs SEC ..." for each ticker whose stored name is not SEC's company name for its CIK (names_match). A
     ticker SEC does not list is not judged here."""
     out = []
     for sym, name in sorted(stored.items()):
+        if sym in NAME_EXCEPTIONS and name == NAME_EXCEPTIONS[sym][0]:
+            continue                                  # a documented exception, only while the stored name is the one it names
         title = sec_titles.get(sym) or sec_titles.get(sym.replace("-", ".")) or sec_titles.get(sym.replace("-", ""))
         if title and not names_match(name, title):
             out.append(f"{sym}: stored \"{name}\" vs SEC \"{title}\"")
