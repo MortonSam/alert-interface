@@ -91,3 +91,13 @@ def test_the_note_check_runs_in_the_gate_and_the_nightly():
     days = [note_smoke.rotation(syms, 3, date(2026, 10, 28) + __import__("datetime").timedelta(days=d)) for d in range(168)]
     assert all(len(d) == 3 for d in days) and len({s for d in days for s in d}) == 503       # every stock in turn
     # the gate's step is held by scripts/test_push_window.py (host tests): "note check" with the five symbols
+
+
+def test_the_nightly_writes_missing_notes_first_then_failed_then_reported_since():
+    from app.scripts import generate_notes as G, refresh
+    rows = [("AAA", "complete", False), ("BBB", None, False), ("CCC", "failed", False), ("DDD", "complete", True), ("EEE", None, False)]
+    assert G.queue(rows, 170) == ["BBB", "EEE", "CCC", "DDD"]          # AAA is current
+    assert G.queue(rows, 2) == ["BBB", "EEE"]
+    assert G.MAX_PER_NIGHT == 170 and G.RESERVE_USD > 0
+    assert ("Research notes (nightly)", ["python", "-m", "app.scripts.generate_notes"]) in refresh.STEPS
+    assert refresh.STEP_TIMEOUTS["Research notes (nightly)"] == 3600

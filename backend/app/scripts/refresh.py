@@ -111,6 +111,8 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Pricing desk (Ivy v3)",          ["python", "-m", "app.scripts.pricing_desk"]),
     # three stocks' research notes end to end with production's key, a different three each night; a failure names this step in the
     # digest (app/scripts/note_smoke, Sam 2026-10-27)
+    # a research note for every active ticker, at most 170 a night under the AI cap, then each again after its next report
+    ("Research notes (nightly)",       ["python", "-m", "app.scripts.generate_notes"]),
     ("Research note check",            ["python", "-m", "app.scripts.note_smoke", "--rotate=3"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
@@ -121,6 +123,7 @@ STEPS: list[tuple[str, list[str]]] = [
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 
 STEP_TIMEOUTS: dict[str, int] = {
+    "Research notes (nightly)": 3600,         # 170 notes, four at a time, about a minute each
     "Refresh profiles (Finnhub)": 300,
     "Growth (XBRL and 8-K releases)": 3600,      # --due; the first night reads every active ticker's facts and releases (about 40 minutes)
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
