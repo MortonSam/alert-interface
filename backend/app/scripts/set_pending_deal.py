@@ -65,9 +65,14 @@ def find_near(body: str, pattern: str, near: str) -> str | None:
 
 
 def price_pattern(price: float) -> str:
-    """Pure: "$15.00 per share in cash" and the usual variants ("$15.00 in cash per share", "$15.00 per share, in cash")."""
+    """Pure: "$15.00 per share in cash" and the usual variants ("$15.00 in cash per share", "$15.00 per share, in cash"), and the merger
+    agreement's own words for each share, "converted into the right to receive $205 in cash" (PTC, 2026-10-05); a whole-dollar price
+    may be written without cents."""
     p = re.escape(f"{price:,.2f}")
-    return rf"\$\s?{p}\s*(?:per\s+share[\s,]*(?:of\s+[\w\s]{{0,40}}?)?(?:,\s*)?(?:payable\s+)?in\s+cash|in\s+cash[\s,]*(?:,\s*)?per\s+share)"
+    if price == int(price):
+        p = rf"{re.escape(f'{int(price):,}')}(?:\.00)?(?!\.\d)"
+    per_share = rf"\$\s?{p}\s*(?:per\s+share[\s,]*(?:of\s+[\w\s]{{0,40}}?)?(?:,\s*)?(?:payable\s+)?in\s+cash|in\s+cash[\s,]*(?:,\s*)?per\s+share)"
+    return rf"{per_share}|right\s+to\s+receive\s+\$\s?{p}\s+in\s+cash"
 
 
 def date_pattern(d: date) -> str:

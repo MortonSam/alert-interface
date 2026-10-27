@@ -39,6 +39,11 @@ def test_the_filing_check_reads_price_date_and_cik():
     for s in ("receive $15.00 per share in cash", "the $73.00 in cash per share of Bio-Techne", "$15.00 per share, in cash"):
         assert re.search(W.price_pattern(15.0 if "15" in s else 73.0), s, re.I), s
     assert not re.search(W.price_pattern(15.0), "a $15.00 per share dividend")
+    # PTC (2026-10-05): "each share ... will be converted into the right to receive $205 in cash", a whole-dollar price without cents
+    ptc = "will be converted into the right to receive $205 in cash, without interest"
+    assert re.search(W.price_pattern(205.0), ptc, re.I)
+    assert not re.search(W.price_pattern(205.0), "the right to receive $205.50 in cash") and not re.search(W.price_pattern(20.0), ptc)
+    assert not re.search(W.price_pattern(205.0), "a $205 million termination fee")
     body = "the President, effective March 2, 2026. " + "x " * 200 + "On March 2, 2026, the Company entered into an Agreement and Plan of Merger"
     assert "Agreement and Plan of Merger" in W.find_near(body, W.date_pattern(date(2026, 3, 2)), W.AGREEMENT_WORDS)
     assert W.find_near("effective March 2, 2026, a new President", W.date_pattern(date(2026, 3, 2)), W.AGREEMENT_WORDS) is None
