@@ -105,6 +105,7 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
 _UNAVAILABLE_REASON: dict[str, str] = {}
 # symbol -> the COMPARISON FACTS block (services/note_comparisons), set by _fetch_context, read by both prompts
 _COMPARISONS: dict[str, str] = {}
+_BUSINESS: dict[str, dict | None] = {}     # the latest 10-K's Item 1 per symbol (note_business), evidence for generation and the check
 MODEL_TIMEOUT_SECONDS = 180      # every generation and verification call is bounded
 
 
@@ -293,6 +294,7 @@ def _build_generation_prompt(
 
     comparisons = _COMPARISONS.get(ticker.symbol) or "COMPARISON FACTS: (none on file)"
     from app.services.note_rules import MAX_POINTS
+    business = _business_block(ticker.symbol)
 
     return f"""\
 You are a financial research analyst producing a STRUCTURED research note for {ticker.symbol}.
@@ -302,6 +304,8 @@ SECTOR: {sector} | INDUSTRY: {industry}
 MARKET CAP: {market_cap}
 {corporate_events or ""}
 {filing_block}
+
+{business}
 
 {comparisons}
 
@@ -327,7 +331,8 @@ RULES:
   "exceptional", "strong buy", "undervalued", "overvalued", "bullish", "bearish", "attractive valuation" or anything similar.
 - No em dashes or en dashes anywhere. Use commas or separate sentences.
 - Use "an" before a number spoken with a vowel sound ("an 18% rise", "an 8-quarter run", "an 11.5% margin") and "a" otherwise.
-- Only state facts about the business that appear in the filing excerpt, COMPARISON FACTS, or are well-established public knowledge.
+- Only state facts about the business that appear in the filing excerpt, ITEM 1 (BUSINESS) or COMPARISON FACTS. A second model checks
+  every sentence against those sources, and a sentence it cannot confirm there is removed from the note before anyone reads it.
 - Do NOT invent revenue figures, margin percentages, ARR, RPO, guidance, or valuation multiples not present in the provided context.
 - Do NOT make superlative claims ("strongest", "best ever", "largest") unless the provided context unambiguously supports them.
 - Return ONLY valid JSON. No markdown fences. No preamble. No explanation outside the JSON object.\
@@ -409,6 +414,22 @@ def _serialize_structured_note(structured: dict, ticker: Ticker) -> str:
     return "\n".join(lines)
 
 
+def _business_block(symbol: str) -> str:
+    b = _BUSINESS.get(symbol)
+    if not b:
+        return "ITEM 1 (BUSINESS): (not available)"
+    return f"ITEM 1 (BUSINESS), from the {b['form']} filed {b['filed']}:\n{b['text']}\n--- END ITEM 1 ---"
+
+
+META_LINE = "*Most recent quarter:"
+
+
+def _checked_text(content_text: str) -> str:
+    """The note as the verifier reads it: without the serialized date line, which is the stats strip's, not a sentence of the note
+    (the verifier marked "Most recent quarter: 2026-07-21" unsupported on 25 notes)."""
+    return "\n".join(line for line in content_text.split("\n") if not line.startswith(META_LINE)).rstrip()
+
+
 def _build_verification_prompt(
     note_content: str,
     filing: dict | None,
@@ -459,13 +480,16 @@ EVIDENCE SOURCE 4 (COMPARISONS computed by the system from stored SEC filings an
 year-earlier, five-year-average and sector-peer comparison):
 {comparisons}
 
+EVIDENCE SOURCE 5 (the company's own description of its business, Item 1 of its latest 10-K):
+{_business_block(ticker.symbol)}
+
 NOTE TO VERIFY:
 {note_content}
 
 CLASSIFICATION RULES:
-- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, ticker metadata, or the comparisons. Quote the specific supporting text in "reason".
+- "supported": The claim is directly and specifically confirmed by the filing text, precomputed stats, ticker metadata, the comparisons or Item 1. Quote the specific supporting text in "reason".
 - "unsupported": The claim is plausible but cannot be confirmed from the provided sources (e.g. drawn from general knowledge, an estimate, or an inference not in the sources). Say why in "reason".
-- "contradicted": The claim directly conflicts with the filing text, precomputed stats, or ticker metadata. Quote the contradiction in "reason".
+- "contradicted": The claim directly conflicts with the filing text, precomputed stats, ticker metadata, the comparisons or Item 1. Quote the contradiction in "reason".
 
 STRICT RULES:
 - Bias toward "unsupported" when in doubt. Do NOT use outside knowledge to mark something "supported".
@@ -477,8 +501,11 @@ STRICT RULES:
   deliberation, never a change of mind ("re-evaluating", "actually"), never a second verdict. A claim whose reason reads as
   deliberation is sent back once and otherwise counted as unsupported.
 
+- "sentence" is the whole sentence of the note the claim comes from, copied exactly, character for character (for a point, the
+  sentence of its text; for a point's short label, the label). A sentence that is not confirmed is removed from the note shown.
+
 Output ONLY valid JSON, no preamble, no markdown fences, no explanation outside the JSON:
-{{"claims": [{{"claim": "...", "verdict": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}\
+{{"claims": [{{"claim": "...", "sentence": "...", "verdict": "supported|unsupported|contradicted", "reason": "one sentence"}}]}}\
 """
 
 
@@ -497,6 +524,9 @@ async def _fetch_context(
             filing, sections = result
     except Exception as exc:
         print(f"EDGAR fetch failed for {ticker.symbol}: {redact(exc)}", flush=True)
+    try:
+        from app.services.note_business import business_section
+        _BUSINESS[ticker.symbol] = await business_section(edgar, ticker.symbol)
     finally:
         await edgar.close()
 
@@ -535,7 +565,7 @@ async def _run_verification(
     ticker: "Ticker",
 ) -> tuple[dict, str, int, int]:
     """Call Opus to verify the note. Returns (verification_dict, model_used, input_tokens, output_tokens)."""
-    prompt = _build_verification_prompt(note_content, filing, sections, reactions, ticker)
+    prompt = _build_verification_prompt(_checked_text(note_content), filing, sections, reactions, ticker)
     client = AnthropicClient(timeout=MODEL_TIMEOUT_SECONDS, max_retries=2)
     raw = await client.verify_research_note(prompt)
 
@@ -554,7 +584,9 @@ async def _run_verification(
             claims[i] = {**c, "verdict": again["claim"]["verdict"], "reason": again["claim"]["reason"]}
         else:
             claims[i] = {**c, "verdict": "unsupported", "reason": UNSETTLED_REASON}
-    verification = {"claims": claims, "summary": summary_of(claims)}      # the summary is counted from the verdicts, never the model's
+    from app.services.note_claims import NOTE_CHECK_VERSION
+    verification = {"claims": claims, "summary": summary_of(claims),      # the summary is counted from the verdicts, never the model's
+                    "version": NOTE_CHECK_VERSION}
 
     print(
         f"Verification complete: "
@@ -687,12 +719,15 @@ async def run_research_note_background(
     ticker_id: uuid.UUID,
     symbol: str,
     charge: dict | None = None,
+    regenerated: bool = False,
 ) -> None:
     """Background task: fetch context, generate with Sonnet, verify with Opus.
 
     Opens its own DB session — the request session is already closed.
     ``charge`` is the rate-limit use recorded for the caller ({"ip", "at"}); a
     failure at either phase refunds it, so a visitor never pays for no note.
+    A note that would lose more than note_claims.MAX_LOST sentences to its check (or hold an unconfirmed claim no sentence of it
+    holds) is written again once (``regenerated``); if the second note would too, it is held and the digest names it.
     """
     from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, refund_use
     from app.services.research_cost import estimate_cost_usd
@@ -773,6 +808,8 @@ async def run_research_note_background(
             now = datetime.now(timezone.utc)
             ver_cost = estimate_cost_usd(verification_model, ver_in, ver_out)
             total_cost = None if gen_cost is None and ver_cost is None else (gen_cost or 0.0) + (ver_cost or 0.0)
+            verdict = check_outcome(structured, verification)
+            status = "complete" if verdict is None else ("verifying" if not regenerated else STATUS_HELD)
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
@@ -783,12 +820,21 @@ async def run_research_note_background(
                     verification_input_tokens  = ver_in,
                     verification_output_tokens = ver_out,
                     estimated_cost_usd = total_cost,
-                    status             = "complete",
+                    status             = status,
+                    error              = None if verdict is None else f"held: {verdict}",
                     updated_at         = now,
                 )
             )
             await _add_to_daily_spend(db, ver_cost, now)
             await db.commit()
+            if verdict is not None:
+                print(f"Research note for {symbol}: {verdict}" + (", held" if regenerated else ", writing it again"), flush=True)
+                if regenerated:
+                    from app.services import user_errors
+                    await user_errors.record("research_note_held", f"held after a second writing: {verdict}", symbol)
+                    await _refund(db)
+                else:
+                    await run_research_note_background(ticker_id, symbol, charge, regenerated=True)
         except Exception as exc:
             print(f"Verification failed for {symbol}: {exc!r} — note withheld from visitors", flush=True)
             from app.services import user_errors
@@ -804,6 +850,19 @@ async def run_research_note_background(
 
 
 STATUS_VERIFICATION_FAILED = "verification_failed"
+STATUS_HELD = "held"           # the check could not confirm too much of the note, twice: never served, named in the digest
+
+
+def check_outcome(structured: dict | None, verification: dict | None) -> str | None:
+    """Pure: why a checked note may not be served as it stands, or None: it would lose more than MAX_LOST sentences, or an
+    unconfirmed claim sits in no sentence of it (so it cannot be removed)."""
+    from app.services.note_claims import MAX_LOST, review
+    r = review(structured, verification)
+    if len(r["lost"]) > MAX_LOST:
+        return f"the check could not confirm {len(r['lost'])} sentences (more than {MAX_LOST})"
+    if r["unlocated"]:
+        return f"{len(r['unlocated'])} unconfirmed claim(s) found in no sentence of the note"
+    return None
 
 
 # ── Who may read a note ───────────────────────────────────────────────────────
@@ -816,6 +875,18 @@ def is_verified(note: ResearchNote) -> bool:
 def verification_failed(note: ResearchNote) -> bool:
     """The check errored, or the note was marked complete without one (older rows)."""
     return note.status == STATUS_VERIFICATION_FAILED or (note.status == "complete" and note.verification is None)
+
+
+def withheld(note: ResearchNote) -> bool:
+    """A visitor never sees this note: its check errored (verification_failed), it was held (STATUS_HELD), or an unconfirmed claim
+    sits in no sentence of it, so the served note could not leave it out (note_claims; a note checked before 2026-10-28 until the
+    nightly checks it again)."""
+    if verification_failed(note) or note.status == STATUS_HELD:
+        return True
+    if is_verified(note):
+        from app.services.note_claims import review
+        return bool(review(note.structured_content, note.verification)["unlocated"])
+    return False
 
 
 # ── Re-verify existing note ───────────────────────────────────────────────────
@@ -856,6 +927,38 @@ async def verify_existing_note(
     await db.commit()
     await db.refresh(note)
     return note
+
+
+async def recheck_note(symbol: str) -> str:
+    """The nightly's check of a note checked before the current check (note_claims.NOTE_CHECK_VERSION): verified again with Item 1 of
+    the 10-K as evidence. A note the check now passes (check_outcome) keeps its text with the new verification; one that would lose
+    more than MAX_LOST sentences, or hold an unconfirmed claim it cannot place, is written again once and held if the second note fails
+    too. Returns "rechecked", "rewritten" or "failed: ..."; a failed check leaves the note as it was."""
+    from app.services.research_cost import estimate_cost_usd
+    async with AsyncSessionLocal() as db:
+        ticker = await _resolve_ticker(db, None, symbol)
+        note = (await db.execute(select(ResearchNote).where(ResearchNote.ticker_id == ticker.id))).scalar_one_or_none()
+        if note is None or not is_verified(note):
+            return "failed: no checked note"
+        filing, sections, reactions = await _fetch_context(db, ticker)
+        try:
+            verification, model, ver_in, ver_out = await _run_verification(note.content, filing, sections, reactions, ticker)
+        except Exception as exc:
+            from app.services import user_errors
+            await user_errors.record("research_verify", exc, symbol)
+            return f"failed: {redact(exc)[:120]}"
+        now = datetime.now(timezone.utc)
+        await _add_to_daily_spend(db, estimate_cost_usd(model, ver_in, ver_out), now)
+        if check_outcome(note.structured_content, verification) is not None:
+            await db.commit()
+            ticker_id = ticker.id
+        else:
+            note.verification, note.verified_at, note.verification_model = verification, now, model
+            note.verification_input_tokens, note.verification_output_tokens, note.updated_at = ver_in, ver_out, now
+            await db.commit()
+            return "rechecked"
+    await run_research_note_background(ticker_id=ticker_id, symbol=symbol, regenerated=True)
+    return "rewritten"
 
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────

@@ -417,7 +417,7 @@ export interface ResearchNote {
   valuation_shown?: boolean;       // a note's valuation figures follow the site's P/E hold (PE_ENABLED); false hides them
   verified_at: string | null;
   verification_model: string | null;
-  status: "generating" | "verifying" | "complete" | "failed" | "verification_failed";
+  status: "generating" | "verifying" | "complete" | "failed" | "verification_failed" | "held";
   error: string | null;
   verification_failed?: boolean;   // only ever true for admins; visitors get a 404
   created_at: string;

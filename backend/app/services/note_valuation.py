@@ -35,8 +35,12 @@ VENDOR_STATS = ("eps_estimate", "eps_actual", "eps_beat_pct", "revenue_estimate"
 # half-year figure is not the quarter's
 TEXT_EPS = re.compile(r"(?<![\w-])(?:diluted )?EPS (?:for the (?:quarter|three months) ended [A-Za-z]{3,9}\.? \d{1,2},? \d{4},? )?(?:of|was|at|came in at|reached|rose to|fell to) (-?)\$(\d+\.\d{2})"
                       r"|(-?)\$(\d+\.\d{2}) (?:per )?diluted", re.I)
-NOT_QUARTER = re.compile(r"(?:trailing|four[- ]quarters?|last\s+four\s+quarters|twelve[- ]months?|full[- ]year|annual|first[- ]half|half[- ]year|TTM"
-                         r"|nine[- ]months?|six[- ]months?|year[- ]to[- ]date)[\w ,-]{0,24}$", re.I)      # "Over the trailing four quarters, EPS of $1.08"
+NOT_QUARTER = re.compile(r"(?:trailing|(?:four|4)(?:[- ](?:most[- ]recent|latest|last|prior|previous))?[- ]quarters?|twelve[- ]months?|full[- ]year|annual"
+                         r"|first[- ]half|half[- ]year|TTM|nine[- ]months?|six[- ]months?|year[- ]to[- ]date|YTD|combined)[\w ,-]{0,24}$", re.I)
+                                                    # "Over the trailing four quarters, EPS of $1.08"; CBOE 2026-10-28: "The four most recent
+                                                    # quarters combined show diluted EPS of $12.83"
+# a figure labeled as other than GAAP is not the strip's (EMR 2026-10-28: "Adjusted diluted EPS of $1.71"; ES: "non-GAAP EPS was $0.87")
+NOT_GAAP = re.compile(r"(?:adjusted|non[- ]?GAAP|excluding[\w ,-]{0,30}|core|operating|pro[- ]forma)[ ,]+(?:diluted |net |earnings |\w+ ){0,2}$", re.I)
 _SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 
@@ -81,11 +85,19 @@ def leaks(structured: dict | None, verification: dict | None, content: str | Non
     return out + [f"{name}: {t[:120]}" for t in texts for name, p in pats if p.search(t)]
 
 
+def labeled_other(t: str, start: int) -> bool:
+    """Pure: the EPS figure at `start` is labeled as other than the quarter's GAAP figure: adjusted or non-GAAP, or trailing, four
+    quarters, year-to-date or another span (the label within the 60 characters before it, in its own sentence)."""
+    before = t[max(0, start - 60):start]
+    before = re.split(r"[.!?]\s+(?=[A-Z])|\n", before)[-1]
+    return bool(NOT_QUARTER.search(before) or NOT_GAAP.search(before))
+
+
 def text_eps(texts: list[str]) -> float | None:
     """Pure: the first quarterly EPS figure the note's text states, in reading order, or None."""
     for t in texts:
         for m in TEXT_EPS.finditer(t or ""):
-            if NOT_QUARTER.search((t or "")[max(0, m.start() - 40):m.start()]):
+            if labeled_other(t or "", m.start()):
                 continue
             sign, digits = (m.group(1), m.group(2)) if m.group(2) else (m.group(3), m.group(4))
             return -float(digits) if sign else float(digits)
@@ -94,6 +106,7 @@ def text_eps(texts: list[str]) -> float | None:
 
 _MON = r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
 QUARTER_ENDED = re.compile(rf"quarter (?:ended|ending) {_MON} (\d{{1,2}}),? (\d{{4}})", re.I)
+MONTH_QUARTER = re.compile(rf"\b{_MON} (\d{{4}}) quarter\b", re.I)          # "the March 2026 quarter" (EL, CRL 2026-10-28)
 QUARTER_LABEL = re.compile(r"\b(?:Q([1-4])|(first|second|third|fourth)[- ]quarter)(?: of)?(?: fiscal)? (?:FY ?)?(\d{4})\b", re.I)
 _ORDINAL = {"first": 1, "second": 2, "third": 3, "fourth": 4}
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
@@ -110,6 +123,9 @@ def named_quarter(sentence: str) -> tuple[date, bool] | None:
             hits.append((m.start(), date(int(m.group(3)), _MONTHS.index(m.group(1)[:3].lower()) + 1, int(m.group(2))), False))
         except ValueError:
             continue
+    for m in MONTH_QUARTER.finditer(sentence):
+        month, year = _MONTHS.index(m.group(1)[:3].lower()) + 1, int(m.group(2))
+        hits.append((m.start(), (date(year + (month == 12), month % 12 + 1, 1) - timedelta(days=1)), True))
     for m in QUARTER_LABEL.finditer(sentence):
         n = int(m.group(1)) if m.group(1) else _ORDINAL[m.group(2).lower()]
         year = int(m.group(3))
@@ -141,7 +157,7 @@ def quarter_text_eps(texts: list[str], period_end) -> float | None:
     for t in texts:
         t = t or ""
         for m in TEXT_EPS.finditer(t):
-            if NOT_QUARTER.search(t[max(0, m.start() - 40):m.start()]):
+            if labeled_other(t, m.start()):
                 continue
             named = named_quarter(_sentence_around(t, m.start(), m.end()))
             if named is not None and not same_quarter(named, period_end):

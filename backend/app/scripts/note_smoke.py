@@ -43,6 +43,7 @@ def rotation(symbols: list[str], n: int, on: date) -> list[str]:
 async def one(symbol: str) -> dict:
     """Generate, verify and read one stock's note in memory: {symbol, ok, verdict, cost_usd, seconds, error}."""
     from app.routers.research_notes import _note_for_reader
+    from app.services.note_claims import lost
     from app.services import research_note_service as R
     from app.services.research_cost import estimate_cost_usd
     t0 = time.monotonic()
@@ -69,9 +70,16 @@ async def one(symbol: str) -> dict:
                                model_used=gen["model_used"], input_tokens=gen["input_tokens"], output_tokens=gen["output_tokens"],
                                structured_content=structured, verification=verification, verified_at=now, verification_model=ver_model,
                                status="complete", error=None, created_at=now, updated_at=now)
-        read = _note_for_reader(note, admin=False)          # what a visitor would be served
         summary = (verification or {}).get("summary") or {}
         out["verdict"] = {k: summary.get(k) for k in ("supported", "unsupported", "contradicted")}
+        out["lost"] = lost(structured, verification)        # sentences the served note leaves out
+        held = R.check_outcome(structured, verification)
+        if held:                                            # the real path writes such a note again once (run_research_note_background)
+            out["ok"], out["error"] = True, None
+            out["held"] = held
+            out["seconds"] = round(time.monotonic() - t0, 1)
+            return out
+        read = _note_for_reader(note, admin=False)          # what a visitor would be served
         if not (read.content or "").strip():
             out["error"] = "the served note is empty"
         elif RAW.search(read.content):

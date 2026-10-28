@@ -1840,6 +1840,36 @@ async def check_note_served_clean(session) -> CheckResult:
 
 
 
+async def check_note_confirmed_only(session) -> CheckResult:
+    """ERROR when a note a visitor is served (services/note_claims.served) still shows a sentence holding an unsupported or contradicted
+    claim, or lists such a claim (Sam, 2026-10-28). Counts the held notes and the notes still waiting for the current check (the
+    nightly's recheck) in the detail."""
+    from types import SimpleNamespace
+    from app.services.note_claims import NOTE_CHECK_VERSION, review, served as confirmed_only, units
+    from app.services.research_note_service import withheld
+    rows = (await session.execute(text("""SELECT t.symbol, n.status, n.structured_content, n.verification, n.content FROM research_notes n
+        JOIN tickers t ON t.id = n.ticker_id WHERE n.status IN ('complete', 'held')"""))).all()
+    bad, shown, held, waiting = [], 0, 0, 0
+    for r in rows:
+        note = SimpleNamespace(status=r.status, structured_content=r.structured_content, verification=r.verification)
+        if withheld(note):
+            held += 1
+            continue
+        shown += 1
+        waiting += int(((r.verification or {}).get("version") or 1) < NOTE_CHECK_VERSION)
+        sc, ver, _c = confirmed_only(r.structured_content, r.verification, r.content)
+        shown_text = " ".join(u["text"] for u in units(sc))
+        left = [t for t in review(r.structured_content, r.verification)["lost"] if t in shown_text]
+        if left:
+            bad.append(f"{r.symbol}: shows {left[0][:80]!r}")
+        if any(str(c.get("verdict")) != "supported" for c in (ver or {}).get("claims") or []):
+            bad.append(f"{r.symbol}: lists an unconfirmed claim")
+    detail = f"{shown} served, {held} withheld, {waiting} served notes waiting for the current check"
+    if bad:
+        return CheckResult("note_confirmed_only", ERROR, f"{len(bad)} served note(s) show an unconfirmed sentence or claim; {detail}", bad[:20])
+    return CheckResult("note_confirmed_only", PASS, f"no served note shows an unconfirmed sentence: {detail}")
+
+
 async def check_note_eps_agrees(session) -> CheckResult:
     """ERROR when a complete research note, as served, shows one EPS in its stats strip (eps_sec, SEC diluted EPS for the strip's
     quarter) and states another in its text for the same quarter (services/note_valuation.eps_disagreement; TSLA showed $0.33 beside
@@ -3989,6 +4019,7 @@ CHECKS = [
     check_live_api_budget,
     check_market_beside_bands,
     check_note_served_clean,
+    check_note_confirmed_only,
     check_note_eps_agrees,
     check_growth_coverage,
     check_growth_fresh,

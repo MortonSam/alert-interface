@@ -28,9 +28,8 @@ export function noteFacts(stats: StructuredNoteStats | null): NoteFact[] {
   return out.slice(0, 3);
 }
 
-/** "13 claims checked: 12 supported, 1 unsupported, 0 contradicted" */
+/** "12 claims confirmed against the filing": the served note keeps its confirmed claims only (backend services/note_claims). */
 export function verificationLine(v: LatestVerifiedNote["verification_summary"]): string | null {
-  if (!v) return null;
-  const total = v.supported + v.unsupported + v.contradicted;
-  return `${total} claims checked: ${v.supported} supported, ${v.unsupported} unsupported, ${v.contradicted} contradicted`;
+  if (!v || v.supported === 0) return null;
+  return `${v.supported} claim${v.supported === 1 ? "" : "s"} confirmed against the filing`;
 }

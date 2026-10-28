@@ -29,7 +29,9 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
       revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "-2.10%", latest_outcome: null, latest_quarter_date: null }))
       .toEqual([]);
     expect(noteFacts(null)).toEqual([]);
-    expect(verificationLine({ supported: 12, unsupported: 1, contradicted: 0 })).toBe("13 claims checked: 12 supported, 1 unsupported, 0 contradicted");
+    expect(verificationLine({ supported: 12, unsupported: 0, contradicted: 0 })).toBe("12 claims confirmed against the filing");
+    expect(verificationLine({ supported: 1, unsupported: 0, contradicted: 0 })).toBe("1 claim confirmed against the filing");
+    expect(verificationLine({ supported: 0, unsupported: 0, contradicted: 0 })).toBeNull();
     expect(verificationLine(null)).toBeNull();
   });
 
@@ -50,15 +52,17 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     for (const banned of ["No confident hallucinations", "the numbers are exact", "checked before you see it"]) {
       expect(home, banned).not.toContain(banned);
     }
-    expect(home).toContain("marks each one supported, unsupported or contradicted");
-    expect(home).toContain("the check reduces errors, it does not remove them");
+    // a sentence the check cannot confirm is left out (backend services/note_claims; validate note_confirmed_only fails otherwise)
+    const flat = (s: string) => s.replace(/\s+/g, " ");
+    expect(flat(home)).toContain("A sentence it cannot confirm, or finds contradicted, is left out of the note, and the confirmed claims are listed with it");
+    expect(flat(home)).toContain("the check reduces errors, it does not remove them");
     const disc = read("app/disclosures/page.tsx");
-    expect(disc).toContain("each claim is marked supported, unsupported or contradicted");
-    expect(disc).toContain("the marks are shown with the note");
-    // the marks really are shown with the note
+    expect(flat(disc)).toContain("a sentence holding a claim the check cannot confirm, or finds contradicted, is left out of the note, and the confirmed claims are listed with it");
+    expect(flat(disc)).not.toContain("the marks are shown with the note");
+    // the confirmed claims really are listed with the note
     const ticker = read("app/tickers/[symbol]/page.tsx");
-    expect(ticker).toMatch(/unsupported\} unsupported/);
-    expect(ticker).toMatch(/contradicted\} contradicted/);
+    expect(ticker).toMatch(/supported\} supported/);
+    expect(ticker).toContain("verification.claims.map");
   });
 
   it("the four counters are live counts from /system/stats, first under the hero, with only the as-of date on hover", async () => {

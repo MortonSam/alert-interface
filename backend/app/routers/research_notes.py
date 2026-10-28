@@ -28,6 +28,7 @@ from app.services.research_note_service import (
     start_research_note_generation,
     verification_failed,
     verify_existing_note,
+    withheld,
 )
 
 router = APIRouter(prefix="/research-notes", tags=["research-notes"])
@@ -101,7 +102,7 @@ async def generate(
         # a visitor generates only where no note exists: a completed note (from any day), one in progress or one
         # that did not pass verification is the owner's to replace. A failed generation produced no note, so the
         # visitor may try again. Nothing generated, nothing charged here.
-        if verification_failed(existing):
+        if withheld(existing):
             raise HTTPException(status_code=409, detail=NOTE_UNPUBLISHED_MESSAGE)
         response.status_code = 200
         return await note_for_reader(db, existing, admin)
@@ -142,6 +143,7 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     Admins get everything, with verification_failed set so the page can say so.
     """
     failed = verification_failed(note)
+    hidden = withheld(note)
     from app.config import settings
     # one verdict per claim is the truth: the stored verification is served normalized, its summary recounted from the claims
     data = {name: getattr(note, name) for name in ResearchNoteRead.model_fields if hasattr(note, name)}
@@ -150,6 +152,11 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     if not licensed():          # LICENSED_ESTIMATES off: no point, claim, line or stat that rests on an estimate
         data["structured_content"], raw_verification = filter_note(data.get("structured_content"), raw_verification)
         data["content"] = "\n".join(line for line in (data.get("content") or "").split("\n") if not mentions_estimates(line))
+    # every sentence holding an unsupported or contradicted claim is left out, and a visitor's claims are the supported ones shown
+    from app.services.note_claims import served as confirmed_only
+    data["structured_content"], kept, data["content"] = confirmed_only(data.get("structured_content"), raw_verification, data.get("content"))
+    if not admin:
+        raw_verification = kept
     data["valuation_shown"] = bool(settings.pe_enabled)
     # no multiple while PE_ENABLED is off, and no figure the Overview states (services/note_valuation); totals recounted after
     from app.services.note_valuation import served
@@ -161,7 +168,7 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     read = ResearchNoteRead.model_validate(data)
     if admin:
         return read.model_copy(update={"verification_failed": failed})
-    if failed:
+    if hidden:
         raise HTTPException(status_code=404, detail="No research note found for this ticker")
     if not is_verified(note):
         return read.model_copy(update={
@@ -208,7 +215,7 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     )).all()
     row = None
     for candidate in rows:
-        if is_verified(candidate[0]) and await report_since(db, candidate[0].ticker_id, candidate[0].generated_at) is None:
+        if is_verified(candidate[0]) and not withheld(candidate[0]) and await report_since(db, candidate[0].ticker_id, candidate[0].generated_at) is None:
             row = candidate
             break
     if row is None:
@@ -221,6 +228,9 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     if not licensed():          # LICENSED_ESTIMATES off: no estimate-based point, claim or stat
         sc, ver = filter_note(sc, ver)
         sc = sc or {}
+    from app.services.note_claims import served as confirmed_only
+    sc, ver, _ = confirmed_only(sc, ver, None)
+    sc = sc or {}
     sc, verification, _ = served(sc, ver, None, bool(settings.pe_enabled))
     from app.services.note_valuation import with_sec_eps
     sc = await with_sec_eps(db, symbol, sc) or {}
@@ -241,7 +251,7 @@ async def get_note(
     if symbol is None and ticker_id is None:
         raise HTTPException(status_code=422, detail="Either symbol or ticker_id is required")
     note = await get_research_note(db, ticker_id, symbol)
-    if note is None or (not admin and verification_failed(note)):
+    if note is None or (not admin and withheld(note)):
         return Response(status_code=204)              # nothing to show is not an error: a 404 logged a console error on every such ticker page
     return await note_for_reader(db, note, admin)
 

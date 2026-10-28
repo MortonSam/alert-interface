@@ -956,11 +956,9 @@ function VerificationPanel({
       >
         <span className="flex items-center gap-3 font-medium">
           <span className="text-foreground">✓ {supported} supported</span>
-          <span className="text-muted-foreground">⚠ {unsupported} unsupported</span>
-          {contradicted > 0
-            ? <span className="text-amber-600 dark:text-amber-400">✗ {contradicted} contradicted</span>
-            : <span className="text-muted-foreground">✗ 0 contradicted</span>
-          }
+          {/* a visitor is served the supported claims only (backend services/note_claims): these show for the owner */}
+          {unsupported > 0 && <span className="text-muted-foreground">⚠ {unsupported} unsupported</span>}
+          {contradicted > 0 && <span className="text-amber-600 dark:text-amber-400">✗ {contradicted} contradicted</span>}
           <span className="text-muted-foreground font-normal">
             · verified {verifiedAt ? timeAgo(verifiedAt) : "—"}
           </span>
@@ -2222,8 +2220,14 @@ export default function TickerPage() {
             </div>
           )}
 
-          {noteStatus === "done" && note && (note.status === "complete" || note.status === "verification_failed") && (
+          {noteStatus === "done" && note && (note.status === "complete" || note.status === "verification_failed" || note.status === "held") && (
             <div>
+              {note.status === "held" && (
+                <Callout severity="caution" banner>
+                  <strong>Held.</strong>{" "}
+                  The check could not confirm too much of this note, twice, so visitors don&apos;t see it. Use Regenerate.
+                </Callout>
+              )}
               {note.verification_failed && (
                 <Callout severity="caution" banner>
                   <strong>Verification failed.</strong>{" "}

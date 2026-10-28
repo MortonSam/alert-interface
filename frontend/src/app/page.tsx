@@ -161,9 +161,10 @@ export default async function Home() {
                   Claims you can verify
                 </h3>
                 <p className="text-[13px] text-foreground/75 leading-[1.65] mt-1.5">
-                  A second model checks every statement against the source filing and
-                  marks each one supported, unsupported or contradicted. The marks are
-                  shown with the note; the check reduces errors, it does not remove them.
+                  A second model checks every statement against the source filing. A
+                  sentence it cannot confirm, or finds contradicted, is left out of the
+                  note, and the confirmed claims are listed with it; the check reduces
+                  errors, it does not remove them.
                 </p>
               </div>
             </div>

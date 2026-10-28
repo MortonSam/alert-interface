@@ -26,7 +26,8 @@ def self_corrected(reason: str | None, verdict: str | None = None) -> bool:
 
 
 _CLAIM_START = re.compile(r'"claim"\s*:\s*"')
-_NEXT_KEY = re.compile(r'"\s*,\s*"(?:verdict|status|reason|evidence)"\s*:')
+_NEXT_KEY = re.compile(r'"\s*,\s*"(?:sentence|verdict|status|reason|evidence)"\s*:')
+_SENTENCE = re.compile(r'"sentence"\s*:\s*"')
 _VERDICT = re.compile(r'"(?:verdict|status)"\s*:\s*"([a-z]+)"', re.I)
 _REASON = re.compile(r'"(?:reason|evidence)"\s*:\s*"(.*)"\s*\}', re.S)
 
@@ -58,21 +59,32 @@ def parse_claims(content: str | None) -> list[dict]:
         claim = chunk[:end.start()] if end else ""
         verdict = _VERDICT.search(chunk)
         reason = _REASON.search(chunk)
+        sm = _SENTENCE.search(chunk)
+        sentence = ""
+        if sm:
+            rest = chunk[sm.end():]
+            nxt = _NEXT_KEY.search(rest)
+            sentence = rest[:nxt.start()] if nxt else ""
         if claim:
             out.append(normalize_claim({"claim": claim.replace('\\"', '"'), "verdict": verdict.group(1) if verdict else None,
-                                        "reason": (reason.group(1) if reason else "").replace('\\"', '"')}))
+                                        "reason": (reason.group(1) if reason else "").replace('\\"', '"'),
+                                        "sentence": sentence.replace('\\"', '"')}))
     if not out:
         raise ValueError("the verifier's reply holds no claim that can be read")
     return out
 
 
 def normalize_claim(raw: dict) -> dict:
-    """Pure: {claim, verdict, reason} from a model row in either shape (verdict/reason, or the older status/evidence)."""
+    """Pure: {claim, verdict, reason} from a model row in either shape (verdict/reason, or the older status/evidence), with the note's
+    sentence the claim came from (since 2026-10-28, services/note_claims) when the row has one."""
     verdict = str(raw.get("verdict") or raw.get("status") or "").strip().lower()
     reason = str(raw.get("reason") if raw.get("reason") is not None else raw.get("evidence") or "").strip()
     if verdict not in VERDICTS:
         verdict = FALLBACK
-    return {"claim": str(raw.get("claim") or "").strip(), "verdict": verdict, "reason": reason}
+    out = {"claim": str(raw.get("claim") or "").strip(), "verdict": verdict, "reason": reason}
+    if str(raw.get("sentence") or "").strip():
+        out["sentence"] = str(raw["sentence"]).strip()
+    return out
 
 
 def summary_of(claims: list[dict]) -> dict:

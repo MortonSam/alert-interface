@@ -90,8 +90,9 @@ export default async function DisclosuresPage() {
           delayed, incomplete, or wrong. Reference data (earnings history,
           analyst actions, volatility) refreshes {refreshWord}. Research notes are
           written by an AI model and checked by a second model against source
-          filings: each claim is marked supported, unsupported or contradicted,
-          and the marks are shown with the note. The check reduces errors but
+          filings: a sentence holding a claim the check cannot confirm, or finds
+          contradicted, is left out of the note, and the confirmed claims are
+          listed with it. The check reduces errors but
           does not eliminate them. Verify anything material against the primary
           source.
         </p>
