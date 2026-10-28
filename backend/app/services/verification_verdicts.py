@@ -25,6 +25,47 @@ def self_corrected(reason: str | None, verdict: str | None = None) -> bool:
     return len(words) >= 2
 
 
+_CLAIM_START = re.compile(r'"claim"\s*:\s*"')
+_NEXT_KEY = re.compile(r'"\s*,\s*"(?:verdict|status|reason|evidence)"\s*:')
+_VERDICT = re.compile(r'"(?:verdict|status)"\s*:\s*"([a-z]+)"', re.I)
+_REASON = re.compile(r'"(?:reason|evidence)"\s*:\s*"(.*)"\s*\}', re.S)
+
+
+def parse_claims(content: str | None) -> list[dict]:
+    """The verifier's {"claims": [{claim, verdict, reason}]} as normalized claims. A row whose text carries the note's or the filing's
+    own quotation marks unescaped (AVY and CARR on 2026-10-28: "Expecting ',' delimiter") is read by its keys instead, as the report-date
+    reader's parse_model_json does: the claim runs to the next key, the reason to the row's closing brace. Raises ValueError when no
+    claim can be read at all, so a reply that is not a verification never passes for one."""
+    import json
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    m = re.search(r"\{.*\}", text, re.S)
+    body = m.group(0) if m else text
+    try:
+        rows = json.loads(body).get("claims") or []
+        return [normalize_claim(c) for c in rows if isinstance(c, dict)]
+    except (ValueError, AttributeError):
+        pass
+    starts = [x.end() for x in _CLAIM_START.finditer(body)]
+    out = []
+    for i, start in enumerate(starts):
+        chunk = body[start:(starts[i + 1] if i + 1 < len(starts) else len(body))]
+        end = _NEXT_KEY.search(chunk)
+        claim = chunk[:end.start()] if end else ""
+        verdict = _VERDICT.search(chunk)
+        reason = _REASON.search(chunk)
+        if claim:
+            out.append(normalize_claim({"claim": claim.replace('\\"', '"'), "verdict": verdict.group(1) if verdict else None,
+                                        "reason": (reason.group(1) if reason else "").replace('\\"', '"')}))
+    if not out:
+        raise ValueError("the verifier's reply holds no claim that can be read")
+    return out
+
+
 def normalize_claim(raw: dict) -> dict:
     """Pure: {claim, verdict, reason} from a model row in either shape (verdict/reason, or the older status/evidence)."""
     verdict = str(raw.get("verdict") or raw.get("status") or "").strip().lower()

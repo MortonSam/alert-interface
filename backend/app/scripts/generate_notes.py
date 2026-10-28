@@ -31,9 +31,9 @@ NOTE_SECONDS = 420             # one note's generation and verification, each bo
 
 def queue(rows: list[tuple[str, str | None, bool]], limit: int) -> list[str]:
     """Pure: (symbol, note status or None, reported since the note) rows to tonight's symbols: no note first, then a failed
-    generation, then a note the company has reported since; a current note is left alone."""
-    rank = {None: 0, "failed": 1}
-    due = [(rank.get(status, 2), sym) for sym, status, stale in rows if status is None or status == "failed" or stale]
+    generation or check, then a note the company has reported since; a current note is left alone."""
+    rank = {None: 0, "failed": 1, "verification_failed": 1}     # a check that errored (AVY, CARR 2026-10-28) is retried like a failure
+    due = [(rank.get(status, 2), sym) for sym, status, stale in rows if status in rank or stale]
     return [sym for _, sym in sorted(due)][:limit]
 
 
@@ -45,7 +45,7 @@ async def candidates(today: date) -> list[tuple[str, str | None, bool]]:
                            AND e.event_date >= (n.generated_at AT TIME ZONE 'America/New_York')::date AND e.event_date <= :today) AS stale
             FROM tickers t LEFT JOIN research_notes n ON n.ticker_id = t.id
             WHERE t.is_active ORDER BY t.symbol"""), {"today": today})).all()
-    return [(r.symbol, r.status, bool(r.stale) if r.status not in (None, "failed") else False) for r in rows]
+    return [(r.symbol, r.status, bool(r.stale) if r.status not in (None, "failed", "verification_failed") else False) for r in rows]
 
 
 async def outcome_of(symbol: str) -> str:

@@ -95,8 +95,9 @@ def test_the_note_check_runs_in_the_gate_and_the_nightly():
 
 def test_the_nightly_writes_missing_notes_first_then_failed_then_reported_since():
     from app.scripts import generate_notes as G, refresh
-    rows = [("AAA", "complete", False), ("BBB", None, False), ("CCC", "failed", False), ("DDD", "complete", True), ("EEE", None, False)]
-    assert G.queue(rows, 170) == ["BBB", "EEE", "CCC", "DDD"]          # AAA is current
+    rows = [("AAA", "complete", False), ("BBB", None, False), ("CCC", "failed", False), ("DDD", "complete", True), ("EEE", None, False),
+            ("FFF", "verification_failed", False)]
+    assert G.queue(rows, 170) == ["BBB", "EEE", "CCC", "FFF", "DDD"]          # AAA is current
     assert G.queue(rows, 2) == ["BBB", "EEE"]
     assert G.MAX_PER_NIGHT == 170 and G.RESERVE_USD > 0
     assert ("Research notes (nightly)", ["python", "-m", "app.scripts.generate_notes"]) in refresh.STEPS
@@ -125,3 +126,17 @@ async def test_withheld_news_says_withheld_and_a_failed_source_never_says_no_new
         monkeypatch.setattr(user_errors, "record", record)
         r = await c.get("/api/v1/tickers/BNY/news")
         assert r.json() == {"items": [], "state": "unavailable"} and recorded == ["data"]
+
+
+def test_the_verifier_reply_survives_the_notes_own_quotation_marks():
+    # AVY and CARR (2026-10-28): "verification failed: Expecting ',' delimiter"; the claim quoted the filing's "quoted" words unescaped
+    from app.services.verification_verdicts import parse_claims
+    bad = ('{"claims": [{"claim": "Management calls the quarter "a record" for labels", "verdict": "supported", '
+           '"reason": "The 10-Q says "record quarter" in the MD&A."}, {"claim": "Sales rose 4%", "verdict": "unsupported", '
+           '"reason": "No figure."}]}')
+    rows = parse_claims(bad)
+    assert [(r["claim"], r["verdict"]) for r in rows] == [('Management calls the quarter "a record" for labels', "supported"), ("Sales rose 4%", "unsupported")]
+    assert rows[0]["reason"] == 'The 10-Q says "record quarter" in the MD&A.'
+    assert parse_claims('```json\n{"claims": [{"claim": "x", "verdict": "contradicted", "reason": "y"}]}\n```')[0]["verdict"] == "contradicted"
+    with pytest.raises(ValueError):
+        parse_claims("I could not verify this note.")

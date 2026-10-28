@@ -540,18 +540,8 @@ async def _run_verification(
     raw = await client.verify_research_note(prompt)
 
     model_used    = raw["model_used"]
-    response_text = raw["content"].strip()
-
-    # Strip accidental markdown fences if present
-    if response_text.startswith("```"):
-        response_text = response_text.split("```")[1]
-        if response_text.startswith("json"):
-            response_text = response_text[4:]
-        response_text = response_text.strip()
-
-    from app.services.verification_verdicts import UNSETTLED_REASON, normalize_claim, self_corrected, summary_of
-    parsed = json.loads(response_text)
-    claims = [normalize_claim(c) for c in (parsed.get("claims") or []) if isinstance(c, dict)]
+    from app.services.verification_verdicts import UNSETTLED_REASON, parse_claims, self_corrected, summary_of
+    claims = parse_claims(raw["content"])          # tolerant of the note's own quotation marks unescaped (AVY, CARR 2026-10-28)
     in_tokens, out_tokens = raw["input_tokens"], raw["output_tokens"]
     # a claim whose reason reads as deliberation is verified once more on its own; a second such answer counts as unsupported
     for i, c in enumerate(claims):
@@ -588,17 +578,11 @@ async def _run_verification(
 async def _reverify_claim(client, claim: str, filing, sections, reactions, ticker) -> dict:
     """One claim verified on its own against the same sources (the "note" is the claim). Returns {claim: {claim, verdict, reason} | None,
     input_tokens, output_tokens}."""
-    from app.services.verification_verdicts import normalize_claim
+    from app.services.verification_verdicts import parse_claims
     raw = await client.verify_research_note(_build_verification_prompt(claim, filing, sections, reactions, ticker))
-    text = raw["content"].strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
     try:
-        rows = [normalize_claim(c) for c in (json.loads(text).get("claims") or []) if isinstance(c, dict)]
-    except (ValueError, AttributeError):
+        rows = parse_claims(raw["content"])
+    except ValueError:
         rows = []
     return {"claim": rows[0] if rows else None, "input_tokens": raw["input_tokens"], "output_tokens": raw["output_tokens"]}
 
