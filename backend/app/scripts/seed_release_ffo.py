@@ -22,6 +22,9 @@ from app.services import ffo as F
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
 from app.services.valuation import release_period_end
+from app.services.write_failures import WriteFailures
+
+WRITES = WriteFailures("Release FFO (REIT 8-K exhibits)")
 
 LOOKBACK_DAYS = 460          # five quarters back, so the newest four each have a year-ago quarter
 CALL_TIMEOUT = 90            # seconds for any one EDGAR or model call
@@ -113,15 +116,15 @@ async def run(argv: list[str]) -> int:
             for r in rows:
                 if r["period_end"] is None:
                     continue
-                await s.execute(text("""INSERT INTO ffo_quarters (symbol, period_end, report_date, ffo_per_share, state, reason, quote, how, xbrl_ffo_per_share, xbrl_gap_pct,
-                        accession, exhibit, computation_version, read_at)
-                    VALUES (:symbol, :period_end, :report_date, :ffo, :state, :reason, :quote, :how, :xbrl, :gap, :accession, :exhibit, :v, :at)
-                    ON CONFLICT (symbol, period_end) DO UPDATE SET report_date = EXCLUDED.report_date, ffo_per_share = EXCLUDED.ffo_per_share,
-                        state = EXCLUDED.state, reason = EXCLUDED.reason, quote = EXCLUDED.quote, how = EXCLUDED.how, xbrl_ffo_per_share = EXCLUDED.xbrl_ffo_per_share,
-                        xbrl_gap_pct = EXCLUDED.xbrl_gap_pct, accession = EXCLUDED.accession, exhibit = EXCLUDED.exhibit,
-                        computation_version = EXCLUDED.computation_version, read_at = EXCLUDED.read_at"""),
-                                {**r, "v": F.FFO_COMPUTATION_VERSION, "at": datetime.now(timezone.utc)})
-            await s.commit()
+                async with WRITES.own(s, f"{r['symbol']} {r['report_date']}"):          # each quarter's row stands alone
+                    await s.execute(text("""INSERT INTO ffo_quarters (symbol, period_end, report_date, ffo_per_share, state, reason, quote, how, xbrl_ffo_per_share, xbrl_gap_pct,
+                            accession, exhibit, computation_version, read_at)
+                        VALUES (:symbol, :period_end, :report_date, :ffo, :state, :reason, :quote, :how, :xbrl, :gap, :accession, :exhibit, :v, :at)
+                        ON CONFLICT (symbol, period_end) DO UPDATE SET report_date = EXCLUDED.report_date, ffo_per_share = EXCLUDED.ffo_per_share,
+                            state = EXCLUDED.state, reason = EXCLUDED.reason, quote = EXCLUDED.quote, how = EXCLUDED.how, xbrl_ffo_per_share = EXCLUDED.xbrl_ffo_per_share,
+                            xbrl_gap_pct = EXCLUDED.xbrl_gap_pct, accession = EXCLUDED.accession, exhibit = EXCLUDED.exhibit,
+                            computation_version = EXCLUDED.computation_version, read_at = EXCLUDED.read_at"""),
+                                    {**r, "v": F.FFO_COMPUTATION_VERSION, "at": datetime.now(timezone.utc)})
     summary = coverage(rows, [s for s, _ in reits], cost)
     print(summary)
     if report_path:
@@ -130,7 +133,7 @@ async def run(argv: list[str]) -> int:
                                                   f"{'' if r['ffo'] is None else '%.2f' % r['ffo']} | {r.get('how') or ''} | {'' if r['xbrl'] is None else '%.2f' % r['xbrl']} | "
                                                   f"{'' if r['gap'] is None else '%.1f%%' % r['gap']} | {(r['reason'] or '').replace('|', '/')[:200]} |" for r in rows))
     print("written" if write else "dry run: nothing written (add --write)")
-    return 0
+    return await WRITES.finish()
 
 
 def coverage(rows: list[dict], reits: list[str], cost: float) -> str:

@@ -15,8 +15,10 @@ from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
 from app.services.step_outcomes import record_step_fields
+from app.services.write_failures import WriteFailures
 
 STEP = "Report move history"
+WRITES = WriteFailures(STEP)
 REPORT_MOVE_DAYS = 45
 
 
@@ -36,13 +38,15 @@ async def run(today: date | None = None) -> int:
         for r in rows:
             if not implied_move_allowed(level_of(r.is_confirmed, r.unresolved_since)):
                 continue
-            rm = await report_move(db, r.symbol, r.event_date, today)
-            states[rm.state] += 1
-            recorded += await record_history(db, r.symbol, rm)
-        await db.commit()
+            async with WRITES.own(db, r.symbol) as done:             # each report's history stands alone
+                rm = await report_move(db, r.symbol, r.event_date, today)
+                n = await record_history(db, r.symbol, rm)
+            if done.ok:
+                states[rm.state] += 1
+                recorded += n
     print(f"[report-move-history] {recorded} recorded; states {dict(states)}")
     await record_step_fields(STEP, {"recorded": recorded, "states": dict(states)})
-    return 0
+    return await WRITES.finish()
 
 
 if __name__ == "__main__":

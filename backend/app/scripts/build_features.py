@@ -36,6 +36,7 @@ from app.models.historical_reaction import HistoricalReaction
 from app.services import price_bars
 from app.models.iv_history import COURIER_SOURCE, IVHistory
 from app.models.ticker import Ticker
+from app.services.write_failures import WriteFailures
 
 # ── V1 thresholds (exact match to thesis.py lines 1032-1155) ────────────────
 
@@ -182,7 +183,10 @@ def _momentum_20d(prices: pd.DataFrame, event_date: date) -> float | None:
 
 # ── Main ────────────────────────────────────────────────────────────────────
 
-async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
+WRITES = WriteFailures("Build earnings features")
+
+
+async def main(limit: int | None = None, skip_yfinance: bool = False) -> int:
     t0 = time.time()
 
     async with ScriptSessionLocal() as session:
@@ -201,7 +205,7 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
 
         if not rows:
             print("No earnings reactions found. Exiting.")
-            return
+            return 0
 
         # 2. Group by ticker_id
         by_ticker: dict[str, list] = defaultdict(list)
@@ -489,10 +493,12 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                     if row[col] is None:
                         null_counts[col] += 1
 
-        # 7. Bulk upsert
+        # 7. Upsert, each ticker's rows in a transaction of their own
         print(f"\nUpserting {len(feature_rows)} feature rows...")
-        for i in range(0, len(feature_rows), 500):
-            batch = feature_rows[i:i + 500]
+        by_symbol: dict[str, list[dict]] = defaultdict(list)
+        for row in feature_rows:
+            by_symbol[row["symbol"]].append(row)
+        for sym, batch in by_symbol.items():
             stmt = pg_insert(EarningsFeature).values(batch)
             stmt = stmt.on_conflict_do_update(
                 index_elements=["ticker_id", "event_date"],
@@ -502,8 +508,8 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
                     if col not in ("ticker_id", "event_date")
                 },
             )
-            await session.execute(stmt)
-        await session.commit()
+            async with WRITES.own(session, sym):
+                await session.execute(stmt)
 
         elapsed = time.time() - t0
         print(f"\nDone in {elapsed:.1f}s")
@@ -522,6 +528,7 @@ async def main(limit: int | None = None, skip_yfinance: bool = False) -> None:
             print(f"  {row['symbol']:6s} {row['event_date']}  w1d={row['weighted_1d']}  "
                   f"lean={row['lean_earnings']}/{row['lean_analyst']}/{row['lean_momentum']}  "
                   f"dec={row['decision']}  actual_1d={row['actual_1d']}  outcome={row['outcome']}")
+    return await WRITES.finish()
 
 
 def cli():
@@ -529,7 +536,7 @@ def cli():
     parser.add_argument("--limit", type=int, default=None, help="Limit number of tickers")
     parser.add_argument("--skip-yfinance", action="store_true", help="Skip yfinance price fetches")
     args = parser.parse_args()
-    asyncio.run(main(limit=args.limit, skip_yfinance=args.skip_yfinance))
+    sys.exit(asyncio.run(main(limit=args.limit, skip_yfinance=args.skip_yfinance)))
 
 
 if __name__ == "__main__":

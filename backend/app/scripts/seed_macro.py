@@ -199,18 +199,19 @@ async def main() -> int:
 
     print(f"\n── Upserting {len(all_events)} events ────────────────────────")
     inserted = updated = 0
+    from app.services.write_failures import WriteFailures
+    writes = WriteFailures(MACRO_STEP_LABEL)
     async with AsyncSessionLocal() as session:
         for ev in all_events:
-            created = await upsert_macro_event(session, ev)
-            if created:
-                inserted += 1
-            else:
-                updated += 1
-        await session.commit()
+            async with writes.own(session, f"{ev.title} {ev.event_date}") as done:         # each release date stands alone
+                created = await upsert_macro_event(session, ev)
+            if done.ok:
+                inserted += created
+                updated += not created
 
     print(f"  ✓ {inserted} inserted, {updated} updated")
     print("\n✓ Done.\n")
-    return 0
+    return await writes.finish()
 
 
 if __name__ == "__main__":

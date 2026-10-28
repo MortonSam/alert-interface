@@ -58,6 +58,7 @@ from app.services.finnhub_client import FinnhubClient
 from app.services.report_announcements import edgar_ir_8ks, from_8k_text, from_news
 from app.services.system_metadata_service import get_value, set_value
 from app.services.step_outcomes import record_step_fields
+from app.services.write_failures import WriteFailures
 
 LOOKAHEAD_DAYS = 120
 PAST_LOOKBACK_DAYS = 60          # past estimated events this old are re-resolved
@@ -76,6 +77,7 @@ FEED_SPOTCHECK_KEY = "ir_feed_confirmations_started"   # system_metadata: the fi
 ANNOUNCE_BUDGET_SECONDS = 240
 REPORT_DUE_DAYS = 75             # no reaction row this recent: a report is due, ask for an announcement whatever the calendar says
 STEP_LABEL = "Refresh earnings calendar (Finnhub)"
+WRITES = WriteFailures(STEP_LABEL)
 SOURCE_ENUM = {"finnhub": DataSource.FINNHUB, "yfinance": DataSource.YFINANCE, "company": DataSource.EDGAR}
 
 
@@ -105,6 +107,18 @@ class Plan:
     yfinance_unreached_streak: dict = field(default_factory=dict)    # {symbol: runs in a row unreached}, from the last outcome
     announcements_checked: int = 0
     announcements_found: int = 0
+
+    def mark(self) -> dict:
+        """Pure: where every count and list stands, for restore() when a ticker's writes are undone."""
+        return {k: (len(v) if isinstance(v, list) else v) for k, v in vars(self).items() if isinstance(v, (int, list)) and not isinstance(v, bool)}
+
+    def restore(self, mark: dict) -> None:
+        for k, v in mark.items():
+            cur = getattr(self, k)
+            if isinstance(cur, list):
+                del cur[v:]
+            else:
+                setattr(self, k, v)
 
     def fields(self) -> dict:
         return {
@@ -390,113 +404,132 @@ async def apply_ticker(session, ticker: Ticker, stored: list[Event], protected: 
 async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime, edgar: EdgarClient | None = None,
                     write: bool = True) -> Plan:
     """Decide and apply for every ticker. `sources` carries what the fetch phase found (see run).
-    With write=False the plan is computed against the database and rolled back: nothing is written."""
-    today = now.date()
+    With write=False the plan is computed against the database and rolled back: nothing is written.
+
+    Each ticker stands alone (Sam, 2026-10-28; Missed reports' unique-key error had rolled back the night's work): its changes are
+    made inside a savepoint and committed with it, so a failure undoes that ticker's changes and its lines in the plan, is named
+    (WRITES), and the rest go on. The step then exits failed (run)."""
     plan = Plan()
     for ticker in tickers:
         sym = ticker.symbol
-        fin_future = sources["finnhub_future"].get(sym, {})
-        yf_future = sources["yfinance_future"].get(sym, {})
-        company = sources["company"].get(sym)
-        answered = {"finnhub": set(fin_future), "yfinance": set(yf_future)}
-        cands = [Candidate(d, "finnhub", t) for d, t in fin_future.items()]
-        cands += [Candidate(d, "yfinance", t) for d, t in yf_future.items()]
-        if company is not None:
-            cands.append(Candidate(company.day, "company", company.timing, company.evidence))
-
-        reactions = sorted((await session.execute(
-            select(HistoricalReaction.event_date).where(
-                HistoricalReaction.ticker_id == ticker.id, HistoricalReaction.event_type == EventType.EARNINGS)
-        )).scalars().all())
-
-        # the same release cannot confirm two dates: a date stored from it earlier (ARES's Sep 30, read as the report date before
-        # quarter-end dates were refused) is removed once it confirms another, unless a reaction row stands on it
-        if company is not None:
-            for e in (await session.execute(select(Event).where(
-                    Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True),
-                    Event.event_date >= today - timedelta(days=SAME_RELEASE_LOOKBACK_DAYS)))).scalars().all():
-                if same_release_stale(e.event_date, e.confirmation_note, company.day, company.evidence, reactions):
-                    plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; the same release confirms {company.day.isoformat()}")
-                    await session.delete(e)
-            await session.flush()
-
-        actuals = sources["finnhub_actual"].get(sym, []) + sources["yfinance_reported"].get(sym, [])
-        # a past report stored on an 8-K alone that the company's own later date shows was not the report (preliminary figures, an
-        # outlook update, an accounting change) is removed (services/earnings_calendar.edgar_only_report_superseded)
-        # every company-confirmed date of the last SAME_REPORT_DAYS and ahead: a company-confirmed date never moves on vendor data, and a
-        # vendor's date beside one is the same report (services/earnings_calendar)
-        company_dates = [e.event_date for e in (await session.execute(select(Event).where(
-            Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS,
-            Event.event_date >= today - timedelta(days=SAME_REPORT_DAYS)))).scalars().all()
-            if company_confirmed(e.is_confirmed, e.confirmation_note)]
-        for e in (await session.execute(select(Event).where(
-                Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True),
-                Event.event_date < today, Event.event_date >= today - timedelta(days=SAME_REPORT_DAYS)))).scalars().all():
-            by = edgar_only_report_superseded(e.event_date, e.confirmation_note, reactions, actuals, company_dates)
-            if by:
-                plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; an 8-K alone stood for it, and the company confirmed {by.isoformat()} for the report")
-                await session.delete(e)
-                continue
-            dup = vendor_report_beside_company(e.event_date, e.confirmation_note, reactions, company_dates)
-            if dup:
-                plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; a vendor's date for the report the company confirmed on {dup.isoformat()}")
-                await session.delete(e)
-        await session.flush()
-
-        stored = list((await session.execute(
-            select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today)
-            .order_by(Event.event_date)
-        )).scalars().all())
-        protected: dict[date, str] = {}
-        for e in stored:
-            reason = beyond_calendar_reach(_stored_date(e), reactions, actuals)
-            if reason:
-                protected[e.event_date] = reason
-
-        # an empty or failed fetch is never evidence: a silent source's stored estimate is its standing word
-        standing = standing_candidates([_stored_date(e) for e in stored if e.event_date not in protected],
-                                       {src for src, days in answered.items() if days}, today)
-        for c in standing:
-            plan.standing.append(f"{sym}: {c.day.isoformat()} ({c.source}) stands; {SOURCE_LABELS[c.source]} returned no future date this run")
-        cands += standing
-
-        # the last report: the newest reaction row, or today's report if its evidence is already stored
-        reported = reactions + [d for d in protected if d <= today]
-        last_report = max(reported) if reported else None
-        decided = merge_future(cands, None, today)
-        if decided and (not protected or decided[0].day < min(protected)):
-            note = far_note(decided[0].day, last_report)
-            if note:
-                decided[0].note += "; " + note
-
-        past_estimates = list((await session.execute(
-            select(Event).where(
-                Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(False),
-                Event.event_date < today, Event.unresolved_since.is_(None) | (Event.event_date >= today - timedelta(days=PAST_LOOKBACK_DAYS)))
-            # every past estimate still standing as resolved is re-judged, however old (FDX's June 2026 estimate stood for
-            # months beyond the lookback); one already marked unresolved is re-asked only inside the lookback
-        )).scalars().all())
-        past: list[tuple[Event, PastResolution]] = []
-        confirmed_future = sorted({d for d, why in protected.items() if why in ("EDGAR", "company announcement")} | set(company_dates))
-        for e in past_estimates:
-            if beyond_calendar_reach(_stored_date(e), reactions, []):
-                continue   # it has its row or a non-calendar source: the calendar step leaves it alone
-            edgar_202: list[date] = []
-            if edgar is not None and (today - e.event_date).days <= EDGAR_202_LOOKBACK_DAYS + 5:
-                edgar_202 = await _edgar_202_dates(edgar, sym, today)
-            res = resolve_past(
-                e.event_date, today, reactions, [f.day for f in decided],
-                sources["finnhub_actual"].get(sym, []), sources["yfinance_reported"].get(sym, []), edgar_202, now,
-                confirmed_future=confirmed_future,
-            )
-            past.append((e, res))
-
-        await apply_ticker(session, ticker, stored, protected, decided, past, now, plan, answered)
+        mark = plan.mark()
+        try:
+            async with session.begin_nested():
+                await _reconcile_ticker(session, ticker, sources, now, edgar, plan)
+            if write:
+                await session.commit()
+        except Exception as exc:
+            plan.restore(mark)
+            WRITES.add(sym, exc)
+            print(f"  {sym}: calendar write failed, the rest go on: {redact(exc)[:160]}", flush=True)
     if write:
         await session.commit()
     else:
         await session.rollback()
     return plan
+
+
+async def _reconcile_ticker(session, ticker: Ticker, sources: dict, now: datetime, edgar: EdgarClient | None, plan: Plan) -> None:
+    """One ticker's decisions and writes (reconcile)."""
+    today = now.date()
+    sym = ticker.symbol
+    fin_future = sources["finnhub_future"].get(sym, {})
+    yf_future = sources["yfinance_future"].get(sym, {})
+    company = sources["company"].get(sym)
+    answered = {"finnhub": set(fin_future), "yfinance": set(yf_future)}
+    cands = [Candidate(d, "finnhub", t) for d, t in fin_future.items()]
+    cands += [Candidate(d, "yfinance", t) for d, t in yf_future.items()]
+    if company is not None:
+        cands.append(Candidate(company.day, "company", company.timing, company.evidence))
+
+    reactions = sorted((await session.execute(
+        select(HistoricalReaction.event_date).where(
+            HistoricalReaction.ticker_id == ticker.id, HistoricalReaction.event_type == EventType.EARNINGS)
+    )).scalars().all())
+
+    # the same release cannot confirm two dates: a date stored from it earlier (ARES's Sep 30, read as the report date before
+    # quarter-end dates were refused) is removed once it confirms another, unless a reaction row stands on it
+    if company is not None:
+        for e in (await session.execute(select(Event).where(
+                Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True),
+                Event.event_date >= today - timedelta(days=SAME_RELEASE_LOOKBACK_DAYS)))).scalars().all():
+            if same_release_stale(e.event_date, e.confirmation_note, company.day, company.evidence, reactions):
+                plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; the same release confirms {company.day.isoformat()}")
+                await session.delete(e)
+        await session.flush()
+
+    actuals = sources["finnhub_actual"].get(sym, []) + sources["yfinance_reported"].get(sym, [])
+    # a past report stored on an 8-K alone that the company's own later date shows was not the report (preliminary figures, an
+    # outlook update, an accounting change) is removed (services/earnings_calendar.edgar_only_report_superseded)
+    # every company-confirmed date of the last SAME_REPORT_DAYS and ahead: a company-confirmed date never moves on vendor data, and a
+    # vendor's date beside one is the same report (services/earnings_calendar)
+    company_dates = [e.event_date for e in (await session.execute(select(Event).where(
+        Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS,
+        Event.event_date >= today - timedelta(days=SAME_REPORT_DAYS)))).scalars().all()
+        if company_confirmed(e.is_confirmed, e.confirmation_note)]
+    for e in (await session.execute(select(Event).where(
+            Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(True),
+            Event.event_date < today, Event.event_date >= today - timedelta(days=SAME_REPORT_DAYS)))).scalars().all():
+        by = edgar_only_report_superseded(e.event_date, e.confirmation_note, reactions, actuals, company_dates)
+        if by:
+            plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; an 8-K alone stood for it, and the company confirmed {by.isoformat()} for the report")
+            await session.delete(e)
+            continue
+        dup = vendor_report_beside_company(e.event_date, e.confirmation_note, reactions, company_dates)
+        if dup:
+            plan.superseded.append(f"{sym}: {e.event_date.isoformat()} removed; a vendor's date for the report the company confirmed on {dup.isoformat()}")
+            await session.delete(e)
+    await session.flush()
+
+    stored = list((await session.execute(
+        select(Event).where(Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.event_date >= today)
+        .order_by(Event.event_date)
+    )).scalars().all())
+    protected: dict[date, str] = {}
+    for e in stored:
+        reason = beyond_calendar_reach(_stored_date(e), reactions, actuals)
+        if reason:
+            protected[e.event_date] = reason
+
+    # an empty or failed fetch is never evidence: a silent source's stored estimate is its standing word
+    standing = standing_candidates([_stored_date(e) for e in stored if e.event_date not in protected],
+                                   {src for src, days in answered.items() if days}, today)
+    for c in standing:
+        plan.standing.append(f"{sym}: {c.day.isoformat()} ({c.source}) stands; {SOURCE_LABELS[c.source]} returned no future date this run")
+    cands += standing
+
+    # the last report: the newest reaction row, or today's report if its evidence is already stored
+    reported = reactions + [d for d in protected if d <= today]
+    last_report = max(reported) if reported else None
+    decided = merge_future(cands, None, today)
+    if decided and (not protected or decided[0].day < min(protected)):
+        note = far_note(decided[0].day, last_report)
+        if note:
+            decided[0].note += "; " + note
+
+    past_estimates = list((await session.execute(
+        select(Event).where(
+            Event.ticker_id == ticker.id, Event.event_type == EventType.EARNINGS, Event.is_confirmed.is_(False),
+            Event.event_date < today, Event.unresolved_since.is_(None) | (Event.event_date >= today - timedelta(days=PAST_LOOKBACK_DAYS)))
+        # every past estimate still standing as resolved is re-judged, however old (FDX's June 2026 estimate stood for
+        # months beyond the lookback); one already marked unresolved is re-asked only inside the lookback
+    )).scalars().all())
+    past: list[tuple[Event, PastResolution]] = []
+    confirmed_future = sorted({d for d, why in protected.items() if why in ("EDGAR", "company announcement")} | set(company_dates))
+    for e in past_estimates:
+        if beyond_calendar_reach(_stored_date(e), reactions, []):
+            continue   # it has its row or a non-calendar source: the calendar step leaves it alone
+        edgar_202: list[date] = []
+        if edgar is not None and (today - e.event_date).days <= EDGAR_202_LOOKBACK_DAYS + 5:
+            edgar_202 = await _edgar_202_dates(edgar, sym, today)
+        res = resolve_past(
+            e.event_date, today, reactions, [f.day for f in decided],
+            sources["finnhub_actual"].get(sym, []), sources["yfinance_reported"].get(sym, []), edgar_202, now,
+            confirmed_future=confirmed_future,
+        )
+        past.append((e, res))
+
+    await apply_ticker(session, ticker, stored, protected, decided, past, now, plan, answered)
 
 
 async def _edgar_202_dates(edgar: EdgarClient, sym: str, today: date) -> list[date]:
@@ -738,9 +771,10 @@ async def run(yf_budget_s: float | None = YFINANCE_BUDGET_SECONDS, announce_budg
             limit = len(rows) if not write else 10
             print(f"\n  {title} ({'all' if limit == len(rows) else 'first 10'}):")
             print("\n".join(f"    {r}" for r in rows[:limit]))
+    code = WRITES.exit_code()
     if write and step_label:
-        await record_step_fields(step_label, outcome_fields(plan.fields(), 0, now))
-    return 0
+        await record_step_fields(step_label, outcome_fields({**plan.fields(), "write_failures": WRITES.rows[:50]}, code, now))
+    return code
 
 
 def outcome_fields(fields: dict, exit_code: int, started: datetime) -> dict:

@@ -32,8 +32,10 @@ from app.scripts.seed_historical_reactions import REFERENCE_SYMBOL, _build_date_
 from app.services import price_bars
 from app.services.security_records import STORED_START
 from app.services.step_outcomes import record_step_fields
+from app.services.write_failures import WriteFailures
 
 STEP_LABEL = "Recompute reactions (Intrinio)"
+WRITES = WriteFailures(STEP_LABEL)
 TOLERANCE_PP = Decimal("0.01")
 BARS_BATCH = 50          # symbols whose bars are read in one query
 LARGEST = 10
@@ -157,6 +159,7 @@ async def run(argv: list[str]) -> int:
     tallies = {t: Tally() for t in VALUE_KEYS}
     updates: list[dict] = []
     stored_marks: list = []
+    owner: dict = {}                                           # row id -> symbol, so each ticker's rows are written together
     records = price_bars.record_map_sync()                     # security_records once, not once per ticker
     symbols = sorted(by)
     frames: dict[str, object] = {}
@@ -170,6 +173,7 @@ async def run(argv: list[str]) -> int:
             hist = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
         kept = records.stored_history_dates(sym, [r["event_date"] for r in by[sym]], sessions)
         for r in by[sym]:
+            owner[r["id"]] = sym
             t = tallies[r["event_type"]]
             t.rows += 1
             if r["event_date"] in kept:
@@ -197,21 +201,26 @@ async def run(argv: list[str]) -> int:
                 print(f"    {sym:6} {dt} stored {a:+.4f} intrinio {b:+.4f} delta {float(d):.4f}")
     if write:
         async with ScriptSessionLocal() as s:
-            for etype, keys in VALUE_KEYS.items():
-                batch = [u for u in updates if set(u) == {"id", "price_source", *keys}]
-                if not batch:
+            for sym in symbols:                                # each ticker's rows in a transaction of their own
+                mine = [u for u in updates if owner[u["id"]] == sym]
+                marks = [i for i in stored_marks if owner[i] == sym]
+                if not mine and not marks:
                     continue
-                sets = ", ".join(f"{k} = :{k}" for k in keys)
-                await s.execute(text(f"UPDATE historical_reactions SET {sets}, price_source = :price_source, price_computed_at = now() WHERE id = :id"), batch)
-            if stored_marks:
-                await s.execute(text("UPDATE historical_reactions SET price_source = :src WHERE id = ANY(:ids)"), {"src": SOURCE_STORED_HISTORY, "ids": stored_marks})
-            await s.commit()
+                async with WRITES.own(s, sym):
+                    for etype, keys in VALUE_KEYS.items():
+                        batch = [u for u in mine if set(u) == {"id", "price_source", *keys}]
+                        if not batch:
+                            continue
+                        sets = ", ".join(f"{k} = :{k}" for k in keys)
+                        await s.execute(text(f"UPDATE historical_reactions SET {sets}, price_source = :price_source, price_computed_at = now() WHERE id = :id"), batch)
+                    if marks:
+                        await s.execute(text("UPDATE historical_reactions SET price_source = :src WHERE id = ANY(:ids)"), {"src": SOURCE_STORED_HISTORY, "ids": marks})
         print(f"  written: {len(updates)} row(s) recomputed and stamped {SOURCE_INTRINIO}, {len(stored_marks)} stamped {SOURCE_STORED_HISTORY}; computation_version kept")
         await record_step_fields(STEP_LABEL, {"nightly": nightly, "tickers": len(by), "written": len(updates), "stored_history": len(stored_marks), "tolerance_pp": float(TOLERANCE_PP),
                                               "changed": sum(t.changed for t in tallies.values()), "filled": sum(t.filled for t in tallies.values()),
                                               "emptied": sum(t.emptied for t in tallies.values()),
                                               "by_type": {n: t.summary() for n, t in tallies.items()}, "at": date.today().isoformat(), "error": None})
-    return 0
+    return await WRITES.finish()
 
 
 if __name__ == "__main__":

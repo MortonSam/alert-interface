@@ -31,12 +31,14 @@ from app.services import valuation as V
 from app.services.edgar_client import PREDECESSOR_CIKS, EdgarClient
 from app.services.redact import redact
 from app.services.system_metadata_service import set_value
+from app.services.write_failures import WriteFailures
 
 RELEASE_AFTER_DAYS = (10, 75)     # a quarter's earnings release is filed this many days after the quarter ends
 STEP_LABEL = "Growth (XBRL and 8-K releases)"
 RUN_BUDGET_S = 8 * 60             # --due: no new ticker starts after this
 RUN_HARD_S = 9 * 60               # --due: a ticker still running now stops (it stays due), so the step ends inside ten minutes
 WORKERS = 6                       # --due: tickers read at once; every SEC request still waits its turn (edgar_client's pacing)
+WRITES = WriteFailures("Growth (XBRL and 8-K releases)")
 RUN_KEY = "growth_run:{sym}"      # system_metadata: {"at": <when the ticker's last growth run finished>}
 PERIODIC_FORMS = {"10-Q", "10-K", "10-Q/A", "10-K/A", "20-F", "40-F", "20-F/A", "40-F/A"}
 
@@ -255,7 +257,12 @@ async def run(argv: list[str]) -> int:
             if got is None:
                 continue
             if write:
-                await write_symbol(sym, *got)
+                try:
+                    await write_symbol(sym, *got)          # its own transaction: a failure is named and the rest go on
+                except Exception as exc:
+                    WRITES.add(sym, exc)
+                    print(f"  {sym}: write failed, the rest go on: {redact(exc)[:160]}", flush=True)
+                    continue
             rows_out.extend(got[0])
             disagreements.extend(got[1])
             done_syms.append(sym)
@@ -274,7 +281,7 @@ async def run(argv: list[str]) -> int:
     if write:
         print(f"written to the local database: {len(done_syms)} ticker(s) in {time.time() - t0:.0f}s")
     await edgar.close()
-    return 0
+    return await WRITES.finish()
 
 
 async def write_symbol(sym: str, rows: list[dict], disagreements: list[tuple]) -> None:

@@ -6,6 +6,8 @@ Fetch failures keep each script's own rule; a database error raised outside any 
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import sqlalchemy.exc
 
 from app.services.redact import redact
@@ -33,6 +35,29 @@ class WriteFailures:
         """Record a failure at a known write site, whatever the exception type."""
         self.rows.append(f"{row}: {redact(exc)[:160]}")
 
+    @asynccontextmanager
+    async def own(self, session, row: str, commit: bool = True):
+        """One stock's (or one row's) writes in a transaction of their own (Sam, 2026-10-28: a step that held every stock in one
+        transaction lost the night's work to one stock's error). The block runs inside a savepoint, flushed, then committed; any
+        failure undoes that block alone, is noted against `row`, and the caller goes on with the next. Yields a Done whose `ok` is
+        True once the block's writes are committed (flushed, with commit=False):
+
+            async with WRITES.own(session, sym) as done:
+                ...
+            if done.ok: ...
+        """
+        done = Done()
+        try:
+            async with session.begin_nested():
+                yield done
+                await session.flush()
+            if commit:
+                await session.commit()
+            done.ok = True
+        except Exception as exc:
+            self.add(row, exc)
+            print(f"  {row}: write failed, the rest go on: {redact(exc)[:160]}", flush=True)
+
     def exit_code(self, otherwise: int = 0) -> int:
         """Pure: 1 when any write failed (the rows are printed), else `otherwise`."""
         if self.rows:
@@ -47,3 +72,7 @@ class WriteFailures:
             from app.services.step_outcomes import record_step_fields
             await record_step_fields(self.step, {"write_failures": self.rows[:50]})
         return code
+
+
+class Done:
+    ok = False

@@ -22,8 +22,10 @@ from app.models.ticker import Ticker
 from app.services.eps_actuals import LOOKBACK_SESSIONS, fill_plan, match_row, sessions_back
 from app.services.finnhub_client import FinnhubClient
 from app.services.step_outcomes import record_step_fields
+from app.services.write_failures import WriteFailures
 
 STEP_LABEL = "EPS actuals (Finnhub)"
+WRITES = WriteFailures(STEP_LABEL)
 
 
 def _num(v) -> float | None:
@@ -125,15 +127,16 @@ async def run(today: date | None = None, since: date | None = None) -> int:
             if not plan:
                 missing.append(f"{sym} {e.event_date.isoformat()}")
                 continue
-            for k, v in plan.items():
-                setattr(e, k, v)
-            filled[source].append(f"{sym} {e.event_date.isoformat()}")
-            print(f"  {sym} {e.event_date}: {plan.get('eps_actual', 'kept')} vs {plan.get('eps_estimate', 'kept')} ({source})", flush=True)
-        await s.commit()
+            async with WRITES.own(s, f"{sym} {e.event_date.isoformat()}") as done:      # each report's figures stand alone
+                for k, v in plan.items():
+                    setattr(e, k, v)
+            if done.ok:
+                filled[source].append(f"{sym} {e.event_date.isoformat()}")
+                print(f"  {sym} {e.event_date}: {plan.get('eps_actual', 'kept')} vs {plan.get('eps_estimate', 'kept')} ({source})", flush=True)
     from app.services.finnhub_client import finnhub_stats
     await record_step_fields(STEP_LABEL, {"since": start.isoformat(), "events": len(events), "due": len(due), "filled_finnhub": filled["finnhub"],
                                           "filled_yfinance": filled["yfinance"], "still_missing": missing[:60], "finnhub": finnhub_stats(), "error": error})
-    return 1 if error and not (filled["finnhub"] or filled["yfinance"]) else 0
+    return await WRITES.finish(1 if error and not (filled["finnhub"] or filled["yfinance"]) else 0)
 
 
 if __name__ == "__main__":

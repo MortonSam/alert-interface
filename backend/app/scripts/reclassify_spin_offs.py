@@ -23,8 +23,10 @@ from app.services import price_bars
 from app.services.corporate_actions import spin_off_reclassification, splits_from_adjustments
 from app.services.security_records import STORED_START
 from app.services.step_outcomes import record_step_fields
+from app.services.write_failures import WriteFailures
 
 STEP_LABEL = "Reclassify spin-offs"
+WRITES = WriteFailures(STEP_LABEL)
 REASON = "no split factor on the shadow bars within one session; Intrinio books the day as a spin-off or separation adjustment"
 
 
@@ -46,16 +48,20 @@ async def run(argv: list[str]) -> int:
     for r in rows:
         print(f"  {r['symbol']:6} {r['date']} {r['split_ratio'] or '-':>6}  {r['title']}")
     if write and rows:
+        written = []
         async with ScriptSessionLocal() as s:
             for r in rows:
-                await s.execute(text("""update events set event_type = 'spin_off', title = :title,
-                                        metadata = coalesce(metadata, CAST('{}' AS jsonb)) || CAST(:extra AS jsonb) where id = :id"""),
-                                {"id": r["id"], "title": f"{r['symbol']} Spin-off Adjustment ({r['split_ratio']})" if r["split_ratio"] else f"{r['symbol']} Spin-off Adjustment",
-                                 "extra": json.dumps({"reclassified_from": "split", "reclassified_reason": REASON})})
-            await s.commit()
-        await record_step_fields(STEP_LABEL, {"reclassified": [f"{r['symbol']} {r['date'].isoformat()} {r['split_ratio']}" for r in rows]})
-        print(f"  written: {len(rows)} row(s) now event_type spin_off")
-    return 0
+                label = f"{r['symbol']} {r['date'].isoformat()} {r['split_ratio']}"
+                async with WRITES.own(s, label) as done:             # each row stands alone
+                    await s.execute(text("""update events set event_type = 'spin_off', title = :title,
+                                            metadata = coalesce(metadata, CAST('{}' AS jsonb)) || CAST(:extra AS jsonb) where id = :id"""),
+                                    {"id": r["id"], "title": f"{r['symbol']} Spin-off Adjustment ({r['split_ratio']})" if r["split_ratio"] else f"{r['symbol']} Spin-off Adjustment",
+                                     "extra": json.dumps({"reclassified_from": "split", "reclassified_reason": REASON})})
+                if done.ok:
+                    written.append(label)
+        await record_step_fields(STEP_LABEL, {"reclassified": written})
+        print(f"  written: {len(written)} row(s) now event_type spin_off")
+    return await WRITES.finish()
 
 
 if __name__ == "__main__":

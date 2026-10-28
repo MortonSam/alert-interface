@@ -367,7 +367,7 @@ def test_a_manual_restore_records_its_exit_so_health_does_not_read_it_as_a_failu
     assert got["checked"] == 512 and got["exit"] == 0 and got["seconds"] >= 0 and got["at"].endswith("+00:00")
     assert outcome_fields({}, 1, started)["exit"] == 1
     src = (Path(__file__).resolve().parents[1] / "app" / "scripts" / "refresh_earnings_calendar.py").read_text()
-    assert "record_step_fields(step_label, outcome_fields(plan.fields(), 0, now))" in src
+    assert "record_step_fields(step_label, outcome_fields({**plan.fields(), \"write_failures\": WRITES.rows[:50]}, code, now))" in src
     assert 'outcome_fields({"checked": 0, "error": "Finnhub returned no calendar entries"}, 1, now)' in src
     # the health page's rule this satisfies
     from app.services.nightly_run import auto_pick_status
@@ -376,3 +376,45 @@ def test_a_manual_restore_records_its_exit_so_health_does_not_read_it_as_a_failu
 # shares rows other files of this group read across tickers (alert picks, seeded ZZ symbols, index membership): one xdist worker runs them
 # (scripts/push_window.py runs pytest -n auto --dist loadgroup)
 pytestmark = pytest.mark.xdist_group(name="shared_rows")
+
+
+@pytest.mark.asyncio
+async def test_one_tickers_failed_write_rolls_back_that_ticker_alone_names_it_and_the_rest_are_written(monkeypatch):
+    """Sam, 2026-10-28: Missed reports' unique-key error rolled back the whole night's work; the calendar refresh held all 503 tickers in
+    one transaction the same way. Now UNH's write fails after its changes were made: UNH's rows stand as they were, its lines leave the
+    plan, it is named, VEEV's change is committed, and the step's exit is a failure."""
+    from sqlalchemy.exc import IntegrityError
+    from app.scripts import refresh_earnings_calendar as R
+    real = R.apply_ticker
+
+    async def failing(session, ticker, *a, **k):
+        await real(session, ticker, *a, **k)
+        await session.flush()
+        if ticker.symbol == UNH:
+            raise IntegrityError("INSERT INTO events", {}, Exception('duplicate key value violates unique constraint "uq_events_ticker_type_date"'))
+    monkeypatch.setattr(R, "apply_ticker", failing)
+    monkeypatch.setattr(R, "WRITES", R.WriteFailures(R.STEP_LABEL))
+    async with ScriptSessionLocal() as s:
+        await _cleanup(s)
+        await _ticker(s, VEEV); await _ticker(s, UNH)
+        await _event(s, UNH, date(2026, 10, 13), "finnhub", note="estimated (Finnhub)")
+        await _reaction(s, UNH, date(2026, 7, 16), 4.08, 4.48)
+        await _reaction(s, VEEV, date(2026, 8, 26), 1.9, 1.8)
+        await s.commit()
+    sources = {"finnhub_future": {UNH: {date(2027, 1, 25): "unknown"}, VEEV: {date(2026, 11, 18): "unknown"}}, "finnhub_actual": {},
+               "yfinance_future": {}, "yfinance_reported": {}, "company": {}}
+    try:
+        async with ScriptSessionLocal() as s:
+            tickers = list((await s.execute(select(Ticker).where(Ticker.symbol.in_((VEEV, UNH))).order_by(Ticker.symbol))).scalars().all())
+            plan = await reconcile(s, tickers, sources, NOW, edgar=None)
+        assert [r.split(":")[0] for r in plan.inserted] == [VEEV] and plan.dropped == [] and plan.checked == 1
+        assert len(R.WRITES.rows) == 1 and R.WRITES.rows[0].startswith(f"{UNH}: ") and "uq_events_ticker_type_date" in R.WRITES.rows[0]
+        assert R.WRITES.exit_code() == 1
+        async with ScriptSessionLocal() as s:
+            rows = await _rows(s, (VEEV, UNH))
+            assert [(r[0], r[1]) for r in rows] == [(UNH, date(2026, 10, 13)), (VEEV, date(2026, 11, 18))]   # UNH as it was; VEEV written
+            checked = dict((await s.execute(text("SELECT symbol, earnings_checked_at FROM tickers WHERE symbol = ANY(:s)"), {"s": [VEEV, UNH]})).all())
+            assert checked[UNH] is None and checked[VEEV] is not None
+    finally:
+        async with ScriptSessionLocal() as s:
+            await _cleanup(s)

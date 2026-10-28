@@ -26,6 +26,9 @@ from app.models.historical_reaction import HistoricalReaction
 from app.services.price_history_exclusion import not_excluded
 from app.models.sector_peer_snapshot import SectorPeerSnapshot
 from app.models.ticker import Ticker
+from app.services.write_failures import WriteFailures
+
+WRITES = WriteFailures("Sector peer snapshot")
 
 COMPUTATION_VERSION = 1
 MIN_PEERS = 5
@@ -151,26 +154,26 @@ async def main() -> int:
                     computation_version = :version,
                     created_at = :now
             """)
-            await session.execute(stmt, {
-                "sector": sector,
-                "symbol": sym,
-                "avg_abs_1d": data["avg_abs_1d"],
-                "quarter_count": data["quarter_count"],
-                "sector_avg_abs_1d": agg["sector_avg_abs_1d"],
-                "sector_peer_count": agg["sector_peer_count"],
-                "as_of_date": today,
-                "version": COMPUTATION_VERSION,
-                "now": datetime.now(timezone.utc),
-            })
-            upserted += 1
+            async with WRITES.own(session, sym) as done:          # each ticker's row stands alone
+                await session.execute(stmt, {
+                    "sector": sector,
+                    "symbol": sym,
+                    "avg_abs_1d": data["avg_abs_1d"],
+                    "quarter_count": data["quarter_count"],
+                    "sector_avg_abs_1d": agg["sector_avg_abs_1d"],
+                    "sector_peer_count": agg["sector_peer_count"],
+                    "as_of_date": today,
+                    "version": COMPUTATION_VERSION,
+                    "now": datetime.now(timezone.utc),
+                })
+            upserted += done.ok
 
-        await session.commit()
         for sym in sorted(wanted):
             print(f"  {sym} stored for {today}: {ticker_data.get(sym)}")
 
     sectors_computed = len(sector_aggs)
     print(f"Upserted {upserted} ticker rows across {sectors_computed} sectors.")
-    return 0
+    return await WRITES.finish()
 
 
 if __name__ == "__main__":
