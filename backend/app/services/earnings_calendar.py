@@ -184,16 +184,17 @@ def resolve_past(
     confirmed_future: list[date] | tuple[date, ...] = (),
 ) -> PastResolution:
     """What becomes of an estimated earnings date that passed with no reaction row on it. `confirmed_future` are the
-    ticker's later dates the company itself or EDGAR confirmed: one within SAME_REPORT_DAYS after the estimate is the
-    same report under its real date, so the estimate is removed (FDX's Sep 16 estimate against its announced Oct 28)."""
+    ticker's dates the company itself or EDGAR confirmed: one within SAME_REPORT_DAYS of the estimate, before or after it, is the
+    same report under its real date, so the estimate is removed (FDX's Sep 16 estimate against its announced Oct 28; UHS's Oct 27
+    estimate against its company-confirmed Oct 26, 2026-10-28, which a vendor's actual EPS had turned into a second report)."""
     near_row = [d for d in reaction_dates if abs((d - estimate).days) <= SUPERSEDED_DAYS]
     if near_row:
         d = min(near_row, key=lambda d: abs((d - estimate).days))
         return PastResolution("superseded", f"the quarter was reported on {fmt_day(d)}; the {fmt_day(estimate)} estimate is removed", d)
 
-    announced = [d for d in confirmed_future if 0 < (d - estimate).days < SAME_REPORT_DAYS]
+    announced = [d for d in confirmed_future if 0 < abs((d - estimate).days) < SAME_REPORT_DAYS]
     if announced:
-        d = min(announced)
+        d = min(announced, key=lambda x: abs((x - estimate).days))
         return PastResolution("superseded", f"the company confirmed {fmt_day(d)} for this report; the {fmt_day(estimate)} estimate is removed", d)
 
     replacing = [d for d in future_estimates if 0 <= (d - estimate).days <= REPLACED_BY_ESTIMATE_DAYS]
@@ -276,6 +277,18 @@ SAME_RELEASE_KEY_CHARS = 60          # notes are cut short when stored: the rele
 
 
 EDGAR_ONLY_NOTE = "per EDGAR (8-K Item 2.02"
+VENDOR_REPORT_NOTES = ("per Yahoo Finance (actual EPS)", "per Finnhub (actual EPS)")
+DUPLICATE_REPORT_DAYS = 3             # a vendor's report date this close to a company-confirmed date is the same report
+
+
+def vendor_report_beside_company(event_date: date, confirmation_note: str | None, reaction_dates, company_dates) -> date | None:
+    """Pure: the company-confirmed date a past report stored on a vendor's word duplicates (UHS, 2026-10-28: the company confirmed
+    Oct 26 and Yahoo's actual EPS made a second report on Oct 27), or None. A row a reaction stands on is left alone."""
+    note = confirmation_note or ""
+    if not note.startswith("reported on") or not note.endswith(VENDOR_REPORT_NOTES) or event_date in set(reaction_dates):
+        return None
+    near = [d for d in company_dates if 0 < abs((d - event_date).days) <= DUPLICATE_REPORT_DAYS]
+    return min(near, key=lambda d: abs((d - event_date).days)) if near else None
 
 
 def edgar_only_report_superseded(event_date: date, confirmation_note: str | None, reaction_dates, actual_dates,

@@ -23,6 +23,7 @@ Usage
 """
 from __future__ import annotations
 from app.services.redact import redact
+from app.services.write_failures import WriteFailures
 
 import asyncio
 import sys
@@ -44,6 +45,7 @@ LOOKBACK_DAYS = 21
 MATCH_TOLERANCE_DAYS = 2      # a row within this many days of the report date counts as the report's row
 REPORT_DUE_DAYS = 80          # no reaction row this recent: a quarterly report was due, check EDGAR even with no stored date
 STEP_LABEL = "Missed reports (catch_up_reports)"
+WRITES = WriteFailures(STEP_LABEL)
 EDGAR_EARNINGS_ITEM = "2.02"  # Results of Operations and Financial Condition
 
 
@@ -168,24 +170,44 @@ async def _expected_in_window(session, ticker_ids: dict[str, object], start: dat
 
 # ── Writes ───────────────────────────────────────────────────────────────────
 
+def ensure_plan(rows: list[tuple[date, bool, str | None]], d: date) -> tuple[str, date | None]:
+    """Pure: what a report on `d` does to the ticker's earnings rows within MATCH_TOLERANCE_DAYS ((date, confirmed, note) each):
+    ("keep", that date) when a company-confirmed date stands for it (UHS, 2026-10-28: the company confirmed Oct 26 and Yahoo dates
+    the report Oct 27; a company-confirmed date never moves on vendor data, nor on a filing date, and no second row is made beside
+    it), ("confirm", d) for a row already on d, ("move", that date) for the nearest other row, ("insert", None) for none."""
+    from app.services.earnings_calendar import company_confirmed
+    company = [r for r in rows if company_confirmed(r[1], r[2])]
+    if company:
+        return "keep", min(company, key=lambda r: abs((r[0] - d).days))[0]
+    if any(r[0] == d for r in rows):
+        return "confirm", d
+    if rows:
+        return "move", min(rows, key=lambda r: abs((r[0] - d).days))[0]
+    return "insert", None
+
+
 async def _ensure_event(session, ticker_id, d: date, source: str) -> str:
-    """Insert or confirm the events row for a report that happened. Returns what was done."""
-    existing = (await session.execute(
+    """Insert, confirm or re-date the events row for a report that happened (ensure_plan). Returns what was done."""
+    near = list((await session.execute(
         select(Event).where(
             Event.ticker_id == ticker_id, Event.event_type == EventType.EARNINGS,
             Event.event_date >= d - timedelta(days=MATCH_TOLERANCE_DAYS),
             Event.event_date <= d + timedelta(days=MATCH_TOLERANCE_DAYS),
         ).order_by(Event.event_date)
-    )).scalars().first()
+    )).scalars().all())
+    action, at = ensure_plan([(e.event_date, bool(e.is_confirmed), e.confirmation_note) for e in near], d)
     src = DataSource.FINNHUB if source == "finnhub" else DataSource.EDGAR
     note = f"reported on {d.isoformat()} per " + ("Finnhub (actual EPS)" if source == "finnhub" else "EDGAR (8-K Item 2.02)")
     now = datetime.now(timezone.utc)
-    if existing is None:
+    if action == "keep":
+        return f"kept the company-confirmed {at.isoformat()}; {source} dates the report {d.isoformat()}"
+    if action == "insert":
         session.add(Event(ticker_id=ticker_id, event_type=EventType.EARNINGS, event_date=d, title="Earnings", source=src,
                           is_confirmed=True, confirmation_note=note, checked_at=now, metadata_={}))
         return "event inserted"
+    existing = next(e for e in near if e.event_date == at)
     changed = []
-    if existing.event_date != d:
+    if action == "move":
         changed.append(f"date {existing.event_date.isoformat()} -> {d.isoformat()}")
         existing.event_date = d
         existing.source = src
@@ -202,7 +224,9 @@ async def _ensure_event(session, ticker_id, d: date, source: str) -> str:
 
 
 async def catch_up(missing: list[Missing], ticker_ids: dict[str, object], write: bool) -> None:
-    """Fill each Missing.status. With write=False nothing is touched and every status is 'found'."""
+    """Fill each Missing.status. With write=False nothing is touched and every status is 'found'. Each report's write and each
+    ticker's seeding stands alone: a failure is noted by name (WRITES) and the rest go on (2026-10-28: one stock's duplicate date
+    rolled back the whole night's work)."""
     from app.scripts.seed_historical_reactions import MIN_AGE_DAYS, seed
 
     if not write:
@@ -211,16 +235,29 @@ async def catch_up(missing: list[Missing], ticker_ids: dict[str, object], write:
             m.detail = "settled, seedable now" if m.age_days >= MIN_AGE_DAYS else f"reaction window not settled ({MIN_AGE_DAYS - m.age_days} more days)"
         return
 
-    async with ScriptSessionLocal() as session:
-        for m in missing:
-            m.detail = await _ensure_event(session, ticker_ids[m.symbol], m.report_date, m.source)
-        await session.commit()
+    failed: set[str] = set()
+    for m in missing:
+        try:
+            async with ScriptSessionLocal() as session:
+                m.detail = await _ensure_event(session, ticker_ids[m.symbol], m.report_date, m.source)
+                await session.commit()
+        except Exception as exc:
+            WRITES.add(m.label(), exc)
+            m.detail, m.status = f"write failed: {redact(exc)[:120]}", "failed"
+            failed.add(m.label())
+            print(f"  {m.label()}: write failed, the rest go on: {redact(exc)[:160]}", flush=True)
 
-    for sym in sorted({m.symbol for m in missing if m.age_days >= MIN_AGE_DAYS}):
-        await seed(sym)   # re-reads Yahoo's earnings dates and upserts every reaction for the ticker
+    for sym in sorted({m.symbol for m in missing if m.age_days >= MIN_AGE_DAYS and m.label() not in failed}):
+        try:
+            await seed(sym)   # re-reads Yahoo's earnings dates and upserts every reaction for the ticker
+        except Exception as exc:
+            WRITES.add(f"{sym} seeding", exc)
+            print(f"  {sym}: seeding failed, the rest go on: {redact(exc)[:160]}", flush=True)
     async with ScriptSessionLocal() as session:
         rows = await _reaction_dates(session, ticker_ids, date.today() - timedelta(days=LOOKBACK_DAYS))
     for m in missing:
+        if m.label() in failed:
+            continue
         if m.age_days < MIN_AGE_DAYS:
             m.status = "pending"
             m.detail += f"; reaction window not settled ({MIN_AGE_DAYS - m.age_days} more days)"
@@ -295,14 +332,14 @@ async def main(argv: list[str]) -> int:
         print(f"  {m.symbol:<6} {m.report_date}  {m.age_days:>2}d ago  via {m.source:<7} {m.status:<10} {m.detail}")
 
     if write:
-        by = {s: [m.label() for m in missing if m.status == s] for s in ("caught_up", "pending", "unseedable")}
+        by = {s: [m.label() for m in missing if m.status == s] for s in ("caught_up", "pending", "unseedable", "failed")}
         await record_step_fields(STEP_LABEL, {
             "checked": len(tickers), "missing": len(missing),
-            "caught_up": by["caught_up"], "pending": by["pending"], "unseedable": by["unseedable"],
+            "caught_up": by["caught_up"], "pending": by["pending"], "unseedable": by["unseedable"], "failed": by["failed"],
             "details": {m.label(): m.detail for m in missing},
             "finnhub": __import__("app.services.finnhub_client", fromlist=["finnhub_stats"]).finnhub_stats(),
         })
-    return 0
+    return await WRITES.finish()
 
 
 if __name__ == "__main__":

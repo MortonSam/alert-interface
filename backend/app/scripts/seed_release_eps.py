@@ -24,6 +24,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import text
 
 from app.database import ScriptSessionLocal
+from app.services.earnings_release import is_results_release
 from app.services.edgar_client import EdgarClient
 from app.services.redact import redact
 from app.services.write_failures import WriteFailures
@@ -143,8 +144,15 @@ async def run(argv: list[str]) -> int:
                 if not recs:
                     print(f"  {sym} {report_date}: no Item 2.02 8-K within {MATCH_DAYS} days"); unread += 1; continue
                 ex, hit, rec = None, None, recs[0]
+                releases, kept, kept_rec = 0, [], recs[0]
                 for rec in recs:                              # a company may file more than one Item 2.02 8-K that week (DTE Gas beside DTE Energy)
                     texts = await edgar.filing_texts(cik, rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""))
+                    if not is_results_release([t for _, t in texts]):
+                        # the one rule every step reads an 8-K by (services/earnings_release): preliminary figures, an outlook update or
+                        # an accounting change are not the quarter's results (EMR's and PRU's of Oct 13 and 15, read here on 2026-10-28)
+                        print(f"  {sym} {report_date}: 8-K {rec['accession']} is not a results release (earnings_release.is_results_release); not read")
+                        continue
+                    releases, kept, kept_rec = releases + 1, texts, rec
                     for cand in exhibit_candidates(texts):   # a subsidiary's release may sit beside the issuer's; the first that reads wins
                         # a release that states no diluted EPS at all is read for its basic figure, stored as basic (eps_basis)
                         hit = parse_release_eps(cand[1], report_date) or parse_release_basic_eps(cand[1], report_date)
@@ -153,6 +161,9 @@ async def run(argv: list[str]) -> int:
                             break
                     if hit:
                         break
+                if not releases:
+                    print(f"  {sym} {report_date}: no results release among {len(recs)} Item 2.02 8-K(s) within {MATCH_DAYS} days"); unread += 1; continue
+                texts, rec = (kept, kept_rec) if not hit else (texts, rec)   # without a hit: the last results release read, never a skipped filing
                 if hit and hit.get("period_end") is None:
                     # the exhibit read states no quarter end of its own (JPM's 3Q26 narrative names only the prior 10-Q's): the filing's
                     # other documents (its financial supplement) do; none stated stays None, never a guess
