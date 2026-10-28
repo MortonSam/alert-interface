@@ -38,11 +38,16 @@ def words(text: str | None) -> list[str]:
     return _WORD.findall(t)
 
 
-def units(structured: dict | None) -> list[dict]:
+def units(structured: dict | None, content: str | None = None) -> list[dict]:
     """Pure: the note's sentences in reading order, {where, text}: where is ("what_they_do"|"bottom_line", None, i) for prose,
-    (section, point, "lead") for a point's lead and (section, point, i) for the i-th sentence of its detail."""
+    (section, point, "lead") for a point's lead and (section, point, i) for the i-th sentence of its detail. An older note with no
+    structured content is read from its markdown lines, ("content", None, i)."""
     s = structured or {}
     out = []
+    if not structured and content:
+        lines = [re.sub(r"^[-*#\s]+|\*\*", "", ln).strip() for ln in content.split("\n")]
+        texts = [t for ln in lines if ln and not ln.startswith("---") for t in sentences(ln)]
+        return [{"where": ("content", None, i), "text": t} for i, t in enumerate(texts)]
     for key in PROSE:
         out += [{"where": (key, None, i), "text": t} for i, t in enumerate(sentences(s.get(key)))]
     for sec in SECTIONS:
@@ -92,9 +97,9 @@ def _verdict(c: dict) -> str:
     return str(c.get("verdict") or c.get("status") or "").lower()
 
 
-def review(structured: dict | None, verification: dict | None) -> dict:
+def review(structured: dict | None, verification: dict | None, content: str | None = None) -> dict:
     """Pure: {drop: set of unit indexes, lost: [sentences dropped], unlocated: [claims not found], keep_claims: [claims served]}."""
-    us = units(structured)
+    us = units(structured, content)
     claims = [c for c in ((verification or {}).get("claims") or []) if isinstance(c, dict)]
     at = [locate(c, us) for c in claims]
     drop = {i for c, i in zip(claims, at) if i is not None and _verdict(c) in DROP}
@@ -124,7 +129,7 @@ def served(structured: dict | None, verification: dict | None, content: str | No
     verification's claims cut to the supported ones still shown."""
     if not verification or not isinstance(verification.get("claims"), list):
         return structured, verification, content
-    r = review(structured, verification)
+    r = review(structured, verification, content)
     us, drop = r["units"], r["drop"]
     if structured:
         s = dict(structured)

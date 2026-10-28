@@ -95,9 +95,11 @@ def test_the_note_check_runs_in_the_gate_and_the_nightly():
 
 def test_the_nightly_writes_missing_notes_first_then_failed_then_reported_since():
     from app.scripts import generate_notes as G, refresh
-    rows = [("AAA", "complete", False), ("BBB", None, False), ("CCC", "failed", False), ("DDD", "complete", True), ("EEE", None, False),
-            ("FFF", "verification_failed", False)]
-    assert G.queue(rows, 170) == ["BBB", "EEE", "CCC", "FFF", "DDD"]          # AAA is current
+    rows = [("AAA", "complete", False, 2), ("BBB", None, False, None), ("CCC", "failed", False, None), ("DDD", "complete", True, 2),
+            ("EEE", None, False, None), ("FFF", "verification_failed", False, None), ("GGG", "complete", False, None), ("HHH", "held", False, 2)]
+    # AAA is current; GGG was checked before the current check (Item 1, sentences): rechecked; HHH is held until it reports again
+    assert G.queue(rows, 170) == ["BBB", "EEE", "CCC", "FFF", "GGG", "DDD"]
+    assert G.due_kind("complete", False, None) == (2, "recheck") and G.due_kind("complete", True, None) == (3, "write")
     assert G.queue(rows, 2) == ["BBB", "EEE"]
     assert G.MAX_PER_NIGHT == 170 and G.RESERVE_USD > 0
     assert ("Research notes (nightly)", ["python", "-m", "app.scripts.generate_notes"]) in refresh.STEPS

@@ -885,7 +885,7 @@ def withheld(note: ResearchNote) -> bool:
         return True
     if is_verified(note):
         from app.services.note_claims import review
-        return bool(review(note.structured_content, note.verification)["unlocated"])
+        return bool(review(note.structured_content, note.verification, getattr(note, "content", None))["unlocated"])
     return False
 
 

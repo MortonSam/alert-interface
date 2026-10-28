@@ -1851,15 +1851,15 @@ async def check_note_confirmed_only(session) -> CheckResult:
         JOIN tickers t ON t.id = n.ticker_id WHERE n.status IN ('complete', 'held')"""))).all()
     bad, shown, held, waiting = [], 0, 0, 0
     for r in rows:
-        note = SimpleNamespace(status=r.status, structured_content=r.structured_content, verification=r.verification)
+        note = SimpleNamespace(status=r.status, structured_content=r.structured_content, verification=r.verification, content=r.content)
         if withheld(note):
             held += 1
             continue
         shown += 1
         waiting += int(((r.verification or {}).get("version") or 1) < NOTE_CHECK_VERSION)
         sc, ver, _c = confirmed_only(r.structured_content, r.verification, r.content)
-        shown_text = " ".join(u["text"] for u in units(sc))
-        left = [t for t in review(r.structured_content, r.verification)["lost"] if t in shown_text]
+        shown_text = " ".join(u["text"] for u in units(sc, _c))
+        left = [t for t in review(r.structured_content, r.verification, r.content)["lost"] if t in shown_text]
         if left:
             bad.append(f"{r.symbol}: shows {left[0][:80]!r}")
         if any(str(c.get("verdict")) != "supported" for c in (ver or {}).get("claims") or []):

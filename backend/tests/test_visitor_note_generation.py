@@ -46,7 +46,7 @@ async def test_a_visitor_gets_the_existing_note_back_whatever_its_state_and_noth
         async def existing(db, ticker_id, symbol, _s=status):
             return _Note(_s)
         wired.setattr(rn, "get_research_note", existing)
-        wired.setattr(rn, "verification_failed", lambda n: False)
+        wired.setattr(rn, "withheld", lambda n: False)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             r = await c.post("/api/v1/research-notes/generate?force=true", json={"symbol": "AAPL"})
         assert r.status_code == 418 and r.json()["detail"] == f"existing:{status}:False", status   # force is not a visitor's

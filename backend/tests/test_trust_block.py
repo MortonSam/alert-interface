@@ -53,14 +53,16 @@ async def test_validate_names_a_stored_note_whose_badges_and_totals_disagree():
             bad = {"claims": [{"claim": "x", "status": "supported", "evidence": "ok"}, {"claim": "y", "status": "unsupported", "evidence": "actually, supported"}],
                    "summary": {"supported": 2, "unsupported": 0, "contradicted": 0}}
             await s.execute(text("""INSERT INTO research_notes (id, ticker_id, generated_at, source_filings, content, model_used, input_tokens, output_tokens, status, verification, created_at, updated_at)
-                SELECT gen_random_uuid(), id, now(), '[]'::jsonb, 'note', 'm', 1, 1, 'complete', CAST(:v AS jsonb), now(), now() FROM tickers WHERE symbol = :s"""), {"v": json.dumps(bad), "s": sym})
+                SELECT gen_random_uuid(), id, now(), '[]'::jsonb, 'Claim x. Claim y.', 'm', 1, 1, 'complete', CAST(:v AS jsonb), now(), now() FROM tickers WHERE symbol = :s"""), {"v": json.dumps(bad), "s": sym})
             await s.commit()
             r = await check_note_verdicts(s)
             assert r.level == ERROR and any(x.startswith(f"{sym}: ") and "corrects itself" in x and "summary says supported 2, the claims count 1" in x for x in r.rows)
             # the API serves the recount, whatever the stored summary says
-            from app.config import settings
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-                body = (await c.get("/api/v1/research-notes", params={"symbol": sym}, headers={"X-Admin-Token": settings.admin_token} if settings.admin_token else {})).json()
+            from app import auth
+            with pytest.MonkeyPatch.context() as mp:             # the owner sees every claim; a visitor, the supported ones shown
+                mp.setattr(auth.settings, "admin_token", "trust-block-token")
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+                    body = (await c.get("/api/v1/research-notes", params={"symbol": sym}, headers={"X-Admin-Token": "trust-block-token"})).json()
             if "verification" in body and body["verification"]:
                 assert body["verification"]["summary"] == {"supported": 1, "unsupported": 1, "contradicted": 0}
                 assert body["verification"]["claims"][1]["verdict"] == "unsupported" and body["verification"]["claims"][1]["status"] == "unsupported"
