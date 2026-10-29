@@ -616,7 +616,12 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
         numbers.append(_num("Its five-year range", f"{num(lo)} to {num(hi)}", span))
         sentences.append(f"Over five years its P/E ran from {num(lo)} to {num(hi)}, with a median of {num(med_stored)}.")
         drawn = runs(series)[-1]
-        chart = {"kind": "pe_range", "as_of": snap["as_of_date"].isoformat(), "points": _points(drawn), "median": med_stored, "today": pe,
+        pts = _points(drawn)
+        sampled = runs([(date.fromisoformat(d), v) for d, v in pts])[-1]       # every fifth session can widen a short break past the limit
+        if len(sampled) < len(pts):
+            pts = pts[len(pts) - len(sampled):]
+            drawn = [x for x in drawn if x[0] >= sampled[0][0]]
+        chart = {"kind": "pe_range", "as_of": snap["as_of_date"].isoformat(), "points": pts, "median": med_stored, "today": pe,
                  "sector_median": sector_median, "sector": sector if sector_median is not None else None, "start": drawn[0][0].isoformat()}
         if len(drawn) < len(series):
             gaps = [(a[0], b[0]) for a, b in zip(series, series[1:]) if (b[0] - a[0]).days > CHART_GAP_DAYS]
@@ -694,7 +699,8 @@ def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typic
         word = compare_moves(imp["pct"], typical["pct"])
         cmp_words = {"more than usual": "more than", "less than usual": "less than", "about its usual": "about the same as"}[word]
         numbers.append(_num("Options price a move of", f"±{num(imp['pct'])}%", f"Options data {fmt_date(imp['chain_date'])}, expiring {fmt_date(imp['expiration'])}"))
-        sentences.append(f"For this report, options price a move of about ±{num(imp['pct'])}% by {fmt_date(imp['expiration'])}, {cmp_words} its typical move.")
+        sentences.append(f"Options price a move of about ±{num(imp['pct'])}% by {fmt_date(imp['expiration'])}, the first expiration after the report, "
+                         f"{cmp_words} its typical move on a report day.")
     holding = (f"its next report on {fmt_date(date_)}" if date_ and conf == "confirmed" else
                f"its next report, expected around {fmt_date(date_)}" if date_ else
                f"its next report, expected between {fmt_date(ne.window_start)} and {fmt_date(ne.window_end)}" if ne and getattr(ne, "window_start", None) else

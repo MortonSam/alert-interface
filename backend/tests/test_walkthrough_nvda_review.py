@@ -95,6 +95,13 @@ def test_a_pe_chart_never_breaks_and_says_where_it_starts():
     assert "Its five-year range" in [n["label"] for n in s["numbers"]]                       # the range stays the history's
 
 
+def test_a_short_break_widened_by_sampling_still_draws_no_gap():
+    days = _sessions(900, date(2026, 10, 27))
+    series = [(d, 30.0) for i, d in enumerate(days) if not 600 <= i < 612]          # a 12-session break: under the limit daily, over it sampled
+    s = W.step_valuation("X", "Industrials", _snap(pe=30.0, median=30.0), series, None, True)
+    assert s["chart"] and W.chart_gaps(s["chart"]) == []
+
+
 def test_no_walkthrough_chart_ever_has_a_gap():
     assert W.chart_gaps({"kind": "pe_range", "points": [["2026-01-02", 1], ["2026-02-02", 1]]}) == ["pe_range pe: 2026-01-02 to 2026-02-02"]
     assert W.chart_gaps(_step4(7.1)["chart"]) == []
@@ -175,10 +182,10 @@ def test_the_options_line_sits_beside_the_typical_move_on_a_confirmed_date():
     ne = SimpleNamespace(date=date(2026, 11, 17), confirmation="confirmed", window_start=None, window_end=None, note=None)
     s = W.step_upcoming("NVIDIA", ne, "amc", imp, typical, None, 1.8)
     assert "After its past 20 reports, the stock moved ±6.6% on a typical report day." in s["sentences"]
-    assert any(x.startswith("For this report, options price a move of about ±7.4% by Nov 20, 2026") for x in s["sentences"])
+    assert "Options price a move of about ±7.4% by Nov 20, 2026, the first expiration after the report, about the same as its typical move on a report day." in s["sentences"]
     assert [n["label"] for n in s["numbers"]] == ["Next report", "Typical move after a report", "Options price a move of"]
     est = SimpleNamespace(date=date(2026, 11, 17), confirmation="estimated", window_start=None, window_end=None, note=None)
-    assert not any("options price" in x for x in W.step_upcoming("NVIDIA", est, None, imp, typical, None, 1.8)["sentences"])
+    assert not any("Options price" in x for x in W.step_upcoming("NVIDIA", est, None, imp, typical, None, 1.8)["sentences"])
 
 
 # ── the company's own words ────────────────────────────────────────────────────────────────────────────────────────────────
