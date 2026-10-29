@@ -1877,8 +1877,14 @@ async def check_note_eps_agrees(session) -> CheckResult:
     strip showing Q2's $6.18)."""
     from app.config import settings
     from app.services.note_valuation import eps_disagreement, sec_quarter_for, served, with_sec_eps
-    rows = (await session.execute(text("""SELECT t.symbol, n.structured_content, n.verification, n.content FROM research_notes n
-        JOIN tickers t ON t.id = n.ticker_id WHERE n.status = 'complete'"""))).all()
+    from sqlalchemy import select as _select
+    from app.models.research_note import ResearchNote
+    from app.models.ticker import Ticker
+    from app.services.note_quarters import withheld_now
+    notes = (await session.execute(_select(ResearchNote, Ticker.symbol).join(Ticker, Ticker.id == ResearchNote.ticker_id)
+                                   .where(ResearchNote.status == "complete"))).all()
+    rows = [type("R", (), {"symbol": sym, "structured_content": n.structured_content, "verification": n.verification, "content": n.content})
+            for n, sym in notes if not await withheld_now(session, n)]          # a note no visitor sees is not a served note
     bad, compared = [], 0
     for r in rows:
         sc, _v, c = served(r.structured_content, r.verification, r.content, bool(settings.pe_enabled))

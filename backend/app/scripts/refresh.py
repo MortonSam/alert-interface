@@ -492,6 +492,10 @@ def main(slot: str | None = None) -> int:
         raw = _db_get("step_outcomes")
         title, body = digest_fields(results, json.loads(raw) if raw else {}, datetime.now(timezone.utc))
         body += user_errors_tail(datetime.now(timezone.utc))
+        from app.services.ai_spend import cap_reminders, cap_usd, spend_day
+        from datetime import date as _date
+        for r in cap_reminders(_date.fromisoformat(spend_day()), cap_usd()):
+            body += f" | reminder: {r}"
         print(f"  {title}: {body}")
         notify_sync(title, body, tags=("sunrise",))
     except Exception as exc:

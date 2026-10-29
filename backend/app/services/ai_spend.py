@@ -7,7 +7,7 @@ per-feature counts and caps (draft_limiter policies, ASK_IVY_DAILY_CAP_USD) stay
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app.config import settings
@@ -25,6 +25,38 @@ def spend_day(now: datetime | None = None) -> str:
 
 def cap_usd() -> float:
     return float(settings.ai_daily_spend_cap_usd)
+
+
+# The nightly's share of the cap (Sam, 2026-10-29, with the cap raised to $35 until Nov 15): until the walkthrough nightly is live,
+# research notes may use up to NOTES_NIGHT_USD; once walkthroughs run, notes get at most NOTES_WITH_WALKTHROUGHS_USD and the
+# walkthroughs at most WALKTHROUGHS_NIGHT_USD; visitors always keep at least VISITOR_RESERVE_USD of the day's cap.
+NOTES_NIGHT_USD = 30.0
+NOTES_WITH_WALKTHROUGHS_USD = 16.0
+WALKTHROUGHS_NIGHT_USD = 14.0
+VISITOR_RESERVE_USD = 5.0
+WALKTHROUGH_STEP = "Ivy walkthroughs"
+
+
+def notes_night_budget(cap: float, walkthroughs_live: bool) -> float:
+    """Pure: what tonight's research notes may spend: their share, never past what leaves the walkthroughs theirs (when they run)
+    and visitors VISITOR_RESERVE_USD."""
+    share = NOTES_WITH_WALKTHROUGHS_USD if walkthroughs_live else NOTES_NIGHT_USD
+    return max(0.0, min(share, cap - VISITOR_RESERVE_USD - (WALKTHROUGHS_NIGHT_USD if walkthroughs_live else 0.0)))
+
+
+def walkthroughs_live() -> bool:
+    """The walkthrough nightly is one of the nightly's steps (scripts/refresh.STEPS)."""
+    from app.scripts.refresh import STEPS
+    return any(label == WALKTHROUGH_STEP for label, _ in STEPS)
+
+
+# A dated reminder in the morning digest: from its day, while the cap is still above the value it names (Sam, 2026-10-29).
+CAP_REMINDERS = ((date(2026, 11, 15), 20.0, "set AI_DAILY_SPEND_CAP_USD back to $20 on Railway (raised to $35 until Nov 15, 2026)"),)
+
+
+def cap_reminders(today: date, cap: float) -> list[str]:
+    """Pure: the reminders due on `today` with the cap at `cap`; one clears itself once the cap is back."""
+    return [text_ for day, back_to, text_ in CAP_REMINDERS if today >= day and cap > back_to]
 
 
 def reached(spent: float, cap: float | None = None) -> bool:

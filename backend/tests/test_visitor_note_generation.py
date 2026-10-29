@@ -34,6 +34,20 @@ def wired(monkeypatch):
     monkeypatch.setattr(rn, "start_research_note_generation", no_generation)
     monkeypatch.setattr(rn, "record_use", no_generation)
 
+    from app.services import edgar_client, note_quarters
+
+    class NoEdgar:                                   # the quarter check before a generation reads no filing here
+        async def get_cik(self, symbol):
+            return None
+
+        async def close(self):
+            pass
+
+    async def agree(*a, **k):
+        return {}
+    monkeypatch.setattr(edgar_client, "EdgarClient", NoEdgar)
+    monkeypatch.setattr(note_quarters, "current_inputs", agree)
+
     async def reader(db, note, admin):
         raise HTTPException(status_code=418, detail=f"existing:{note.status}:{admin}")   # reached the existing-note return
     monkeypatch.setattr(rn, "note_for_reader", reader)
@@ -46,7 +60,9 @@ async def test_a_visitor_gets_the_existing_note_back_whatever_its_state_and_noth
         async def existing(db, ticker_id, symbol, _s=status):
             return _Note(_s)
         wired.setattr(rn, "get_research_note", existing)
-        wired.setattr(rn, "withheld", lambda n: False)
+        async def shown(db, n):
+            return False
+        wired.setattr(rn, "withheld_now", shown)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             r = await c.post("/api/v1/research-notes/generate?force=true", json={"symbol": "AAPL"})
         assert r.status_code == 418 and r.json()["detail"] == f"existing:{status}:False", status   # force is not a visitor's

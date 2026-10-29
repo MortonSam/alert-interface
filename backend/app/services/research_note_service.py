@@ -748,6 +748,8 @@ async def run_research_note_background(
             # Attach Python-computed stats (exact DB values, never model-generated)
             stats_obj = _build_stats_object(ticker, reactions)
             structured["stats"] = stats_obj
+            from app.services.note_quarters import current_inputs
+            structured["inputs"] = await current_inputs(db, ticker.id, (filing or {}).get("filing_date"))     # the quarter each input names
 
             # Attach Finnhub financial metrics (best-effort, never model-generated)
             financials_obj = await _fetch_financials(symbol)

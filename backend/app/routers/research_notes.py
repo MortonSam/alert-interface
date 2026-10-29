@@ -20,6 +20,7 @@ from app.schemas.research_note import (
     ResearchNoteVerifyRequest,
 )
 from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, check_limit, get_client_ip, record_use
+from app.services.note_quarters import withheld_now
 from app.services.research_note_service import (
     _resolve_ticker,
     get_research_note,
@@ -32,6 +33,8 @@ from app.services.research_note_service import (
 )
 
 router = APIRouter(prefix="/research-notes", tags=["research-notes"])
+# Claude's wording (2026-10-29), for Sam's approval: a note waits while its inputs name different quarters (services/note_quarters)
+NOTE_WAITING_MESSAGE = "This company reported recently, and Ivy waits until every figure she uses has the new quarter. Try again in a few days."
 
 # ── Who may generate ──────────────────────────────────────────────────────────
 #
@@ -102,13 +105,27 @@ async def generate(
         # a visitor generates only where no note exists: a completed note (from any day), one in progress or one
         # that did not pass verification is the owner's to replace. A failed generation produced no note, so the
         # visitor may try again. Nothing generated, nothing charged here.
-        if withheld(existing):
+        if await withheld_now(db, existing):
             raise HTTPException(status_code=409, detail=NOTE_UNPUBLISHED_MESSAGE)
         response.status_code = 200
         return await note_for_reader(db, existing, admin)
     if existing is not None and _has_note_from_today(existing, now) and not force:
         response.status_code = 200   # the owner without force: today's note is returned
         return await note_for_reader(db, existing, admin)
+
+    from app.services.edgar_client import EdgarClient
+    from app.services.note_quarters import current_inputs, disagreement
+    edgar = EdgarClient()
+    try:
+        cik = await edgar.get_cik(ticker.symbol)
+        filing = await edgar.get_best_filing(cik) if cik else None
+    except Exception:
+        filing = None
+    finally:
+        await edgar.close()
+    if disagreement(await current_inputs(db, ticker.id, (filing or {}).get("filing_date"))):
+        # the company reported and not every input has the new quarter yet: no note is written, the existing one stays (Sam, 2026-10-29)
+        raise HTTPException(status_code=409, detail=NOTE_WAITING_MESSAGE)
 
     client_ip = get_client_ip(request)
     from app.services import ai_spend
@@ -134,7 +151,7 @@ async def verify(
     return await verify_existing_note(db, payload.ticker_id, payload.symbol)
 
 
-def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
+def _note_for_reader(note: ResearchNote, admin: bool, hidden: bool | None = None) -> ResearchNoteRead:
     """What this reader may see of a note.
 
     Visitors only ever get the text of a note whose verification completed. A
@@ -143,7 +160,7 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
     Admins get everything, with verification_failed set so the page can say so.
     """
     failed = verification_failed(note)
-    hidden = withheld(note)
+    hidden = withheld(note) if hidden is None else hidden          # note_for_reader passes note_quarters.withheld_now
     from app.config import settings
     # one verdict per claim is the truth: the stored verification is served normalized, its summary recounted from the claims
     data = {name: getattr(note, name) for name in ResearchNoteRead.model_fields if hasattr(note, name)}
@@ -180,7 +197,7 @@ def _note_for_reader(note: ResearchNote, admin: bool) -> ResearchNoteRead:
 
 async def note_for_reader(db, note: ResearchNote, admin: bool) -> ResearchNoteRead:
     """_note_for_reader, plus the date the company reported again after the note was written (None while it is current)."""
-    read = _note_for_reader(note, admin)
+    read = _note_for_reader(note, admin, await withheld_now(db, note))
     if read.structured_content:
         from app.services.note_valuation import with_sec_eps
         symbol = (await db.execute(select(Ticker.symbol).where(Ticker.id == note.ticker_id))).scalar()
@@ -215,7 +232,7 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     )).all()
     row = None
     for candidate in rows:
-        if is_verified(candidate[0]) and not withheld(candidate[0]) and await report_since(db, candidate[0].ticker_id, candidate[0].generated_at) is None:
+        if is_verified(candidate[0]) and not await withheld_now(db, candidate[0]) and await report_since(db, candidate[0].ticker_id, candidate[0].generated_at) is None:
             row = candidate
             break
     if row is None:
@@ -251,7 +268,7 @@ async def get_note(
     if symbol is None and ticker_id is None:
         raise HTTPException(status_code=422, detail="Either symbol or ticker_id is required")
     note = await get_research_note(db, ticker_id, symbol)
-    if note is None or (not admin and withheld(note)):
+    if note is None or (not admin and await withheld_now(db, note)):
         return Response(status_code=204)              # nothing to show is not an error: a 404 logged a console error on every such ticker page
     return await note_for_reader(db, note, admin)
 

@@ -101,7 +101,7 @@ def test_the_nightly_writes_missing_notes_first_then_failed_then_reported_since(
     assert G.queue(rows, 170) == ["BBB", "EEE", "CCC", "FFF", "GGG", "DDD"]
     assert G.due_kind("complete", False, None) == (2, "recheck") and G.due_kind("complete", True, None) == (3, "write")
     assert G.queue(rows, 2) == ["BBB", "EEE"]
-    assert G.MAX_PER_NIGHT == 170 and G.RESERVE_USD > 0
+    assert G.MAX_PER_NIGHT == 170
     assert ("Research notes (nightly)", ["python", "-m", "app.scripts.generate_notes"]) in refresh.STEPS
     assert refresh.STEP_TIMEOUTS["Research notes (nightly)"] == 3600
 
