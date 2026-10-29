@@ -4,8 +4,11 @@ One-off mode (TICKER ...) computes from the ticker's stored earnings events firs
 that is confirmed or carries a reported EPS, with the timing stored on the event (EDGAR acceptance time, an announcement)
 or in earnings_report_timing. Only a ticker with no stored past report asks yfinance for dates. Prices are the stored
 Intrinio bars of the ticker's current security record (services/price_bars). One-off mode is a dry run unless --write is
-given; it prints every row it would create and the typical 1-day move they yield. Bulk mode (--all, the nightly) is
-unchanged: yfinance dates, always written.
+given; it prints every row it would create and the typical 1-day move they yield. Bulk mode (--all, the nightly) takes the
+same stored reports and their timing first and adds yfinance's dates only where no stored report is within
+DUPLICATE_GUARD_DAYS (2026-10-29: yfinance dated PGR's Oct 14 and SYF's Oct 20 reports a day early, so their rows carried no
+timing and no move, and it never listed FAST's Oct 14 report at all). A stored report replaces an unmeasured row yfinance put a
+few days off it; a measured row there is left as it is. Always written.
 
 v3: Timing-aware reaction windows.
   bmo: base = close(T-1), 1d = close(T), 3d = close(T+2), 5d = close(T+4)
@@ -73,6 +76,8 @@ LOOKBACK_YEARS = 5
 MIN_AGE_DAYS = 8
 # Never insert an earnings row when the ticker already has one this close.
 DUPLICATE_GUARD_DAYS = 10
+# The nightly also retries a stored report this recent that still has no measured reaction on its own date.
+RETRY_UNMEASURED_DAYS = 45
 # Must match the step label in refresh.py so /health shows the refusals on that step.
 SEEDER_STEP_LABEL = "Historical reactions (--all)"
 # Each refused insert this run: {"symbol", "refused_date", "existing_date"}
@@ -219,6 +224,49 @@ def stored_report_entries(rows: list, today: date) -> tuple[list[tuple[date, Dec
         if report_timing and report_timing != "unknown":
             timing[event_date] = report_timing
     return sorted(entries, key=lambda x: x[0]), timing
+
+
+def merge_report_entries(yf_entries: list, stored_entries: list) -> list:
+    """Pure: the stored reports, plus each yfinance date that has no stored report within DUPLICATE_GUARD_DAYS, oldest first.
+    A stored report is the company's date (EDGAR, the company's own calendar); yfinance can put the same quarter a day or two
+    off it, or leave it out."""
+    stored_dates = [d for d, _, _ in stored_entries]
+    extra = [e for e in yf_entries if all(abs((e[0] - d).days) > DUPLICATE_GUARD_DAYS for d in stored_dates)]
+    return sorted([*stored_entries, *extra], key=lambda x: x[0])
+
+
+def misdated_plan(stored_dates, existing: dict[date, bool]) -> tuple[set[date], set[date]]:
+    """Pure: (rows to drop, stored dates to skip) before writing the stored reports. `existing` maps each stored earnings row's
+    date to whether it has a 1-day move. A stored report with no row of its own and a row within DUPLICATE_GUARD_DAYS of it is
+    the same quarter under another date: an unmeasured row there is dropped so the report is written on its own date, and a
+    measured one is kept and the report skipped (never two rows for one quarter, never a measured move lost). A row on another
+    stored report's date is never dropped."""
+    stored = set(stored_dates)
+    drop: set[date] = set()
+    skip: set[date] = set()
+    for d in sorted(stored):
+        if d in existing:
+            continue
+        near = [x for x in existing if x != d and x not in stored and abs((x - d).days) <= DUPLICATE_GUARD_DAYS]
+        if any(existing[x] for x in near):
+            skip.add(d)
+        else:
+            drop.update(near)
+    return drop, skip
+
+
+async def apply_misdated_plan(session, ticker_id, stored_dates, write: bool = True) -> tuple[set[date], set[date]]:
+    """misdated_plan over the ticker's stored rows; deletes the dropped rows when `write`. Returns (dropped, skipped)."""
+    rows = (await session.execute(
+        select(HistoricalReaction.event_date, HistoricalReaction.pct_change_1d).where(
+            HistoricalReaction.ticker_id == ticker_id, HistoricalReaction.event_type == EventType.EARNINGS)
+    )).all()
+    drop, skip = misdated_plan(stored_dates, {r.event_date: r.pct_change_1d is not None for r in rows})
+    if drop and write:
+        await session.execute(sa_delete(HistoricalReaction).where(
+            HistoricalReaction.ticker_id == ticker_id, HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.event_date.in_(sorted(drop)), HistoricalReaction.pct_change_1d.is_(None)))
+    return drop, skip
 
 
 async def load_stored_report_entries(session, ticker_id, today: date) -> tuple[list, dict[date, str]]:
@@ -664,6 +712,9 @@ async def build_process_list(session) -> dict[str, str]:
           whose event_date > max(event_date) of that ticker's reactions
           AND event_date <= today - MIN_AGE_DAYS (enough time has passed
           for price data to settle).
+      (c) unmeasured — a confirmed earnings event in the last
+          RETRY_UNMEASURED_DAYS, at least MIN_AGE_DAYS old, with no measured
+          reaction on its own date (CB's Oct 20 report: its row had no timing).
 
     All other tickers are skipped.
     """
@@ -712,14 +763,39 @@ async def build_process_list(session) -> dict[str, str]:
         .group_by(Ticker.id, Ticker.symbol)
     )).scalars().all())
 
+    measured_same_day = (
+        select(HistoricalReaction.id).where(
+            HistoricalReaction.ticker_id == Event.ticker_id,
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.event_date == Event.event_date,
+            HistoricalReaction.pct_change_1d.is_not(None),
+        ).exists()
+    )
+    needs_unmeasured = set((await session.execute(
+        select(Ticker.symbol)
+        .join(Event, Event.ticker_id == Ticker.id)
+        .where(
+            Event.event_type == EventType.EARNINGS,
+            Event.is_confirmed.is_(True),
+            Event.unresolved_since.is_(None),
+            Ticker.is_active.is_(True),
+            Event.event_date <= age_cutoff,
+            Event.event_date >= today - timedelta(days=RETRY_UNMEASURED_DAYS),
+            ~measured_same_day,
+        )
+        .group_by(Ticker.id, Ticker.symbol)
+    )).scalars().all())
+
     # Build result dict with reasons
     result: dict[str, str] = {}
-    for sym in sorted(needs_version | needs_new_earnings):
+    for sym in sorted(needs_version | needs_new_earnings | needs_unmeasured):
         reasons = []
         if sym in needs_version:
             reasons.append("version_upgrade")
         if sym in needs_new_earnings:
             reasons.append("new_earnings")
+        if sym in needs_unmeasured:
+            reasons.append("unmeasured")
         result[sym] = ", ".join(reasons)
 
     return result
@@ -785,6 +861,13 @@ async def seed(symbol: str, write: bool = False) -> None:
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
         timing_map.update(event_timing)
+        if source == "stored earnings events":
+            dropped, skipped_dates = await apply_misdated_plan(session, ticker.id, [d for d, _, _ in earnings_entries], write=write)
+            for d in sorted(dropped):
+                print(f"  {d.isoformat():<12} unmeasured row {'replaced' if write else 'would be replaced'} by the stored report date near it")
+            for d in sorted(skipped_dates):
+                print(f"  {d.isoformat():<12} skipped: a measured row for this quarter is stored under a nearby date")
+            earnings_entries = [e for e in earnings_entries if e[0] not in skipped_dates]
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
         basis_unclear = await basis_mismatch_dates(session, ticker.id)
         kept = await price_bars.stored_history_dates(session, sym, [d for d, _, _ in earnings_entries], load_reference_sessions())
@@ -882,16 +965,24 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
         if n_deleted:
             tqdm.write(f"  🗑 {ticker.symbol}: deleted {n_deleted} reaction(s) before {first_hist_date}")
 
+        # The stored reports first, with their timing; yfinance's dates fill in only where none is stored near them
+        stored_entries, event_timing = await load_stored_report_entries(session, ticker.id, date.today())
+        earnings_entries = merge_report_entries(earnings_entries, stored_entries)
         if not earnings_entries:
             await session.commit()
             return 0, 0, 0
+        dropped, skipped = await apply_misdated_plan(session, ticker.id, [d for d, _, _ in stored_entries])
+        if dropped:
+            tqdm.write(f"  ↺ {ticker.symbol}: replaced unmeasured row(s) {', '.join(sorted(d.isoformat() for d in dropped))} with the stored report date")
+        earnings_entries = [e for e in earnings_entries if e[0] not in skipped]
 
-        # Look up report_timing from earnings_report_timing table
+        # Timing: the event's own first, then the earnings_report_timing table
         timing_rows = (await session.execute(
             select(EarningsReportTiming.event_date, EarningsReportTiming.timing)
             .where(EarningsReportTiming.ticker_id == ticker.id)
         )).all()
         timing_map = {r.event_date: r.timing for r in timing_rows}
+        timing_map.update(event_timing)
         anchors = await load_anchors(session, ticker.id, {d: a for d, _, a in earnings_entries})
         basis_unclear = await basis_mismatch_dates(session, ticker.id)
         kept = await price_bars.stored_history_dates(session, ticker.symbol, [d for d, _, _ in earnings_entries], load_reference_sessions())
