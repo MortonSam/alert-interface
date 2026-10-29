@@ -2928,17 +2928,28 @@ async def check_reaction_count_moving(session) -> CheckResult:
 
 
 async def check_figi_change(session) -> CheckResult:
-    """ERROR when Intrinio's current FIGI for a ticker (figi_seen at the last refresh) differs from the stored one:
-    the ticker now points at a different security and the record map needs a new row."""
+    """ERROR when Intrinio's current FIGI for a ticker (figi_seen at the last refresh) differs from the stored one and the security
+    itself may have changed: a different composite FIGI, share class FIGI or Intrinio security record, or one that cannot be
+    compared. A listing move (only the exchange-level FIGI moved, everything else the same: PANW 2026-10-29) passes, named in the
+    message (services/security_records.figi_move)."""
     from app.models.security_record import SecurityRecord
-    from app.services.security_records import CURRENT
+    from app.services.security_records import CURRENT, FIGI_CHANGED, LISTING_MOVE, figi_move
     rows = (await session.execute(select(SecurityRecord).where(SecurityRecord.role == CURRENT))).scalars().all()
-    changed = [f"{r.symbol}: stored FIGI {r.figi}, Intrinio now {r.figi_seen} (checked {r.checked_at.date().isoformat() if r.checked_at else '?'})"
-               for r in rows if r.figi and r.figi_seen and r.figi != r.figi_seen]
+    changed: list[str] = []
+    moves: list[str] = []
+    for r in rows:
+        kind, detail = figi_move(r.figi, r.composite_figi, r.share_class_figi, r.intrinio_security_id,
+                                 r.figi_seen, r.seen_composite_figi, r.seen_share_class_figi, r.seen_security_id)
+        line = f"{r.symbol}: {detail} (checked {r.checked_at.date().isoformat() if r.checked_at else '?'})"
+        if kind == FIGI_CHANGED:
+            changed.append(line)
+        elif kind == LISTING_MOVE:
+            moves.append(line)
     if changed:
-        return CheckResult("figi_change", ERROR, f"{len(changed)} ticker(s) whose current record moved to a new FIGI", sorted(changed))
+        return CheckResult("figi_change", ERROR, f"{len(changed)} ticker(s) whose current record moved to a new FIGI", sorted(changed + moves))
     unchecked = sum(1 for r in rows if r.figi_seen is None)
-    return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + (f" ({unchecked} not yet refreshed)" if unchecked else ""))
+    tail = (f" ({unchecked} not yet refreshed)" if unchecked else "") + (f"; {len(moves)} listing move(s), logged: {'; '.join(sorted(moves))}" if moves else "")
+    return CheckResult("figi_change", PASS, f"No FIGI changes across {len(rows)} current records" + tail)
 
 
 # ── Splits: every stored split has its factor on the shadow bars within one session ──────────────────────

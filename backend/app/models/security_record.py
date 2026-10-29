@@ -30,7 +30,13 @@ class SecurityRecord(Base):
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
+    share_class_figi: Mapped[str | None] = mapped_column(Text, nullable=True)     # the stored FIGI's share class (recorded from 2026-10-29)
     figi_seen: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # what Intrinio returned for the ticker at the last refresh, beside the FIGI: validate's figi_change compares them with the
+    # stored identity to tell a listing move (same security, a new exchange line) from a different security
+    seen_composite_figi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seen_share_class_figi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seen_security_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_price_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

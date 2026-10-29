@@ -65,10 +65,16 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
             inserted += 1
         else:
             updated += 1
-        if row.role == CURRENT and row.figi and r.figi and row.figi != r.figi:
-            changed = True          # Intrinio moved the ticker to a new record: the check reports it, the stored FIGI stays
-        row.intrinio_security_id = r.intrinio_security_id
-        row.composite_figi = r.composite_figi
+        moved = r.role == CURRENT and bool(row.figi and r.figi and row.figi != r.figi)
+        if moved:
+            changed = True          # Intrinio moved the ticker to a new FIGI: the check judges it, the stored FIGI stays
+        if not moved:
+            # the stored identity follows the stored FIGI: while Intrinio reports another one, the row keeps its own composite,
+            # share class and record id, and what Intrinio now returns goes to the seen_* columns for validate to compare
+            row.intrinio_security_id = r.intrinio_security_id
+            row.composite_figi = r.composite_figi
+            if r.role == CURRENT:
+                row.share_class_figi = seen.get("share_class_figi")
         row.name = r.name
         row.valid_to = r.valid_to
         row.role = r.role
@@ -79,6 +85,9 @@ async def upsert(session, rows: list[Record], seen: dict) -> tuple[int, int, boo
             row.intrinio_ticker = seen.get("ticker")
             row.intrinio_active = seen.get("active")
             row.figi_seen = seen.get("figi")
+            row.seen_composite_figi = seen.get("composite_figi")
+            row.seen_share_class_figi = seen.get("share_class_figi")
+            row.seen_security_id = seen.get("id")
             lp = seen.get("last_stock_price")
             row.last_price_date = date.fromisoformat(lp) if isinstance(lp, str) else lp
             row.checked_at = now
@@ -168,6 +177,8 @@ async def accept_figi(symbols: list[str], write: bool) -> int:
                 print(f"  {sym}: {verdict}; {detail}" + ("" if write or verdict != "accept" else "; dry run, nothing written"))
                 if verdict == "accept" and write:
                     row.figi, row.composite_figi, row.figi_seen = current["figi"], current.get("composite_figi"), current["figi"]
+                    row.share_class_figi = row.seen_share_class_figi = current.get("share_class_figi")
+                    row.seen_composite_figi, row.seen_security_id = current.get("composite_figi"), current.get("id")
                     row.checked_at = datetime.now(timezone.utc)
                     await session.commit()
                     print("  stored; validate's figi_change clears for this ticker")

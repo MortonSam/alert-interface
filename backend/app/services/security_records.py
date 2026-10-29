@@ -148,3 +148,30 @@ def coverage_problems(records: list[Record], start: date, end: date) -> list[str
     if cursor <= end and _has_session(cursor, end):
         out.append(f"gap {cursor.isoformat()}..{end.isoformat()}")
     return out
+
+
+LISTING_MOVE = "listing move"
+FIGI_CHANGED = "changed"
+
+
+def figi_move(figi: str | None, composite: str | None, share_class: str | None, security_id: str | None,
+              seen_figi: str | None, seen_composite: str | None, seen_share_class: str | None, seen_security_id: str | None) -> tuple[str | None, str]:
+    """Pure: how Intrinio's FIGI for a ticker differs from the stored one: None when it does not (or nothing was seen),
+    LISTING_MOVE when only the exchange-level FIGI moved (the same composite FIGI, share class FIGI and Intrinio security record:
+    PANW's NYSE line BBG002VZ5C47 to its Nasdaq line BBG002VZ5CL8, 2026-10-29), FIGI_CHANGED for anything else, including a
+    composite, share class or record that cannot be compared. A stored row from before 2026-10-29 has no share class of its own:
+    there the composite FIGI, which Bloomberg issues per share class, stands for it."""
+    if not figi or not seen_figi or figi == seen_figi:
+        return None, ""
+    line = f"stored FIGI {figi}, Intrinio now {seen_figi}"
+    if not (composite and seen_composite and security_id and seen_security_id):
+        return FIGI_CHANGED, f"{line}; its composite FIGI or security record was not returned, so it cannot be judged a listing move"
+    if composite != seen_composite:
+        return FIGI_CHANGED, f"{line}; composite FIGI {composite} -> {seen_composite}"
+    if security_id != seen_security_id:
+        return FIGI_CHANGED, f"{line}; Intrinio security {security_id} -> {seen_security_id}"
+    if not seen_share_class:
+        return FIGI_CHANGED, f"{line}; Intrinio returned no share class FIGI, so it cannot be judged a listing move"
+    if share_class and share_class != seen_share_class:
+        return FIGI_CHANGED, f"{line}; share class FIGI {share_class} -> {seen_share_class}"
+    return LISTING_MOVE, f"{line}: the same composite FIGI {composite}, share class and Intrinio security {security_id} (a new exchange line)"
