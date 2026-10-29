@@ -31,16 +31,17 @@ export default async function Home() {
           .open-h1 { font-size: clamp(40px, min(4.6vw, 7.6svh), 84px); }   /* beside the heron: the headline, subhead and buttons fit the screen */
           .open-heron { width: 100%; max-width: 760px; max-height: 70svh; object-fit: contain; }
         }
-        /* the entrance: the heron settles first, then the headline reveals, then the rest */
+        /* the entrance: the heron settles first, then the headline reveals, then the rest. Content never depends on it (Sam,
+           2026-10-29, Safari): it runs only once the script below marks the page (no script, no animation), and MOTION_DONE_MS
+           after load the marker ends it, so an animation that stalls or never starts leaves everything shown. */
         @keyframes heron-settle { from { opacity: 0; transform: translateX(-28px) scale(.985); } to { opacity: 1; transform: none; } }
         @keyframes line-reveal  { from { opacity: 0; transform: translateY(.35em); clip-path: inset(0 0 100% 0); } to { opacity: 1; transform: none; clip-path: inset(0 0 0 0); } }
         @keyframes soft-in      { from { opacity: 0; } to { opacity: 1; } }
-        .open-heron  { animation: heron-settle 1100ms cubic-bezier(.2,.7,.15,1) both; }
-        .open-line   { animation: line-reveal 800ms cubic-bezier(.2,.7,.2,1) 650ms both; }
-        .open-rest   { animation: soft-in 700ms ease-out 1150ms both; }
-        .open-cue    { animation: soft-in 900ms ease-out 1700ms both; }
-        @media (prefers-reduced-motion: reduce) {
-          .open-heron, .open-line, .open-rest, .open-cue { animation: none; }
+        @media (prefers-reduced-motion: no-preference) {
+          html.motion:not(.motion-done) .open-heron { animation: heron-settle 1100ms cubic-bezier(.2,.7,.15,1) both; }
+          html.motion:not(.motion-done) .open-line  { animation: line-reveal 800ms cubic-bezier(.2,.7,.2,1) 650ms both; }
+          html.motion:not(.motion-done) .open-rest  { animation: soft-in 700ms ease-out 1150ms both; }
+          html.motion:not(.motion-done) .open-cue   { animation: soft-in 900ms ease-out 1700ms both; }
         }
         ${COUNTER_CSS}
         .statement-h2 {
@@ -49,6 +50,9 @@ export default async function Home() {
           letter-spacing: -.01em;
         }
       `}</style>
+      {/* the opening's switch (public/opening-motion.js): marks the page before the opening paints; MOTION_DONE_MS ends it */}
+      {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+      <script src="/opening-motion.js" />
 
       {/* ── 1. The opening: the heron large on the left facing the words, the headline, subhead and buttons on its right; on a
              phone the heron sits above the headline, left-aligned. Nothing else on the screen but a quiet scroll cue. ── */}

@@ -1,5 +1,7 @@
 # Renders every public route of production as an anonymous visitor (frontend/scripts/public-pages-check.mjs) after every deploy
-# and after every nightly, and sends one ntfy alarm when any route shows a token count, a model name, a cost or a developer message.
+# and after every nightly, and sends one ntfy alarm when any route shows a token count, a model name, a cost or a developer message,
+# or when a main page shows a section whose text is invisible or empty in Chrome, WebKit (Safari) or Firefox at 390 or 1440 wide
+# (frontend/scripts/visible-sections-check.mjs, Sam 2026-10-29).
 # When it runs is decided by scripts/public_check_due.py (tested in scripts/test_public_check_due.py).
 name: Public pages check
 
@@ -19,7 +21,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       BASE: https://alertinterface.com
     steps:
@@ -50,6 +52,19 @@ jobs:
         run: |
           set -o pipefail
           timeout 900 node frontend/scripts/public-pages-check.mjs "$BASE" 2>&1 | tee check.txt
+      - name: Install Playwright with WebKit and Firefox
+        if: ${{ !cancelled() && steps.due.outputs.run == 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && npm init -y >/dev/null && npm i --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium webkit firefox
+      - name: Every section visible in Chrome, WebKit and Firefox
+        id: visible
+        if: ${{ !cancelled() && steps.due.outputs.run == 'true' }}
+        env:
+          PLAYWRIGHT_DIR: ${{ runner.temp }}/pw
+        run: |
+          set -o pipefail
+          timeout 1200 node frontend/scripts/visible-sections-check.mjs "$BASE" chromium,webkit,firefox 2>&1 | tee -a check.txt
       - name: Alarm
         if: failure() && steps.due.outputs.run == 'true'
         env:

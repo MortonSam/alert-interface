@@ -38,7 +38,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark ${fontDisplay.variable} ${fontUi.variable} ${fontMono.variable} ${fontBrand.variable}`}>
+    <html lang="en" className={`dark ${fontDisplay.variable} ${fontUi.variable} ${fontMono.variable} ${fontBrand.variable}`} suppressHydrationWarning>
       <body className="font-sans antialiased">
         <PostHogProvider>
           <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">

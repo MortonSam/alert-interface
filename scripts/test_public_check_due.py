@@ -1,5 +1,6 @@
 """When the scheduled public-pages check runs, and the one alarm it sends. Run: python3 -m unittest scripts/test_public_check_due.py"""
 import unittest
+from pathlib import Path
 from datetime import datetime, timezone
 
 from public_check_due import ALARM_LINES, alarm_text, due
@@ -56,3 +57,19 @@ class Alarm(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VisibleSectionsCheck(unittest.TestCase):
+    """Sam (2026-10-29): Safari showed the home page's sections empty. After each deploy every main page is rendered in Chrome,
+    WebKit and Firefox at 390 and 1440 wide, and a section whose text is invisible or empty fails the run (and alarms)."""
+
+    def test_the_workflow_runs_it_in_three_engines_and_alarms_on_it(self):
+        root = Path(__file__).resolve().parent.parent
+        wf = (root / ".github" / "workflows" / "public-pages-check.yml").read_text()
+        self.assertIn('node frontend/scripts/visible-sections-check.mjs "$BASE" chromium,webkit,firefox 2>&1 | tee -a check.txt', wf)
+        self.assertIn("npx playwright install --with-deps chromium webkit firefox", wf)
+        self.assertLess(wf.index("visible-sections-check.mjs"), wf.index("- name: Alarm"))
+        js = (root / "frontend" / "scripts" / "visible-sections-check.mjs").read_text()
+        self.assertIn('const ROUTES = ["/", "/tickers/NVDA", "/discover", "/build", "/ivy"];', js)
+        self.assertIn("const WIDTHS = [390, 1440];", js)
+        self.assertIn("before scrolling", js)
