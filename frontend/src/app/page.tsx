@@ -2,11 +2,9 @@ import Link from "next/link";
 import LatestVerifiedNote from "@/components/LatestVerifiedNote";
 import { HeroSearchButton } from "@/components/TickerSearch";
 import { TickerGrid } from "./ticker-grid";
-import { HomeLedgerBody, HomeLedgerFootnote, HomeLedgerHeadline } from "@/components/IvyCopy";
 import { SiteCounters } from "@/components/SiteCounters";
 import { COUNTER_CSS } from "@/lib/siteCounters";
 import { fetchSiteStatsServer } from "@/lib/siteStats";
-import { IvyStatLine } from "@/components/IvyStatLine";
 import { IvyMark } from "@/components/IvyMark";
 import { BRAND } from "@/lib/brand";
 
@@ -182,16 +180,13 @@ export default async function Home() {
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
             </p>
+            {/* Sam's placeholder copy (2026-10-29); the picks ledger is not named on the home page */}
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              <HomeLedgerHeadline />
+              Ivy reads the filings so you can understand the company, and shows her work.
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
-              <HomeLedgerBody />
-            </p>
-
-            <IvyStatLine className="font-mono text-xs text-muted-foreground mt-6" />
-            <p className="text-[11px] text-muted-foreground/50 mt-2">
-              <HomeLedgerFootnote />
+              What it does, whether it&#39;s growing, how much of each sale it keeps, whether it&#39;s expensive, and what could go
+              wrong, all from the company&#39;s own filings. Ivy explains. She never tells you what to buy or sell.
             </p>
 
             <div className="mt-8">

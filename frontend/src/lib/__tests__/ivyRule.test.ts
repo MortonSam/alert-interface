@@ -98,7 +98,7 @@ function files(dir: string): string[] {
 describe("no page types Ivy's numbers by hand", () => {
   const COPY = [
     ...files(join(SRC, "app/ivy")), join(SRC, "app/page.tsx"), join(SRC, "app/disclosures/page.tsx"),
-    join(SRC, "components/IvyCopy.tsx"), join(SRC, "components/IvyStatLine.tsx"), join(SRC, "lib/ivyRule.ts"),
+    join(SRC, "components/IvyCopy.tsx"), join(SRC, "lib/ivyRule.ts"),
   ];
   const BANNED: [RegExp, string][] = [
     [/more than 10%|<= ?-10\b|≤ ?-?10%/, "momentum cutoff"],
