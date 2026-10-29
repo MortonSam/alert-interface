@@ -12,6 +12,8 @@ from datetime import date
 
 from sqlalchemy import text
 
+from app.services.dates import fmt_day
+
 COUNT_KEY = "earnings_reaction_counts"
 STUCK_SESSIONS = 3
 STUCK_MIN_REPORTS = 5
@@ -52,8 +54,8 @@ def verdict(window: tuple[date, date, int, int] | None, reports: int) -> tuple[b
     if window is None:
         return False, "not enough nightly counts recorded yet"
     first, last, before, now = window
-    span = f"{first.isoformat()} to {last.isoformat()}"
+    span = f"{fmt_day(first)} to {fmt_day(last)}"
     if before == now and reports >= STUCK_MIN_REPORTS:
-        return True, (f"the stored earnings reactions count has stayed at {now:,} over the last {STUCK_SESSIONS} trading sessions "
+        return True, (f"the earnings reactions count has stayed at {now:,} over the last {STUCK_SESSIONS} trading sessions "
                       f"({span}) while {reports} S&P 500 companies reported")
     return False, f"count {before:,} before {span}, {now:,} now; {reports} S&P 500 report(s) in those sessions"
