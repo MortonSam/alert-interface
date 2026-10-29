@@ -109,8 +109,14 @@ OPEN_DRAFT_ROUTES = {"/api/v1/theses/draft", "/api/v1/theses/draft-alternative",
                      "/api/v1/research-notes/generate", "/api/v1/tickers/{symbol}/ask"}     # anonymous, limited per IP by get_draft_caller's limiter
 
 
+# accounts (routers/accounts, ACCOUNTS_ENABLED): asking for a link, spending it, signing out and one-click unsubscribe are open by
+# design (the link, the cookie or the signed unsubscribe key is the credential); every other account write needs the session cookie
+ACCOUNT_OPEN_ROUTES = {"/api/v1/account/sign-in", "/api/v1/account/verify", "/api/v1/account/sign-out", "/api/v1/account/unsubscribe"}
+
+
 def test_every_write_route_requires_credentials():
     from tests.route_scan import api_routes, dependency_calls
+    from app.routers.accounts import signed_in
     unguarded, writes = [], 0
     for path, route in api_routes(app):
         if not (route.methods & {"POST", "PUT", "PATCH", "DELETE"}):
@@ -120,7 +126,9 @@ def test_every_write_route_requires_credentials():
         if path in OPEN_DRAFT_ROUTES:
             assert get_draft_caller in calls, path
             continue
-        if get_current_user not in calls and require_admin not in calls:
+        if path in ACCOUNT_OPEN_ROUTES:
+            continue
+        if get_current_user not in calls and require_admin not in calls and signed_in not in calls:
             unguarded.append(f"{sorted(route.methods)} {path}")
     assert writes > 10, "the route walk found the app's write routes"
     assert unguarded == [], unguarded
