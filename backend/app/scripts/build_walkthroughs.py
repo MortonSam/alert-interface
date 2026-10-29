@@ -90,7 +90,6 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     from app.services.briefing import short_name
     from app.services.fact_holds import holds_for
     from app.services.fiscal_periods import quarter_label
-    from app.services.fomc_calendar import decision_days
     from app.services import walkthrough_data as D
     from app.thresholds import MARKET_DAY_MIN_SPY_PCT
     today = u["today"]
@@ -115,15 +114,22 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     rdays = await D.report_days(db, t["id"])
     stock = u["closes"].get(sym, [])
     moves = D.biggest_moves(stock, u["spy"], rdays, MARKET_DAY_MIN_SPY_PCT)
-    s4 = W.step_stock(name, sector, stock, u["spy"], u["sectors"].get(sector), moves, MARKET_DAY_MIN_SPY_PCT, today)
+    s4 = W.step_stock(name, sector, stock, u["spy"], u["sectors"].get(sector), moves, MARKET_DAY_MIN_SPY_PCT, today, W.index_share(sym, u["tickers"]))
     snap = u["pe"].get(sym)
     if snap and "pe" in held:
         snap = None
     if reit:
         s5 = W.step_valuation_reit(name, ffo, close, periods)
     else:
-        series = await D.pe_series(db, sym, u["splits"].get(sym, []), actions, today) if snap and snap["status"] == "ok" else []
-        s5 = W.step_valuation(name, sector, snap, series, u["pe_sector"].get(sector), True, periods)
+        series, left_out, year = [], {}, None
+        if snap and snap["status"] == "ok":
+            from app.services import valuation as V
+            bars, quarters = await D.pe_inputs(db, sym, u["splits"].get(sym, []), today)
+            act_dates = [a["date"] for a in actions]
+            series = V.pe_series_clean(bars, quarters, act_dates) if quarters else []
+            left_out = D.pe_left_out(bars, quarters, act_dates)
+            year = D.pe_year(bars, quarters, snap, s4.get("year_pct"))
+        s5 = W.step_valuation(name, sector, snap, series, u["pe_sector"].get(sector), True, periods, left_out, year)
     ne = u["next"].get(sym) if "report_date" not in held else None
     timing = None
     implied = None
@@ -132,8 +138,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
                                    {"t": t["id"], "d": ne.date})).scalar()
         implied = None if "implied_move" in held else await D.implied_move(db, sym, ne.date, today)
     typical = await D.typical_move(db, t["id"], sym, held)
-    fed = next(iter(decision_days(today, today + timedelta(days=400))), None)
-    s6 = W.step_upcoming(name, ne, timing, implied, typical, fed, D.ordinary_move(stock, rdays) if typical else None)
+    s6 = W.step_upcoming(name, ne, timing, implied, typical, None, D.ordinary_move(stock, rdays) if typical else None)
     s7 = W.step_risks(name, risks, merger)
     steps = [s1, s2, s3, s4, s5, s6, s7]
     fl = (ffo or {}).get("latest")
@@ -149,7 +154,12 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
                    "steps": {s["key"]: {"numbers": list(s["numbers"]), "sentences": list(s["sentences"]), "deeper": list(s["deeper"])} for s in (s1, s2, s3) if s["status"] != "absent"},
                    "risks": [{"n": r["n"], "heading": r["heading"], "body": r["body"]} for r in (risks or {}).get("risks", [])] if s7["status"] != "absent" else [],
                    "risk_filed": (risks or {}).get("filed").isoformat() if s7["status"] != "absent" and risks and risks.get("filed") else None}
-    return {"payload": json.loads(json.dumps(payload, default=str)), "steps_shown": W.steps_shown(steps), "story_facts": story_facts, "as_of": as_of}
+    from app.services import walkthrough_quotes as Q
+    latest_growth = max((r for r in growth_rows or [] if r["metric"] == "revenue" and not r.get("held_reason") and r.get("value") is not None),
+                        key=lambda r: r["period_end"], default=None)
+    want = Q.wanted(payload, latest_growth, m, periods)
+    return {"payload": json.loads(json.dumps(payload, default=str)), "steps_shown": W.steps_shown(steps), "story_facts": story_facts, "as_of": as_of,
+            "quote_want": json.loads(json.dumps(want, default=str))}
 
 
 async def run(argv: list[str]) -> int:
@@ -171,6 +181,7 @@ async def run(argv: list[str]) -> int:
     built: dict[str, dict] = {}
     rows: list[dict] = []
     sec_failed = 0
+    quote_spend = 0.0
     try:
         for i, sym in enumerate(symbols, 1):
             prior = stored.get(sym) or {}
@@ -182,6 +193,17 @@ async def run(argv: list[str]) -> int:
                 src = prior.get("sources") or {}
             async with ScriptSessionLocal() as db:
                 b = await build_one(db, u, sym, src)
+            from app.services import walkthrough_quotes as Q
+            try:
+                q = await Q.refresh(edgar, await edgar.get_cik(sym), b["quote_want"], src.get("quotes"), b["payload"]["name"], story and write)
+                if q.get("cost_usd"):
+                    quote_spend += q["cost_usd"]
+                    print(f"  {sym}: quotes {sorted(q['quotes'])} kept, {len(q.get('dropped') or [])} dropped, ${q['cost_usd']:.3f}", flush=True)
+            except Exception as exc:
+                print(f"  {sym}: quotes failed, none shown: {redact(exc)[:120]}", flush=True)
+                q = {"version": Q.QUOTES_VERSION, "want": b["quote_want"], "fingerprint": None, "quotes": {}}
+            src = {**src, "quotes": q}
+            Q.apply(b["payload"], q)
             built[sym] = {**b, "sources": src, "prior": prior}
             st = {s["key"]: s["status"] for s in b["payload"]["steps"]}
             rows.append({"symbol": sym, "sector": u["tickers"][sym]["sector"], "steps": st,
@@ -228,7 +250,7 @@ async def run(argv: list[str]) -> int:
             counts[k][v] += 1
     for k, c in counts.items():
         print(f"  step {k:<10} ok {c['ok']:>3}  partial {c['partial']:>3}  absent {c['absent']:>3}", flush=True)
-    print(f"  SEC reads failed: {sec_failed}; story spend ${spent:.2f}", flush=True)
+    print(f"  SEC reads failed: {sec_failed}; story spend ${spent:.2f}; quote spend ${quote_spend:.2f}", flush=True)
     if report:
         with open(report, "w") as fh:
             json.dump({"run_at": datetime.now(timezone.utc).isoformat(), "today": today.isoformat(), "counts": counts, "stocks": rows}, fh, default=str, indent=1)

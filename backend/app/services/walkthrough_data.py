@@ -29,7 +29,7 @@ async def load_universe(db, today: date) -> dict:
     from app.services.next_earnings import batch_next_earnings
     from app.services.ticker_exits import MERGED, REASON_PREFIXES
     tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text(
-        "SELECT id, symbol, name, sector, industry, market_cap, index_member FROM tickers WHERE is_active ORDER BY symbol"))).all()}
+        "SELECT id, symbol, name, sector, industry, market_cap, market_cap_updated_at, index_member FROM tickers WHERE is_active ORDER BY symbol"))).all()}
     syms = list(tickers)
     profiles = {r.symbol: dict(r._mapping) for r in (await db.execute(text(
         "SELECT symbol, short_description, fetched_at, latest_filing_date FROM company_profiles WHERE symbol = ANY(:s)"), {"s": syms})).all()}
@@ -63,7 +63,7 @@ async def load_universe(db, today: date) -> dict:
     for r in (await db.execute(text("""SELECT symbol, metric, period_end, year_ago_end, value, year_ago_value, growth_pct, phrase, held_reason, readers, version, computed_at
             FROM growth_figures WHERE symbol = ANY(:s) ORDER BY symbol, metric, period_end"""), {"s": syms})).all():
         growth.setdefault(r.symbol, []).append(dict(r._mapping))
-    pe = {r.symbol: dict(r._mapping) for r in (await db.execute(text("""SELECT DISTINCT ON (symbol) symbol, as_of_date, status, reason, pe, trailing_eps, window_start, window_end,
+    pe = {r.symbol: dict(r._mapping) for r in (await db.execute(text("""SELECT DISTINCT ON (symbol) symbol, as_of_date, price, status, reason, pe, trailing_eps, window_start, window_end,
             window_source, hist_median, hist_share_above, hist_sessions, hist_first, hist_last FROM pe_snapshots WHERE symbol = ANY(:s) ORDER BY symbol, as_of_date DESC"""), {"s": syms})).all()}
     pe_sector = {r.sector: dict(r._mapping) for r in (await db.execute(text(
         "SELECT DISTINCT ON (sector) sector, as_of_date, median_pe, shown, reason, fresh, active FROM pe_sector_snapshots ORDER BY sector, as_of_date DESC"))).all()}
@@ -236,16 +236,67 @@ async def implied_move(db, symbol: str, report_date: date, today: date) -> dict 
     return {"pct": round(im.pct * 100, 1), "chain_date": date.fromisoformat(str(last_trade)[:10]), "expiration": date.fromisoformat(exp)}
 
 
-async def pe_series(db, symbol: str, splits: list[tuple], actions: list[dict], today: date) -> list[tuple[date, float]]:
-    """The daily P/E over the stored five years, from the quarters and raw closes compute_pe reads (valuation.pe_series_clean)."""
+async def pe_inputs(db, symbol: str, splits: list[tuple], today: date) -> tuple[list[tuple[date, float]], list[dict]]:
+    """The rebased closes over the stored five years and the stored quarters compute_pe reads."""
     quarters = [{"end": r[0], "start": r[1], "eps": float(r[2]), "filed": r[3], "derived": bool(r[4])} for r in (await db.execute(text(
         "SELECT period_end, period_start, eps, filed_on, derived FROM eps_quarters WHERE symbol = :s ORDER BY period_end"), {"s": symbol})).all()]
     if not quarters:
-        return []
+        return [], []
     raw = [(r[0], float(r[1])) for r in (await db.execute(text("SELECT date, close FROM price_bars_shadow WHERE symbol = :s AND date >= :d ORDER BY date"),
                                                            {"s": symbol, "d": today - timedelta(days=366 * V.RANGE_YEARS)})).all()]
-    bars = V.rebase_closes(raw, splits)
-    return V.pe_series_clean(bars, quarters, [a["date"] for a in actions])
+    return V.rebase_closes(raw, splits), quarters
+
+
+async def pe_series(db, symbol: str, splits: list[tuple], actions: list[dict], today: date) -> list[tuple[date, float]]:
+    """The daily P/E over the stored five years, from the quarters and raw closes compute_pe reads (valuation.pe_series_clean)."""
+    bars, quarters = await pe_inputs(db, symbol, splits, today)
+    return V.pe_series_clean(bars, quarters, [a["date"] for a in actions]) if quarters else []
+
+
+def pe_left_out(bars: list[tuple[date, float]], quarters: list[dict], action_dates: list[date]) -> dict[date, str]:
+    """Pure: the sessions pe_series_clean leaves out, with why: "loss" (four quarters' earnings at or below zero), "over_cap" (a P/E
+    above 1 / MIN_EARNINGS_YIELD) or "action" (a corporate action inside the four quarters). Sessions before four quarters are known
+    are not listed."""
+    out = {}
+    for d, close in bars:
+        four = V.trailing_four(quarters, d, d)
+        if four is None:
+            continue
+        total = sum(q["eps"] for q in four)
+        if total <= 0:
+            out[d] = "loss"
+        elif total < V.MIN_EARNINGS_YIELD * close:
+            out[d] = "over_cap"
+        elif any(four[0]["start"] <= a <= d for a in action_dates):
+            out[d] = "action"
+    return out
+
+
+PE_YEAR_DAYS = 365
+
+
+def pe_year(bars: list[tuple[date, float]], quarters: list[dict], snap: dict, price_pct: float | None = None) -> dict | None:
+    """Pure: the year behind a P/E (step 5's check): its four-quarter earnings per share (the snapshot's) against the four quarters
+    before them, its close against the close a year earlier, and the P/E then. price_pct, when given, is step 4's one-year change
+    (the figure the visitor has just read), and the close a year earlier follows from it. None when a figure is missing or the
+    earlier earnings are at or below zero."""
+    if not snap or snap.get("trailing_eps") is None or snap.get("price") is None or not snap.get("window_end"):
+        return None
+    end = snap["window_end"] if isinstance(snap["window_end"], date) else date.fromisoformat(str(snap["window_end"])[:10])
+    before = [q for q in quarters if q["end"] < end - timedelta(days=PE_YEAR_DAYS - 20)][-4:]
+    if len(before) < 4 or any(not 80 <= (b["end"] - a["end"]).days <= 100 for a, b in zip(before, before[1:])):
+        return None
+    eps_then = sum(q["eps"] for q in before)
+    as_of = snap["as_of_date"]
+    then = [(d, c) for d, c in bars if d <= as_of - timedelta(days=PE_YEAR_DAYS)]
+    if eps_then <= 0 or not then:
+        return None
+    eps_now, price_now = float(snap["trailing_eps"]), float(snap["price"])
+    t_day, t_close = then[-1]
+    if price_pct is not None:
+        t_close = price_now / (1 + price_pct / 100)
+    return {"eps_pct": round((eps_now / eps_then - 1) * 100, 1), "price_pct": round((price_now / t_close - 1) * 100, 1),
+            "pe_then": round(t_close / eps_then, 1), "now": as_of, "then": t_day, "eps_then": round(eps_then, 4)}
 
 
 async def report_days(db, ticker_id) -> set[date]:

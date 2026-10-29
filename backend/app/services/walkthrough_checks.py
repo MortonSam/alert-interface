@@ -7,8 +7,8 @@ clearly wrong to someone who understood the idea. Each template returns {concept
 why}, or None when the data cannot support a fair question. Options whose right answer is the same text for every stock are
 ordered per stock (_ordered: a fixed hash of the stock's name), so the right answer's position is not always the same, and carry
 `same_answer`: the frontend shows such a check only the first time a visitor meets that answer (the last one met for its concept),
-and the line comparing the two stocks after that. Explanations never restate the rules below; step 4's closeness rule is in its
-Go deeper (CLOSE_RULE).
+and the line comparing the two stocks after that. Explanations never restate the rules below, and no screen shows them (Sam,
+2026-10-29: step 4's closeness rule left its Go deeper).
 
 The rules (each constant below is the threshold the explanation quotes):
   step 1  no check.
@@ -19,9 +19,12 @@ The rules (each constant below is the threshold the explanation quotes):
           or more is named cyclical.
   step 4  two moves are close when within CLOSE_POINTS percentage points or within CLOSE_SHARE of the larger move, whichever is
           wider. The year was the closer of the S&P 500 and the median stock of its sector when that one is close, else the
-          company's own.
+          company's own. A stock over walkthrough.INDEX_SHARE_NO_VERDICT of the index's market value gets no such verdict: its
+          check asks what that share means (index_share_check).
   step 5  investors pay more or less than usual when the P/E is more than PE_SAME_RATIO above or below its five-year median;
-          about usual asks nothing.
+          about usual asks nothing. The right answer fits the company's year (pe_check): when its four-quarter earnings per share
+          and its price over the year differ by more than SAME_RATIO (as growth factors), in the direction that moved the P/E, and
+          the P/E a year earlier was not already on the same side of the median, the answer is that fact; else the usual reading.
   step 6  report days move the stock k times as much as an ordinary day (the typical report-day move over the ordinary day's);
           under REPORT_MULTIPLE_MIN asks nothing.
   step 7  a risk maps to the result it would hit first by RISK_TARGETS, only when its heading and sentence match exactly one
@@ -204,10 +207,6 @@ def year_owner(stock: float, sector: float, market: float) -> str:
 OWNER_SUMMARY = {"market": "in step with the whole market", "industry": "in step with its industry", "company": "mostly its own"}
 
 
-CLOSE_RULE = (f"Ivy calls two moves close when they are within {CLOSE_POINTS:.0f} points or within a fifth of the larger move, whichever is wider, "
-              "and when both benchmarks are close it picks the closer one.")
-
-
 def market_check(name: str, sector: str, stock: float, sector_pct: float, market: float) -> dict:
     options = ["The company", "Its industry", "The whole market"]
     owner = year_owner(stock, sector_pct, market)
@@ -224,6 +223,19 @@ def market_check(name: str, sector: str, stock: float, sector_pct: float, market
             "why": why,
             "question": f"Over the year {name} {moved(stock)}, the typical {sector} stock {moved(sector_pct)} and the S&P 500 {moved(market)}. "
                         f"Was {name}'s year mostly the company, its industry, or the whole market?"}
+
+
+INDEX_SHARE_RIGHT = "Its own moves are part of the index's move"
+INDEX_SHARE_WRONG = ("The index holds no other large companies", "It can't rise in a year the index falls")
+
+
+def index_share_check(name: str, share_pct: float) -> dict:
+    """A stock big enough to move the index: what its share means when its year is set beside the S&P 500's."""
+    options, answer = _ordered([INDEX_SHARE_RIGHT, *INDEX_SHARE_WRONG], INDEX_SHARE_RIGHT, name)
+    return {"concept": "market_vs_company", "options": options, "answer": answer, "same_answer": "index_share",
+            "question": f"{name} makes up {num(share_pct)}% of the S&P 500 by market value. What does that mean when you set its year beside the index's?",
+            "why": f"At {num(share_pct)}% of the index, {name}'s own rises and falls are a real part of the S&P 500's, so the index's year is partly "
+                   f"{name}'s year. The median stock of its industry is the fairer yardstick."}
 
 
 def move_owner(stock_pct: float, spy_pct: float | None, min_spy_pct: float) -> str:
@@ -253,15 +265,42 @@ PE_RIGHT = {"below": "They expect its profits to fall from here", "above": "They
 PE_SPLIT = "Its stock split"
 
 
-def pe_check(name: str, pe: float, median: float) -> dict | None:
+def pe_fact(a: str, year: dict | None, median: float) -> str | None:
+    """Pure: the fact that moved this company's P/E to the side of its median it sits on, or None: its four-quarter earnings per
+    share against its price over the year (growth factors more than SAME_RATIO apart, the way that moves the P/E toward `a`), when
+    the P/E a year earlier was not already on that side."""
+    if not year or year.get("eps_pct") is None or year.get("price_pct") is None or year.get("pe_then") is None:
+        return None
+    if against(year["pe_then"], median) == a:
+        return None
+    w = faster(year["eps_pct"], year["price_pct"])
+    if a == "below" and w == "faster":
+        return "Its profits grew faster than its price" if year["eps_pct"] >= 0 else "Its price fell faster than its profits"
+    if a == "above" and w == "slower":
+        return "Its price rose faster than its profits" if year["price_pct"] >= 0 else "Its profits fell faster than its price"
+    return None
+
+
+def pe_check(name: str, pe: float, median: float, year: dict | None = None) -> dict | None:
     """Investors pay more or less than usual (the P/E against its own five-year median): what is a common reason? None when about
-    usual."""
+    usual. The right answer fits the company (pe_fact) when its year shows why; year: {eps_pct, price_pct, pe_then, now}."""
+    from app.services.briefing import fmt_date
     a = against(pe, median)
     if a == "same":
         return None
+    lower = a == "below"
+    fact = pe_fact(a, year, median)
+    if fact:
+        options, answer = _ordered([fact, PE_RIGHT["above" if lower else "below"], PE_SPLIT], fact, name)
+        verb = lambda x: f"{'rose' if x >= 0 else 'fell'} {pct(x)}"
+        return {"concept": "pe", "options": options, "answer": answer,
+                "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is the reason here?",
+                "why": f"Its P/E of {num(pe)} is {'below' if lower else 'above'} its five-year median of {num(median)}, and a year earlier it was {num(year['pe_then'])}. "
+                       f"In the year to {fmt_date(year['now'])} its earnings per share over four quarters {verb(year['eps_pct'])} while its share price "
+                       f"{verb(year['price_pct'])}, so each dollar of profit costs {'less' if lower else 'more'} than it did. A stock split changes the share price "
+                       f"and earnings per share together, so it leaves the P/E unchanged."}
     right = PE_RIGHT[a]
     options, answer = _ordered([right, PE_RIGHT["above" if a == "below" else "below"], PE_SPLIT], right, name)
-    lower = a == "below"
     return {"concept": "pe", "options": options, "answer": answer,
             "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is a common reason?",
             "why": f"Its P/E of {num(pe)} is {'below' if lower else 'above'} its five-year median of {num(median)}. A {'lower' if lower else 'higher'} P/E than usual "

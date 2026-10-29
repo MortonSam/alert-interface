@@ -277,7 +277,7 @@ def test_market_check_picks_the_closer_benchmark():
     c = C.market_check("Micron", "Information Technology", 358.4, 20.1, 16.0)
     assert c["answer"] == 0 and c["question"] == ("Over the year Micron rose 358.4%, the typical Information Technology stock rose 20.1% and the S&P 500 rose 16.0%. "
                                                   "Was Micron's year mostly the company, its industry, or the whole market?")
-    assert "within 5 points" not in c["why"] and "picks the closer one" in C.CLOSE_RULE
+    assert "within 5 points" not in c["why"] and not hasattr(C, "CLOSE_RULE")        # Sam, 2026-10-29: the rule's text left Go deeper
 
 
 def test_move_owner_for_one_day():
@@ -816,13 +816,12 @@ def test_same_answer_checks_are_marked_and_explanations_carry_no_rule_sentences(
     assert "or its profits have fallen while its price held" in C.pe_check("X", 14, 12)["why"]
 
 
-def test_step4_keeps_the_closeness_rule_in_go_deeper_and_step6_serves_the_multiple():
+def test_step6_serves_the_multiple():
     from types import SimpleNamespace
     ne = SimpleNamespace(date=date(2026, 10, 21), confirmation="estimated", window_start=None, window_end=None, note=None)
     s = W.step_upcoming("Tesla", ne, None, None, {"pct": 8.6, "n": 20, "as_of": date(2026, 7, 22)}, None, 2.1)
     assert s["fact"] == {"concept": "report_move", "measure": "report_multiple", "lead": "Tesla's report days swing 4.1 times an ordinary day",
                          "short": "Tesla's swing 4.1 times", "tail": ""}
-    assert C.CLOSE_RULE.startswith("Ivy calls two moves close when they are within 5 points")
 
 
 def test_a_compare_sentence_names_only_rows_its_table_shows():

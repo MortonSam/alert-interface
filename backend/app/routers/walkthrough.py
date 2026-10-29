@@ -26,10 +26,17 @@ from app.services import walkthrough as W
 router = APIRouter(tags=["walkthrough"])
 
 
-def gate(payload: dict, growth_on: bool, pe_on: bool) -> dict:
+def gate(payload: dict, growth_on: bool, pe_on: bool, now=None) -> dict:
     """Pure: the payload as served: growth and the P/E replaced by their in-review line while their flag is off (a real estate
-    trust's price to FFO is not a P/E and stays). Step 7's check never points at a figure the flags hide."""
+    trust's price to FFO is not a P/E and stays). Step 7's check never points at a figure the flags hide. Step 6's next Fed
+    decision is the next one as of `now` (New York; the request's time by default), never one a stored build named that has passed."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     out = copy.deepcopy(payload)
+    now = now or datetime.now(ZoneInfo("America/New_York"))
+    for s in out["steps"]:
+        if s["key"] == "upcoming":
+            W.with_fed(s, W.next_fed_day(now))
     name = out["name"]
     reit = bool(out.get("reit"))
     noun = out.get("noun") or "sales"

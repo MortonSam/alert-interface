@@ -9,6 +9,7 @@ import {
 } from "@/lib/walkthrough";
 import { WALK_COPY as T } from "@/lib/walkthroughCopy";
 import Explained from "@/components/Explained";
+import { explainOnce, type Segment } from "@/lib/explainSegments";
 import { PeRangeChart, PriceVsMarketChart } from "./WalkthroughCharts";
 
 export type Screen = { kind: "step"; i: number } | { kind: "summary" } | { kind: "compare"; with: string | null };
@@ -24,7 +25,7 @@ export function screenParam(s: Screen): string {
   return s.kind === "step" ? String(s.i + 1) : s.kind;
 }
 
-function IdeaBox({ idea, known }: { idea: WalkIdea; known: { from: string; line: string } | null }) {
+function IdeaBox({ idea, known, segments }: { idea: WalkIdea; known: { from: string; line: string } | null; segments?: Segment[] }) {
   return (
     <aside className="mt-6 rounded-xl border border-border bg-muted/40 px-4 py-3.5">
       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{T.idea}</p>
@@ -36,14 +37,14 @@ function IdeaBox({ idea, known }: { idea: WalkIdea; known: { from: string; line:
       ) : (
         <>
           <p className="mt-1.5 text-sm font-semibold text-foreground">{idea.title}</p>
-          <p className="mt-1 text-sm leading-relaxed text-foreground/80"><Explained text={idea.text} /></p>
+          <p className="mt-1 text-sm leading-relaxed text-foreground/80"><Explained text={idea.text} segments={segments} /></p>
         </>
       )}
     </aside>
   );
 }
 
-function QuickCheck({ check, onDone }: { check: WalkCheck; onDone: () => void }) {
+function QuickCheck({ check, onDone, segs }: { check: WalkCheck; onDone: () => void; segs?: { question?: Segment[]; why?: Segment[] } }) {
   const [picked, setPicked] = useState<number | null>(null);
   const [skipped, setSkipped] = useState(false);
   if (skipped) return null;
@@ -58,7 +59,7 @@ function QuickCheck({ check, onDone }: { check: WalkCheck; onDone: () => void })
           </button>
         )}
       </div>
-      <p className="mt-1.5 text-sm text-foreground"><Explained text={check.question} /></p>
+      <p className="mt-1.5 text-sm text-foreground"><Explained text={check.question} segments={segs?.question} /></p>
       <div className="mt-3 grid gap-2">
         {check.options.map((o, i) => {
           const right = i === check.answer;
@@ -82,7 +83,7 @@ function QuickCheck({ check, onDone }: { check: WalkCheck; onDone: () => void })
       </div>
       {done && (
         <p className="mt-3 text-sm text-foreground/85" role="status">
-          <span className="font-semibold">{picked === check.answer ? T.right : T.notQuite}</span> <Explained text={check.why} />
+          <span className="font-semibold">{picked === check.answer ? T.right : T.notQuite}</span> <Explained text={check.why} segments={segs?.why} />
         </p>
       )}
     </section>
@@ -97,6 +98,21 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
   // A check whose answer the visitor has already met for this concept is not asked again: the line comparing the two stocks shows instead.
   const asks = step.status !== "absent" && !!step.check && !alreadyMet(step.check, learned);
   const [checked, setChecked] = useState(false);
+  // a glossary term is explained at its first mention on the screen only, in reading order (Sam, 2026-10-29)
+  const texts = [
+    ...step.numbers.map((n) => n.label), ...step.sentences, ...(step.risks ?? []).map((r) => r.sentence), step.story,
+    step.quote?.lead, step.quote?.text, asks ? step.check?.question : null, asks ? step.check?.why : null, known ? null : step.idea?.text,
+  ];
+  const once = useMemo(() => explainOnce(texts), [step, asks, !!known]);  // eslint-disable-line react-hooks/exhaustive-deps
+  let at = 0;
+  const seg = () => once[at++];
+  const nLabels = step.numbers.map(() => seg());
+  const sSegs = step.sentences.map(() => seg());
+  const rSegs = (step.risks ?? []).map(() => seg());
+  const storySeg = seg();
+  const quoteSegs = { lead: seg(), text: seg() };
+  const checkSegs = { question: seg(), why: seg() };
+  const ideaSeg = seg();
   return (
     <div>
       <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight text-foreground">{step.question}</h2>
@@ -109,19 +125,19 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
               {step.numbers.map((n) => (
                 <div key={n.label}>
                   <p className="font-sans text-[30px] sm:text-[36px] font-semibold leading-none tracking-tight text-foreground">{n.value}</p>
-                  <p className="mt-1.5 text-[13px] text-foreground/85"><Explained text={n.label} /></p>
+                  <p className="mt-1.5 text-[13px] text-foreground/85"><Explained text={n.label} segments={nLabels[step.numbers.indexOf(n)]} /></p>
                   <p className="mt-0.5 text-[11px] text-muted-foreground">{n.as_of}</p>
                 </div>
               ))}
             </div>
           )}
           <div className="mt-5 space-y-2.5 font-display text-[17px] sm:text-lg leading-relaxed text-foreground/90">
-            {step.sentences.map((s) => <p key={s}><Explained text={s} /></p>)}
+            {step.sentences.map((s, i) => <p key={s}><Explained text={s} segments={sSegs[i]} /></p>)}
             {step.risks && (
               <ul className="space-y-2.5">
-                {step.risks.map((r) => (
+                {step.risks.map((r, i) => (
                   <li key={r.n} className="border-l-2 border-primary/50 pl-3">
-                    <Explained text={r.sentence} />
+                    <Explained text={r.sentence} segments={rSegs[i]} />
                     {step.source?.url && (
                       <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="ml-2 font-sans text-xs text-cool hover:underline">{T.readFiling}</a>
                     )}
@@ -129,14 +145,23 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
                 ))}
               </ul>
             )}
-            {step.story && <p><Explained text={step.story} /></p>}
+            {step.story && <p><Explained text={step.story} segments={storySeg} /></p>}
           </div>
+          {step.quote && (
+            <figure className="mt-5" data-walk-quote>
+              <figcaption className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground"><Explained text={step.quote.lead} segments={quoteSegs.lead} /></figcaption>
+              <blockquote className="mt-1.5 border-l-2 border-primary/50 pl-3 font-display text-[16px] leading-relaxed text-foreground/90">
+                “<Explained text={step.quote.text} segments={quoteSegs.text} />”
+                <a href={step.quote.source.url} target="_blank" rel="noopener noreferrer" className="ml-2 font-sans text-xs text-cool hover:text-foreground">{T.readFiling}</a>
+              </blockquote>
+            </figure>
+          )}
           {step.chart?.kind === "price_vs_market" && <PriceVsMarketChart chart={step.chart} name={w.name} sector={w.sector} />}
           {step.chart?.kind === "pe_range" && <PeRangeChart chart={step.chart} />}
         </>
       )}
-      {asks && step.check && <QuickCheck key={step.key} check={step.check} onDone={() => setChecked(true)} />}
-      {step.idea && (!asks || checked) && <IdeaBox idea={step.idea} known={known} />}
+      {asks && step.check && <QuickCheck key={step.key} check={step.check} onDone={() => setChecked(true)} segs={checkSegs} />}
+      {step.idea && (!asks || checked) && <IdeaBox idea={step.idea} known={known} segments={ideaSeg} />}
       {(step.deeper.length > 0 || step.source) && step.status !== "absent" && (
         <details className="mt-6 group">
           <summary className="tap cursor-pointer select-none text-sm font-medium text-foreground/85 hover:text-foreground">{T.goDeeper}</summary>

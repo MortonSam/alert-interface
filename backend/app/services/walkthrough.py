@@ -31,8 +31,12 @@ from app.services.move_comparison import compare_moves
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 3                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 4                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
+                                                  # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
+                                                  #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
+                                                  #   index; P/E charts never break (the latest unbroken run); the P/E check fits the company's year;
+                                                  #   the next Fed decision is chosen when served; the options line beside the typical move
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
@@ -41,6 +45,9 @@ REIT_SECTOR = "Real Estate"
 REVENUE_INDUSTRY_WORDS = ("Bank", "Insurance", "Reinsurance")    # GICS sub-industries of banks and insurers, which say "revenue", never "sales"
 ENTRY_MIN_STEPS = 4                               # a ticker page offers the walkthrough only when at least this many of the seven steps show data
 COMPARE_PERIOD_DAYS = 120                         # a Compare row is hidden when the two companies' periods end further apart than this
+CHART_GAP_DAYS = 21                               # frontend lib/walkthroughAxis GAP_DAYS: points further apart break the line; no chart is built with one
+INDEX_SHARE_NO_VERDICT = 2.0                      # a stock above this percent of the S&P 500's market value is part of the market: step 4 gives no
+                                                  # market-or-company verdict for it (Sam, 2026-10-29, NVDA) and compares it with its industry
 
 QUESTIONS = {
     1: "What does it do, and how does it make money?",
@@ -437,8 +444,28 @@ def _points(series: list[tuple[date, float]]) -> list[list]:
     return [[d.isoformat(), round(v, 2)] for d, v in pts]
 
 
+def index_share(symbol: str, tickers: dict) -> dict | None:
+    """Pure: the stock's share of the S&P 500's market value, {pct, as_of}: its stored market value over the sum of every active
+    index member's, dated by the oldest stored value among them. None without its own value."""
+    me = tickers.get(symbol) or {}
+    members = [t for t in tickers.values() if t.get("index_member") and t.get("market_cap")]
+    if not me.get("market_cap") or not me.get("index_member") or not members:
+        return None
+    dates = [t.get("market_cap_updated_at") for t in members if t.get("market_cap_updated_at")]
+    as_of = min(dates).date() if dates else None
+    return {"pct": round(me["market_cap"] / sum(t["market_cap"] for t in members) * 100, 1), "as_of": as_of, "members": len(members)}
+
+
+def industry_verdict(stock: float, sector_pct: float) -> str:
+    """Pure: "outpaced", "lagged" or "kept pace with" its industry, by walkthrough_checks' closeness rule."""
+    return "kept pace with" if C.close(stock, sector_pct) else "outpaced" if stock > sector_pct else "lagged"
+
+
 def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], spy: list[tuple[date, float]], sec: dict | None, moves: list[dict], min_spy_pct: float,
-               today: date) -> dict:
+               today: date, share: dict | None = None) -> dict:
+    """Step 4 leads with the industry (the median stock of its sector in the index), then the S&P 500. A stock over
+    INDEX_SHARE_NO_VERDICT of the index's market value is part of the market's move: no market-or-company verdict, for the year or a
+    day, and its check asks what that share means instead (Sam, 2026-10-29)."""
     from app.services.walkthrough_data import QUARTER_SESSIONS, STALE_BAR_DAYS, YEAR_SESSIONS, aligned, change
     cal = [d for d, _ in spy[-YEAR_SESSIONS - 1:]]
     if not cal or (today - cal[-1]).days > STALE_BAR_DAYS:
@@ -451,17 +478,33 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
     p1, p3 = change(spy, YEAR_SESSIONS), change(spy, QUARTER_SESSIONS)
     end = cal[-1]
     as_of = f"Close {fmt_date(end)}"
-    numbers = [_num(f"{name} over one year", signed(c1[0]), as_of), _num("S&P 500 (SPY) over one year", signed(p1[0]), as_of)]
-    first = f"Over the past year {name}'s stock {moved(c1[0])}, while the S&P 500 {moved(p1[0])}"
+    heavy = bool(share and share["pct"] > INDEX_SHARE_NO_VERDICT)
+    numbers = [_num(f"{name} over one year", signed(c1[0]), as_of)]
     if sec:
-        first += f" and the median {sector} stock in the index {moved(sec['change_1y'])}"
-    sentences = [first + ".", f"Over the last three months it {moved(c3[0])}, against {change_noun(p3[0])} for the S&P 500."]
+        numbers.append(_num(f"Median {sector} stock over one year", signed(sec["change_1y"]), f"{sec['members']} S&P 500 stocks, close {fmt_date(end)}"))
+    numbers.append(_num("S&P 500 (SPY) over one year", signed(p1[0]), as_of))
+    sentences = []
+    if sec and heavy:
+        sentences.append(f"Over the past year {name}'s stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock in the S&P 500, "
+                         f"so it {industry_verdict(c1[0], sec['change_1y'])} its industry.")
+    elif sec:
+        sentences.append(f"Over the past year {name}'s stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock in the S&P 500 "
+                         f"and {change_noun(p1[0])} for the S&P 500 itself.")
+    else:
+        sentences.append(f"Over the past year {name}'s stock {moved(c1[0])}, while the S&P 500 {moved(p1[0])}.")
+    if heavy:
+        sentences.append(f"The S&P 500 {moved(p1[0])} over the same year, and {name} makes up {num(share['pct'])}% of the index by market value.")
+    sentences.append(f"Over the last three months it {moved(c3[0])}, against {change_noun(p3[0])} for the S&P 500.")
     top = next((m for m in moves if m["spy_pct"] is not None), None)
     if top:
-        whose = f"mostly {name}'s own" if top["owner"] == "company" else "carried mostly by the market"
+        owner = f"mostly {name}'s own" if top["owner"] == "company" else "carried mostly by the market"
+        whose = "" if heavy else f", so that move was {owner}"
         sentences.append(f"Its biggest day in the last three months was {fmt_date(top['date'])}" + (", around an earnings report" if top["report_day"] else "")
-                         + f", when it {moved(top['move_pct'])} and the S&P 500 {moved(top['spy_pct'])}, so that move was {whose}.")
-    check = C.market_check(name, sector, c1[0], sec["change_1y"], p1[0]) if sec else None
+                         + f", when it {moved(top['move_pct'])} and the S&P 500 {moved(top['spy_pct'])}{whose}.")
+    if heavy:
+        check = C.index_share_check(name, share["pct"])
+    else:
+        check = C.market_check(name, sector, c1[0], sec["change_1y"], p1[0]) if sec else None
     base = s_series[0][1]
     spy_a = aligned(spy, cal)
     chart = {"kind": "price_vs_market", "as_of": end.isoformat(), "start": cal[0].isoformat(), "series": [
@@ -469,30 +512,78 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
         {"key": "spy", "label": "S&P 500 (SPY)", "points": _points([(d, spy_a[d] / spy_a[cal[0]] * 100) for d in cal])}]}
     if sec:
         chart["series"].append({"key": "sector", "label": f"Median {sector} stock", "points": _points(sec["index"])})
-    deeper = [_num(f"{name} over three months", signed(c3[0]), as_of), _num("S&P 500 over three months", signed(p3[0]), as_of)]
+    deeper = []
     if sec:
-        deeper.append(_num(C.CLOSE_RULE, "", ""))
-    if sec:
-        deeper += [_num(f"Median {sector} stock over one year", signed(sec["change_1y"]), f"{sec['members']} S&P 500 stocks, close {fmt_date(end)}"),
-                   _num(f"Median {sector} stock over three months", signed(sec["change_3m"]), f"{sec['members']} S&P 500 stocks, close {fmt_date(end)}")]
+        deeper.append(_num(f"Median {sector} stock over three months", signed(sec["change_3m"]), f"{sec['members']} S&P 500 stocks, close {fmt_date(end)}"))
+    deeper += [_num(f"{name} over three months", signed(c3[0]), as_of), _num("S&P 500 over three months", signed(p3[0]), as_of)]
+    if share:
+        deeper.append(_num(f"{name}'s share of the S&P 500", f"{num(share['pct'])}%", f"By market value on file, {share['members']} index stocks"
+                           + (f", values as of {fmt_date(share['as_of'])} or later" if share.get("as_of") else "")))
     for mv in moves:
         if mv["spy_pct"] is None:
             continue
         deeper.append(_num(f"{fmt_date(mv['date'])}{', report' if mv['report_day'] else ''}", f"{signed(mv['move_pct'])}, S&P 500 {signed(mv['spy_pct'])}",
-                           "Mostly the company" if mv["owner"] == "company" else "Mostly the market"))
-    summary = f"Over the year to {fmt_date(end)} the stock {moved(c1[0])}, against {change_noun(p1[0])} for the S&P 500"
-    summary += f", so its year was {C.OWNER_SUMMARY[C.year_owner(c1[0], sec['change_1y'], p1[0])]}." if sec else "."
+                           "" if heavy else "Mostly the company" if mv["owner"] == "company" else "Mostly the market"))
+    if sec and heavy:
+        summary = (f"Over the year to {fmt_date(end)} the stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock, "
+                   f"so it {industry_verdict(c1[0], sec['change_1y'])} its industry.")
+    elif sec:
+        summary = (f"Over the year to {fmt_date(end)} the stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock and "
+                   f"{change_noun(p1[0])} for the S&P 500, so its year was {C.OWNER_SUMMARY[C.year_owner(c1[0], sec['change_1y'], p1[0])]}.")
+    else:
+        summary = f"Over the year to {fmt_date(end)} the stock {moved(c1[0])}, against {change_noun(p1[0])} for the S&P 500."
     fact = {"concept": "market_vs_company", "measure": "stock_1y", "lead": f"{name}'s stock {moved(c1[0])}", "short": f"{name}'s {moved(c1[0])}",
             "tail": f"over the year to {fmt_date(end)}"}
     point = f"The {pct(c1[0])} {'rise' if c1[0] >= 0 else 'fall'} in its stock over the year"
-    return _step(4, status="ok", numbers=numbers, sentences=sentences, idea="market_vs_company", chart=chart, check=check, deeper=deeper, summary=summary,
-                 fact=fact, point=point, cell={"close": {"value": signed(c1[0]), "as_of": as_of, "end": str(end)}})
+    st = _step(4, status="ok", numbers=numbers, sentences=sentences, idea="market_vs_company", chart=chart, check=check, deeper=deeper, summary=summary,
+               fact=fact, point=point, cell={"close": {"value": signed(c1[0]), "as_of": as_of, "end": str(end)}})
+    st["year_pct"] = c1[0]                                 # step 5's check sets the P/E against the stock's year
+    return st
 
 
 # ── step 5: valuation ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
+def runs(series: list[tuple[date, float]], gap_days: int = CHART_GAP_DAYS) -> list[list[tuple[date, float]]]:
+    """Pure: the series split wherever two neighbouring points sit more than gap_days apart."""
+    out: list[list[tuple[date, float]]] = []
+    for d, v in series:
+        if out and (d - out[-1][-1][0]).days <= gap_days:
+            out[-1].append((d, v))
+        else:
+            out.append([(d, v)])
+    return out
+
+
+def chart_gaps(chart: dict | None, gap_days: int = CHART_GAP_DAYS) -> list[str]:
+    """Pure: every break in a walkthrough chart's lines ("pe_range: 2023-02-22 to 2023-09-21"); a chart is built only without one."""
+    if not chart:
+        return []
+    lines = [("pe", chart["points"])] if chart.get("kind") == "pe_range" else [(sr["key"], sr["points"]) for sr in chart.get("series") or []]
+    out = []
+    for key, pts in lines:
+        days = [date.fromisoformat(str(p[0])[:10]) for p in pts]
+        out += [f"{chart.get('kind')} {key}: {a} to {b}" for a, b in zip(days, days[1:]) if (b - a).days > gap_days]
+    return out
+
+
+LEFT_OUT_WORDS = {"loss": "its earnings over four quarters were below zero", "over_cap": "its P/E was above {cap}",
+                  "action": "a merger or spin-off sat inside its four quarters"}
+
+
+def left_out_line(start: date, reasons: set[str]) -> str:
+    """Pure: why the chart starts where it does: "The chart starts on Oct 20, 2023. Before that, its P/E was above 100 at times, which
+    Ivy leaves out of its P/E history." (the cap from valuation.MIN_EARNINGS_YIELD)."""
+    from app.services.valuation import MIN_EARNINGS_YIELD
+    words = [LEFT_OUT_WORDS[r].format(cap=f"{1 / MIN_EARNINGS_YIELD:,.0f}") for r in ("loss", "over_cap", "action") if r in reasons]
+    why = " or ".join(words) if words else "its P/E could not be worked out"
+    return f"The chart starts on {fmt_date(start)}. Before that, {why} at times, which Ivy leaves out of its P/E history."
+
+
 def step_valuation(name: str, sector: str | None, snap: dict | None, series: list[tuple[date, float]], sec_row: dict | None, enabled: bool,
-                   periods: dict | None = None) -> dict:
+                   periods: dict | None = None, left_out: dict | None = None, year: dict | None = None) -> dict:
+    """The P/E chart is the series' latest unbroken run (runs): a stretch the history leaves out (left_out: {session: reason}, a loss,
+    a P/E over the cap or a corporate action) is never drawn across, and the chart says where it starts and why. The range and the
+    median stay the five-year history's. year (walkthrough_data.pe_year) lets the check name this company's reason."""
     from statistics import median
     if not enabled:
         return _absent(5, name, PE_IN_REVIEW, "P/E figures still being checked", "pe")
@@ -524,15 +615,22 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
         span = f"{fmt_date(series[0][0])} to {fmt_date(series[-1][0])}"
         numbers.append(_num("Its five-year range", f"{num(lo)} to {num(hi)}", span))
         sentences.append(f"Over five years its P/E ran from {num(lo)} to {num(hi)}, with a median of {num(med_stored)}.")
-        chart = {"kind": "pe_range", "as_of": snap["as_of_date"].isoformat(), "points": _points(series), "median": med_stored, "today": pe,
-                 "sector_median": sector_median, "sector": sector if sector_median is not None else None}
+        drawn = runs(series)[-1]
+        chart = {"kind": "pe_range", "as_of": snap["as_of_date"].isoformat(), "points": _points(drawn), "median": med_stored, "today": pe,
+                 "sector_median": sector_median, "sector": sector if sector_median is not None else None, "start": drawn[0][0].isoformat()}
+        if len(drawn) < len(series):
+            gaps = [(a[0], b[0]) for a, b in zip(series, series[1:]) if (b[0] - a[0]).days > CHART_GAP_DAYS]
+            reasons = {r for d, r in (left_out or {}).items() if any(g0 < d < g1 for g0, g1 in gaps)}
+            sentences.append(left_out_line(drawn[0][0], reasons))
+        if chart_gaps(chart):
+            chart = None                                   # never: runs() leaves none; a chart with a break is not shown
     elif med_stored is not None:
         sentences.append(f"Its median P/E over the past five years is {num(med_stored)}.")
     if sector_median is not None:
         sentences.append(f"The median {sector} stock in the S&P 500 is at {num(sector_median)}.")
     summary = f"Investors pay {num(pe)} times its last four quarters' earnings."
     if med_stored:
-        check = C.pe_check(name, pe, med_stored)
+        check = C.pe_check(name, pe, med_stored, year)
         rel = {"More than usual": "above", "Less than usual": "below", "About the same as usual": "about level with"}[C.pe_word(pe, med_stored)]
         summary = f"Investors pay {num(pe)} times its last four quarters' earnings, {rel} its five-year median of {num(med_stored)}."
     deeper = [_num("Earnings per share, last four quarters", dollars(float(snap["trailing_eps"])), f"Four quarters {through(periods, snap['window_end'])}")]
@@ -564,10 +662,12 @@ def step_valuation_reit(name: str, ffo: dict | None, close: dict | None, periods
 
 # ── step 6: what's coming up ───────────────────────────────────────────────────────────────────────────────────────────────
 
-def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typical: dict | None, fed_day: date | None,
+def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typical: dict | None, fed_day: date | None = None,
                   ordinary: float | None = None) -> dict:
     """The check: report days move the stock k times as much as an ordinary day (ordinary: the mean move on other days, which the
-    step's own text never states); what that means for someone holding it through the next report."""
+    step's own text never states); what that means for someone holding it through the next report. With a confirmed date and a
+    fresh chain, the options line sets what options price for the report beside the typical move. The next Fed decision is added
+    when the step is served (with_fed), so it is never one that has passed; fed_day here is for a build's own report."""
     from app.services.implied_move import implied_move_allowed
     date_ = getattr(ne, "date", None) if ne else None
     conf = getattr(ne, "confirmation", None) if ne else None
@@ -586,29 +686,25 @@ def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typic
         sentences.append(f"{name} is expected to report around {day_words(date_)}, a date the company has not confirmed yet.")
     else:
         sentences.append(f"{name} has no next report date on file yet.")
-    imp = implied if implied and date_ and implied_move_allowed(conf) else None
+    imp = implied if implied and date_ and conf == "confirmed" and implied_move_allowed(conf) else None
+    if typical:
+        numbers.append(_num("Typical move after a report", f"±{num(typical['pct'])}%", f"{typical['n']} reports to {fmt_date(typical['as_of'])}"))
+        sentences.append(f"After its past {typical['n']} reports, the stock moved ±{num(typical['pct'])}% on a typical report day.")
     if imp and typical:
         word = compare_moves(imp["pct"], typical["pct"])
         cmp_words = {"more than usual": "more than", "less than usual": "less than", "about its usual": "about the same as"}[word]
         numbers.append(_num("Options price a move of", f"±{num(imp['pct'])}%", f"Options data {fmt_date(imp['chain_date'])}, expiring {fmt_date(imp['expiration'])}"))
-        sentences.append(f"Options price a move of about ±{num(imp['pct'])}% by {fmt_date(imp['expiration'])}, {cmp_words} its typical ±{num(typical['pct'])}% after a report.")
-    elif typical:
-        numbers.append(_num("Typical move after a report", f"±{num(typical['pct'])}%", f"{typical['n']} reports to {fmt_date(typical['as_of'])}"))
-        sentences.append(f"After its past {typical['n']} reports, the stock moved ±{num(typical['pct'])}% on a typical report day.")
+        sentences.append(f"For this report, options price a move of about ±{num(imp['pct'])}% by {fmt_date(imp['expiration'])}, {cmp_words} its typical move.")
     holding = (f"its next report on {fmt_date(date_)}" if date_ and conf == "confirmed" else
                f"its next report, expected around {fmt_date(date_)}" if date_ else
                f"its next report, expected between {fmt_date(ne.window_start)} and {fmt_date(ne.window_end)}" if ne and getattr(ne, "window_start", None) else
                "its next report")
     check = C.report_check(name, typical["pct"], ordinary, holding) if typical else None
-    if fed_day:
-        sentences.append(f"The next Fed rate decision is on {day_words(fed_day)}, a day that can move the whole market.")
     deeper = []
     if typical:
         deeper.append(_num("Typical move after a report", f"±{num(typical['pct'])}%", f"Average size of the next-day move over {typical['n']} reports to {fmt_date(typical['as_of'])}"))
     if ne and getattr(ne, "note", None) and date_:
         deeper.append(_num("Where the date comes from", CONFIRMATION_WORDS.get(conf or "estimated", "Estimated"), fmt_date(date_)))
-    if fed_day:
-        deeper.append(_num("Next Fed decision", day_words(fed_day), "Federal Reserve calendar"))
     due = (f"on {fmt_date(date_)}, a date the company has confirmed" if date_ and conf == "confirmed" else
            f"around {fmt_date(date_)}, a date the company hasn't confirmed" if date_ else
            f"between {fmt_date(ne.window_start)} and {fmt_date(ne.window_end)}, judging by its past reports" if ne and getattr(ne, "window_start", None) else None)
@@ -628,7 +724,35 @@ def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typic
     st["next_report"] = f"What its next report shows, due {due}." if due else None
     if not due:
         st["gap"] = f"{GAP_TOPIC[6]} (no date on file)"
+    if fed_day:
+        with_fed(st, fed_day)
     return st
+
+
+FED_SENTENCE = "The next Fed rate decision is on {day}, a day that can move the whole market."
+FED_LABEL = "Next Fed decision"
+FED_DECISION_HOUR = 14                          # the statement's time, New York (services/fomc_calendar)
+
+
+def next_fed_day(now) -> date | None:
+    """Pure: the next scheduled Fed decision as of `now` (a New York datetime): today's until its 2pm statement, else the next one."""
+    from app.services.fomc_calendar import decision_days
+    today = now.date()
+    days = decision_days(today, today + timedelta(days=400))
+    if days and days[0] == today and now.hour >= FED_DECISION_HOUR:
+        days = days[1:]
+    return days[0] if days else None
+
+
+def with_fed(step: dict, fed_day: date | None) -> dict:
+    """Pure (in place): step 6 with its Fed line and Go deeper row for fed_day, any earlier one replaced (routers/walkthrough.gate calls
+    it with the day as served, so a stored payload never shows a decision that has passed)."""
+    step["sentences"] = [x for x in step["sentences"] if not x.startswith("The next Fed rate decision")]
+    step["deeper"] = [d for d in step["deeper"] if d["label"] != FED_LABEL]
+    if fed_day and step["status"] != "absent":
+        step["sentences"].append(FED_SENTENCE.format(day=day_words(fed_day)))
+        step["deeper"].append(_num(FED_LABEL, day_words(fed_day), "Federal Reserve calendar"))
+    return step
 
 
 # ── step 7: risks ───────────────────────────────────────────────────────────────────────────────────────────────────────────

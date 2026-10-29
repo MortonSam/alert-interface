@@ -4043,6 +4043,17 @@ async def check_walkthrough_coverage(session) -> CheckResult:
     return CheckResult("walkthrough_coverage", PASS, f"{len(rows)} of {active} active tickers have a walkthrough", details)
 
 
+async def check_walkthrough_chart_gaps(session) -> CheckResult:
+    """ERROR when a stored walkthrough's chart has a break in a line (services/walkthrough.chart_gaps: two points more than
+    CHART_GAP_DAYS apart). The build draws a P/E chart's latest unbroken run only, so none should (Sam, 2026-10-29, NVDA)."""
+    from app.services.walkthrough import chart_gaps
+    rows = (await session.execute(text("SELECT symbol, payload FROM ivy_walkthroughs ORDER BY symbol"))).all()
+    bad = [f"{r.symbol}: {g}" for r in rows for st in (r.payload or {}).get("steps", []) for g in chart_gaps(st.get("chart"))]
+    if bad:
+        return CheckResult("walkthrough_chart_gaps", ERROR, f"{len(bad)} break(s) in walkthrough charts", bad[:40])
+    return CheckResult("walkthrough_chart_gaps", PASS, f"No break in any of {len(rows)} stored walkthroughs' charts")
+
+
 async def check_walkthrough_staleness(session) -> CheckResult:
     """WARN when a stored walkthrough was built more than WALKTHROUGH_MAX_AGE_HOURS ago or under another WALKTHROUGH_VERSION (the
     nightly rebuilds every stock, so either means the step did not run or failed for those stocks)."""
@@ -4125,6 +4136,7 @@ async def check_walkthrough_claims(session) -> CheckResult:
 CHECKS = [
     # Ivy's walkthrough
     check_walkthrough_coverage,
+    check_walkthrough_chart_gaps,
     check_walkthrough_staleness,
     check_walkthrough_claims,
     # Tickers

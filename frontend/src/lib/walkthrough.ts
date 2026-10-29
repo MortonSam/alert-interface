@@ -15,7 +15,9 @@ export interface ChartSeries { key: "stock" | "spy" | "sector"; label: string; p
 export interface PriceChart { kind: "price_vs_market"; as_of: string; start: string; series: ChartSeries[] }
 /** This stock's figure for its step's concept, for the line comparing two stocks once the concept is known. */
 export interface WalkFact { concept: string; measure: string; lead: string; short: string; tail: string }
-export interface PeChart { kind: "pe_range"; as_of: string; points: [string, number][]; median: number; today: number; sector_median: number | null; sector: string | null }
+export interface PeChart { kind: "pe_range"; as_of: string; points: [string, number][]; median: number; today: number; sector_median: number | null; sector: string | null; start?: string }
+/** The company's own words beside a step's figures (backend walkthrough_quotes), shown with a link to the filing. */
+export interface WalkQuote { text: string; lead: string; source: { label: string; url: string } }
 
 export interface WalkStep {
   n: number;
@@ -35,6 +37,7 @@ export interface WalkStep {
   gap: string | null;
   fact: WalkFact | null;
   risks?: { n: number; sentence: string }[];
+  quote?: WalkQuote;
 }
 
 export interface CompareCell { value: string; as_of: string }
