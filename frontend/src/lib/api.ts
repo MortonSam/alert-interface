@@ -128,6 +128,7 @@ export interface HistoricalReaction {
   pct_change_1d: string | null;
   pct_change_3d: string | null;
   pct_change_5d: string | null;
+  pending_windows?: Array<"3d" | "5d">;   // longer windows whose sessions have not closed yet (backend services/reaction_windows)
   volume_before: number | null;
   volume_after: number | null;
   notes: string | null;

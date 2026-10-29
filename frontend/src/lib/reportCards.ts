@@ -7,7 +7,12 @@ import { fmtDay } from "@/lib/tickerDates";
 
 export const TIMING_WORDS: Record<string, string> = { bmo: "Before the open", amc: "After the close" };
 
-export interface CardMove { key: "1d" | "3d" | "5d"; label: string; value: number | null }
+export interface CardMove { key: "1d" | "3d" | "5d"; label: string; value: number | null; pending?: boolean }
+
+/** A longer window whose sessions have not closed yet (the first-day move is stored the night after the report, the 3- and
+ * 5-day moves as each closes): shown in words, never as a zero or as missing data. */
+export const MOVE_NOT_YET = "Not yet available";
+export const MOVE_NOT_ON_FILE = "Not on file";
 
 export interface ReportCard {
   id: string;
@@ -42,8 +47,8 @@ export function reportCard(r: HistoricalReaction): ReportCard {
     ...epsLine(r),
     moves: [
       { key: "1d", label: "1 day", value: num(r.pct_change_1d) },
-      { key: "3d", label: "3 days", value: num(r.pct_change_3d) },
-      { key: "5d", label: "5 days", value: num(r.pct_change_5d) },
+      { key: "3d", label: "3 days", value: num(r.pct_change_3d), pending: (r.pending_windows ?? []).includes("3d") },
+      { key: "5d", label: "5 days", value: num(r.pct_change_5d), pending: (r.pending_windows ?? []).includes("5d") },
     ],
   };
 }

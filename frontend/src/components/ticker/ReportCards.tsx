@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HistoricalReaction } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BACK_TO_CHART, clickClearsPick, smoothScroll, type PickedReport } from "@/lib/evidenceViews";
-import { fmtMove, reportCards, whyItMoved, type TypicalMove } from "@/lib/reportCards";
+import { fmtMove, MOVE_NOT_ON_FILE, MOVE_NOT_YET, reportCards, whyItMoved, type TypicalMove } from "@/lib/reportCards";
 
 const FIRST_SHOWN = 8;
 
@@ -85,7 +85,7 @@ export function ReportCards({ reactions, typical, picked = null, onBack }: {
                         m.value == null ? "text-muted-foreground font-normal"
                           : Number(m.value.toFixed(1)) > 0 ? "text-success" : Number(m.value.toFixed(1)) < 0 ? "text-destructive" : "text-foreground",
                       )} data-testid={`report-card-${m.key}`}>
-                        {m.value == null ? "Not on file" : fmtMove(m.value)}
+                        {m.value == null ? (m.pending ? MOVE_NOT_YET : MOVE_NOT_ON_FILE) : fmtMove(m.value)}
                       </span>
                     </span>
                   ))}

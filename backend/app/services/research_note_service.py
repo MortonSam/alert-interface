@@ -69,8 +69,11 @@ def _precompute_stats(reactions: list[HistoricalReaction]) -> dict:
     latest_eps_est  = f"${float(latest.eps_estimate):.2f}" if latest.eps_estimate else "N/A"
     latest_eps_act  = f"${float(latest.eps_actual):.2f}"   if latest.eps_actual   else "N/A"
     latest_1d = _fmt_pct(_pct(latest.pct_change_1d))
-    latest_3d = _fmt_pct(_pct(latest.pct_change_3d))
-    latest_5d = _fmt_pct(_pct(latest.pct_change_5d))
+    from app.services.chart_markers import today_ny
+    from app.services.reaction_windows import NOT_YET, pending_windows
+    pending = pending_windows(latest.event_date, latest.pct_change_1d, latest.pct_change_3d, latest.pct_change_5d, today_ny())
+    latest_3d = NOT_YET if "3d" in pending else _fmt_pct(_pct(latest.pct_change_3d))     # a window still to close, never zero or "N/A"
+    latest_5d = NOT_YET if "5d" in pending else _fmt_pct(_pct(latest.pct_change_5d))
 
     beat_sentence = (
         f"Beaten consensus EPS in {beat} of {total} quarters "

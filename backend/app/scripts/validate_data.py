@@ -2906,6 +2906,27 @@ async def check_ticker_name_matches_sec(session) -> CheckResult:
     return CheckResult("ticker_name_matches_sec", PASS, f"Every stored name matches SEC's company name ({judged} of {len(stored)} active tickers listed by SEC)")
 
 
+async def check_reaction_count_moving(session) -> CheckResult:
+    """WARN when the stored earnings-reactions count has not changed over the last STUCK_SESSIONS trading sessions while at least
+    STUCK_MIN_REPORTS S&P 500 companies reported in them (services/reaction_count_guard; Sam, 2026-10-29)."""
+    import json
+    from app.services.reaction_count_guard import COUNT_KEY, STUCK_SESSIONS, stuck_window, verdict
+    raw = (await session.execute(text("SELECT value FROM system_metadata WHERE key = :k"), {"k": COUNT_KEY})).scalar()
+    counts = json.loads(raw) if raw else {}
+    sessions = list((await session.execute(text(
+        "SELECT date FROM price_bars_shadow WHERE symbol = 'SPY' ORDER BY date DESC LIMIT :n"), {"n": STUCK_SESSIONS + 2})).scalars().all())
+    window = stuck_window(counts, sessions)
+    reports = 0
+    if window:
+        reports = int((await session.execute(text("""SELECT count(*) FROM events e JOIN tickers t ON t.id = e.ticker_id AND t.is_active
+            WHERE e.event_type = 'earnings' AND e.unresolved_since IS NULL AND (e.is_confirmed OR e.eps_actual IS NOT NULL)
+              AND e.event_date BETWEEN :a AND :b"""), {"a": window[0], "b": window[1]})).scalar() or 0)
+    stuck, detail = verdict(window, reports)
+    if stuck:
+        return CheckResult("reaction_count_moving", WARN, detail[:1].upper() + detail[1:])
+    return CheckResult("reaction_count_moving", PASS, detail[:1].upper() + detail[1:])
+
+
 async def check_figi_change(session) -> CheckResult:
     """ERROR when Intrinio's current FIGI for a ticker (figi_seen at the last refresh) differs from the stored one:
     the ticker now points at a different security and the record map needs a new row."""
@@ -4072,6 +4093,8 @@ CHECKS = [
     # Security records: one Intrinio record per ticker per date, FIGI unchanged
     check_security_record_coverage,
     check_figi_change,
+    # Earnings reactions keep arriving (a count stuck while companies report)
+    check_reaction_count_moving,
     check_ticker_name_matches_sec,
     # Chain shadow: Intrinio's EOD chain against the courier's, judged over a week
     check_chain_shadow,

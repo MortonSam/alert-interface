@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 from app.models.enums import EarningsOutcome, EventType
 
@@ -57,6 +57,14 @@ class HistoricalReactionRead(HistoricalReactionBase):
     eps_change_pct: float | None = None     # None between a loss and a profit (the line says it in words)
     eps_line: str | None = None             # "EPS $2.22, up 111.4% from $1.05 a year ago", or the plain absence
     measure: str | None = None              # "EPS", or "FFO per share" for a REIT (services/ffo)
+
+    @computed_field
+    @property
+    def pending_windows(self) -> list[str]:
+        """The longer windows ("3d", "5d") whose sessions have not closed yet: shown as not yet available, never as zero."""
+        from app.services.chart_markers import today_ny
+        from app.services.reaction_windows import pending_windows
+        return pending_windows(self.event_date, self.pct_change_1d, self.pct_change_3d, self.pct_change_5d, today_ny())
     # NOTE: gap/intraday decomposition (open_after/close_before − 1, close_after/open_after − 1)
     # is misleading for after-close reporters: stored open_after/close_after are pre-print event-day
     # prices, not the post-earnings reaction. Meaningful decomposition requires next-day OHLCV

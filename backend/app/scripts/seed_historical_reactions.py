@@ -72,8 +72,17 @@ from app.services.split_basis import (
 
 
 LOOKBACK_YEARS = 5
-# We need T+5 data, so skip very recent earnings to avoid incomplete windows
-MIN_AGE_DAYS = 8
+# A report is measured once the first full session after it has closed, so the nightly after that session stores its first-day
+# move (Sam, 2026-10-29: the eight-day wait kept every new quarter off the page for a week). The 3- and 5-day moves are left
+# empty until their sessions close, and later nights fill them in on the same row: an empty longer window is "not yet
+# available", never zero (services/reaction_windows).
+MIN_AGE_DAYS = 1
+# A report younger than this is written only with its first-day move: a row that cannot have one yet waits for the next night
+# rather than standing as the latest quarter with no move. Older reports keep the rule they always had (a row with whatever
+# the bars give, metadata only when the timing is unknown).
+FULL_WINDOW_DAYS = 8
+# The nightly comes back to a report this recent whose first-day move is stored and whose 3- or 5-day move is still empty.
+from app.services.reaction_windows import WINDOW_FILL_DAYS  # noqa: E402
 # Never insert an earnings row when the ticker already has one this close.
 DUPLICATE_GUARD_DAYS = 10
 # The nightly also retries a stored report this recent that still has no measured reaction on its own date.
@@ -224,6 +233,12 @@ def stored_report_entries(rows: list, today: date) -> tuple[list[tuple[date, Dec
         if report_timing and report_timing != "unknown":
             timing[event_date] = report_timing
     return sorted(entries, key=lambda x: x[0]), timing
+
+
+def write_now(data: dict, event_date: date, today: date) -> bool:
+    """Pure: whether a computed reaction is written tonight. A report younger than FULL_WINDOW_DAYS is written only once its
+    first-day move exists (an amc report's first session has not closed by the first nightly after it); older ones as always."""
+    return data.get("pct_change_1d") is not None or (today - event_date).days >= FULL_WINDOW_DAYS
 
 
 def merge_report_entries(yf_entries: list, stored_entries: list) -> list:
@@ -712,6 +727,9 @@ async def build_process_list(session) -> dict[str, str]:
           whose event_date > max(event_date) of that ticker's reactions
           AND event_date <= today - MIN_AGE_DAYS (enough time has passed
           for price data to settle).
+      (d) filling — a stored first-day move from the last WINDOW_FILL_DAYS
+          whose 3- or 5-day move is still empty: the nightly comes back
+          until each window's session has closed.
       (c) unmeasured — a confirmed earnings event in the last
           RETRY_UNMEASURED_DAYS, at least MIN_AGE_DAYS old, with no measured
           reaction on its own date (CB's Oct 20 report: its row had no timing).
@@ -786,9 +804,22 @@ async def build_process_list(session) -> dict[str, str]:
         .group_by(Ticker.id, Ticker.symbol)
     )).scalars().all())
 
+    needs_filling = set((await session.execute(
+        select(Ticker.symbol)
+        .join(HistoricalReaction, HistoricalReaction.ticker_id == Ticker.id)
+        .where(
+            HistoricalReaction.event_type == EventType.EARNINGS,
+            HistoricalReaction.pct_change_1d.is_not(None),
+            HistoricalReaction.pct_change_3d.is_(None) | HistoricalReaction.pct_change_5d.is_(None),
+            HistoricalReaction.event_date >= today - timedelta(days=WINDOW_FILL_DAYS),
+            Ticker.is_active.is_(True),
+        )
+        .group_by(Ticker.id, Ticker.symbol)
+    )).scalars().all())
+
     # Build result dict with reasons
     result: dict[str, str] = {}
-    for sym in sorted(needs_version | needs_new_earnings | needs_unmeasured):
+    for sym in sorted(needs_version | needs_new_earnings | needs_unmeasured | needs_filling):
         reasons = []
         if sym in needs_version:
             reasons.append("version_upgrade")
@@ -796,6 +827,8 @@ async def build_process_list(session) -> dict[str, str]:
             reasons.append("new_earnings")
         if sym in needs_unmeasured:
             reasons.append("unmeasured")
+        if sym in needs_filling:
+            reasons.append("filling")
         result[sym] = ", ".join(reasons)
 
     return result
@@ -887,6 +920,10 @@ async def seed(symbol: str, write: bool = False) -> None:
             if data is None:
                 skipped += 1
                 print(f"  {event_date.isoformat():<12} {report_timing:<8} {'':>8} {'':>8} {'':>8}  skipped (no bars around the date)")
+                continue
+            if not write_now(data, event_date, today):
+                skipped += 1
+                print(f"  {event_date.isoformat():<12} {report_timing:<8} {'':>8} {'':>8} {'':>8}  waits (its first session after the report has not closed)")
                 continue
             data["eps_estimate"] = eps_estimate
             data["eps_actual"]   = eps_actual
@@ -994,7 +1031,7 @@ async def _seed_ticker_bulk(ticker: Ticker, loop) -> tuple[int, int, int]:
                 continue
             report_timing = timing_map.get(event_date, "unknown")
             data = _compute_v3(hist, dates_cache, event_date, report_timing, load_reference_sessions())
-            if data is None:
+            if data is None or not write_now(data, event_date, date.today()):
                 no_price += 1
                 continue
             data["eps_estimate"] = eps_estimate
@@ -1245,6 +1282,11 @@ async def main() -> int:
     if args.all_tickers or args.retry_only:
         rc = await main_bulk(retry_only=args.retry_only, limit=args.limit, force=args.force)
         await record_guard_refusals()
+        if args.all_tickers and args.limit is None:
+            # tonight's count, for validate's reaction_count_moving (services/reaction_count_guard)
+            from app.services.reaction_count_guard import record_count
+            async with AsyncSessionLocal() as session:
+                print(f"Earnings reactions with a first-day move: {await record_count(session, date.today()):,}", flush=True)
         return rc
 
     # One-off mode: positional TICKER args
