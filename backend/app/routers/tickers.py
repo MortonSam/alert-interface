@@ -2075,6 +2075,10 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     from app.services.draft_limiter import check_limit, get_client_ip, record_use, refund_use
     if not (settings.ask_ivy_enabled or admin):
         raise HTTPException(status_code=404, detail="Not found")
+    from app.services import account_copy as _K, accounts as _Acc
+    person = settings.accounts_enabled and caller_id.startswith(_Acc.ACCOUNT_PREFIX)
+    if settings.accounts_enabled and not admin and not person:
+        raise HTTPException(status_code=401, detail=_K.API["sign_in_needed"])      # with accounts on, asking needs sign-in; reading never does
     question = " ".join(body.question.split())
     if not question or len(question) > A.MAX_QUESTION_CHARS:
         raise HTTPException(status_code=422, detail=f"Ask a question of up to {A.MAX_QUESTION_CHARS} characters.")
@@ -2094,6 +2098,8 @@ async def ask_ivy(symbol: str, body: AskRequest, request: Request, db: AsyncSess
     from app.services import ai_spend
     if await A.spend_today(db) >= settings.ask_ivy_daily_cap_usd or await ai_spend.cap_reached(db):
         raise HTTPException(status_code=429, detail="Ivy has reached today's budget and is paused until tomorrow.")
+    if person and not await A.person_may_ask(db, caller_id):
+        raise HTTPException(status_code=429, detail=A.PERSON_LIMIT_MESSAGE)
     # the model classifies the question (one small call, no keyword list); only a question with nothing to do with this stock is refused
     try:
         klass = await A.classify_question(A.ask_client(), question, pack["symbol"], pack["name"])

@@ -32,7 +32,8 @@ const SRC = join(__dirname, "..", "..");
 const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
 const FILES = ["app", "components", "lib"].flatMap((d) => walk(join(SRC, d)))
   .filter((f) => /\.tsx?$/.test(f) && !f.includes("__tests__") && !f.includes(join("app", "admin")) && !f.endsWith(".d.ts")
-    && !f.endsWith("displayedDates.ts"));   // a rule table only its test reads
+    && !f.endsWith("displayedDates.ts")    // a rule table only its test reads
+    && !f.endsWith("legalDrafts.ts"));     // the privacy policy must name the providers that handle a person's data
 
 /** Copy a visitor can read: JSX text, and string or template literals of three words or more, found by parsing the file (so code is
  *  never mistaken for text). Import paths, className values and keys are not copy. */

@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     # fallback. A Railway variable; switching is an env change and a redeploy, never a code change.
     options_primary_source: str = "courier"
 
+    # Accounts (Sam, 2026-10-29): email magic-link sign-in and what it unlocks (services/accounts). Off until Sam approves every word
+    # (backend/ops/reports/accounts_2026-10-29/wording.md) and the privacy policy and terms; reading never needs an account.
+    accounts_enabled: bool = False            # ACCOUNTS_ENABLED
+    emails_enabled: bool = False              # EMAILS_ENABLED: the nightly sends the opted-in emails; also needs ACCOUNTS_ENABLED and a provider
+    account_secret: str = ""                  # ACCOUNT_SECRET: signs unsubscribe links (HMAC); sign-in tokens and sessions are random, stored hashed
+    site_url: str = "https://alertinterface.com"
+    postmark_server_token: str = ""           # POSTMARK_SERVER_TOKEN: the email provider (services/mailer); empty = nothing is sent
+    email_from: str = "Ivy at Alert Interface <ivy@alertinterface.com>"
+    mailing_address: str = "MAILING_ADDRESS"  # MAILING_ADDRESS: the postal address every email's footer carries (CAN-SPAM); Sam provides it
+
     # Clerk auth (empty = disabled, admin-token-only mode)
     clerk_jwks_url: str = ""            # https://<frontend-api>/.well-known/jwks.json
     clerk_authorized_party: str = ""    # http://localhost:3000

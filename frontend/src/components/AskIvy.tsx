@@ -3,7 +3,10 @@ import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 
 import { IvyMark } from "@/components/IvyMark";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import AccountPrompt from "@/components/AccountPrompt";
+import { ACCOUNTS_ON, SIGN_IN_STATUS, account } from "@/lib/account";
+import { ACCOUNT_COPY } from "@/lib/accountCopy";
 import posthog from "posthog-js";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import { api, ApiError, type QuestionAnswer } from "@/lib/api";
@@ -21,6 +24,9 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
   const [answer, setAnswer] = useState<QuestionAnswer | null>(initialAnswer);   // initialAnswer: a rendered answer for tests and previews
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // with accounts on, asking needs sign-in (reading never does): a visitor sees the box and one quiet line where it is
+  const [signedOut, setSignedOut] = useState(false);
+  useEffect(() => { if (ACCOUNTS_ON) account.me().then((r) => setSignedOut(!r.ok)); }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,6 +38,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
       setAnswer(res.answer);
       try { posthog.capture("question_asked", { ticker: symbol, covered: res.answer.inputs.length > 0, cached: res.cached }); } catch { /* analytics never breaks the page */ }
     } catch (err) {
+      if (ACCOUNTS_ON && err instanceof ApiError && err.status === SIGN_IN_STATUS) { setSignedOut(true); return; }
       setError(visitorMessage(err, "Ivy couldn't answer just now. Try again in a few minutes."));
     } finally {
       setBusy(false);
@@ -52,6 +59,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
           {busy ? "Asking…" : "Ask"}
         </button>
       </div>
+      {signedOut && <div className="mt-3"><AccountPrompt text={ACCOUNT_COPY.askPrompt} testId="ask-sign-in" /></div>}
       {error && <p className="text-sm text-muted-foreground mt-3">{error}</p>}
       {answer && (
         <div className="mt-4 text-sm leading-relaxed">
