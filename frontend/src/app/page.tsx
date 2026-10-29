@@ -85,8 +85,9 @@ export default async function Home() {
         </p>
       </section>
 
-      {/* ── 2. The counts: four live numbers from stored tables, on their own screen. ── */}
-      <section className="screen-section py-12 sm:py-0 flex items-center justify-center">
+      {/* ── 2. The counts: the live numbers from stored tables, a compact band right under the opening (Sam, 2026-10-29: on a
+             screen of their own they floated in black). ── */}
+      <section className="py-12 sm:py-16">
         {/* the row lib/siteCounters' layout model measures (COUNTER_LAYOUT: max-w-5xl with its padding) */}
         <div className="w-full max-w-5xl mx-auto px-4 sm:px-8">
           <SiteCounters initial={initial} />

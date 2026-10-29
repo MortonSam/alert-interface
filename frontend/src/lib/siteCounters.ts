@@ -39,7 +39,9 @@ export function counterRows(stats: SiteStats | null): CounterRow[] {
 // the old model took the row as 1024px when max-w-5xl includes its 32px side padding, so 60px figures overflowed 228px columns).
 // The row is a size container: the grid is four across only when the row is at least FOUR_ACROSS_MIN_PX wide, otherwise 2x2,
 // columns are GAP_PX apart, and each figure's size is the column width over the longest figure's width in ems (--num-em, set by
-// SiteCounters from the values shown), capped at FONT_MAX_PX, so a figure always fits its column. page.tsx's CSS carries these
+// SiteCounters from the values shown), capped at FONT_MAX_PX, so a figure always fits its column. Across, the grid has one column
+// per count shown (2026-10-29: with the analyst count withheld, three counts in four columns sat left of centre), and two by two an
+// odd last count spans the row, centred. page.tsx's CSS carries these
 // numbers (tested); __tests__/siteCounters.test.ts holds the geometry at 360 to 1920 and the real-Chrome check measures it.
 
 export const COUNTER_LAYOUT = {
@@ -92,11 +94,12 @@ export function rowWidth(viewport: number): number {
 export function counterGeometry(viewport: number, numbers: string[]): CounterGeometry {
   const L = COUNTER_LAYOUT;
   const row = rowWidth(viewport);
-  const columns = row >= L.fourAcrossMinPx ? 4 : 2;
+  const columns = row >= L.fourAcrossMinPx ? Math.max(1, Math.min(4, numbers.length)) : 2;
   const columnWidth = (row - L.gapPx * (columns - 1)) / columns;
   const fontSize = Math.min(L.fontMaxPx, columnWidth / numEm(numbers));
   const boxes = numbers.map((n, i) => {
-    const left = (i % columns) * (columnWidth + L.gapPx);
+    const alone = columns === 2 && i === numbers.length - 1 && i % 2 === 0;    // the odd last count, two by two: centred across the row
+    const left = alone ? (row - numberWidth(n, fontSize)) / 2 : (i % columns) * (columnWidth + L.gapPx);
     return [left, left + numberWidth(n, fontSize)] as [number, number];
   });
   return { columns, columnWidth, fontSize, boxes };
@@ -111,13 +114,15 @@ export function boxesOverlap(a: [number, number], b: [number, number]): boolean 
 export const COUNTER_CSS = `
         .counters { container-type: inline-size; }
         .counters-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: ${COUNTER_LAYOUT.gapPx}px; row-gap: 40px; }
+        .counters-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
         .stat-number {
           font-size: min(${COUNTER_LAYOUT.fontMaxPx}px, calc((100cqw - ${COUNTER_LAYOUT.gapPx}px) / 2 / var(--num-em, 4.3)));
           line-height: 1;
           letter-spacing: -.01em;
           font-variant-numeric: tabular-nums;
         }
-        @container (min-width: ${COUNTER_LAYOUT.fourAcrossMinPx}px) {
-          .counters-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-          .stat-number { font-size: min(${COUNTER_LAYOUT.fontMaxPx}px, calc((100cqw - ${3 * COUNTER_LAYOUT.gapPx}px) / 4 / var(--num-em, 4.3))); }
+        @container (min-width: ${COUNTER_LAYOUT.fourAcrossMinPx}px) {${[1, 2, 3, 4].map((n) => `
+          .counters-grid[data-n="${n}"] { grid-template-columns: repeat(${n}, minmax(0, 1fr)); }
+          .counters-grid[data-n="${n}"] .stat-number { font-size: min(${COUNTER_LAYOUT.fontMaxPx}px, calc((100cqw - ${(n - 1) * COUNTER_LAYOUT.gapPx}px) / ${n} / var(--num-em, 4.3))); }`).join("")}
+          .counters-grid > :last-child:nth-child(odd) { grid-column: auto; }
         }`;

@@ -16,6 +16,24 @@ function gaps(viewport: number, numbers: string[]): number[] {
   return out;
 }
 
+describe("three counts (the analyst count withheld, as on production since 2026-10)", () => {
+  const THREE = ["197,959", "675,766", "10,000"];
+  it("across, three columns fill the row: no empty fourth column pushes the row off centre", () => {
+    const g = counterGeometry(1440, THREE);
+    expect(g.columns).toBe(3);
+    expect(g.columnWidth).toBeCloseTo((rowWidth(1440) - 2 * COUNTER_LAYOUT.gapPx) / 3, 5);
+    expect(COUNTER_CSS).toContain('.counters-grid[data-n="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }');
+    expect(read("components/SiteCounters.tsx")).toContain("data-n={rows.length}");
+  });
+  it("two by two, the odd last count spans the row and sits centred", () => {
+    const g = counterGeometry(390, THREE);
+    expect(g.columns).toBe(2);
+    const [l, r] = g.boxes[2];
+    expect(l + r).toBeCloseTo(rowWidth(390), 5);
+    expect(COUNTER_CSS).toContain(".counters-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }");
+  });
+});
+
 describe("the counters never touch", () => {
   it.each([1024, 1280, 1440, 1920])("at %ipx no two boxes overlap and each gap is at least 24px", (viewport) => {
     for (const numbers of [LIVE, LONG]) {
@@ -59,7 +77,8 @@ describe("the counters never touch", () => {
     expect(src).toContain('"--num-em": numEm(');
     expect(src).not.toContain("whitespace-nowrap`");                       // labels wrap inside their column, never into the next
     const section = page.match(/<section className="([^"]*)">\s*\{\/\*[^*]*\*\/\}\s*<div className="w-full max-w-5xl mx-auto px-4 sm:px-8">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
-    expect(section).toContain("screen-section");
-    expect(section).toContain("flex items-center");
+    expect(section).toBe("py-12 sm:py-16");
+    expect(section).not.toContain("screen-section");                     // a band under the opening, never a screen of its own
+    expect(section).not.toMatch(/min-h-|h-screen|svh|dvh/);
   });
 });
