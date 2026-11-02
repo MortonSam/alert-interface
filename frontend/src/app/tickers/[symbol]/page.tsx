@@ -51,6 +51,7 @@ import { chainDateLabel } from "./optionsReadFootnote";
 import { ANALYST_WINDOW_TEXT, REACTION_WINDOW_TEXT, fedVsEarningsLine } from "./reactionWindowText";
 import { capture } from "@/lib/analytics";
 import { writtenBeforeLabel } from "@/lib/latestNote";
+import { pendingFilingLabel, writtenLabel } from "@/lib/liveFigures";
 import * as Sentry from "@sentry/nextjs";
 import Callout from "@/components/Callout";
 import { SectionKicker } from "@/components/SectionKicker";
@@ -2174,9 +2175,14 @@ export default function TickerPage() {
                   {writtenBeforeLabel(note.report_since) && (
                     <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
                   )}
-                  Generated {timeAgo(note.generated_at)}
+                  {writtenLabel(note.generated_at)}
                   {note.source_filings.length > 0 && (
                     <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
+                  )}
+                  {pendingFilingLabel(note.pending_filing) && (
+                    <> · {note.pending_filing?.url
+                      ? <a href={note.pending_filing.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" data-testid="note-pending-filing">{pendingFilingLabel(note.pending_filing)}</a>
+                      : <span data-testid="note-pending-filing">{pendingFilingLabel(note.pending_filing)}</span>}</>
                   )}
                 </span>
               </div>
@@ -2187,7 +2193,7 @@ export default function TickerPage() {
                   companyName={ticker?.name}
                   sector={ticker?.sector}
                   industry={ticker?.industry}
-                  valuationShown={note.valuation_shown === true}
+                  liveInputs={note.live_inputs ?? []}
                 />
               ) : (
                 <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">
@@ -2266,9 +2272,14 @@ export default function TickerPage() {
                   {writtenBeforeLabel(note.report_since) && (
                     <span className="font-medium text-amber-600 dark:text-amber-400" data-testid="note-written-before">{writtenBeforeLabel(note.report_since)} · </span>
                   )}
-                  Generated {timeAgo(note.generated_at)}
+                  {writtenLabel(note.generated_at)}
                   {note.source_filings.length > 0 && (
                     <> · {note.source_filings[0].form_type} {fmtOneDate(note.source_filings[0].filing_date) ?? note.source_filings[0].filing_date}</>
+                  )}
+                  {pendingFilingLabel(note.pending_filing) && (
+                    <> · {note.pending_filing?.url
+                      ? <a href={note.pending_filing.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80" data-testid="note-pending-filing">{pendingFilingLabel(note.pending_filing)}</a>
+                      : <span data-testid="note-pending-filing">{pendingFilingLabel(note.pending_filing)}</span>}</>
                   )}
                 </span>
                 {genPolicy?.can_regenerate && (
@@ -2287,7 +2298,7 @@ export default function TickerPage() {
                   companyName={ticker?.name}
                   sector={ticker?.sector}
                   industry={ticker?.industry}
-                  valuationShown={note.valuation_shown === true}
+                  liveInputs={note.live_inputs ?? []}
                 />
               ) : (
                 <div className="px-6 py-5 prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-li:text-foreground/90 prose-strong:text-foreground">

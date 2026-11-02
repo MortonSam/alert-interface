@@ -54,6 +54,8 @@ class ResearchNoteRead(BaseModel):
     updated_at: datetime
     verification_failed: bool = False   # admins only ever see True here; visitors get a 404 instead
     report_since: date | None = None     # the company reported again on this date after the note was written (services/note_currency)
+    live_inputs: list[dict] = []         # the receipts behind the note's live figures, filled at read time: {name, value, as_of, source}
+    pending_filing: dict | None = None   # a material filing newer than the note, read tonight: {form, items, filed_on, url}
 
 
 class ResearchNoteGenerateRequest(BaseModel):
@@ -88,3 +90,4 @@ class LatestVerifiedNoteRead(BaseModel):
     stats: dict | None                 # structured_content.stats: the note's own fact figures
     highlights: list[dict]             # structured_content.highlights: [{lead, detail}], the note's own words
     verification_summary: dict | None  # {supported, unsupported, contradicted}
+    live_inputs: list[dict] = []       # the receipts behind the live figures in the highlights shown (services/note_live)

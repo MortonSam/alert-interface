@@ -10,6 +10,7 @@ import Link from "next/link";
 import { api, type LatestVerifiedNote as Note } from "@/lib/api";
 import { noteFacts, verificationLine } from "@/lib/latestNote";
 import { fmtDate as fmtOneDate } from "@/lib/dates";
+import LiveText from "@/components/LiveText";
 
 const RATING_CLASS: Record<string, string> = {
   bullish: "bg-success/10 text-success border-success/25",
@@ -75,7 +76,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
         {note.highlights.length > 0 && (
           <div className="space-y-2">
             {note.highlights.map((h) => (
-              <p key={h.lead} className="text-sm text-foreground/85"><span className="font-semibold text-foreground">{h.lead}.</span> {h.detail}</p>
+              <p key={h.lead} className="text-sm text-foreground/85"><span className="font-semibold text-foreground"><LiveText text={h.lead} inputs={note.live_inputs} />.</span> <LiveText text={h.detail} inputs={note.live_inputs} /></p>
             ))}
           </div>
         )}

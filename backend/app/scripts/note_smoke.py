@@ -52,13 +52,20 @@ async def one(symbol: str) -> dict:
         async with AsyncSessionLocal() as db:
             ticker = await R._resolve_ticker(db, None, symbol)
             filing, sections, reactions = await R._fetch_context(db, ticker)
-            prompt = R._build_generation_prompt(ticker, filing, sections, reactions, await R.merger_context(db, ticker.symbol))
+            from app.services.material_filings import prompt_block as material_prompt_block
+            from app.services.note_live import keep_available, prompt_block as live_block, values_for
+            values = await values_for(db, ticker.symbol)
+            material = await material_prompt_block(db, ticker.symbol, (filing or {}).get("filing_date"))
+            prompt = R._build_generation_prompt(ticker, filing, sections, reactions, await R.merger_context(db, ticker.symbol),
+                                                live_block(set(values)), material)
             structured, gen = await R._generate_structured(prompt, ticker.symbol)
+            structured = keep_available(structured, values)
             structured["stats"] = R._build_stats_object(ticker, reactions)
-            structured["financials"] = await R._fetch_financials(symbol)
+            structured["financials"] = R.durable_financials(await R._fetch_financials(symbol))
             content = R._serialize_structured_note(structured, ticker)
-            verification, ver_model, ver_in, ver_out = await R._run_verification(content, filing, sections, reactions, ticker)
-            out["cost_usd"] = round((estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"]) or 0.0)
+            verification, ver_model, ver_in, ver_out = await R._run_verification(content, filing, sections, reactions, ticker, values, material)
+            out["cost_usd"] = round((estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"],
+                                                       gen.get("cache_write_tokens", 0), gen.get("cache_read_tokens", 0)) or 0.0)
                                     + (estimate_cost_usd(ver_model, ver_in, ver_out) or 0.0), 4)
             now = datetime.now(timezone.utc)
             from app.config import settings
@@ -79,9 +86,11 @@ async def one(symbol: str) -> dict:
             out["held"] = held
             out["seconds"] = round(time.monotonic() - t0, 1)
             return out
-        read = _note_for_reader(note, admin=False)          # what a visitor would be served
+        read = _note_for_reader(note, admin=False, values=values)          # what a visitor would be served
         if not (read.content or "").strip():
             out["error"] = "the served note is empty"
+        elif "{live:" in (read.content or "") + str(read.structured_content or ""):
+            out["error"] = "the served note carries an unfilled live-figure slot"
         elif RAW.search(read.content):
             out["error"] = "the served note carries exception text"
         else:

@@ -124,7 +124,7 @@ def _wire(monkeypatch, verdicts_by_attempt):
         calls["gen"] += 1
         return dict(note), {"model_used": "m", "input_tokens": 1, "output_tokens": 1}
 
-    async def verify(content, filing, sections, reactions, ticker):
+    async def verify(content, filing, sections, reactions, ticker, values=None, material=None):
         bad = verdicts_by_attempt[calls["gen"] - 1]
         claims = [{"claim": t, "verdict": "unsupported" if i < bad else "supported", "reason": ""}
                   for i, t in enumerate(["A one", "B two", "C three", "D four", "E five"])]
@@ -140,6 +140,11 @@ def _wire(monkeypatch, verdicts_by_attempt):
     monkeypatch.setattr(R, "_run_verification", verify)
     monkeypatch.setattr(R, "_fetch_financials", none)
     monkeypatch.setattr(R, "merger_context", none)
+    from app.services import note_live
+
+    async def no_values(db, symbol):
+        return {}
+    monkeypatch.setattr(note_live, "values_for", no_values)
     monkeypatch.setattr(user_errors, "record", held)
     return calls
 

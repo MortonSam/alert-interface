@@ -10,20 +10,12 @@ export function writtenBeforeLabel(reportSince: string | null | undefined): stri
   return `Written before the ${fmtDate(reportSince.slice(0, 10))} report`;
 }
 
-function fmtCap(n: number): string {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
-  return `$${n.toFixed(0)}`;
-}
-
 export interface NoteFact { label: string; value: string; sub?: string }
 
 /** Three facts from the note's own stats, in a fixed order, skipping any the note does not hold. */
 export function noteFacts(stats: StructuredNoteStats | null): NoteFact[] {
   if (!stats) return [];
   const out: NoteFact[] = [];
-  if (stats.market_cap != null) out.push({ label: "Market cap", value: fmtCap(stats.market_cap) });
   if (stats.eps_sec != null) out.push({ label: "EPS", value: `$${stats.eps_sec.toFixed(2)}` });   // SEC diluted EPS, as the note's text
   return out.slice(0, 3);
 }

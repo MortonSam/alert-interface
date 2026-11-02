@@ -151,7 +151,7 @@ async def verify(
     return await verify_existing_note(db, payload.ticker_id, payload.symbol)
 
 
-def _note_for_reader(note: ResearchNote, admin: bool, hidden: bool | None = None) -> ResearchNoteRead:
+def _note_for_reader(note: ResearchNote, admin: bool, hidden: bool | None = None, values: dict | None = None) -> ResearchNoteRead:
     """What this reader may see of a note.
 
     Visitors only ever get the text of a note whose verification completed. A
@@ -179,6 +179,17 @@ def _note_for_reader(note: ResearchNote, admin: bool, hidden: bool | None = None
     from app.services.note_valuation import served
     data["structured_content"], verification, data["content"] = served(data.get("structured_content"), raw_verification,
                                                                        data.get("content"), data["valuation_shown"])
+    # the live figures filled from today's stored receipts, never the day the note was written (services/note_live, Sam 2026-11-02);
+    # a stored price-based multiple is never served
+    from app.services.note_live import fill_markdown, fill_structured, fill_verification, used_inputs
+    from app.services.research_note_service import durable_financials
+    values = values or {}
+    data["live_inputs"] = used_inputs(data.get("structured_content"), data.get("content"), values)
+    data["structured_content"] = fill_structured(data.get("structured_content"), values)
+    if data["structured_content"] and data["structured_content"].get("financials") is not None:
+        data["structured_content"] = {**data["structured_content"], "financials": durable_financials(data["structured_content"]["financials"])}
+    data["content"] = fill_markdown(data.get("content"), values) or ""
+    verification = fill_verification(verification, values)
     data["verification"] = normalize_verification(verification)
     if data.get("error"):                        # every reader, the owner too: the stored exception text is the digest's, not the page's
         data["error"] = visitor_failure_reason(note)
@@ -197,12 +208,17 @@ def _note_for_reader(note: ResearchNote, admin: bool, hidden: bool | None = None
 
 async def note_for_reader(db, note: ResearchNote, admin: bool) -> ResearchNoteRead:
     """_note_for_reader, plus the date the company reported again after the note was written (None while it is current)."""
-    read = _note_for_reader(note, admin, await withheld_now(db, note))
+    from app.services.note_live import values_for
+    symbol_ = (await db.execute(select(Ticker.symbol).where(Ticker.id == note.ticker_id))).scalar()
+    uses_live = "{live:" in (note.content or "")
+    read = _note_for_reader(note, admin, await withheld_now(db, note), await values_for(db, symbol_) if uses_live and symbol_ else None)
     if read.structured_content:
         from app.services.note_valuation import with_sec_eps
         symbol = (await db.execute(select(Ticker.symbol).where(Ticker.id == note.ticker_id))).scalar()
         read = read.model_copy(update={"structured_content": await with_sec_eps(db, symbol, read.structured_content)})
-    return read.model_copy(update={"report_since": await report_since(db, note.ticker_id, note.generated_at)})
+    from app.services.material_filings import pending_for
+    return read.model_copy(update={"report_since": await report_since(db, note.ticker_id, note.generated_at),
+                                   "pending_filing": await pending_for(db, symbol_, note.generated_at) if symbol_ else None})
 
 
 def visitor_failure_reason(note: ResearchNote) -> str:
@@ -249,12 +265,19 @@ async def latest_verified(db: AsyncSession = Depends(get_db)) -> LatestVerifiedN
     sc, ver, _ = confirmed_only(sc, ver, None)
     sc = sc or {}
     sc, verification, _ = served(sc, ver, None, bool(settings.pe_enabled))
+    live_inputs: list[dict] = []
+    if "{live:" in (note.content or ""):                       # the live figures as of today (services/note_live)
+        from app.services.note_live import fill_structured, fill_verification, used_inputs, values_for
+        vals = await values_for(db, symbol)
+        live_inputs = used_inputs({"highlights": list(sc.get("highlights") or [])[:2]}, None, vals)
+        sc, verification = fill_structured(sc, vals) or {}, fill_verification(verification, vals)
     from app.services.note_valuation import with_sec_eps
     sc = await with_sec_eps(db, symbol, sc) or {}
     return LatestVerifiedNoteRead(
         symbol=symbol, company_name=name, generated_at=note.generated_at, verified_at=note.verified_at,
         rating=sc.get("rating"), stats=sc.get("stats"), highlights=list(sc.get("highlights") or [])[:2],
         verification_summary=(normalize_verification(verification) or {}).get("summary"),    # counted from the claims, never the stored totals
+        live_inputs=live_inputs,
     )
 
 

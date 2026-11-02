@@ -9,7 +9,9 @@
 Each section holds at most MAX_POINTS points and may hold none. Every point that states a figure carries a comparison (the
 company's own history, the same quarter a year earlier, or sector peers): COMPARISON_CUE. Nothing repeats what the ticker page
 already shows (the beat rate and the moves after past reports): REPEATS. The Bottom Line summarizes what to watch and gives no
-verdict on the stock: VERDICT_WORDS.
+verdict on the stock: VERDICT_WORDS. No fast-changing figure is typed into the text: it is a {live:...} slot the page fills when the
+note is read (services/note_live, Sam 2026-11-02); a sentence that types one, uses an unknown slot or compares a slot in its own words
+is named on the retry and dropped from the note as stored.
 """
 from __future__ import annotations
 
@@ -85,6 +87,9 @@ def point_problems(point: dict) -> list[str]:
         out.append("gives a verdict on the stock")
     if re.search(r"[—–]", text):
         out.append("uses a dash")
+    from app.services.note_live import sentence_problems
+    for sentence in [point.get("lead", "")] + _sentences(point.get("detail") or ""):
+        out += [f"{why}: {sentence[:120]!r}" for why in sentence_problems(sentence)]
     return out
 
 
@@ -105,6 +110,10 @@ def note_problems(structured: dict) -> list[str]:
         out.append("bottom_line: repeats what the ticker page shows")
     if re.search(r"[—–]", bl + (structured.get("what_they_do") or "")):
         out.append("bottom_line or what_they_do: uses a dash")
+    from app.services.note_live import sentence_problems
+    for key in ("bottom_line", "what_they_do"):
+        for sentence in _sentences(structured.get(key) or ""):
+            out += [f"{key}: {why}: {sentence[:120]!r}" for why in sentence_problems(sentence)]
     return out
 
 
@@ -115,12 +124,21 @@ def _sentences(text: str) -> list[str]:
 def enforce(structured: dict) -> dict:
     """Pure: the note as stored. Points that repeat the page, state a bare figure or give a verdict are dropped, then each
     section keeps its first MAX_POINTS; Bottom Line sentences with a verdict or a repeat are dropped; text is cleaned."""
+    from app.services.note_live import sentence_problems
     out = dict(structured)
     for sec in SECTIONS:
-        kept = [p for p in (structured.get(sec) or []) if not [w for w in point_problems(p) if w != "uses a dash"]]
+        kept = []
+        for p in structured.get(sec) or []:
+            if sentence_problems(p.get("lead", "")):
+                continue
+            detail = " ".join(x for x in _sentences(p.get("detail") or "") if not sentence_problems(x))
+            q = {**p, "detail": detail}
+            if detail and not [w for w in point_problems(q) if w != "uses a dash"]:
+                kept.append(q)
         out[sec] = [{**p, "lead": clean_text(p.get("lead", "")), "detail": clean_text(p.get("detail", ""))} for p in kept[:MAX_POINTS]]
-    bl = [s for s in _sentences(structured.get("bottom_line") or "") if not VERDICT_WORDS.search(s) and not REPEATS.search(s)]
+    bl = [s for s in _sentences(structured.get("bottom_line") or "")
+          if not VERDICT_WORDS.search(s) and not REPEATS.search(s) and not sentence_problems(s)]
     out["bottom_line"] = clean_text(" ".join(bl))
-    out["what_they_do"] = clean_text(structured.get("what_they_do") or "")
+    out["what_they_do"] = clean_text(" ".join(s for s in _sentences(structured.get("what_they_do") or "") if not sentence_problems(s)))
     out.pop("rating", None)                # no verdict on the stock, so no rating badge
     return out

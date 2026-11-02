@@ -16,8 +16,15 @@ PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {   # model: (input, outpu
 PRICES_AS_OF = "2026-10-12"
 
 
-def estimate_cost_usd(model: str | None, input_tokens: int | None, output_tokens: int | None) -> float | None:
+CACHE_WRITE_MULTIPLIER = 1.25      # a 5-minute cache entry is written at 1.25 times the input price
+CACHE_READ_MULTIPLIER = 0.1        # and read at 0.1 times it (the models in the table above)
+
+
+def estimate_cost_usd(model: str | None, input_tokens: int | None, output_tokens: int | None,
+                      cache_write_tokens: int = 0, cache_read_tokens: int = 0) -> float | None:
+    """`input_tokens` are the uncached input tokens (the API's usage.input_tokens); prompt-cache writes and reads are priced apart."""
     if not model or model not in PRICES_USD_PER_MTOK or input_tokens is None or output_tokens is None:
         return None
     pin, pout = PRICES_USD_PER_MTOK[model]
-    return round((input_tokens * pin + output_tokens * pout) / 1_000_000, 4)
+    cached = (cache_write_tokens or 0) * pin * CACHE_WRITE_MULTIPLIER + (cache_read_tokens or 0) * pin * CACHE_READ_MULTIPLIER
+    return round((input_tokens * pin + output_tokens * pout + cached) / 1_000_000, 4)

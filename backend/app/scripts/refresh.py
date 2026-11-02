@@ -112,6 +112,8 @@ STEPS: list[tuple[str, list[str]]] = [
     # three stocks' research notes end to end with production's key, a different three each night; a failure names this step in the
     # digest (app/scripts/note_smoke, Sam 2026-10-27)
     # a research note for every active ticker, at most 170 a night under the AI cap, then each again after its next report
+    # every company's new 8-Ks read for a material event (services/material_filings): a note is written again after one
+    ("Material filings (8-K)",         ["python", "-m", "app.scripts.scan_material_filings"]),
     ("Research notes (nightly)",       ["python", "-m", "app.scripts.generate_notes"]),
     ("Research note check",            ["python", "-m", "app.scripts.note_smoke", "--rotate=3"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
@@ -123,6 +125,7 @@ STEPS: list[tuple[str, list[str]]] = [
 STEP_TIMEOUT_SECONDS = 600  # 10 minutes default
 
 STEP_TIMEOUTS: dict[str, int] = {
+    "Material filings (8-K)": 2400,           # the first night reads 120 days of 8-Ks for every company; later nights only the new ones
     "Research notes (nightly)": 3600,         # 170 notes, four at a time, about a minute each
     "Refresh profiles (Finnhub)": 300,
     "Growth (XBRL and 8-K releases)": 3600,      # --due; the first night reads every active ticker's facts and releases (about 40 minutes)
@@ -496,6 +499,11 @@ def main(slot: str | None = None) -> int:
         from datetime import date as _date
         for r in cap_reminders(_date.fromisoformat(spend_day()), cap_usd()):
             body += f" | reminder: {r}"
+        from app.services.ai_spend import SPEND_KEY, month_days, month_warnings
+        _today = _date.fromisoformat(spend_day())
+        _month = sum(float(_db_get(f"{SPEND_KEY}:{d}") or 0) for d in month_days(_today))
+        for w in month_warnings(_month, _today):
+            body += f" | WARN: {w}"
         print(f"  {title}: {body}")
         notify_sync(title, body, tags=("sunrise",))
     except Exception as exc:

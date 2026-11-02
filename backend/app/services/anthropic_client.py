@@ -54,22 +54,30 @@ class AnthropicClient:
             await record_failure(method, exc)
             raise
 
-    async def generate_research_note(self, prompt: str) -> dict:
-        """Generate a research note (structured JSON output).
+    async def generate_research_note(self, prompt: str, retry: str | None = None) -> dict:
+        """Generate a research note (structured JSON output). `prompt` is sent as one cached block (5-minute prompt cache), so the
+        retry that names the first draft's broken rules (`retry`, a second block after it) reads the prompt from the cache instead of
+        paying for it again; the text the model reads is the prompt followed by the retry, as before.
 
         Returns:
-            {"content": str, "model_used": str, "input_tokens": int, "output_tokens": int}
+            {"content": str, "model_used": str, "input_tokens": int (uncached), "output_tokens": int,
+             "cache_write_tokens": int, "cache_read_tokens": int}
         """
-        msg = await self._create("generate_research_note", 
+        content = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
+        if retry:
+            content.append({"type": "text", "text": retry})
+        msg = await self._create("generate_research_note",
             model=GENERATION_MODEL,
             max_tokens=2500,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
         )
         return {
             "content":       msg.content[0].text,
             "model_used":    GENERATION_MODEL,
             "input_tokens":  msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
+            "cache_write_tokens": getattr(msg.usage, "cache_creation_input_tokens", 0) or 0,
+            "cache_read_tokens":  getattr(msg.usage, "cache_read_input_tokens", 0) or 0,
         }
 
     async def generate_options_read(self, prompt: str) -> dict:

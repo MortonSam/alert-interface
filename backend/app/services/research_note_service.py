@@ -24,6 +24,7 @@ from app.services.anthropic_client import AnthropicClient
 from app.services.edgar_client import EdgarClient
 from app.services.finnhub_client import FinnhubClient
 from app.services import financials_cache
+from app.services.note_live import NOTE_RULE_VERSION, prompt_block as live_prompt_block
 
 
 # ── Precomputed stats ─────────────────────────────────────────────────────────
@@ -139,18 +140,6 @@ PRECOMPUTED STATISTICS (authoritative, use these exact figures, do not recount o
 
 # ── Prompt builders ───────────────────────────────────────────────────────────
 
-def _format_market_cap(mc: int | None) -> str:
-    if mc is None:
-        return "N/A"
-    if mc >= 1_000_000_000_000:
-        return f"${mc / 1_000_000_000_000:.2f}T"
-    if mc >= 1_000_000_000:
-        return f"${mc / 1_000_000_000:.2f}B"
-    if mc >= 1_000_000:
-        return f"${mc / 1_000_000:.0f}M"
-    return f"${mc:,}"
-
-
 # ── Stats object (Python-attached, exact values) ─────────────────────────────
 
 def _build_stats_object(
@@ -159,7 +148,7 @@ def _build_stats_object(
 ) -> dict:
     """Build the stats sub-object with exact DB values. Never fabricate."""
     stats: dict = {
-        "market_cap": ticker.market_cap,
+        "market_cap": None,             # a market value changes every day: never stored with a note (the Overview states it, dated)
         "eps_estimate": None,
         "eps_actual": None,
         "eps_beat_pct": None,
@@ -257,6 +246,14 @@ async def _fetch_financials(symbol: str) -> dict | None:
     return extracted
 
 
+PRICE_BASED = ("forward_pe", "pe_ttm", "ps_ttm", "peg_ttm", "forward_peg")     # each divides by or into the share price
+
+
+def durable_financials(f: dict | None) -> dict | None:
+    """Pure: the financials a note stores: margins, growth and returns, never a price-based multiple (Sam, 2026-11-02)."""
+    return None if f is None else {k: v for k, v in f.items() if k not in PRICE_BASED}
+
+
 async def merger_context(db: AsyncSession, symbol: str) -> str | None:
     """The merger into this company on file (its exit record), for the note to describe the combined company: VMRK's 10-Q predates
     its merger with AvalonBay, and a note written from it alone described Equity Residential (2026-10-15)."""
@@ -277,11 +274,12 @@ def _build_generation_prompt(
     sections: dict | None,
     reactions: list[HistoricalReaction],
     corporate_events: str | None = None,
+    live_block: str | None = None,
+    material_block: str | None = None,
 ) -> str:
     name       = ticker.name or ticker.symbol
     sector     = ticker.sector or "N/A"
     industry   = ticker.industry or "N/A"
-    market_cap = _format_market_cap(ticker.market_cap)
 
     if filing and sections:
         mda   = (sections.get("mda") or "").strip()
@@ -304,13 +302,14 @@ You are a financial research analyst producing a STRUCTURED research note for {t
 
 COMPANY: {ticker.symbol}, {name}
 SECTOR: {sector} | INDUSTRY: {industry}
-MARKET CAP: {market_cap}
 {corporate_events or ""}
 {filing_block}
-
+{material_block or ""}
 {business}
 
 {comparisons}
+
+{live_block or live_prompt_block(set())}
 
 OUTPUT FORMAT: Return ONLY a valid JSON object with exactly these keys (no markdown fences, no preamble, no text outside the JSON):
 
@@ -337,6 +336,11 @@ RULES:
 - Only state facts about the business that appear in the filing excerpt, ITEM 1 (BUSINESS) or COMPARISON FACTS. A second model checks
   every sentence against those sources, and a sentence it cannot confirm there is removed from the note before anyone reads it.
 - Do NOT invent revenue figures, margin percentages, ARR, RPO, guidance, or valuation multiples not present in the provided context.
+- Never type a figure that changes from day to day: the share price or its change over any period, a P/E or any other valuation
+  multiple, the market value, the move options price, volatility, a 52-week high or low, a dividend yield. Use its LIVE FIGURES
+  placeholder instead, exactly as written there, or leave the figure out; a figure with no placeholder is left out. A sentence with a
+  number placeholder makes no comparison in its own words ("above", "below", "high", "cheap"): the value changes and the words would
+  not. Use the word placeholders for such comparisons. Figures from filings (sales, EPS, margins, segments, guidance) are written out.
 - Do NOT make superlative claims ("strongest", "best ever", "largest") unless the provided context unambiguously supports them.
 - Return ONLY valid JSON. No markdown fences. No preamble. No explanation outside the JSON object.\
 """
@@ -439,6 +443,8 @@ def _build_verification_prompt(
     sections: dict | None,
     reactions: list[HistoricalReaction],
     ticker: "Ticker",
+    live: str = "(none)",
+    material_block: str | None = None,
 ) -> str:
     if filing and sections:
         mda   = (sections.get("mda") or "").strip()
@@ -461,8 +467,7 @@ def _build_verification_prompt(
         f"SYMBOL: {ticker.symbol}\n"
         f"NAME: {ticker.name or ticker.symbol}\n"
         f"SECTOR: {ticker.sector or 'N/A'}\n"
-        f"INDUSTRY: {ticker.industry or 'N/A'}\n"
-        f"MARKET CAP: {_format_market_cap(ticker.market_cap)}"
+        f"INDUSTRY: {ticker.industry or 'N/A'}"
     )
 
     comparisons = _COMPARISONS.get(ticker.symbol) or "COMPARISON FACTS: (none on file)"
@@ -486,6 +491,10 @@ year-earlier, five-year-average and sector-peer comparison):
 EVIDENCE SOURCE 5 (the company's own description of its business, Item 1 of its latest 10-K):
 {_business_block(ticker.symbol)}
 
+EVIDENCE SOURCE 6 (LIVE FIGURES: today's stored values with their dates; the note shows these figures filled in where it uses them,
+ground truth for the price, its changes, the market value, valuation multiples, volatility and the options-implied move):
+{live}
+{material_block or ""}
 NOTE TO VERIFY:
 {note_content}
 
@@ -497,7 +506,7 @@ CLASSIFICATION RULES:
 STRICT RULES:
 - Bias toward "unsupported" when in doubt. Do NOT use outside knowledge to mark something "supported".
 - The precomputed stats are the sole ground truth for beat/miss/meet counts, averages, and all move percentages.
-- Ticker metadata (symbol, name, sector, industry, market cap) is ground truth for those fields.
+- Ticker metadata (symbol, name, sector, industry) is ground truth for those fields; the live figures for theirs.
 - Check every specific number, statistic, date, product name, and factual assertion.
 - Skip purely subjective or stylistic phrases that contain no verifiable facts.
 - Decide each verdict before you write it. "reason" is ONE sentence stating the basis of the settled verdict: never your
@@ -566,9 +575,15 @@ async def _run_verification(
     sections: dict | None,
     reactions: list[HistoricalReaction],
     ticker: "Ticker",
+    values: dict | None = None,
+    material_block: str | None = None,
 ) -> tuple[dict, str, int, int]:
-    """Call Opus to verify the note. Returns (verification_dict, model_used, input_tokens, output_tokens)."""
-    prompt = _build_verification_prompt(_checked_text(note_content), filing, sections, reactions, ticker)
+    """Call Opus to verify the note. Returns (verification_dict, model_used, input_tokens, output_tokens). The note is checked with
+    its live-figure slots filled from `values` (services/note_live), and the claims are stored with the slots put back."""
+    from app.services.note_live import fill_markdown, live_evidence, reslot
+    values = values or {}
+    filled = fill_markdown(note_content, values) or ""
+    prompt = _build_verification_prompt(_checked_text(filled), filing, sections, reactions, ticker, live_evidence(values), material_block)
     client = AnthropicClient(timeout=MODEL_TIMEOUT_SECONDS, max_retries=2)
     raw = await client.verify_research_note(prompt)
 
@@ -580,7 +595,7 @@ async def _run_verification(
     for i, c in enumerate(claims):
         if not self_corrected(c["reason"], c["verdict"]):
             continue
-        again = await _reverify_claim(client, c["claim"], filing, sections, reactions, ticker)
+        again = await _reverify_claim(client, c["claim"], filing, sections, reactions, ticker, live_evidence(values), material_block)
         in_tokens += again["input_tokens"]
         out_tokens += again["output_tokens"]
         if again["claim"] is not None and not self_corrected(again["claim"]["reason"], again["claim"]["verdict"]):
@@ -590,6 +605,7 @@ async def _run_verification(
     from app.services.note_claims import NOTE_CHECK_VERSION
     verification = {"claims": claims, "summary": summary_of(claims),      # the summary is counted from the verdicts, never the model's
                     "version": NOTE_CHECK_VERSION}
+    verification = reslot(verification, note_content, values)
 
     print(
         f"Verification complete: "
@@ -610,11 +626,11 @@ async def _run_verification(
     return verification, model_used, in_tokens, out_tokens
 
 
-async def _reverify_claim(client, claim: str, filing, sections, reactions, ticker) -> dict:
+async def _reverify_claim(client, claim: str, filing, sections, reactions, ticker, live: str = "(none)", material_block: str | None = None) -> dict:
     """One claim verified on its own against the same sources (the "note" is the claim). Returns {claim: {claim, verdict, reason} | None,
     input_tokens, output_tokens}."""
     from app.services.verification_verdicts import parse_claims
-    raw = await client.verify_research_note(_build_verification_prompt(claim, filing, sections, reactions, ticker))
+    raw = await client.verify_research_note(_build_verification_prompt(claim, filing, sections, reactions, ticker, live, material_block))
     try:
         rows = parse_claims(raw["content"])
     except ValueError:
@@ -700,20 +716,22 @@ async def _generate_structured(prompt: str, symbol: str) -> tuple[dict, dict]:
     client = AnthropicClient(timeout=MODEL_TIMEOUT_SECONDS, max_retries=2)
     gen = await client.generate_research_note(prompt)
     structured = _parse_generation_response(gen["content"])
-    used = {"model_used": gen["model_used"], "input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"], "attempts": 1}
+    used = {"model_used": gen["model_used"], "input_tokens": gen["input_tokens"], "output_tokens": gen["output_tokens"], "attempts": 1,
+            "cache_write_tokens": gen.get("cache_write_tokens", 0), "cache_read_tokens": gen.get("cache_read_tokens", 0)}
     problems = note_problems(structured)
     if problems:
-        retry = prompt + "\n\nYOUR PREVIOUS DRAFT BROKE THESE RULES; write the note again without them:\n" + "\n".join(f"- {p}" for p in problems)
-        again = await client.generate_research_note(retry)
-        used["input_tokens"] += again["input_tokens"]
-        used["output_tokens"] += again["output_tokens"]
+        retry = "\n\nYOUR PREVIOUS DRAFT BROKE THESE RULES; write the note again without them:\n" + "\n".join(f"- {p}" for p in problems)
+        again = await client.generate_research_note(prompt, retry)          # the prompt itself is read from the cache
+        for k in ("input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens"):
+            used[k] += again.get(k, 0)
         used["attempts"] = 2
         try:
             structured = _parse_generation_response(again["content"])
         except ValueError:
             pass                                            # the first draft, enforced below
     used["problems_first_draft"] = problems
-    print(f"Research note generated for {symbol}: {used['input_tokens']} in / {used['output_tokens']} out tokens, "
+    print(f"Research note generated for {symbol}: {used['input_tokens']} in / {used['output_tokens']} out tokens "
+          f"(cache: {used['cache_write_tokens']} written, {used['cache_read_tokens']} read), "
           f"{used['attempts']} attempt(s), {len(problems)} rule(s) broken in the first draft", flush=True)
     return enforce(structured), used
 
@@ -743,10 +761,16 @@ async def run_research_note_background(
         try:
             ticker = await _resolve_ticker(db, ticker_id, symbol)
             filing, sections, reactions = await _fetch_context(db, ticker)
+            from app.services.material_filings import prompt_block as material_prompt_block
+            from app.services.note_live import keep_available, values_for
+            values = await values_for(db, ticker.symbol)           # today's figures for the slots: the writer gets their names only
+            material = await material_prompt_block(db, ticker.symbol, (filing or {}).get("filing_date"))
 
             # ── Phase 1: Sonnet generation (structured JSON) ─────────────
-            prompt = _build_generation_prompt(ticker, filing, sections, reactions, await merger_context(db, ticker.symbol))
+            prompt = _build_generation_prompt(ticker, filing, sections, reactions, await merger_context(db, ticker.symbol),
+                                              live_prompt_block(set(values)), material)
             structured, gen = await _generate_structured(prompt, ticker.symbol)
+            structured = keep_available(structured, values)
 
             # Attach Python-computed stats (exact DB values, never model-generated)
             stats_obj = _build_stats_object(ticker, reactions)
@@ -754,9 +778,10 @@ async def run_research_note_background(
             from app.services.note_quarters import current_inputs
             structured["inputs"] = await current_inputs(db, ticker.id, (filing or {}).get("filing_date"))     # the quarter each input names
 
-            # Attach Finnhub financial metrics (best-effort, never model-generated)
+            # Attach Finnhub financial metrics (best-effort, never model-generated); a price-based multiple changes every day, so none
+            # is stored with the note (Sam, 2026-11-02): the page's own P/E comes from the dated pe_snapshots
             financials_obj = await _fetch_financials(symbol)
-            structured["financials"] = financials_obj
+            structured["financials"] = durable_financials(financials_obj)
 
             # Serialize to readable text for content column + verifier
             content_text = _serialize_structured_note(structured, ticker)
@@ -771,7 +796,8 @@ async def run_research_note_background(
                 })
 
             now = datetime.now(timezone.utc)
-            gen_cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"])
+            gen_cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"],
+                                         gen.get("cache_write_tokens", 0), gen.get("cache_read_tokens", 0))
             await db.execute(
                 update(ResearchNote)
                 .where(ResearchNote.ticker_id == ticker.id)
@@ -784,7 +810,7 @@ async def run_research_note_background(
                     estimated_cost_usd = gen_cost,
                     source_filings     = source_filings,
                     status             = "verifying",
-                    data_version       = 3,
+                    data_version       = NOTE_RULE_VERSION,
                     updated_at         = now,
                 )
             )
@@ -808,7 +834,7 @@ async def run_research_note_background(
         # ── Phase 2: Opus verification (best-effort) ─────────────────
         try:
             verification, verification_model, ver_in, ver_out = await _run_verification(
-                content_text, filing, sections, reactions, ticker
+                content_text, filing, sections, reactions, ticker, values, material
             )
             now = datetime.now(timezone.utc)
             ver_cost = estimate_cost_usd(verification_model, ver_in, ver_out)
@@ -911,9 +937,12 @@ async def verify_existing_note(
         raise HTTPException(status_code=404, detail="No research note found. Generate one first.")
 
     filing, sections, reactions = await _fetch_context(db, ticker)
+    from app.services.material_filings import prompt_block as material_prompt_block
+    from app.services.note_live import values_for
     try:
         verification, verification_model, ver_in, ver_out = await _run_verification(
-            note.content, filing, sections, reactions, ticker
+            note.content, filing, sections, reactions, ticker, await values_for(db, ticker.symbol),
+            await material_prompt_block(db, ticker.symbol, (filing or {}).get("filing_date"), note.generated_at),
         )
     except Exception as exc:
         from app.services import user_errors
@@ -946,8 +975,12 @@ async def recheck_note(symbol: str) -> str:
         if note is None or not is_verified(note):
             return "failed: no checked note"
         filing, sections, reactions = await _fetch_context(db, ticker)
+        from app.services.material_filings import prompt_block as material_prompt_block
+        from app.services.note_live import values_for
         try:
-            verification, model, ver_in, ver_out = await _run_verification(note.content, filing, sections, reactions, ticker)
+            verification, model, ver_in, ver_out = await _run_verification(
+                note.content, filing, sections, reactions, ticker, await values_for(db, ticker.symbol),
+                await material_prompt_block(db, ticker.symbol, (filing or {}).get("filing_date"), note.generated_at))
         except Exception as exc:
             from app.services import user_errors
             await user_errors.record("research_verify", exc, symbol)

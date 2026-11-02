@@ -1,12 +1,12 @@
 "use client";
 
-import { cn, fmtMarketCap } from "@/lib/utils";
-import type { StructuredNote, StructuredNoteItem, StructuredNoteFinancials } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import type { BriefingInput, StructuredNote, StructuredNoteItem, StructuredNoteFinancials } from "@/lib/api";
 import Tip from "@/components/Tip";
+import LiveText from "@/components/LiveText";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const fmtCap = (n: number) => fmtMarketCap(n);
 
 function fmtRevenue(n: number): string {
   if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
@@ -25,11 +25,6 @@ function isNegative(s: string): boolean {
   return !isNaN(n) && n < 0;
 }
 
-function fmtMultiple(v: number | null): string | null {
-  if (v == null) return null;
-  return `${v.toFixed(1)}\u00d7`;
-}
-
 function fmtPct(v: number | null): string | null {
   if (v == null) return null;
   return `${v.toFixed(1)}%`;
@@ -40,10 +35,6 @@ function fmtPctSigned(v: number | null): string | null {
   return `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 }
 
-function fmtPeg(v: number | null): string | null {
-  if (v == null) return null;
-  return v.toFixed(1);
-}
 
 // ── Color configs ────────────────────────────────────────────────────────────
 
@@ -96,16 +87,6 @@ const sectionColors = {
 // ── Metric tooltips ──────────────────────────────────────────────────────────
 
 const METRIC_TIPS: Record<string, string> = {
-  forward_pe:
-    "Forward P/E \u2014 the stock price divided by next year's expected earnings. Lower means you're paying less per dollar of future profit.",
-  pe_ttm:
-    "Trailing P/E \u2014 stock price divided by the last 12 months of actual earnings. Useful as a reality check against the forward estimate.",
-  ps_ttm:
-    "Price-to-Sales \u2014 market cap divided by trailing 12-month revenue. Helpful for companies that aren't yet profitable.",
-  peg_ttm:
-    "PEG Ratio \u2014 the P/E divided by the earnings growth rate. A PEG near 1 suggests the stock is fairly priced for its growth.",
-  forward_peg:
-    "Forward PEG \u2014 same idea as PEG but uses forward earnings estimates. Below 1 may signal undervaluation relative to expected growth.",
   gross_margin:
     "Gross Margin \u2014 revenue minus cost of goods sold, as a percentage. Shows how much the company keeps before operating expenses.",
   operating_margin:
@@ -247,9 +228,11 @@ function SectionBlock({
 function ItemList({
   items,
   color,
+  inputs,
 }: {
   items: StructuredNoteItem[];
   color: keyof typeof sectionColors;
+  inputs: BriefingInput[];
 }) {
   const c = sectionColors[color];
   return (
@@ -260,10 +243,10 @@ function ItemList({
           className={cn("border-l-2 pl-3.5 py-1", c.accent, c.bg, "rounded-r-md")}
         >
           <p className="text-[13px] font-semibold text-foreground leading-snug">
-            {item.lead}
+            <LiveText text={item.lead} inputs={inputs} />
           </p>
           <p className="text-[13px] text-foreground/80 leading-[1.65] mt-0.5">
-            {item.detail}
+            <LiveText text={item.detail} inputs={inputs} />
           </p>
         </div>
       ))}
@@ -272,61 +255,6 @@ function ItemList({
 }
 
 // ── Financials blocks (Variant 3: editorial big-number) ─────────────────────
-
-function ValuationBlock({ f }: { f: StructuredNoteFinancials }) {
-  const cells: React.ReactNode[] = [];
-
-  if (f.forward_pe != null) {
-    cells.push(
-      <BigMetric
-        key="fpe"
-        label="Fwd P/E"
-        tip={METRIC_TIPS.forward_pe}
-        value={fmtMultiple(f.forward_pe)}
-        sub={f.pe_ttm != null ? `TTM ${fmtMultiple(f.pe_ttm)}` : undefined}
-        isFirst={cells.length === 0}
-      />,
-    );
-  }
-  if (f.ps_ttm != null) {
-    cells.push(
-      <BigMetric
-        key="ps"
-        label="P/S"
-        tip={METRIC_TIPS.ps_ttm}
-        value={fmtMultiple(f.ps_ttm)}
-        sub="trailing"
-        isFirst={cells.length === 0}
-      />,
-    );
-  }
-  if (f.peg_ttm != null) {
-    cells.push(
-      <BigMetric
-        key="peg"
-        label="PEG"
-        tip={METRIC_TIPS.peg_ttm}
-        value={fmtPeg(f.peg_ttm)}
-        sub={f.forward_peg != null ? `Fwd ${fmtPeg(f.forward_peg)}` : "trailing"}
-        isFirst={cells.length === 0}
-      />,
-    );
-  }
-
-  if (cells.length === 0) return null;
-
-  return (
-    <div className="rounded-[13px] border border-border px-5 py-4">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="h-2 w-2 rounded-full bg-cool" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-cool">
-          Valuation
-        </span>
-      </div>
-      <MetricRow>{cells}</MetricRow>
-    </div>
-  );
-}
 
 function FinancialsQualityBlock({ f }: { f: StructuredNoteFinancials }) {
   // Margins row
@@ -450,7 +378,7 @@ interface StructuredNoteViewProps {
   companyName?: string | null;
   sector?: string | null;
   industry?: string | null;
-  valuationShown?: boolean;      // the API's valuation_shown: the note's P/E and multiples follow the site's P/E hold (PE_ENABLED)
+  liveInputs?: BriefingInput[];  // the API's live_inputs: the receipts behind the note's live figures (backend services/note_live)
 }
 
 export default function StructuredNoteView({
@@ -459,19 +387,13 @@ export default function StructuredNoteView({
   companyName,
   sector,
   industry,
-  valuationShown = false,
+  liveInputs = [],
 }: StructuredNoteViewProps) {
   const { stats } = note;
   const financials = note.financials ?? null;
 
   // ── Stat cells (only render non-null) ────────────────────────────────────
   const statCells: React.ReactNode[] = [];
-
-  if (stats.market_cap != null) {
-    statCells.push(
-      <StatCell key="mc" label="Market Cap" value={fmtCap(stats.market_cap)} />,
-    );
-  }
 
   // The strip's EPS is the SEC diluted figure for the note's quarter (backend services/note_valuation.with_sec_eps), the figure its
   // text uses; no vendor actual, estimate, surprise, beat count or past move is shown (Block 2, 2026-10-20)
@@ -495,9 +417,9 @@ export default function StructuredNoteView({
             )}
           </div>
         </div>
-        {(sector || industry || stats.market_cap != null) && (
+        {(sector || industry) && (
           <p className="font-mono text-xs text-muted-foreground/70 mt-2">
-            {[sector, industry, stats.market_cap != null ? fmtCap(stats.market_cap) : null]
+            {[sector, industry]
               .filter(Boolean)
               .join(" \u00b7 ")}
           </p>
@@ -516,12 +438,11 @@ export default function StructuredNoteView({
         {note.what_they_do && (
           <SectionBlock color="about" title="What They Do">
             <p className="text-[13px] text-foreground/85 leading-[1.65]">
-              {note.what_they_do}
+              <LiveText text={note.what_they_do} inputs={liveInputs} />
             </p>
           </SectionBlock>
         )}
 
-        {financials && valuationShown && <ValuationBlock f={financials} />}
         {financials && <FinancialsQualityBlock f={financials} />}
 
         {note.highlights.length > 0 && (
@@ -530,19 +451,19 @@ export default function StructuredNoteView({
             title="Recent Highlights"
             count={note.highlights.length}
           >
-            <ItemList items={note.highlights} color="highlights" />
+            <ItemList items={note.highlights} color="highlights" inputs={liveInputs} />
           </SectionBlock>
         )}
 
         {note.watch.length > 0 && (
           <SectionBlock color="watch" title="What to Watch" count={note.watch.length}>
-            <ItemList items={note.watch} color="watch" />
+            <ItemList items={note.watch} color="watch" inputs={liveInputs} />
           </SectionBlock>
         )}
 
         {note.risks.length > 0 && (
           <SectionBlock color="risks" title="Key Risks" count={note.risks.length}>
-            <ItemList items={note.risks} color="risks" />
+            <ItemList items={note.risks} color="risks" inputs={liveInputs} />
           </SectionBlock>
         )}
       </div>
@@ -554,7 +475,7 @@ export default function StructuredNoteView({
             Bottom Line
           </p>
           <p className="text-[13px] text-foreground/85 leading-[1.65]">
-            {note.bottom_line}
+            <LiveText text={note.bottom_line} inputs={liveInputs} />
           </p>
         </div>
       )}

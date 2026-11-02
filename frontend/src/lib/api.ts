@@ -337,10 +337,11 @@ export interface LatestVerifiedNote {
   stats: StructuredNoteStats | null;
   highlights: StructuredNoteItem[];
   verification_summary: { supported: number; unsupported: number; contradicted: number } | null;
+  live_inputs?: BriefingInput[];   // the receipts behind the live figures in the highlights shown (backend services/note_live)
 }
 
 export interface StructuredNoteStats {
-  market_cap: number | null;
+  market_cap: number | null;      // always null: a market value is never stored with a note (the Overview states it, dated)
   eps_estimate: number | null;
   eps_actual: number | null;
   eps_beat_pct: number | null;
@@ -359,12 +360,9 @@ export interface StructuredNoteStats {
   unavailable_reason?: string | null;   // why beat_count/total_quarters are null (price history excluded)
 }
 
+// margins, growth and returns only: a price-based multiple changes every day and is never stored or served with a note
+// (backend research_note_service.durable_financials, Sam 2026-11-02)
 export interface StructuredNoteFinancials {
-  forward_pe: number | null;
-  pe_ttm: number | null;
-  ps_ttm: number | null;
-  peg_ttm: number | null;
-  forward_peg: number | null;
   gross_margin_ttm: number | null;
   gross_margin_5y: number | null;
   operating_margin_ttm: number | null;
@@ -424,6 +422,8 @@ export interface ResearchNote {
   created_at: string;
   updated_at: string;
   report_since?: string | null;   // the company reported again on this date after the note was written
+  live_inputs?: BriefingInput[];  // the receipts behind the note's live figures, filled from today's stored values (services/note_live)
+  pending_filing?: { form: string; items: string | null; why: string[] | null; filed_on: string | null; url: string | null } | null;   // a material filing newer than the note
 }
 
 export interface SparklinePoint {

@@ -24,7 +24,8 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     // the EPS is the SEC diluted figure the API sets as served (eps_sec); no vendor actual, estimate, beat count or past move (Block 2)
     const facts = noteFacts({ market_cap: 4.3e12, eps_actual: 2.01, eps_estimate: 1.94, eps_beat_pct: 3.6, beat_count: 18, total_quarters: 20,
       revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "+3.56%", latest_outcome: "beat", latest_quarter_date: null, eps_sec: 1.98 });
-    expect(facts.map((f) => [f.label, f.value, f.sub])).toEqual([["Market cap", "$4.30T", undefined], ["EPS", "$1.98", undefined]]);
+    // no market value either, even from an older stored note: it changes every day (Sam, 2026-11-02; backend services/note_live)
+    expect(facts.map((f) => [f.label, f.value, f.sub])).toEqual([["EPS", "$1.98", undefined]]);
     expect(noteFacts({ market_cap: null, eps_actual: null, eps_estimate: null, eps_beat_pct: null, beat_count: null, total_quarters: null,
       revenue_estimate: null, revenue_actual: null, revenue_beat_pct: null, latest_move_1d: "-2.10%", latest_outcome: null, latest_quarter_date: null }))
       .toEqual([]);

@@ -123,14 +123,18 @@ async def test_a_new_note_waits_until_the_strip_has_the_new_quarter(monkeypatch)
             await _clean(s, sym)
 
 
-def test_the_nightly_budget_under_the_35_dollar_cap_and_the_nov_15_reminder():
+def test_the_nightly_budget_under_the_15_dollar_cap_and_the_month_warnings():
     from app.services import ai_spend as A
-    assert A.notes_night_budget(35.0, walkthroughs_live=False) == 30.0          # until the walkthrough nightly is live
-    assert A.notes_night_budget(35.0, walkthroughs_live=True) == 16.0           # then notes 16, walkthroughs 14, visitors at least 5
-    assert A.WALKTHROUGHS_NIGHT_USD == 14.0 and A.VISITOR_RESERVE_USD == 5.0
-    assert A.notes_night_budget(20.0, walkthroughs_live=False) == 15.0          # back at $20: visitors still keep 5
-    assert A.notes_night_budget(20.0, walkthroughs_live=True) == 1.0
-    assert A.cap_reminders(date(2026, 11, 14), 35.0) == []
-    assert A.cap_reminders(date(2026, 11, 15), 35.0) == ["set AI_DAILY_SPEND_CAP_USD back to $20 on Railway (raised to $35 until Nov 15, 2026)"]
-    assert A.cap_reminders(date(2026, 11, 20), 20.0) == []                       # clears itself once the cap is back
+    assert A.notes_night_budget(15.0, walkthroughs_live=False) == 6.0           # notes at most $6 a night
+    assert A.notes_night_budget(15.0, walkthroughs_live=True) == 6.0            # walkthroughs $5 beside them, visitors keep $4
+    assert A.WALKTHROUGHS_NIGHT_USD == 5.0 and A.VISITOR_RESERVE_USD == 4.0
+    assert A.notes_night_budget(8.0, walkthroughs_live=False) == 4.0            # a lower cap: visitors still keep 4
+    assert A.notes_night_budget(8.0, walkthroughs_live=True) == 0.0
+    assert A.cap_reminders(date(2026, 11, 2), 35.0) == []
+    assert A.cap_reminders(date(2026, 11, 3), 35.0) == ["set AI_DAILY_SPEND_CAP_USD to $15 on Railway (Sam, 2026-11-02)"]
+    assert A.cap_reminders(date(2026, 11, 4), 15.0) == []                       # clears itself once the cap is $15
+    assert A.month_days(date(2026, 11, 3)) == ["2026-11-01", "2026-11-02", "2026-11-03"]
+    assert A.month_warnings(149.99, date(2026, 11, 20)) == []
+    assert A.month_warnings(150.0, date(2026, 11, 20)) == ["AI spend in November is $150.00, past the $150 line"]
+    assert A.month_warnings(212.5, date(2026, 11, 28)) == ["AI spend in November is $212.50, past the $200 line"]
     assert not A.walkthroughs_live()                                            # main has no walkthrough step yet

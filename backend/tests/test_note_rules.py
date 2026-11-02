@@ -73,8 +73,8 @@ class FakeClient:
     """The model's drafts in order; records each prompt."""
     def __init__(self, *drafts):
         self.drafts, self.prompts = list(drafts), []
-    async def generate_research_note(self, prompt):
-        self.prompts.append(prompt)
+    async def generate_research_note(self, prompt, retry=None):
+        self.prompts.append(prompt + (retry or ""))            # the retry is a second block after the cached prompt
         return {"content": json.dumps(self.drafts.pop(0)), "model_used": "claude-sonnet-4-6", "input_tokens": 100, "output_tokens": 50}
 
 

@@ -1900,6 +1900,39 @@ async def check_note_eps_agrees(session) -> CheckResult:
     return CheckResult("note_eps_agrees", PASS, f"{compared} complete notes: strip EPS and text agree")
 
 
+async def check_note_live_figures(session) -> CheckResult:
+    """ERROR when a served research note types a fast-changing figure into its text (a price or its change over any period, a
+    valuation multiple, a market value, an implied move, volatility, a 52-week figure or a dividend yield), uses a live-figure slot
+    that does not exist, or compares a slot in its own words (services/note_live, Sam 2026-11-02: no fast-changing number is ever
+    frozen into a note). PASS names how many served notes were written before the rule (the nightly writes them again, largest first)."""
+    from app.config import settings
+    from app.models.research_note import ResearchNote
+    from app.models.ticker import Ticker
+    from app.services.note_claims import served as confirmed_only, units
+    from app.services.note_live import NOTE_RULE_VERSION, sentence_problems
+    from app.services.note_quarters import withheld_now
+    from app.services.note_valuation import served
+    from sqlalchemy import select as _select
+    notes = (await session.execute(_select(ResearchNote, Ticker.symbol).join(Ticker, Ticker.id == ResearchNote.ticker_id)
+                                   .where(ResearchNote.status == "complete", Ticker.is_active.is_(True)))).all()
+    bad, checked, older = [], 0, 0
+    for n, sym in notes:
+        if await withheld_now(session, n):
+            continue                                       # a note no visitor sees is not a served note
+        sc, ver, content = confirmed_only(n.structured_content, n.verification, n.content)
+        sc, _v, content = served(sc, ver, content, bool(settings.pe_enabled))
+        checked += 1
+        older += int((n.data_version or 0) < NOTE_RULE_VERSION)
+        for u in units(sc, content):
+            why = sentence_problems(u["text"])
+            if why:
+                bad.append(f"{sym}: {why[0].split(':')[0]}: {u['text'][:100]!r}")
+    if bad:
+        return CheckResult("note_live_figures", ERROR, f"{len(bad)} served note sentence(s) freeze a fast-changing figure or misuse a live slot", bad[:20])
+    return CheckResult("note_live_figures", PASS, f"{checked} served notes: no fast-changing figure typed into the text; "
+                                                  f"{older} written before the live-figure rule, queued to be written again")
+
+
 GROWTH_COVERAGE_MIN = 0.60       # share of active tickers with an agreed revenue growth quarter, below which validate warns
 GROWTH_STALE_DAYS = 10           # a report this many days old should have figures computed since (the nightly runs compute_growth --due)
 GROWTH_DISAGREE_MAX = 0.25       # share of revenue readings that disagree, above which validate warns
@@ -4059,6 +4092,7 @@ CHECKS = [
     check_note_served_clean,
     check_note_confirmed_only,
     check_note_eps_agrees,
+    check_note_live_figures,
     check_growth_coverage,
     check_growth_fresh,
     check_growth_disagreements,

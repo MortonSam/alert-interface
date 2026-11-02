@@ -27,13 +27,13 @@ def cap_usd() -> float:
     return float(settings.ai_daily_spend_cap_usd)
 
 
-# The nightly's share of the cap (Sam, 2026-10-29, with the cap raised to $35 until Nov 15): until the walkthrough nightly is live,
-# research notes may use up to NOTES_NIGHT_USD; once walkthroughs run, notes get at most NOTES_WITH_WALKTHROUGHS_USD and the
-# walkthroughs at most WALKTHROUGHS_NIGHT_USD; visitors always keep at least VISITOR_RESERVE_USD of the day's cap.
-NOTES_NIGHT_USD = 30.0
-NOTES_WITH_WALKTHROUGHS_USD = 16.0
-WALKTHROUGHS_NIGHT_USD = 14.0
-VISITOR_RESERVE_USD = 5.0
+# The nightly's share of the cap (Sam, 2026-11-02, with the cap at $15): research notes at most NOTES_NIGHT_USD a night, the
+# walkthroughs at most WALKTHROUGHS_NIGHT_USD until every stock has one, and visitors always keep at least VISITOR_RESERVE_USD of
+# the day's cap. (Until 2026-11-02: a $35 cap, notes $30, or $16 with walkthroughs at $14, visitors $5.)
+NOTES_NIGHT_USD = 6.0
+NOTES_WITH_WALKTHROUGHS_USD = 6.0
+WALKTHROUGHS_NIGHT_USD = 5.0
+VISITOR_RESERVE_USD = 4.0
 WALKTHROUGH_STEP = "Ivy walkthroughs"
 
 
@@ -51,7 +51,23 @@ def walkthroughs_live() -> bool:
 
 
 # A dated reminder in the morning digest: from its day, while the cap is still above the value it names (Sam, 2026-10-29).
-CAP_REMINDERS = ((date(2026, 11, 15), 20.0, "set AI_DAILY_SPEND_CAP_USD back to $20 on Railway (raised to $35 until Nov 15, 2026)"),)
+CAP_REMINDERS = ((date(2026, 11, 3), 15.0, "set AI_DAILY_SPEND_CAP_USD to $15 on Railway (Sam, 2026-11-02)"),)
+
+# The month's spend named in the digest once it passes each line (Sam, 2026-11-02): the sum of the month's New York days so far.
+MONTH_WARNINGS_USD = (150.0, 200.0)
+
+
+def month_days(today: date) -> list[str]:
+    """Pure: the New York days of today's month up to today, as the spend keys name them."""
+    return [today.replace(day=d).isoformat() for d in range(1, today.day + 1)]
+
+
+def month_warnings(spent: float, today: date) -> list[str]:
+    """Pure: the digest's warning for the highest line the month's AI spend has passed, or nothing."""
+    passed = [w for w in MONTH_WARNINGS_USD if spent >= w]
+    if not passed:
+        return []
+    return [f"AI spend in {today.strftime('%B')} is ${spent:.2f}, past the ${max(passed):.0f} line"]
 
 
 def cap_reminders(today: date, cap: float) -> list[str]:
