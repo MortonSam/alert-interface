@@ -25,7 +25,8 @@ import re
 from app.services.note_claims import sentences, words
 
 LIVE = re.compile(r"\{live:([a-z0-9_]+)\}")
-NOTE_RULE_VERSION = 4           # 4 (2026-11-02): fast-changing figures only as slots; every note written before it is written again
+NOTE_RULE_VERSION = 4           # 4 (2026-11-02): fast-changing figures only as slots; stored with each note written since. A note written
+                                # before it is not written again for the rule alone (Sam, 2026-11-02): only after a report or a material 8-K
 
 # slot id: (the receipt's name in the fact pack, what it means, as the writer is told)
 SLOTS: dict[str, tuple[str, str]] = {

@@ -102,12 +102,10 @@ async def test_pending_for_and_prompt_block_read_the_stored_list(monkeypatch):
     assert await M.prompt_block(None, "ZZMF", "2026-10-30", before=datetime(2026, 11, 1, tzinfo=timezone.utc)) is None   # after the note
 
 
-def test_the_queue_writes_a_note_after_a_material_filing_and_then_every_note_under_the_old_rule_largest_first():
+def test_the_queue_writes_a_note_after_a_material_filing_and_never_for_a_rule_change_alone():
     from app.scripts.generate_notes import due_kind, queue
     assert due_kind("complete", True, 2) == (3, "write")                     # a report or a material 8-K since the note
-    assert due_kind("complete", False, 2, old_rule=True) == (4, "write")     # written before the live-figure rule
-    assert due_kind("complete", False, 2) is None
-    rows = [("SMALL", "complete", False, 2, 1e9, False, False, True), ("BIG", "complete", False, 2, 5e12, False, False, True),
-            ("FILED", "complete", True, 2, 2e9, False, False, False), ("NEW", None, False, None, 1e10, False, False, False),
-            ("DONE", "complete", False, 2, 9e12, False, False, False)]
-    assert queue(rows, 10) == ["NEW", "FILED", "BIG", "SMALL"]
+    assert due_kind("complete", False, 2) is None                           # current: never rewritten for a rule change alone
+    rows = [("SMALL", "complete", True, 2, 1e9, False, False), ("BIG", "complete", True, 2, 5e12, False, False),
+            ("NEW", None, False, None, 1e10, False, False), ("DONE", "complete", False, 2, 9e12, False, False)]
+    assert queue(rows, 10) == ["NEW", "BIG", "SMALL"]

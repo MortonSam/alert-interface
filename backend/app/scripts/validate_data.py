@@ -1904,7 +1904,8 @@ async def check_note_live_figures(session) -> CheckResult:
     """ERROR when a served research note types a fast-changing figure into its text (a price or its change over any period, a
     valuation multiple, a market value, an implied move, volatility, a 52-week figure or a dividend yield), uses a live-figure slot
     that does not exist, or compares a slot in its own words (services/note_live, Sam 2026-11-02: no fast-changing number is ever
-    frozen into a note). PASS names how many served notes were written before the rule (the nightly writes them again, largest first)."""
+    frozen into a note). PASS names how many served notes were written before the rule (each is written again only after its company's
+    next report or material 8-K; this check holds them to the rule meanwhile)."""
     from app.config import settings
     from app.models.research_note import ResearchNote
     from app.models.ticker import Ticker
@@ -1930,7 +1931,7 @@ async def check_note_live_figures(session) -> CheckResult:
     if bad:
         return CheckResult("note_live_figures", ERROR, f"{len(bad)} served note sentence(s) freeze a fast-changing figure or misuse a live slot", bad[:20])
     return CheckResult("note_live_figures", PASS, f"{checked} served notes: no fast-changing figure typed into the text; "
-                                                  f"{older} written before the live-figure rule, queued to be written again")
+                                                  f"{older} written before the live-figure rule")
 
 
 GROWTH_COVERAGE_MIN = 0.60       # share of active tickers with an agreed revenue growth quarter, below which validate warns

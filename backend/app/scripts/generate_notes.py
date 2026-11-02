@@ -6,8 +6,8 @@ Each night writes at most MAX_PER_NIGHT notes with production's key, through the
 check fails is never served). The order: tickers with no note, then tickers whose last generation failed, then notes checked before
 the current check (note_claims.NOTE_CHECK_VERSION: checked again against Item 1 of the 10-K, and written again once when they would
 lose more than MAX_LOST sentences, research_note_service.recheck_note), then notes the company has reported since
-(note_currency.report_since) or filed a material 8-K since (services/material_filings), then notes written before the current
-rule (note_live.NOTE_RULE_VERSION: fast-changing figures only as live slots, Sam 2026-11-02), largest companies first. The site-wide AI cap (services/ai_spend) stays in force: the step stops before today's
+(note_currency.report_since) or filed a material 8-K since (services/material_filings). A note is never written again for a rule
+change alone (Sam, 2026-11-02: the live-figure rule did not rewrite the 497 notes; none typed a live figure). The site-wide AI cap (services/ai_spend) stays in force: the step stops before today's
 notes' spend tonight reaches services/ai_spend.notes_night_budget (their share of the cap; visitors keep VISITOR_RESERVE_USD). CONCURRENCY notes run at a time.
 
     python -m app.scripts.generate_notes                  # the nightly step
@@ -31,8 +31,7 @@ CONCURRENCY = 4
 NOTE_SECONDS = 840             # one note's generation and verification, and its second writing, each bounded by MODEL_TIMEOUT_SECONDS
 
 
-def due_kind(status: str | None, stale: bool, check_version: int | None = None, hidden: bool = False, disagree: bool = False,
-             old_rule: bool = False) -> tuple[int, str] | None:
+def due_kind(status: str | None, stale: bool, check_version: int | None = None, hidden: bool = False, disagree: bool = False) -> tuple[int, str] | None:
     """Pure: (rank, "write" or "recheck") for one note tonight, or None when it is current. A note hidden from visitors ranks with
     the missing ones (Sam, 2026-10-29): one whose inputs name different quarters is written again (once they agree, write_due),
     one hidden by its check is checked again."""
@@ -49,38 +48,34 @@ def due_kind(status: str | None, stale: bool, check_version: int | None = None, 
         return 3, "write"
     if old_check:
         return 2, "recheck"
-    if old_rule:
-        return 4, "write"
     return None
 
 
 def queue(rows: list[tuple], limit: int) -> list[str]:
     """Pure: rows (symbol, note status or None, reported or filed a material 8-K since the note[, the check's version[, market value[,
-    hidden from visitors[, inputs disagree[, written before the current rule]]]]]) to tonight's symbols: no note and a hidden note first, then a failed generation or check, then a note
+    hidden from visitors[, inputs disagree]]]]) to tonight's symbols: no note and a hidden note first, then a failed generation or check, then a note
     checked before the current check, then a note the company has reported since; within each, the largest market value first
     (Sam, 2026-10-29: TSLA and the other big names are covered first). A current note is left alone."""
     due = []
     for r in rows:
-        k = due_kind(r[1], r[2], r[3] if len(r) > 3 else None, bool(r[5]) if len(r) > 5 else False, bool(r[6]) if len(r) > 6 else False,
-                     bool(r[7]) if len(r) > 7 else False)
+        k = due_kind(r[1], r[2], r[3] if len(r) > 3 else None, bool(r[5]) if len(r) > 5 else False, bool(r[6]) if len(r) > 6 else False)
         if k is not None:
             due.append((k[0], -(r[4] or 0) if len(r) > 4 else 0, r[0]))
     return [sym for _, _, sym in sorted(due)][:limit]
 
 
 async def candidates(today: date) -> list[tuple]:
-    """(symbol, status, stale, check version, market value, hidden from visitors, inputs disagree, written before the current rule) for
-    every active stock. Stale: the company reported, or filed a material 8-K, after the note was written."""
+    """(symbol, status, stale, check version, market value, hidden from visitors, inputs disagree) for every active stock. Stale: the
+    company reported, or filed a material 8-K, after the note was written."""
     from app.models.research_note import ResearchNote
     from app.services.material_filings import newer_than, stored
-    from app.services.note_live import NOTE_RULE_VERSION
     from app.services.note_quarters import disagreement, note_inputs
     from app.services.research_note_service import is_verified, withheld
     from sqlalchemy import select
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(text("""
             SELECT t.symbol, t.market_cap, n.id AS note_id, n.status, (n.verification->>'version')::int AS check_version,
-                   n.data_version, n.generated_at,
+                   n.generated_at,
                    EXISTS (SELECT 1 FROM events e WHERE e.ticker_id = t.id AND e.event_type = 'earnings' AND e.is_confirmed
                            AND e.event_date >= (n.generated_at AT TIME ZONE 'America/New_York')::date AND e.event_date <= :today) AS stale
             FROM tickers t LEFT JOIN research_notes n ON n.ticker_id = t.id
@@ -94,7 +89,7 @@ async def candidates(today: date) -> list[tuple]:
             written = r.status not in (None, "failed", "verification_failed")
             material = bool(written and r.generated_at and newer_than(await stored(db, r.symbol), r.generated_at))
             out.append((r.symbol, r.status, bool(r.stale or material) if written else False, r.check_version,
-                        r.market_cap, hidden, disagree, bool(written and (r.data_version or 0) < NOTE_RULE_VERSION)))
+                        r.market_cap, hidden, disagree))
     return out
 
 
@@ -127,7 +122,7 @@ async def run(argv: list[str]) -> int:
     limit = next((int(a.split("=", 1)[1]) for a in argv if a.startswith("--limit=")), MAX_PER_NIGHT)
     rows = await candidates(date.today())
     todo = queue(rows, limit)
-    kind = {r[0]: due_kind(r[1], r[2], r[3], r[5], r[6], r[7])[1] for r in rows if r[0] in set(todo)}
+    kind = {r[0]: due_kind(r[1], r[2], r[3], r[5], r[6])[1] for r in rows if r[0] in set(todo)}
     from app.services.edgar_client import EdgarClient
     edgar = EdgarClient()
     print(f"{STEP_LABEL}: {len(todo)} note(s) due tonight (at most {limit})", flush=True)
