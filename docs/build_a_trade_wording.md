@@ -14,6 +14,16 @@
 | Chart legend, the dashed vertical line | `The stock's latest price (its time is above the chart)` (was "Stock price when this was priced", which was wrong: the line marks the latest quote) |
 | Ticker page options card, Ivy's trades, watchlist | A delayed quote is now dated "Nov 2, 2026, 11:42 AM ET, delayed 15 min", where it used to say "last trade". |
 
+## A2. Pending approval, already live (research notes, ef0e25d, Nov 2): shipped before you approved them
+
+These stay live until you decide. From now on no visitor-facing wording ships before you approve it.
+
+| Where | Line | Source |
+|---|---|---|
+| Research note header, every note | `Written Oct 30, 2026` (replaced "Generated 3 days ago") | `frontend/src/lib/liveFigures.ts`, `writtenLabel` |
+| Research note header, while a material 8-K is newer than the note | `Not yet in this note: the 8-K filed Nov 2, 2026`, linked to the filing | `frontend/src/lib/liveFigures.ts`, `pendingFilingLabel` |
+| Tooltip on a live figure in a note's text (price, P/E, volatility and so on), once a note uses one | `last close, as of Oct 30, 2026`: the figure's name and its own date | `frontend/src/lib/liveFigures.ts`, `liveReceipt` |
+
 ## B. Held: the "What this trade does" panel and Go deeper
 
 **Where:** above the cost cards, on every draft.
