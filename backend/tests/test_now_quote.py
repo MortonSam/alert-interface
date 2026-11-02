@@ -51,3 +51,14 @@ def test_no_route_asks_finnhub_for_the_price_now_past_the_live_layer():
             if own_quote and fn.name in ASKS_LIVE_FIRST:
                 assert "served_quote" in calls, f"{path.name}:{fn.name} must ask the live layer before Finnhub"
     assert offenders == []
+
+
+def test_the_watchlist_reads_the_served_quotes_basis():
+    """batch_enrich builds each row from _served_quote's shape, which serves the record's "basis" as quote_basis: a delayed quote is
+    labeled delayed on the watchlist (2a0e304 read "basis" there and labeled every row last_trade)."""
+    from app.routers.tickers import _quote_data_from, _served_quote
+    import time
+    served = _served_quote(_quote_data_from({"c": 148.14, "t": int(time.time()) - 60, "basis": "delayed", "delay_minutes": 15}))
+    assert served["quote_basis"] == "delayed" and "basis" not in served
+    src = (ROUTERS / "tickers.py").read_text()
+    assert 'quote_basis=q.get("quote_basis")' in src

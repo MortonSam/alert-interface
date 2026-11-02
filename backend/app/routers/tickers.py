@@ -522,7 +522,7 @@ async def batch_enrich(
                 change=q.get("change"),
                 change_pct=q.get("change_pct"),
                 quote_ts=q.get("timestamp"),
-                quote_basis=q.get("basis") or "last_trade",          # the record's key is "basis" (it read "quote_basis", always last_trade)
+                quote_basis=q.get("quote_basis") or "last_trade",    # q is _served_quote's shape: "basis" served as quote_basis
                 delay_minutes=q.get("delay_minutes"),
                 quote_state=q["quote_state"],
                 quote_reason=q["quote_reason"],
