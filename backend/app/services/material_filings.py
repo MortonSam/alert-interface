@@ -4,7 +4,9 @@ A note is written again after each earnings report (note_currency, generate_note
 reader (scripts/scan_material_filings) in each company's SEC filing index:
 
   - always: Items 1.01 (a material agreement), 1.02 (one ended), 2.01 (an acquisition or disposition completed), 2.05 (exit or
-    disposal costs), 2.06 (a material impairment), 5.01 (a change in control) and 5.02 (directors or officers)
+    disposal costs), 2.06 (a material impairment) and 5.01 (a change in control)
+  - Item 5.02 only when its words announce a departure, appointment or election of the CEO, CFO, president, chair or a director
+    (leadership_change, the item's own heading left out); a 5.02 that only sets or amends pay or plans does not count (Sam, 2026-11-02)
   - Items 7.01 and 8.01 only when the filing's own text announces guidance, a deal or a major legal matter (kinds(): GUIDANCE, DEAL,
     LEGAL, from the cover and its exhibits)
 
@@ -20,7 +22,8 @@ import json
 import re
 from datetime import date, datetime, timedelta, timezone
 
-ALWAYS = {"1.01", "1.02", "2.01", "2.05", "2.06", "5.01", "5.02"}
+ALWAYS = {"1.01", "1.02", "2.01", "2.05", "2.06", "5.01"}
+OFFICERS = "5.02"
 IF_ANNOUNCES = {"7.01", "8.01"}
 RESULTS = "2.02"
 KEY = "material_filings:{sym}"
@@ -33,6 +36,27 @@ GUIDANCE = re.compile(r"\b(?:guidance|outlook)\b[^.]{0,80}\b(?:rais|lower|reaffi
 DEAL = re.compile(r"definitive (?:merger |purchase |acquisition |sale |separation )?agreement|agreed to (?:acquire|be acquired|sell|merge|combine)"
                   r"|entered into an agreement to (?:acquire|sell|merge)|(?:proposed|pending) (?:acquisition|merger|sale|spin-?off|separation)"
                   r"|announce[sd]? (?:the |its |a )?(?:acquisition|merger|sale|spin-?off|separation|divestiture)", re.I)
+# Item 5.02's own title names every kind it covers ("Departure of Directors or Certain Officers; Election of Directors; Appointment of
+# Certain Officers; Compensatory Arrangements of Certain Officers"), so it is taken out before the words are read
+ITEM_502_TITLE = re.compile(r"Departure of Directors or (?:Certain )?(?:Principal )?Officers;?\s*Election of Directors;?\s*Appointment of (?:Certain )?"
+                            r"(?:Principal )?Officers;?\s*(?:and\s*)?Compensatory Arrangements of Certain Officers\.?", re.I)
+_ROLE = (r"(?:Chief Executive Officer|CEO|Chief Financial Officer|CFO|(?<!Vice )(?<!Vice-)President|Chair(?:man|woman|person)?|"
+         r"Executive Chair\w*|director|Board of Directors|member of the Board)")
+# within one sentence: a period ends it unless it closes an initial or a usual abbreviation ("David S. Marriott", "Mr.", "Inc.")
+_ABBREVIATIONS = ("Mr", "Ms", "Mrs", "Dr", "Inc", "Corp", "Co", "Jr", "Sr", "Ltd", "Messrs", "No")
+_SPAN = r"(?:[^.]|(?<=\b[A-Z])\.|" + "|".join(rf"(?<=\b{a})\." for a in _ABBREVIATIONS) + r"){0,200}?"
+_CHANGE = (r"(?:resign(?:ed|s|ation)?|retire[ds]?|retirement|depart(?:ed|s|ure)|step(?:s|ped)? down|stepping down|terminated (?:as|from)|"
+           r"removed (?:as|from)|not (?:to )?stand for re-?election|appoint(?:ed|s|ment)|elect(?:ed|s)|named|nominated|will succeed|succeeds?|succeeded|"
+           r"transition(?:s|ed)? from|left the Company|will leave the Company)")
+LEADERSHIP = re.compile(rf"\b{_CHANGE}\b{_SPAN}\b{_ROLE}\b|\b{_ROLE}\b{_SPAN}\b{_CHANGE}\b", re.I)
+
+
+def leadership_change(text: str | None) -> bool:
+    """Pure: an Item 5.02 filing's words announce a departure, appointment or election of the CEO, CFO, president, chair or a director
+    (its own title left out)."""
+    return bool(text and LEADERSHIP.search(ITEM_502_TITLE.sub(" ", text)))
+
+
 LEGAL = re.compile(r"\b(?:settlement agreement|agreed to settle|class action|jury (?:verdict|returned)|verdict|indict(?:ed|ment)|consent decree"
                    r"|Department of Justice|Federal Trade Commission|(?:SEC|Securities and Exchange Commission) (?:investigation|charges|complaint)"
                    r"|subpoena|criminal (?:charges|investigation)|antitrust (?:lawsuit|suit|complaint))\b", re.I)
@@ -58,13 +82,17 @@ def kinds(text: str) -> list[str]:
 def needs_text(record: dict) -> bool:
     """Pure: the filing must be read to decide (7.01 or 8.01 with no always-material item)."""
     it = items_of(record)
-    return bool(it & IF_ANNOUNCES) and not (it & ALWAYS) and RESULTS not in it
+    if it & ALWAYS:
+        return False
+    return OFFICERS in it or (bool(it & IF_ANNOUNCES) and RESULTS not in it)
 
 
 def verdict(record: dict, text: str | None) -> tuple[bool, list[str]]:
     """Pure: (material, why): the always-material items it holds, or what a 7.01/8.01 filing's text announces."""
     it = items_of(record)
     hard = sorted(it & ALWAYS)
+    if OFFICERS in it and leadership_change(text):
+        hard = sorted(hard + [OFFICERS])
     if hard:
         return True, [f"Item {i}" for i in hard]
     if RESULTS in it:
@@ -160,7 +188,7 @@ async def scan(db, edgar, symbol: str, today: date) -> dict:
     records, _ = await edgar.get_8k_records_since(cik, since)
     new = material_new = 0
     for rec in records:
-        if rec["accession"] in seen or not (items_of(rec) & (ALWAYS | IF_ANNOUNCES)):
+        if rec["accession"] in seen or not (items_of(rec) & (ALWAYS | IF_ANNOUNCES | {OFFICERS})):
             continue
         texts = await edgar.filing_texts(cik, rec["accession"], rec["primary_document"], every_exhibit=True)
         joined = " ".join(t for _, t in texts)

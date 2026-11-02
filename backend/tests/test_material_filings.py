@@ -7,7 +7,8 @@ from app.services import material_filings as M
 
 
 @pytest.mark.parametrize("items,material", [
-    ("1.01,9.01", True), ("1.02", True), ("2.01,9.01", True), ("2.05", True), ("2.06", True), ("5.01", True), ("5.02,9.01", True),
+    ("1.01,9.01", True), ("1.02", True), ("2.01,9.01", True), ("2.05", True), ("2.06", True), ("5.01", True),
+    ("5.02,9.01", False),            # only with its words: leadership_change
     ("2.02,9.01", False),            # results: the earnings report rule covers them
     ("5.07", False), ("3.02", False),
 ])
@@ -27,7 +28,43 @@ def test_a_7_01_or_8_01_filing_is_material_only_when_its_words_announce_guidance
     # an earnings release with its outlook under 7.01 is the report itself: the report rule writes the note again
     assert M.verdict({"items": "2.02,7.01,9.01"}, "The Company raised its full-year 2026 guidance.") == (False, [])
     assert not M.needs_text({"items": "2.02,7.01,9.01"})
-    assert M.verdict({"items": "2.02,5.02,9.01"}, None) == (True, ["Item 5.02"])
+    assert M.verdict({"items": "2.02,5.02,9.01"}, "Item 5.02. Jane Roe will retire as Chief Financial Officer on March 31.") == (True, ["Item 5.02"])
+
+
+TITLE = ("Item 5.02 Departure of Directors or Certain Officers; Election of Directors; Appointment of Certain Officers; "
+         "Compensatory Arrangements of Certain Officers. ")
+
+
+@pytest.mark.parametrize("body", [
+    "On October 28, 2026, John Smith informed the Board that he will resign as Chief Executive Officer, effective December 31.",
+    "The Board appointed Maria Lopez as Chief Financial Officer, effective November 15, 2026.",
+    "The Board elected Ann Lee to serve as a director, increasing its size to twelve members.",
+    "Mr. Brown will retire from his role as Chairman of the Board at the 2027 annual meeting.",
+    "The Company named Raj Patel President and Chief Operating Officer.",
+    # the scan's own cases (2026-11-02): an abbreviation or an initial inside the sentence
+    "On July 16, 2026, Kara Wilson notified the Board of Directors (the Board) of Paychex, Inc. (the Company) of her decision not to stand for re-election.",
+    "On July 20, 2026, the Board of Directors of the Company elected David S. Marriott and Charles J. Meyers to serve as directors.",
+    "On September 29, 2026, the Board of Directors of Roper Technologies, Inc. elected Mr. Abhijit Dubey to serve as a member of the Board.",
+    "On August 17, 2026, Aon plc announced that Edmund Reese will transition from his role as Executive Vice President and Chief Financial Officer.",
+])
+def test_item_5_02_counts_when_it_announces_a_leadership_change(body):
+    assert M.leadership_change(TITLE + body)
+    assert M.verdict({"items": "5.02,9.01"}, TITLE + body) == (True, ["Item 5.02"])
+    assert M.needs_text({"items": "5.02,9.01"})
+
+
+@pytest.mark.parametrize("body", [
+    "The Compensation Committee approved an amendment to the 2020 Omnibus Incentive Plan to increase the shares reserved.",
+    "The Company entered into an amended and restated severance agreement with its Chief Executive Officer.",
+    "The Board approved the annual base salaries and target bonus opportunities of the named executive officers for 2027.",
+    "The Company adopted the Executive Officer Clawback Policy, effective December 1, 2026.",
+    # officers outside the list: a vice president, a chief administrative or legal officer
+    "Mr. Keenan will step down as Chief Administrative Officer but will continue to serve as Senior Executive Vice President of the Company.",
+    "Benjamin Lee notified Reddit of his intention to step down as Chief Legal Officer and Corporate Secretary.",
+])
+def test_item_5_02_that_only_sets_or_amends_pay_or_plans_does_not_count(body):
+    assert not M.leadership_change(TITLE + body)
+    assert M.verdict({"items": "5.02,9.01"}, TITLE + body) == (False, [])
 
 
 def test_the_excerpt_is_the_filings_own_items_then_its_exhibit():
