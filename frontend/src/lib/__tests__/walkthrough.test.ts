@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import { PE_RANGE_ENCODING, PRICE_VS_MARKET_ENCODING, peMark, peRangeLegend, priceMark, priceVsMarketLegend, type PeMarkKey, type PriceMarkKey } from "../encodings/walkthroughCharts";
 import { WALK_COPY } from "../walkthroughCopy";
-import { compareLine, entryLine, HOME_ENTRY, learn, learnedElsewhere, readLearned, type WalkFact } from "../walkthrough";
+import { compareLine, researchEntry, HOME_ENTRY, learn, learnedElsewhere, readLearned, type WalkFact } from "../walkthrough";
 
 const read = (p: string) => readFileSync(join(__dirname, "../..", p), "utf8");
 
@@ -44,14 +44,14 @@ describe("walkthrough charts", () => {
 describe("walkthrough copy", () => {
   it("has no colons or em dashes in visible strings", () => {
     const strings = Object.values(WALK_COPY).map((v) => (typeof v === "function" ? (v as (...a: unknown[]) => string)("Micron", "sector") : v));
-    strings.push(entryLine("Micron", 3).lead, entryLine("Micron", 3).action, HOME_ENTRY(3));
+    strings.push(researchEntry("Micron", 3).action, researchEntry("Micron", 3).length, HOME_ENTRY(3));
     for (const s of strings) {
       expect(s).not.toContain(":");
       expect(s).not.toContain("—");
     }
   });
   it("the entry says the stated length", () => {
-    expect(`${entryLine("Micron", 3).lead} ${entryLine("Micron", 3).action}`).toBe("New to Micron? Walk through it with Ivy, about 3 minutes.");
+    expect(researchEntry("Micron", 3)).toEqual({ action: "Walk through Micron with Ivy", length: "About 3 minutes" });
   });
 });
 

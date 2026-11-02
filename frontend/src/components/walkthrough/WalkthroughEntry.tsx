@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { entryLine, fetchWalkthrough, type Walkthrough } from "@/lib/walkthrough";
+import { fetchWalkthrough, researchEntry, type Walkthrough } from "@/lib/walkthrough";
 import WalkthroughOverlay, { screenFromParam, screenParam, type Screen } from "./Walkthrough";
 
-/** The line under the company name on a ticker page, and the walkthrough it opens. Shown only when a walkthrough is stored and
- *  the API says it has enough steps with data (`entry`);
+/** The entry at the top of a ticker page's Research section (Sam, 2026-11-02; it sat under the company name before), and the
+ *  walkthrough it opens. Shown only when a walkthrough is stored and the API says it has enough steps with data (`entry`); the API
+ *  serves none while IVY_WALKTHROUGH_ENABLED is off, so the entry stays hidden;
  *  ?learn=1..7, ?learn=summary or ?learn=compare&with=AAPL opens it at that screen (the home page's entry links here). */
 export default function WalkthroughEntry({ symbol }: { symbol: string }) {
   const [w, setW] = useState<Walkthrough | null>(null);
@@ -35,16 +36,14 @@ export default function WalkthroughEntry({ symbol }: { symbol: string }) {
   }, []);
 
   if (!w) return null;
-  const line = entryLine(w.name, w.minutes);
+  const line = researchEntry(w.name, w.minutes);
   return (
     <>
-      <p className="mt-2 text-sm text-muted-foreground">
-        {line.lead}{" "}
-        <button type="button" onClick={() => { const s: Screen = { kind: "step", i: 0 }; setOpen(s); sync(s); }}
-          className="tap font-medium text-primary underline-offset-4 hover:underline">
-          {line.action}
-        </button>
-      </p>
+      <button type="button" data-testid="walkthrough-entry" onClick={() => { const s: Screen = { kind: "step", i: 0 }; setOpen(s); sync(s); }}
+        className="tap mb-8 flex w-full items-center justify-between gap-4 rounded-lg border border-border px-5 py-4 text-left hover:border-foreground/40 transition-colors">
+        <span className="font-medium text-foreground">{line.action}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{line.length}</span>
+      </button>
       {open && <WalkthroughOverlay w={w} initial={open} onScreen={sync} onClose={() => { setOpen(null); sync(null); }} />}
     </>
   );

@@ -442,7 +442,7 @@ def test_flags_gate_growth_and_pe_at_serve_time():
     assert gate(reit, True, False)["steps"][4]["status"] == "ok"             # a trust's price to FFO is not a P/E: PE_ENABLED leaves it
     thin = {**payload, "steps": [W._step(n, status="ok" if n in (4, 6, 7) else "absent", idea=None) for n in range(1, 8)]}
     assert not gate(thin, True, True)["entry"]                               # three of seven: the ticker page offers no walkthrough (VMRK)
-    assert W.ENTRY_MIN_STEPS == 4
+    assert W.ENTRY_MIN_STEPS == 5
 
 
 def test_pe_series_median_is_the_stored_median():

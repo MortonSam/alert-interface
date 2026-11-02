@@ -1973,7 +1973,6 @@ export default function TickerPage() {
             {ticker.name && (
               <p className="text-xl text-muted-foreground mt-2">{ticker.name}</p>
             )}
-            <WalkthroughEntry symbol={ticker.symbol} />
             {!ticker.index_member && (
               <div className="mt-1.5">
                 <ExplainTip term="index-removal">
@@ -2109,6 +2108,7 @@ export default function TickerPage() {
         {/* ── RESEARCH ────────────────────────────────────────────────── */}
         <section id="research" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index={sectionIndex("research")} label="Research" />
+          <WalkthroughEntry symbol={ticker.symbol} />
 
           {noteStatus === "loading" && (
             <div className="animate-pulse space-y-3">

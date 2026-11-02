@@ -176,16 +176,41 @@ def test_a_stored_walkthrough_shows_the_next_fed_decision_as_served():
     assert [d["value"] for d in up["deeper"] if d["label"] == W.FED_LABEL] == ["Wed, Dec 9, 2026"]
 
 
-def test_the_options_line_sits_beside_the_typical_move_on_a_confirmed_date():
+def test_the_options_line_compares_like_with_like():
+    """Sam's NVDA review (2026-11-02): a move through an expiration is never set beside the typical report-day move. With a confirmed
+    date and the report's own share of the move on file, that share is compared; otherwise the figure is stated with its expiration
+    and compared with nothing."""
     typical = {"pct": 6.6, "n": 20, "as_of": date(2026, 8, 26)}
     imp = {"pct": 7.4, "chain_date": date(2026, 10, 28), "expiration": date(2026, 11, 20)}
     ne = SimpleNamespace(date=date(2026, 11, 17), confirmation="confirmed", window_start=None, window_end=None, note=None)
-    s = W.step_upcoming("NVIDIA", ne, "amc", imp, typical, None, 1.8)
+    # the report's own share on file: it is the figure, compared by the site's one rule
+    share = {"pct": 5.1, "chain_date": date(2026, 10, 28), "verdict": "less than usual"}
+    s = W.step_upcoming("NVIDIA", ne, "amc", imp, typical, None, 1.8, share)
     assert "After its past 20 reports, the stock moved ±6.6% on a typical report day." in s["sentences"]
-    assert "Options price a move of about ±7.4% by Nov 20, 2026, the first expiration after the report, about the same as its typical move on a report day." in s["sentences"]
-    assert [n["label"] for n in s["numbers"]] == ["Next report", "Typical move after a report", "Options price a move of"]
+    assert "Options price a move of about ±5.1% from the report itself, less than its typical move on a report day." in s["sentences"]
+    assert not any("by Nov 20" in x for x in s["sentences"])
+    assert [n["label"] for n in s["numbers"]] == ["Next report", "Typical move after a report", "Options price for the report itself"]
+    # no share: the move through the expiration, with its date, beside nothing
+    s = W.step_upcoming("NVIDIA", ne, "amc", imp, typical, None, 1.8, None)
+    assert "Options price a move of about ±7.4% by Nov 20, 2026, the first expiration after the report." in s["sentences"]
+    assert not any(w in " ".join(s["sentences"]) for w in ("more than its typical", "less than its typical", "about the same as"))
+    # a share whose comparison the rule withholds (too few reports): stated alone
+    s = W.step_upcoming("NVIDIA", ne, "amc", imp, typical, None, 1.8, {**share, "verdict": None})
+    assert "Options price a move of about ±5.1% from the report itself." in s["sentences"]
     est = SimpleNamespace(date=date(2026, 11, 17), confirmation="estimated", window_start=None, window_end=None, note=None)
-    assert not any("Options price" in x for x in W.step_upcoming("NVIDIA", est, None, imp, typical, None, 1.8)["sentences"])
+    assert not any("Options price" in x for x in W.step_upcoming("NVIDIA", est, None, imp, typical, None, 1.8, share)["sentences"])
+
+
+def test_realty_income_nov_2_report_with_the_nov_20_expiration_makes_no_comparison():
+    """O: reports Nov 2, the first expiration after it is Nov 20, eighteen days on; with no report share on file the straddle to
+    Nov 20 is stated as a move by Nov 20 and never against the ±1.9% report-day move."""
+    typical = {"pct": 1.9, "n": 20, "as_of": date(2026, 8, 5)}
+    ne = SimpleNamespace(date=date(2026, 11, 2), confirmation="confirmed", window_start=None, window_end=None, note=None)
+    imp = {"pct": 3.2, "chain_date": date(2026, 10, 30), "expiration": date(2026, 11, 20)}
+    s = W.step_upcoming("Realty Income", ne, "amc", imp, typical, None, 0.6, None)
+    line = [x for x in s["sentences"] if x.startswith("Options price")]
+    assert line == ["Options price a move of about ±3.2% by Nov 20, 2026, the first expiration after the report."]
+    assert "typical" not in line[0]
 
 
 # ── the company's own words ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -274,3 +299,25 @@ async def test_a_quote_the_verifier_rejects_twice_is_dropped():
                     "input_tokens": 10, "output_tokens": 10}
     got = await Q.quotes_for("NVIDIA", {"growth": WANT["growth"]}, SOURCES, client=Fake())
     assert got["quotes"] == {} and calls == ["gen", "ver", "gen", "ver"] and got["dropped"] == [{"id": "growth", "reason": "another quarter"}]
+
+
+def test_one_quarter_across_the_steps():
+    """MU (Sam's review, 2026-11-02): step 2 showed fiscal Q3 2026 beside step 3 through fiscal Q4. Every quarter step shows the latest
+    quarter the company has filed, or says that quarter's figure is not on file yet; never an older quarter."""
+    def ok(n):
+        return W._step(n, status="ok", numbers=[W._num("x", "1", "y")], sentences=["s"], idea={2: "growth", 3: "margins", 5: "pe"}[n])
+    steps = [W._step(1, status="ok", idea="segments"), ok(2), ok(3), W._step(4, status="ok", idea="market_vs_company"), ok(5),
+             W._step(6, status="ok", idea="report_move"), W._step(7, status="ok", idea="risk_factors")]
+    q3, q4 = date(2026, 5, 28), date(2026, 9, 3)
+    replaced = W.one_quarter(steps, {2: q3, 3: q4, 5: date(2026, 8, 28)}, q4, None, "Micron")
+    assert replaced == [2]                                                  # Aug 28 and Sep 3 are the same quarter; May 28 is not
+    assert steps[1]["status"] == "absent" and steps[1]["numbers"] == []
+    assert steps[1]["absent"] == ("Ivy can't show this for Micron yet. Its sales growth for the quarter ended Sep 3, 2026 is not on file yet, "
+                                  "so this step shows no older quarter.")
+    assert steps[1]["behind"] == {"end": "2026-05-28", "latest": "2026-09-03"}
+    assert steps[2]["status"] == "ok" and steps[4]["status"] == "ok"
+    bank = [W._step(1, status="ok", idea="segments"), ok(2), ok(3), W._step(4, status="ok", idea="market_vs_company"), ok(5),
+            W._step(6, status="ok", idea="report_move"), W._step(7, status="ok", idea="risk_factors")]
+    W.one_quarter(bank, {3: q3}, q4, None, "JPMorgan", noun="revenue")
+    assert "How much of each revenue dollar it keeps for the quarter ended Sep 3, 2026 is not on file yet" in bank[2]["absent"]
+    assert W.one_quarter(bank, {2: q4}, None, None, "X") == []              # no filed quarter known: nothing changes

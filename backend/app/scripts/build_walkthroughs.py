@@ -67,6 +67,15 @@ def latest_periodic(submissions: dict) -> str | None:
     return next((a for f, a in zip(r.get("form") or [], r.get("accessionNumber") or []) if f in ("10-Q", "10-K", "10-KT")), None)
 
 
+def _iso_date(v) -> date | None:
+    if v is None or isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except ValueError:
+        return None
+
+
 def _jsonable(d: dict) -> dict:
     return json.loads(json.dumps(d, default=str))
 
@@ -138,9 +147,34 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
                                    {"t": t["id"], "d": ne.date})).scalar()
         implied = None if "implied_move" in held else await D.implied_move(db, sym, ne.date, today)
     typical = await D.typical_move(db, t["id"], sym, held)
-    s6 = W.step_upcoming(name, ne, timing, implied, typical, None, D.ordinary_move(stock, rdays) if typical else None)
+    report_share = None                              # the report's own share of the move, as Ivy's Read states it, against the same typical move
+    if ne and ne.date and getattr(ne, "confirmation", None) == "confirmed":
+        from app.services.report_move import report_move_view
+        v = await report_move_view(db, sym, ne.date, today, held, typical=(typical["pct"], typical["n"]) if typical else (None, 0))
+        if v.get("rep") is not None:
+            report_share = {"pct": v["rep"], "chain_date": v["chain_date"], "verdict": v.get("move_comparison")}
+    s6 = W.step_upcoming(name, ne, timing, implied, typical, None, D.ordinary_move(stock, rdays) if typical else None, report_share)
     s7 = W.step_risks(name, risks, merger)
     steps = [s1, s2, s3, s4, s5, s6, s7]
+    # one quarter across the steps (W.one_quarter): the latest quarter the company has filed, and each quarter step's own period end
+    def _end(cell: dict | None, *keys: str) -> date | None:
+        for k in keys:
+            v = (cell or {}).get(k)
+            v = next(iter(v.values()), None) if isinstance(v, dict) and "end" not in v else v
+            if isinstance(v, dict) and v.get("end"):
+                return date.fromisoformat(str(v["end"])[:10])
+        return None
+    pe_end = (snap or {}).get("window_end") if not reit and s5["status"] != "absent" else None
+    reit_end = (((ffo or {}).get("ttm") or {}).get("end")) if reit and s5["status"] != "absent" else None
+    quarter_ends = {2: _end(s2.get("cell"), "quarter", "ttm") if s2["status"] != "absent" else None,
+                    3: _end(s3.get("cell"), "keeps_now") if s3["status"] != "absent" else None,
+                    5: _iso_date(pe_end or reit_end)}
+    filed_latest = (await db.execute(text("SELECT max(period_end) FROM eps_quarters WHERE symbol = :s AND (filed_on IS NULL OR filed_on <= :d)"),
+                                     {"s": sym, "d": today})).scalar()
+    latest_q = max([d for d in [filed_latest, *quarter_ends.values()] if d] or [None], default=None) if (filed_latest or any(quarter_ends.values())) else None
+    quarter_check = {"latest": str(latest_q) if latest_q else None, "ends": {str(k): str(v) if v else None for k, v in quarter_ends.items()},
+                     "replaced": W.one_quarter(steps, quarter_ends, latest_q, periods, name, noun, reit)}
+    s2, s3, s5 = steps[1], steps[2], steps[4]
     fl = (ffo or {}).get("latest")
     ffo_cell = ({"value": W.signed(fl["growth_pct"]), "as_of": f"{quarter_label(periods, fl['end'])}, against a year earlier", "end": str(fl["end"])}
                 if fl and fl.get("growth_pct") is not None else None)
@@ -159,7 +193,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
                         key=lambda r: r["period_end"], default=None)
     want = Q.wanted(payload, latest_growth, m, periods)
     return {"payload": json.loads(json.dumps(payload, default=str)), "steps_shown": W.steps_shown(steps), "story_facts": story_facts, "as_of": as_of,
-            "quote_want": json.loads(json.dumps(want, default=str))}
+            "quote_want": json.loads(json.dumps(want, default=str)), "quarter_check": quarter_check}
 
 
 async def run(argv: list[str]) -> int:
@@ -177,6 +211,7 @@ async def run(argv: list[str]) -> int:
     symbols = [s for s in (only or list(u["tickers"])) if s in u["tickers"]]
     print(f"{STEP_LABEL}: {len(symbols)} stock(s) ({'write' if write else 'dry run'}{', stories' if story and write else ''}); closes through "
           f"{u['spy'][-1][0] if u['spy'] else None}", flush=True)
+    from app.services import walkthrough_story as WS
     edgar = EdgarClient()
     built: dict[str, dict] = {}
     rows: list[dict] = []
@@ -195,7 +230,9 @@ async def run(argv: list[str]) -> int:
                 b = await build_one(db, u, sym, src)
             from app.services import walkthrough_quotes as Q
             try:
-                q = await Q.refresh(edgar, await edgar.get_cik(sym), b["quote_want"], src.get("quotes"), b["payload"]["name"], story and write)
+                # the quotes' checks share the night's walkthrough budget with the stories (WS.NIGHTLY_STORY_CAP_USD)
+                q = await Q.refresh(edgar, await edgar.get_cik(sym), b["quote_want"], src.get("quotes"), b["payload"]["name"],
+                                    story and write and quote_spend < WS.NIGHTLY_STORY_CAP_USD)
                 if q.get("cost_usd"):
                     quote_spend += q["cost_usd"]
                     print(f"  {sym}: quotes {sorted(q['quotes'])} kept, {len(q.get('dropped') or [])} dropped, ${q['cost_usd']:.3f}", flush=True)
@@ -209,16 +246,16 @@ async def run(argv: list[str]) -> int:
             rows.append({"symbol": sym, "sector": u["tickers"][sym]["sector"], "steps": st,
                          "reasons": {s["key"]: s["absent"] for s in b["payload"]["steps"] if s["status"] == "absent"},
                          "segment_reason": (src.get("segments") or {}).get("reason"), "risk_reason": (src.get("risks") or {}).get("reason"),
-                         "margin_measure": (src.get("margins") or {}).get("measure"), "margin_reason": (src.get("margins") or {}).get("reason")})
+                         "margin_measure": (src.get("margins") or {}).get("measure"), "margin_reason": (src.get("margins") or {}).get("reason"),
+                         "steps_shown": b["steps_shown"], "quarter_check": b.get("quarter_check")})
             if i % 50 == 0:
                 print(f"  {i}/{len(symbols)} built", flush=True)
     finally:
         await edgar.close()
 
-    from app.services import walkthrough_story as WS
     spent = 0.0
     if story and write:
-        spent = await WS.run_stories(built, today)
+        spent = await WS.run_stories(built, today, max(0.0, WS.NIGHTLY_STORY_CAP_USD - quote_spend))
     else:
         await WS.reuse_stories(built)
     if write:

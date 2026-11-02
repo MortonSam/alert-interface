@@ -67,7 +67,8 @@ TERM_ROLES = re.compile(r"(?:customers?|clients?|tenants?|consumers?|devices?|bu
 MULTIPLES = re.compile(r"\b(?:doubl\w*|tripl\w*|quadrupl\w*|halv\w*|tenfold|\w+fold)\b", re.I)    # a figure in words
 MODEL_SECONDS = 60
 CALL_SECONDS = 150
-NIGHTLY_STORY_CAP_USD = 14.0           # the walkthroughs' share of the $35 cap once their nightly is live (Sam, 2026-10-29; main's ai_spend.WALKTHROUGHS_NIGHT_USD)
+from app.services.ai_spend import WALKTHROUGHS_NIGHT_USD
+NIGHTLY_STORY_CAP_USD = WALKTHROUGHS_NIGHT_USD   # the walkthroughs' night, quotes and stories together: $5 under the $15 cap (Sam, 2026-11-02; $14 before)
 STORY_WORDS = 32
 RISK_WORDS = 28
 MAX_RISKS = 3

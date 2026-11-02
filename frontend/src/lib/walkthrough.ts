@@ -91,8 +91,9 @@ export const fetchCompare = (a: string, b: string) =>
 export const fetchFeatured = () => getJson<Featured>("/walkthrough-featured");
 
 /** "New to Micron Technology? Walk through it with Ivy, about 3 minutes." */
-export function entryLine(name: string, minutes: number): { lead: string; action: string } {
-  return { lead: `New to ${name}?`, action: `Walk through it with Ivy, about ${minutes} minutes.` };
+/** The entry at the top of a ticker page's Research section (Sam, 2026-11-02): "Walk through NVIDIA with Ivy", with its length. */
+export function researchEntry(name: string, minutes: number): { action: string; length: string } {
+  return { action: `Walk through ${name} with Ivy`, length: `About ${minutes} minutes` };
 }
 
 export const HOME_ENTRY = (minutes: number) => `Learn to read a stock in ${minutes} minutes`;

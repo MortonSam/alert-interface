@@ -115,7 +115,7 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
   const ideaSeg = seg();
   return (
     <div>
-      <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight text-foreground">{step.question}</h2>
+      <h2 className="font-display text-headline font-semibold text-foreground">{step.question}</h2>
       {step.status === "absent" ? (
         <p className="mt-5 font-display text-lg leading-relaxed text-foreground/80"><Explained text={step.absent} /></p>
       ) : (
@@ -139,7 +139,7 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
                   <li key={r.n} className="border-l-2 border-primary/50 pl-3">
                     <Explained text={r.sentence} segments={rSegs[i]} />
                     {step.source?.url && (
-                      <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="ml-2 font-sans text-xs text-cool hover:underline">{T.readFiling}</a>
+                      <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="ml-2 font-sans text-xs text-cool hover:text-cool/80">{T.readFiling}</a>
                     )}
                   </li>
                 ))}
@@ -175,7 +175,7 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
             ))}
           </dl>
           {step.source?.url && (
-            <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-cool hover:underline">{step.source.label}</a>
+            <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-cool hover:text-cool/80">{step.source.label}</a>
           )}
         </details>
       )}
@@ -186,7 +186,7 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
 function SummaryScreen({ w, onCompare, onAsk, onClose }: { w: Walkthrough; onCompare: () => void; onAsk: () => void; onClose: () => void }) {
   return (
     <div>
-      <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight">{T.summaryTitle(w.name)}</h2>
+      <h2 className="font-display text-headline font-semibold">{T.summaryTitle(w.name)}</h2>
       <ol className="mt-5 space-y-2.5 font-display text-[17px] leading-relaxed">
         {w.summary.known.map((k) => (
           <li key={k.n} className="flex gap-3 text-foreground/90">
@@ -250,7 +250,7 @@ function CompareScreen({ w, other, setOther }: { w: Walkthrough; other: string |
   const matches = useMemo(() => matchTickers(tickers, query, 6).filter((t) => t.symbol !== w.symbol), [tickers, query, w.symbol]);
   return (
     <div>
-      <h2 className="font-display text-[26px] sm:text-[30px] font-semibold leading-tight">{T.compareTitle}</h2>
+      <h2 className="font-display text-headline font-semibold">{T.compareTitle}</h2>
       <div className="mt-4 flex flex-wrap gap-2">
         {w.compare_choices.map((c) => (
           <button key={c.symbol} type="button" onClick={() => setOther(c.symbol)}

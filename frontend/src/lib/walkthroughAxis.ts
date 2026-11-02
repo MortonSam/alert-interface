@@ -6,7 +6,7 @@ const DAY_MS = 86_400_000;
 export const GAP_DAYS = 21;
 
 /** A calendar day ("2026-10-16") as milliseconds at noon UTC, so no zone moves it. */
-export const dayMs = (iso: string): number => Date.parse(`${iso.slice(0, 10)}T12:00:00Z`);
+export const dayMs = (iso: string): number => Date.parse(iso.slice(0, 10) + "T12:00:00Z");     // an axis position, never shown
 
 /** Rows on a time axis: each row's t is its day in milliseconds; where two rows sit more than GAP_DAYS apart, a row with every
  *  series null goes between them, so the line breaks there (connectNulls off). */

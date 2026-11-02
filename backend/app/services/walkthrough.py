@@ -27,7 +27,6 @@ from datetime import date, timedelta
 
 from app.services.briefing import description_text, fmt_date, short_name
 from app.services.fiscal_periods import cap, four_label, quarter, quarter_label, quarter_name, through, year
-from app.services.move_comparison import compare_moves
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
@@ -43,7 +42,7 @@ PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must matc
 CLOSING_LINE = "Ivy doesn't make buy or sell calls."
 REIT_SECTOR = "Real Estate"
 REVENUE_INDUSTRY_WORDS = ("Bank", "Insurance", "Reinsurance")    # GICS sub-industries of banks and insurers, which say "revenue", never "sales"
-ENTRY_MIN_STEPS = 4                               # a ticker page offers the walkthrough only when at least this many of the seven steps show data
+ENTRY_MIN_STEPS = 5                               # a walkthrough is shown only when at least this many of the seven steps show data (Sam, 2026-11-02; 4 before)
 COMPARE_PERIOD_DAYS = 120                         # a Compare row is hidden when the two companies' periods end further apart than this
 CHART_GAP_DAYS = 21                               # frontend lib/walkthroughAxis GAP_DAYS: points further apart break the line; no chart is built with one
 INDEX_SHARE_NO_VERDICT = 2.0                      # a stock above this percent of the S&P 500's market value is part of the market: step 4 gives no
@@ -668,11 +667,16 @@ def step_valuation_reit(name: str, ffo: dict | None, close: dict | None, periods
 # ── step 6: what's coming up ───────────────────────────────────────────────────────────────────────────────────────────────
 
 def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typical: dict | None, fed_day: date | None = None,
-                  ordinary: float | None = None) -> dict:
+                  ordinary: float | None = None, report_share: dict | None = None) -> dict:
     """The check: report days move the stock k times as much as an ordinary day (ordinary: the mean move on other days, which the
-    step's own text never states); what that means for someone holding it through the next report. With a confirmed date and a
-    fresh chain, the options line sets what options price for the report beside the typical move. The next Fed decision is added
-    when the step is served (with_fed), so it is never one that has passed; fed_day here is for a build's own report."""
+    step's own text never states); what that means for someone holding it through the next report. The next Fed decision is added
+    when the step is served (with_fed), so it is never one that has passed; fed_day here is for a build's own report.
+
+    The options line compares like with like (Sam's NVDA review, 2026-11-02): with a confirmed date and the report's own share of the
+    move on file (services/report_move.report_move_view, as Ivy's Read states it: report_share {pct, chain_date, verdict}), that
+    share is set beside the typical report-day move by the site's one rule; otherwise the options figure is stated with its
+    expiration (implied: the straddle through the first expiration after the report) and compared with nothing, since a move
+    through an expiration days after the report is not a report-day move."""
     from app.services.implied_move import implied_move_allowed
     date_ = getattr(ne, "date", None) if ne else None
     conf = getattr(ne, "confirmation", None) if ne else None
@@ -691,16 +695,20 @@ def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typic
         sentences.append(f"{name} is expected to report around {day_words(date_)}, a date the company has not confirmed yet.")
     else:
         sentences.append(f"{name} has no next report date on file yet.")
-    imp = implied if implied and date_ and conf == "confirmed" and implied_move_allowed(conf) else None
+    confirmed = bool(date_ and conf == "confirmed" and implied_move_allowed(conf))
+    imp = implied if implied and confirmed else None
+    share = report_share if report_share and confirmed and report_share.get("pct") is not None else None
     if typical:
         numbers.append(_num("Typical move after a report", f"±{num(typical['pct'])}%", f"{typical['n']} reports to {fmt_date(typical['as_of'])}"))
         sentences.append(f"After its past {typical['n']} reports, the stock moved ±{num(typical['pct'])}% on a typical report day.")
-    if imp and typical:
-        word = compare_moves(imp["pct"], typical["pct"])
-        cmp_words = {"more than usual": "more than", "less than usual": "less than", "about its usual": "about the same as"}[word]
+    if share:
+        cmp_words = OPTIONS_COMPARISON.get(share.get("verdict")) if typical else None
+        numbers.append(_num("Options price for the report itself", f"±{num(share['pct'])}%", f"Options data {fmt_date(share['chain_date'])}"))
+        sentences.append(f"Options price a move of about ±{num(share['pct'])}% from the report itself"
+                         + (f", {cmp_words} its typical move on a report day." if cmp_words else "."))
+    elif imp:
         numbers.append(_num("Options price a move of", f"±{num(imp['pct'])}%", f"Options data {fmt_date(imp['chain_date'])}, expiring {fmt_date(imp['expiration'])}"))
-        sentences.append(f"Options price a move of about ±{num(imp['pct'])}% by {fmt_date(imp['expiration'])}, the first expiration after the report, "
-                         f"{cmp_words} its typical move on a report day.")
+        sentences.append(f"Options price a move of about ±{num(imp['pct'])}% by {fmt_date(imp['expiration'])}, the first expiration after the report.")
     holding = (f"its next report on {fmt_date(date_)}" if date_ and conf == "confirmed" else
                f"its next report, expected around {fmt_date(date_)}" if date_ else
                f"its next report, expected between {fmt_date(ne.window_start)} and {fmt_date(ne.window_end)}" if ne and getattr(ne, "window_start", None) else
@@ -735,6 +743,8 @@ def step_upcoming(name: str, ne, timing: str | None, implied: dict | None, typic
     return st
 
 
+# report_move_view's verdict (services/move_comparison.compare_moves) in step 6's words
+OPTIONS_COMPARISON = {"more than usual": "more than", "less than usual": "less than", "about its usual": "about the same as"}
 FED_SENTENCE = "The next Fed rate decision is on {day}, a day that can move the whole market."
 FED_LABEL = "Next Fed decision"
 FED_DECISION_HOUR = 14                          # the statement's time, New York (services/fomc_calendar)
@@ -834,6 +844,36 @@ def with_risk_story(step: dict, name: str, risk_sentences: list[dict], headings:
 
 
 # ── summary, compare, fingerprints ─────────────────────────────────────────────────────────────────────────────────────────
+
+SAME_QUARTER_DAYS = 45            # two period ends this close are the same fiscal quarter (a 52/53-week year shifts the end a few days)
+QUARTER_WHAT = {2: "its {noun} growth", 3: "how much of each {unit} it keeps", 5: "its P/E"}
+QUARTER_WHAT_REIT = {5: "its price against FFO per share"}
+QUARTER_IDEA = {2: "growth", 3: "margins", 5: "pe"}
+
+
+def one_quarter(steps: list[dict], ends: dict[int, date | None], latest: date | None, periods: dict | None, name: str,
+                noun: str = "sales", reit: bool = False) -> list[int]:
+    """One quarter across the steps (Sam's review of MU, 2026-11-02: step 2 showed fiscal Q3 2026 beside step 3 through fiscal Q4).
+
+    The walkthrough's quarter is the latest one the company has filed: `latest`, the newest period end among its stored SEC quarters
+    and the steps' own figures. Each step that names a quarter (2 growth, 3 margins, 5 the P/E or the price against FFO) shows its
+    figure only for that quarter; a step whose figure is for an earlier quarter shows nothing from it and says the latest quarter's
+    figure is not on file yet. Changes `steps` in place; returns the steps it replaced."""
+    if latest is None:
+        return []
+    replaced = []
+    for n, end in ends.items():
+        if end is None or (latest - end).days <= SAME_QUARTER_DAYS or steps[n - 1]["status"] == "absent":
+            continue
+        what = (QUARTER_WHAT_REIT.get(n) if reit else None) or QUARTER_WHAT[n].format(noun=noun, unit=each_unit(noun))
+        qtr = quarter(periods, latest)
+        st = _absent(n, name, f"{cap(what)} for {qtr} is not on file yet, so this step shows no older quarter.",
+                     f"not on file for {qtr} yet", "p_ffo" if reit and n == 5 else QUARTER_IDEA[n], noun)
+        st["behind"] = {"end": str(end), "latest": str(latest)}
+        steps[n - 1] = st
+        replaced.append(n)
+    return replaced
+
 
 def summary(name: str, steps: list[dict]) -> dict:
     """What you now know (one takeaway per step shown), what's still uncertain (each step or part Ivy couldn't show and why, and the
