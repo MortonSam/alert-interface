@@ -223,8 +223,10 @@ def live_evidence(values: dict[str, dict]) -> str:
     """The figures the checker may confirm a filled slot against: name, value and date."""
     if not values:
         return "(none)"
-    return "\n".join(f"  {f['name']}: {f['value']}" + (f" (as of {str(f['as_of'])[:10]})" if f.get("as_of") else "")
-                     for f in values.values())
+    def line(f: dict) -> str:                    # the checker's prompt only: an ISO day, as the receipts store it
+        day = str(f["as_of"])[:10] if f.get("as_of") else None
+        return f"  {f['name']}: {f['value']}" + (" (as of " + day + ")" if day else "")
+    return "\n".join(line(f) for f in values.values())
 
 
 def reslot(verification: dict | None, slotted_text: str, values: dict[str, dict]) -> dict | None:
