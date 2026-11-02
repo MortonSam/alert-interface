@@ -63,7 +63,7 @@ async def sign_in(body: SignIn, request: Request, db: AsyncSession = Depends(get
     html_ = (f'<p style="font-size:16px">{m["lead"]}</p><p><a href="{url}" style="display:inline-block;padding:12px 20px;background:#f97316;color:#111;'
              f'border-radius:10px;text-decoration:none;font-weight:600">{m["button"]}</a></p><p style="font-size:13px;color:#666">{m["note"]}</p>'
              f'<p style="font-size:13px;color:#666">{K.NO_CALLS}<br>{settings.mailing_address}</p>')
-    await mailer.send(mailer.Message(to=email, subject=m["subject"], html=html_, text=f"{m['lead']}\n\n{url}\n\n{m['note']}\n\n{K.NO_CALLS}\n{settings.mailing_address}"))
+    await mailer.send(mailer.Message(to=email, subject=m["subject"], sign_in=True, html=html_, text=f"{m['lead']}\n\n{url}\n\n{m['note']}\n\n{K.NO_CALLS}\n{settings.mailing_address}"))
     return {"detail": K.API["link_sent"]}
 
 

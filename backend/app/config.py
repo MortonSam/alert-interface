@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     site_url: str = "https://alertinterface.com"
     postmark_server_token: str = ""           # POSTMARK_SERVER_TOKEN: the email provider (services/mailer); empty = nothing is sent
     email_from: str = "Ivy at Alert Interface <ivy@alertinterface.com>"
+    postmark_transactional_stream: str = "outbound"   # POSTMARK_TRANSACTIONAL_STREAM: sign-in links and per-stock alerts (services/mailer)
+    postmark_broadcast_stream: str = "broadcast"      # POSTMARK_BROADCAST_STREAM: the Sunday earnings-week email
     mailing_address: str = "MAILING_ADDRESS"  # MAILING_ADDRESS: the postal address every email's footer carries (CAN-SPAM); Sam provides it
 
     # Clerk auth (empty = disabled, admin-token-only mode)

@@ -51,7 +51,7 @@ async def run(argv: list[str]) -> int:
             print(f"  {p.id}: {em.subject} ({', '.join(em.kinds)})", flush=True)
             if not send:
                 continue
-            pid = await mailer.send(mailer.Message(to=p.email_lower, subject=em.subject, html=em.html, text=em.text, stream=mailer.STREAM_UPDATES,
+            pid = await mailer.send(mailer.Message(to=p.email_lower, subject=em.subject, html=em.html, text=em.text, stream=mailer.stream_for(em.kinds),
                                                    unsubscribe_url=unsubscribe_url(p.id, em.kinds[0] if len(em.kinds) == 1 else E.ALL)))
             await db.execute(text("""INSERT INTO email_sends (user_id, day, kinds, items, provider_id) VALUES (:u, :d, :k, CAST(:i AS jsonb), :p)
                 ON CONFLICT DO NOTHING"""), {"u": p.id, "d": today, "k": em.kinds, "i": json.dumps(em.items), "p": pid})

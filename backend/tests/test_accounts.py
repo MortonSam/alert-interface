@@ -205,3 +205,19 @@ def test_a_saved_idea_is_scored_at_expiration_against_what_options_priced():
     assert spread["paid_usd"] == 390.0 and spread["worth_usd"] == 1000.0 and spread["moved_vs_priced"] == "more"     # capped at the width
     assert T.summary_line([call, put, spread]) == "3 hypothetical trades, 2 finished ahead"
     assert T.summary_line([call]) == "1 hypothetical trade, 1 finished ahead"
+
+
+def test_each_email_goes_on_its_postmark_stream():
+    """Sign-in links and the per-stock alerts on the transactional stream, the Sunday email on broadcast (Sam, 2026-11-02)."""
+    from app.config import settings
+    from app.services import mailer
+    assert mailer.stream_for(["date_confirmed"]) == mailer.TRANSACTIONAL
+    assert mailer.stream_for(["earnings_eve", "morning_after"]) == mailer.TRANSACTIONAL
+    assert mailer.stream_for(["earnings_week"]) == mailer.BROADCAST
+    assert mailer.stream_for(["earnings_week", "date_confirmed"]) == mailer.BROADCAST          # a merged day holding the Sunday email
+    sign_in = mailer.payload(mailer.Message(to="a@b.c", subject="s", html="h", text="t", sign_in=True))
+    week = mailer.payload(mailer.Message(to="a@b.c", subject="s", html="h", text="t", stream=mailer.BROADCAST, unsubscribe_url="u"))
+    assert sign_in["MessageStream"] == settings.postmark_transactional_stream == "outbound"
+    assert week["MessageStream"] == settings.postmark_broadcast_stream == "broadcast"
+    from app.services.account_copy import KINDS
+    assert set(KINDS) - mailer.BROADCAST_KINDS == {"date_confirmed", "earnings_eve", "morning_after"}     # every other kind is an alert
