@@ -1,6 +1,6 @@
 # Build a Trade: new wording for Sam's approval (2026-11-02)
 
-**Part B is held until you approve it** (branch `build-teach`, not pushed). **Part A shipped today** with fixes 1 and 2 (2a0e304, live); it's listed so you can see every new line in one place. Every line of the teaching panel lives in one file, `frontend/src/lib/tradeTeachingCopy.ts`, so a change to the wording is a change to that file alone. Every figure is worked out in code from the trade's own legs, with no model call (`frontend/src/lib/tradeTeaching.ts`).
+**Part B: approved by Sam on Nov 2 with two changes**, both applied (it ships with this commit). **Part A shipped today** with fixes 1 and 2 (2a0e304, live); it's listed so you can see every new line in one place. Every line of the teaching panel lives in one file, `frontend/src/lib/tradeTeachingCopy.ts`, so a change to the wording is a change to that file alone. Every figure is worked out in code from the trade's own legs, with no model call (`frontend/src/lib/tradeTeaching.ts`).
 
 ## A. Shipped with fixes 1 and 2 (live)
 
@@ -24,15 +24,20 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 | Research note header, while a material 8-K is newer than the note | `Not yet in this note: the 8-K filed Nov 2, 2026`, linked to the filing | `frontend/src/lib/liveFigures.ts`, `pendingFilingLabel` |
 | Tooltip on a live figure in a note's text (price, P/E, volatility and so on), once a note uses one | `last close, as of Oct 30, 2026`: the figure's name and its own date | `frontend/src/lib/liveFigures.ts`, `liveReceipt` |
 
-## B. Held: the "What this trade does" panel and Go deeper
+## B. Approved Nov 2: the "What this trade does" panel and Go deeper
 
 **Where:** above the cost cards, on every draft.
 
 **Build a Trade drafts four structures today:** a single call, a single put, a call spread and a put spread. The panel also covers put and call credit spreads, straddles, strangles, covered calls and protective puts, so it's ready if those are added. Examples 3 to 5 show it on structures Build a Trade does not draft yet.
 
-**Terms:** each of these terms gets its plain tooltip at its first use in the panel only: strike price, expiration, net debit, net credit, breakeven, straddle. Implied volatility is explained wherever it appears, as now.
+**Terms:** each of these terms gets its plain tooltip at its first use in the panel only: strike price, expiration, breakeven, straddle. Since the cost line was merged, the panel no longer says "net debit" or "net credit". Both stay under Go deeper and in the glossary. Implied volatility is explained wherever it appears, as now.
 
 **New glossary entry:** **Net credit**: "The cash a trade brings in when it is opened, what the contracts sold fetch minus what any contracts bought cost."
+
+**Approval changes (round 3, Nov 2):**
+- The cost line and the 100-shares line are one line: "Option prices are quoted per share, and one contract covers 100 shares, so you pay $360 at the start ($3.60 a share)." It says "so you receive" for a credit trade. "For 100 shares" is gone, and a test fails if it comes back.
+- A loss range with no floor above $0 reads "the loss grows by $100 for every $1 lower, up to $26,690 at $0." (the covered call below its breakeven). Bounded loss ranges keep "a loss that shrinks as the stock rises, largest at $145 ($360)".
+- Approved as written: the covered call's "The most it can make is" line, and the punctuation-only changes to the net debit and breakeven tooltips, site-wide.
 
 **Your review of Nov 2, applied (round 2):**
 - Each stretch at expiration is told moving away from the breakeven, and every breakeven is one of the stretch boundaries. A gain "grows by $100 for every $1 higher (or lower)", ending "up to $640 at $155" when a strike stops it. A loss is "a loss that shrinks as the stock rises (or falls), largest at $145 ($360)". "Drops by ... for every $1 the stock rises" is gone, and a test fails if it comes back.
@@ -58,8 +63,7 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 ### 1. BNY $145/$155 call spread (Sam's screenshot case)
 
 > This is a call spread. A call spread is buying one call and selling another with a higher strike price. The call sold lowers the cost and caps the gain.  
-> You pay $360 at the start, a net debit of $3.60 a share, for 100 shares.  
-> Option prices are quoted per share, and one contract covers 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares, so you pay $360 at the start ($3.60 a share).  
 > It gains if BNY ends above $148.60 at expiration on Nov 20, 2026.  
 > The breakeven is $148.60, the $145 strike price plus the $3.60 a share paid.  
 > The gain stops growing at $155. Past it, the most the trade can make is $640.  
@@ -74,8 +78,7 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 ### 2. A single call (NVDA $220, illustrative prices)
 
 > This is a call. A call is the right to buy 100 shares at its strike price until expiration; it gains when the stock ends above the strike price by more than the call cost.  
-> You pay $840 at the start, $8.40 a share, for 100 shares.  
-> Option prices are quoted per share, and one contract covers 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares, so you pay $840 at the start ($8.40 a share).  
 > It gains if NVDA ends above $228.40 at expiration on Dec 18, 2026.  
 > The breakeven is $228.40, the $220 strike price plus the $8.40 a share paid.  
 > There is no cap on the gain. It keeps growing as the stock rises.  
@@ -89,8 +92,7 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 ### 3. A put credit spread (KO $90/$85, illustrative)
 
 > This is a put credit spread. A put credit spread is selling one put and buying another with a lower strike price. The cash comes in at the start, and the put bought caps the loss.  
-> You receive $140 at the start, a net credit of $1.40 a share, for 100 shares.  
-> Option prices are quoted per share, and one contract covers 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares, so you receive $140 at the start ($1.40 a share).  
 > It gains if KO ends above $88.60 at expiration on Dec 18, 2026.  
 > The breakeven is $88.60, the $90 strike price minus the $1.40 a share received.  
 > You keep the full $140 if KO ends above $90.  
@@ -105,8 +107,7 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 ### 4. A straddle (TSLA $450, illustrative)
 
 > This is a straddle. A straddle is buying a call and a put with the same strike price and expiration. It gains when the stock moves far enough either way to cover both.  
-> You pay $4,250 at the start, a net debit of $42.50 a share, for 100 shares.  
-> Option prices are quoted per share, and one contract covers 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares, so you pay $4,250 at the start ($42.50 a share).  
 > It gains if TSLA ends below $407.50 or above $492.50 at expiration on Nov 20, 2026, a big enough move either way.  
 > There are two breakevens, $407.50 and $492.50, and the result at expiration is zero at each.  
 > There is no cap on the gain as the stock rises; as it falls, the gain grows up to $40,750 if it reached $0.  
@@ -121,8 +122,7 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 ### 5. A covered call (AAPL shares at $270 with the $285 call, illustrative)
 
 > This is a covered call. You own 100 shares and sell someone the right to buy them from you at $285, which brings in cash now. If AAPL ends above $285, you sell at $285 and miss any rise past it.  
-> You receive $310 at the start, a net credit of $3.10 a share, for 100 shares.  
-> Option prices are quoted per share, and one contract covers 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares, so you receive $310 at the start ($3.10 a share).  
 > It assumes 100 shares held at $270.  
 > It gains if AAPL ends above $266.90 at expiration on Dec 18, 2026.  
 > The breakeven is $266.90, the $270 share price minus the $3.10 a share received.  
@@ -131,7 +131,7 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 > At expiration on Dec 18, 2026  
 > - Above $285, a $1,810 gain, wherever it ends in that range.  
 > - Between $266.90 and $285, the gain grows by $100 for every $1 higher, up to $1,810 at $285.  
-> - Below $266.90, a loss that shrinks as the stock rises, largest at $0 ($26,690).  
+> - Below $266.90, the loss grows by $100 for every $1 lower, up to $26,690 at $0.  
 > You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day.  
 
 ### The structure sentences not shown above

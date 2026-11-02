@@ -1,4 +1,4 @@
-// Every visitor-facing line of Build a Trade's "What this trade does" panel (Sam, 2026-11-02): DRAFT, held for Sam's approval
+// Every visitor-facing line of Build a Trade's "What this trade does" panel (Sam, 2026-11-02), approved by Sam on Nov 2
 // (docs/build_a_trade_wording.md renders it for five trades). The figures come from lib/tradeTeaching, worked out from the trade's
 // own legs in code, and no model writes any of it. No line has a colon (Sam, 2026-11-02). No line tells anyone to buy or sell; each says what the position is and does.
 
@@ -26,10 +26,8 @@ export const PANEL_TITLE = "What this trade does";
 /** Each line of the panel, filled from figures the code works out (money and prices already formatted). */
 export const LINES = {
   intro: (name: string, explain: string) => `This is ${name}. ${explain}`,
-  paySingle: (total: string, perShare: string) => `You pay ${total} at the start, ${perShare} a share, for 100 shares.`,
-  payDebit: (total: string, perShare: string) => `You pay ${total} at the start, a net debit of ${perShare} a share, for 100 shares.`,
-  receiveCredit: (total: string, perShare: string) => `You receive ${total} at the start, a net credit of ${perShare} a share, for 100 shares.`,
-  optionUnit: "Option prices are quoted per share, and one contract covers 100 shares.",
+  pay: (total: string, perShare: string) => `Option prices are quoted per share, and one contract covers 100 shares, so you pay ${total} at the start (${perShare} a share).`,
+  receive: (total: string, perShare: string) => `Option prices are quoted per share, and one contract covers 100 shares, so you receive ${total} at the start (${perShare} a share).`,
   coveredCallDoing: (sym: string, strike: string) =>
     `You own 100 shares and sell someone the right to buy them from you at ${strike}, which brings in cash now. If ${sym} ends above ${strike}, you sell at ${strike} and miss any rise past it.`,
   shares: (basis: string) => `It assumes 100 shares held at ${basis}.`,
@@ -58,7 +56,7 @@ export const LINES = {
 /** One stretch of stock prices at expiration and what the trade is worth there. */
 /** One stretch of stock prices at expiration and what the trade is worth there. Every breakeven bounds a stretch, so each stretch
  *  is all gain or all loss, told the way a person thinks: a gain grows as the stock moves the trade's way, and a loss is largest
- *  at the end farthest from the breakeven. */
+ *  at the end farthest from the breakeven (or grows to $0, when nothing floors it above $0). */
 export const REGIONS = {
   above: (level: string) => `Above ${level}`,
   between: (lo: string, hi: string) => `Between ${lo} and ${hi}`,
@@ -68,6 +66,7 @@ export const REGIONS = {
   gainGrowsTo: (range: string, perDollar: string, way: "higher" | "lower", most: string, at: string) =>
     `${range}, the gain grows by ${perDollar} for every $1 ${way}, up to ${most} at ${at}.`,
   lossShrinks: (range: string, way: "rises" | "falls", at: string, loss: string) => `${range}, a loss that shrinks as the stock ${way}, largest at ${at} (${loss}).`,
+  lossGrowsToZero: (range: string, perDollar: string, loss: string) => `${range}, the loss grows by ${perDollar} for every $1 lower, up to ${loss} at $0.`,
   lossGrowsOpen: (range: string, perDollar: string) => `${range}, the loss grows by ${perDollar} for every $1 higher, with no limit.`,
 };
 

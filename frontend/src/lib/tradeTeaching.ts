@@ -15,7 +15,7 @@ export interface TeachLeg {
 
 export interface TeachPanel {
   structure: StructureKey;
-  lines: string[];        // intro, cash, per-share quoting, bet, breakeven, cap, most it can lose
+  lines: string[];        // intro, cash (with how options are quoted), bet, breakeven, cap, most it can lose
   expirationLine: string;
   regions: string[];      // above the highest strike or breakeven first, then down
   closing: string;        // the trade can be closed before expiration
@@ -91,13 +91,9 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
   const cashPerShare = opts.reduce((s, l) => s + (l.side === "long" ? -l.price : l.price), 0);   // < 0: paid; > 0: received
   const lines: string[] = [structure === "covered_call" ? LINES.intro(name, LINES.coveredCallDoing(symbol, price(strikes[0]))) : LINES.intro(name, explain)];
 
-  // what is paid or received
-  if (cashPerShare < 0) {
-    lines.push(opts.length === 1 && !stock ? LINES.paySingle(money(cashPerShare * SHARES), perShare(cashPerShare)) : LINES.payDebit(money(cashPerShare * SHARES), perShare(cashPerShare)));
-  } else if (cashPerShare > 0) {
-    lines.push(LINES.receiveCredit(money(cashPerShare * SHARES), perShare(cashPerShare)));
-  }
-  if (cashPerShare !== 0) lines.push(LINES.optionUnit);
+  // what is paid or received, with how options are quoted
+  if (cashPerShare < 0) lines.push(LINES.pay(money(cashPerShare * SHARES), perShare(cashPerShare)));
+  else if (cashPerShare > 0) lines.push(LINES.receive(money(cashPerShare * SHARES), perShare(cashPerShare)));
   if (stock) lines.push(LINES.shares(price(stock.price)));
 
   // the shape: the value at $0, at each strike, and the slope past the highest
@@ -191,8 +187,9 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
       return farK === 0 ? REGIONS.gainGrows(label, perDollar, rising ? "higher" : "lower")
                         : REGIONS.gainGrowsTo(label, perDollar, rising ? "higher" : "lower", money(farV), price(farK));
     }
-    // a loss, shrinking toward the breakeven and largest at the other end
+    // a loss: with no floor above $0 it grows to $0; otherwise it shrinks toward the breakeven and is largest at the other end
     const [farK, farV] = fa < fb_ ? [a, fa] : [b, fb_];
+    if (farK === 0) return REGIONS.lossGrowsToZero(label, perDollar, money(farV));
     return REGIONS.lossShrinks(label, fa < fb_ ? "rises" : "falls", price(farK), money(farV));
   };
   if (strikes.length) regions.push(describe(top, null, fTop, null));

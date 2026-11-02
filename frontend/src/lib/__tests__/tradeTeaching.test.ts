@@ -29,8 +29,7 @@ describe("What this trade does, from the trade's own legs", () => {
     const p = teachPanel("BNY", EXAMPLES[0].legs, "2026-11-20");
     expect(p.lines).toEqual([
       LINES.intro(STRUCTURES.call_debit_spread.name, STRUCTURES.call_debit_spread.explain),
-      "You pay $360 at the start, a net debit of $3.60 a share, for 100 shares.",
-      LINES.optionUnit,
+      "Option prices are quoted per share, and one contract covers 100 shares, so you pay $360 at the start ($3.60 a share).",
       "It gains if BNY ends above $148.60 at expiration on Nov 20, 2026.",
       "The breakeven is $148.60, the $145 strike price plus the $3.60 a share paid.",
       "The gain stops growing at $155. Past it, the most the trade can make is $640.",
@@ -48,18 +47,18 @@ describe("What this trade does, from the trade's own legs", () => {
 
   it("states a single call, a put credit spread, a straddle and a covered call", () => {
     const call = teachPanel("NVDA", EXAMPLES[1].legs, "2026-12-18");
-    expect(call.lines.slice(1)).toEqual(["You pay $840 at the start, $8.40 a share, for 100 shares.", LINES.optionUnit,
+    expect(call.lines.slice(1)).toEqual(["Option prices are quoted per share, and one contract covers 100 shares, so you pay $840 at the start ($8.40 a share).",
       "It gains if NVDA ends above $228.40 at expiration on Dec 18, 2026.",
       "The breakeven is $228.40, the $220 strike price plus the $8.40 a share paid.", LINES.noCapUp, "The most it can lose is $840, the amount paid."]);
     expect(call.regions).toEqual(["Above $228.40, the gain grows by $100 for every $1 higher.",
       "Between $220 and $228.40, a loss that shrinks as the stock rises, largest at $220 ($840).",
       "Below $220, an $840 loss, wherever it ends in that range."]);
     const credit = teachPanel("KO", EXAMPLES[2].legs, "2026-12-18");
-    expect(credit.lines.slice(1)).toEqual(["You receive $140 at the start, a net credit of $1.40 a share, for 100 shares.", LINES.optionUnit,
+    expect(credit.lines.slice(1)).toEqual(["Option prices are quoted per share, and one contract covers 100 shares, so you receive $140 at the start ($1.40 a share).",
       "It gains if KO ends above $88.60 at expiration on Dec 18, 2026.", "The breakeven is $88.60, the $90 strike price minus the $1.40 a share received.",
       "You keep the full $140 if KO ends above $90.", "The most it can lose is $360, if it ends at or below $85."]);
     const straddle = teachPanel("TSLA", EXAMPLES[3].legs, "2026-11-20");
-    expect(straddle.lines.slice(1)).toEqual(["You pay $4,250 at the start, a net debit of $42.50 a share, for 100 shares.", LINES.optionUnit,
+    expect(straddle.lines.slice(1)).toEqual(["Option prices are quoted per share, and one contract covers 100 shares, so you pay $4,250 at the start ($42.50 a share).",
       "It gains if TSLA ends below $407.50 or above $492.50 at expiration on Nov 20, 2026, a big enough move either way.",
       "There are two breakevens, $407.50 and $492.50, and the result at expiration is zero at each.",
       "There is no cap on the gain as the stock rises; as it falls, the gain grows up to $40,750 if it reached $0.", "The most it can lose is $4,250, the amount paid."]);
@@ -69,11 +68,11 @@ describe("What this trade does, from the trade's own legs", () => {
       "Below $407.50, the gain grows by $100 for every $1 lower."]);
     const covered = teachPanel("AAPL", EXAMPLES[4].legs, "2026-12-18");
     expect(covered.lines).toEqual(["This is a covered call. You own 100 shares and sell someone the right to buy them from you at $285, which brings in cash now. If AAPL ends above $285, you sell at $285 and miss any rise past it.",
-      "You receive $310 at the start, a net credit of $3.10 a share, for 100 shares.", LINES.optionUnit, "It assumes 100 shares held at $270.",
+      "Option prices are quoted per share, and one contract covers 100 shares, so you receive $310 at the start ($3.10 a share).", "It assumes 100 shares held at $270.",
       "It gains if AAPL ends above $266.90 at expiration on Dec 18, 2026.", "The breakeven is $266.90, the $270 share price minus the $3.10 a share received.",
       "The most it can make is $1,810, if AAPL ends at or above $285.",
       "If AAPL fell to $0, you would lose $26,690, which is $310 less than owning the shares alone."]);
-    expect(covered.regions[2]).toBe("Below $266.90, a loss that shrinks as the stock rises, largest at $0 ($26,690).");
+    expect(covered.regions[2]).toBe("Below $266.90, the loss grows by $100 for every $1 lower, up to $26,690 at $0.");
   });
 
   it("a call credit spread keeps its credit below the lower strike", () => {
@@ -92,7 +91,8 @@ describe("What this trade does, from the trade's own legs", () => {
     for (const legs of [...EXAMPLES.map((e) => e.legs), ...more]) {
       const p = teachPanel("KO", legs, "2026-12-18");
       for (const s of [...p.lines, p.expirationLine, ...p.regions, p.closing]) expect(s).not.toContain(":");
-      expect(p.lines.filter((l) => l === LINES.optionUnit)).toHaveLength(1);
+      expect(p.lines.filter((l) => l.startsWith("Option prices are quoted per share, and one contract covers 100 shares, so you "))).toHaveLength(1);
+      expect([...p.lines, ...p.regions].join(" ")).not.toContain("for 100 shares");
       const num = (x: string) => Number(x.replace(/,/g, ""));
       const stretches = p.regions.map((r) => r.match(/^(Above|Below|Between) \$([\d,]*\d(?:\.\d+)?)(?: and \$([\d,]*\d(?:\.\d+)?))?/)!);
       const bounds = new Set(stretches.flatMap((m) => [m[2], m[3]]).filter(Boolean));
@@ -112,7 +112,8 @@ describe("What this trade does, from the trade's own legs", () => {
     for (const e of EXAMPLES) {
       const p = teachPanel(e.symbol, e.legs, e.expiration);
       const text = [...p.lines, ...p.regions].join(" ");
-      for (const m of text.matchAll(/up to \$([\d,]+) at \$([\d.]+)/g)) expect(Math.round(payoffAt(e.legs, Number(m[2])))).toBe(Number(m[1].replace(/,/g, "")));
+      for (const m of text.matchAll(/gain grows by \$[\d,]+ for every \$1 \w+, up to \$([\d,]+) at \$([\d.]+)/g)) expect(Math.round(payoffAt(e.legs, Number(m[2])))).toBe(Number(m[1].replace(/,/g, "")));
+      for (const m of text.matchAll(/loss grows by \$[\d,]+ for every \$1 lower, up to \$([\d,]+) at \$0/g)) expect(Math.round(-payoffAt(e.legs, 0))).toBe(Number(m[1].replace(/,/g, "")));
       for (const m of text.matchAll(/largest at \$([\d.]+) \(\$([\d,]+)\)/g)) expect(Math.round(-payoffAt(e.legs, Number(m[1])))).toBe(Number(m[2].replace(/,/g, "")));
     }
   });
@@ -127,13 +128,11 @@ describe("What this trade does, from the trade's own legs", () => {
 });
 
 describe("each term is explained at its first use in the panel only", () => {
-  it("keeps the first strike price, net debit, expiration and breakeven and leaves the later ones plain", async () => {
+  it("keeps the first strike price, expiration and breakeven and leaves the later ones plain", async () => {
     const { firstUses } = await import("@/components/TradeTeachingPanel");
     const p = teachPanel("BNY", EXAMPLES[0].legs, "2026-11-20");
     const keyed = firstUses([...p.lines, p.expirationLine, ...p.regions]).flat().filter((s) => s.key).map((s) => s.key);
     expect(keyed).toEqual([...new Set(keyed)]);                       // no term twice
-    expect(keyed).toEqual(expect.arrayContaining(["strike", "net-debit", "expiration", "breakeven"]));
-    const credit = teachPanel("KO", EXAMPLES[2].legs, "2026-12-18");
-    expect(firstUses(credit.lines).flat().some((s) => s.key === "net-credit")).toBe(true);
+    expect(keyed).toEqual(expect.arrayContaining(["strike", "expiration", "breakeven"]));
   });
 });
