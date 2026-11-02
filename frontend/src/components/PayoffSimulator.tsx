@@ -9,6 +9,7 @@ import {
   ResponsiveContainer, ReferenceLine, ReferenceDot,
 } from "recharts";
 import { priceAtX } from "@/lib/tradeMath";
+import { scrubValue, scrubWhen, sliderYears } from "@/lib/payoffScrub";
 import Callout from "@/components/Callout";
 import { fmtDate as fmtOneDate } from "@/lib/dates";
 import {
@@ -26,7 +27,7 @@ type ChartPoint = {
   pnl: number;
   pnl_pos: number | null;   // pnl when >= 0, else null  → green line
   pnl_neg: number | null;   // pnl when <  0, else null  → red line
-  expiry?: number;          // profit or loss at expiration at this price (the scrub's headline)
+  expiry?: number;          // profit or loss at expiration at this price (the expiration reference line)
 };
 
 /**
@@ -89,7 +90,8 @@ export interface PayoffSimulatorProps {
   xMax: number;              // x-axis upper bound, already fallback-resolved by caller
   earningsMs: number | null; // for the IV-crush caveat; null = no caveat
   ivContext?: { expiration: string | null; chainDate: string | null };  // the chain the IVs came from
-  pricing?: string | null;   // "priced at $X from the <date> options data; the stock is now $Y (last trade ...)", from the fact block
+  pricing?: string | null;   // "priced at $X from the <date> options data; the stock is now $Y (<time>, delayed N min)", from the fact block
+  earlierSession?: string | null;   // "The option prices are from the <date> session; the stock price is from <date>." (lib/freshness)
   usingIVFallback: boolean;  // true if any IV came from BS_IV_DEFAULT
   sdFailed: boolean;         // true if strategyData fetch failed (different warning message)
 }
@@ -98,7 +100,7 @@ export interface PayoffSimulatorProps {
 
 export default function PayoffSimulator({
   legs, spot, currentPrice, symbol, expirationMs, mult, xMin, xMax,
-  earningsMs, ivContext, pricing, usingIVFallback, sdFailed,
+  earningsMs, ivContext, pricing, earlierSession, usingIVFallback, sdFailed,
 }: PayoffSimulatorProps) {
 
   const nowMs = Date.now();
@@ -112,7 +114,7 @@ export default function PayoffSimulator({
     setScrubPrice(spot);
   }, [spot]);
 
-  const T_slider = Math.max(0, (totalDays - dateOffset) / 365.25);
+  const T_slider = sliderYears(totalDays, dateOffset);
   const selectedDateMs = nowMs + dateOffset * 86400000;
   const selectedDateStr = fmtOneDate(selectedDateMs) ?? "";
   const daysLeft = Math.max(0, totalDays - dateOffset);
@@ -149,7 +151,10 @@ export default function PayoffSimulator({
   }, [legs, xMin, xMax, daysToExpiry, mult]);
 
   const effectivePrice = scrubPrice;
-  const expiryPnlAtScrub = multiLegPayoffPS(legs, scrubPrice) * mult;             // the headline: at expiration, intrinsic value only
+  // the headline, the dot and its label: the curve for the slider's date (at expiration, intrinsic value), never the expiration line
+  // on an earlier date (Sam, 2026-11-02: BNY's figure read the expiration line with the slider on Nov 10)
+  const pnlAtScrub = scrubValue(legs, scrubPrice, T_slider, mult);
+  const scrubWhenLabel = scrubWhen(daysLeft, selectedDateMs);
 
   // Robinhood-style scrub: a finger dragged along the chart (or a pointer moved over it) sets the price; the plot starts after the
   // y-axis (PLOT_LEFT) and ends before the right margin (PLOT_RIGHT), as the LineChart below lays it out
@@ -189,6 +194,7 @@ export default function PayoffSimulator({
         <span className="text-xs text-muted-foreground"><Explained text="Black-Scholes projection" /></span>
       </div>
       {pricing && <p className="text-xs text-muted-foreground">{symbol} {pricing}</p>}
+      {earlierSession && <p className="text-xs text-muted-foreground" data-testid="sim-earlier-session">{earlierSession}</p>}
 
       {/* IV disclosure — always show what IV the simulation holds constant */}
       {ivLabel && !sdFailed && !usingIVFallback && (
@@ -212,13 +218,13 @@ export default function PayoffSimulator({
       {/* Hero simulated P&L */}
       <div className="py-1">
         <p className="text-xs text-muted-foreground mb-1.5" data-testid="scrub-label">
-          {symbol} at ${scrubPrice.toFixed(2)} <Explained text="at expiration" />
+          {symbol} at ${scrubPrice.toFixed(2)} {daysLeft <= 0 ? <Explained text="at expiration" /> : scrubWhenLabel}
         </p>
         <p className={[
           "text-4xl font-bold font-mono tabular-nums tracking-tight leading-none",
-          expiryPnlAtScrub >= 0 ? "text-success" : "text-destructive",
+          pnlAtScrub >= 0 ? "text-success" : "text-destructive",
         ].join(" ")} data-testid="scrub-pnl">
-          {`${expiryPnlAtScrub >= 0 ? "+" : "\u2212"}$${Math.abs(expiryPnlAtScrub).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          {`${pnlAtScrub >= 0 ? "+" : "\u2212"}$${Math.abs(pnlAtScrub).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
         </p>
       </div>
 
@@ -284,15 +290,15 @@ export default function PayoffSimulator({
                 />
               )}
 
-              {/* At expiration: the curve the scrub's headline reads */}
+              {/* At expiration: the reference line the curve becomes on the expiration date */}
               <Line dataKey="expiry" {...payoffMark("expiry")} dot={false} activeDot={false} type="linear" isAnimationActive={false} />
 
-              {/* Price scrubber: a line and a marker on the expiration curve */}
+              {/* Price scrubber: a line and a marker on the curve for the slider's date */}
               <ReferenceLine
                 x={effectivePrice}
                 {...payoffMark("scrubber")}
               />
-              <ReferenceDot x={effectivePrice} y={expiryPnlAtScrub} r={5} fill={payoffMark("scrubber").stroke} stroke="hsl(var(--background))" strokeWidth={2} />
+              <ReferenceDot x={effectivePrice} y={pnlAtScrub} r={5} fill={payoffMark("scrubber").stroke} stroke="hsl(var(--background))" strokeWidth={2} />
 
               {/* Green: profit zone (pnl >= 0) */}
               <Line

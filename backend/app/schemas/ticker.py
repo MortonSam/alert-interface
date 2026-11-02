@@ -147,7 +147,8 @@ class BatchEnrichRead(BaseModel):
     change: float | None = None
     change_pct: float | None = None
     quote_ts: int | None = None       # Unix UTC (exchange last-trade time, or the session's close when quote_basis is close)
-    quote_basis: str = "last_trade"   # last_trade | close
+    quote_basis: str = "last_trade"   # last_trade | close | delayed
+    delay_minutes: int | None = None  # the delayed quote's stated delay, rendered by the page
     expected_move_pct: float | None = None
     earnings_date: str | None = None
     rv_rank: float | None = None

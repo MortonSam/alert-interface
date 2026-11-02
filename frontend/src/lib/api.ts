@@ -819,7 +819,8 @@ export interface BatchEnrichItem {
   change: number | null;
   change_pct: number | null;
   quote_ts: number | null;
-  quote_basis?: "last_trade" | "close";
+  quote_basis?: "last_trade" | "close" | "delayed";
+  delay_minutes?: number | null;   // the delayed quote's stated delay, rendered by the page
   expected_move_pct: number | null;
   earnings_date: string | null;
   rv_rank: number | null;
@@ -966,6 +967,8 @@ export interface ThesisDraftRead {
     price_as_of: string | null;      // ISO last-trade time of the quote
     options_as_of?: string | null;   // YYYY-MM-DD of the options chain the draft used; current_price is that chain's spot
     quote_price?: number | null;     // the stock now: the quote, whose last-trade time is price_as_of
+    quote_basis?: "last_trade" | "close" | "delayed" | null;   // what the quote's time marks (backend services/live_data.now_quote)
+    delay_minutes?: number | null;   // the delayed quote's stated delay, rendered by the page
     span_days?: number | null;       // days from options_as_of to expiration_used: the window the implied move covers
     atm_strike: number | null;
     earnings_date: string | null;
@@ -1045,7 +1048,8 @@ export interface AlertPickLedgerItem {
   entry_price: number;
   current_price: number | null;
   quote_ts: number | null;
-  quote_basis?: "last_trade" | "close";
+  quote_basis?: "last_trade" | "close" | "delayed";
+  delay_minutes?: number | null;
   unrealized_move_pct: number | null;
   cost_to_enter: number | null;
   max_loss: number | null;

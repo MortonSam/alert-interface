@@ -24,6 +24,13 @@ export function fmtDate(x: string | number | Date | null | undefined): string | 
   return p.d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: p.dayOnly ? "UTC" : MARKET_TZ });
 }
 
+/** "2026-10-15": the New York day of an instant (a calendar date stays itself), for comparing two dates' days. */
+export function isoDayNY(x: string | number | Date | null | undefined): string | null {
+  const p = parse(x);
+  if (!p) return null;
+  return p.d.toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: p.dayOnly ? "UTC" : MARKET_TZ });
+}
+
 /** "Oct 15, 2026, 4:00 PM ET" */
 export function fmtDateTime(x: string | number | Date | null | undefined): string | null {
   const p = parse(x);

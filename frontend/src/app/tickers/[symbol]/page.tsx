@@ -2746,7 +2746,7 @@ export default function TickerPage() {
               } : null,
               typical: storedTypical(reactionSummary),
               quote: quote && quote.price != null && quote.timestamp != null
-                ? { price: quote.price, asOf: `${quote.quote_basis === "close" ? "close" : "last trade"} on ${fmtDayUnix(quote.timestamp)}` }
+                ? { price: quote.price, asOf: quoteAsOf(quote.timestamp, quote.quote_basis, quote.delay_minutes) ?? "" }
                 : null,
             })} />
           )}

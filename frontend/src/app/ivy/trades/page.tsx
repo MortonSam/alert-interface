@@ -124,7 +124,7 @@ function PickCard({
             <span className="font-mono font-medium">${pick.current_price.toFixed(2)}</span>
             {!isClosed && pick.quote_ts != null && (
               <span className="text-[10px] text-muted-foreground/50 ml-1">
-                {quoteAsOf(pick.quote_ts, pick.quote_basis)}
+                {quoteAsOf(pick.quote_ts, pick.quote_basis, pick.delay_minutes)}
               </span>
             )}
           </div>

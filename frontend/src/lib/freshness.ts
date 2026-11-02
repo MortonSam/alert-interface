@@ -2,7 +2,7 @@
 // Nothing here types a cadence or a delay: "nightly", "once a day" and the price source come from the record, and
 // every quote and chain is named by its own date.
 import type { Cadence } from "@/lib/api";
-import { fmtDate as fmtOneDate, fmtDateTime } from "@/lib/dates";
+import { fmtDate as fmtOneDate, fmtDateTime, isoDayNY } from "@/lib/dates";
 
 const MARKET_TZ = "America/New_York";
 
@@ -151,19 +151,38 @@ export function priceAsOfPhrase(priceAsOf: string | null | undefined): string | 
 }
 
 /**
- * Build a Trade's price line: the spot the options were priced at, dated by the chain, and the stock now,
- * dated by its own last trade. Never a request-time stamp.
- * "priced at $339.85 from the 2026-09-28 options data; the stock is now $332.35 (last trade 09:31:00)"
+ * Build a Trade's price line: the spot the options were priced at, dated by the chain, and the stock now, dated by its own quote
+ * time and named as every page names it (a delayed quote by its stated delay, a close as a close). Never a request-time stamp.
+ * "priced at $145.20 from the Oct 30, 2026 options data; the stock is now $147.11 (Nov 2, 2026, 11:42 AM ET, delayed N min)"
  */
 export function pricedAtLine(
-  fb: { current_price: number; options_as_of?: string | null; quote_price?: number | null; price_as_of?: string | null },
+  fb: { current_price: number; options_as_of?: string | null; quote_price?: number | null; price_as_of?: string | null;
+        quote_basis?: QuoteBasis | string | null; delay_minutes?: number | null },
   fmtTime: (iso: string | null | undefined) => string | null,
 ): string {
   const source = fb.options_as_of ? `from the ${fmtOneDate(fb.options_as_of) ?? fb.options_as_of} options data` : "from the latest options data on file";
   const head = `priced at $${fb.current_price.toFixed(2)} ${source}`;
   if (fb.quote_price == null) return head;
   const t = fmtTime(fb.price_as_of);
-  return `${head}; the stock is now $${fb.quote_price.toFixed(2)}${t ? ` (last trade ${t})` : ""}`;
+  let when: string | null;
+  if (fb.quote_basis === "delayed") {
+    const delay = delayPhrase(fb.delay_minutes) ?? QUOTE_BASIS_LABELS.delayed;
+    when = t ? `${t}, ${delay}` : delay;
+  } else if (fb.quote_basis === "close") {
+    when = t ? `${t} ${QUOTE_BASIS_LABELS.close}` : QUOTE_BASIS_LABELS.close;
+  } else {
+    when = t ? `${QUOTE_BASIS_LABELS.last_trade} ${t}` : null;
+  }
+  return `${head}; the stock is now $${fb.quote_price.toFixed(2)}${when ? ` (${when})` : ""}`;
+}
+
+/** Said plainly when the option prices are from an earlier session than the stock price beside them:
+ *  "The option prices are from the Oct 30, 2026 session; the stock price is from Nov 2, 2026." Null when they share a day. */
+export function earlierSessionLine(fb: { options_as_of?: string | null; price_as_of?: string | null; quote_price?: number | null }): string | null {
+  if (fb.quote_price == null) return null;
+  const optionsDay = isoDayNY(fb.options_as_of), priceDay = isoDayNY(fb.price_as_of);
+  if (!optionsDay || !priceDay || optionsDay >= priceDay) return null;
+  return `The option prices are from the ${fmtOneDate(optionsDay)} session; the stock price is from ${fmtOneDate(priceDay)}.`;
 }
 
 /**

@@ -48,11 +48,12 @@ from app.services.ivy_outcomes import ivy_outcome_label
 MARKET_DATA_UNAVAILABLE = "Market data for this ticker could not be fetched just now. Try again in a minute."
 DRAFT_UNAVAILABLE = "The draft could not be generated just now. Try again in a minute."
 from app.services.anthropic_client import AnthropicClient
-from app.services import chain_store, quote_cache
+from app.services import chain_store
 from app.services.basis_exclusion import basis_mismatch_dates, excluded_note
 from app.services.corporate_actions import load_action_dates
 from app.services.price_history_exclusion import EXCLUSION_REASON, is_excluded
 from app.services.finnhub_client import FinnhubClient, VISITOR
+from app.services import live_data
 from app.services.price_freshness import assess_quote
 from app.services.rv_store import get_latest_rv
 from app.services.recommendations import analyst_lean as lean_from_recommendations
@@ -157,6 +158,29 @@ def _canonicalize_spread(
     return (lo, hi) if direction == "bullish" else (hi, lo)
 
 
+async def _price_now(db: AsyncSession | None, sym: str, use_quote_cache: bool = True) -> tuple[float | None, str | None]:
+    """(the price now, its quote time) from the live layer's delayed quote first (services/live_data.now_quote), as every page shows
+    it; (None, None) when nothing came. use_quote_cache=False skips the shared cache (write paths that need a fresh price)."""
+    try:
+        if use_quote_cache:
+            quote = await live_data.now_quote(db, sym)
+        else:
+            live = await live_data.served_quote(db, sym) if db is not None else None
+            if live is None:
+                finnhub = FinnhubClient(priority=VISITOR)
+                try:
+                    live = await finnhub.get_quote(sym)
+                finally:
+                    await finnhub.close()
+            quote = live or {}
+    except Exception:
+        return None, None
+    p = quote.get("c")
+    if not p or float(p) <= 0:
+        return None, None
+    return float(p), _quote_time(quote.get("t"))
+
+
 async def _compute_option_mark(
     thesis: Thesis,
     loop: asyncio.AbstractEventLoop,
@@ -218,27 +242,8 @@ async def _compute_option_mark(
                 mark_note = f"Expired {fmt_day(exp_date)}, settled at official close"
                 price_as_of = options_as_of = exp_date.isoformat()
             else:
-                # Fallback: live quote with "intrinsic" label (history unavailable)
-                cached = quote_cache.get(sym) if use_quote_cache else None
-                if cached is not None and cached.get("price"):
-                    current_price = cached["price"]
-                    price_as_of = _quote_time(cached.get("timestamp"))
-                else:
-                    finnhub = FinnhubClient(priority=VISITOR)
-                    try:
-                        quote = await finnhub.get_quote(sym)
-                        p = quote.get("c")
-                        if p and float(p) > 0:
-                            current_price = float(p)
-                            change = float(quote.get("d")) if quote.get("d") is not None else None
-                            change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
-                            price_as_of = _quote_time(quote.get("t"))
-                            quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
-                            "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
-                    except Exception:
-                        pass
-                    finally:
-                        await finnhub.close()
+                # Fallback: the price now (the live layer's delayed quote first) with "intrinsic" label (history unavailable)
+                current_price, price_as_of = await _price_now(db, sym, use_quote_cache)
                 mark_basis = "intrinsic"
                 mark_note = f"Expired {fmt_day(exp_date)}, expiration-day close unavailable, using live price"
 
@@ -256,26 +261,7 @@ async def _compute_option_mark(
     else:
         # Live quotes for unexpired options
         if current_price is None:
-            cached = quote_cache.get(sym) if use_quote_cache else None
-            if cached is not None and cached.get("price"):
-                current_price = cached["price"]
-                price_as_of = _quote_time(cached.get("timestamp"))
-            else:
-                finnhub = FinnhubClient(priority=VISITOR)
-                try:
-                    quote = await finnhub.get_quote(sym)
-                    p = quote.get("c")
-                    if p and float(p) > 0:
-                        current_price = float(p)
-                        change = float(quote.get("d")) if quote.get("d") is not None else None
-                        change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
-                        price_as_of = _quote_time(quote.get("t"))
-                        quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
-                        "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
-                except Exception:
-                    pass
-                finally:
-                    await finnhub.close()
+            current_price, price_as_of = await _price_now(db, sym, use_quote_cache)
 
         # Mark from ingested chain
         exp_str = exp_date.isoformat()
@@ -353,10 +339,9 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
 
     # ── 1. Parallel market data fetch ─────────────────────────────────────────
     action_dates = (await load_action_dates(db, [sym])).get(sym, set())
-    finnhub = FinnhubClient(priority=VISITOR)
     try:
         quote, rv_raw = await asyncio.gather(
-            finnhub.get_quote(sym),
+            live_data.now_quote(db, sym),           # the delayed quote every page shows, never Finnhub's alone (2026-11-02)
             loop.run_in_executor(
                 None, lambda: price_bars.realized_vol_sync(sym, action_dates=action_dates),      # the stored Intrinio bars, not Yahoo (2026-10-12)
             ),
@@ -364,8 +349,6 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     except Exception as exc:
         print(f"[draft] {sym}: market data fetch failed: {redact(exc)}", flush=True)
         raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
-    finally:
-        await finnhub.close()
 
     # A stale quote must never reach the model: same test the quote endpoint uses.
     q = assess_quote(float(quote.get("c") or 0) or None, int(quote["t"]) if quote.get("t") else None)
@@ -582,6 +565,8 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
         "price_as_of": (
             datetime.fromtimestamp(q.traded_on_ts, tz=timezone.utc).isoformat() if q.traded_on_ts else None
         ),
+        "quote_basis": quote.get("basis", "last_trade"),       # delayed, last_trade or close: what the quote's time marks
+        "delay_minutes": quote.get("delay_minutes"),           # the source's stated delay, rendered by the page
         "chain_from_ingested": chain_from_ingested,
         "draft_spot": draft_spot,
     }
@@ -759,6 +744,8 @@ async def _run_draft_generation(
         "current_price":             round(current_price, 2),     # the spot the options were priced at: the chain's own
         "price_as_of":               price_as_of,                 # the live quote's last-trade time (see quote_price)
         "quote_price":               round(data["current_price"], 2) if data.get("current_price") else None,   # the stock now
+        "quote_basis":               data.get("quote_basis"),     # delayed, last_trade or close (services/live_data.now_quote)
+        "delay_minutes":             data.get("delay_minutes"),   # the delayed quote's stated delay, rendered by the page
         "atm_strike":                atm_strike,
         "earnings_date":             data.get("earnings_shown") or earnings_str,
         "earnings_source":           data.get("earnings_source"),
@@ -2006,40 +1993,17 @@ async def list_alert_picks(
     price_map: dict[str, float | None] = {}
     ts_map: dict[str, int | None] = {}
     basis_map: dict[str, str] = {}
+    delay_map: dict[str, int | None] = {}
     if open_symbols:
-        to_fetch: list[str] = []
-        for sym in open_symbols:
-            cached = quote_cache.get(sym)
-            if cached is not None:
-                price_map[sym] = cached.get("price")
-                ts_map[sym] = cached.get("timestamp")
-                basis_map[sym] = cached.get("basis", "last_trade")
-            else:
-                to_fetch.append(sym)
-
-        if to_fetch:
-            finnhub = FinnhubClient(priority=VISITOR)
-            try:
-                raw_quotes = await asyncio.gather(
-                    *(finnhub.get_quote(s) for s in to_fetch),
-                    return_exceptions=True,
-                )
-            finally:
-                await finnhub.close()
-
-            for sym, q in zip(to_fetch, raw_quotes):
-                if isinstance(q, BaseException):
-                    price_map[sym] = None
-                else:
-                    price = float(q.get("c") or 0) or None
-                    change = float(q.get("d")) if q.get("d") is not None else None
-                    change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-                    ts = int(q["t"]) if q.get("t") else None
-                    quote_cache.set(sym, {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts,
-                                         "basis": q.get("basis", "last_trade")})
-                    price_map[sym] = price
-                    ts_map[sym] = ts
-                    basis_map[sym] = q.get("basis", "last_trade")
+        got = await asyncio.gather(*(live_data.now_quote(db, s) for s in open_symbols), return_exceptions=True)   # the delayed quote first
+        for sym, q in zip(open_symbols, got):
+            if isinstance(q, BaseException) or not q:
+                price_map[sym] = None
+                continue
+            price_map[sym] = float(q.get("c") or 0) or None
+            ts_map[sym] = int(q["t"]) if q.get("t") else None
+            basis_map[sym] = q.get("basis", "last_trade")
+            delay_map[sym] = q.get("delay_minutes")
 
     # A stale quote is not a current price: withhold it, as the quote endpoints do.
     for sym in list(price_map):
@@ -2167,6 +2131,7 @@ async def list_alert_picks(
             current_price=current,
             quote_ts=ts_map.get(r.symbol) if not (is_closed or is_void) else None,
             quote_basis=basis_map.get(r.symbol, "last_trade"),
+            delay_minutes=delay_map.get(r.symbol),
             unrealized_move_pct=unrealized,
             cost_to_enter=float(r.cost_to_enter) if r.cost_to_enter else None,
             max_loss=float(r.max_loss) if r.max_loss else None,
@@ -2226,14 +2191,11 @@ async def draft_alternative(
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
     # ── 1. Finnhub quote ─────────────────────────────────────────────────────
-    finnhub = FinnhubClient(priority=VISITOR)
     try:
-        quote = await finnhub.get_quote(sym)
+        quote = await live_data.now_quote(db, sym)            # the delayed quote every page shows (2026-11-02)
     except Exception as exc:
         print(f"[draft] {sym}: market data fetch failed: {redact(exc)}", flush=True)
         raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
-    finally:
-        await finnhub.close()
 
     current_price: float | None = float(quote.get("c") or 0) or None
     if not current_price:
@@ -2598,17 +2560,7 @@ async def create_thesis(
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
 
     # ── Capture entry_price from live quote ───────────────────────────────────
-    entry_price: float | None = None
-    finnhub = FinnhubClient(priority=VISITOR)
-    try:
-        quote = await finnhub.get_quote(sym)
-        p = quote.get("c")
-        if p and float(p) > 0:
-            entry_price = float(p)
-    except Exception:
-        pass
-    finally:
-        await finnhub.close()
+    entry_price, _ = await _price_now(db, sym, use_quote_cache=False)     # the price now, the live layer's delayed quote first
 
     # ── Capture entry_premium from live chain (if option leg specified) ───────
     entry_premium: float | None = None
@@ -2690,7 +2642,7 @@ async def stock_mark_thesis(
 ) -> ThesisStockMarkRead:
     """Compute live price mark for a stock-only thesis (no option leg).
 
-    Marks against the live Finnhub quote — never the options chain.
+    Marks against the price now (the live layer's delayed quote first, services/live_data.now_quote), never the options chain.
 
     If the thesis is past its target_date and still open, auto-resolves it in
     the same request using the live price.  Sets status to RESOLVED (with
@@ -2716,26 +2668,8 @@ async def stock_mark_thesis(
     sym   = thesis.ticker.symbol
     as_of = datetime.now(tz=timezone.utc).isoformat()
 
-    # ── Fetch live stock price (60s quote cache) ───────────────────────────────
-    current_price: float | None = None
-    cached = quote_cache.get(sym)
-    if cached is not None and cached.get("price"):
-        current_price = cached["price"]
-    else:
-        finnhub = FinnhubClient(priority=VISITOR)
-        try:
-            quote = await finnhub.get_quote(sym)
-            p = quote.get("c")
-            if p and float(p) > 0:
-                current_price = float(p)
-                change = float(quote.get("d")) if quote.get("d") is not None else None
-                change_pct = float(quote.get("dp")) if quote.get("dp") is not None else None
-                quote_cache.set(sym, {"price": current_price, "change": change, "change_pct": change_pct,
-                                     "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
-        except Exception:
-            pass
-        finally:
-            await finnhub.close()
+    # ── The stock price now: the live layer's delayed quote first (services/live_data.now_quote) ───────────────
+    current_price, _ = await _price_now(db, sym)
 
     entry  = float(thesis.entry_price)  if thesis.entry_price  else None
     target = float(thesis.price_target) if thesis.price_target else None
@@ -2849,16 +2783,7 @@ async def resolve_thesis(
     if payload.price_override is not None:
         resolution_price = float(payload.price_override)
     else:
-        finnhub = FinnhubClient(priority=VISITOR)
-        try:
-            quote = await finnhub.get_quote(thesis.ticker.symbol)
-            p = quote.get("c")
-            if p and float(p) > 0:
-                resolution_price = float(p)
-        except Exception:
-            pass
-        finally:
-            await finnhub.close()
+        resolution_price, _ = await _price_now(db, thesis.ticker.symbol, use_quote_cache=False)
 
     if resolution_price is None:
         needs_manual = True

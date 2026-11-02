@@ -4,7 +4,7 @@ import { estimatesShown } from "@/lib/licensedEstimates";
 import Explained from "@/components/Explained";
 import { cheaperCostLine, expensiveOptionsLine, expensiveOptionsPrompt } from "@/lib/cheaperDraft";
 import { volRegime } from "@/lib/encodings/volRegime";
-import { impliedSpanPhrase, optionsCadencePhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
+import { earlierSessionLine, impliedSpanPhrase, optionsCadencePhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
 import { useIvyRule } from "@/lib/useIvyRule";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -194,6 +194,7 @@ function buildDraftSimProps(draft: ThesisDraftRead) {
     earningsMs: fb.earnings_date ? dateMs(fb.earnings_date) : null,
     ivContext: { expiration: fb.expiration_used, chainDate: fb.options_as_of ?? null },
     pricing: pricedAtLine(fb, fmtTimestamp),
+    earlierSession: earlierSessionLine(fb),
     usingIVFallback,
     sdFailed: false,
   };
@@ -474,7 +475,8 @@ function DraftDisplay({
 
       {/* G) Fact grid */}
       <div className="border border-border/60 bg-transparent rounded-md p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-2.5 text-xs text-muted-foreground">
-        <span className="sm:col-span-2">Price: <span className="text-foreground">{pricedAtLine(fb, fmtTimestamp)}</span></span>
+        <span className="sm:col-span-2">Price: <span className="text-foreground">{pricedAtLine(fb, fmtTimestamp)}</span>
+          {earlierSessionLine(fb) && <span className="block mt-1" data-testid="earlier-session">{earlierSessionLine(fb)}</span>}</span>
         <span>
           <Explained text="Implied move:" />{" "}
           <span className="font-mono text-foreground">

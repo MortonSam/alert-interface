@@ -112,6 +112,18 @@ describe("priced from the options data, the stock now from its quote (audit item
     expect(pricedAtLine(fb, () => null)).toBe("priced at $339.85 from the Sep 28, 2026 options data; the stock is now $332.35");
     expect(pricedAtLine({ current_price: 339.85, options_as_of: "2026-09-28" }, () => "09:31:00")).toBe("priced at $339.85 from the Sep 28, 2026 options data");
     expect(pricedAtLine({ current_price: 339.85 }, () => null)).not.toMatch(/\d{4}-\d{2}-\d{2}/);   // no date it does not have
+    // the delayed quote every page shows, named by its stated delay, and a close as a close (Sam, 2026-11-02: BNY read "last trade Oct 30"
+    // on Monday Nov 2 in market hours)
+    const bny = { current_price: 145.2, options_as_of: "2026-10-30", quote_price: 147.11, price_as_of: "2026-11-02T16:42:00+00:00",
+                  quote_basis: "delayed", delay_minutes: 15 };
+    expect(pricedAtLine(bny, () => "Nov 2, 2026, 11:42 AM ET")).toBe(
+      "priced at $145.20 from the Oct 30, 2026 options data; the stock is now $147.11 (Nov 2, 2026, 11:42 AM ET, delayed 15 min)");
+    expect(pricedAtLine({ ...bny, quote_basis: "close" }, () => "Oct 30, 2026, 4:00 PM ET")).toBe(
+      "priced at $145.20 from the Oct 30, 2026 options data; the stock is now $147.11 (Oct 30, 2026, 4:00 PM ET close)");
+    const { earlierSessionLine } = await import("@/lib/freshness");
+    expect(earlierSessionLine(bny)).toBe("The option prices are from the Oct 30, 2026 session; the stock price is from Nov 2, 2026.");
+    expect(earlierSessionLine({ ...bny, options_as_of: "2026-11-02" })).toBeNull();          // the same session: nothing to say
+    expect(earlierSessionLine({ ...bny, quote_price: null })).toBeNull();
     // item 7: the implied move is labelled with its span, from the data; history is one-day and never counted against it
     expect(impliedSpanPhrase("2026-11-20", 53, "2026-09-28")).toBe("through Nov 20, 2026, 53 days from the Sep 28, 2026 options data");
     expect(impliedSpanPhrase("2026-11-20", 1, "2026-11-19")).toBe("through Nov 20, 2026, 1 day from the Nov 19, 2026 options data");

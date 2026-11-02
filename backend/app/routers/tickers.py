@@ -457,36 +457,11 @@ async def batch_enrich(
                     edate.isoformat() if hasattr(edate, "isoformat") else str(edate)
                 )
 
-    # ── 2. Batch quote fetch (Finnhub, 60s cache) ───────────────────────────
+    # ── 2. The price now: the live layer's delayed quote first, as every page shows it (services/live_data.now_quote) ──
     quotes: dict[str, dict] = {}
-    to_fetch: list[str] = []
-    for sym in syms:
-        cached = quote_cache.get(sym)
-        if cached is not None:
-            quotes[sym] = cached
-        else:
-            to_fetch.append(sym)
-
-    if to_fetch:
-        finnhub = FinnhubClient(priority=VISITOR)
-        try:
-            raw_quotes = await asyncio.gather(
-                *(finnhub.get_quote(s) for s in to_fetch),
-                return_exceptions=True,
-            )
-        finally:
-            await finnhub.close()
-        for sym, q in zip(to_fetch, raw_quotes):
-            if isinstance(q, BaseException):
-                quotes[sym] = {"price": None, "change": None, "change_pct": None}
-                continue
-            price = float(q.get("c") or 0) or None
-            change = float(q.get("d")) if q.get("d") is not None else None
-            change_pct = float(q.get("dp")) if q.get("dp") is not None else None
-            ts = int(q["t"]) if q.get("t") else None
-            data = {"price": price, "change": change, "change_pct": change_pct, "timestamp": ts, "basis": q.get("basis", "last_trade")}
-            quote_cache.set(sym, data)
-            quotes[sym] = data
+    got = await asyncio.gather(*(live_data.now_quote(db, s) for s in syms), return_exceptions=True)
+    for sym, q in zip(syms, got):
+        quotes[sym] = _quote_data_from(q) if q and not isinstance(q, BaseException) else {"price": None, "change": None, "change_pct": None}
 
     # ── 3. Batch RV from precomputed snapshots (no yfinance) ────────────────
     from app.services.rv_store import get_latest_rv_bulk
@@ -547,7 +522,8 @@ async def batch_enrich(
                 change=q.get("change"),
                 change_pct=q.get("change_pct"),
                 quote_ts=q.get("timestamp"),
-                quote_basis=q.get("quote_basis", "last_trade"),
+                quote_basis=q.get("basis") or "last_trade",          # the record's key is "basis" (it read "quote_basis", always last_trade)
+                delay_minutes=q.get("delay_minutes"),
                 quote_state=q["quote_state"],
                 quote_reason=q["quote_reason"],
                 expected_move_pct=em_pct,
@@ -1480,15 +1456,12 @@ async def get_options_read(
             return absent(stale_reason(stale_fact), f"stale cached read ({stale_fact} servable now), no admin token")
         return absent(READ_PENDING_NIGHTLY, "cache miss, no admin token")
 
-    # ── Finnhub quote. RV comes from the stored snapshot or is absent. ─────────
-    finnhub = FinnhubClient(priority=VISITOR)
+    # ── The price now (the live layer's delayed quote first, services/live_data.now_quote). RV comes from the stored snapshot or is absent.
     try:
-        quote = await finnhub.get_quote(sym)
+        quote = await live_data.now_quote(db, sym)
     except Exception as exc:
         await user_errors.record("data", exc, sym)
         raise HTTPException(status_code=502, detail=user_errors.plain("data"))
-    finally:
-        await finnhub.close()
 
     quote_price: float | None = float(quote.get("c") or 0) or None
     quote_ts: int | None = int(quote["t"]) if quote.get("t") else None

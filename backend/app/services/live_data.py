@@ -237,6 +237,34 @@ async def served_quote(db, symbol: str, admin: bool = False, now: datetime | Non
     return await asyncio.get_event_loop().run_in_executor(None, stored_close_quote_sync, symbol.upper())
 
 
+async def now_quote(db, symbol: str, admin: bool = False) -> dict:
+    """The stock's price now, as every page shows it (Sam, 2026-11-02: Build a Trade said "the stock is now $147.11 (last trade Oct 30)"
+    on Monday Nov 2 in market hours because it read Finnhub directly): the live layer's delayed quote with its delay figure, else
+    its stored close; with the layer off for this reader, the shared quote cache, else Finnhub (which fills the cache). Finnhub-shaped
+    {c, d, dp, h, l, o, pc, t, basis[, delay_minutes]}; an empty dict when nothing came. A Finnhub failure raises, as get_quote does."""
+    sym = symbol.upper()
+    if db is not None:
+        live = await served_quote(db, sym, admin)
+        if live is not None:
+            return live
+    from app.services import quote_cache
+    cached = quote_cache.get(sym)
+    if cached is not None and cached.get("price"):
+        return {"c": cached["price"], "d": cached.get("change"), "dp": cached.get("change_pct"), "t": cached.get("timestamp"),
+                "basis": cached.get("basis", "last_trade"), "delay_minutes": cached.get("delay_minutes")}
+    from app.services.finnhub_client import VISITOR, FinnhubClient
+    finnhub = FinnhubClient(priority=VISITOR)
+    try:
+        quote = await finnhub.get_quote(sym)
+    finally:
+        await finnhub.close()
+    if quote and quote.get("c"):
+        quote_cache.set(sym, {"price": float(quote["c"]), "change": float(quote["d"]) if quote.get("d") is not None else None,
+                              "change_pct": float(quote["dp"]) if quote.get("dp") is not None else None,
+                              "timestamp": int(quote["t"]) if quote.get("t") else None, "basis": quote.get("basis", "last_trade")})
+    return quote or {}
+
+
 _chart_cache: dict[str, tuple[float, dict]] = {}
 
 

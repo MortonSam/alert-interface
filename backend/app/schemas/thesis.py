@@ -197,7 +197,8 @@ class AlertPickLedgerItem(BaseModel):
     entry_price: float
     current_price: float | None           # live mark
     quote_ts: int | None = None           # Unix UTC (exchange last-trade time, or the session's close when quote_basis is close)
-    quote_basis: str = "last_trade"       # last_trade | close
+    quote_basis: str = "last_trade"       # last_trade | close | delayed (services/live_data.now_quote)
+    delay_minutes: int | None = None      # the delayed quote's stated delay, rendered by the page
     unrealized_move_pct: float | None     # stock % change from entry_price
     cost_to_enter: float | None
     max_loss: float | None

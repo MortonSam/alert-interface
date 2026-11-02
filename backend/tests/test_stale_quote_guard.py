@@ -39,7 +39,7 @@ def _install(monkeypatch, ts: int):
     monkeypatch.setattr(chain_store, "get_ingested_expirations", exps)
     monkeypatch.setattr(chain_store, "pick_expiration", pick)
     monkeypatch.setattr(chain_store, "get_chain", chain)
-    monkeypatch.setattr(chain_store, "is_fresh", lambda d, max_trading_days=3: True)
+    monkeypatch.setattr(chain_store, "is_fresh", lambda d, max_trading_days=3, today=None: True)   # the report move passes today=
 
 
 async def _get(path: str) -> dict:

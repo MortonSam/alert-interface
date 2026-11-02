@@ -159,7 +159,7 @@ function WatchlistRow({
             {fmtPrice(data?.price ?? null)}
             {data?.price != null && data?.quote_ts != null && (
               <span className="text-[10px] text-muted-foreground/50 ml-1.5">
-                {quoteAsOf(data.quote_ts, data.quote_basis)}
+                {quoteAsOf(data.quote_ts, data.quote_basis, data.delay_minutes)}
               </span>
             )}
           </span>
