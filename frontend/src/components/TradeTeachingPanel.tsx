@@ -24,8 +24,9 @@ function Segs({ segs }: { segs: Segment[] }) {
 
 export default function TradeTeachingPanel({ symbol, legs, expires }: { symbol: string; legs: TeachLeg[]; expires: string }) {
   const panel = teachPanel(symbol, legs, expires);
-  const segs = firstUses([...panel.lines, panel.expirationLine, ...panel.regions]);
-  const lines = segs.slice(0, panel.lines.length), atExp = segs[panel.lines.length], regions = segs.slice(panel.lines.length + 1);
+  const segs = firstUses([...panel.lines, panel.expirationLine, ...panel.regions, panel.closing]);
+  const lines = segs.slice(0, panel.lines.length), atExp = segs[panel.lines.length];
+  const regions = segs.slice(panel.lines.length + 1, -1), closing = segs[segs.length - 1];
   return (
     <section className="rounded-md border border-border/60 p-5 space-y-3 text-sm leading-relaxed" data-testid="trade-teaching">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{PANEL_TITLE}</p>
@@ -36,6 +37,7 @@ export default function TradeTeachingPanel({ symbol, legs, expires }: { symbol: 
           {regions.map((r, i) => <li key={i}><Segs segs={r} /></li>)}
         </ul>
       </div>
+      <p className="text-foreground/85"><Segs segs={closing} /></p>
     </section>
   );
 }

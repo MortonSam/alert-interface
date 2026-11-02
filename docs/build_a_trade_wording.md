@@ -32,7 +32,18 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 
 **Terms:** each of these terms gets its plain tooltip at its first use in the panel only: strike price, expiration, net debit, net credit, breakeven, straddle. Implied volatility is explained wherever it appears, as now.
 
-**New glossary entry:** **Net credit**: "The cash a trade brings in when it is opened: what the contracts sold fetch, minus what any contracts bought cost."
+**New glossary entry:** **Net credit**: "The cash a trade brings in when it is opened, what the contracts sold fetch minus what any contracts bought cost."
+
+**Your review of Nov 2, applied (round 2):**
+- Each stretch at expiration is told moving away from the breakeven, and every breakeven is one of the stretch boundaries. A gain "grows by $100 for every $1 higher (or lower)", ending "up to $640 at $155" when a strike stops it. A loss is "a loss that shrinks as the stock rises (or falls), largest at $145 ($360)". "Drops by ... for every $1 the stock rises" is gone, and a test fails if it comes back.
+- After the cost line, once per panel, "Option prices are quoted per share, and one contract covers 100 shares."
+- Covered call: the opening sentence says what you are doing, in the trade's own strike, and the most it can lose says the risk is in the shares and the call lowers it.
+- Credit spreads: "You keep the full $140 if KO ends above $90." replaces "The gain stops growing at". For a call credit spread it reads "below" the lower strike. The covered call, also opened for a credit, gets "The most it can make is $1,810, if AAPL ends at or above $285." in that place (new line, for your approval).
+- Every panel ends with "You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day."
+- No colons. Colons became periods or commas, and "At expiration on Nov 20, 2026" is now a plain heading above the list. A test fails if any panel line has a colon. Semicolons are unchanged (the call and put sentences, and the straddle's no-cap line).
+- **Two shared tooltips changed punctuation only**, because they open from the panel. These entries also show elsewhere on the site wherever the term appears.
+  - **Net debit:** "What a two-part options trade costs to open, the price of the contract bought minus the price of the contract sold. It is also the most the trade can lose."
+  - **Breakeven:** "The stock price at the contract's end date where the trade neither gains nor loses. It is the agreed price level plus (for a bet on a rise) or minus (for a fall) what the trade cost per share."
 
 **Moved under a "Go deeper" fold:**
 - the simulator's "Black-Scholes projection" label;
@@ -46,74 +57,90 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 
 ### 1. BNY $145/$155 call spread (Sam's screenshot case)
 
-> This is a call spread. A call spread is buying one call and selling another with a higher strike price: the call sold lowers the cost and caps the gain.  
-> You pay $360 at the start: a net debit of $3.60 a share, for 100 shares.  
+> This is a call spread. A call spread is buying one call and selling another with a higher strike price. The call sold lowers the cost and caps the gain.  
+> You pay $360 at the start, a net debit of $3.60 a share, for 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares.  
 > It gains if BNY ends above $148.60 at expiration on Nov 20, 2026.  
-> The breakeven is $148.60: the $145 strike price plus the $3.60 a share paid.  
-> The gain stops growing at $155: past it, the most the trade can make is $640.  
+> The breakeven is $148.60, the $145 strike price plus the $3.60 a share paid.  
+> The gain stops growing at $155. Past it, the most the trade can make is $640.  
 > The most it can lose is $360, the amount paid.  
-> At expiration on Nov 20, 2026:  
-> - Above $155: a $640 gain, wherever it ends in that range.  
-> - Between $145 and $155: the result grows by $100 for every $1 the stock rises, from a $360 loss at $145 to a $640 gain at $155.  
-> - Below $145: a $360 loss, wherever it ends in that range.  
+> At expiration on Nov 20, 2026  
+> - Above $155, a $640 gain, wherever it ends in that range.  
+> - Between $148.60 and $155, the gain grows by $100 for every $1 higher, up to $640 at $155.  
+> - Between $145 and $148.60, a loss that shrinks as the stock rises, largest at $145 ($360).  
+> - Below $145, a $360 loss, wherever it ends in that range.  
+> You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day.  
 
 ### 2. A single call (NVDA $220, illustrative prices)
 
 > This is a call. A call is the right to buy 100 shares at its strike price until expiration; it gains when the stock ends above the strike price by more than the call cost.  
-> You pay $840 at the start: $8.40 a share, for 100 shares.  
+> You pay $840 at the start, $8.40 a share, for 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares.  
 > It gains if NVDA ends above $228.40 at expiration on Dec 18, 2026.  
-> The breakeven is $228.40: the $220 strike price plus the $8.40 a share paid.  
-> There is no cap on the gain: it keeps growing as the stock rises.  
+> The breakeven is $228.40, the $220 strike price plus the $8.40 a share paid.  
+> There is no cap on the gain. It keeps growing as the stock rises.  
 > The most it can lose is $840, the amount paid.  
-> At expiration on Dec 18, 2026:  
-> - Above $220: the result grows by $100 for every $1 the stock rises past $220, from an $840 loss there.  
-> - Below $220: an $840 loss, wherever it ends in that range.  
+> At expiration on Dec 18, 2026  
+> - Above $228.40, the gain grows by $100 for every $1 higher.  
+> - Between $220 and $228.40, a loss that shrinks as the stock rises, largest at $220 ($840).  
+> - Below $220, an $840 loss, wherever it ends in that range.  
+> You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day.  
 
 ### 3. A put credit spread (KO $90/$85, illustrative)
 
-> This is a put credit spread. A put credit spread is selling one put and buying another with a lower strike price: the cash comes in at the start, and the put bought caps the loss.  
-> You receive $140 at the start: a net credit of $1.40 a share, for 100 shares.  
+> This is a put credit spread. A put credit spread is selling one put and buying another with a lower strike price. The cash comes in at the start, and the put bought caps the loss.  
+> You receive $140 at the start, a net credit of $1.40 a share, for 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares.  
 > It gains if KO ends above $88.60 at expiration on Dec 18, 2026.  
-> The breakeven is $88.60: the $90 strike price minus the $1.40 a share received.  
-> The gain stops growing at $90: past it, the most the trade can make is $140.  
+> The breakeven is $88.60, the $90 strike price minus the $1.40 a share received.  
+> You keep the full $140 if KO ends above $90.  
 > The most it can lose is $360, if it ends at or below $85.  
-> At expiration on Dec 18, 2026:  
-> - Above $90: a $140 gain, wherever it ends in that range.  
-> - Between $85 and $90: the result grows by $100 for every $1 the stock rises, from a $360 loss at $85 to a $140 gain at $90.  
-> - Below $85: a $360 loss, wherever it ends in that range.  
+> At expiration on Dec 18, 2026  
+> - Above $90, a $140 gain, wherever it ends in that range.  
+> - Between $88.60 and $90, the gain grows by $100 for every $1 higher, up to $140 at $90.  
+> - Between $85 and $88.60, a loss that shrinks as the stock rises, largest at $85 ($360).  
+> - Below $85, a $360 loss, wherever it ends in that range.  
+> You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day.  
 
 ### 4. A straddle (TSLA $450, illustrative)
 
-> This is a straddle. A straddle is buying a call and a put with the same strike price and expiration: it gains when the stock moves far enough either way to cover both.  
-> You pay $4,250 at the start: a net debit of $42.50 a share, for 100 shares.  
-> It gains if TSLA ends below $407.50 or above $492.50 at expiration on Nov 20, 2026: a big enough move either way.  
-> There are two breakevens, $407.50 and $492.50: the result at expiration is zero at each.  
+> This is a straddle. A straddle is buying a call and a put with the same strike price and expiration. It gains when the stock moves far enough either way to cover both.  
+> You pay $4,250 at the start, a net debit of $42.50 a share, for 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares.  
+> It gains if TSLA ends below $407.50 or above $492.50 at expiration on Nov 20, 2026, a big enough move either way.  
+> There are two breakevens, $407.50 and $492.50, and the result at expiration is zero at each.  
 > There is no cap on the gain as the stock rises; as it falls, the gain grows up to $40,750 if it reached $0.  
 > The most it can lose is $4,250, the amount paid.  
-> At expiration on Nov 20, 2026:  
-> - Above $450: the result grows by $100 for every $1 the stock rises past $450, from a $4,250 loss there.  
-> - Below $450: the result drops by $100 for every $1 the stock rises, from a $40,750 gain at $0 to a $4,250 loss at $450.  
+> At expiration on Nov 20, 2026  
+> - Above $492.50, the gain grows by $100 for every $1 higher.  
+> - Between $450 and $492.50, a loss that shrinks as the stock rises, largest at $450 ($4,250).  
+> - Between $407.50 and $450, a loss that shrinks as the stock falls, largest at $450 ($4,250).  
+> - Below $407.50, the gain grows by $100 for every $1 lower.  
+> You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day.  
 
 ### 5. A covered call (AAPL shares at $270 with the $285 call, illustrative)
 
-> This is a covered call. A covered call is owning 100 shares and selling a call on them: the call brings in cash now, and any rise above its strike price goes to the call's owner instead.  
-> You receive $310 at the start: a net credit of $3.10 a share, for 100 shares.  
+> This is a covered call. You own 100 shares and sell someone the right to buy them from you at $285, which brings in cash now. If AAPL ends above $285, you sell at $285 and miss any rise past it.  
+> You receive $310 at the start, a net credit of $3.10 a share, for 100 shares.  
+> Option prices are quoted per share, and one contract covers 100 shares.  
 > It assumes 100 shares held at $270.  
 > It gains if AAPL ends above $266.90 at expiration on Dec 18, 2026.  
-> The breakeven is $266.90: the $270 share price minus the $3.10 a share received.  
-> The gain stops growing at $285: past it, the most the trade can make is $1,810.  
-> The most it can lose is $26,690, if it ends at $0.  
-> At expiration on Dec 18, 2026:  
-> - Above $285: a $1,810 gain, wherever it ends in that range.  
-> - Below $285: the result grows by $100 for every $1 the stock rises, from a $26,690 loss at $0 to a $1,810 gain at $285.  
+> The breakeven is $266.90, the $270 share price minus the $3.10 a share received.  
+> The most it can make is $1,810, if AAPL ends at or above $285.  
+> If AAPL fell to $0, you would lose $26,690, which is $310 less than owning the shares alone.  
+> At expiration on Dec 18, 2026  
+> - Above $285, a $1,810 gain, wherever it ends in that range.  
+> - Between $266.90 and $285, the gain grows by $100 for every $1 higher, up to $1,810 at $285.  
+> - Below $266.90, a loss that shrinks as the stock rises, largest at $0 ($26,690).  
+> You don't have to wait for expiration. You can close the trade earlier at whatever it's worth that day.  
 
 ### The structure sentences not shown above
 
 - **A put:** "A put is the right to sell 100 shares at its strike price until expiration; it gains when the stock ends below the strike price by more than the put cost."
-- **A put spread:** "A put spread is buying one put and selling another with a lower strike price: the put sold lowers the cost and caps the gain."
-- **A call credit spread:** "A call credit spread is selling one call and buying another with a higher strike price: the cash comes in at the start, and the call bought caps the loss."
-- **A strangle:** "A strangle is buying a call with a higher strike price and a put with a lower one: it costs less than a straddle and needs a bigger move either way."
-- **A protective put:** "A protective put is owning 100 shares and buying a put on them: the put sets a floor under the shares until expiration, for what it costs."
+- **A put spread:** "A put spread is buying one put and selling another with a lower strike price. The put sold lowers the cost and caps the gain."
+- **A call credit spread:** "A call credit spread is selling one call and buying another with a higher strike price. The cash comes in at the start, and the call bought caps the loss."
+- **A strangle:** "A strangle is buying a call with a higher strike price and a put with a lower one. It costs less than a straddle and needs a bigger move either way."
+- **A protective put:** "A protective put is owning 100 shares and buying a put on them. The put sets a floor under the shares until expiration, for what it costs."
 - **Anything else:** "This is this combination. Its result at expiration is worked out below from each of its parts."
 
-Screenshots of the five panels are in the report.
+Screenshots of the five panels, and BNY's with the breakeven tooltip open, are in the report.

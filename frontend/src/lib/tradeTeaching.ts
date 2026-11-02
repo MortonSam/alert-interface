@@ -1,6 +1,6 @@
 // Build a Trade's "What this trade does" panel, worked out from the trade's own legs (Sam, 2026-11-02): what is paid or received,
 // what the trade bets on and by when, its breakeven, where the gain stops growing, the most it can lose, and its result at
-// expiration in each stretch of stock prices. Pure arithmetic on the legs (payoff at expiration, per 100 shares); no model call.
+// expiration in each stretch of stock prices, each told moving away from the breakeven. Pure arithmetic on the legs (payoff at expiration, per 100 shares); no model call.
 // The words are lib/tradeTeachingCopy's.
 
 import { fmtDate } from "@/lib/dates";
@@ -15,9 +15,10 @@ export interface TeachLeg {
 
 export interface TeachPanel {
   structure: StructureKey;
-  lines: string[];        // intro, cash, bet, breakeven, cap, most it can lose
+  lines: string[];        // intro, cash, per-share quoting, bet, breakeven, cap, most it can lose
   expirationLine: string;
-  regions: string[];      // above the highest strike first, then down
+  regions: string[];      // above the highest strike or breakeven first, then down
+  closing: string;        // the trade can be closed before expiration
 }
 
 const SHARES = 100;
@@ -88,7 +89,7 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
   const stock = legs.find((l) => l.type === "stock");
   const strikes = [...new Set(opts.map((l) => l.strike as number))].sort((a, b) => a - b);
   const cashPerShare = opts.reduce((s, l) => s + (l.side === "long" ? -l.price : l.price), 0);   // < 0: paid; > 0: received
-  const lines: string[] = [LINES.intro(name, explain)];
+  const lines: string[] = [structure === "covered_call" ? LINES.intro(name, LINES.coveredCallDoing(symbol, price(strikes[0]))) : LINES.intro(name, explain)];
 
   // what is paid or received
   if (cashPerShare < 0) {
@@ -96,6 +97,7 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
   } else if (cashPerShare > 0) {
     lines.push(LINES.receiveCredit(money(cashPerShare * SHARES), perShare(cashPerShare)));
   }
+  if (cashPerShare !== 0) lines.push(LINES.optionUnit);
   if (stock) lines.push(LINES.shares(price(stock.price)));
 
   // the shape: the value at $0, at each strike, and the slope past the highest
@@ -131,7 +133,13 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
 
   // where the gain stops growing
   const best = Math.max(...values, up === 0 ? fLast : -Infinity);
-  if (up > 0) lines.push(values[0] > 0 ? LINES.noCapUpAndDown(money(values[0])) : LINES.noCapUp);
+  const creditKept = cashPerShare > 0 && !stock && Math.round(best) === Math.round(cashPerShare * SHARES) && bes.length === 1;
+  if (creditKept) {
+    // a credit trade's best is the credit itself, kept where the options sold expire worthless
+    const keptAbove = up === 0 && Math.round(fLast) === Math.round(best);     // a put credit spread's puts expire above the top strike
+    lines.push(LINES.keepCredit(money(best), symbol, keptAbove ? "above" : "below", price(keptAbove ? last : strikes[0])));
+  } else if (structure === "covered_call") lines.push(LINES.mostAt(money(best), symbol, price(strikes[0])));
+  else if (up > 0) lines.push(values[0] > 0 ? LINES.noCapUpAndDown(money(values[0])) : LINES.noCapUp);
   else if (values[0] === best && values[0] > 0 && strikes.length === 1 && opts.length === 1) lines.push(LINES.capAtZero(money(best)));
   else if (best > 0) {
     const at = knots.slice(1).find((k, i) => values[i + 1] === best) ?? last;
@@ -144,6 +152,7 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
     const worst = Math.min(...values, up === 0 ? fLast : Infinity);
     if (worst < 0) {
       if (Math.abs(Math.round(-worst) - Math.round(-cashPerShare * SHARES)) <= 1 && cashPerShare < 0 && !stock) lines.push(LINES.maxLossPaid(money(worst)));
+      else if (structure === "covered_call") lines.push(LINES.maxLossShares(symbol, money(worst), money(cashPerShare * SHARES)));   // the risk is the shares'; the call's cash lowers it
       else {
         // where it is reached: a flat stretch from $0 ("at or below"), a flat top ("at or above"), or one price
         const at = (() => {
@@ -158,18 +167,36 @@ export function teachPanel(symbol: string, legs: TeachLeg[], expiration: string)
     }
   }
 
-  // the result at expiration in each stretch, from the top down
+  // the result at expiration in each stretch, from the top down: every strike and every breakeven bounds a stretch, so each is
+  // all gain or all loss, told moving away from the breakeven
   const regions: string[] = [];
+  const bounds = [...new Set([...knots, ...bes])].sort((a, b) => a - b);
+  const at = bounds.map((k) => payoffAt(legs, k));
+  const top = bounds[bounds.length - 1], fTop = at[at.length - 1];
   const range = (a: number, b: number | null) => (b == null ? REGIONS.above(price(a)) : a === 0 ? REGIONS.below(price(b)) : REGIONS.between(price(a), price(b)));
   const describe = (a: number, b: number | null, fa: number, fb: number | null) => {
     const label = range(a, b);
-    if (b == null) return up === 0 ? REGIONS.flat(label, result(fa)) : REGIONS.open(label, money(up), result(fa), price(a));
-    if (Math.round(fa) === Math.round(fb as number)) return REGIONS.flat(label, result(fa));
-    const perDollar = money(((fb as number) - fa) / (b - a));
-    return REGIONS.sloped(label, perDollar, (fb as number) > fa ? "grows" : "drops", result(fa), a === 0 ? "$0" : price(a), result(fb as number), price(b));
+    if (b == null) {
+      if (up === 0) return REGIONS.flat(label, result(fa));
+      if (up > 0) return REGIONS.gainGrows(label, money(up), "higher");
+      return REGIONS.lossGrowsOpen(label, money(up));
+    }
+    const fb_ = fb as number;
+    if (Math.round(fa) === Math.round(fb_)) return REGIONS.flat(label, result(fa));
+    const perDollar = money((fb_ - fa) / (b - a));
+    if (Math.round(fa) > 0 || Math.round(fb_) > 0) {
+      // a gain, largest at the far end from the breakeven: up to it, unless that end is $0 (the cap line says what $0 gives)
+      const rising = fb_ > fa;
+      const [farK, farV] = rising ? [b, fb_] : [a, fa];
+      return farK === 0 ? REGIONS.gainGrows(label, perDollar, rising ? "higher" : "lower")
+                        : REGIONS.gainGrowsTo(label, perDollar, rising ? "higher" : "lower", money(farV), price(farK));
+    }
+    // a loss, shrinking toward the breakeven and largest at the other end
+    const [farK, farV] = fa < fb_ ? [a, fa] : [b, fb_];
+    return REGIONS.lossShrinks(label, fa < fb_ ? "rises" : "falls", price(farK), money(farV));
   };
-  if (strikes.length) regions.push(describe(last, null, fLast, null));
-  for (let i = knots.length - 2; i >= 0; i--) regions.push(describe(knots[i], knots[i + 1], values[i], values[i + 1]));
+  if (strikes.length) regions.push(describe(top, null, fTop, null));
+  for (let i = bounds.length - 2; i >= 0; i--) regions.push(describe(bounds[i], bounds[i + 1], at[i], at[i + 1]));
 
-  return { structure, lines, expirationLine: LINES.atExpiration(date), regions };
+  return { structure, lines, expirationLine: LINES.atExpiration(date), regions, closing: LINES.closeEarly };
 }
