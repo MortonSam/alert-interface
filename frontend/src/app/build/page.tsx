@@ -33,6 +33,9 @@ import { cardEarningsNote, expectedWindowLine, noDateLine } from "@/lib/earnings
 import { matchTickers } from "@/lib/tickerSearch";
 import { ESTIMATE_NOTE, NO_IMPLIED_MOVE, NO_IMPLIED_VOL, chancePastBreakeven, estimateReceipt, fmtDollars, gainAtImpliedMove, impliedMoveLabel, payoffRange, stretchLine, type DebitTrade } from "@/lib/tradeMath";
 import PayoffSimulator from "@/components/PayoffSimulator";
+import TradeTeachingPanel from "@/components/TradeTeachingPanel";
+import { Fold } from "@/components/ticker/Fold";
+import type { TeachLeg } from "@/lib/tradeTeaching";
 import { type Leg, dateMs } from "@/lib/black-scholes";
 import { fmtTimestamp } from "@/lib/marks";
 
@@ -301,6 +304,14 @@ function DraftDisplay({
 
   const [reasoningMode, setReasoningMode] = useState<"plain" | "detailed">("plain");
 
+  // The legs the "What this trade does" panel reads: the contract bought and, for a spread, the one sold (per-share mids)
+  const optionKind: "call" | "put" = draft.direction === "bullish" ? "call" : "put";
+  const teachLegs: TeachLeg[] | null = draft.suggested_strike != null && leg1Mid != null && (!isSpread || leg2Mid != null)
+    ? [{ type: optionKind, side: "long", strike: draft.suggested_strike, price: leg1Mid },
+       ...(isSpread && draft.suggested_spread_strike != null && leg2Mid != null
+         ? [{ type: optionKind, side: "short" as const, strike: draft.suggested_spread_strike, price: leg2Mid }] : [])]
+    : null;
+
   // ── Budget alternative — local state, on-demand only ─────────────────────
   const [altOpen, setAltOpen] = useState(false);
   const [altBudgetInput, setAltBudgetInput] = useState("");
@@ -516,6 +527,9 @@ function DraftDisplay({
         )}
       </div>
 
+      {/* H0) What this trade does: the trade's own legs in plain words (lib/tradeTeaching), above the cost cards */}
+      {teachLegs && fb.expiration_used && <TradeTeachingPanel symbol={draft.symbol} legs={teachLegs} expires={fb.expiration_used} />}
+
       {/* H) Position cost & risk */}
       {draft.suggested_strike != null && (
         <div className="space-y-3">
@@ -560,9 +574,11 @@ function DraftDisplay({
             <Callout severity="caution" compact>{stretch}</Callout>
           )}
           {isSpread && netDebit != null && spreadWidth != null && (
-            <p className="text-xs text-muted-foreground">
-              <Explained text="Net debit $" />{netDebit.toFixed(2)}<Explained text=" · spread width $" />{spreadWidth.toFixed(0)}
-            </p>
+            <Fold label="Go deeper" testId="cost-go-deeper">
+              <p className="text-xs text-muted-foreground">
+                <Explained text="Net debit $" />{netDebit.toFixed(2)}<Explained text=" · spread width $" />{spreadWidth.toFixed(0)}
+              </p>
+            </Fold>
           )}
           {leg1Mid == null && (
             <Callout severity="caution" compact>

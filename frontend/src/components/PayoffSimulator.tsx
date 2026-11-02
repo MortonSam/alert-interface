@@ -11,6 +11,7 @@ import {
 import { priceAtX } from "@/lib/tradeMath";
 import { scrubValue, scrubWhen, sliderYears } from "@/lib/payoffScrub";
 import Callout from "@/components/Callout";
+import { Fold } from "@/components/ticker/Fold";
 import { fmtDate as fmtOneDate } from "@/lib/dates";
 import {
   BS_R,
@@ -191,19 +192,10 @@ export default function PayoffSimulator({
         <span className="bg-cool/10 text-cool border border-cool/40 text-xs font-medium px-2 py-0.5 rounded-full">
           SIMULATED
         </span>
-        <span className="text-xs text-muted-foreground"><Explained text="Black-Scholes projection" /></span>
       </div>
       {pricing && <p className="text-xs text-muted-foreground">{symbol} {pricing}</p>}
       {earlierSession && <p className="text-xs text-muted-foreground" data-testid="sim-earlier-session">{earlierSession}</p>}
 
-      {/* IV disclosure — always show what IV the simulation holds constant */}
-      {ivLabel && !sdFailed && !usingIVFallback && (
-        <p className="text-xs text-muted-foreground">
-          <Explained text="Simulated at IV " />{ivLabel}, held constant
-          {ivContext?.expiration ? `, from the ${fmtOneDate(ivContext.expiration) ?? ivContext.expiration} expiration` : ""}
-          {ivContext?.chainDate ? ` · options data as of ${fmtOneDate(ivContext.chainDate) ?? ivContext.chainDate}` : ""}
-        </p>
-      )}
       {(sdFailed || usingIVFallback) && (
         <Callout severity="info" compact>
           <strong>
@@ -398,10 +390,24 @@ export default function PayoffSimulator({
         </Callout>
       )}
 
-      {/* Footnote — keeps the "not a forecast" label visible at all times */}
-      <p className="text-[10px] text-muted-foreground">
-        <Explained text="Simulated values use Black-Scholes with IV held constant. Not a forecast." />
-      </p>
+      {/* Footnote — keeps the "not a forecast" label visible at all times; how it is computed sits under Go deeper */}
+      <p className="text-[10px] text-muted-foreground">Simulated, not a forecast.</p>
+      <Fold label="Go deeper" testId="sim-go-deeper">
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground"><Explained text="Black-Scholes projection" /></p>
+          {/* IV disclosure: what IV the simulation holds constant */}
+          {ivLabel && !sdFailed && !usingIVFallback && (
+            <p className="text-xs text-muted-foreground">
+              <Explained text="Simulated at IV " />{ivLabel}, held constant
+              {ivContext?.expiration ? `, from the ${fmtOneDate(ivContext.expiration) ?? ivContext.expiration} expiration` : ""}
+              {ivContext?.chainDate ? ` · options data as of ${fmtOneDate(ivContext.chainDate) ?? ivContext.chainDate}` : ""}
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground">
+            <Explained text="Simulated values use Black-Scholes with IV held constant." />
+          </p>
+        </div>
+      </Fold>
     </div>
   );
 }

@@ -31,6 +31,8 @@ export const TERMS: GlossaryTerm[] = [
     match: [] },
   { key: "options-spread", term: "Spread (options spread)", explanation: "Buying one option and selling another on the same stock and date at a different price level, so the sale lowers the cost but caps the gain. A bull spread gains if the stock rises, a bear spread if it falls.",
     match: ["bull call spread", "bear put spread", "vertical spread"] },
+  { key: "net-credit", term: "Net credit", explanation: "The cash a trade brings in when it is opened: what the contracts sold fetch, minus what any contracts bought cost.",
+    match: ["net credit"] },
   { key: "net-debit", term: "Net debit", explanation: "What a two-part options trade costs to open: the price of the contract bought minus the price of the contract sold. It is also the most the trade can lose.",
     match: ["net debit"] },
   { key: "pnl", term: "P&L", explanation: "Profit and loss: what a trade gained or lost, shown here as a percent of the money paid to open it. These figures are hypothetical; no trade was placed.",
