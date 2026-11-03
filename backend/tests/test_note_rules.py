@@ -136,3 +136,21 @@ def test_recount_note_verdicts_settles_each_claim_and_counts_the_summary():
     assert new["claims"][0] == {**stored["claims"][0], "verdict": "supported", "reason": "The filing says so."}
     assert len(changes) == 3 and changes[-1].startswith("summary ")
     assert recount(new)[1] == []                                    # a corrected note needs nothing more
+
+
+def test_comparisons_the_check_used_to_read_as_bare_figures():
+    """Sam, 2026-11-02: 16 of 73 bare-figure points in 60 first drafts were real comparisons in words the check did not know."""
+    from app.services.note_rules import point_problems
+    compared = [
+        "Diluted EPS declined 54.5% year-over-year in the quarter ended December 31, 2025.",
+        "SG&A was $267.3 million, up $10.4 million or 4.0% from the same period in 2025.",
+        "SG&A as a share of sales increased 50 basis points to 16.7%.",
+        "Regulated rate base grew from approximately $34 billion at year-end 2024 to approximately $36 billion.",
+        "Q4 2025 EPS rose 53.0% over Q4 2024.",
+        "Margins were unchanged from Q2 2025 at 21%.",
+    ]
+    for text in compared:
+        assert not [w for w in point_problems({"lead": "x", "detail": text}) if "no comparison" in w], text
+    bare = ["Carrier recognized a benefit of $133 million from tariff refunds.", "Parts and service were 28% of net sales in 2025."]
+    for text in bare:
+        assert [w for w in point_problems({"lead": "x", "detail": text}) if "no comparison" in w], text

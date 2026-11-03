@@ -39,7 +39,15 @@ REPEATS = re.compile(
 COMPARISON_CUE = re.compile(
     r"year earlier|year ago|year-ago|a year before|prior[- ]year|last year|from a year|five-year|5-year|\d+-year|"
     r"\baverage\b|\bmedian\b|\bpeers?\b|\bsector\b|\bindustry\b|compared|versus|\bvs\.?|than\b|\bfrom \$?\d|"
-    r"up from|down from|previous quarter|prior quarter|sequential|historical|its own history|\bsince\b|\brecord\b", re.I)
+    r"up from|down from|previous quarter|prior quarter|sequential|historical|its own history|\bsince\b|\brecord\b|"
+    # comparisons the check read as bare figures in first drafts (Sam, 2026-11-02, 60 drafts scored twice): "grew from approximately
+    # $34 billion ... to", "unchanged from", "the prior four quarters", "comparable", "year-over-year", "from the same period in 2025",
+    # "increased 50 basis points", "growth over Q4 2024"
+    r"\b(?:grew|rose|fell|declined|increased|decreased|climbed|dropped|moved|went) from\b|\bunchanged from\b|"
+    r"\b(?:prior|previous|preceding) (?:four|three|two|six|nine|twelve) (?:quarters|months)\b|\bcomparable\b|"
+    r"\byear[- ]over[- ]year\b|\bfrom the same (?:period|quarter|months?|time)\b|"
+    r"\b(?:up|down|rose|fell|increased|decreased|grew|declined|expanded|contracted|improved|widened|narrowed) (?:by )?\d+(?:\.\d+)? ?"
+    r"(?:basis points|bps|percentage points?)\b|\bover (?:Q[1-4]|the (?:same|prior|previous) (?:quarter|period|year))\b", re.I)
 
 # a figure: a percentage, a dollar amount, or a number with a unit; a bare year or a date is not a figure
 FIGURE = re.compile(r"\$\s?\d|\d+(?:\.\d+)?\s?%|\b\d[\d,]*(?:\.\d+)?\s?(?:billion|million|thousand|bps|basis points|x)\b", re.I)
