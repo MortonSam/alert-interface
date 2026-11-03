@@ -645,14 +645,10 @@ async def _add_to_daily_spend(db: AsyncSession, cost: float | None, now: datetim
         key = f"research_gen:unpriced:{now.strftime('%Y-%m-%d')}"
         raw = await get_value(db, key)
         await set_value(db, key, str((int(raw) if raw else 0) + 1))
-        from app.services import ai_spend
-        await ai_spend.add(db, None, now, commit=False)
         return
     key = f"research_gen:spend:{now.strftime('%Y-%m-%d')}"
     raw = await get_value(db, key)
-    await set_value(db, key, f"{(float(raw) if raw else 0.0) + cost:.4f}")
-    from app.services import ai_spend
-    await ai_spend.add(db, cost, now, commit=False)          # the site-wide cap counts every feature's spend
+    await set_value(db, key, f"{(float(raw) if raw else 0.0) + cost:.4f}")    # the site-wide cap counts each call itself (AnthropicClient._create)
 
 
 # ── Generate (two-phase: immediate upsert + background work) ─────────────────
@@ -818,6 +814,11 @@ async def run_research_note_background(
             await db.commit()
 
         except Exception as exc:
+            from app.services.ai_spend import NightlyBudgetReached
+            if isinstance(exc, NightlyBudgetReached):           # refused before it was sent: the stored note stays as it is
+                print(f"Research note for {symbol}: not written tonight ({exc})", flush=True)
+                await _refund(db)
+                return
             print(f"Research note generation failed for {symbol}: {exc!r}", flush=True)
             from app.services import user_errors
             await user_errors.record("research_note", exc, symbol)          # the digest gets the real error; the note says PLAIN

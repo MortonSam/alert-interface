@@ -24,8 +24,6 @@ from app.models.thesis import Thesis, ThesisStatus
 from app.models.ticker import Ticker
 from app.schemas.thesis import (
     AlertPickLedgerItem,
-    AlertPickRead,
-    AlertPickRequest,
     IvyActivityRead,
     IvySampleRefusal,
     IvyWorksheetPick,
@@ -572,18 +570,6 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     }
 
 
-async def _record_draft_spend(gen: dict) -> None:
-    """Add the draft's estimated cost to the site-wide AI spend (services/ai_spend); never fails the draft."""
-    try:
-        from app.database import ScriptSessionLocal
-        from app.services import ai_spend
-        from app.services.research_cost import estimate_cost_usd
-        async with ScriptSessionLocal() as s:
-            await ai_spend.add(s, estimate_cost_usd(gen.get("model_used"), gen.get("input_tokens"), gen.get("output_tokens")))
-    except Exception as exc:
-        print(f"[thesis-draft] spend not recorded: {redact(exc)[:120]}", flush=True)
-
-
 async def _run_draft_generation(
     data: dict,
     direction: str,
@@ -979,7 +965,6 @@ Return ONLY this JSON object (no other text):
             raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
 
         print(f"[thesis-draft] {sym} attempt={attempt}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
-        await _record_draft_spend(gen)
 
         # ── 11. Parse + validate ──────────────────────────────────────────────
         try:
@@ -1095,6 +1080,10 @@ def defined_risk_reasoning(sym: str, direction: str, spread: dict, premium: dict
 
 # ── Draft endpoint ─────────────────────────────────────────────────────────────
 
+DRAFT_DIRECTIONS = ("bullish", "bearish")              # the visitor's choice; there is no "let Ivy decide" (Sam, 2026-11-02)
+DRAFT_RISK_LEVELS = ("conservative", "moderate", "aggressive")
+
+
 @router.post("/draft", response_model=ThesisDraftRead)
 async def draft_thesis(
     payload: ThesisDraftRequest,
@@ -1102,28 +1091,42 @@ async def draft_thesis(
     user_id: str = Depends(get_draft_caller),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftRead:
-    """AI-assisted thesis parameter drafting."""
+    """AI-assisted thesis parameter drafting, in the direction the visitor chose (Ivy never picks one). A draft already written
+    for the same inputs on the same stored chain is served from services/draft_cache: no model call, no slot, no spend."""
+    direction, aggressiveness = payload.direction.lower(), payload.aggressiveness.lower()
+    if direction not in DRAFT_DIRECTIONS or aggressiveness not in DRAFT_RISK_LEVELS:
+        raise HTTPException(status_code=422, detail="direction must be bullish or bearish, and the risk level conservative, moderate or aggressive")
     from app.services.pending_deals import deal_for, note_for
     deal = await deal_for(db, payload.symbol.upper())
     if deal:                                            # a pending cash deal: no draft, and no draft slot spent
         raise HTTPException(status_code=409, detail=note_for(deal))
     client_ip = get_client_ip(request)
+    data = await _gather_draft_data(payload.symbol.upper(), db)
+    from app.services import draft_cache
+    cache_key = draft_cache.key_for(payload.symbol, direction, aggressiveness, data.get("chain_last_trade"), data.get("chosen_exp"),
+                                    payload.proposed_target)
+    cached = await draft_cache.get(db, cache_key)
+    if cached is not None:                              # the same draft for everyone for the rest of this chain's day, at no cost
+        return ThesisDraftRead(**draft_cache.restamp(cached, data))
     from app.services import ai_spend
     from app.services.draft_limiter import DRAFT_POLICY
     if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
         raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
-    data = await _gather_draft_data(payload.symbol.upper(), db)
     from app.services.ivy_v2 import options_premium_check
     premium = await options_premium_check(db, payload.symbol.upper())     # Ivy's own comparison: expensive options get a cheaper spread
     result = await _run_draft_generation(
         data,
-        payload.direction.lower(),
-        payload.aggressiveness.lower(),
+        direction,
+        aggressiveness,
         proposed_target=payload.proposed_target,
         premium=premium,
     )
     await record_draft(db, user_id, client_ip, payload.symbol.upper())
+    try:
+        await draft_cache.put(db, cache_key, result.model_dump())
+    except Exception as exc:                            # an unkept draft is written again by the next visitor; never fail this one
+        print(f"[thesis-draft] {payload.symbol.upper()}: draft not cached: {redact(exc)[:120]}", flush=True)
     return result
 
 
@@ -1709,42 +1712,6 @@ async def compute_alert_pick(
     }
 
 
-# ── Alert-pick endpoint ───────────────────────────────────────────────────────
-
-@router.post("/alert-pick", response_model=AlertPickRead)
-async def alert_pick(
-    payload: AlertPickRequest,
-    request: Request,
-    user_id: str = Depends(get_draft_caller),
-    db: AsyncSession = Depends(get_db),
-) -> AlertPickRead:
-    """Evidence-based auto-direction: compute signal leans, pick direction when
-    signals agree (or decline when they conflict), draft at moderate aggressiveness,
-    and persist every pick to alert_picks."""
-    client_ip = get_client_ip(request)
-    await check_draft_limit(db, user_id, client_ip)
-    pick_source = "visitor" if user_id == "anon" else "manual"
-    result = await compute_alert_pick(payload.symbol.upper(), db, source=pick_source)
-    if result["draft"] is not None:
-        # a draft slot pays for a draft: an outcome that produces none (refused, passed, holding) is free
-        await record_draft(db, user_id, client_ip, payload.symbol.upper())
-    outcome = result["outcome"]
-    direction = result.get("picked_direction")
-    return AlertPickRead(
-        symbol=payload.symbol.upper(),
-        outcome=outcome,
-        outcome_label=ivy_outcome_label(outcome),
-        note=(result.get("note") or None) if outcome != "structure_failed" else None,   # structure_failed's note is the exception
-        # a direction only where the outcome names one: a refusal's "bullish" placeholder is not Ivy's call
-        picked_direction=direction if outcome in ("picked", "open_pick_exists", "mixed_evidence") and direction in ("bullish", "bearish", "mixed_evidence") else None,
-        leans=result["leans"] or [],
-        draft=result["draft"],
-        generated_at=result["generated_at"],
-        existing_pick=result["existing_pick"],
-    )
-
-
-
 # ── Alert-picks ledger ─────────────────────────────────────────────────────────
 
 _EXP_TAIL_RE = re.compile(
@@ -2183,10 +2150,16 @@ async def draft_alternative(
     The existing /theses/draft endpoint and its output are never touched.
     """
     client_ip = get_client_ip(request)
+    from app.services import ai_spend
+    from app.services.draft_limiter import DRAFT_POLICY
+    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
+        raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
     sym = payload.symbol.upper()
     direction = payload.direction.lower()
     aggressiveness = payload.aggressiveness.lower()
+    if direction not in DRAFT_DIRECTIONS:
+        raise HTTPException(status_code=422, detail="direction must be bullish or bearish")
     budget = payload.budget
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 

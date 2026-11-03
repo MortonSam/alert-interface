@@ -167,24 +167,6 @@ class SignalLean(BaseModel):
     justification: str  # one-line human-readable
 
 
-class AlertPickRequest(BaseModel):
-    symbol: str
-
-
-class AlertPickRead(BaseModel):
-    symbol: str
-    outcome: str                       # an ivy_outcomes code: picked, vol_gate, no_features, open_pick_exists, ...
-    outcome_label: str                 # its label from ivy_outcomes, e.g. "Refused: options too expensive for the edge"
-    note: str | None = None            # the engine's reason text, when it has one and it is fit for a visitor
-    picked_direction: str | None       # "bullish" | "bearish" | "mixed_evidence"; None when the outcome names no direction
-    leans: list[SignalLean]
-    draft: ThesisDraftRead | None      # None unless the engine produced a draft; the v2 engine never does
-    generated_at: str
-    existing_pick: bool = False        # True when returning an existing open pick (duplicate refusal)
-    season: int = 1
-    receipt: dict | None = None
-
-
 class AlertPickLedgerItem(BaseModel):
     id: str
     symbol: str

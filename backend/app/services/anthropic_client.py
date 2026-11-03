@@ -32,6 +32,22 @@ def _scrub_dashes(text: str) -> str:
     return text
 
 
+async def _record_call(method: str, model: str | None, msg) -> None:
+    """Count one reply's estimated cost in services/ai_spend; never fails the call it counts."""
+    try:
+        from app.database import ScriptSessionLocal
+        from app.services import ai_spend
+        from app.services.research_cost import estimate_cost_usd
+        u = getattr(msg, "usage", None)
+        cost = estimate_cost_usd(model, getattr(u, "input_tokens", None), getattr(u, "output_tokens", None),
+                                 getattr(u, "cache_creation_input_tokens", 0) or 0, getattr(u, "cache_read_input_tokens", 0) or 0)
+        async with ScriptSessionLocal() as s:
+            await ai_spend.record_call(s, method, cost)
+    except Exception as exc:
+        from app.services.redact import redact
+        print(f"[ai-spend] {method}: spend not recorded: {redact(exc)[:120]}", flush=True)
+
+
 class AnthropicClient:
     def __init__(self, timeout: float | None = None, max_retries: int | None = None) -> None:
         """`timeout` (seconds per attempt) and `max_retries` bound a caller that must answer a visitor (Ask Ivy); left out, the SDK's
@@ -46,13 +62,22 @@ class AnthropicClient:
         self._client = AsyncAnthropic(api_key=settings.anthropic_api_key, **kwargs)
 
     async def _create(self, method: str, **kwargs):
-        """Every call: a failure is recorded with its feature (services/ai_health) before it propagates to the caller."""
+        """Every call: a nightly-pool call is refused before it is sent when it could cut into visitors' share of today's AI cap
+        (services/ai_spend.check_nightly, NightlyBudgetReached); a failure is recorded with its feature (services/ai_health) before
+        it propagates to the caller; a reply's estimated cost is counted to the day, its pool and its feature (ai_spend.record_call)."""
+        from app.database import ScriptSessionLocal
+        from app.services import ai_spend
+        if ai_spend.pool() == ai_spend.NIGHTLY:
+            async with ScriptSessionLocal() as s:
+                await ai_spend.check_nightly(s, kwargs.get("model"), kwargs)
         try:
-            return await self._client.messages.create(**kwargs)
+            msg = await self._client.messages.create(**kwargs)
         except Exception as exc:
             from app.services.ai_health import record_failure
             await record_failure(method, exc)
             raise
+        await _record_call(method, kwargs.get("model"), msg)
+        return msg
 
     async def generate_research_note(self, prompt: str, retry: str | None = None) -> dict:
         """Generate a research note (structured JSON output). `prompt` is sent as one cached block (5-minute prompt cache), so the

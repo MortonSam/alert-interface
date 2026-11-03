@@ -12,6 +12,7 @@ PRICES_USD_PER_MTOK: dict[str, tuple[float, float]] = {   # model: (input, outpu
     "claude-opus-4-6": (5.0, 25.0),
     "claude-fable-5": (10.0, 50.0),        # DRAFT_MODEL (Build a Trade): $10 in, $50 out per MTok, platform.claude.com pricing page
     "claude-fable-5-1": (10.0, 50.0),
+    "claude-haiku-4-5-20251001": (1.0, 5.0),   # CLASSIFIER_MODEL (Ask Ivy's question classifier): $1 in, $5 out per MTok
 }
 PRICES_AS_OF = "2026-10-12"
 

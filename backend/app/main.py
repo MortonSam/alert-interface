@@ -75,6 +75,18 @@ app.include_router(admin.router, prefix="/api/v1")
 
 
 @app.middleware("http")
+async def visitor_ai_pool(request, call_next):
+    """A model call made while serving a request counts against the visitor pool of the daily AI cap (services/ai_spend); calls
+    anywhere else (the nightly's steps, scripts, background loops started at boot) count against the nightly pool."""
+    from app.services import ai_spend
+    token = ai_spend.set_pool(ai_spend.VISITOR)
+    try:
+        return await call_next(request)
+    finally:
+        ai_spend._POOL.reset(token)
+
+
+@app.middleware("http")
 async def ticker_alias_redirect(request, call_next):
     """A path segment that is a ticker's old symbol redirects (308) to the same path under its current symbol, so
     /api/v1/tickers/EQR and every sibling route keep working after a rename (services/ticker_aliases)."""

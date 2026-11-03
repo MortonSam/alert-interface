@@ -63,20 +63,28 @@ async def test_every_feature_adds_to_one_ledger_and_the_cap_closes_each_with_its
     now = datetime(2030, 1, 5, 15, 0, tzinfo=timezone.utc)        # a day no real spend touches
     async with ScriptSessionLocal() as s:
         try:
-            await s.execute(text("DELETE FROM system_metadata WHERE key LIKE :p"), {"p": "ai_spend%:2030-01-05"})
+            await s.execute(text("DELETE FROM system_metadata WHERE key LIKE :p"), {"p": "ai_spend%:2030-01-05%"})
             await s.commit()
-            await ai_spend.add(s, 0.12, now)
-            await ai_spend.add(s, 0.003, now)
-            await ai_spend.add(s, None, now)
+            await ai_spend.record_call(s, "generate_research_note", 0.12, now)
+            token = ai_spend.set_pool(ai_spend.VISITOR)
+            try:
+                await ai_spend.record_call(s, "generate_thesis_draft", 0.003, now)
+                await ai_spend.record_call(s, "generate_thesis_draft", None, now)
+            finally:
+                ai_spend._POOL.reset(token)
             assert round(await ai_spend.spend_today(s, now), 3) == 0.123 and await ai_spend.unpriced_today(s, now) == 1
             summary = await ai_spend.summary(s, now)
             assert summary["day"] == "2030-01-05" and summary["cap_usd"] == 20.0 and summary["reached"] is False
+            assert summary["by_pool"] == {"visitor": 0.003, "nightly": 0.12}
+            assert await ai_spend.breakdown(s, "2030-01-05") == {
+                "nightly": {"generate_research_note": {"usd": 0.12, "calls": 1}},
+                "visitor": {"generate_thesis_draft": {"usd": 0.003, "calls": 2}}}
         finally:
-            await s.execute(text("DELETE FROM system_metadata WHERE key LIKE :p"), {"p": "ai_spend%:2030-01-05"})
+            await s.execute(text("DELETE FROM system_metadata WHERE key LIKE :p"), {"p": "ai_spend%:2030-01-05%"})
             await s.commit()
     src = (ROOT / "app" / "routers").glob("*.py")
     joined = "".join(p.read_text() for p in src)
-    assert joined.count("ai_spend.cap_reached(db)") == 3          # notes, drafts, Ask Ivy
+    assert joined.count("ai_spend.cap_reached(db)") == 4          # notes, drafts, the drafts' alternative, Ask Ivy
     assert "detail=DRAFT_POLICY.global_message" in joined and "RESEARCH_GENERATION_POLICY.global_message.format" in joined
 
 

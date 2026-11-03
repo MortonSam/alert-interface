@@ -28,6 +28,8 @@ from app.database import AsyncSessionLocal
 STEP_LABEL = "Research notes (nightly)"
 MAX_PER_NIGHT = 170
 CONCURRENCY = 4
+NOTE_ROOM_USD = 0.75           # the most one note's calls can cost (writing, check, a second writing and its check, at their
+                               # ceilings): a note starts only with this much room per running note (services/ai_spend.nightly_room)
 NOTE_SECONDS = 840             # one note's generation and verification, and its second writing, each bounded by MODEL_TIMEOUT_SECONDS
 
 
@@ -144,7 +146,7 @@ async def run(argv: list[str]) -> int:
                 return
             async with AsyncSessionLocal() as db:
                 spent = await ai_spend.spend_today(db)
-                if spent - spent_at_start >= budget or spent >= ai_spend.cap_usd() - ai_spend.VISITOR_RESERVE_USD:
+                if spent - spent_at_start >= budget or ai_spend.nightly_room(ai_spend.cap_usd(), spent) < NOTE_ROOM_USD * CONCURRENCY:
                     stopped = (f"stopped at ${spent:.2f} of the ${ai_spend.cap_usd():.0f} daily cap: notes' ${budget:.0f} for the night used "
                                f"or ${ai_spend.VISITOR_RESERVE_USD:.0f} left for visitors")
                     return

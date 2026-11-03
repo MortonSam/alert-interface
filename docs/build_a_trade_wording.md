@@ -144,3 +144,22 @@ These stay live until you decide. From now on no visitor-facing wording ships be
 - **Anything else:** "This is this combination. Its result at expiration is worked out below from each of its parts."
 
 Screenshots of the five panels, and BNY's with the breakeven tooltip open, are in the report.
+
+## C. Pending your approval: when Ivy can't write a new draft (not shipped)
+
+**Why the line changes.** Today's line, "Drafting is busy today and paused until tomorrow. Browse the research notes meanwhile.", is not what happens. Drafting isn't busy. The day's AI budget has run out, and from this deploy, a draft already written today for the same stock, direction and risk level still opens. The line below says that and keeps the visitor on the page. The draft button stays, so a different choice that someone already drafted still opens.
+
+**Where:** under the Generate button on Build a Trade, when the daily AI budget is reached. The per-visitor line ("You've used today's 5 free drafts…") is unchanged.
+
+**Proposed (option 1, short):**
+> Ivy can't write a new draft until midnight ET because today's drafting budget is used up. Drafts already written today still open, so another direction or risk level may work. Meanwhile, the {SYMBOL} page has Ivy's research note and what the options are pricing.
+
+"the {SYMBOL} page" links to /tickers/{SYMBOL}.
+
+**Proposed (option 2, shortest):**
+> No new drafts until midnight ET, because today's drafting budget is used up. Drafts already written today still open. You can read Ivy's note on {SYMBOL} meanwhile.
+
+**Facts each line rests on (for the claims rule):**
+- "midnight ET": the cap resets at midnight New York time (`services/ai_spend.spend_day`).
+- "Drafts already written today still open": `services/draft_cache` serves a draft written for the same stock, direction, risk level and options day, even with the cap reached. It's tested in `tests/test_ai_pools_and_draft_cache.py`. Strictly, it's the options day, not the calendar day. Until the next session's options data lands, yesterday's evening drafts still open.
+- "Ivy's research note": shown only when {SYMBOL} has a served note. Otherwise the line names the options alone.

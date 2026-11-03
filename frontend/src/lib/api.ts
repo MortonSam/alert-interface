@@ -1024,18 +1024,6 @@ export interface SignalLean {
   justification: string;
 }
 
-export interface AlertPickRead {
-  symbol: string;
-  outcome: string;                  // an ivy outcome code: picked, vol_gate, no_features, open_pick_exists, ...
-  outcome_label: string;            // its label, the same one the desk shows
-  note: string | null;              // the engine's reason text when it has one
-  picked_direction: string | null;  // "bullish" | "bearish" | "mixed_evidence"; null when the outcome names none
-  leans: SignalLean[];
-  draft: ThesisDraftRead | null;    // the v2 engine never returns a draft; a pick is drafted by /theses/draft
-  generated_at: string;
-  existing_pick?: boolean;
-}
-
 export interface AlertPickLedgerItem {
   id: string;
   symbol: string;
@@ -1406,8 +1394,6 @@ export const api = {
       request<ThesisDraftRead>("/theses/draft", { method: "POST", body: JSON.stringify(data) }),
     draftAlternative: (data: ThesisDraftAlternativeRequest) =>
       request<ThesisDraftAlternativeRead>("/theses/draft-alternative", { method: "POST", body: JSON.stringify(data) }),
-    alertPick: (data: { symbol: string }) =>
-      request<AlertPickRead>("/theses/alert-pick", { method: "POST", body: JSON.stringify(data) }),
     alertPicks: (season?: number) =>
       request<AlertPickLedgerItem[]>(`/theses/alert-picks?season=${season ?? 2}`),
     ivyActivity: () =>

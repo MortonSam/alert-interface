@@ -6,10 +6,6 @@ import type { ThesisDraftRead } from "@/lib/api";
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 
 /** After Ivy declines her own pick on expensive options: the customer picks a direction and gets the cheaper draft. */
-export function expensiveOptionsPrompt(symbol: string): string {
-  return `The options on ${symbol} are expensive right now compared with how much the stock usually moves. Pick a direction and the draft will be a cheaper way to make that bet.`;
-}
-
 /** Above the cheaper draft. */
 export function expensiveOptionsLine(symbol: string): string {
   return `The options on ${symbol} are expensive right now compared with how much the stock usually moves, so the draft below is a cheaper way to make the same bet.`;
