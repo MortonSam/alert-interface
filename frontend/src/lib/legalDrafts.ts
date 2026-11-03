@@ -75,7 +75,7 @@ export const TERMS_DRAFT: LegalDoc = {
       "Alert Interface explains public companies and their stocks for learning. Ivy doesn't make buy or sell calls. Nothing here is investment, tax or legal advice, an offer, or a recommendation to buy, sell or hold any security.",
     ] },
     { heading: "Hypothetical only", paragraphs: [
-      "Every trade on this site is hypothetical. Saved ideas, their results and Ivy's picks are never executed, and no money changes hands. Past results, real or hypothetical, say nothing certain about the future.",
+      "Every trade on this site is hypothetical. Saved ideas and their results are never executed, and no money changes hands. Past results, real or hypothetical, say nothing certain about the future.",
     ] },
     { heading: "Data and accuracy", paragraphs: [
       "Figures come from dated sources such as SEC filings and licensed market data, and each is shown with its date. Some data is delayed. We check figures and Ivy's sentences, but mistakes can still happen; check anything that matters to you with the source.",
