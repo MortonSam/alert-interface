@@ -163,3 +163,52 @@ Screenshots of the five panels, and BNY's with the breakeven tooltip open, are i
 - "midnight ET": the cap resets at midnight New York time (`services/ai_spend.spend_day`).
 - "Drafts already written today still open": `services/draft_cache` serves a draft written for the same stock, direction, risk level and options day, even with the cap reached. It's tested in `tests/test_ai_pools_and_draft_cache.py`. Strictly, it's the options day, not the calendar day. Until the next session's options data lands, yesterday's evening drafts still open.
 - "Ivy's research note": shown only when {SYMBOL} has a served note. Otherwise the line names the options alone.
+
+## D. Pending your approval: drafts from rules, no model (branch `draft-rules`, not shipped)
+
+Drafting no longer calls a model (`backend/app/services/draft_rules.py`). The structure, strikes and target follow the rules the model was given, now in code. Every sentence is in `backend/app/services/draft_copy.py`, and a draft is these sentences joined, in this order. Figures in braces come from the draft's stored chain and history.
+
+**The rules:**
+- **Structure:**
+  - Options priced high against the stock's own movement (`iv_rich`): a spread, except an aggressive draft, which buys the option outright.
+  - Options priced low (`iv_cheap`): the option outright.
+  - Otherwise: a conservative draft is a spread; moderate and aggressive drafts buy the option outright.
+- **Option bought:**
+  - conservative: at the money or just inside it;
+  - moderate: the first strike past the price;
+  - aggressive: the third strike past the price;
+  - always within 10% of the price.
+- **Target:** 0.65, 1 or 1.75 times the move options price by the expiration, or the visitor's own target.
+- **Option sold** (spreads): the first strike at or past the target.
+
+**Cost:** $0 per draft (was about $0.088 and 17 seconds).
+
+1. **Why this structure** (one of):
+   - "Options on {SYM} are priced for {x} points more movement than the stock has shown over the last 20 trading days, so the draft is a spread, where the option sold pays for part of the one bought."
+   - (aggressive with expensive options) "…over the last 20 trading days. The aggressive draft buys the option outright anyway, for the larger gain if the stock moves far."
+   - "Options on {SYM} are priced for {x} points less movement than the stock has shown over the last 20 trading days, so buying the option outright doesn't pay extra for movement."
+   - "Options on {SYM} are priced close to how much the stock has moved lately, and the conservative draft is a spread, which costs less and caps the gain."
+   - "Options on {SYM} are priced close to how much the stock has moved lately, so the draft buys the option outright."
+2. **History:** "After its last {n} reports, {SYM} moved {avg}% on a typical report day, and {max}% at most."
+3. **The strike:**
+   - "The {call/put} bought is at the money or just inside it, so less of its price is a bet on the move."
+   - "The {call/put} bought is the first strike past the stock's price."
+   - "The {call/put} bought is a few strikes past the stock's price. It costs less and needs a bigger move."
+4. **The option sold** (spreads):
+   - "The {call/put} sold, at ${k}, sits at or just past the target and caps the gain there."
+   - When no priced strike reaches the target: "The {call/put} sold, at ${k}, is the farthest priced strike toward the target, so the gain stops there, short of the target."
+5. **The target:**
+   - "The target, ${t}, is {about two thirds of / about / about 1.75 times} the ±{x}% move options price by {expiration}, the {risk} choice."
+   - With your own target: "The target, ${t}, is the one you entered."
+6. **Analysts** (with at least three measured): "After {n} analyst {upgrades/downgrades}, {SYM}'s median move the next day was {+x.xx}%."
+
+**Flags (above the draft):**
+- "A target of ${t} needs a {x}% move, more than the largest move after any of its last {n} reports ({max}%)."
+- "A target of ${t} needs a {x}% move, more than twice the ±{x}% options price."
+
+**Example (AAPL, bullish, conservative, dev data):** "Options on AAPL are priced for 19.1 points more movement than the stock has shown over the last 20 trading days, so the draft is a spread, where the option sold pays for part of the one bought. After its last 20 reports, AAPL moved 3.1% on a typical report day, and 7.6% at most. The call bought is at the money or just inside it, so less of its price is a bet on the move. The call sold, at $352.5, sits at or just past the target and caps the gain there. The target, $352.02, is about two thirds of the ±6.2% move options price by Nov 20, 2026, the conservative choice. After 21 analyst upgrades, AAPL's median move the next day was +1.67%."
+
+**Unchanged:**
+- The expensive-options spread (already built by rules).
+- The page's "drafted by Ivy from the options data on file" label (`model_used: deterministic`).
+- The budget alternative ("a cheaper alternative under $X"), which still calls the model and keeps its cap check.

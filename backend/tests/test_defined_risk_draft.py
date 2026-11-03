@@ -79,9 +79,9 @@ def test_the_draft_path_returns_the_cheaper_spread_with_its_comparison_and_no_ai
 
 
 def test_options_that_are_not_expensive_keep_the_usual_draft(monkeypatch):
-    monkeypatch.setattr(T, "AnthropicClient", NoAI)
-    with pytest.raises(AssertionError, match="no AI call"):                               # it went on to the AI draft
-        asyncio.run(T._run_draft_generation(_data(), "bullish", "moderate", premium={**PREMIUM, "expensive": False}))
+    monkeypatch.setattr(T, "AnthropicClient", NoAI)                                       # rules since 2026-11-03: no model call either way
+    d = asyncio.run(T._run_draft_generation(_data(), "bullish", "moderate", premium={**PREMIUM, "expensive": False}))
+    assert d.model_used == "deterministic" and d.options_expensive is None and d.strategy.startswith("Bull call spread")
 
 
 def test_a_split_stocks_adjusted_contracts_never_price_a_draft():
