@@ -32,6 +32,12 @@ describe("the counters' layers", () => {
     expect(readSnapshot(broken)).toBeNull();
     expect(() => writeSnapshot(broken, STATS)).not.toThrow();
     expect(isSiteStats(STATS) && !isSiteStats({}) && !isSiteStats(null)).toBe(true);
+    // production withholds the analyst count (null) under personal_use: the stats are still valid, and its counter is left out
+    // (2026-11-02: rejecting them showed four dashes on the live home page)
+    const withheld = { ...STATS, analyst_reactions_measured: null, analyst_reactions_as_of: null };
+    expect(isSiteStats(withheld)).toBe(true);
+    expect(counterRows(withheld).map((r) => r.key)).toEqual(["contracts", "prices", "earnings"]);
+    expect(isSiteStats({ ...STATS, earnings_reports_measured: null })).toBe(false);
   });
 
   it("the four labels exist without any count, and the rows use the same labels", () => {

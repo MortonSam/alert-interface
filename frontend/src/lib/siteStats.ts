@@ -20,12 +20,14 @@ export interface StatsSnapshot {
 
 export type StatsSource = "fresh" | "server" | "stored" | null;
 
-const KEYS: Array<keyof SiteStats> = ["option_contracts_captured", "licensed_daily_prices", "earnings_reports_measured", "analyst_reactions_measured"];
+const KEYS: Array<keyof SiteStats> = ["option_contracts_captured", "licensed_daily_prices", "earnings_reports_measured"];
+const WITHHELD_OK: Array<keyof SiteStats> = ["analyst_reactions_measured"];   // null while the API withholds a personal-use count
 
 export function isSiteStats(x: unknown): x is SiteStats {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
-  return KEYS.every((k) => typeof o[k] === "number" && Number.isFinite(o[k] as number));
+  const count = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+  return KEYS.every((k) => count(o[k])) && WITHHELD_OK.every((k) => o[k] === null || count(o[k]));
 }
 
 /** Pure: the counts to show and where they came from, fresh over server over stored. */
