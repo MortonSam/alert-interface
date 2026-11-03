@@ -9,6 +9,7 @@
     DELETE /account                      the person and everything saved, in one step
     GET    /account/unsubscribe          ?u=&k=&s=: one click, signed, no sign-in needed (POST too: List-Unsubscribe-Post)
     GET    /account/trades/results       every saved idea and its hypothetical result, with the running summary
+    POST   /account/postmark-webhook     Postmark's bounce, spam-complaint and suppression records (Basic auth): services/email_suppression
 """
 from __future__ import annotations
 
@@ -58,12 +59,18 @@ async def sign_in(body: SignIn, request: Request, db: AsyncSession = Depends(get
         raise HTTPException(status_code=422, detail=K.API["link_invalid"])
     if status_ == "limited":
         raise HTTPException(status_code=429, detail=K.API["link_limited"])
+    from app.services import email_suppression as SUP
+    if await SUP.is_suppressed(db, email):                          # never mailed again; the answer is the same as for any address
+        return {"detail": K.API["link_sent"]}
     url = f"{settings.site_url}/account/verify#t={token}"          # in the fragment: it never reaches a server log or a referrer
     m = K.SIGN_IN_EMAIL
     html_ = (f'<p style="font-size:16px">{m["lead"]}</p><p><a href="{url}" style="display:inline-block;padding:12px 20px;background:#f97316;color:#111;'
              f'border-radius:10px;text-decoration:none;font-weight:600">{m["button"]}</a></p><p style="font-size:13px;color:#666">{m["note"]}</p>'
              f'<p style="font-size:13px;color:#666">{K.NO_CALLS}<br>{settings.mailing_address}</p>')
-    await mailer.send(mailer.Message(to=email, subject=m["subject"], sign_in=True, html=html_, text=f"{m['lead']}\n\n{url}\n\n{m['note']}\n\n{K.NO_CALLS}\n{settings.mailing_address}"))
+    try:
+        await mailer.send(mailer.Message(to=email, subject=m["subject"], sign_in=True, html=html_, text=f"{m['lead']}\n\n{url}\n\n{m['note']}\n\n{K.NO_CALLS}\n{settings.mailing_address}"))
+    except SUP.InactiveRecipient as exc:
+        await SUP.suppress(db, email, "inactive_recipient", "send", str(exc))
     return {"detail": K.API["link_sent"]}
 
 
@@ -81,16 +88,24 @@ async def verify(body: Verify, response: Response, request: Request, db: AsyncSe
 async def me(uid: str = Depends(signed_in), db: AsyncSession = Depends(get_db)) -> dict:
     email = (await db.execute(text("SELECT email_lower FROM users WHERE id = :u"), {"u": uid})).scalar()
     prefs = {r.kind: r.enabled for r in (await db.execute(text("SELECT kind, enabled FROM email_prefs WHERE user_id = :u"), {"u": uid})).all()}
-    return {"email": email, "emails": [{"kind": k, **v, "enabled": bool(prefs.get(k))} for k, v in K.KINDS.items()],
+    from app.services.email_suppression import is_suppressed
+    return {"email": email, "emails": [{"kind": k, **v, "enabled": bool(prefs.get(k))} for k, v in K.offered_kinds(settings.sunday_email_enabled).items()],
+            "suppressed": K.API["email_suppressed"] if email and await is_suppressed(db, email) else None,
             "watchlist_count": (await db.execute(text("SELECT count(*) FROM watchlist_tickers wt JOIN watchlists w ON w.id = wt.watchlist_id WHERE w.user_id = :u"), {"u": uid})).scalar(),
             "trade_count": (await db.execute(text("SELECT count(*) FROM theses WHERE user_id = :u"), {"u": uid})).scalar()}
 
 
 @router.put("/emails")
 async def set_emails(body: dict[str, bool], uid: str = Depends(signed_in), db: AsyncSession = Depends(get_db)) -> dict:
+    offered = K.offered_kinds(settings.sunday_email_enabled)
     for kind, on in body.items():
-        if kind not in K.KINDS:
+        if kind not in offered:
             raise HTTPException(status_code=422, detail=f"unknown email {kind}")
+    from app.services.email_suppression import is_suppressed
+    email = (await db.execute(text("SELECT email_lower FROM users WHERE id = :u"), {"u": uid})).scalar()
+    if email and any(body.values()) and await is_suppressed(db, email):
+        raise HTTPException(status_code=409, detail=K.API["email_suppressed"])
+    for kind, on in body.items():
         await db.execute(text("""INSERT INTO email_prefs (user_id, kind, enabled, updated_at) VALUES (:u, :k, :e, now())
             ON CONFLICT (user_id, kind) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()"""), {"u": uid, "k": kind, "e": bool(on)})
     await db.commit()
@@ -168,3 +183,30 @@ async def trade_results(uid: str = Depends(signed_in), db: AsyncSession = Depend
               "saved_on": r.created_at.date().isoformat(), "result": r.result} for r in rows]
     scored = [i["result"] for i in items if i["result"]]
     return {"label": "Hypothetical", "summary": summary_line(scored) if scored else None, "items": items}
+
+
+@router.post("/postmark-webhook")
+async def postmark_webhook(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Postmark's records that change who may be mailed (services/email_suppression). 401 without the webhook's credentials; any
+    other record is acknowledged and ignored, so Postmark never retries it."""
+    _on()
+    import base64
+    from app.services import email_suppression as SUP
+    user = password = None
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("basic "):
+        try:
+            user, _, password = base64.b64decode(auth[6:]).decode().partition(":")
+        except Exception:
+            pass
+    if not SUP.webhook_auth_ok(settings.postmark_webhook_secret, user, password):
+        raise HTTPException(status_code=401, detail="Not authorized")
+    change = SUP.from_webhook(await request.json())
+    if change is None:
+        return {"ok": True, "change": None}
+    email, reason, detail = change
+    if reason is None:
+        await SUP.lift(db, email)
+    else:
+        await SUP.suppress(db, email, reason, "webhook", detail)
+    return {"ok": True, "change": reason or "lifted"}

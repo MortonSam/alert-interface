@@ -110,8 +110,10 @@ OPEN_DRAFT_ROUTES = {"/api/v1/theses/draft", "/api/v1/theses/draft-alternative",
 
 
 # accounts (routers/accounts, ACCOUNTS_ENABLED): asking for a link, spending it, signing out and one-click unsubscribe are open by
-# design (the link, the cookie or the signed unsubscribe key is the credential); every other account write needs the session cookie
-ACCOUNT_OPEN_ROUTES = {"/api/v1/account/sign-in", "/api/v1/account/verify", "/api/v1/account/sign-out", "/api/v1/account/unsubscribe"}
+# design (the link, the cookie or the signed unsubscribe key is the credential), and so is Postmark's webhook, whose Basic credentials
+# the route checks itself (services/email_suppression.webhook_auth_ok); every other account write needs the session cookie
+ACCOUNT_OPEN_ROUTES = {"/api/v1/account/sign-in", "/api/v1/account/verify", "/api/v1/account/sign-out", "/api/v1/account/unsubscribe",
+                       "/api/v1/account/postmark-webhook"}
 
 
 def test_every_write_route_requires_credentials():

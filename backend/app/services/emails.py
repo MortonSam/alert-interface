@@ -82,6 +82,16 @@ def page_url(site: str, symbol: str) -> str:
     return f"{site}/tickers/{symbol}"
 
 
+UTM_SOURCE = "alertinterface_email"
+
+
+def tag(url: str, kind: str) -> str:
+    """Pure: a link to the site with the tags its analytics reads (utm_source, utm_medium, utm_campaign = the email type); Postmark's
+    own link tracking is off (services/mailer), so these are the only record of a click, and only after the visitor's consent."""
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}utm_source={UTM_SOURCE}&utm_medium=email&utm_campaign={kind}"
+
+
 # ── the four kinds, from facts (pure) ─────────────────────────────────────────────────────────────────────────────────────
 
 def confirmed_section(f: dict, site: str) -> Section:
@@ -175,11 +185,11 @@ def merge(sections: list[Section], *, site: str, unsubscribe: dict[str, str], se
         body.append(f'<h2 style="margin:24px 0 8px;font-size:19px;line-height:1.3;font-weight:600">{e(s.title)}</h2>')
         text_ += [s.title, ""]
         for i, ln in enumerate(s.lines):
-            url = s.line_urls.get(i)
+            url = tag(s.line_urls[i], s.kind) if i in s.line_urls else None
             inner = f'<a href="{h(url)}" style="color:#111">{e(ln)}</a>' if url else e(ln)
             body.append(f'<p style="margin:0 0 10px;font-size:16px;line-height:1.5">{inner}</p>')
             text_.append(f"{ln} {url}" if url else ln)
-        for label, url in s.links:
+        for label, url in ((lb, tag(u, s.kind)) for lb, u in s.links):
             body.append(f'<p style="margin:0 0 8px;font-size:15px"><a href="{h(url)}" style="color:#c2410c">{e(label)} →</a></p>')
             text_.append(f"{label}: {url}")
         text_.append("")

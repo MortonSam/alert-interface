@@ -22,6 +22,7 @@ API = {
     "unsubscribed_all": "You won't get any email from Ivy any more. You can turn each one back on in your settings.",
     "unsubscribe_bad": "This unsubscribe link isn't valid. You can change every email in your settings.",
     "sign_in_needed": "Sign in to use this. Reading stays open to everyone.",
+    "email_suppressed": "Emails to this address bounced or were reported as spam, so Ivy has stopped sending them. To get them again, write to sam@alertinterface.com from this address.",
 }
 
 KINDS = {   # every email type, all off until the person turns one on
@@ -30,6 +31,11 @@ KINDS = {   # every email type, all off until the person turns one on
     "morning_after": {"name": "Morning after", "about": "The day after a stock you follow reports: how much it moved against what options priced, and your hypothetical trades on it that expired."},
     "earnings_week": {"name": "Sunday earnings week", "about": "Sunday evening: the week's ten largest companies reporting, and the stocks you follow that report that week."},
 }
+
+def offered_kinds(sunday_on: bool) -> dict:
+    """Pure: the email types a person can turn on: every kind but the Sunday earnings week while SUNDAY_EMAIL_ENABLED is off."""
+    return {k: v for k, v in KINDS.items() if k != "earnings_week" or sunday_on}
+
 
 SIGN_IN_EMAIL = {
     "subject": "Your sign-in link for Alert Interface",

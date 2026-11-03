@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     email_from: str = "Ivy at Alert Interface <ivy@alertinterface.com>"
     postmark_transactional_stream: str = "outbound"   # POSTMARK_TRANSACTIONAL_STREAM: sign-in links and per-stock alerts (services/mailer)
     postmark_broadcast_stream: str = "broadcast"      # POSTMARK_BROADCAST_STREAM: the Sunday earnings-week email
+    postmark_webhook_secret: str = ""         # POSTMARK_WEBHOOK_SECRET: the password in the bounce and spam webhook's URL (services/email_suppression)
+    sunday_email_enabled: bool = False        # SUNDAY_EMAIL_ENABLED: offer and send the Sunday earnings-week email (off at launch, Sam 2026-11-02)
     mailing_address: str = "MAILING_ADDRESS"  # MAILING_ADDRESS: the postal address every email's footer carries (CAN-SPAM); Sam provides it
 
     # Clerk auth (empty = disabled, admin-token-only mode)

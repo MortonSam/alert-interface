@@ -1,7 +1,8 @@
-"""Accounts' tables (migration a1c2c0d9e7f5): sign-in links, sessions, email preferences and the one-email-a-day log."""
+"""Accounts' tables (migration a1c2c0d9e7f5): sign-in links, sessions, email preferences, the one-email-a-day log and the addresses
+never sent to again."""
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -44,3 +45,12 @@ class EmailSend(Base):
     items: Mapped[list | None] = mapped_column(JSONB)
     provider_id: Mapped[str | None] = mapped_column(String(128))
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmailSuppression(Base):
+    __tablename__ = "email_suppressions"
+    email_lower: Mapped[str] = mapped_column(String(320), primary_key=True)
+    reason: Mapped[str] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(16))
+    detail: Mapped[str | None] = mapped_column(Text)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

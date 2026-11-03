@@ -75,6 +75,7 @@ function Settings({ me, setMe }: { me: Me; setMe: (m: Me | null) => void }) {
       <div>
         <h2 className="text-headline font-display font-semibold">{C.emailsTitle}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{C.emailsBody}</p>
+        {me.suppressed && <p className="mt-2 text-sm text-foreground" data-testid="email-suppressed">{me.suppressed}</p>}
         <ul className="mt-4 divide-y divide-border/60">
           {me.emails.map((e) => (
             <li key={e.kind} className="flex items-start justify-between gap-4 py-3">

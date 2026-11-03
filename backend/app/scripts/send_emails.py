@@ -35,9 +35,16 @@ async def run(argv: list[str]) -> int:
     async with ScriptSessionLocal() as db:
         people = (await db.execute(text("""SELECT u.id, u.email_lower, array_agg(p.kind) AS kinds FROM users u JOIN email_prefs p ON p.user_id = u.id AND p.enabled
             WHERE u.id LIKE 'acct\\_%' AND NOT EXISTS (SELECT 1 FROM email_sends s WHERE s.user_id = u.id AND s.day = :d) GROUP BY u.id, u.email_lower"""), {"d": today})).all()
+        from app.services import account_copy as K
+        from app.services import email_suppression as SUP
+        offered = set(K.offered_kinds(settings.sunday_email_enabled))
         for p in people:
-            sections = await E.sections_for(db, p.id, set(p.kinds), today, settings.site_url)
-            em = E.merge(sections, site=settings.site_url, unsubscribe={k: unsubscribe_url(p.id, k) for k in [*p.kinds, E.ALL]},
+            kinds = set(p.kinds) & offered                  # the Sunday email waits for SUNDAY_EMAIL_ENABLED
+            if not kinds or await SUP.is_suppressed(db, p.email_lower):
+                skipped += 1
+                continue
+            sections = await E.sections_for(db, p.id, kinds, today, settings.site_url)
+            em = E.merge(sections, site=settings.site_url, unsubscribe={k: unsubscribe_url(p.id, k) for k in [*kinds, E.ALL]},
                          settings_url=f"{settings.site_url}/account", mailing_address=settings.mailing_address)
             if em is None:
                 skipped += 1
@@ -51,8 +58,13 @@ async def run(argv: list[str]) -> int:
             print(f"  {p.id}: {em.subject} ({', '.join(em.kinds)})", flush=True)
             if not send:
                 continue
-            pid = await mailer.send(mailer.Message(to=p.email_lower, subject=em.subject, html=em.html, text=em.text, stream=mailer.stream_for(em.kinds),
-                                                   unsubscribe_url=unsubscribe_url(p.id, em.kinds[0] if len(em.kinds) == 1 else E.ALL)))
+            try:
+                pid = await mailer.send(mailer.Message(to=p.email_lower, subject=em.subject, html=em.html, text=em.text, stream=mailer.stream_for(em.kinds),
+                                                       unsubscribe_url=unsubscribe_url(p.id, em.kinds[0] if len(em.kinds) == 1 else E.ALL)))
+            except SUP.InactiveRecipient as exc:            # Postmark has the address suppressed: never again, settings off
+                await SUP.suppress(db, p.email_lower, "inactive_recipient", "send", str(exc))
+                skipped += 1
+                continue
             await db.execute(text("""INSERT INTO email_sends (user_id, day, kinds, items, provider_id) VALUES (:u, :d, :k, CAST(:i AS jsonb), :p)
                 ON CONFLICT DO NOTHING"""), {"u": p.id, "d": today, "k": em.kinds, "i": json.dumps(em.items), "p": pid})
             await db.commit()

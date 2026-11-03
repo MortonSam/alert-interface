@@ -57,6 +57,14 @@ def upgrade() -> None:
         sa.Column("provider_id", sa.String(128), nullable=True),
         sa.Column("sent_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
+    op.create_table(                                                    # services/email_suppression: never sent to again
+        "email_suppressions",
+        sa.Column("email_lower", sa.String(320), primary_key=True),
+        sa.Column("reason", sa.String(32), nullable=False),           # hard_bounce, spam_complaint, manual, inactive_recipient
+        sa.Column("source", sa.String(16), nullable=False),           # webhook or send
+        sa.Column("detail", sa.Text, nullable=True),
+        sa.Column("at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
     op.add_column("theses", sa.Column("priced_move_pct", sa.Numeric(8, 4), nullable=True))        # options' implied move when saved
     op.add_column("theses", sa.Column("priced_move_as_of", sa.Date, nullable=True))
     op.add_column("theses", sa.Column("result", postgresql.JSONB, nullable=True))                 # services/trade_results, after expiration
@@ -66,6 +74,7 @@ def downgrade() -> None:
     op.drop_column("theses", "result")
     op.drop_column("theses", "priced_move_as_of")
     op.drop_column("theses", "priced_move_pct")
+    op.drop_table("email_suppressions")
     op.drop_table("email_sends")
     op.drop_table("email_prefs")
     op.drop_table("auth_sessions")

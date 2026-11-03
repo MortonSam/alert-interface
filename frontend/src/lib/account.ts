@@ -13,7 +13,7 @@ function mark(on: boolean): void {
 const BASE = "/api/v1/account";
 
 export interface EmailKind { kind: string; name: string; about: string; enabled: boolean }
-export interface Me { email: string; emails: EmailKind[]; watchlist_count: number; trade_count: number }
+export interface Me { email: string; emails: EmailKind[]; watchlist_count: number; trade_count: number; suppressed?: string | null }   // suppressed: the API's sentence when Postmark stopped this address
 export interface TradeResult {
   paid_usd: number; worth_usd: number; result_usd: number; result_pct: number | null; ahead: boolean;
   stock_move_pct: number | null; priced_move_pct: number | null; moved_vs_priced: "more" | "less" | "same" | null; expiration: string; saved_on: string;

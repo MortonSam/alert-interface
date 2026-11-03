@@ -7,6 +7,11 @@ asked for (date confirmed, earnings eve, morning after), each sent because of on
 the Sunday earnings-week email, the same list to everyone who turned it on. A day's merged email that holds the Sunday email goes as
 broadcast. The stream ids are Postmark's (POSTMARK_TRANSACTIONAL_STREAM, default "outbound", the id Postmark gives every server's
 transactional stream; POSTMARK_BROADCAST_STREAM, default "broadcast", the id Postmark suggests for the broadcast stream Sam creates).
+
+Open and link tracking are off on every message (TrackOpens false, TrackLinks "None"): Postmark neither adds a pixel nor rewrites a
+link. A link to the site carries its own utm tags (services/emails.tag), which the site's analytics reads after the visitor's consent.
+A send to an address Postmark has suppressed raises email_suppression.InactiveRecipient; nothing is ever sent to an address in
+email_suppressions.
 """
 from __future__ import annotations
 
@@ -15,6 +20,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import settings
+from app.services.email_suppression import INACTIVE_RECIPIENT, InactiveRecipient
 
 POSTMARK_URL = "https://api.postmarkapp.com/email"
 TRANSACTIONAL = "transactional"     # the sign-in link and the per-stock alerts
@@ -46,7 +52,8 @@ class Message:
 
 def payload(m: Message) -> dict:
     """Pure: the Postmark request body."""
-    body = {"From": settings.email_from, "To": m.to, "Subject": m.subject, "HtmlBody": m.html, "TextBody": m.text, "MessageStream": stream_id(m.stream)}
+    body = {"From": settings.email_from, "To": m.to, "Subject": m.subject, "HtmlBody": m.html, "TextBody": m.text, "MessageStream": stream_id(m.stream),
+            "TrackOpens": False, "TrackLinks": "None"}
     if m.unsubscribe_url:
         body["Headers"] = [{"Name": "List-Unsubscribe", "Value": f"<{m.unsubscribe_url}>"},
                            {"Name": "List-Unsubscribe-Post", "Value": "List-Unsubscribe=One-Click"}]
@@ -61,5 +68,14 @@ async def send(m: Message) -> str | None:
         return None
     async with httpx.AsyncClient(timeout=SECONDS) as c:
         r = await c.post(POSTMARK_URL, json=payload(m), headers={"X-Postmark-Server-Token": settings.postmark_server_token, "Accept": "application/json"})
-        r.raise_for_status()
-        return r.json().get("MessageID")
+    if r.status_code == 422 and _error_code(r) == INACTIVE_RECIPIENT:
+        raise InactiveRecipient(str(r.json().get("Message") or "inactive recipient")[:200])
+    r.raise_for_status()
+    return r.json().get("MessageID")
+
+
+def _error_code(r) -> int | None:
+    try:
+        return int(r.json().get("ErrorCode"))
+    except Exception:
+        return None
