@@ -97,7 +97,7 @@ STEPS: list[tuple[str, list[str]]] = [
     # RV ranks first: snapshot_iv reads realized vol from the rv_snapshots row written here.
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),
-    ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
+    # Auto-pick stopped (Sam, 2026-11-03): Ivy picks nothing; its stored picks and worksheets stay (app.scripts.auto_pick is kept)
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     # Scheduled at 03:05 America/New_York by the script itself (it waits when reached early); shadow only, no reader switches.
@@ -146,7 +146,6 @@ STEP_TIMEOUTS: dict[str, int] = {
     "FOMC reactions": 900,
     "Analyst actions": 1200,
     "Build earnings features": 1200,
-    "Auto-pick": 600,
     "Shadow eval": 600,
     "Options chains (Intrinio)": 3 * 3600 + 1800,   # may wait up to MAX_WAIT_SECONDS for 03:05 New York, then ~2 requests per ticker
     "Recompute reactions (Intrinio)": 900,          # the first production night recomputes every row; afterwards only new rows and corrected windows
