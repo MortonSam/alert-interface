@@ -1189,4 +1189,7 @@ async def answer_question(db: AsyncSession, pack: dict, question: str, *, client
 
 
 def ip_hash(ip: str) -> str:
-    return hashlib.sha256(ip.encode()).hexdigest()[:12]
+    """The network address as Ask Ivy's log keeps it: the limits' HMAC with IP_HASH_SALT (services/draft_limiter.scrambled), never a
+    bare hash that trying every address would reverse (Sam, 2026-11-03)."""
+    from app.services.draft_limiter import scrambled
+    return scrambled(ip)[:12]
