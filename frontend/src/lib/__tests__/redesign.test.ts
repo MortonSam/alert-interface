@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { IvyBacktest, IvyRule } from "@/lib/ivyRule";
 import { evidenceSummary, limitLines, refusalTile, ruleTiles } from "@/lib/ivyRule";
-import { IVY_BACKTEST_ENCODING, backtestScale, ivyBacktestLegend } from "@/lib/encodings/ivyBacktest";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -47,14 +46,5 @@ describe("Meet Ivy: tiles, evidence and limits come from the rule", () => {
     expect(lines).toContain("Every pick since Sep 15, 2026 is recorded the night it is made. The ledger goes public at launch.");
     expect(lines).toContain("No bearish calls. The data has not earned them yet.");
     expect(limitLines({ ...RULE, ledger_public: true })).toContain("Every pick since Sep 15, 2026 is on the ledger, losses next to wins.");
-  });
-  it("the evidence chart reads one encoding, and its legend names every mark", () => {
-    expect(ivyBacktestLegend().map((l) => l.label)).toEqual(Object.values(IVY_BACKTEST_ENCODING).map((e) => e.label));
-    const looks = Object.values(IVY_BACKTEST_ENCODING).map((e) => `${e.color}|${e.filled}`);
-    expect(new Set(looks).size).toBe(looks.length);
-    expect(backtestScale([0.515, 0.596])).toEqual({ min: 50, max: 61 });
-    const page = read("app/ivy/page.tsx");
-    expect(page).toContain("ivyBacktestLegend()");
-    expect(page).not.toMatch(/54\.2|52\.4|59\.6|51\.5|\b365\b/);
   });
 });

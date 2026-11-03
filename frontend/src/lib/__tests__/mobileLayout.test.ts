@@ -17,14 +17,13 @@ describe("390px layout (audit item 24)", () => {
     expect(read("app/disclosures/page.tsx")).toContain("px-4 sm:px-6");
   });
 
-  it("the header nav wraps instead of scrolling sideways, and the Ivy CTA row and tabs wrap", () => {
+  it("the header nav wraps instead of scrolling sideways, and the Ivy page's grids stack on a phone", () => {
     expect(read("app/layout.tsx")).toMatch(/min-h-\[3\.25rem\][^"]*flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-6/);
     expect(read("app/layout.tsx")).not.toMatch(/h-\[3\.25rem\] flex items-center gap-6/);
     const ivy = read("app/ivy/page.tsx");
-    expect(ivy).toContain("flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 sm:gap-6");
-    expect(ivy).not.toMatch(/font-display text-xl font-bold text-foreground whitespace-nowrap/);
-    expect(ivy).toContain('<div className="flex flex-wrap gap-3">');
-    expect(read("app/ivy/layout.tsx")).toContain('className="flex flex-wrap gap-1 border-b mb-6"');
+    expect(ivy).toContain('grid grid-cols-1 gap-4 md:grid-cols-3');
+    expect(ivy).toContain('mt-3 flex flex-wrap items-center gap-2');      // the quick picks wrap
+    expect(ivy).not.toMatch(/whitespace-nowrap/);
     const ticker = read("app/tickers/[symbol]/page.tsx");
     expect(ticker).toContain("-mx-4 px-4 sm:-mx-8 sm:px-8");
     expect(ticker).toContain("flex flex-wrap gap-x-4 gap-y-1.5 sm:gap-6 py-3");

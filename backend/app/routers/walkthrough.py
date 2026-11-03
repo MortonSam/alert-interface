@@ -3,6 +3,8 @@
     GET /walkthrough/{symbol}                 the seven steps, the summary, and Compare's two choices
     GET /walkthrough/compare?a=MU&b=AAPL      both stocks' rows side by side, Ivy's sentence for the pair when one was verified
     GET /walkthrough-featured                 the home page's stock, chosen nightly by walkthrough_compare.FEATURED_RULE
+    GET /ivy-page                             the /ivy page's live parts: quick picks, the seven ideas with an example step each, and
+                                              the counts behind "why you can trust her", each with its own date
 
 IVY_WALKTHROUGH_ENABLED (off in production until the wording is approved) hides all three from everyone but the admin token.
 GROWTH_ENABLED and PE_ENABLED apply here (gate), at serve time: while one is off its step is the honest in-review line, its
@@ -122,3 +124,53 @@ async def featured(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_
         return {"symbol": None, "name": None, "rule": pick.get("rule"), "date": pick.get("date")}
     name = (await db.execute(text("SELECT payload->>'name' FROM ivy_walkthroughs WHERE symbol = :s"), {"s": sym})).scalar()
     return {"symbol": sym if name else None, "name": name, "rule": pick.get("rule"), "date": pick.get("date"), "minutes": W.MINUTES}
+
+
+IVY_QUICK_PICKS = ("NVDA", "AAPL", "JPM")          # the /ivy page's quick picks (Sam, 2026-11-02), offered only with a walkthrough entry
+_ENTRY_CACHE: dict = {}
+
+
+async def _entries(db: AsyncSession) -> tuple[int, str | None]:
+    """How many stored walkthroughs a ticker page offers (gate's entry, with today's flags) and the latest as_of among them; computed
+    once per nightly build (the cache key is the table's latest as_of, its row count and the flags)."""
+    stamp = (await db.execute(text("SELECT max(as_of)::text, count(*) FROM ivy_walkthroughs"))).first()
+    key = (stamp[0], stamp[1], settings.growth_enabled, settings.pe_enabled)
+    if _ENTRY_CACHE.get("key") != key:
+        n, latest = 0, None
+        for payload, as_of in (await db.execute(text("SELECT payload, as_of::text FROM ivy_walkthroughs"))).all():
+            if gate(payload, settings.growth_enabled, settings.pe_enabled)["entry"]:
+                n += 1
+                latest = max(latest or as_of, as_of)
+        _ENTRY_CACHE.update(key=key, value=(n, latest))
+    return _ENTRY_CACHE["value"]
+
+
+@router.get("/ivy-page")
+async def ivy_page(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict:
+    """The /ivy page's live parts. quick_picks: IVY_QUICK_PICKS that have a walkthrough entry. ideas: for each of the seven steps, its
+    idea from the first quick pick (then the featured stock) where that step shows data, with the step to open. trust: counts of
+    stored records, each with the date it is as of: served research notes (complete and checked), the statements in them the checker
+    confirmed against the filings, and the stocks with a walkthrough entry."""
+    _shown(admin)
+    examples = list(IVY_QUICK_PICKS)
+    raw = (await db.execute(text("SELECT value FROM system_metadata WHERE key = 'ivy_featured'"))).scalar()
+    featured = (json.loads(raw) if raw else {}).get("symbol")
+    if featured and featured not in examples:
+        examples.append(featured)
+    payloads = {sym: p for sym in examples if (p := await _payload(db, sym))}
+    quick = [{"symbol": s, "name": payloads[s]["name"]} for s in IVY_QUICK_PICKS if s in payloads and payloads[s]["entry"]]
+    ideas = []
+    for n in range(1, 8):
+        for sym in examples:
+            p = payloads.get(sym)
+            step = next((x for x in (p or {}).get("steps", []) if x["n"] == n), None) if p and p["entry"] else None
+            if step and step["status"] != "absent" and step.get("idea"):
+                ideas.append({"n": n, "key": step["key"], "concept": step["idea"]["concept"], "title": step["idea"]["title"],
+                              "text": step["idea"]["text"], "symbol": sym, "name": p["name"]})
+                break
+    notes = (await db.execute(text("""SELECT count(*), COALESCE(sum((verification->'summary'->>'supported')::int), 0), max(verified_at)::date::text
+        FROM research_notes WHERE status = 'complete' AND verification IS NOT NULL"""))).first()
+    walks, walks_as_of = await _entries(db)
+    return {"minutes": W.MINUTES, "quick_picks": quick, "ideas": ideas,
+            "trust": {"notes": {"count": notes[0], "as_of": notes[2]}, "confirmed": {"count": int(notes[1]), "as_of": notes[2]},
+                      "walkthroughs": {"count": walks, "as_of": walks_as_of}}}

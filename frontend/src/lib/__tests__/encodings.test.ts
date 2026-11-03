@@ -8,7 +8,6 @@ import { RV_TIER_ENCODING, rvTier, rvTierLegend } from "../encodings/rvTier";
 import { tapeVolatilityClause } from "../discoverSentences";
 import { VOL_REGIME_ENCODING, volRegime, volRegimeLegend } from "../encodings/volRegime";
 import { EARNINGS_PROXIMITY_ENCODING, earningsProximity, earningsProximityLegend, earningsProximityText } from "../encodings/earningsProximity";
-import { PICK_MOVE_ENCODING, PICK_RESULT_ENCODING, pickMove, pickResult, pickResultLegend } from "../encodings/pickResult";
 import { MARK_BASIS_LABELS, markBasisLegend } from "../marks";
 import { rvRankShort } from "../utils";
 import { DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP, RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL, TAPE_CHOPPIEST_RANK, TAPE_ONE_OF_CHOPPIEST_RANK } from "../thresholds";
@@ -132,23 +131,6 @@ describe("earnings proximity", () => {
   });
   it("legend covers every tier", () => {
     expectLegendCovers(earningsProximityLegend(), Object.keys(EARNINGS_PROXIMITY_ENCODING));
-  });
-});
-
-describe("pick result", () => {
-  it("HIT/MISS says it is about direction, and move color is about favor, not sign", () => {
-    expect(pickResult(true)!.label).toBe("Direction HIT");
-    expect(pickResult(null)).toBeNull();
-    expect(pickMove("bearish", -3).key).toBe("favorable");
-    expect(pickMove("bearish", 3).key).toBe("unfavorable");
-    expect(pickMove("bullish", 3).key).toBe("favorable");
-    expect(pickMove("bullish", 0).key).toBe("flat");
-  });
-  it("legend covers both results and both move colors, and the trades page renders it", () => {
-    const keys = pickResultLegend().map((l) => l.key);
-    expect(keys).toEqual([...Object.keys(PICK_RESULT_ENCODING), "favorable", "unfavorable"]);
-    expect(Object.keys(PICK_MOVE_ENCODING)).toContain("flat");
-    expect(read("app/ivy/trades/page.tsx")).toContain("pickResultLegend()");
   });
 });
 

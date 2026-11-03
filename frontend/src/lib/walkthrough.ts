@@ -90,6 +90,18 @@ export const fetchCompare = (a: string, b: string) =>
   getJson<CompareResult>(`/walkthrough/compare?a=${encodeURIComponent(a.toUpperCase())}&b=${encodeURIComponent(b.toUpperCase())}`);
 export const fetchFeatured = () => getJson<Featured>("/walkthrough-featured");
 
+/** The /ivy page's live parts (backend GET /ivy-page): the quick picks with a walkthrough, each step's idea with the stock it is
+ *  shown on, and the counts behind "why you can trust her", each with the date it is as of. */
+export interface IvyCount { count: number; as_of: string | null }
+export interface IvyPageIdea { n: number; key: string; concept: string; title: string; text: string; symbol: string; name: string }
+export interface IvyPage {
+  minutes: number;
+  quick_picks: { symbol: string; name: string }[];
+  ideas: IvyPageIdea[];
+  trust: { notes: IvyCount; confirmed: IvyCount; walkthroughs: IvyCount };
+}
+export const fetchIvyPage = () => getJson<IvyPage>("/ivy-page");
+
 /** "New to Micron Technology? Walk through it with Ivy, about 3 minutes." */
 /** The entry at the top of a ticker page's Research section (Sam, 2026-11-02): "Walk through NVIDIA with Ivy", with its length. */
 export function researchEntry(name: string, minutes: number): { action: string; length: string } {

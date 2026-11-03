@@ -43,11 +43,12 @@ describe("Discover is a list of rows, not a card grid", () => {
 
   it("every section renders the row template with its own sentence", () => {
     expect(page).toContain('import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";');
-    for (const fn of ["latestPickSentence(latestPick)", "reportingSoonSentence(item)", "justReportedSentence(item)", "suggestionSentence(item)", "unusuallyActiveSentence(item)"]) {
+    for (const fn of ["reportingSoonSentence(item)", "justReportedSentence(item)", "suggestionSentence(item)", "unusuallyActiveSentence(item)"]) {
       expect(page).toContain(`sentence={${fn}}`);
     }
-    expect(page.match(/<DiscoverRow\b/g)?.length).toBe(5);
-    expect(page.match(/<DiscoverRows>/g)?.length).toBe(6);   // five sections and the loading skeleton
+    expect(page.match(/<DiscoverRow\b/g)?.length).toBe(4);
+    expect(page.match(/<DiscoverRows>/g)?.length).toBe(5);   // four sections and the loading skeleton (no ledger pick since 2026-11-02)
+    expect(page).not.toMatch(/latestPick|From the ledger/);
   });
 
   it("a row is one link to the ticker page, one column with a hairline between rows, and nothing truncates", () => {
@@ -64,7 +65,7 @@ describe("Discover is a list of rows, not a card grid", () => {
     expect(page).toContain("freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime), health?.cadence)");
     expect(page).not.toMatch(/timeAgo|\bago\b/);                       // one timestamp format on Discover: "Oct 15, 4:00 PM ET"
     expect(page).not.toContain("health.last_refreshed_at");            // the global stamp dates nothing a visitor sees
-    expect(page.match(/index=\{nextIndex\(\)\}/g)?.length).toBe(5);
+    expect(page.match(/index=\{nextIndex\(\)\}/g)?.length).toBe(4);
     expect(page).toContain('<div className="max-w-6xl mx-auto">');
   });
 });

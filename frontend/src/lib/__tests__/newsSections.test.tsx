@@ -62,7 +62,7 @@ describe("Discover news sections", () => {
   });
   it("is the first thing on Discover and carries headlines only", () => {
     const page = readFileSync(join(SRC, "app/discover/page.tsx"), "utf8");
-    expect(page.indexOf("<NewsSections")).toBeLessThan(page.indexOf("Ivy's Pick"));
+    expect(page.indexOf("<NewsSections")).toBeLessThan(page.indexOf("Reporting soon"));
     const comp = readFileSync(join(SRC, "components/NewsSections.tsx"), "utf8") + readFileSync(join(SRC, "lib/newsSections.ts"), "utf8");
     expect(comp).not.toMatch(/summary|because[^"]/i);
   });
