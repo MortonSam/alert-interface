@@ -98,7 +98,9 @@ export interface IvyPage {
   minutes: number;
   quick_picks: { symbol: string; name: string }[];
   ideas: IvyPageIdea[];
-  trust: { notes: IvyCount; confirmed: IvyCount; walkthroughs: IvyCount };
+  trust: { notes: IvyCount; confirmed: IvyCount; walkthroughs: IvyCount; checked: IvyCount };
+  /** One served note's sentence beside the filing passage its check quoted, verbatim in the filing; null when none qualifies. */
+  check: { symbol: string; name: string; sentence: string; passage: string; form: string | null; filed: string | null; url: string } | null;
 }
 export const fetchIvyPage = () => getJson<IvyPage>("/ivy-page");
 

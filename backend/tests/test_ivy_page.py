@@ -13,4 +13,4 @@ async def test_the_ivy_page_answers_only_with_the_walkthrough_flag(monkeypatch):
     monkeypatch.setattr(settings, "ivy_walkthrough_enabled", False)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         assert (await c.get("/api/v1/ivy-page")).status_code == 404
-    assert R.IVY_QUICK_PICKS == ("NVDA", "AAPL", "JPM")
+    assert R.IVY_QUICK_PICKS == ("NVDA", "JPM")

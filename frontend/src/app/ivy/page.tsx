@@ -1,20 +1,33 @@
 "use client";
 
-// The one Ivy page (Sam, 2026-11-02): what Ivy does and why to trust her, and nothing of the old pick pages. Every line is
-// lib/ivyPageCopy's; the quick picks, the seven ideas (each linked to the step it is shown on) and the counts with their dates come
-// from GET /ivy-page, which answers only while IVY_WALKTHROUGH_ENABLED is on (the search, ideas and counts hide without it).
+// The one Ivy page as a demonstration (Sam, 2026-11-03): it shows her work rather than describing it, at the home page's pace, one
+// screen per section with its content centered and one focal point each. 1. the headline and the search that starts a walkthrough;
+// 2. a real step (NVIDIA's margins), rendered by the walkthrough's own StepScreen; 3. a real note sentence beside the filing passage
+// that confirmed it, with the live count of checked statements; 4. the seven ideas, each linked to its example step; 5. the closing
+// line. Every line is lib/ivyPageCopy's; the step, the example, the counts and the ideas come from the API, which answers only while
+// IVY_WALKTHROUGH_ENABLED is on (sections 2 to 4 hide without it).
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { StepScreen } from "@/components/walkthrough/Walkthrough";
 import { api, type Ticker } from "@/lib/api";
 import { fmtDate } from "@/lib/dates";
 import { IVY_PAGE as C } from "@/lib/ivyPageCopy";
 import { matchTickers } from "@/lib/tickerSearch";
-import { fetchIvyPage, fetchWalkthrough, type IvyCount, type IvyPage } from "@/lib/walkthrough";
+import { fetchIvyPage, fetchWalkthrough, type IvyPage, type Walkthrough } from "@/lib/walkthrough";
 
 const walkHref = (symbol: string, step = 1) => `/tickers/${symbol}?learn=${step}`;
+const EXAMPLE = { symbol: "NVDA", step: "margins" } as const;        // the step shown in section 2 (Sam, 2026-11-03)
 
-function WalkSearch({ page }: { page: IvyPage }) {
+function Screen({ children, testid }: { children: React.ReactNode; testid: string }) {
+  return (
+    <section className="screen-section flex flex-col items-center justify-center px-4 sm:px-8 py-12" data-testid={testid}>
+      {children}
+    </section>
+  );
+}
+
+function WalkSearch({ page }: { page: IvyPage | null }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [tickers, setTickers] = useState<Ticker[]>([]);
@@ -34,97 +47,117 @@ function WalkSearch({ page }: { page: IvyPage }) {
   }
 
   return (
-    <div className="mx-auto mt-10 w-full max-w-xl text-left" data-testid="ivy-walk-search">
-      <label htmlFor="ivy-walk-search" className="block text-sm font-semibold text-foreground">{C.searchLabel}</label>
-      <p className="mt-0.5 text-xs text-muted-foreground">{C.length(page.minutes)}</p>
-      <input id="ivy-walk-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={C.searchPlaceholder} autoComplete="off"
-        className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-foreground/40" />
-      {matches.length > 0 && (
-        <ul className="mt-1 rounded-lg border border-border divide-y divide-border/60">
-          {matches.map((t) => (
-            <li key={t.symbol}>
-              <button type="button" onClick={() => void open(t)} className="tap w-full px-3 py-2 text-left text-sm hover:bg-muted">
-                <span className="font-semibold">{t.symbol}</span> <span className="text-muted-foreground">{t.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {missing && <p className="mt-2 text-sm text-muted-foreground">{missing}</p>}
-      {page.quick_picks.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">{C.quickPicks}</span>
+    <div className="mt-12 w-full max-w-2xl" data-testid="ivy-walk-search">
+      <label htmlFor="ivy-walk-search" className="sr-only">{C.searchLabel}</label>
+      <div className="relative">
+        <input id="ivy-walk-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={C.searchPlaceholder} autoComplete="off"
+          className="w-full rounded-2xl border-2 border-primary bg-background px-6 py-5 text-lg sm:text-xl text-foreground outline-none placeholder:text-muted-foreground focus:ring-4 focus:ring-primary/20" />
+        {matches.length > 0 && (
+          <ul className="absolute inset-x-0 top-full z-10 mt-2 rounded-xl border border-border bg-background text-left shadow-xl divide-y divide-border/60">
+            {matches.map((t) => (
+              <li key={t.symbol}>
+                <button type="button" onClick={() => void open(t)} className="tap w-full px-5 py-3 text-left text-base hover:bg-muted">
+                  <span className="font-semibold">{t.symbol}</span> <span className="text-muted-foreground">{t.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {missing && <p className="mt-3 text-sm text-muted-foreground">{missing}</p>}
+      {page && page.quick_picks.length > 0 && (
+        <p className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+          <span>{C.quickPicks}</span>
           {page.quick_picks.map((q) => (
-            <Link key={q.symbol} href={walkHref(q.symbol)} data-testid="ivy-quick-pick"
-              className="tap rounded-full border border-border px-3.5 py-1.5 text-sm text-foreground/85 hover:border-foreground/30">
-              {q.symbol} <span className="text-muted-foreground">{q.name}</span>
+            <Link key={q.symbol} href={walkHref(q.symbol)} data-testid="ivy-quick-pick" className="tap font-semibold text-primary hover:text-foreground transition-colors">
+              {q.symbol}
             </Link>
           ))}
-        </div>
+        </p>
       )}
     </div>
   );
 }
 
-function TrustLine({ text, c }: { text: (n: string) => string; c: IvyCount }) {
-  const date = fmtDate(c.as_of);
-  return (
-    <li className="rounded-lg border border-border/60 px-5 py-4">
-      <p className="text-sm text-foreground">{text(c.count.toLocaleString("en-US"))}</p>
-      {date && <p className="mt-1 text-xs text-muted-foreground">{C.asOf(date)}</p>}
-    </li>
-  );
-}
-
 export default function IvyPageView() {
   const [page, setPage] = useState<IvyPage | null>(null);
-  useEffect(() => { fetchIvyPage().then(setPage); }, []);
+  const [walk, setWalk] = useState<Walkthrough | null>(null);
+  useEffect(() => {
+    fetchIvyPage().then(setPage);
+    fetchWalkthrough(EXAMPLE.symbol).then(setWalk);
+  }, []);
+  const step = walk?.steps.find((s) => s.key === EXAMPLE.step && s.status !== "absent") ?? null;
+  const checkedOn = fmtDate(page?.trust.checked.as_of);
+  const filed = fmtDate(page?.check?.filed);
 
   return (
-    <main className="pb-20">
-      <section className="pt-6 text-center">
-        <h1 className="text-display font-display font-bold text-foreground max-w-[22ch] mx-auto">{C.headline}</h1>
-        {page && <WalkSearch page={page} />}
-      </section>
+    <main>
+      <Screen testid="ivy-open">
+        <h1 className="text-display font-display font-bold text-foreground max-w-[22ch] text-center">{C.headline}</h1>
+        <WalkSearch page={page} />
+      </Screen>
 
-      <section className="mt-16 grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="ivy-cards">
-        {C.cards.map((card) => (
-          <div key={card.key} className="rounded-lg border border-border/60 px-5 py-5">
-            <h3 className="text-base font-semibold text-foreground">{card.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{card.body}</p>
+      {walk && step && (
+        <Screen testid="ivy-step">
+          <div className="w-full max-w-2xl">
+            <p className="mb-6 font-mono text-xs uppercase tracking-[.16em] text-primary">{C.stepFrom(walk.name)}</p>
+            <StepScreen step={step} w={walk} learned={{}} others={{}} preview />
+            <div className="mt-8 text-center">
+              <Link href={walkHref(walk.symbol)} className="inline-block rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
+                {C.startWalk(walk.name)} →
+              </Link>
+            </div>
           </div>
-        ))}
-      </section>
+        </Screen>
+      )}
 
-      {page && (
-        <section className="mt-16" data-testid="ivy-trust">
-          <h2 className="text-headline font-display font-semibold text-foreground">{C.trustTitle}</h2>
-          <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <TrustLine text={C.trust.notes} c={page.trust.notes} />
-            <TrustLine text={C.trust.confirmed} c={page.trust.confirmed} />
-            <TrustLine text={C.trust.walkthroughs} c={page.trust.walkthroughs} />
-          </ul>
-        </section>
+      {page?.check && (
+        <Screen testid="ivy-check">
+          <div className="w-full max-w-4xl">
+            <h2 className="text-headline font-display font-semibold text-foreground text-center">{C.checkTitle}</h2>
+            <div className="mt-10 grid grid-cols-1 gap-10 md:grid-cols-2 md:gap-14">
+              <figure>
+                <figcaption className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground">{C.noteFrom(page.check.name)}</figcaption>
+                <blockquote className="mt-3 font-display text-xl leading-relaxed text-foreground">{page.check.sentence}</blockquote>
+              </figure>
+              <figure>
+                <figcaption className="font-mono text-xs uppercase tracking-[.16em] text-muted-foreground">
+                  {page.check.form && filed ? C.filingFrom(page.check.form, filed) : C.readFiling}
+                </figcaption>
+                <blockquote className="mt-3 border-l-2 border-primary/60 pl-4 font-display text-xl leading-relaxed text-foreground/90">
+                  “{page.check.passage}”
+                </blockquote>
+                <a href={page.check.url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm text-cool hover:text-foreground">{C.readFiling} →</a>
+              </figure>
+            </div>
+            {checkedOn && (
+              <p className="mt-12 text-center text-sm text-muted-foreground" data-testid="ivy-checked">
+                {C.checked(page.trust.checked.count.toLocaleString("en-US"), checkedOn)}
+              </p>
+            )}
+          </div>
+        </Screen>
       )}
 
       {page && page.ideas.length > 0 && (
-        <section className="mt-16" data-testid="ivy-ideas">
-          <h2 className="text-headline font-display font-semibold text-foreground">{C.ideasTitle}</h2>
-          <ol className="mt-4 space-y-3">
-            {page.ideas.map((idea) => (
-              <li key={idea.n} className="rounded-lg border border-border/60 px-5 py-4">
-                <p className="text-sm font-semibold text-foreground">{idea.n}. {idea.title}</p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{idea.text}</p>
-                <Link href={walkHref(idea.symbol, idea.n)} className="mt-2 inline-block text-sm font-medium text-primary hover:text-foreground transition-colors">
-                  {C.ideaLink(idea.name)} →
-                </Link>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <Screen testid="ivy-ideas">
+          <div className="w-full max-w-xl">
+            <h2 className="text-headline font-display font-semibold text-foreground text-center">{C.ideasTitle}</h2>
+            <ol className="mt-8 space-y-3 text-lg">
+              {page.ideas.map((idea) => (
+                <li key={idea.n} className="flex gap-4">
+                  <span className="w-6 shrink-0 text-right font-mono text-muted-foreground">{idea.n}</span>
+                  <Link href={walkHref(idea.symbol, idea.n)} className="text-foreground hover:text-primary transition-colors">{idea.title}</Link>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </Screen>
       )}
 
-      <p className="mt-16 text-center text-base font-medium text-foreground" data-testid="ivy-closing">{C.closing}</p>
+      <Screen testid="ivy-closing">
+        <p className="statement-h2 font-display font-bold text-foreground max-w-[22ch] text-center">{C.closing}</p>
+      </Screen>
     </main>
   );
 }

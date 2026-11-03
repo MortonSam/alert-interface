@@ -8,9 +8,9 @@ const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
 
 const lines = (): string[] => [
-  IVY_PAGE.headline, IVY_PAGE.searchLabel, IVY_PAGE.searchPlaceholder, IVY_PAGE.length(3), IVY_PAGE.quickPicks, IVY_PAGE.noWalkthrough("NVIDIA"),
-  ...IVY_PAGE.cards.flatMap((c) => [c.title, c.body]), IVY_PAGE.trustTitle, IVY_PAGE.trust.notes("12"), IVY_PAGE.trust.confirmed("300"),
-  IVY_PAGE.trust.walkthroughs("452"), IVY_PAGE.asOf("Nov 2, 2026"), IVY_PAGE.ideasTitle, IVY_PAGE.ideaLink("NVIDIA"), IVY_PAGE.closing,
+  IVY_PAGE.headline, IVY_PAGE.searchLabel, IVY_PAGE.searchPlaceholder, IVY_PAGE.quickPicks, IVY_PAGE.noWalkthrough("NVIDIA"),
+  IVY_PAGE.stepFrom("NVIDIA"), IVY_PAGE.startWalk("NVIDIA"), IVY_PAGE.checkTitle, IVY_PAGE.noteFrom("NVIDIA Corporation"),
+  IVY_PAGE.filingFrom("10-Q", "Aug 26, 2026"), IVY_PAGE.readFiling, IVY_PAGE.checked("398", "Nov 2, 2026"), IVY_PAGE.ideasTitle, IVY_PAGE.closing,
 ];
 
 describe("the one Ivy page (Sam, 2026-11-02)", () => {
@@ -26,9 +26,11 @@ describe("the one Ivy page (Sam, 2026-11-02)", () => {
   it("types no count or date: they come from the API with their own dates", () => {
     const page = read("app/ivy/page.tsx");
     expect(page).toContain("fetchIvyPage()");
-    expect(page).toContain("C.asOf(date)");
-    expect(page).not.toMatch(/\b(?:12|300|452|503)\b/);                   // no count typed by hand
+    expect(page).toContain("C.checked(page.trust.checked.count");
+    expect(page).not.toMatch(/(?<![-\w])(?:300|398|452|503)\b/);         // no count typed by hand
     expect(page).toMatch(/walkHref\(idea\.symbol, idea\.n\)/);           // each idea opens its example step
+    expect(page).toContain("<StepScreen step={step} w={walk}");            // a real step, rendered by the walkthrough's own component
+    expect(page).not.toMatch(/cards|ivy-trust|Ivy's Read/);                // no descriptive boxes (Sam, 2026-11-03)
   });
 
   it("the old pages redirect to /ivy and leave the sitemap, the nav and every page", () => {

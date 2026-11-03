@@ -21,8 +21,8 @@ describe("390px layout (audit item 24)", () => {
     expect(read("app/layout.tsx")).toMatch(/min-h-\[3\.25rem\][^"]*flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-6/);
     expect(read("app/layout.tsx")).not.toMatch(/h-\[3\.25rem\] flex items-center gap-6/);
     const ivy = read("app/ivy/page.tsx");
-    expect(ivy).toContain('grid grid-cols-1 gap-4 md:grid-cols-3');
-    expect(ivy).toContain('mt-3 flex flex-wrap items-center gap-2');      // the quick picks wrap
+    expect(ivy).toContain('grid grid-cols-1 gap-10 md:grid-cols-2');        // the note and the filing stack on a phone
+    expect(ivy).toContain('flex flex-wrap items-center justify-center');   // the quick picks wrap
     expect(ivy).not.toMatch(/whitespace-nowrap/);
     const ticker = read("app/tickers/[symbol]/page.tsx");
     expect(ticker).toContain("-mx-4 px-4 sm:-mx-8 sm:px-8");

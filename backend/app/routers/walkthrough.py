@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -126,7 +127,7 @@ async def featured(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_
     return {"symbol": sym if name else None, "name": name, "rule": pick.get("rule"), "date": pick.get("date"), "minutes": W.MINUTES}
 
 
-IVY_QUICK_PICKS = ("NVDA", "AAPL", "JPM")          # the /ivy page's quick picks (Sam, 2026-11-02), offered only with a walkthrough entry
+IVY_QUICK_PICKS = ("NVDA", "JPM")                  # the /ivy page's quick picks (Sam, 2026-11-03), offered only with a walkthrough entry
 _ENTRY_CACHE: dict = {}
 
 
@@ -143,6 +144,68 @@ async def _entries(db: AsyncSession) -> tuple[int, str | None]:
                 latest = max(latest or as_of, as_of)
         _ENTRY_CACHE.update(key=key, value=(n, latest))
     return _ENTRY_CACHE["value"]
+
+
+CHECK_EXAMPLE_FIRST = ("NVDA",)                  # the self-check example comes from NVIDIA's note when one of its claims qualifies
+_CHECK_CACHE: dict = {}
+QUOTED = re.compile(r"(?:^|[\s:(])['\u2018\u201c\"](.{60,400}?)['\u2019\u201d\"](?=[\s.,;:)]|$)")    # a quote may hold an apostrophe
+
+
+def _plain(html_or_text: str) -> str:
+    """Pure: text as words, for a verbatim check: tags dropped, entities and curly quotes made plain, whitespace collapsed."""
+    import html as H
+    t = H.unescape(re.sub(r"<[^>]+>", " ", html_or_text))
+    t = t.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"').replace("\xa0", " ")
+    return re.sub(r"\s+", " ", t).strip().lower()
+
+
+def check_candidates(claims: list[dict]) -> list[tuple[str, str]]:
+    """Pure: (the note's sentence, the filing passage the check quoted) for each supported claim whose reason quotes the filing."""
+    out = []
+    for c in claims or []:
+        if c.get("verdict") != "supported" or not c.get("sentence") or not c.get("reason"):
+            continue
+        m = QUOTED.search(c["reason"])
+        if m and 40 <= len(c["sentence"]) <= 320:
+            out.append((c["sentence"], m.group(1).strip()))
+    return sorted(out, key=lambda x: not re.search(r"\d", x[0]))      # a sentence with a figure first, then the note's order
+
+
+async def _check_example(db: AsyncSession) -> dict | None:
+    """One sentence from a served research note beside the filing passage its check quoted, shown only when that passage is in the
+    filing word for word (fetched from SEC EDGAR, cached by accession). Cached per note version."""
+    rows = (await db.execute(text("""SELECT t.symbol, t.name, n.verification->'claims', n.source_filings->0, n.verified_at::text
+        FROM research_notes n JOIN tickers t ON t.id = n.ticker_id
+        WHERE n.status = 'complete' AND n.verification IS NOT NULL AND n.source_filings->0->>'url' IS NOT NULL
+        ORDER BY (t.symbol = ANY(:first)) DESC, n.verified_at DESC LIMIT 5"""), {"first": list(CHECK_EXAMPLE_FIRST)})).all()
+    from app.services.edgar_client import EdgarClient
+    edgar = EdgarClient()
+    try:
+        for sym, name, claims, filing, verified_at in rows:
+            key = (sym, verified_at)
+            if key in _CHECK_CACHE:
+                if _CHECK_CACHE[key]:
+                    return _CHECK_CACHE[key]
+                continue
+            found = None
+            m = re.search(r"/data/(\d+)/(\d{18})/([^/?#]+)$", filing.get("url") or "")
+            if m:
+                acc = f"{m.group(2)[:10]}-{m.group(2)[10:12]}-{m.group(2)[12:]}"
+                try:
+                    body = _plain(await edgar.fetch_filing_html(m.group(1), acc, m.group(3)))
+                except Exception:
+                    body = ""
+                for sentence, passage in check_candidates(claims):
+                    if _plain(passage) in body:
+                        found = {"symbol": sym, "name": name, "sentence": sentence, "passage": passage, "form": filing.get("form_type"),
+                                 "filed": filing.get("filing_date"), "url": filing["url"]}
+                        break
+            _CHECK_CACHE[key] = found
+            if found:
+                return found
+        return None
+    finally:
+        await edgar.close()
 
 
 @router.get("/ivy-page")
@@ -168,9 +231,11 @@ async def ivy_page(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_
                 ideas.append({"n": n, "key": step["key"], "concept": step["idea"]["concept"], "title": step["idea"]["title"],
                               "text": step["idea"]["text"], "symbol": sym, "name": p["name"]})
                 break
-    notes = (await db.execute(text("""SELECT count(*), COALESCE(sum((verification->'summary'->>'supported')::int), 0), max(verified_at)::date::text
+    notes = (await db.execute(text("""SELECT count(*), COALESCE(sum((verification->'summary'->>'supported')::int), 0), max(verified_at)::date::text,
+        COALESCE(sum(jsonb_array_length(verification->'claims')), 0)
         FROM research_notes WHERE status = 'complete' AND verification IS NOT NULL"""))).first()
     walks, walks_as_of = await _entries(db)
     return {"minutes": W.MINUTES, "quick_picks": quick, "ideas": ideas,
             "trust": {"notes": {"count": notes[0], "as_of": notes[2]}, "confirmed": {"count": int(notes[1]), "as_of": notes[2]},
-                      "walkthroughs": {"count": walks, "as_of": walks_as_of}}}
+                      "walkthroughs": {"count": walks, "as_of": walks_as_of}, "checked": {"count": int(notes[3]), "as_of": notes[2]}},
+            "check": await _check_example(db)}

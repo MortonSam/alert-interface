@@ -90,13 +90,15 @@ function QuickCheck({ check, onDone, segs }: { check: WalkCheck; onDone: () => v
   );
 }
 
-function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrough; learned: Learned; others: Record<string, Walkthrough | null> }) {
+/** `preview`: the step's figures, sentences, quote and chart only, without the quick check, "The idea" or Go deeper (the /ivy page
+ *  shows one step as a sample of the walkthrough, Sam 2026-11-03). */
+export function StepScreen({ step, w, learned, others, preview = false }: { step: WalkStep; w: Walkthrough; learned: Learned; others: Record<string, Walkthrough | null>; preview?: boolean }) {
   const from = learnedElsewhere(step.idea, learned, w.symbol);
   const line = from && step.idea ? compareLine(factFor(others[from.symbol] ?? null, step.idea.concept), step.fact) : null;
   const known = from && line ? { from: others[from.symbol]?.name ?? from.name, line } : null;
   // order: numbers, Ivy's sentences, the quick check, then "The idea" once the visitor answers or skips (it never shows beside an open question).
   // A check whose answer the visitor has already met for this concept is not asked again: the line comparing the two stocks shows instead.
-  const asks = step.status !== "absent" && !!step.check && !alreadyMet(step.check, learned);
+  const asks = !preview && step.status !== "absent" && !!step.check && !alreadyMet(step.check, learned);
   const [checked, setChecked] = useState(false);
   // a glossary term is explained at its first mention on the screen only, in reading order (Sam, 2026-10-29)
   const texts = [
@@ -161,8 +163,8 @@ function StepScreen({ step, w, learned, others }: { step: WalkStep; w: Walkthrou
         </>
       )}
       {asks && step.check && <QuickCheck key={step.key} check={step.check} onDone={() => setChecked(true)} segs={checkSegs} />}
-      {step.idea && (!asks || checked) && <IdeaBox idea={step.idea} known={known} segments={ideaSeg} />}
-      {(step.deeper.length > 0 || step.source) && step.status !== "absent" && (
+      {!preview && step.idea && (!asks || checked) && <IdeaBox idea={step.idea} known={known} segments={ideaSeg} />}
+      {!preview && (step.deeper.length > 0 || step.source) && step.status !== "absent" && (
         <details className="mt-6 group">
           <summary className="tap cursor-pointer select-none text-sm font-medium text-foreground/85 hover:text-foreground">{T.goDeeper}</summary>
           <dl className="mt-3 divide-y divide-border/60 text-sm">
