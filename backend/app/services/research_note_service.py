@@ -324,9 +324,11 @@ OUTPUT FORMAT: Return ONLY a valid JSON object with exactly these keys (no markd
 RULES:
 - At most {MAX_POINTS} points in each of highlights, watch and risks. Fewer is fine, and a section may be empty. Write only the
   points that matter most.
-- Every point that states a figure sets it against something: the company's own history (for example a margin against its
-  five-year average), the same quarter a year earlier, or sector peers. Take those comparisons from COMPARISON FACTS or the filing.
-  Never a bare number. A point with no comparison available states no figure.
+- A figure about how the business performed (sales, growth, margins, earnings, cash flow, guidance) is set against something in
+  the same sentence: the company's own history (for example a margin against its five-year average), the same quarter a year
+  earlier, or sector peers, from COMPARISON FACTS or the filing. Never a bare performance figure; with no comparison available,
+  leave that number out. A figure that describes the company's makeup (a segment's share of sales, a count of stores, employees
+  or properties) or a one-off event (a charge, a deal's price, a settlement) needs no comparison.
 - Do not repeat what the ticker page already shows: no beat rate, no count of beats or misses, no EPS surprise, and nothing about
   how the stock moved after past reports.
 - The bottom_line summarizes what to watch and stays neutral. No verdict on the stock, no rating, and none of "compelling",

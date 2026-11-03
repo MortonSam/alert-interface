@@ -6,8 +6,9 @@
                                  articles corrected everywhere
     clean_text(text)          -> no em or en dashes, and "a"/"an" right before a number ("an 18-of-20", "a 5% rise")
 
-Each section holds at most MAX_POINTS points and may hold none. Every point that states a figure carries a comparison (the
-company's own history, the same quarter a year earlier, or sector peers): COMPARISON_CUE. Nothing repeats what the ticker page
+Each section holds at most MAX_POINTS points and may hold none. Every point that states a figure about performance carries a
+comparison (the company's own history, the same quarter a year earlier, or sector peers): COMPARISON_CUE; a figure about the
+company's makeup or a one-off event needs none (needs_comparison). Nothing repeats what the ticker page
 already shows (the beat rate and the moves after past reports): REPEATS. The Bottom Line summarizes what to watch and gives no
 verdict on the stock: VERDICT_WORDS. No fast-changing figure is typed into the text: it is a {live:...} slot the page fills when the
 note is read (services/note_live, Sam 2026-11-02); a sentence that types one, uses an unknown slot or compares a slot in its own words
@@ -49,6 +50,23 @@ COMPARISON_CUE = re.compile(
     r"\b(?:up|down|rose|fell|increased|decreased|grew|declined|expanded|contracted|improved|widened|narrowed) (?:by )?\d+(?:\.\d+)? ?"
     r"(?:basis points|bps|percentage points?)\b|\bover (?:Q[1-4]|the (?:same|prior|previous) (?:quarter|period|year))\b", re.I)
 
+# Which figures need a comparison (Sam, 2026-11-03): a figure about how the business performed (sales, growth, margins, earnings,
+# cash flow, guidance) does; one that describes the company's makeup (a segment's share of sales, a count of stores, employees or
+# properties) or a one-off event (a charge, a deal's price, a settlement) does not. Read per sentence: a sentence with a figure needs
+# a comparison when it names a performance measure and is neither makeup nor a one-off.
+PERFORMANCE = re.compile(
+    r"\b(?:grow(?:s|th|ing)?|grew|revenues?|sales|net income|operating income|income|earnings|eps|per share|profits?|margins?|"
+    r"cash flows?|free cash|guidance|guided|outlook|forecasts?|expects?|backlog|bookings|same[- ]store|comparable[- ]store|"
+    r"returns? on|roe|roic|ffo|affo|noi|occupancy)\b", re.I)
+MAKEUP = re.compile(
+    r"\b(?:share of|percent of|portion of|of (?:its |the company's |total |net |consolidated )?(?:revenues?|sales)|accounted for|accounts for|"
+    r"represent(?:s|ed|ing)?|makes? up|made up|comprise[sd]?|employees|headcount|stores|locations|restaurants|properties|countries|"
+    r"offices|stake|owned|ownership)\b|\d+(?:\.\d+)?\s?% of\b", re.I)
+ONE_OFF = re.compile(
+    r"\b(?:charges?|impairments?|write-?(?:downs?|offs?)|one-time|one-off|acqui(?:re|red|res|sition|sitions)|divest\w*|sale of|sold|"
+    r"proceeds|settlements?|settled|refunds?|restructuring|severance|mergers?|deal|purchase price|tender|authoriz\w*|issued|issuance|"
+    r"notes due|offering|lawsuits?|fines?|penalt(?:y|ies)|spin-?off)\b", re.I)
+
 # a figure: a percentage, a dollar amount, or a number with a unit; a bare year or a date is not a figure
 FIGURE = re.compile(r"\$\s?\d|\d+(?:\.\d+)?\s?%|\b\d[\d,]*(?:\.\d+)?\s?(?:billion|million|thousand|bps|basis points|x)\b", re.I)
 
@@ -83,14 +101,20 @@ def clean_text(text: str) -> str:
     return _ARTICLE_NUMBER.sub(art, t)
 
 
+def needs_comparison(text: str) -> bool:
+    """Pure: some sentence states a figure about performance that is neither the company's makeup nor a one-off event."""
+    return any(FIGURE.search(s) and PERFORMANCE.search(s) and not MAKEUP.search(s) and not ONE_OFF.search(s)
+               for s in _sentences(text) or [text])
+
+
 def point_problems(point: dict) -> list[str]:
     """Pure: why one point breaks the rules."""
     text = f"{point.get('lead', '')}. {point.get('detail', '')}"
     out = []
     if REPEATS.search(text):
         out.append("repeats what the ticker page shows (beat rate or moves after past reports)")
-    if FIGURE.search(text) and not COMPARISON_CUE.search(text):
-        out.append("states a figure with no comparison (its own history, the same quarter a year earlier, or sector peers)")
+    if needs_comparison(text) and not COMPARISON_CUE.search(text):
+        out.append("states a performance figure with no comparison (its own history, the same quarter a year earlier, or sector peers)")
     if VERDICT_WORDS.search(text):
         out.append("gives a verdict on the stock")
     if re.search(r"[—–]", text):

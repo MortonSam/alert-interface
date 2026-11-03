@@ -30,7 +30,7 @@ def _p(lead, detail):
 def test_point_rules():
     assert NR.point_problems(_p("Margin", "Gross margin was 75.0% against a five-year average of 65.2%.")) == []
     assert NR.point_problems(_p("Revenue", "Revenue grew 62% to $57 billion, up from $35.1 billion a year earlier.")) == []
-    assert "states a figure with no comparison" in NR.point_problems(_p("Revenue", "Revenue reached $57 billion."))[0]
+    assert "states a performance figure with no comparison" in NR.point_problems(_p("Revenue", "Revenue reached $57 billion."))[0]
     assert NR.point_problems(_p("Guidance", "Management expects demand to stay firm into next year.")) == []      # no figure, no comparison needed
     for repeat in ("It beat estimates in 18 of 20 quarters.", "The stock fell 6% after its last report, against a typical 4%.",
                    "Its beat rate is 90%, above peers.", "The post-earnings move averaged 5%, above the sector."):
@@ -42,7 +42,7 @@ def test_at_most_three_points_no_minimum_and_a_neutral_bottom_line():
     draft = {"rating": "bullish", "what_they_do": "Makes chips — mostly GPUs.",
              "bottom_line": "Watch data center revenue against the year-ago quarter. The setup is compelling. Watch export rules.",
              "highlights": [_p(f"P{i}", f"Revenue up {i}% from a year earlier.") for i in range(5)],
-             "watch": [], "risks": [_p("Bare", "Inventory was $10 billion."), _p("Ok", "Inventory rose 20% from a year earlier.")]}
+             "watch": [], "risks": [_p("Bare", "Revenue was $10 billion."), _p("Ok", "Inventory rose 20% from a year earlier.")]}
     probs = NR.note_problems(draft)
     assert "highlights: 5 points, at most 3" in probs and "bottom_line: gives a verdict on the stock" in probs
     note = NR.enforce(draft)
@@ -151,6 +151,21 @@ def test_comparisons_the_check_used_to_read_as_bare_figures():
     ]
     for text in compared:
         assert not [w for w in point_problems({"lead": "x", "detail": text}) if "no comparison" in w], text
-    bare = ["Carrier recognized a benefit of $133 million from tariff refunds.", "Parts and service were 28% of net sales in 2025."]
+    bare = ["Revenue was $9.23 billion in the quarter.", "Gross margin was 51.6% over the trailing twelve months."]   # performance, bare
     for text in bare:
         assert [w for w in point_problems({"lead": "x", "detail": text}) if "no comparison" in w], text
+
+
+def test_only_performance_figures_need_a_comparison():
+    """Sam, 2026-11-03: makeup and one-off figures need no comparison; performance figures still do."""
+    from app.services.note_rules import needs_comparison, point_problems
+    bare = lambda t: [w for w in point_problems({"lead": "x", "detail": t}) if "no comparison" in w]
+    for performance in ("Revenue was $96.2 billion in the quarter.", "Gross margin reached 74.7%.", "Free cash flow was $3.1 billion.",
+                        "Management guided to revenue of $54 billion for the next quarter."):
+        assert needs_comparison(performance) and bare(performance), performance
+    for free in ("Parts and service were 28% of net sales in 2025.", "International operations represented approximately 52% of net sales.",
+                 "Carrier recognized a benefit of $133 million from tariff refunds.", "It sold its Riello business for $438 million.",
+                 "The company employs 4,250 people in 55 offices.", "It owned 62% of Forestar Group at June 30, 2026.",
+                 "The company recorded a $496.0 million impairment charge."):
+        assert not needs_comparison(free) and not bare(free), free
+    assert not bare("Revenue was $96.2 billion, up 105.9% from $46.7 billion a year earlier.")
