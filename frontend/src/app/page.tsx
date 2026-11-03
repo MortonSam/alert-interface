@@ -85,9 +85,9 @@ export default async function Home() {
         </p>
       </section>
 
-      {/* ── 2. The counts: the live numbers from stored tables, a compact band right under the opening (Sam, 2026-10-29: on a
-             screen of their own they floated in black). ── */}
-      <section className="py-12 sm:py-16">
+      {/* ── 2. The counts: the live numbers from stored tables, on a screen of their own and centered like every home section
+             (Sam, 2026-11-02, reversing the compact band of 2026-10-29). ── */}
+      <section className="screen-section flex items-center justify-center py-12 sm:py-0">
         {/* the row lib/siteCounters' layout model measures (COUNTER_LAYOUT: max-w-5xl with its padding) */}
         <div className="w-full max-w-5xl mx-auto px-4 sm:px-8">
           <SiteCounters initial={initial} />
@@ -204,8 +204,8 @@ export default async function Home() {
       <LatestVerifiedNote className="screen-section flex flex-col justify-center" />
 
         {/* ── 8. Market grid ───────────────────────────────────── */}
-          <section id="market" className="screen-section max-w-7xl mx-auto px-4 sm:px-8 py-12 sm:py-16">
-            <div className="text-center mb-12">
+          <section id="market" className="screen-section screen-fit flex flex-col max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
+            <div className="text-center mb-4 sm:mb-6">
               <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
                 Start anywhere
               </p>

@@ -77,8 +77,7 @@ describe("the counters never touch", () => {
     expect(src).toContain('"--num-em": numEm(');
     expect(src).not.toContain("whitespace-nowrap`");                       // labels wrap inside their column, never into the next
     const section = page.match(/<section className="([^"]*)">\s*\{\/\*[^*]*\*\/\}\s*<div className="w-full max-w-5xl mx-auto px-4 sm:px-8">\s*<SiteCounters initial=\{initial\} \/>/)?.[1] ?? "";
-    expect(section).toBe("py-12 sm:py-16");
-    expect(section).not.toContain("screen-section");                     // a band under the opening, never a screen of its own
-    expect(section).not.toMatch(/min-h-|h-screen|svh|dvh/);
+    expect(section).toBe("screen-section flex items-center justify-center py-12 sm:py-0");   // a screen of its own, centered (Sam, 2026-11-02)
+    expect(section).not.toMatch(/min-h-|h-screen|svh|dvh/);                 // its height comes from the one .screen-section rule
   });
 });

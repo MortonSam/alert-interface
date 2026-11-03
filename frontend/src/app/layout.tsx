@@ -41,7 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`dark ${fontDisplay.variable} ${fontUi.variable} ${fontMono.variable} ${fontBrand.variable}`} suppressHydrationWarning>
       <body className="font-sans antialiased">
         <PostHogProvider>
-          <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
+          <header className="border-b bg-background sticky top-0 z-40">
             <div className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[3.25rem] py-2 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-6">
               <Link href="/" className="tap flex items-center gap-2 sm:mr-2" data-testid="brand-lockup">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

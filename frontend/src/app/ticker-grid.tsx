@@ -2,14 +2,23 @@
 
 import { visitorMessage } from "@/lib/errors";
 import { datasetAgeLine, datasetsStale, freshnessLine } from "@/lib/freshness";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
 import { fmtMarketCap } from "@/lib/utils";
 import { SHARE_CLASS, gridEarningsLine } from "@/lib/earningsSource";
 
 import { fmtDate as fmtOneDate } from "@/lib/dates";
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 24;            // before the grid's box is measured
+const GRID_GAP_PX = 12;          // gap-3
+const ROW_GUESS_PX = 120;        // a card's height before one is on screen
+
+/** Pure: how many cards a page holds so the grid fills its box without overflowing it: whole rows only, at least one row
+ *  (the home page's market section is exactly one screen, Sam 2026-11-02). */
+export function fitPageSize(boxHeight: number, cols: number, rowHeight: number, gap = GRID_GAP_PX): number {
+  const rows = Math.max(1, Math.floor((boxHeight + gap) / (rowHeight + gap)));
+  return Math.max(1, cols) * rows;
+}
 
 function fmtAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -56,6 +65,8 @@ export function TickerGrid() {
   const [sector, setSector] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("market_cap");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const gridBox = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     api.tickers
@@ -119,9 +130,29 @@ export function TickerGrid() {
     });
   }, [tickers, debouncedSearch, sector, sort]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const paginated = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  // A page holds what fits in the grid's box (the section is one screen): its columns from the grid's own template, its row height
+  // from the first card, recomputed whenever the box or the width changes.
+  useLayoutEffect(() => {
+    const box = gridBox.current;
+    if (!box) return;
+    const measure = () => {
+      const grid = box.firstElementChild as HTMLElement | null;
+      if (!grid) return;
+      const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
+      const card = grid.firstElementChild as HTMLElement | null;
+      const rowH = card ? card.getBoundingClientRect().height : ROW_GUESS_PX;
+      const next = fitPageSize(box.clientHeight, cols, rowH);
+      setPageSize((cur) => (cur === next ? cur : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [loading, filtered.length === 0]);
   const isFiltered = !!debouncedSearch || !!sector || sort !== "market_cap";
 
   // ── Batch quote fetch for the current page ──────────────────────────────────
@@ -195,7 +226,7 @@ export function TickerGrid() {
   }
 
   return (
-    <section className="mt-8 space-y-4">
+    <section className="mt-8 flex flex-1 min-h-0 flex-col gap-4">
       {/* Freshness indicator */}
       <div className="flex justify-end items-center">
         <span
@@ -287,6 +318,7 @@ export function TickerGrid() {
           </button>
         </div>
       ) : (
+        <div ref={gridBox} className="flex-1 min-h-0 overflow-hidden flex flex-col justify-center">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
           {paginated.map((ticker) => {
             const q = quotes.get(ticker.symbol);
@@ -353,6 +385,7 @@ export function TickerGrid() {
               </Link>
             );
           })}
+        </div>
         </div>
       )}
 
