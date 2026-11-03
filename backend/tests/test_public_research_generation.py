@@ -13,6 +13,8 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from app.services.draft_limiter import RESEARCH_GENERATION_POLICY, _ip_key
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -41,7 +43,7 @@ async def _cleanup(session) -> None:
     await session.execute(text("DELETE FROM research_notes WHERE ticker_id IN (SELECT id FROM tickers WHERE symbol = :s)"), {"s": SYM})
     await session.execute(text("DELETE FROM tickers WHERE symbol = :s"), {"s": SYM})
     await session.execute(text("DELETE FROM system_metadata WHERE key IN (:a, :b)"),
-                          {"a": f"research_gen:ip:{IP}", "b": f"research_gen:global:{_today()}"})
+                          {"a": _ip_key(RESEARCH_GENERATION_POLICY, IP), "b": f"research_gen:global:{_today()}"})
     await session.commit()
 
 
@@ -73,7 +75,7 @@ def _client():
 async def _set_ip_uses(ages_minutes: list[int]) -> None:
     now = datetime.now(timezone.utc)
     async with ScriptSessionLocal() as s:
-        await set_value(s, f"research_gen:ip:{IP}", json.dumps([(now - timedelta(minutes=m)).isoformat() for m in ages_minutes]))
+        await set_value(s, _ip_key(RESEARCH_GENERATION_POLICY, IP), json.dumps([(now - timedelta(minutes=m)).isoformat() for m in ages_minutes]))
         await s.commit()
 
 
@@ -185,10 +187,10 @@ async def test_a_failed_generation_refunds_the_use(ticker):
     async with ScriptSessionLocal() as s:
         charged_at = await record_use(s, POLICY, "anon", IP, SYM)
         assert await global_count_today(s, POLICY) == 1
-        assert len(json.loads(await get_value(s, f"research_gen:ip:{IP}"))) == 1
+        assert len(json.loads(await get_value(s, _ip_key(RESEARCH_GENERATION_POLICY, IP)))) == 1
         await refund_use(s, POLICY, IP, charged_at)
         assert await global_count_today(s, POLICY) == 0
-        assert json.loads(await get_value(s, f"research_gen:ip:{IP}")) == []
+        assert json.loads(await get_value(s, _ip_key(RESEARCH_GENERATION_POLICY, IP))) == []
 
 
 def test_cost_is_estimated_from_the_price_table_or_absent():
