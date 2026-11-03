@@ -99,9 +99,23 @@ def steps_for(lane: str) -> list[tuple[str, list[str], Path]]:
     return [s for s in STEPS if lane == "full" or s[0].startswith("frontend")]
 
 
-def foreground_steps(lane: str) -> list[tuple[str, list[str], Path]]:
-    """The steps run in turn while the backend suite runs in the background: every step of the lane but the backend suite."""
-    return [s for s in steps_for(lane) if s[0] != "backend tests"]
+# The note check spends the dev key on five notes (about $0.70 a run, Sam, 2026-11-02), so it runs only when the push carries a change
+# to how notes are written or checked: their generation, verification, rules or prompts. Any other push skips it and the gate says so.
+NOTE_PATHS = ("backend/app/services/research_note_service.py", "backend/app/services/anthropic_client.py",
+              "backend/app/services/note_", "backend/app/services/verification_verdicts.py", "backend/app/services/material_filings.py",
+              "backend/app/services/research_cost.py", "backend/app/scripts/note_smoke.py", "backend/app/scripts/generate_notes.py",
+              "backend/app/models/research_note.py")
+
+
+def note_check_needed(changed: list[str] | None) -> bool:
+    """Pure: the push changes note generation, verification or their prompts (or what it carries is unknown)."""
+    return changed is None or any(f.startswith(NOTE_PATHS) for f in changed)
+
+
+def foreground_steps(lane: str, changed: list[str] | None = None) -> list[tuple[str, list[str], Path]]:
+    """The steps run in turn while the backend suite runs in the background: every step of the lane but the backend suite, and the
+    note check only when note_check_needed."""
+    return [s for s in steps_for(lane) if s[0] != "backend tests" and (s[0] != "note check" or note_check_needed(changed))]
 
 
 def changed_files() -> list[str] | None:
@@ -245,8 +259,10 @@ def main(argv: list[str]) -> int:
             print(f"\n$ {' '.join(cmd)}   (in ., background, output to {BACKEND_LOG})", flush=True)
             backend_started = clock.monotonic()
             backend = subprocess.Popen(cmd, cwd=ROOT, stdout=open(BACKEND_LOG, "wb"), stderr=subprocess.STDOUT)
+    if lane == "full" and not note_check_needed(changed):
+        print("note check skipped: the push changes nothing in note generation, verification or their prompts", flush=True)
     if all(code == 0 for _, code in results):
-        for name, cmd, cwd in foreground_steps(lane):
+        for name, cmd, cwd in foreground_steps(lane, changed):
             t0 = clock.monotonic()
             if name == "frontend build":
                 was_running = _stop_dev_server()      # the build and the dev server share .next

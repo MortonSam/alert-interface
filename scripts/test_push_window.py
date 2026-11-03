@@ -84,6 +84,13 @@ class LaneTests(unittest.TestCase):
     def test_the_full_lane_runs_the_host_tests_beside_the_backend_suite(self):
         self.assertEqual([n for n, _, _ in foreground_steps("full")], ["validate smoke", "note check", "host tests", "frontend tests", "frontend build"])
         self.assertEqual([n for n, _, _ in foreground_steps("frontend")], ["frontend tests", "frontend build"])
+        # the note check runs only for a push that changes note generation, verification or their prompts (Sam, 2026-11-02)
+        self.assertEqual([n for n, _, _ in foreground_steps("full", ["backend/app/routers/thesis.py", "frontend/src/app/page.tsx"])],
+                         ["validate smoke", "host tests", "frontend tests", "frontend build"])
+        for path in ("backend/app/services/research_note_service.py", "backend/app/services/note_rules.py",
+                     "backend/app/services/anthropic_client.py", "backend/app/scripts/note_smoke.py"):
+            self.assertIn("note check", [n for n, _, _ in foreground_steps("full", ["docs/x.md", path])], path)
+        self.assertIn("note check", [n for n, _, _ in foreground_steps("full", None)])     # unknown: run it
         host = next(c for n, c, _ in STEPS if n == "host tests")
         self.assertEqual(host[1:], ["-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])   # picks up test_courier_wrapper.py
 
