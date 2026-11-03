@@ -67,10 +67,18 @@ async def load_universe(db, today: date) -> dict:
             window_source, hist_median, hist_share_above, hist_sessions, hist_first, hist_last FROM pe_snapshots WHERE symbol = ANY(:s) ORDER BY symbol, as_of_date DESC"""), {"s": syms})).all()}
     pe_sector = {r.sector: dict(r._mapping) for r in (await db.execute(text(
         "SELECT DISTINCT ON (sector) sector, as_of_date, median_pe, shown, reason, fresh, active FROM pe_sector_snapshots ORDER BY sector, as_of_date DESC"))).all()}
+    # step 1's description: the served research note's own "what they do", word for word (Sam, 2026-11-03); a note's text with a live
+    # figure slot is never copied (its value changes; the vendor description stands instead)
+    notes: dict[str, dict] = {}
+    for r in (await db.execute(text("""SELECT t.symbol, n.structured_content->>'what_they_do' AS text, COALESCE(n.verified_at, n.updated_at) AS written
+            FROM research_notes n JOIN tickers t ON t.id = n.ticker_id WHERE t.symbol = ANY(:s) AND n.status = 'complete' AND n.verification IS NOT NULL"""),
+            {"s": syms})).all():
+        if r.text and r.text.strip() and "{live:" not in r.text:
+            notes[r.symbol] = {"text": " ".join(r.text.split()), "written": r.written.date() if r.written else None}
     ids = [t["id"] for t in tickers.values()]
     nexts = await batch_next_earnings(db, ids, today)
     next_by_symbol = {t["symbol"]: nexts.get(t["id"]) for t in tickers.values()}
-    return {"today": today, "tickers": tickers, "profiles": profiles, "mergers": mergers, "actions": actions, "splits": splits, "closes": closes,
+    return {"today": today, "tickers": tickers, "profiles": profiles, "notes": notes, "mergers": mergers, "actions": actions, "splits": splits, "closes": closes,
             "spy": spy, "sectors": sectors, "growth": growth, "pe": pe, "pe_sector": pe_sector, "next": next_by_symbol}
 
 

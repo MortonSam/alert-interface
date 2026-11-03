@@ -217,11 +217,14 @@ def nouned(text: str, noun: str) -> str:
     return text.replace("sales", "revenue") if noun == "revenue" else text
 
 
-def step_business(name: str, profile: dict | None, segments: dict | None, merger: dict | None, periods: dict | None = None, noun: str = "sales") -> dict:
-    """Step 1 has no quick check. Its first sentence is the vendor's company description until the story step's verified plain line on
-    what the company does replaces it (walkthrough_story.apply; "described" marks that the first sentence is the description)."""
-    desc = description_text((profile or {}).get("short_description"))
-    profile_ok = bool(desc) and not predates(merger, (profile or {}).get("latest_filing_date"))
+def step_business(name: str, profile: dict | None, segments: dict | None, merger: dict | None, periods: dict | None = None, noun: str = "sales",
+                  note: dict | None = None) -> dict:
+    """Step 1 has no quick check. Its description is the served research note's own "what they do", word for word (Sam, 2026-11-03;
+    note: {text, written}); only a stock with no served note falls back to the vendor's company description, which the story step's
+    verified plain line on what the company does then replaces (walkthrough_story.apply; "described" marks that fallback)."""
+    from_note = bool(note and note.get("text"))
+    desc = note["text"] if from_note else description_text((profile or {}).get("short_description"))
+    profile_ok = bool(desc) and (from_note or not predates(merger, (profile or {}).get("latest_filing_date")))
     seg_ok = bool(segments and segments.get("ok")) and not predates(merger, segments.get("filed"))
     Noun = cap(noun)
     if not profile_ok and not seg_ok:
@@ -261,11 +264,14 @@ def step_business(name: str, profile: dict | None, segments: dict | None, merger
         sentences.append(f"Ivy can't split {name}'s {noun} yet. {nouned(why[0], noun)}")
         gap = nouned(why[1], noun)
         summary = desc        # until the story step's plain line on what it does replaces it
-    if profile_ok and as_of_profile:
+    if from_note:
+        deeper.append(_num("Company description", "Ivy's research note", f"Written {fmt_date(note['written'])}" if note.get("written") else "Ivy's research note"))
+    elif profile_ok and as_of_profile:
         deeper.append(_num("Company description", "Intrinio company profile", f"Fetched {fmt_date(as_of_profile.date() if hasattr(as_of_profile, 'date') else as_of_profile)}"))
     st = _step(1, status="ok" if (profile_ok and seg_ok) else "partial", numbers=numbers, sentences=sentences, idea="segments",
                deeper=deeper, source=source, summary=summary, fact=fact, point=point, cell=cell, noun=noun)
-    st["described"] = profile_ok
+    st["described"] = profile_ok and not from_note      # only the vendor's description is replaced by the story's plain line
+    st["from_note"] = from_note
     if gap:
         st["gap"] = f"How its {noun} {'splits' if noun == 'revenue' else 'split'} by line ({gap})"
     return st

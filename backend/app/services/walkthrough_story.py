@@ -192,8 +192,8 @@ def risk_lines(facts: dict, limit: int = RISKS_SHOWN_TO_MODEL, body: int = BODY_
 def build_prompt(facts: dict, redo: dict | None = None) -> str:
     steps = [k for k in STORY_STEPS if k in (facts.get("steps") or {})]
     want = {k: "one sentence" for k in steps}
-    if facts.get("description") or "business" in (facts.get("steps") or {}):
-        want["does"] = "one sentence"
+    if not facts.get("from_note") and (facts.get("description") or "business" in (facts.get("steps") or {})):
+        want["does"] = "one sentence"            # a stock whose step 1 reads its research note's own description needs no "does" line
     if facts.get("risks"):
         want["risks"] = f"up to {MAX_RISKS} items"
     if redo:
@@ -441,7 +441,7 @@ def apply(payload: dict, story: dict, headings: dict[int, str] | None = None) ->
         if k in sents and by_key[k]["status"] != "absent":
             by_key[k]["story"] = sents[k]
     b = by_key["business"]
-    if sents.get("does") and b["status"] != "absent":
+    if sents.get("does") and b["status"] != "absent" and not b.get("from_note"):
         if b.get("described") and b["sentences"]:
             b["sentences"][0] = sents["does"]
         seg_line = b["summary"] if b.get("fact") else None          # with a sales split, its line follows; else the plain line replaces the description
