@@ -57,7 +57,10 @@ EMAIL = {
     # a. date confirmed
     "confirmed_title": "{name} confirmed its report date",
     "confirmed_line": "{name} reports on {day}{timing}, a date the company has confirmed.",
-    "confirmed_options": "Options price a move of about ±{implied}% by {expiration}, the first expiration after the report, {cmp} its typical ±{typical}% on a report day.",
+    # like with like (Sam, 2026-11-03, the walkthrough's rule): the report's own share of the move against the typical report-day move,
+    # or the options figure with its expiration and no comparison
+    "confirmed_options": "Options price a move of about ±{report}% from the report itself, {cmp} its typical ±{typical}% on a report day.",
+    "confirmed_options_term": "Options price a move of about ±{implied}% by {expiration}, the first expiration after the report.",
     "confirmed_typical": "After its past {n} reports, it moved ±{typical}% on a typical report day.",
     # b. earnings eve
     "eve_title": "{name} reports {when}",
@@ -67,7 +70,7 @@ EMAIL = {
     # c. morning after
     "after_title": "How {name} moved after its report",
     "after_move": "{name} {moved} on {day}, the first session after its report.",
-    "after_vs_priced": "Options had priced a move of about ±{implied}%, so it moved {cmp} options priced.",
+    "after_vs_priced": "Options had priced a move of about ±{implied}% from the report itself, so it moved {cmp} options priced.",
     "after_history": "In {k} of its last {n} reports on file, it moved more than options priced.",
     "after_trades_lead": "Your hypothetical trades on {name} that expired",
     "after_trade": "{label}, saved {saved}: cost {cost}, worth {worth} at expiration, {result}.",

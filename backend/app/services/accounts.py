@@ -86,6 +86,16 @@ def cookie_settings(secure: bool = True) -> dict:
     return {"key": SESSION_COOKIE, "httponly": True, "secure": secure, "samesite": "lax", "max_age": SESSION_DAYS * 86400, "path": "/"}
 
 
+LINK_RECORD_DAYS = 30            # a sign-in link's record (address, network address, times) is deleted 30 days after it was asked for
+                                 # (privacy policy question 7, Sam 2026-11-03)
+
+
+async def delete_old_links(db, now: datetime | None = None) -> int:
+    """Delete sign-in link records older than LINK_RECORD_DAYS; uncommitted. Returns how many went."""
+    res = await db.execute(text("DELETE FROM auth_links WHERE created_at < :c"), {"c": (now or now_utc()) - timedelta(days=LINK_RECORD_DAYS)})
+    return res.rowcount or 0
+
+
 async def request_link(db, email_raw: str, ip: str | None, now: datetime | None = None) -> tuple[str, str | None, str | None]:
     """(status, token, email): "sent" with a new token to email, "invalid" for a non-address, or "limited". The caller emails the
     token; the database keeps only its hash."""
@@ -105,6 +115,7 @@ async def request_link(db, email_raw: str, ip: str | None, now: datetime | None 
         return "limited", None, email
     token = new_token()
     db.add(AuthLink(token_hash=token_hash(token), email_lower=email, ip=ip, created_at=now, expires_at=now + timedelta(minutes=LINK_MINUTES)))
+    await delete_old_links(db, now)
     await db.commit()
     return "sent", token, email
 

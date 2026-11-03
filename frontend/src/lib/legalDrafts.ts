@@ -11,14 +11,14 @@ export const PRIVACY_DRAFT: LegalDoc = {
   updated: "Draft of Nov 2, 2026",
   sections: [
     { heading: "The short version", paragraphs: [
-      "You can read everything on Alert Interface without an account. Even then, a few things are recorded: our hosting providers log each request, we keep your network address for a day's limits when you use Build a Trade, Ask Ivy or a research note, and analytics run only if you accept them. If you make an account, we also keep your email address, the stocks you follow, the trade ideas you save, your email settings and when you signed in. We don't sell any of it, and we don't use it for advertising.",
+      "You can read everything on Alert Interface without an account. Even then, a few things are recorded: our hosting providers log each request, we keep a scrambled form of your network address for a day when you use Build a Trade, Ask Ivy or a research note, and analytics run only if you accept them. If you make an account, we also keep your email address, the stocks you follow, the trade ideas you save, your email settings and when you signed in. We don't sell any of it, and we don't use it for advertising.",
     ] },
     { heading: "Without an account", paragraphs: [
-      "Request logs. Vercel, which hosts the website, and Railway, which runs our servers, log each request: the page or address asked for, the time, your network address (IP) and your browser's description of itself. [CONFIRM: How long do Vercel and Railway keep these logs on our plans?]",
-      "Limits. When you ask Build a Trade for a draft, ask Ivy a question or ask for a research note to be written, we keep your network address with the times you used it, so each visitor stays within the day's limits. [CONFIRM: Today all three limits keep the address exactly as it is, and the record is never deleted, though only the last day's times are read. Should it be scrambled and deleted after a day before launch?]",
-      "Questions you ask Ivy. We keep the question, Ivy's answer and a scrambled form of the network address it came from, to answer the same question faster next time and to keep the box within its limits. [CONFIRM: Should questions be linked to the account of a signed-in person? They aren't today.]",
+      "Request logs. Vercel, which hosts the website, and Railway, which runs our servers, log each request: the page or address asked for, the time, your network address (IP) and your browser's description of itself. Vercel keeps these logs for up to a day and Railway for up to 90 days.",
+      "Limits. When you ask Build a Trade for a draft, ask Ivy a question or ask for a research note to be written, we keep a scrambled form of your network address with the times you used it, so each visitor stays within the day's limits. The scrambled form can't be turned back into the address without a secret only we hold, and the record is deleted a day after you last used one of these.",
+      "Questions you ask Ivy. We keep the question, Ivy's answer and a scrambled form of the network address it came from, to answer the same question faster next time and to keep the box within its limits. Questions aren't linked to your account, even when you're signed in.",
       "Build a Trade drafts. The stock, direction and risk level you choose are kept with the draft Ivy writes, and the same draft is shown to anyone who makes the same choice that day. Nothing about you is kept with it.",
-      "Error reports. When something breaks, an error report can be sent to Sentry with the page address, your browser's description and your network address. [CONFIRM: Is Sentry switched on in production (SENTRY_DSN on Railway, and on Vercel for the website)? If it isn't, this paragraph comes out.]",
+      "Error reports. When the website breaks in your browser, an error report goes to Sentry with the page address, the error and your browser's description of itself. It doesn't include your network address.",
       "Analytics, only if you accept them. PostHog records how pages are used, including session replays with every typed field masked. A link in one of our emails carries a tag naming the kind of email, so analytics can count visits that came from it. If you decline, nothing is recorded and the tag is ignored.",
       "Your browser keeps your analytics choice, your recent searches, a copy of the site's counts so the home page loads quickly, and, before you sign in, the stocks you follow. None of these leave your browser except the followed stocks, which move into your account when you sign in.",
     ] },
@@ -38,7 +38,7 @@ export const PRIVACY_DRAFT: LegalDoc = {
       "Ivy's answers, research notes and Build a Trade drafts are written with Anthropic's models. When you ask Ivy a question, the question and the stock's facts on file are sent to Anthropic to write the answer. Your email address and your network address are never sent.",
     ] },
     { heading: "Who handles it for us", paragraphs: [
-      "Vercel hosts the website. Railway runs our servers and database. Postmark sends our email. Anthropic writes Ivy's answers, notes and drafts. PostHog records analytics, only if you accept them. Sentry receives error reports. Market data comes from Intrinio and the SEC, and none of your information goes to them. [CONFIRM: Is this list complete, and does each one have a data processing agreement with us?]",
+      "Vercel hosts the website. Railway runs our servers and database. Postmark sends our email. ImprovMX forwards email you send to our addresses to our inbox. Anthropic writes Ivy's answers, notes and drafts. PostHog records analytics, only if you accept them. Sentry receives the website's error reports. Each handles your information only to provide its service to us, under a data processing agreement. Market data comes from Intrinio and the SEC, and none of your information goes to them.",
     ] },
     { heading: "Cookies", paragraphs: [
       "One cookie keeps you signed in. It can't be read by scripts on the page, it is only sent over a secure connection, and it lasts at most 30 days.",
@@ -52,11 +52,11 @@ export const PRIVACY_DRAFT: LegalDoc = {
     ] },
     { heading: "Deleting your data", paragraphs: [
       "In your settings, Delete my account removes your account, your email address, your followed stocks, your saved trades and their results, your email settings and history, your sign-in records and your sessions, all at once. It can't be undone. The one exception is the do-not-email list above.",
-      "Copies in our database backups expire within [CONFIRM: How many days does Railway keep database backups on our plan?] days.",
+      "Copies in our database backups expire within three months.",
       "Without an account, you can ask us to delete the questions you asked Ivy or the records kept for limits by writing to privacy@alertinterface.com with the day and roughly the time.",
     ] },
     { heading: "How long we keep it", paragraphs: [
-      "Account data, until you delete your account. Used and expired sign-in links are removed after [CONFIRM: How long should used and expired sign-in links be kept? 30 days is a common choice.].",
+      "Account data, until you delete your account. Sign-in link records are deleted 30 days after the link was asked for.",
     ] },
     { heading: "Children", paragraphs: ["The site is not meant for anyone under 18, and we don't knowingly keep their information."] },
     { heading: "Changes and contact", paragraphs: [

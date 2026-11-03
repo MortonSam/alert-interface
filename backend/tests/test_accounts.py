@@ -157,7 +157,14 @@ def test_several_due_emails_merge_into_one_with_the_full_footer():
     em = _email([confirmed, eve])
     assert em.subject == "NVIDIA confirmed its report date and 1 more from Ivy" and em.kinds == ["date_confirmed", "earnings_eve"]
     assert "NVIDIA reports on Tue, Nov 17, 2026, after the market closes, a date the company has confirmed." in em.text
-    assert "Options price a move of about ±8.7% by Nov 20, 2026, the first expiration after the report, more than its typical ±6.6% on a report day." in em.text
+    # like with like (Sam, 2026-11-03): with no report-only move on file, the straddle stands alone with its expiration, then the typical move
+    assert "Options price a move of about ±8.7% by Nov 20, 2026, the first expiration after the report." in em.text
+    assert "After its past 20 reports, it moved ±6.6% on a typical report day." in em.text
+    assert "more than its typical" not in em.text
+    shared = E.confirmed_section({"symbol": "NVDA", "name": "NVIDIA", "date": date(2026, 11, 17), "timing": "amc", "implied": (8.7, date(2026, 11, 20)),
+                                  "report": {"pct": 5.3, "verdict": "about its usual"}, "typical": 6.6, "n": 20}, SITE)
+    assert shared.lines[1] == "Options price a move of about ±5.3% from the report itself, about the same as its typical ±6.6% on a report day."
+    assert len(shared.lines) == 2 and "8.7" not in " ".join(shared.lines)
     assert f"{SITE}/u/all" in em.text and "You get this because you turned on Date confirmed and Earnings eve in your settings." in em.text
     for must in (K.NO_CALLS, K.EMAIL["footer_unsubscribe_all"], K.EMAIL["footer_settings"], "MAILING_ADDRESS", K.EMAIL["footer_one_a_day"]):
         assert must in em.text and must in em.html
@@ -173,7 +180,7 @@ def test_the_morning_after_and_the_week():
                          "history": [(5.0, 7.0), (-9.0, 6.5), (2.0, 6.0)], "trades": trades}, SITE)
     t = "\n".join(a.lines)
     assert "NVIDIA fell 4.2% on Wed, Nov 18, 2026, the first session after its report." in t
-    assert "Options had priced a move of about ±7.4%, so it moved less than options priced." in t
+    assert "Options had priced a move of about ±7.4% from the report itself, so it moved less than options priced." in t
     assert "In 1 of its last 3 reports on file, it moved more than options priced." in t
     assert "cost $500.00, worth $1,200.00 at expiration, ahead by $700.00 (140.0%)." in t and K.EMAIL["hypothetical"] in t
     w = E.week_section([{"symbol": f"S{i}", "name": f"Co {i}", "date": date(2026, 11, 2), "timing": "bmo"} for i in range(12)],

@@ -104,3 +104,24 @@ async def test_an_inactive_recipient_refusal_is_raised_for_the_caller_to_record(
     monkeypatch.setattr(mailer.httpx, "AsyncClient", C)
     with pytest.raises(SUP.InactiveRecipient):
         await mailer.send(mailer.Message(to="a@b.c", subject="s", html="h", text="t", sign_in=True))
+
+
+@pytest.mark.asyncio
+async def test_sign_in_link_records_are_deleted_after_thirty_days():
+    from datetime import datetime, timedelta, timezone
+    from app.services import accounts as A
+    now = datetime(2030, 3, 1, tzinfo=timezone.utc)
+    async with ScriptSessionLocal() as db:
+        await db.execute(text("DELETE FROM auth_links WHERE email_lower LIKE 'zz-linkage-%'"))
+        await db.execute(text("""INSERT INTO auth_links (token_hash, email_lower, ip, created_at, expires_at) VALUES
+            ('zzold', 'zz-linkage-old@example.com', NULL, :o, :o), ('zznew', 'zz-linkage-new@example.com', NULL, :n, :n)"""),
+                         {"o": now - timedelta(days=31), "n": now - timedelta(days=29)})
+        await db.commit()
+        try:
+            assert await A.delete_old_links(db, now) >= 1
+            await db.commit()
+            left = set((await db.execute(text("SELECT email_lower FROM auth_links WHERE email_lower LIKE 'zz-linkage-%'"))).scalars())
+            assert left == {"zz-linkage-new@example.com"}
+        finally:
+            await db.execute(text("DELETE FROM auth_links WHERE email_lower LIKE 'zz-linkage-%'"))
+            await db.commit()

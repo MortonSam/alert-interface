@@ -95,16 +95,21 @@ def tag(url: str, kind: str) -> str:
 # ── the four kinds, from facts (pure) ─────────────────────────────────────────────────────────────────────────────────────
 
 def confirmed_section(f: dict, site: str) -> Section:
-    """f: {symbol, name, date, timing, implied: (percent, expiration) or None, typical, n}. The straddle runs to the first expiration
-    after the report, so its move is said "by" that day, never "for the report" (which Ivy's Read separates)."""
+    """f: {symbol, name, date, timing, implied: (percent, expiration) or None, report: {pct, verdict} or None, typical, n}. Like with
+    like (Sam, 2026-11-03, the walkthrough's rule): only the report's own share of the move (services/report_move, as Ivy's Read states
+    it) is compared with the typical report-day move; the straddle runs to the first expiration after the report, so it is stated "by"
+    that day, with no comparison, and the typical move follows on its own line."""
     from app.services.briefing import fmt_date
     lines = [K.EMAIL["confirmed_line"].format(name=f["name"], day=day_words(f["date"]), timing=K.TIMING.get(f.get("timing") or "", ""))]
-    if f.get("implied") and f.get("typical") is not None:
-        from app.services.move_comparison import compare_moves
-        im, exp = f["implied"]
-        lines.append(K.EMAIL["confirmed_options"].format(implied=pct(im), expiration=fmt_date(exp), typical=pct(f["typical"]), cmp=K.COMPARE[compare_moves(im, f["typical"])]))
-    elif f.get("typical") is not None:
-        lines.append(K.EMAIL["confirmed_typical"].format(n=f["n"], typical=pct(f["typical"])))
+    rep = f.get("report") or {}
+    if rep.get("pct") is not None and rep.get("verdict") and f.get("typical") is not None:
+        lines.append(K.EMAIL["confirmed_options"].format(report=pct(rep["pct"]), typical=pct(f["typical"]), cmp=K.COMPARE[rep["verdict"]]))
+    else:
+        if f.get("implied"):
+            im, exp = f["implied"]
+            lines.append(K.EMAIL["confirmed_options_term"].format(implied=pct(im), expiration=fmt_date(exp)))
+        if f.get("typical") is not None:
+            lines.append(K.EMAIL["confirmed_typical"].format(n=f["n"], typical=pct(f["typical"])))
     return Section("date_confirmed", K.EMAIL["confirmed_title"].format(name=f["name"]), lines,
                    [(K.EMAIL["open_page"].format(name=f["name"]), page_url(site, f["symbol"]))], [{"kind": "date_confirmed", "symbol": f["symbol"], "date": f["date"].isoformat()}])
 
@@ -245,6 +250,14 @@ async def implied_for_report(db, symbol: str, report_date: date, today: date) ->
     return (round(im.pct * 100, 1), date.fromisoformat(exp)) if im else None
 
 
+async def report_share(db, symbol: str, report_date: date, today: date, typical: float | None, n: int) -> dict | None:
+    """{pct, verdict}: the report's own share of the move options price and its comparison words against the typical report-day
+    move, as Ivy's Read states them (services/report_move.report_move_view); None when either is not on file."""
+    from app.services.report_move import report_move_view
+    v = await report_move_view(db, symbol, report_date, today, typical=(typical, n) if typical is not None else (None, 0))
+    return {"pct": v["rep"], "verdict": v.get("move_comparison")} if v.get("rep") is not None and v.get("move_comparison") else None
+
+
 async def priced_before(db, symbol: str, report_date: date) -> float | None:
     """The report move options priced on the last stored chain before the report (services/report_move history)."""
     import json
@@ -309,7 +322,8 @@ async def sections_for(db, user_id: str, kinds: set[str], today: date, site: str
             if "date_confirmed" in kinds and ("date_confirmed", s["symbol"], ne.date.isoformat()) not in seen:
                 typical, n = await typical_move(db, s["id"])
                 out.append(confirmed_section({"symbol": s["symbol"], "name": name, "date": ne.date, "timing": timing,
-                                              "implied": await implied_for_report(db, s["symbol"], ne.date, today), "typical": typical, "n": n}, site))
+                                              "implied": await implied_for_report(db, s["symbol"], ne.date, today),
+                                              "report": await report_share(db, s["symbol"], ne.date, today, typical, n), "typical": typical, "n": n}, site))
             if "earnings_eve" in kinds and ne.date == tomorrow and ("earnings_eve", s["symbol"], ne.date.isoformat()) not in seen:
                 typical, n = await typical_move(db, s["id"])
                 sec = eve_section({"symbol": s["symbol"], "name": name, "date": ne.date, "timing": timing, "read": await read_for(db, s["symbol"]),
