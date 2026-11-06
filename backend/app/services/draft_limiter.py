@@ -65,8 +65,29 @@ def get_client_ip(request: Request) -> str:
     return "unknown"
 
 
+IP_RECORD_HOURS = 24          # a visitor's limit record is deleted a day after its last use (privacy policy, Sam 2026-11-03)
+
+
+def scrambled(ip: str) -> str:
+    """Pure: the network address as the limits keep it, never the address itself (Sam, 2026-11-03): an HMAC with IP_HASH_SALT, so the
+    stored form cannot be turned back into the address by trying every address without the salt."""
+    import hmac
+    from app.config import settings
+    salt = (getattr(settings, "ip_hash_salt", "") or "alert-interface-limits").encode()
+    return hmac.new(salt, ip.encode(), hashlib.sha256).hexdigest()[:32]
+
+
 def _ip_key(policy: LimitPolicy, ip: str) -> str:
-    return f"{policy.prefix}:ip:{ip}"
+    return f"{policy.prefix}:ip:{scrambled(ip)}"
+
+
+async def delete_stale_ip_records(db: AsyncSession, now: datetime | None = None) -> int:
+    """Delete every visitor limit record (any policy) not used for IP_RECORD_HOURS; the records written before the address was
+    scrambled go the same way. Returns how many went."""
+    from sqlalchemy import text
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(hours=IP_RECORD_HOURS)
+    res = await db.execute(text("DELETE FROM system_metadata WHERE key LIKE '%:ip:%' AND updated_at < :c"), {"c": cutoff})
+    return res.rowcount or 0
 
 
 def _global_key(policy: LimitPolicy, now: datetime) -> str:
@@ -120,6 +141,7 @@ async def record_use(db: AsyncSession, policy: LimitPolicy, caller_id: str, clie
         uses = await _ip_uses(db, policy, client_ip, now)
         uses.append(now)
         await set_value(db, _ip_key(policy, client_ip), json.dumps([t.isoformat() for t in uses]))
+        await delete_stale_ip_records(db, now)
         charged = True
 
     if not (admin and policy.admin_bypasses_global):
