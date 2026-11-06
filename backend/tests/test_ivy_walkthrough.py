@@ -1012,6 +1012,8 @@ def test_step_1_names_its_split_and_follows_the_descriptions():
     assert s["numbers"][1]["label"] == "From Compute & Networking, by business segment"
     assert s["sentences"][1].startswith("Split by business segment, its biggest line is Compute & Networking")
     assert any(d["label"].startswith("Its 10-K also splits revenue by product and market") and d["value"] == "Data Center, 90.0%" for d in s["deeper"])
+    worded = W.step_business("NVIDIA", None, NV_SPLITS, None, note={"text": "Revenue flows from two segments, Compute and Networking and Graphics.", "written": None})
+    assert worded["numbers"][1]["label"] == "From Compute & Networking, by business segment"     # "&" and "and" are the same name
     plain = W.step_business("NVIDIA", None, NV_SPLITS, None, note={"text": "NVIDIA designs chips for data centers and gaming PCs.", "written": None})
     assert plain["numbers"][1]["label"] == "From Data Center, by product and market"
     visible = json.dumps([plain["numbers"], plain["sentences"], plain["summary"], [d["label"] for d in plain["deeper"][:2]]])
