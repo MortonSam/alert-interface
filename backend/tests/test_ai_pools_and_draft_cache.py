@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
@@ -150,9 +151,17 @@ async def test_a_kept_draft_is_served_free_even_with_the_cap_reached(monkeypatch
             body = r.json()
             assert body["strategy"] == "Long $100 call ($4.00 mid)" and body["generated_at"] == "2030-01-06T14:00:00+00:00"
             assert body["fact_block"]["quote_price"] == 101.25 and body["fact_block"]["price_as_of"] == data["price_as_of"]
-            # another risk level is a new draft: the cap answers
+            # another risk level is a new draft, built by rules with no model (2026-11-06): the AI cap never closes it, only the
+            # visitor's own daily draft limit can
+            limited: list[str] = []
+
+            async def limit(*a, **k):
+                limited.append("limit")
+                raise HTTPException(status_code=429, detail="the visitor's limit")
+
+            monkeypatch.setattr(thesis, "check_draft_limit", limit)
             r = await c.post("/api/v1/theses/draft", json={"symbol": "AAPL", "direction": "bullish", "aggressiveness": "aggressive"})
-            assert r.status_code == 429
+            assert r.status_code == 429 and r.json()["detail"] == "the visitor's limit" and limited == ["limit"]
         assert calls == []
     finally:
         async with ScriptSessionLocal() as s:
