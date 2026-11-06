@@ -30,3 +30,4 @@ from app.models.rate import Rate  # noqa: F401
 from app.models.ticker_alias import TickerAlias  # noqa: F401
 from app.models.company_profile import CompanyProfile  # noqa: F401
 from app.models.ivy_walkthrough import IvyCompareStory, IvyWalkthrough  # noqa: F401
+from app.models.account import AuthLink, AuthSession, EmailPref, EmailSend, EmailSuppression  # noqa: F401

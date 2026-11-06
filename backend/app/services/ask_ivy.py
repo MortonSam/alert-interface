@@ -1193,3 +1193,22 @@ def ip_hash(ip: str) -> str:
     bare hash that trying every address would reverse (Sam, 2026-11-03)."""
     from app.services.draft_limiter import scrambled
     return scrambled(ip)[:12]
+
+
+# ── one person's daily questions (accounts, Sam 2026-10-29) ─────────────────────────────────────────────────────────────────
+ASK_PER_PERSON_DAY = 10          # answered questions a signed-in person may ask a New York day (about $0.02 each on production: at most ~$0.21)
+PERSON_LIMIT_MESSAGE = f"You've asked Ivy {ASK_PER_PERSON_DAY} questions today. Ask again tomorrow."    # Claude's wording, for Sam
+
+
+async def person_may_ask(db, user_id: str) -> bool:
+    """Count one question against the person's day and say whether it is within ASK_PER_PERSON_DAY (a cached answer never counts:
+    the route checks this only before a model runs)."""
+    from app.services.ai_spend import spend_day
+    from app.services.system_metadata_service import get_value, set_value
+    key = f"ask_person:{user_id}:{spend_day()}"
+    n = int(await get_value(db, key) or 0)
+    if n >= ASK_PER_PERSON_DAY:
+        return False
+    await set_value(db, key, str(n + 1))
+    await db.commit()
+    return True

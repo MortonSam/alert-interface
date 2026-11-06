@@ -15,13 +15,17 @@
  * opens. With a reviewer key the personal reads answer 401 and these views fall to
  * the same sign-in notice, and Build a Trade refuses the save with the same reason.
  */
+import { ACCOUNTS_ON, ACCOUNT_MARKER_KEY } from "@/lib/account";
+import { ACCOUNT_COPY } from "@/lib/accountCopy";
+
 export const ADMIN_TOKEN_KEY = "admin_token";
 
-/** A key is stored. It may be the admin token or a reviewer key: the backend's answer settles which. */
+/** A key is stored (the admin token or a reviewer key), or, with email accounts on, the marker a sign-in leaves (lib/account
+ *  ACCOUNT_MARKER_KEY; the session itself is an HttpOnly cookie no script reads). The backend's answer settles either. */
 export function isSignedIn(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return !!localStorage.getItem(ADMIN_TOKEN_KEY);
+    return !!localStorage.getItem(ADMIN_TOKEN_KEY) || (ACCOUNTS_ON && !!localStorage.getItem(ACCOUNT_MARKER_KEY));
   } catch {
     return false;
   }
@@ -48,7 +52,7 @@ export const THESIS_SIGN_IN_PROMPT = {
 /** Under a failed or stale note for a visitor: only the owner replaces a note that exists. */
 export const OWNER_REGENERATES = "Only the site owner can regenerate a note that already exists.";
 
-export const SAVE_REQUIRES_SIGN_IN =
+export const SAVE_REQUIRES_SIGN_IN = ACCOUNTS_ON ? ACCOUNT_COPY.savePrompt :
   `Saving needs a signed-in account, and this browser is not signed in: this trade can be built and previewed but not saved. ${NO_PUBLIC_SIGN_IN}`;
 
 /** What the My Trades page shows. Signed out wins over everything: no rows, no controls, no counts. */

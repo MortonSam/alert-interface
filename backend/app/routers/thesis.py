@@ -2134,6 +2134,13 @@ async def create_thesis(
             pass  # graceful: thesis created without option premium
 
     opt_exp = date.fromisoformat(payload.option_expiration) if payload.option_expiration else None
+    priced_pct = priced_on = None
+    if opt_exp is not None:                 # what options price for the move to its expiration, for its result later (services/trade_results)
+        from app.services.trade_results import priced_move_now
+        try:
+            priced_pct, priced_on = await priced_move_now(db, ticker.symbol, opt_exp)
+        except Exception:
+            pass
 
     thesis = Thesis(
         user_id=user_id,
@@ -2156,6 +2163,8 @@ async def create_thesis(
         entry_premium2=entry_premium2,
         spread_type=payload.spread_type,
         from_ai_draft=payload.from_ai_draft,
+        priced_move_pct=priced_pct,
+        priced_move_as_of=priced_on,
     )
     db.add(thesis)
     await db.commit()

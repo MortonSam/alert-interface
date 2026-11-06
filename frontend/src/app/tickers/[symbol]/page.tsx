@@ -1,5 +1,7 @@
 "use client";
 
+import { ACCOUNTS_ON } from "@/lib/account";
+import { EarningsEmailLine, LocalFollow } from "@/components/AccountFollow";
 import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 import { eventConfirmationBadge, expectedWindowLine, nextEarningsLine } from "@/lib/earningsSource";
@@ -2021,12 +2023,14 @@ export default function TickerPage() {
                   {watched ? "★" : "☆"}
                 </button>
               )}
+              {ACCOUNTS_ON && watched !== null && !watchlistId && <LocalFollow symbol={ticker.symbol} />}
             </div>
           </div>
 
           <p className="text-sm text-muted-foreground mt-5" data-testid="next-earnings-line">
             {nextEarningsLine(ticker.next_earnings_date, ticker.next_earnings_source, ticker.next_earnings_checked_at, ticker.next_earnings_confirmation, ticker.next_earnings_note, undefined, ticker.next_earnings_window_center, ticker.next_earnings_window_source, ticker.next_earnings_window_company)}
           </p>
+          <EarningsEmailLine symbol={ticker.symbol} name={shortCompanyName(ticker.name, ticker.symbol) ?? ticker.symbol} />
 
           {/* "Why now" strip */}
           <WhyNowStrip events={events} />

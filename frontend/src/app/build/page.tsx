@@ -25,6 +25,8 @@ import { buildPlainEnglish } from "@/lib/plain-english";
 import Callout from "@/components/Callout";
 import { GiBull, GiBearFace } from "react-icons/gi";
 import { SAVE_REQUIRES_SIGN_IN, isSignedIn } from "@/lib/session";
+import AccountPrompt from "@/components/AccountPrompt";
+import { ACCOUNTS_ON } from "@/lib/account";
 import { ALTERNATIVE_FAILED, DRAFT_FAILED, SAVE_FAILED, visitorMessage } from "@/lib/errors";
 import { cardEarningsNote, expectedWindowLine, noDateLine } from "@/lib/earningsSource";
 import { matchTickers } from "@/lib/tickerSearch";
@@ -1279,11 +1281,11 @@ function BuildTradePageContent() {
                 </div>
 
                 {saveError && <p className="text-sm text-red-500">{saveError}</p>}
-                {signedIn === false && (
+                {signedIn === false && (ACCOUNTS_ON ? <AccountPrompt text={SAVE_REQUIRES_SIGN_IN} testId="save-requires-sign-in" /> : (
                   <p className="text-sm text-muted-foreground" data-testid="save-requires-sign-in">
                     {SAVE_REQUIRES_SIGN_IN}
                   </p>
-                )}
+                ))}
 
                 <div className="flex flex-wrap gap-3 pt-1">
                   {signedIn !== false && (

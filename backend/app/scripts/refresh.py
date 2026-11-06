@@ -100,6 +100,7 @@ STEPS: list[tuple[str, list[str]]] = [
     # Auto-pick stopped (Sam, 2026-11-03): Ivy picks nothing; its stored picks and worksheets stay (app.scripts.auto_pick is kept)
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
+    ("Hypothetical trade results",     ["python", "-m", "app.scripts.score_trades"]),       # saved ideas scored after expiration (services/trade_results)
     # Scheduled at 03:05 America/New_York by the script itself (it waits when reached early); shadow only, no reader switches.
     ("Options chains (Intrinio)",      ["python", "-m", "app.scripts.shadow_option_chains"]),
     ("ATM IV (solver)",                ["python", "-m", "app.scripts.solve_atm_iv"]),

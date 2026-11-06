@@ -134,18 +134,31 @@ def _extract_bearer(authorization: str | None) -> str | None:
     return None
 
 
+async def account_user(request: Request | None, db: AsyncSession) -> str | None:
+    """The signed-in email account (services/accounts session cookie), only while ACCOUNTS_ENABLED is on."""
+    if not settings.accounts_enabled or request is None:
+        return None
+    from app.services.accounts import SESSION_COOKIE, session_user
+    return await session_user(db, request.cookies.get(SESSION_COOKIE))
+
+
 async def get_current_user(
     authorization: str | None = Header(None),
     x_admin_token: str | None = Header(None),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ) -> str:
     """Resolve caller identity. Returns user_id string.
 
     Priority:
+    0. An email account's session cookie (ACCOUNTS_ENABLED) → its user_id
     1. Bearer JWT (if JWKS configured) → Clerk user_id, upserts into users table
     2. Admin token match → "admin-local"
     3. Neither → 401 (there is no default identity)
     """
+    acct = await account_user(request, db)
+    if acct:
+        return acct
     # 1. Try Bearer JWT
     bearer = _extract_bearer(authorization)
     if bearer and _get_jwks_client() is not None:
@@ -176,10 +189,14 @@ async def get_draft_caller(
     """Resolve caller identity for draft endpoints. Returns user_id or "anon".
 
     Same priority as get_current_user but never raises 401:
+    0. An email account's session cookie (ACCOUNTS_ENABLED) → its user_id
     1. Bearer JWT → Clerk user_id
     2. Admin token match → "admin-local"
     3. Otherwise → "anon" (rate limited by draft_limiter)
     """
+    acct = await account_user(request, db)
+    if acct:
+        return acct
     bearer = _extract_bearer(authorization)
     if bearer and _get_jwks_client() is not None:
         payload = verify_clerk_jwt(bearer)
