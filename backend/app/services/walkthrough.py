@@ -229,8 +229,9 @@ SPLIT_WORDS = {"business segment": "by business segment", "product or service": 
 def mentions(text: str | None, segs: list[dict]) -> int:
     """Pure: how many of a split's names the description names (case-insensitive, whole words)."""
     import re
-    t = (text or "").lower()
-    return sum(1 for g in segs if g.get("label") and re.search(r"(?<![a-z])" + re.escape(g["label"].lower()) + r"(?![a-z])", t))
+    norm = lambda x: re.sub(r"\s+", " ", re.sub(r"\s*&\s*", " and ", (x or "").lower()))     # "Compute & Networking" is "Compute and Networking"
+    t = norm(text)
+    return sum(1 for g in segs if g.get("label") and re.search(r"(?<![a-z])" + re.escape(norm(g["label"])) + r"(?![a-z])", t))
 
 
 def split_for(segments: dict, desc: str | None) -> tuple[dict, dict | None]:
