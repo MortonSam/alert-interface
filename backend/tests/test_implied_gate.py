@@ -35,6 +35,7 @@ async def test_strip_overview_and_ask_ivy_price_only_a_confirmed_date(monkeypatc
         return NextEarnings(date=when + timedelta(days=10), source="yfinance" if confirmation != "confirmed" else "edgar", confirmation=confirmation, note="x")
     monkeypatch.setattr(BB, "next_earnings_for", fake_next)
     monkeypatch.setattr(BB, "report_move_view", _fake_view())
+    monkeypatch.setattr(BB.B, "find_big_move", lambda *a, **k: None)   # a big move in the copied bars (MU's -17.5% of Nov 5) takes the sentence's place
     async with ScriptSessionLocal() as db:
         qs = await BB.build_questions(db, "MU", today)
         brief = await BB.build_briefing(db, "MU", today)
