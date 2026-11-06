@@ -1,4 +1,5 @@
 from app.services.redact import redact
+from app.services.briefing import fmt_date
 import asyncio
 import json
 import re
@@ -648,21 +649,9 @@ async def _run_draft_generation(
             )
 
     # ── 6. Build quality-filtered strike lists ────────────────────────────────
-    if direction == "bullish":
-        primary_raw, secondary_raw = calls_raw, puts_raw
-        primary_label, secondary_label = "CALLS (for bullish position)", "PUTS (for spread second leg)"
-        target_1x       = implied_range_high
-        target_hist_max = current_price * (1 + (hist_max or 0.08))
-        target_hist_max_label = "upside"
-    else:  # bearish
-        primary_raw, secondary_raw = puts_raw, calls_raw
-        primary_label, secondary_label = "PUTS (for bearish position)", "CALLS (for spread second leg)"
-        target_1x       = implied_range_low
-        target_hist_max = current_price * (1 - (hist_max or 0.08))
-        target_hist_max_label = "downside"
-
-    primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, current_price)
-    secondary_text, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, current_price, limit=8)
+    primary_raw, secondary_raw = (calls_raw, puts_raw) if direction == "bullish" else (puts_raw, calls_raw)
+    _, primary_rows   = _build_strike_lines(primary_raw,   atm_strike, current_price)
+    _, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, current_price, limit=8)
 
     # ── Quality-strike guard ─────────────────────────────────────────────
     MIN_QUALITY_STRIKES = 3
@@ -676,9 +665,7 @@ async def _run_draft_generation(
             ),
         )
 
-    valid_primary_strikes = {r["strike"] for r in primary_rows}
-
-    # ── Intrinsic-bound pre-check (catch stale chains before LLM call) ────
+    # ── Intrinsic-bound pre-check (catch stale chains before drafting) ────
     # Only consider near-ATM strikes (within 15% of current price) with
     # positive mid — deep ITM stale bids should not block drafting.
     for _row in primary_rows:
@@ -700,27 +687,6 @@ async def _run_draft_generation(
                     f"so the quotes can't be trusted. Drafting paused."
                 ),
             )
-
-    # ── 7. Realism pre-check ──────────────────────────────────────────────────
-    realism_precheck = ""
-    if proposed_target is not None:
-        pt = proposed_target
-        move_req = abs(pt - current_price) / current_price
-        realism_precheck = f"\nUSER-PROPOSED TARGET: ${pt:.2f} (requires a {move_req*100:.1f}% move from ${current_price:.2f})\n"
-        if hist_max and move_req > hist_max:
-            realism_precheck += (
-                f"⚠ WARNING: This EXCEEDS {sym}'s largest recorded earnings-day move in the dataset "
-                f"({hist_max*100:.1f}% on {hist_sample} quarters). "
-                f"\"realism_flag\" MUST warn that this requires a move outside historical range.\n"
-            )
-        elif expected_move_pct and move_req > 2.0 * expected_move_pct:
-            realism_precheck += (
-                f"⚠ WARNING: This is {move_req/expected_move_pct:.1f}× the implied expected move "
-                f"(±{expected_move_pct*100:.1f}%). "
-                f"\"realism_flag\" MUST note this is well beyond the implied range.\n"
-            )
-        else:
-            realism_precheck += "Evaluate whether this target fits the requested aggressiveness profile.\n"
 
     # ── 8. Build fact_block dict ──────────────────────────────────────────────
     fact_block: dict = {
@@ -806,232 +772,48 @@ async def _run_draft_generation(
             )
 
 
-    # ── 9. Build prompt ───────────────────────────────────────────────────────
-    def _n(v, fmt=".2f"): return f"{v:{fmt}}" if v is not None else "(unavailable)"
-    def _pct(v, fmt=".1f"): return f"{v*100:{fmt}}%" if v is not None else "(unavailable)"
-
-    em_display  = f"±{expected_move_pct*100:.2f}% (±${expected_move_dollars:.2f})" if expected_move_pct and expected_move_dollars else "(unavailable)"
-    ir_display  = f"${implied_range_low:.2f} - ${implied_range_high:.2f}" if implied_range_low and implied_range_high else "(unavailable)"
-    t1x_display = f"${target_1x:.2f}" if target_1x else "(unavailable)"
-    thmax_display = f"${target_hist_max:.2f} ({target_hist_max_label}, based on hist max ±{hist_max*100:.1f}%)" if hist_max else "(unavailable)"
-
-    # Vol-regime display string
-    if vol_regime == "iv_rich":
-        vol_regime_display = f"IV RICH (IV {iv_rv_spread_pp:+.1f}pp above RV)"
-    elif vol_regime == "iv_cheap":
-        vol_regime_display = f"IV CHEAP (IV {iv_rv_spread_pp:+.1f}pp vs RV)"
-    elif vol_regime == "iv_fair":
-        vol_regime_display = f"IV FAIR (IV {iv_rv_spread_pp:+.1f}pp vs RV)"
+    # ── 9. The draft from rules (services/draft_rules, Sam 2026-11-03): no model call; every sentence is services/draft_copy's ──
+    from app.services import draft_copy as DC
+    from app.services.draft_rules import draft as rule_draft
+    rd = rule_draft(direction, aggressiveness, vol_regime, primary_rows, current_price, expected_move_pct, hist_max, proposed_target)
+    print(f"[thesis-draft] {sym} {direction} {aggressiveness} | rules | price=${current_price:.2f} vol_regime={vol_regime or 'N/A'} "
+          f"primary_strikes={len(primary_rows)} -> {rd}", flush=True)
+    if rd is None:
+        raise HTTPException(status_code=422, detail=DRAFT_UNAVAILABLE)
+    kind = DC.KIND[direction]
+    if rd.structure == "spread":
+        strategy = DC.strategy_spread(direction, rd.long_strike, rd.short_strike, round(rd.long_mid - rd.short_mid, 2))
     else:
-        vol_regime_display = "(unavailable)"
-
-    beat_lines = (f"  Beat rate:          {_n(beat_rate)}%" + ((" (" + excluded_note(data.get("basis_excluded", 0)) + ")") if data.get("basis_excluded") else "") + "\n"
-                  f"  Beat-but-dropped:   {_n(bbd_rate)}% (price fell after beating this % of the time)\n") if est_ok else ""
-
-    # Conditional earnings profile section
-    ce_lines = []
-    if len(beats) >= 3 and avg_1d_on_beat is not None:
-        line = f"  On beats (N={len(beats)}): avg 1d {avg_1d_on_beat:+.2f}%, median {median_1d_on_beat:+.2f}%"
-        if beat_cont_pct is not None:
-            line += f"\n    Follow-through: direction held at day 5 in {beat_cont_pct:.0f}% of cases (N={beat_5d_n})"
-        ce_lines.append(line)
-    if len(ce_misses) >= 3 and avg_1d_on_miss is not None:
-        line = f"  On misses (N={len(ce_misses)}): avg 1d {avg_1d_on_miss:+.2f}%, median {median_1d_on_miss:+.2f}%"
-        if miss_cont_pct is not None:
-            line += f"\n    Follow-through: direction held at day 5 in {miss_cont_pct:.0f}% of cases (N={miss_5d_n})"
-        ce_lines.append(line)
-    if magnitude_trend:
-        ce_lines.append(f"  Magnitude trend: {magnitude_trend}")
-    ce_section = ""
-    if ce_lines:
-        ce_section = f"\nCONDITIONAL EARNINGS PROFILE ({hist_sample} quarters):\n" + "\n".join(ce_lines) + "\n"
-
-    # Analyst reaction stats section. The median is stored only when there are
-    # enough distinct sessions (compute_analyst_reactions.MIN_SESSIONS), so a
-    # non-null median is the gate; the sample wording names both counts.
-    def _sample(actions: int, sessions: int) -> str:
-        return f"N={actions}" if actions == sessions else f"N={actions} actions across {sessions} sessions"
-
-    analyst_section = ""
-    if analyst_row:
-        a_lines = []
-        if analyst_row.median_1d_upgrade is not None:
-            line = (f"  Upgrades ({_sample(analyst_row.upgrade_count, analyst_row.upgrade_sessions)}): "
-                    f"median 1d move {float(analyst_row.median_1d_upgrade):+.2f}%")
-            if analyst_row.upgrade_5d_continuation_pct is not None:
-                line += f", 5d continuation {float(analyst_row.upgrade_5d_continuation_pct):.0f}%"
-            a_lines.append(line)
-        if analyst_row.median_1d_downgrade is not None:
-            line = (f"  Downgrades ({_sample(analyst_row.downgrade_count, analyst_row.downgrade_sessions)}): "
-                    f"median 1d move {float(analyst_row.median_1d_downgrade):+.2f}%")
-            if analyst_row.downgrade_5d_continuation_pct is not None:
-                line += f", 5d continuation {float(analyst_row.downgrade_5d_continuation_pct):.0f}%"
-            a_lines.append(line)
-        if a_lines:
-            analyst_section = "\nANALYST REACTION STATS:\n" + "\n".join(a_lines) + "\n"
-
-    prompt = f"""\
-You are a financial data assistant. Your role: translate a user's {direction} view on {sym} into data-grounded thesis parameters. The user has already decided the direction. You calibrate the HOW (target, strike, strategy), not the WHAT.
-
-CRITICAL RULES (violating any is an error):
-1. Return ONLY a valid JSON object, no prose before or after it, no markdown fences
-2. Every figure in "reasoning" and "strategy" MUST appear verbatim in the fact block below
-3. "suggested_strike" MUST be one of the exact float values listed under AVAILABLE STRIKES, never a made-up number
-4. "realism_flag" MUST be a non-null string (with specific numbers) whenever the target exceeds the REALISM THRESHOLDS
-5. "Aggressive" means ambitious but data-supported. A target beyond historical max moves is a lottery ticket. Label it as such with context
-6. Frame everything as a data-grounded suggestion to review, not a prediction or advice
-7. The "reasoning" MUST cite: (a) the vol regime and its implication for structure choice, (b) at least one historical-reaction or conditional-earnings fact, and (c) analyst-reaction data when available (N≥3)
-8. For single-leg options (no spread): suggested_strike MUST be within 10% of the current price.
-9. Never use em dashes (\u2014) in any text field. Use commas, periods, or parentheses instead.
-
-═══════════════════ INJECTED FACT BLOCK ═══════════════════
-SYMBOL / DIRECTION: {sym} / {direction}
-PRICE (last trade {price_as_of or "time unknown"}): ${current_price:.2f}
-ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
-NEXT EARNINGS DATE: {earnings_str or "(unknown)"}
-EXPIRATION USED:    {chosen_exp or "(none)"} ({_n(days_to_exp, "d")} days out)
-
-EXPECTED MOVE (ATM straddle):
-  Implied move:     {em_display}
-  Implied range:    {ir_display}
-  Straddle price:   ${_n(expected_move_dollars)} (= call mid + put mid at ATM)
-
-HISTORICAL EARNINGS (1-day reactions, {hist_sample} quarters):
-  Avg absolute move:  ±{_n(hist_avg*100 if hist_avg else None)}%
-  Max absolute move:  ±{_n(hist_max*100 if hist_max else None)}%
-  Min absolute move:  ±{_n(hist_min*100 if hist_min else None)}%
-{beat_lines}  NOTE: These are 1-day earnings-day reactions; the expiration above covers the full period.
-{ce_section}\
-VOLATILITY:
-  ATM implied vol:    {_pct(atm_iv)}
-  20-day realized vol:{_pct(current_rv)}
-  RV rank (0-100):    {_n(rv_rank)} (0=1yr low, 100=1yr high)
-  IV-RV spread:       {f"{iv_rv_spread_pp:+.1f}pp" if iv_rv_spread_pp is not None else "(unavailable)"}
-  Vol regime:         {vol_regime_display}
-
-VOL-REGIME RULES (binding, override aggressiveness defaults when applicable):
-  * iv_rich (IV-RV > +8pp): Prefer vertical spreads (bull call spread / bear put spread) to cap premium outlay. Long calls/puts are acceptable ONLY at aggressive level. State in reasoning: "IV is Xpp above RV, using a spread to reduce vol drag."
-  * iv_cheap (IV-RV < -4pp): Long calls/puts are attractive, premium is discounted relative to realized movement. State in reasoning: "IV is Xpp below RV, long premium is well-priced."
-  * iv_fair (-4pp <= IV-RV <= +8pp): No vol-regime override. Follow the aggressiveness guide as-is.
-{analyst_section}\
-AVAILABLE STRIKES ({primary_label}):
-{primary_text}
-
-AVAILABLE STRIKES ({secondary_label}):
-{secondary_text}
-═══════════════════ END FACT BLOCK ═══════════════════════
-
-AGGRESSIVENESS REQUESTED: {aggressiveness}
-
-AGGRESSIVENESS GUIDE:
-  conservative: target within 0.5-0.8x implied move from current price (${current_price:.2f}); ITM or ATM strike; consider spread to cap premium outlay
-  moderate:     target ~1x implied move edge ({t1x_display}); ATM or first OTM strike; long call/put OK unless vol regime says otherwise
-  aggressive:   target 1.5-2x implied move ({f"${current_price + 1.5*(expected_move_dollars or 0):.2f}" if direction == "bullish" else f"${current_price - 1.5*(expected_move_dollars or 0):.2f}"}); 2-4 strikes OTM; MUST flag if beyond historical max
-
-REALISM THRESHOLDS (pre-computed, enforce these):
-  1× implied move target:      {t1x_display}
-  Historical max-move target:  {thmax_display}
-  Any target beyond {thmax_display} REQUIRES a non-null realism_flag explaining the data context.
-{realism_precheck}\
-{extra_prompt_section}\
-Return ONLY this JSON object (no other text):
-{{
-  "suggested_target": <float, price target in dollars, data-grounded>,
-  "suggested_strike": <float, MUST be a value from AVAILABLE STRIKES list above>,
-  "suggested_spread_strike": <float or null, second leg for spread, else null>,
-  "strategy": "<e.g. 'Long $315 call ($5.80 mid)' or 'Bull call spread $315/$325 ($X.XX net debit)'. Do NOT include the expiration date, DTE, or target in this field>",
-  "reasoning": "<2-4 sentences citing specific figures from the fact block>",
-  "realism_flag": "<string with specific numbers, or null if target is within data support>"
-}}"""
-
-    print(
-        f"[thesis-draft] {sym} {direction} {aggressiveness} | "
-        f"price=${current_price:.2f} "
-        f"em=±{f'{expected_move_pct*100:.1f}%' if expected_move_pct is not None else 'N/A'} "
-        f"hist_max=±{f'{hist_max*100:.1f}%' if hist_max is not None else 'N/A'} "
-        f"vol_regime={vol_regime or 'N/A'} "
-        f"primary_strikes={len(primary_rows)}",
-        flush=True,
-    )
-
-    # ── 10. Generate (with post-LLM strike guardrail retry) ────────────────
-    client = AnthropicClient()
-    current_prompt = prompt
-    for attempt in range(2):
-        try:
-            gen = await client.generate_thesis_draft(current_prompt)
-        except Exception as exc:
-            print(f"[thesis-draft] {sym}: AI generation failed: {redact(exc)}", flush=True)
-            raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
-
-        print(f"[thesis-draft] {sym} attempt={attempt}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}", flush=True)
-
-        # ── 11. Parse + validate ──────────────────────────────────────────────
-        try:
-            parsed = _extract_json(gen["content"])
-        except Exception as exc:
-            print(f"[thesis-draft] {sym}: AI returned non-JSON output: {redact(exc)}\nRaw: {gen['content'][:300]}", flush=True)
-            raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
-
-        suggested_target = parsed.get("suggested_target")
-        suggested_strike = parsed.get("suggested_strike")
-        spread_strike    = parsed.get("suggested_spread_strike")
-        strategy         = parsed.get("strategy")
-        reasoning        = parsed.get("reasoning", "")
-        realism_flag     = parsed.get("realism_flag")
-
-        suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
-
-        # ── Post-LLM strike distance check (single-leg only) ─────────────
-        strike_violation: str | None = None
-        if (
-            spread_strike is None
-            and suggested_strike is not None
-            and current_price > 0
-        ):
-            dist = abs(suggested_strike - current_price) / current_price
-            if dist > 0.10:
-                strike_violation = (
-                    f"suggested_strike ${suggested_strike:.2f} is {dist*100:.1f}% from "
-                    f"current price ${current_price:.2f} (max 10% for single-leg)"
-                )
-
-        if strike_violation:
-            if attempt == 0:
-                print(f"[thesis-draft] {sym}: strike violation on attempt 0, retrying: {strike_violation}", flush=True)
-                current_prompt = prompt + (
-                    f"\n\nCORRECTION REQUIRED: Your previous suggestion violated rule 8. "
-                    f"{strike_violation}. Pick a strike within 10% of the current price."
-                )
-                continue
-            else:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"strategy out of policy: {strike_violation}",
-                )
-        break  # no violation, exit loop
-
-    if suggested_strike is not None and suggested_strike not in valid_primary_strikes:
-        note = (
-            f"Note: AI suggested strike ${suggested_strike:.2f} was not found in the available chain "
-            f"(verify before trading). Valid nearby strikes: "
-            f"{', '.join(f'${s:.2f}' for s in sorted(valid_primary_strikes)[:5])}."
-        )
-        realism_flag = f"{realism_flag} {note}".strip() if realism_flag else note
-
+        strategy = DC.strategy_long(rd.long_strike, kind, rd.long_mid)
+    sentences = [DC.vol_sentence(sym, vol_regime, iv_rv_spread_pp, rd.structure)]
+    if hist_sample and hist_avg is not None and hist_max is not None:
+        sentences.append(DC.history_sentence(sym, hist_sample, hist_avg * 100, hist_max * 100))
+    sentences.append(DC.strike_sentence(aggressiveness, kind))
+    if rd.structure == "spread":
+        sentences.append(DC.spread_sentence(kind, rd.short_strike, rd.short_reaches))
+    if proposed_target is not None:
+        sentences.append(DC.target_own(rd.target))
+    elif expected_move_pct and chosen_exp:
+        sentences.append(DC.target_sentence(rd.target, aggressiveness, expected_move_pct * 100, fmt_date(date.fromisoformat(chosen_exp))))
+    median_col, count_col = ("median_1d_upgrade", "upgrade_count") if direction == "bullish" else ("median_1d_downgrade", "downgrade_count")
+    if analyst_row is not None and getattr(analyst_row, median_col) is not None and (getattr(analyst_row, count_col) or 0) >= 3:
+        sentences.append(DC.analyst_sentence(sym, direction, getattr(analyst_row, count_col), float(getattr(analyst_row, median_col))))
+    move_pct = abs(rd.target - current_price) / current_price * 100
+    realism_flag = (DC.flag_beyond_history(rd.target, move_pct, hist_max * 100, hist_sample) if rd.flag == "beyond_history"
+                    else DC.flag_beyond_implied(rd.target, move_pct, expected_move_pct * 100) if rd.flag == "beyond_implied" else None)
     return ThesisDraftRead(
         symbol=sym,
         direction=direction,
         aggressiveness=aggressiveness,
-        suggested_target=suggested_target,
-        suggested_strike=suggested_strike,
-        suggested_spread_strike=spread_strike,
+        suggested_target=rd.target,
+        suggested_strike=rd.long_strike,
+        suggested_spread_strike=rd.short_strike,
         strategy=strategy,
-        reasoning=reasoning,
+        reasoning=" ".join(sentences),
         realism_flag=realism_flag,
         vol_regime=vol_regime,
         fact_block=fact_block,
-        model_used=gen["model_used"],
+        model_used="deterministic",
         generated_at=generated_at,
     )
 
@@ -1108,10 +890,6 @@ async def draft_thesis(
     cached = await draft_cache.get(db, cache_key)
     if cached is not None:                              # the same draft for everyone for the rest of this chain's day, at no cost
         return ThesisDraftRead(**draft_cache.restamp(cached, data))
-    from app.services import ai_spend
-    from app.services.draft_limiter import DRAFT_POLICY
-    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
-        raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
     from app.services.ivy_v2 import options_premium_check
     premium = await options_premium_check(db, payload.symbol.upper())     # Ivy's own comparison: expensive options get a cheaper spread
@@ -2140,20 +1918,11 @@ async def draft_alternative(
     user_id: str = Depends(get_draft_caller),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftAlternativeRead:
-    """Generate a budget-constrained alternative to the best trade draft.
-
-    Reuses market-data gather + chain fetch + _build_strike_lines.
-    Returns fits=False (never crashes) when:
-      - no liquid options exist for the symbol
-      - only lottery-ticket far-OTM plays fit the budget
-      - AI returns invalid strikes or cost above budget (validation failure)
-    The existing /theses/draft endpoint and its output are never touched.
-    """
+    """A cheaper alternative to the draft under the visitor's budget, built by rules from the same stored chain
+    (services/draft_rules.alternative, sentences from services/draft_copy): no model call, so the site's AI cap never closes it.
+    Returns fits=False with the reason when no liquid options exist, or nothing within reach of the money fits the budget
+    without being a lottery ticket. The /theses/draft endpoint and its output are never touched."""
     client_ip = get_client_ip(request)
-    from app.services import ai_spend
-    from app.services.draft_limiter import DRAFT_POLICY
-    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
-        raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
     sym = payload.symbol.upper()
     direction = payload.direction.lower()
@@ -2163,18 +1932,7 @@ async def draft_alternative(
     budget = payload.budget
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
-    # ── 1. Finnhub quote ─────────────────────────────────────────────────────
-    try:
-        quote = await live_data.now_quote(db, sym)            # the delayed quote every page shows (2026-11-02)
-    except Exception as exc:
-        print(f"[draft] {sym}: market data fetch failed: {redact(exc)}", flush=True)
-        raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
-
-    current_price: float | None = float(quote.get("c") or 0) or None
-    if not current_price:
-        raise HTTPException(status_code=422, detail=f"No live price available for {sym}")
-
-    # ── 2. DB: ticker + next earnings ─────────────────────────────────────────
+    # ── 1. The ticker ─────────────────────────────────────────────────────────
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     if not ticker_row:
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
@@ -2183,223 +1941,43 @@ async def draft_alternative(
     if await is_excluded(db, sym):
         raise HTTPException(status_code=422, detail=f"{sym}: {EXCLUSION_REASON}")
 
-    today = date.today()
-    ned_val = (await db.execute(
-        select(func.min(Event.event_date))
-        .where(Event.event_type == "earnings", Event.event_date >= today,
-               Event.ticker_id == ticker_row.id)
-    )).scalar_one_or_none()
-    earnings_str: str | None = (
-        ned_val.isoformat() if ned_val and hasattr(ned_val, "isoformat") else (str(ned_val) if ned_val else None)
-    )
+    # ── 2-5. The draft's own data: the same stored chain, expiration and price the draft was built from ──
+    data = await _gather_draft_data(sym, db)
+    draft_spot: float = data["draft_spot"]
+    atm_strike = data["atm_strike"]
+    calls_raw, puts_raw = data["calls_raw"], data["puts_raw"]
 
-    # ── 3. Choose expiration from ingested chains ─────────────────────────────
-    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
-    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
+    # ── 6. Quality-filtered strikes on the side of the bet ─────────────────────
+    _, primary_rows = _build_strike_lines(calls_raw if direction == "bullish" else puts_raw, atm_strike, draft_spot)
 
-    # ── 4. Options chain from ingested store ──────────────────────────────────
-    chain: dict = {"calls": [], "puts": []}
-    if chosen_exp:
-        chain_result = await chain_store.get_chain(db, sym, chosen_exp)
-        if chain_result and chain_store.is_fresh(chain_result[1]):
-            chain = chain_result[0]
-
-    calls_raw: list[dict] = chain.get("calls", [])
-    puts_raw:  list[dict] = chain.get("puts",  [])
-
-    # Use snapshot spot (underlying price at chain-capture time) for all
-    # arithmetic that touches chain mids, falling back to Finnhub if absent.
-    snapshot_price: float | None = chain.get("underlying_price")
-    draft_spot: float = snapshot_price if snapshot_price is not None else current_price
-
-    # ── 5. ATM strike ─────────────────────────────────────────────────────────
-    atm_strike: float | None = None
-    intersection = {c["strike"] for c in calls_raw} & {p["strike"] for p in puts_raw}
-    if intersection:
-        atm_strike = min(intersection, key=lambda s: abs(s - draft_spot))
-
-    # ── 6. Quality-filtered strike lists ──────────────────────────────────────
-    if direction == "bullish":
-        primary_raw, secondary_raw = calls_raw, puts_raw
-        primary_label   = "CALLS (for bullish position)"
-        secondary_label = "PUTS (for spread second leg)"
-    else:
-        primary_raw, secondary_raw = puts_raw, calls_raw
-        primary_label   = "PUTS (for bearish position)"
-        secondary_label = "CALLS (for spread second leg)"
-
-    primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, draft_spot)
-    secondary_text, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, draft_spot, limit=8)
-
-    valid_primary_strikes = {r["strike"] for r in primary_rows}
-
-    # ── NVR / no-options early exit ───────────────────────────────────────────
-    if not primary_rows:
-        await record_draft(db, user_id, client_ip, sym)
-        return ThesisDraftAlternativeRead(
-            fits=False,
-            strategy=None, suggested_strike=None, suggested_spread_strike=None,
-            cost_to_enter=None, target=None, tradeoff=None, reasoning=None,
-            note=f"No liquid options found for {sym}. No alternative structure can be constructed.",
-            model_used="n/a",
-            generated_at=generated_at,
-        )
-
-    # ── 7. Build prompt ───────────────────────────────────────────────────────
-    if payload.best_spread_strike is not None:
-        best_play_desc = f"${payload.best_strike:.2f}/${payload.best_spread_strike:.2f} {direction} spread"
-    else:
-        best_play_desc = f"${payload.best_strike:.2f} {direction} option"
-
-    prompt = f"""\
-You are a financial data assistant. The user wants a {direction} trade on {sym} but their budget of ${budget:.0f} per contract is below the best play's cost of ${payload.best_cost:.0f} ({best_play_desc}). Find a REAL cheaper alternative from the available strikes, OR honestly report that nothing good fits within the budget.
-
-CRITICAL RULES (violating any is an error):
-1. Output ONLY the JSON object. Do not write any reasoning, explanation, or "thinking out loud" text before the JSON. Your response must begin with {{ and end with }}.
-2. You may and should verify your arithmetic, but show any necessary math compactly INSIDE the JSON fields (e.g. in "tradeoff": "Caps max gain at $253 ([$5.00 width - $2.47 debit] x 100)"), NOT as prose before the JSON object.
-3. "suggested_strike" and "suggested_spread_strike" MUST be exact float values listed under AVAILABLE STRIKES, never invent a strike
-4. "cost_to_enter" MUST be <= {budget:.2f} when fits=true. Naked cost = premium x 100; spread cost = net_debit x 100 where net_debit = leg1_mid - leg2_mid
-5. HONESTY GUARDRAIL: If every structure that fits the budget is far-OTM (more than 3 strikes from ATM) or costs less than $50 per contract for this underlying, it is a lottery ticket. Set fits=false and explain honestly. It is better to report nothing fits than to suggest a low-probability play
-6. Frame as a data-grounded suggestion to review, not financial advice
-
-═══════════════════ INJECTED FACT BLOCK ═══════════════════
-SYMBOL / DIRECTION: {sym} / {direction}
-PRICE:              ${draft_spot:.2f}
-ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
-EXPIRATION:         {chosen_exp or "(none)"}
-NEXT EARNINGS:      {earnings_str or "(unknown)"}
-AGGRESSIVENESS:     {aggressiveness}
-USER BUDGET:        ${budget:.2f} per contract (hard ceiling, must not exceed)
-
-BEST PLAY (context only, do NOT suggest this):
-  Structure: {best_play_desc}
-  Cost:      ${payload.best_cost:.0f} per contract (exceeds user budget)
-
-AVAILABLE STRIKES ({primary_label}):
-{primary_text}
-
-AVAILABLE STRIKES ({secondary_label}):
-{secondary_text}
-═══════════════════ END FACT BLOCK ═══════════════════════
-
-SEARCH ORDER FOR ALTERNATIVES (prefer in this order):
-  1. A tighter spread using real strikes where net_debit × 100 <= {budget:.0f}
-  2. A further-OTM naked option (1-2 strikes OTM from ATM) where mid × 100 <= {budget:.0f}
-  3. fits=false: if nothing affordable is within 3 strikes of ATM or if all affordable plays cost < $50, report nothing good fits
-
-When fits=true, "tradeoff" MUST state what is given up vs {best_play_desc} (e.g. "Caps max gain at $X vs unlimited for the naked call" or "Requires a move to $X vs $Y, lower probability of profit").
-
-SPREAD MAX-GAIN MATH (READ THIS CAREFULLY):
-  MAX GAIN for a vertical spread = (width - net_debit) x 100.
-  Example: $15-wide spread at $6.00 net debit: (15 - 6) x 100 = $900. The max gain is $900, NOT $1,500.
-  $1,500 is the gross spread width x 100. That figure is WRONG as max gain and must NEVER appear as the max gain.
-  The single max-gain dollar figure you state in "tradeoff" MUST equal (width - net_debit) x 100. State that one number only.
-  SANITY CHECK before you write the tradeoff: does your stated max gain equal (width - net_debit) x 100?
-  If you wrote width x 100 anywhere as the max gain, it is wrong. Recompute before responding.
-
-Return ONLY this JSON object (no other text):
-{{
-  "fits": <true|false>,
-  "strategy": "<description with real strikes and real cost, e.g. 'Bull call spread $305/$320 ($8.10 net debit)', or null if fits=false>",
-  "suggested_strike": <float, must appear verbatim in AVAILABLE STRIKES, or null if fits=false>,
-  "suggested_spread_strike": <float from AVAILABLE STRIKES or null>,
-  "cost_to_enter": <float, must be <= {budget:.2f} if fits=true, else null>,
-  "target": <float, data-grounded price target at {aggressiveness} aggressiveness>,
-  "tradeoff": "<honest comparison to best play, null if fits=false>",
-  "reasoning": "<2-3 sentences citing real strike values and mids from the fact block, null if fits=false>",
-  "note": "<when fits=false: specific reason nothing fits + recommendation (try larger budget or lower-priced underlying); null when fits=true>"
-}}"""
-
-    print(
-        f"[draft-alternative] {sym} {direction} {aggressiveness} | "
-        f"budget=${budget:.0f} best_cost=${payload.best_cost:.0f} "
-        f"primary_strikes={len(primary_rows)}",
-        flush=True,
-    )
-
-    # ── 8. Generate ───────────────────────────────────────────────────────────
-    client = AnthropicClient()
-    try:
-        gen = await client.generate_thesis_draft_alternative(prompt)
-    except Exception as exc:
-        print(f"[draft-alternative] {sym}: AI generation failed: {redact(exc)}", flush=True)
-        raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
-
-    print(
-        f"[draft-alternative] {sym}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}",
-        flush=True,
-    )
-
-    # ── 9. Parse ──────────────────────────────────────────────────────────────
-    try:
-        parsed = _extract_json(gen["content"])
-    except Exception as exc:
-        print(f"[draft-alternative] {sym}: AI returned non-JSON output: {redact(exc)}\nRaw: {gen['content'][:300]}", flush=True)
-        raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
-
-    fits              = bool(parsed.get("fits", False))
-    strategy          = parsed.get("strategy")
-    suggested_strike  = parsed.get("suggested_strike")
-    spread_strike     = parsed.get("suggested_spread_strike")
-    cost_to_enter     = parsed.get("cost_to_enter")  # AI value; overridden below from chain mids
-    target            = parsed.get("target")
-    tradeoff          = parsed.get("tradeoff")
-    reasoning         = parsed.get("reasoning")
-    note              = parsed.get("note")
-
-    # Canonicalize leg order: suggested_strike is always the long leg.
-    suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
-
-    # Override cost_to_enter with Python-computed value from chain mids — never trust the AI's figure.
-    # primary_rows is already in scope: list of {"strike": float, "mid": float, "iv": ...}
-    if fits and suggested_strike is not None:
-        def _find_mid(k: float) -> float | None:
-            row = next((r for r in primary_rows if abs(r["strike"] - k) < 1e-6), None)
-            return row["mid"] if row else None
-
-        long_mid = _find_mid(suggested_strike)
-        if long_mid is None:
-            cost_to_enter = None
-        elif spread_strike is not None:
-            short_mid = _find_mid(spread_strike)
-            if short_mid is None:
-                cost_to_enter = None
-            else:
-                cost_to_enter = round((long_mid - short_mid) * 100, 2)
-        else:
-            cost_to_enter = round(long_mid * 100, 2)
-
-    # ── 10. Validate — prefer fits=false over returning bad data ──────────────
+    # ── 7. The alternative, by rules (services/draft_rules.alternative; Sam, 2026-11-06: no model in drafting) ──
+    from app.services import draft_copy as copy
+    from app.services import draft_rules as rules
+    kind = copy.KIND[direction]
+    alt = rules.alternative(direction, primary_rows, draft_spot, budget, payload.best_strike, payload.best_target)
+    fits = isinstance(alt, rules.Alternative)
+    strategy = suggested_strike = spread_strike = cost_to_enter = tradeoff = reasoning = note = None
     if fits:
-        failures: list[str] = []
-
-        if suggested_strike is None:
-            failures.append("fits=true but no suggested_strike returned")
-        elif suggested_strike not in valid_primary_strikes:
-            failures.append(
-                f"strike ${suggested_strike:.2f} not in available chain "
-                f"(valid: {', '.join(f'${s:.2f}' for s in sorted(valid_primary_strikes)[:5])})"
-            )
-
-        if spread_strike is not None and spread_strike not in valid_primary_strikes:
-            failures.append(f"spread strike ${spread_strike:.2f} not in available chain")
-
-        if cost_to_enter is None:
-            failures.append("fits=true but cost_to_enter could not be computed (strike mid not found in chain)")
-        elif cost_to_enter > budget:
-            failures.append(
-                f"cost_to_enter ${cost_to_enter:.2f} exceeds budget ${budget:.2f}"
-            )
-
-        if failures:
-            fits              = False
-            strategy          = None
-            suggested_strike  = None
-            spread_strike     = None
-            cost_to_enter     = None
-            tradeoff          = None
-            reasoning         = None
-            note = "Alternative validation failed: " + "; ".join(failures) + ". No reliable alternative could be confirmed within budget."
+        suggested_strike, spread_strike, cost_to_enter = alt.long_strike, alt.short_strike, alt.cost
+        if alt.structure == "spread":
+            strategy = copy.strategy_spread(direction, alt.long_strike, alt.short_strike, alt.debit)
+            max_gain = abs(alt.short_strike - alt.long_strike) * 100 - alt.cost
+            best_max_gain = (abs(payload.best_spread_strike - payload.best_strike) * 100 - payload.best_cost
+                             if payload.best_spread_strike is not None else None)
+            tradeoff = copy.alt_tradeoff_spread(direction, kind, payload.best_strike, payload.best_spread_strike, max_gain, best_max_gain)
+            reasoning = copy.alt_reasoning_spread(kind, budget, payload.best_cost, alt.long_strike, alt.long_mid, alt.short_strike,
+                                                  alt.short_mid, alt.cost, payload.best_strike)
+        else:
+            sign = 1 if direction == "bullish" else -1
+            strategy = copy.strategy_long(alt.long_strike, kind, alt.long_mid)
+            tradeoff = copy.alt_tradeoff_long(direction, kind, alt.long_strike, alt.long_strike + sign * alt.long_mid, payload.best_strike,
+                                              payload.best_strike + sign * payload.best_cost / 100)
+            reasoning = copy.alt_reasoning_long(kind, budget, payload.best_cost, alt.long_strike, alt.long_mid, alt.cost)
+    else:
+        note = copy.alt_none(alt.reason, sym, budget, rules.ALT_MAX_STEPS, rules.ALT_MIN_COST, alt.cheapest)
+    print(f"[draft-alternative] {sym} {direction} {aggressiveness} | budget=${budget:.0f} best_cost=${payload.best_cost:.0f} "
+          f"-> {strategy or alt.reason}", flush=True)
+    target = payload.best_target if fits else None
 
     await record_draft(db, user_id, client_ip, sym)
     return ThesisDraftAlternativeRead(
@@ -2412,7 +1990,7 @@ Return ONLY this JSON object (no other text):
         tradeoff=tradeoff,
         reasoning=reasoning,
         note=note,
-        model_used=gen["model_used"],
+        model_used="deterministic",
         generated_at=generated_at,
     )
 
