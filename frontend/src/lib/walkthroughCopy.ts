@@ -4,6 +4,8 @@
 export const WALK_COPY = {
   ivy: "Ivy",
   stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
+  // each step's short name, shown above its question (Sam, 2026-11-04)
+  stepLabel: { business: "Overview", growth: "Growth", margins: "Margin", stock: "Historical", valuation: "Valuation", upcoming: "Earnings", risks: "Risks" },
   back: "Back",
   next: "Next",
   toSummary: "See the summary",

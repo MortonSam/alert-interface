@@ -204,7 +204,7 @@ def build_prompt(facts: dict, redo: dict | None = None) -> str:
     redo_block = ""
     if redo:
         redo_block = "\nYOUR LAST DRAFT FAILED THESE CHECKS. Write each again so it passes:\n" + "\n".join(f"- {k}: {v}" for k, v in redo.items()) + "\n"
-    revenue_rule = ("\n- This company is a bank or an insurer: call what it brings in \"revenue\", never \"sales\"." if facts.get("noun") == "revenue" else "")
+    revenue_rule = ("\n- Call what the company brings in \"revenue\", never \"sales\"." if facts.get("noun") == "revenue" else "")
     return f"""{VOICE}
 
 COMPANY: {facts['name']} ({facts.get('sector') or 'sector not on file'})
@@ -274,7 +274,7 @@ def parse_draft(content: str) -> dict:
     return out
 
 
-def output_problems(sentence: str, words: int, key: str | None = None, noun: str = "sales") -> list[str]:
+def output_problems(sentence: str, words: int, key: str | None = None, noun: str = "revenue") -> list[str]:
     """Pure: why a drafted sentence cannot be shown (ask_ivy.check_output with no facts allowed, plus length and punctuation, plus
     Sam's rule: nothing sensitive or exposed anywhere, and outside the risks (key "risk:N") no risk and nothing about what may
     happen next; a step's sentence never states its check's answer)."""
@@ -302,7 +302,7 @@ def output_problems(sentence: str, words: int, key: str | None = None, noun: str
         if m:
             problems.append(f"names a risk or what may happen next, which only the risks may: {m.group(0)}")
     if noun == "revenue" and SALES_WORD.search(sentence):
-        problems.append("says sales for a bank or an insurer, which has revenue")
+        problems.append("says sales, which the walkthrough calls revenue")
     if key in GIVEAWAY:
         m = GIVEAWAY[key].search(sentence)
         if m:
@@ -400,7 +400,7 @@ async def story_for(facts: dict, *, client=None) -> dict:
         failed: dict[str, str] = {}
         clean = []
         for i, s in drafted:
-            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "sales") + step_problems(i, s, facts, kinds.get(i))
+            p = output_problems(s, RISK_WORDS if i.startswith("risk:") else STORY_WORDS, i, facts.get("noun") or "revenue") + step_problems(i, s, facts, kinds.get(i))
             if p:
                 failed[i] = "; ".join(p)
                 verdicts[i] = {"status": "rejected", "reason": failed[i], "round": rnd, "draft": s, **kinds.get(i, {})}
@@ -449,7 +449,7 @@ def apply(payload: dict, story: dict, headings: dict[int, str] | None = None) ->
     risks = [{"n": int(i.split(":")[1]), "sentence": s} for i, s in sents.items() if i.startswith("risk:")]
     st = by_key["risks"]
     if st["status"] != "absent":
-        W.with_risk_story(st, payload["name"], sorted(risks, key=lambda r: r["n"]), headings, payload["steps"], payload.get("noun") or "sales")
+        W.with_risk_story(st, payload["name"], sorted(risks, key=lambda r: r["n"]), headings, payload["steps"], payload.get("noun") or "revenue")
     payload["summary"] = W.summary(payload["name"], payload["steps"])
 
 

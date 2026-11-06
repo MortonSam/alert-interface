@@ -49,7 +49,7 @@ export function PeRangeChart({ chart }: { chart: PeChart }) {
           <LineChart data={rows} margin={{ top: 6, right: 8, bottom: 0, left: -12 }}>
             <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.4} vertical={false} />
             <XAxis dataKey="t" type="number" scale="time" domain={domain} ticks={yearTicks(domain[0], domain[1])} interval={0} tickFormatter={yearLabel} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={40} axisLine={false} tickLine={false} domain={[0, "auto"]} />
+            <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={40} axisLine={false} tickLine={false} domain={[0, "auto"]} tickFormatter={(v: number) => `$${v}`} />
             <ReferenceLine y={chart.median} {...peMark("median")} />
             {chart.sector_median != null && <ReferenceLine y={chart.sector_median} {...peMark("sectorMedian")} />}
             <Line dataKey="pe" dot={false} isAnimationActive={false} connectNulls={false} {...peMark("pe")} />

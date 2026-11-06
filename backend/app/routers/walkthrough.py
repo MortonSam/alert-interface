@@ -42,7 +42,7 @@ def gate(payload: dict, growth_on: bool, pe_on: bool, now=None) -> dict:
             W.with_fed(s, W.next_fed_day(now))
     name = out["name"]
     reit = bool(out.get("reit"))
-    noun = out.get("noun") or "sales"
+    noun = out.get("noun") or "revenue"
     hidden = set()
     for i, s in enumerate(out["steps"]):
         if s["key"] == "growth" and not growth_on:

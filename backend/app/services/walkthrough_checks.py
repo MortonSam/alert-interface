@@ -126,7 +126,7 @@ GROWTH_TOGETHER = {"sales": "Its sales and profit always grow together", "revenu
 
 
 def growth_check(name: str, sales_pct: float | None, period: str, per_share_pct: float | None, per_share: str = "earnings per share",
-                 noun: str = "sales") -> dict | None:
+                 noun: str = "revenue") -> dict | None:
     """Earnings (or FFO) per share grew faster or slower than sales in the latest quarter: what does that usually mean? None when
     they grew about as fast, when either figure is missing, or in the slower case when sales fell (the right option says it is
     selling more)."""
@@ -169,7 +169,7 @@ def is_cyclical(now: float, then: float | None) -> bool:
     return then is not None and abs(round(now) - round(then)) >= CYCLICAL_SWING_CENTS
 
 
-def margins_check(name: str, now: float, then: float | None, unit: str = "sales dollar") -> dict | None:
+def margins_check(name: str, now: float, then: float | None, unit: str = "revenue dollar") -> dict | None:
     """Now against three years earlier, in the whole cents the step shows: what does a change like that usually point to?"""
     if then is None:
         return None
@@ -281,6 +281,11 @@ def pe_fact(a: str, year: dict | None, median: float) -> str | None:
     return None
 
 
+def usd(x: float) -> str:
+    """Pure: what investors pay for $1 of profit (walkthrough.per_dollar's rule): "$28", "$7.9"."""
+    return f"${x:,.0f}" if x >= 10 else f"${x:,.1f}"
+
+
 def pe_check(name: str, pe: float, median: float, year: dict | None = None) -> dict | None:
     """Investors pay more or less than usual (the P/E against its own five-year median): what is a common reason? None when about
     usual. The right answer fits the company (pe_fact) when its year shows why; year: {eps_pct, price_pct, pe_then, now}."""
@@ -295,18 +300,18 @@ def pe_check(name: str, pe: float, median: float, year: dict | None = None) -> d
         verb = lambda x: f"{'rose' if x >= 0 else 'fell'} {pct(x)}"
         return {"concept": "pe", "options": options, "answer": answer,
                 "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is the reason here?",
-                "why": f"Its P/E of {num(pe)} is {'below' if lower else 'above'} its five-year median of {num(median)}, and a year earlier it was {num(year['pe_then'])}. "
-                       f"In the year to {fmt_date(year['now'])} its earnings per share over four quarters {verb(year['eps_pct'])} while its share price "
-                       f"{verb(year['price_pct'])}, so each dollar of profit costs {'less' if lower else 'more'} than it did. A stock split changes the share price "
-                       f"and earnings per share together, so it leaves the P/E unchanged."}
+                "why": f"Investors pay about {usd(pe)} for each $1 of its profit, {'below' if lower else 'above'} the {usd(median)} of its five-year median, and a year earlier "
+                       f"they paid {usd(year['pe_then'])}. In the year to {fmt_date(year['now'])} its earnings per share over four quarters {verb(year['eps_pct'])} while its "
+                       f"share price {verb(year['price_pct'])}, so each dollar of profit costs {'less' if lower else 'more'} than it did. A stock split changes the share "
+                       f"price and earnings per share together, so it leaves this figure unchanged."}
     right = PE_RIGHT[a]
     options, answer = _ordered([right, PE_RIGHT["above" if a == "below" else "below"], PE_SPLIT], right, name)
     return {"concept": "pe", "options": options, "answer": answer,
             "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is a common reason?",
-            "why": f"Its P/E of {num(pe)} is {'below' if lower else 'above'} its five-year median of {num(median)}. A {'lower' if lower else 'higher'} P/E than usual "
-                   f"commonly means " + ("investors expect its profits to fall from here, or its profits have grown faster than its price. " if lower else
+            "why": f"Investors pay about {usd(pe)} for each $1 of its profit, {'below' if lower else 'above'} its five-year median of {usd(median)}. Paying "
+                   f"{'less' if lower else 'more'} than usual commonly means " + ("investors expect its profits to fall from here, or its profits have grown faster than its price. " if lower else
                                         "investors expect its profits to keep growing, or its profits have fallen while its price held. ")
-                   + "A stock split changes the share price and earnings per share together, so it leaves the P/E unchanged."}
+                   + "A stock split changes the share price and earnings per share together, so it leaves this figure unchanged."}
 
 
 # ── step 6 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -343,7 +348,7 @@ def risk_target(heading: str, sentence: str = "") -> str | None:
     return hits.pop() if len(hits) == 1 else None
 
 
-def risk_check(name: str, sentence: str, right: str, decoys: list[str], noun: str = "sales") -> dict:
+def risk_check(name: str, sentence: str, right: str, decoys: list[str], noun: str = "revenue") -> dict:
     options, answer = _ordered([right] + decoys[:2], right, name)
     each = "each revenue dollar" if noun == "revenue" else "each sale"
     return {"concept": "risk_factors", "options": options, "answer": answer,

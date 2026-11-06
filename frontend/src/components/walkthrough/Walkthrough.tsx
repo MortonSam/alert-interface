@@ -117,6 +117,7 @@ export function StepScreen({ step, w, learned, others, preview = false }: { step
   const ideaSeg = seg();
   return (
     <div>
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-primary" data-walk-label>{T.stepLabel[step.key]}</p>
       <h2 className="font-display text-headline font-semibold text-foreground">{step.question}</h2>
       {step.status === "absent" ? (
         <p className="mt-5 font-display text-lg leading-relaxed text-foreground/80"><Explained text={step.absent} /></p>

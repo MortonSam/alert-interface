@@ -91,7 +91,7 @@ def test_a_pe_chart_never_breaks_and_says_where_it_starts():
     s = W.step_valuation("NVIDIA", "Information Technology", _snap(median=med), series, None, True, None, left)
     assert s["chart"] and W.chart_gaps(s["chart"]) == []
     assert s["chart"]["start"] == second[0][0].isoformat() and s["chart"]["points"][0][0] == second[0][0].isoformat()
-    assert f"The chart starts on {W.fmt_date(second[0][0])}. Before that, its P/E was above 100 at times" in s["sentences"][-1]
+    assert f"The chart starts on {W.fmt_date(second[0][0])}. Before that, investors paid more than $100 for each $1 of its profit at times" in s["sentences"][-1]
     assert "Its five-year range" in [n["label"] for n in s["numbers"]]                       # the range stays the history's
 
 
@@ -129,7 +129,7 @@ def test_the_pe_check_fits_the_company_nvidia_whose_profits_grew_faster_than_its
     c = C.pe_check("NVIDIA", 27.6, 52.6, year)
     assert c["options"][c["answer"]] == "Its profits grew faster than its price"
     assert "They expect its profits to fall from here" not in c["options"]
-    assert "earnings per share over four quarters rose 125.4% while its share price rose 17.3%" in c["why"] and "a year earlier it was 54.2" in c["why"]
+    assert "earnings per share over four quarters rose 125.4% while its share price rose 17.3%" in c["why"] and "a year earlier they paid $54" in c["why"]
     # already below its median a year earlier: the year is not why, the usual reading stands
     assert C.pe_check("NVIDIA", 27.6, 52.6, {**year, "pe_then": 30.0})["options"][C.pe_check("NVIDIA", 27.6, 52.6, {**year, "pe_then": 30.0})["answer"]] == C.PE_RIGHT["below"]
     up = C.pe_check("X", 40.0, 25.0, {"eps_pct": 2.0, "price_pct": 60.0, "pe_then": 25.0, "now": date(2026, 10, 27)})
@@ -312,7 +312,7 @@ def test_one_quarter_across_the_steps():
     replaced = W.one_quarter(steps, {2: q3, 3: q4, 5: date(2026, 8, 28)}, q4, None, "Micron")
     assert replaced == [2]                                                  # Aug 28 and Sep 3 are the same quarter; May 28 is not
     assert steps[1]["status"] == "absent" and steps[1]["numbers"] == []
-    assert steps[1]["absent"] == ("Ivy can't show this for Micron yet. Its sales growth for the quarter ended Sep 3, 2026 is not on file yet, "
+    assert steps[1]["absent"] == ("Ivy can't show this for Micron yet. Its revenue growth for the quarter ended Sep 3, 2026 is not on file yet, "
                                   "so this step shows no older quarter.")
     assert steps[1]["behind"] == {"end": "2026-05-28", "latest": "2026-09-03"}
     assert steps[2]["status"] == "ok" and steps[4]["status"] == "ok"

@@ -16,7 +16,7 @@ lists as uncertain, or None), fact (this stock's figure for its concept, for the
 concept is known: {concept, measure, lead, short, tail}), point (the step's headline figure in words, for step 7's check),
 cell (Compare's figures by measure: {measure: {value, as_of, end}})}.
 
-Banks and insurers say "revenue" where every other company says "sales" (noun_for). A ticker page offers the walkthrough only
+Every company's sales are called "revenue" (noun_for; Sam, 2026-11-04). A ticker page offers the walkthrough only
 when at least ENTRY_MIN_STEPS steps show data (routers/walkthrough serves `entry`).
 """
 from __future__ import annotations
@@ -30,12 +30,15 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 4                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 5                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
                                                   #   index; P/E charts never break (the latest unbroken run); the P/E check fits the company's year;
                                                   #   the next Fed decision is chosen when served; the options line beside the typical move
+                                                  # 5 (2026-11-06, Sam's Nov 4 review): "revenue" for every company; step 5 in dollars ("about $28 for
+                                                  #   every $1 of profit"), "P/E" named once; step 1 says which split its figures use and follows the
+                                                  #   description's breakdown when the 10-K files both
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
@@ -51,7 +54,7 @@ INDEX_SHARE_NO_VERDICT = 2.0                      # a stock above this percent o
 QUESTIONS = {
     1: "What does it do, and how does it make money?",
     2: "Is the business getting bigger?",
-    3: "How much of each sale does it keep?",       # "each revenue dollar" for banks and insurers (question_for)
+    3: "How much of each revenue dollar does it keep?",
     4: "What has the stock done, and was it the company or the market?",
     5: "Is it expensive?",
     6: "What's coming up?",
@@ -59,16 +62,16 @@ QUESTIONS = {
 }
 KEYS = {1: "business", 2: "growth", 3: "margins", 4: "stock", 5: "valuation", 6: "upcoming", 7: "risks"}
 # what the summary's "still uncertain" list calls a step Ivy couldn't show
-GAP_TOPIC = {1: "What it does", 2: "Whether its sales are growing", 3: "How much of each sale it keeps", 4: "How its stock did against the market",
+GAP_TOPIC = {1: "What it does", 2: "Whether its revenue is growing", 3: "How much of each revenue dollar it keeps", 4: "How its stock did against the market",
              5: "How it is valued", 6: "When it reports next", 7: "What could go wrong"}
 
 # "The idea": the concept behind each step, true of any stock. No figure here may be about one company.
 IDEAS = {
-    "segments": ("Segments", "A company's annual report, the 10-K, splits its sales into segments. The segment that brings in most of the money is what really drives the business, whatever the company is best known for."),
-    "growth": ("Growth", "Growth compares a quarter with the same quarter a year earlier, so seasonal swings cancel out. Sales growth shows demand. Earnings per share, set beside sales, shows how much of that growth reaches each share as profit."),
-    "margins": ("Margins", "A margin is the slice of each sales dollar a company keeps. How the slice changes over several years says something about the company's prices and costs. Compare margins within an industry, since a grocer and a software maker run on very different slices."),
+    "segments": ("Where the money comes from", "A company's annual report, the 10-K, splits its revenue by business segment, the units it is run and reported as, and often also by product or market. The biggest piece is what really drives the business, whatever the company is best known for."),
+    "growth": ("Growth", "Growth compares a quarter with the same quarter a year earlier, so seasonal swings cancel out. Revenue growth shows demand. Earnings per share, set beside revenue, shows how much of that growth reaches each share as profit."),
+    "margins": ("Margins", "A margin is the slice of each revenue dollar a company keeps. How the slice changes over several years says something about the company's prices and costs. Compare margins within an industry, since a grocer and a software maker run on very different slices."),
     "market_vs_company": ("Market or company", "Every stock moves partly with the whole market and partly on its own news. Comparing it with the S&P 500 and with similar companies separates the two. If they all rose together, it was the market. If it rose alone, it was the company."),
-    "pe": ("P/E", "P/E is the share price divided by the company's earnings per share over the last year, so it is what investors pay for each dollar of profit. It says most next to the same company's past and similar companies."),
+    "pe": ("Price for each $1 of profit", "Divide the share price by the company's earnings per share over the last year and you get what investors pay for each $1 of its profit. The figure says most next to the same company's past and similar companies."),
     "p_ffo": ("Price to FFO", "A real estate trust is valued on funds from operations, or FFO, per share. FFO adds back the depreciation of its buildings, which accounting writes down every year even when the properties hold their value. Price to FFO is the share price divided by the last year's FFO per share, what investors pay for each dollar the properties bring in."),
     "report_move": ("The report move", "An earnings report is when a company tells investors how its last quarter went. The stock's moves after its past reports show what is normal for it, and options prices show how big a move traders expect this time."),
     "risk_factors": ("Risk factors", "Every annual report has a section called Item 1A, Risk Factors, where the company must list what could hurt it. A listed risk is a disclosure, not a prediction, and reading the list tells you what could change the story."),
@@ -76,12 +79,12 @@ IDEAS = {
 REIT_GROWTH_NOTE = "Real estate trusts are usually judged by funds from operations per share rather than earnings per share, and Ivy doesn't have that figure for this trust yet."
 REIT_VALUE_ABSENT = "Real estate trusts are valued on funds from operations (FFO) per share rather than earnings, and its FFO per share is not on file yet."
 GROWTH_IN_REVIEW = "Growth figures are still being checked and are not shown on this site until they pass."
-PE_IN_REVIEW = "P/E figures are still being checked and are not shown on this site until they pass."
+PE_IN_REVIEW = "What investors pay for each $1 of profit (the P/E) is still being checked and isn't shown on this site until it passes."
 SEGMENT_REASONS = {
     "no 10-K": ("There is no annual report (10-K) on file at the SEC.", "no annual report on file"),
     "no full fiscal year": ("Its annual report's data has no full fiscal year.", "its annual report has no full year"),
-    "do not add up": ("The segment figures in its annual report do not add up to its total sales, so Ivy doesn't show them.", "its segment figures don't add up to its total"),
-    "no revenue split": ("Its annual report does not split its sales by segment or product.", "its annual report has no split"),
+    "do not add up": ("The revenue splits in its annual report do not add up to its total revenue, so Ivy doesn't show them.", "its revenue splits don't add up to its total"),
+    "no revenue split": ("Its annual report does not split its revenue by business segment or by product.", "its annual report has no split"),
     "no XBRL instance": ("Its annual report has no machine-readable figures.", "its annual report has no machine-readable figures"),
 }
 RISK_REASONS = {
@@ -105,6 +108,12 @@ def money_words(x: float) -> str:
         if abs(x) >= unit:
             return f"{sign}${abs(x) / unit:,.1f} {word}"
     return f"{sign}${abs(x):,.0f}"
+
+
+def per_dollar(x: float) -> str:
+    """What investors pay for $1 of profit, as a visitor reads it (Sam, 2026-11-04: "paying about $28 for every $1 of profit"):
+    whole dollars from $10, one decimal below ("$7.9")."""
+    return f"${x:,.0f}" if x >= 10 else f"${x:,.1f}"
 
 
 def dollars(x: float) -> str:
@@ -132,7 +141,7 @@ def change_phrase(g: float | None, stored: str | None) -> str:
     return f"{'up' if g > 0 else 'down'} {pct(g)} from a year earlier"
 
 
-def grew(g: float, noun: str = "sales") -> str:
+def grew(g: float, noun: str = "revenue") -> str:
     return "grew" if round(g, 1) > 0 else "shrank" if round(g, 1) < 0 else ("was" if noun == "revenue" else "were") + " unchanged"
 
 
@@ -152,8 +161,9 @@ def is_reit(sector: str | None, industry: str | None) -> bool:
 
 
 def noun_for(industry: str | None) -> str:
-    """Pure: "revenue" for a bank or an insurer (its GICS sub-industry), "sales" for everyone else."""
-    return "revenue" if any(w in (industry or "") for w in REVENUE_INDUSTRY_WORDS) else "sales"
+    """Pure: "revenue", for every company (Sam, 2026-11-04: "revenue" instead of "sales" everywhere in the walkthrough; banks and
+    insurers alone said "revenue" before). The `noun` plumbing stays so a wording change is one line."""
+    return "revenue"
 
 
 def each_unit(noun: str) -> str:
@@ -176,7 +186,7 @@ def _num(label: str, value: str, as_of: str) -> dict:
 
 def _step(n: int, *, status: str, numbers=None, sentences=None, idea: str | None = None, absent: str | None = None, chart=None, check=None,
           deeper=None, source=None, summary: str | None = None, gap: str | None = None, fact: dict | None = None, point: str | None = None,
-          cell=None, noun: str = "sales") -> dict:
+          cell=None, noun: str = "revenue") -> dict:
     title, text = IDEAS[idea] if idea else (None, None)
     if text and noun == "revenue":
         text = text.replace("Sales", "Revenue").replace("sales", "revenue")
@@ -186,7 +196,7 @@ def _step(n: int, *, status: str, numbers=None, sentences=None, idea: str | None
             "point": point, "cell": cell}
 
 
-def _absent(n: int, name: str, why: str, gap: str, idea: str, noun: str = "sales") -> dict:
+def _absent(n: int, name: str, why: str, gap: str, idea: str, noun: str = "revenue") -> dict:
     return _step(n, status="absent", absent=cant(name, why), idea=idea, gap=gap, noun=noun)
 
 
@@ -212,12 +222,32 @@ def merger_line(merger: dict, what: str) -> str:
 
 # ── step 1: what it does ────────────────────────────────────────────────────────────────────────────────────────────────────
 
+# what a split's figures say they are (Sam, 2026-11-06): a split by product, market or platform is never called "segments"
+SPLIT_WORDS = {"business segment": "by business segment", "product or service": "by product and market"}
+
+
+def mentions(text: str | None, segs: list[dict]) -> int:
+    """Pure: how many of a split's names the description names (case-insensitive, whole words)."""
+    import re
+    t = (text or "").lower()
+    return sum(1 for g in segs if g.get("label") and re.search(r"(?<![a-z])" + re.escape(g["label"].lower()) + r"(?![a-z])", t))
+
+
+def split_for(segments: dict, desc: str | None) -> tuple[dict, dict | None]:
+    """Pure: (the split step 1 shows, the other one or None). When the 10-K splits revenue both by business segment and by product
+    and market, the figures follow the breakdown the description names more of; a tie keeps the reader's first (segments.AXES)."""
+    other = segments.get("other")
+    if other and mentions(desc, other["segments"]) > mentions(desc, segments["segments"]):
+        return ({**segments, **other, "other": None},
+                {k: segments[k] for k in ("axis", "axis_label", "tag", "total", "segments")})
+    return segments, other
+
 def nouned(text: str, noun: str) -> str:
     """Pure: a stored reason's "sales" said as "revenue" for a bank or an insurer."""
     return text.replace("sales", "revenue") if noun == "revenue" else text
 
 
-def step_business(name: str, profile: dict | None, segments: dict | None, merger: dict | None, periods: dict | None = None, noun: str = "sales",
+def step_business(name: str, profile: dict | None, segments: dict | None, merger: dict | None, periods: dict | None = None, noun: str = "revenue",
                   note: dict | None = None) -> dict:
     """Step 1 has no quick check. Its description is the served research note's own "what they do", word for word (Sam, 2026-11-03;
     note: {text, written}); only a stock with no served note falls back to the vendor's company description, which the story step's
@@ -232,7 +262,7 @@ def step_business(name: str, profile: dict | None, segments: dict | None, merger
             why = (f"It merged with {short_name(merger['name'])} on {fmt_date(merger['date'])}, and its last annual report and company description both describe the business before the merger.",
                    "it merged after its last annual report")
         else:
-            why = _reason((segments or {}).get("reason"), SEGMENT_REASONS, ("Its company description and sales split are not on file.", "no description or sales split on file"))
+            why = _reason((segments or {}).get("reason"), SEGMENT_REASONS, ("Its company description and revenue split are not on file.", "no description or revenue split on file"))
         return _absent(1, name, nouned(why[0], noun), nouned(why[1], noun), "segments", noun)
     sentences, numbers, deeper = [], [], []
     as_of_profile = (profile or {}).get("fetched_at")
@@ -241,26 +271,32 @@ def step_business(name: str, profile: dict | None, segments: dict | None, merger
     source = fact = point = cell = gap = None
     summary = None
     if seg_ok:
-        segs, total = segments["segments"], segments["total"]
+        shown, other = split_for(segments, desc if profile_ok else None)
+        segs, total = shown["segments"], shown["total"]
+        by = SPLIT_WORDS.get(shown.get("axis_label"), "by line")
         top = segs[0]
         period = year(periods, segments["end"])
         as_of = f"{cap(period.removeprefix('the '))}, 10-K filed {fmt_date(segments['filed'])}"
-        numbers = [_num(f"{Noun} in its last fiscal year", money_words(total), as_of), _num(f"From {top['label']}", pct(top["share"]), as_of)]
-        sentences.append(f"Its biggest line is {top['label']}, at {pct(top['share'])} of {money_words(total)} in {period}.")
+        numbers = [_num(f"{Noun} in its last fiscal year", money_words(total), as_of), _num(f"From {top['label']}, {by}", pct(top["share"]), as_of)]
+        sentences.append(f"Split {by}, its biggest line is {top['label']}, at {pct(top['share'])} of {money_words(total)} in {period}.")
         if len(segs) > 1:
             sentences.append(f"Next comes {segs[1]['label']} at {pct(segs[1]['share'])}.")
-        deeper = [_num(g["label"], f"{pct(g['share'])} ({money_words(g['value'])})", as_of) for g in segs]
+        deeper = [_num(f"{g['label']} ({by})", f"{pct(g['share'])} ({money_words(g['value'])})", as_of) for g in segs]
+        if other:
+            o = other["segments"][0]
+            deeper.append(_num(f"Its 10-K also splits {noun} {SPLIT_WORDS.get(other.get('axis_label'), 'another way')}",
+                               f"{o['label']}, {pct(o['share'])}", as_of))
         source = {"label": f"10-K filed {fmt_date(segments['filed'])}", "url": segments.get("url")}
-        summary = f"Its biggest line, {top['label']}, brought in {pct(top['share'])} of its {noun} in {period}."
+        summary = f"Split {by}, its biggest line, {top['label']}, brought in {pct(top['share'])} of its {noun} in {period}."
         fact = {"concept": "segments", "measure": "segments", "lead": f"{name}'s biggest line, {top['label']}, brought in {pct(top['share'])} of its {noun}",
                 "short": f"{name}'s, {top['label']}, brought in {pct(top['share'])}", "tail": f"in {period}"}
         point = f"The {pct(top['share'])} of its {noun} from {top['label']}"
-        cell = {"share": {"value": f"{top['label']}, {top['share']:,.0f}% of {noun}", "as_of": as_of, "end": str(segments["end"])}}
+        cell = {"share": {"value": f"{top['label']}, {top['share']:,.0f}% of {noun}", "as_of": f"{as_of}, {by}", "end": str(segments["end"])}}
     else:
         if merger and segments and segments.get("ok"):
             why = (merger_line(merger, "its last annual report"), "it merged after its last annual report")
         else:
-            why = _reason((segments or {}).get("reason"), SEGMENT_REASONS, ("Its sales split is not on file.", "no split on file"))
+            why = _reason((segments or {}).get("reason"), SEGMENT_REASONS, ("Its revenue split is not on file.", "no split on file"))
         sentences.append(f"Ivy can't split {name}'s {noun} yet. {nouned(why[0], noun)}")
         gap = nouned(why[1], noun)
         summary = desc        # until the story step's plain line on what it does replaces it
@@ -294,7 +330,7 @@ def ttm_growth(rows: list[dict]) -> tuple[float, float, float, date] | None:
 
 
 def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled: bool, periods: dict | None = None, reit: bool = False,
-                ffo: dict | None = None, noun: str = "sales") -> dict:
+                ffo: dict | None = None, noun: str = "revenue") -> dict:
     if not enabled:
         return _absent(2, name, GROWTH_IN_REVIEW, "figures still being checked", "growth", noun)
     Noun = cap(noun)
@@ -361,7 +397,7 @@ def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled:
 
 # ── step 3: margins ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-MEASURE_NUMBER_LABEL = {"gross": "Kept per $1 of sales", "operating": "Kept as operating profit per $1 of sales", "net": "Kept as profit per $1 of revenue"}
+MEASURE_NUMBER_LABEL = {"gross": "Kept per $1 of revenue", "operating": "Kept as operating profit per $1 of revenue", "net": "Kept as profit per $1 of revenue"}
 
 
 def margin_hold(m: dict, actions: list[dict]) -> tuple[bool, dict | None]:
@@ -404,7 +440,7 @@ def margin_cells(m: dict, periods: dict | None, keep_then: bool) -> dict:
     return out
 
 
-def step_margins(name: str, m: dict | None, actions: list[dict], periods: dict | None = None, noun: str = "sales") -> dict:
+def step_margins(name: str, m: dict | None, actions: list[dict], periods: dict | None = None, noun: str = "revenue") -> dict:
     if not m or not m.get("ok"):
         why = (m or {}).get("reason") or "Its filings do not tag the figures."
         return _absent(3, name, why[0].upper() + why[1:] + ("" if why.endswith(".") else "."), margin_gap(why), "margins", noun)
@@ -571,7 +607,7 @@ def chart_gaps(chart: dict | None, gap_days: int = CHART_GAP_DAYS) -> list[str]:
     return out
 
 
-LEFT_OUT_WORDS = {"loss": "its earnings over four quarters were below zero", "over_cap": "its P/E was above {cap}",
+LEFT_OUT_WORDS = {"loss": "its earnings over four quarters were below zero", "over_cap": "investors paid more than {cap} for each $1 of its profit",
                   "action": "a merger or spin-off sat inside its four quarters"}
 
 
@@ -579,9 +615,9 @@ def left_out_line(start: date, reasons: set[str]) -> str:
     """Pure: why the chart starts where it does: "The chart starts on Oct 20, 2023. Before that, its P/E was above 100 at times, which
     Ivy leaves out of its P/E history." (the cap from valuation.MIN_EARNINGS_YIELD)."""
     from app.services.valuation import MIN_EARNINGS_YIELD
-    words = [LEFT_OUT_WORDS[r].format(cap=f"{1 / MIN_EARNINGS_YIELD:,.0f}") for r in ("loss", "over_cap", "action") if r in reasons]
-    why = " or ".join(words) if words else "its P/E could not be worked out"
-    return f"The chart starts on {fmt_date(start)}. Before that, {why} at times, which Ivy leaves out of its P/E history."
+    words = [LEFT_OUT_WORDS[r].format(cap=f"${1 / MIN_EARNINGS_YIELD:,.0f}") for r in ("loss", "over_cap", "action") if r in reasons]
+    why = " or ".join(words) if words else "the price of its profit could not be worked out"
+    return f"The chart starts on {fmt_date(start)}. Before that, {why} at times, which Ivy leaves out of this history."
 
 
 def step_valuation(name: str, sector: str | None, snap: dict | None, series: list[tuple[date, float]], sec_row: dict | None, enabled: bool,
@@ -593,13 +629,13 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
     if not enabled:
         return _absent(5, name, PE_IN_REVIEW, "P/E figures still being checked", "pe")
     if not snap:
-        return _absent(5, name, "Its P/E is not on file.", "no P/E on file", "pe")
+        return _absent(5, name, "What investors pay for each $1 of its profit is not on file.", "no P/E on file", "pe")
     status = snap["status"]
     if status == "not_meaningful":
         lost = snap.get("pe") is None
-        why = ("It lost money over the last four quarters, so a price-to-earnings ratio has no meaning." if lost
-               else "Its earnings over the last four quarters are close to zero, so a P/E says little.")
-        st = _step(5, status="absent", absent=f"Ivy can't show a P/E for {name}. {why}", idea="pe",
+        why = ("It lost money over the last four quarters, so there is no profit to set the price against." if lost
+               else "Its earnings over the last four quarters are close to zero, so the figure would say little.")
+        st = _step(5, status="absent", absent=f"Ivy can't show what investors pay for each $1 of {name}'s profit. {why}", idea="pe",
                    gap="it lost money over the last four quarters" if lost else "its earnings are close to zero")
         return st
     if status != "ok" or snap.get("pe") is None:
@@ -608,8 +644,10 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
         return _absent(5, name, why, "its latest earnings are not yet in its filings", "pe")
     pe = float(snap["pe"])
     as_of = f"Close {fmt_date(snap['as_of_date'])}, earnings over the last four quarters, {through(periods, snap['window_end'])}"
-    numbers = [_num("P/E", num(pe), as_of)]
-    sentences = [f"{name}'s stock costs {num(pe)} times its earnings over the last four quarters."]
+    numbers = [_num("Paid for each $1 of profit", per_dollar(pe), as_of)]
+    # "P/E" is named once, here (Sam, 2026-11-04); every other line says it in dollars
+    sentences = [f"Investors are paying about {per_dollar(pe)} for every $1 of {name}'s profit over the last four quarters. "
+                 f"That figure is the price-to-earnings ratio, or P/E."]
     med_stored = float(snap["hist_median"]) if snap.get("hist_median") is not None else None
     chart = check = None
     vals = [v for _, v in series]
@@ -618,8 +656,8 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
     if series_ok:
         lo, hi = min(vals), max(vals)
         span = f"{fmt_date(series[0][0])} to {fmt_date(series[-1][0])}"
-        numbers.append(_num("Its five-year range", f"{num(lo)} to {num(hi)}", span))
-        sentences.append(f"Over five years its P/E ran from {num(lo)} to {num(hi)}, with a median of {num(med_stored)}.")
+        numbers.append(_num("Its five-year range", f"{per_dollar(lo)} to {per_dollar(hi)}", span))
+        sentences.append(f"Over five years investors paid between {per_dollar(lo)} and {per_dollar(hi)} for each $1, and {per_dollar(med_stored)} at the median.")
         drawn = runs(series)[-1]
         pts = _points(drawn)
         sampled = runs([(date.fromisoformat(d), v) for d, v in pts])[-1]       # every fifth session can widen a short break past the limit
@@ -635,22 +673,23 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
         if chart_gaps(chart):
             chart = None                                   # never: runs() leaves none; a chart with a break is not shown
     elif med_stored is not None:
-        sentences.append(f"Its median P/E over the past five years is {num(med_stored)}.")
+        sentences.append(f"Over the past five years investors paid {per_dollar(med_stored)} for each $1 at the median.")
     if sector_median is not None:
-        sentences.append(f"The median {sector} stock in the S&P 500 is at {num(sector_median)}.")
-    summary = f"Investors pay {num(pe)} times its last four quarters' earnings."
+        sentences.append(f"For the median {sector} stock in the S&P 500, they pay {per_dollar(sector_median)}.")
+    summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters."
     if med_stored:
         check = C.pe_check(name, pe, med_stored, year)
         rel = {"More than usual": "above", "Less than usual": "below", "About the same as usual": "about level with"}[C.pe_word(pe, med_stored)]
-        summary = f"Investors pay {num(pe)} times its last four quarters' earnings, {rel} its five-year median of {num(med_stored)}."
+        summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters, {rel} its five-year median of {per_dollar(med_stored)}."
     deeper = [_num("Earnings per share, last four quarters", dollars(float(snap["trailing_eps"])), f"Four quarters {through(periods, snap['window_end'])}")]
     if med_stored is not None:
-        deeper.append(_num("Five-year median P/E", num(med_stored), f"{snap['hist_sessions']:,} trading days, {fmt_date(snap['hist_first'])} to {fmt_date(snap['hist_last'])}"))
+        deeper.append(_num("Five-year median, paid for each $1 of profit", per_dollar(med_stored), f"{snap['hist_sessions']:,} trading days, {fmt_date(snap['hist_first'])} to {fmt_date(snap['hist_last'])}"))
     if sec_row and not sec_row.get("shown"):
-        deeper.append(_num(f"Median {sector} P/E", "Not shown", f"Only {sec_row['fresh']} of {sec_row['active']} stocks in the sector have a current P/E"))
-    fact = {"concept": "pe", "measure": "pe", "lead": f"{name}'s P/E is {num(pe)}", "short": f"{name}'s is {num(pe)}", "tail": f"at the {fmt_date(snap['as_of_date'])} close"}
+        deeper.append(_num(f"Median {sector} stock, paid for each $1 of profit", "Not shown", f"Only {sec_row['fresh']} of {sec_row['active']} stocks in the sector have a current figure"))
+    fact = {"concept": "pe", "measure": "pe", "lead": f"Investors pay about {per_dollar(pe)} for every $1 of {name}'s profit",
+            "short": f"For {name}'s, about {per_dollar(pe)}", "tail": f"at the {fmt_date(snap['as_of_date'])} close"}
     return _step(5, status="ok" if series_ok else "partial", numbers=numbers, sentences=sentences, idea="pe", chart=chart, check=check, deeper=deeper, summary=summary,
-                 fact=fact, point=f"Its P/E of {num(pe)}", cell={"pe": {"value": num(pe), "as_of": as_of, "end": str(snap["as_of_date"])}})
+                 fact=fact, point=f"The {per_dollar(pe)} investors pay for each $1 of its profit", cell={"pe": {"value": per_dollar(pe), "as_of": as_of, "end": str(snap["as_of_date"])}})
 
 
 def step_valuation_reit(name: str, ffo: dict | None, close: dict | None, periods: dict | None = None) -> dict:
@@ -808,7 +847,7 @@ def featured_risk(risk_sentences: list[dict], headings: dict[int, str], steps: l
     return None
 
 
-def risk_check(name: str, risk_sentences: list[dict], headings: dict[int, str], steps: list[dict], noun: str = "sales") -> dict | None:
+def risk_check(name: str, risk_sentences: list[dict], headings: dict[int, str], steps: list[dict], noun: str = "revenue") -> dict | None:
     """Pure: step 7's check. The featured risk (featured_risk) asks which result it would hit most directly; the options are this
     walkthrough's business results (walkthrough_checks.RISK_OPTION_STEPS), all three shown. Otherwise no check."""
     f = featured_risk(risk_sentences, headings, steps)
@@ -831,7 +870,7 @@ def lead_lower(sentence: str, name: str) -> str:
 
 
 def with_risk_story(step: dict, name: str, risk_sentences: list[dict], headings: dict[int, str] | None = None, steps: list[dict] | None = None,
-                    noun: str = "sales") -> dict:
+                    noun: str = "revenue") -> dict:
     """Pure: step 7 with the verified risk sentences ([{n, sentence}]) and its check."""
     if not risk_sentences:
         step["sentences"].append("Ivy's plain summaries of these risks are not checked yet, so read them in the filing.")
@@ -858,7 +897,7 @@ QUARTER_IDEA = {2: "growth", 3: "margins", 5: "pe"}
 
 
 def one_quarter(steps: list[dict], ends: dict[int, date | None], latest: date | None, periods: dict | None, name: str,
-                noun: str = "sales", reit: bool = False) -> list[int]:
+                noun: str = "revenue", reit: bool = False) -> list[int]:
     """One quarter across the steps (Sam's review of MU, 2026-11-02: step 2 showed fiscal Q3 2026 beside step 3 through fiscal Q4).
 
     The walkthrough's quarter is the latest one the company has filed: `latest`, the newest period end among its stored SEC quarters
@@ -897,7 +936,7 @@ def summary(name: str, steps: list[dict]) -> dict:
     return {"known": known, "uncertain": uncertain, "concepts": concepts, "closing": CLOSING_LINE}
 
 
-def compare_row(name: str, symbol: str, steps: list[dict], *, reit: bool, noun: str = "sales", ffo_growth: dict | None = None,
+def compare_row(name: str, symbol: str, steps: list[dict], *, reit: bool, noun: str = "revenue", ffo_growth: dict | None = None,
                 dividend: dict | None = None) -> dict:
     """Compare's cells for one stock, each the figure its own walkthrough shows, by measure: {key: {measure: {value, as_of, end}}}
     ({} where it shows none). compare_table sets two stocks side by side on a measure both have."""
@@ -918,10 +957,10 @@ def compare_row(name: str, symbol: str, steps: list[dict], *, reit: bool, noun: 
     return {"symbol": symbol, "name": name, "reit": reit, "noun": noun, "rows": rows}
 
 
-COMPARE_LABELS = {"sells": "Biggest line", "growth": "Sales growth", "ffo_growth": "FFO per share growth", "keeps_now": "Keeps per $1 now",
+COMPARE_LABELS = {"sells": "Biggest line", "growth": "Revenue growth", "ffo_growth": "FFO per share growth", "keeps_now": "Keeps per $1 now",
                   "keeps_then": "Keeps per $1 three years earlier", "stock_1y": "Stock over one year", "dividend_yield": "Dividend yield",
                   "next_report": "Next report"}
-VALUATION_LABEL = {"pe": "P/E", "p_ffo": "Price to FFO"}
+VALUATION_LABEL = {"pe": "Paid for each $1 of profit", "p_ffo": "Price to FFO"}
 # the measures a row may use, most preferred first: both stocks are shown on the first one both have
 COMPARE_MEASURES = {"sells": ("share",), "growth": ("ttm", "quarter"), "keeps_now": ("gross", "operating", "net"), "stock_1y": ("close",),
                     "valuation": ("pe", "p_ffo"), "ffo_growth": ("quarter",), "dividend_yield": ("close",), "next_report": ("date",)}

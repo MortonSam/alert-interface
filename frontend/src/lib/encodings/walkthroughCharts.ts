@@ -1,4 +1,5 @@
-// The walkthrough's two charts (step 4, the stock against the market; step 5, the P/E against its own five years). Each chart
+// The walkthrough's two charts (step 4, the stock against the market; step 5, what investors pay for each $1 of profit against its
+// own five years, in dollars, Sam 2026-11-04). Each chart
 // and its legend read these configs; a label with {name} or {sector} takes the stock's own name or sector from the API.
 import type { LegendItem } from "./types";
 
@@ -10,7 +11,7 @@ export const PRICE_VS_MARKET_ENCODING = {
 } as const;
 
 export const PE_RANGE_ENCODING = {
-  pe:           { label: "Its P/E each trading day",  color: "hsl(var(--primary))",    dash: "",    width: 2,   opacity: 1 },
+  pe:           { label: "Paid for each $1 of profit, each trading day", color: "hsl(var(--primary))", dash: "", width: 2, opacity: 1 },
   median:       { label: "Its five-year median",      color: "hsl(var(--foreground))", dash: "6 4", width: 1.5, opacity: 0.75 },
   sectorMedian: { label: "Median {sector} stock now", color: "hsl(var(--cool))",       dash: "2 3", width: 1.5, opacity: 0.9 },
   today:        { label: "Today",                     color: "hsl(var(--primary))",    dash: "",    width: 0,   opacity: 1, dot: true },

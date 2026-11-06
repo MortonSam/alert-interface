@@ -387,7 +387,7 @@ def wanted(payload: dict, growth_row: dict | None, margin: dict | None, periods:
     from app.services.fiscal_periods import quarter
     from app.services.margins import MEASURE_LABEL
     by_key = {s["key"]: s for s in payload["steps"]}
-    noun = payload.get("noun") or "sales"
+    noun = payload.get("noun") or "revenue"
     out: dict = {}
     if growth_row and by_key["growth"]["status"] != "absent" and growth_row.get("growth_pct") is not None:
         g = float(growth_row["growth_pct"])
@@ -402,7 +402,10 @@ def wanted(payload: dict, growth_row: dict | None, margin: dict | None, periods:
 
 
 def fingerprint(want: dict, sources: dict) -> str:
+    """The growth quote's noun is the walkthrough's word, not the filing's: it is hashed as "sales" whatever the walkthrough calls it
+    (every company "revenue" since 2026-11-04), so the wording change re-picks no quote the company's filings still hold."""
     from app.services import walkthrough as W
+    want = {**want, "growth": {**want["growth"], "noun": "sales"}} if "growth" in want else want
     return W.fingerprint({"v": QUOTES_VERSION, "want": want, "acc": {k: (sources.get(k) or {}).get("accession") for k in SOURCE_KEYS.values()}})
 
 

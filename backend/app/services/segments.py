@@ -19,7 +19,9 @@ from io import BytesIO
 
 from app.services.growth import revenue_tags
 
-SEGMENTS_VERSION = 2                 # 2 (2026-10-19): names as the 10-K's text writes them (text_name)
+SEGMENTS_VERSION = 3                 # 2 (2026-10-19): names as the 10-K's text writes them (text_name)
+                                     # 3 (2026-11-06): the other axis's split too, when it also adds up (`other`), so step 1 can follow the
+                                     #   description's breakdown and say which one its figures use
 SUM_TOLERANCE = 0.01                 # members must add up to the total within 1%
 FY_DAYS = (350, 380)                 # the fiscal year's duration
 MIN_SEGMENTS = 2                     # one member is the company itself, not a split
@@ -244,10 +246,11 @@ def partition(members: dict[str, float], target: float) -> list[str] | None:
 def split_revenue(parsed: dict, sector: str | None, labels: dict[str, str] | None = None) -> dict:
     """Pure: the trustworthy split, or the reason there is none.
 
-    Returns {ok: True, axis, axis_label, tag, start, end, total, segments: [{member, label, value, share}], adjustments, external} or
-    {ok: False, reason}. For each revenue tag in the sector's order that carries one fiscal-year total, each axis in AXES is tried,
-    first on sales to outside customers (when the filing tags them) and then on segment totals; the first whose members (with the
-    corporate and elimination rows, when the axis is business segments) add up to the total wins (partition)."""
+    Returns {ok: True, axis, axis_label, tag, start, end, total, segments: [{member, label, value, share}], adjustments, external,
+    other} or {ok: False, reason}. For each revenue tag in the sector's order that carries one fiscal-year total, each axis in AXES is
+    tried, first on sales to outside customers (when the filing tags them) and then on segment totals; the first whose members (with
+    the corporate and elimination rows, when the axis is business segments) add up to the total wins (partition). `other` is the first
+    readable split on the other axis when that one adds up too ({axis, axis_label, tag, total, segments}), else None."""
     labels = labels or {}
     fy = fiscal_year(parsed)
     if not fy:
@@ -258,6 +261,7 @@ def split_revenue(parsed: dict, sector: str | None, labels: dict[str, str] | Non
         by_tag.setdefault(tag, []).append((cid, val))
     tried: list[str] = []
     fallback: dict | None = None
+    found: dict[str, dict] = {}                           # the first readable split on each axis
     for tag in revenue_tags(sector):
         rows = [(tuple(sorted(ctx[cid][2].items())), val) for cid, val in by_tag.get(tag) or [] if ctx.get(cid) and (ctx[cid][0], ctx[cid][1]) == fy]
         totals = {val for dims, val in rows if not dims}
@@ -287,7 +291,10 @@ def split_revenue(parsed: dict, sector: str | None, labels: dict[str, str] | Non
                 if any(ACRONYM.match(g["label"]) for g in segs):
                     fallback = fallback or out                 # readable on another axis? keep looking, else use this one
                     continue
-                return out
+                found.setdefault(axis, out)
+    if found:
+        first, *rest = found.values()                      # the first found, as before; the other axis beside it
+        return {**first, "other": ({k: rest[0][k] for k in ("axis", "axis_label", "tag", "total", "segments")} if rest else None)}
     if fallback:
         return fallback
     if tried:
@@ -348,6 +355,6 @@ async def read_segments(edgar, ciks: list[str], sector: str | None) -> dict:
     out = split_revenue(parse_instance(x.content), sector, labels)
     if out.get("ok"):
         text = document_text(await edgar.fetch_filing_html(cik, k["accession"], k["primary_document"]))
-        for g in out["segments"]:
+        for g in out["segments"] + ((out.get("other") or {}).get("segments") or []):
             g["label"] = text_name(g["label"], text)
     return {**out, **receipt}
