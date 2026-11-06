@@ -510,10 +510,10 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
     from app.services.walkthrough_data import QUARTER_SESSIONS, STALE_BAR_DAYS, YEAR_SESSIONS, aligned, change
     cal = [d for d, _ in spy[-YEAR_SESSIONS - 1:]]
     if not cal or (today - cal[-1]).days > STALE_BAR_DAYS:
-        return _absent(4, name, "The S&P 500's stored prices are not up to date, so Ivy can't compare against it.", "the S&P 500's prices are not up to date", "market_vs_company")
+        return _absent(4, name, "The S&P 500's prices on file are not up to date, so Ivy can't compare against it.", "the S&P 500's prices are not up to date", "market_vs_company")
     a = aligned(stock, cal)
     if a is None or len(a) < len(cal):
-        return _absent(4, name, "Its stored prices do not cover the past year up to the latest close.", "its prices don't cover the past year", "market_vs_company")
+        return _absent(4, name, "Its prices on file do not cover the past year up to the latest close.", "its prices don't cover the past year", "market_vs_company")
     s_series = [(d, a[d]) for d in cal]
     c1, c3 = change(s_series, YEAR_SESSIONS), change(s_series, QUARTER_SESSIONS)
     p1, p3 = change(spy, YEAR_SESSIONS), change(spy, QUARTER_SESSIONS)

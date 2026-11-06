@@ -51,11 +51,12 @@ def served_steps(payload: dict, growth_on: bool, pe_on: bool) -> int:
 def choose_featured(cands: list[dict], today: date, history: list[dict]) -> dict | None:
     """Pure: FEATURED_RULE over [{symbol, market_cap, full (all seven steps served), next_date, confirmed}]; history is
     [{symbol, date}] of past picks."""
+    from app.services.briefing import fmt_date
     full = [c for c in cands if c["full"] and c.get("market_cap")]
     soon = [c for c in full if c.get("confirmed") and c.get("next_date") and today <= c["next_date"] <= today + timedelta(days=FEATURED_REPORT_DAYS)]
     if soon:
         c = max(soon, key=lambda c: c["market_cap"])
-        return {"symbol": c["symbol"], "why": f"reports on {c['next_date'].isoformat()}, a date the company has confirmed"}
+        return {"symbol": c["symbol"], "why": f"reports on {fmt_date(c['next_date'])}, a date the company has confirmed"}
     recent = {h["symbol"] for h in history if date.fromisoformat(str(h["date"])[:10]) > today - timedelta(days=FEATURED_REPEAT_DAYS)}
     rest = [c for c in full if c["symbol"] not in recent]
     if rest:

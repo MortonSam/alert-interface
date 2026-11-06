@@ -190,7 +190,7 @@ async def _check_example(db: AsyncSession) -> dict | None:
             found = None
             m = re.search(r"/data/(\d+)/(\d{18})/([^/?#]+)$", filing.get("url") or "")
             if m:
-                acc = f"{m.group(2)[:10]}-{m.group(2)[10:12]}-{m.group(2)[12:]}"
+                acc = "-".join((m.group(2)[:10], m.group(2)[10:12], m.group(2)[12:]))      # an accession number, not a date
                 try:
                     body = _plain(await edgar.fetch_filing_html(m.group(1), acc, m.group(3)))
                 except Exception:
