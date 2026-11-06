@@ -41,6 +41,8 @@ FEATURES = {
     "generate_answer": "Ask Ivy and Ivy's Discover sentences",
     "classify_question": "Ask Ivy's question classifier",
     "key_check": "nightly key check",
+    "generate_walkthrough": "Ivy's walkthrough sentences",
+    "verify_walkthrough": "verification (Ivy's walkthrough)",
 }
 
 

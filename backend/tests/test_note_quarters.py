@@ -137,4 +137,4 @@ def test_the_nightly_budget_under_the_15_dollar_cap_and_the_month_warnings():
     assert A.month_warnings(149.99, date(2026, 11, 20)) == []
     assert A.month_warnings(150.0, date(2026, 11, 20)) == ["AI spend in November is $150.00, past the $150 line"]
     assert A.month_warnings(212.5, date(2026, 11, 28)) == ["AI spend in November is $212.50, past the $200 line"]
-    assert not A.walkthroughs_live()                                            # main has no walkthrough step yet
+    assert A.walkthroughs_live()                                                # this branch runs the walkthrough nightly: notes $6, walkthroughs $5, visitors $4

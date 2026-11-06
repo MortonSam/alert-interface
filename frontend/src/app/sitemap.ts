@@ -3,7 +3,7 @@ import type { MetadataRoute } from "next";
 // The public pages and every active ticker page (read from the API at request time; a failed read lists the public pages alone).
 // Per-visitor pages (My Trades, Watchlists) are left out.
 export const SITE = "https://alertinterface.com";
-export const PUBLIC_PATHS = ["/", "/discover", "/build", "/ivy", "/ivy/desk", "/ivy/trades", "/disclosures"];
+export const PUBLIC_PATHS = ["/", "/discover", "/build", "/ivy", "/disclosures"];
 export const revalidate = 3600;
 
 export async function activeSymbols(apiBase: string | undefined, fetcher: typeof fetch = fetch): Promise<string[]> {

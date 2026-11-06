@@ -17,6 +17,7 @@ from __future__ import annotations
 from app.services.redact import redact
 
 import asyncio
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -4023,7 +4024,121 @@ async def check_report_move_outlier(session) -> CheckResult:
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
+WALKTHROUGH_MIN_COVERAGE = 0.95      # stored walkthroughs per active ticker
+WALKTHROUGH_MAX_AGE_HOURS = 36       # a nightly missed shows here
+
+
+async def check_walkthrough_coverage(session) -> CheckResult:
+    """WARN when fewer than WALKTHROUGH_MIN_COVERAGE of active tickers have a stored walkthrough; the details count, per step, how many
+    stocks show it (services/walkthrough: ok, partial or absent)."""
+    active = (await session.execute(text("SELECT count(*) FROM tickers WHERE is_active"))).scalar() or 0
+    rows = (await session.execute(text("SELECT payload FROM ivy_walkthroughs w JOIN tickers t ON t.symbol = w.symbol AND t.is_active"))).scalars().all()
+    per: dict[str, dict[str, int]] = {}
+    for p in rows:
+        for st in p.get("steps", []):
+            per.setdefault(st["key"], {"ok": 0, "partial": 0, "absent": 0})[st["status"]] += 1
+    details = [f"{k}: {v['ok']} ok, {v['partial']} partial, {v['absent']} absent" for k, v in per.items()]
+    if active and len(rows) < WALKTHROUGH_MIN_COVERAGE * active:
+        return CheckResult("walkthrough_coverage", WARN, f"{len(rows)} of {active} active tickers have a walkthrough ({WALKTHROUGH_MIN_COVERAGE:.0%} expected)", details)
+    return CheckResult("walkthrough_coverage", PASS, f"{len(rows)} of {active} active tickers have a walkthrough", details)
+
+
+async def check_walkthrough_chart_gaps(session) -> CheckResult:
+    """ERROR when a stored walkthrough's chart has a break in a line (services/walkthrough.chart_gaps: two points more than
+    CHART_GAP_DAYS apart). The build draws a P/E chart's latest unbroken run only, so none should (Sam, 2026-10-29, NVDA)."""
+    from app.services.walkthrough import chart_gaps
+    rows = (await session.execute(text("SELECT symbol, payload FROM ivy_walkthroughs ORDER BY symbol"))).all()
+    bad = [f"{r.symbol}: {g}" for r in rows for st in (r.payload or {}).get("steps", []) for g in chart_gaps(st.get("chart"))]
+    if bad:
+        return CheckResult("walkthrough_chart_gaps", ERROR, f"{len(bad)} break(s) in walkthrough charts", bad[:40])
+    return CheckResult("walkthrough_chart_gaps", PASS, f"No break in any of {len(rows)} stored walkthroughs' charts")
+
+
+async def check_walkthrough_staleness(session) -> CheckResult:
+    """WARN when a stored walkthrough was built more than WALKTHROUGH_MAX_AGE_HOURS ago or under another WALKTHROUGH_VERSION (the
+    nightly rebuilds every stock, so either means the step did not run or failed for those stocks)."""
+    from app.services.walkthrough import WALKTHROUGH_VERSION
+    rows = (await session.execute(text("""SELECT symbol, version, built_at FROM ivy_walkthroughs
+        WHERE version <> :v OR built_at < now() - make_interval(hours => :h) ORDER BY symbol"""), {"v": WALKTHROUGH_VERSION, "h": WALKTHROUGH_MAX_AGE_HOURS})).all()
+    if rows:
+        return CheckResult("walkthrough_staleness", WARN, f"{len(rows)} walkthrough(s) stale or built under another version",
+                           [f"{s}: version {v}, built {b:%Y-%m-%d %H:%M}Z" for s, v, b in rows[:40]])
+    return CheckResult("walkthrough_staleness", PASS, f"Every walkthrough is version {WALKTHROUGH_VERSION} and built within {WALKTHROUGH_MAX_AGE_HOURS} hours")
+
+
+DIVIDEND_YIELD_MAX_PCT = 20.0
+WALK_HYPHEN_MINUS = re.compile(r"(?<![\w-])-\d")                          # "-9.0%" where a true minus belongs
+WALK_NO_SEPARATOR = re.compile(r"(?<![\d,.])\d{4,}\.\d|\$\d{4,}")           # "1061.5" or "$1234" (years and dates have no decimals)
+
+
+def visible_text(payload: dict) -> list[str]:
+    """Pure: every string a visitor reads in a stored walkthrough (labels, figures, sentences, checks, the summary)."""
+    out: list[str] = []
+    for st in payload.get("steps", []):
+        out += [st.get("absent") or "", *st.get("sentences", []), st.get("summary") or "", st.get("gap") or ""]
+        for n in st.get("numbers", []) + st.get("deeper", []):
+            out += [n["label"], n["value"], n["as_of"]]
+        if st.get("check"):
+            out += [st["check"]["question"], st["check"]["why"], *st["check"]["options"]]
+    for by_measure in ((payload.get("compare") or {}).get("rows") or {}).values():
+        for c in (by_measure or {}).values():
+            out += [c.get("value") or "", c.get("as_of") or ""]
+    return [t for t in out if t]
+
+
+async def check_walkthrough_claims(session) -> CheckResult:
+    """ERROR when a stored walkthrough shows a model sentence without a "supported" verdict or with a digit, a Compare sentence
+    without one, or a figure outside its band: segment shares 0-100% adding to no more than 101%, margins inside
+    services/margins.MARGIN_BAND, a P/E or price to FFO above 0 and at most 100, a dividend yield of at most DIVIDEND_YIELD_MAX_PCT, and
+    no visible text with a hyphen for a minus sign or a four-digit figure without its thousands separator."""
+    import re
+    from app.services.margins import MARGIN_BAND
+    bad: list[str] = []
+    rows = (await session.execute(text("SELECT symbol, payload, story, sources FROM ivy_walkthroughs ORDER BY symbol"))).all()
+    for sym, payload, story, sources in rows:
+        verdicts = (story or {}).get("verdicts") or {}
+        for i, sentence in ((story or {}).get("sentences") or {}).items():
+            if (verdicts.get(i) or {}).get("status") != "supported":
+                bad.append(f"{sym} {i}: shown without a supported verdict")
+            if re.search(r"\d", sentence):
+                bad.append(f"{sym} {i}: a digit in a model sentence")
+        seg = (sources or {}).get("segments") or {}
+        if seg.get("ok"):
+            shares = [g["share"] for g in seg.get("segments", [])]
+            if any(not 0 <= x <= 100 for x in shares) or sum(shares) > 101:
+                bad.append(f"{sym}: segment shares out of band {shares}")
+        m = (sources or {}).get("margins") or {}
+        if m.get("ok"):
+            lo, hi = MARGIN_BAND[m["measure"]]
+            for k in ("now", "then"):
+                if m.get(k) is not None and not lo <= m[k] <= hi:
+                    bad.append(f"{sym}: {m['measure']} margin {k} {m[k]} outside {lo} to {hi}")
+        for st in (payload or {}).get("steps", []):
+            if st["key"] == "valuation" and st["status"] != "absent":
+                v = st["numbers"][0]["value"] if st["numbers"] else None
+                if v is None or not 0 < float(v.replace(",", "").replace("\u2212", "-")) <= 100:
+                    bad.append(f"{sym}: {st['numbers'][0]['label'] if st['numbers'] else 'P/E'} {v} outside 0 to 100")
+        dy = (((payload or {}).get("compare") or {}).get("rows", {}).get("dividend_yield") or {}).get("close")
+        if dy and not 0 < dy.get("pct", 0) <= DIVIDEND_YIELD_MAX_PCT:
+            bad.append(f"{sym}: dividend yield {dy.get('value')} outside 0 to {DIVIDEND_YIELD_MAX_PCT}%")
+        for t in visible_text(payload or {}):
+            if WALK_HYPHEN_MINUS.search(t) or WALK_NO_SEPARATOR.search(t):
+                bad.append(f"{sym}: unformatted figure in {t[:80]!r}")
+                break
+    for sym, other, sentence, verdicts in (await session.execute(text("SELECT symbol, other, sentence, verdicts FROM ivy_compare_stories WHERE sentence IS NOT NULL"))).all():
+        if not any((v or {}).get("status") == "supported" and v.get("draft") == sentence for v in (verdicts or [])):
+            bad.append(f"{sym} vs {other}: Compare sentence without a supported verdict")
+    if bad:
+        return CheckResult("walkthrough_claims", ERROR, f"{len(bad)} walkthrough claim(s) unverified or out of band", bad[:40])
+    return CheckResult("walkthrough_claims", PASS, f"{len(rows)} walkthrough(s): every model sentence verified, every figure in its band")
+
+
 CHECKS = [
+    # Ivy's walkthrough
+    check_walkthrough_coverage,
+    check_walkthrough_chart_gaps,
+    check_walkthrough_staleness,
+    check_walkthrough_claims,
     # Tickers
     check_ticker_missing_metadata,
     check_ticker_market_cap,

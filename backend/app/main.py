@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.database import AsyncSessionLocal
-from app.routers import admin, discover, discover_news, events, growth, historical_reactions, research_notes, system, tickers, watchlists, thesis, ivy_desk, ivy_verdicts
+from app.routers import admin, discover, discover_news, events, growth, historical_reactions, research_notes, system, tickers, watchlists, thesis, ivy_desk, ivy_verdicts, walkthrough
 from app.services.system_metadata_service import get_value
 from app.startup import lifespan, REFRESH_SENTINEL_MAX_MINUTES
 
@@ -71,6 +71,7 @@ app.include_router(system.router, prefix="/api/v1")
 app.include_router(thesis.router, prefix="/api/v1")
 app.include_router(ivy_desk.router, prefix="/api/v1")
 app.include_router(ivy_verdicts.router, prefix="/api/v1")
+app.include_router(walkthrough.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 

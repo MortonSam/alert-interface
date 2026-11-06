@@ -1,7 +1,7 @@
 """Trailing P/E from filings: the release parser on Micron's Sep 30, 2026 exhibit text, quarterly facts with the derived
 fourth quarter, the freshness rule (the window must hold the latest reported quarter), the history summary with its
 exclusions, the release-against-XBRL flag, and the checker's quarter match."""
-from datetime import date
+from datetime import date, timedelta
 
 from app.scripts.check_release_eps import derived_only_match, matching_quarter
 from app.scripts.seed_release_eps import exhibit_text
@@ -230,4 +230,25 @@ def test_quarters_and_closes_are_restated_across_recorded_splits():
     assert V.rebase_closes([(date(2026, 4, 1), 5000.0), (date(2026, 4, 7), 200.0)], splits) == [(date(2026, 4, 1), 200.0), (date(2026, 4, 7), 200.0)]
     assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), 0.2)]) == (0.2, ["1:5 reverse split of Feb 1, 2026"])     # a reverse split multiplies
     assert V.split_factor(date(2026, 1, 1), [(date(2026, 2, 1), None)]) == (1.0, [])                                      # unreadable ratio: left alone
-    assert V.PE_COMPUTATION_VERSION == 2
+    assert V.PE_COMPUTATION_VERSION == 3
+
+
+def test_a_quarter_is_known_from_its_first_filing_so_the_pe_history_has_no_hole():
+    """NVDA (2026-10-29): each quarter is restated in the next year's 10-Q (and across the 10:1 split of 2024-06-10); keeping the
+    latest filing's date made every quarter unknown to the history for a year, a 614-day hole in the P/E series (2023-05-24 to
+    2025-01-27). The value is the latest (restated) one, the date the first."""
+    splits = [(date(2024, 6, 10), 10.0)]
+    rows = []
+    for i, (start, end, first, later, val) in enumerate([
+            ("2023-01-30", "2023-04-30", "2023-05-26", "2024-05-29", 0.82), ("2023-05-01", "2023-07-30", "2023-08-28", "2024-08-28", 2.48),
+            ("2023-07-31", "2023-10-29", "2023-11-21", "2024-11-20", 3.71), ("2023-10-30", "2024-01-28", "2024-02-21", "2025-02-26", 4.93),
+            ("2024-01-29", "2024-04-28", "2024-05-29", "2025-05-28", 5.98)]):
+        rows.append({"start": start, "end": end, "filed": first, "val": val, "form": "10-Q"})              # first filed, old basis
+        rows.append({"start": start, "end": end, "filed": later, "val": val if later < "2024-06-10" else round(val / 10, 3), "form": "10-Q"})  # repeated a year later
+    qs = V.eps_quarters({"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": rows}}}}}, splits)
+    assert [q["filed"].isoformat() for q in qs] == ["2023-05-26", "2023-08-28", "2023-11-21", "2024-02-21", "2024-05-29"]
+    assert [q["eps"] for q in qs] == [0.082, 0.248, 0.371, 0.493, 0.598]                    # the restated values
+    bars = [(date(2024, 3, 1) + timedelta(days=d), 80.0) for d in range(0, 120)]
+    series = V.pe_series_clean(bars, qs, [])
+    assert series and series[0][0] == date(2024, 3, 1)                                      # known since Feb 21, 2024: no hole
+    assert all((b[0] - a[0]).days <= 1 for a, b in zip(series, series[1:]))

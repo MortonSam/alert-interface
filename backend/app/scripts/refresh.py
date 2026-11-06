@@ -97,7 +97,7 @@ STEPS: list[tuple[str, list[str]]] = [
     # RV ranks first: snapshot_iv reads realized vol from the rv_snapshots row written here.
     ("IV + RV snapshot (snapshot_iv)",  ["python", "-m", "app.scripts.snapshot_iv"]),
     ("Build earnings features",         ["python", "-m", "app.scripts.build_features"]),
-    ("Auto-pick",                      ["python", "-m", "app.scripts.auto_pick"]),
+    # Auto-pick stopped (Sam, 2026-11-03): Ivy picks nothing; its stored picks and worksheets stay (app.scripts.auto_pick is kept)
     ("Shadow eval",                    ["python", "-m", "app.scripts.shadow_eval"]),
     ("Close expired alert picks",      ["python", "-m", "app.scripts.close_alert_picks"]),
     # Scheduled at 03:05 America/New_York by the script itself (it waits when reached early); shadow only, no reader switches.
@@ -116,6 +116,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Material filings (8-K)",         ["python", "-m", "app.scripts.scan_material_filings"]),
     ("Research notes (nightly)",       ["python", "-m", "app.scripts.generate_notes"]),
     ("Research note check",            ["python", "-m", "app.scripts.note_smoke", "--rotate=3"]),
+    # after the P/E, the reactions, the chains and the calendar it reads: Ivy's walkthrough, rule-built steps for every stock and
+    # model sentences only where a stock's filing facts changed (services/walkthrough_story's nightly cap)
+    ("Ivy walkthroughs",                ["python", "-m", "app.scripts.build_walkthroughs", "--write"]),
     # The warm fills the options-read cache for tonight's chain date; validate's options_read_coverage judges
     # that cache, so validate runs last (before, every chain-roll day reported 0/512 and then the warm filled it).
     ("Warm options reads",               ["python", "-m", "app.scripts.warm_options_reads"]),
@@ -129,6 +132,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Research notes (nightly)": 3600,         # 170 notes, four at a time, about a minute each
     "Refresh profiles (Finnhub)": 300,
     "Growth (XBRL and 8-K releases)": 3600,      # --due; the first night reads every active ticker's facts and releases (about 40 minutes)
+    "Ivy walkthroughs": 2400,                    # the first night reads every 10-K (about 8 SEC requests a stock); later nights only new ones
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years
     "Refresh earnings calendar (Finnhub)": 1200,  # Finnhub once, Yahoo per ticker (420s budget), announcements (240s budget), EDGAR 2.02 checks
@@ -142,7 +146,6 @@ STEP_TIMEOUTS: dict[str, int] = {
     "FOMC reactions": 900,
     "Analyst actions": 1200,
     "Build earnings features": 1200,
-    "Auto-pick": 600,
     "Shadow eval": 600,
     "Options chains (Intrinio)": 3 * 3600 + 1800,   # may wait up to MAX_WAIT_SECONDS for 03:05 New York, then ~2 requests per ticker
     "Recompute reactions (Intrinio)": 900,          # the first production night recomputes every row; afterwards only new rows and corrected windows

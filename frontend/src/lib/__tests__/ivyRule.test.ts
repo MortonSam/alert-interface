@@ -98,7 +98,7 @@ function files(dir: string): string[] {
 describe("no page types Ivy's numbers by hand", () => {
   const COPY = [
     ...files(join(SRC, "app/ivy")), join(SRC, "app/page.tsx"), join(SRC, "app/disclosures/page.tsx"),
-    join(SRC, "components/IvyCopy.tsx"), join(SRC, "lib/ivyRule.ts"),
+    join(SRC, "lib/ivyPageCopy.ts"), join(SRC, "lib/ivyRule.ts"),
   ];
   const BANNED: [RegExp, string][] = [
     [/more than 10%|<= ?-10\b|≤ ?-?10%/, "momentum cutoff"],
@@ -135,13 +135,9 @@ describe("ledger copy follows the flag (audit item 10)", () => {
     expect(oneRuleParagraph(pub, BACKTEST)).toContain("the live record, kept since Sep 15, 2026. A small edge you can check");
   });
   it("no page types the public wording itself", () => {
-    const ivy = read("app/ivy/page.tsx");
-    expect(ivy).toContain("ledgerHeadline(ivy.rule)");
-    expect(ivy).toContain("ledgerLinkLabel(ivy.rule)");
-    expect(ivy).not.toMatch(/record you can check|Her full record/);
+    const ivy = read("app/ivy/page.tsx");                             // the one Ivy page speaks of no record at all (2026-11-02)
+    expect(ivy).not.toMatch(/ledger|record you can check|Her full record|backtest/i);
     const disc = read("app/disclosures/page.tsx");
-    expect(disc).toContain("<LedgerVisibilityClause />");
     expect(disc).not.toContain("published to every visitor identically");
-    expect(read("components/IvyCopy.tsx")).toContain("ledgerVisibilityClause(ivy.rule)");
   });
 });

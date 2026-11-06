@@ -20,6 +20,7 @@ import { useTapAway } from "@/lib/useTapAway";
 import { impliedBand, yearLabel, yearTicks } from "@/lib/chartAxis";
 import { useParams, useRouter, notFound } from "next/navigation";
 import { NoLongerTrades } from "@/components/ticker/NoLongerTrades";
+import WalkthroughEntry from "@/components/walkthrough/WalkthroughEntry";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
@@ -2107,6 +2108,7 @@ export default function TickerPage() {
         {/* ── RESEARCH ────────────────────────────────────────────────── */}
         <section id="research" className="border-t pt-16 pb-24 scroll-mt-28">
           <SectionKicker index={sectionIndex("research")} label="Research" />
+          <WalkthroughEntry symbol={ticker.symbol} />
 
           {noteStatus === "loading" && (
             <div className="animate-pulse space-y-3">

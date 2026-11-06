@@ -33,8 +33,8 @@ describe("no exception text reaches a visitor", () => {
     }
   });
 
-  it("Build, the desk and the trades page never render err.message", () => {
-    for (const page of ["app/build/page.tsx", "app/ivy/desk/page.tsx", "app/ivy/trades/page.tsx"]) {
+  it("Build never renders err.message", () => {
+    for (const page of ["app/build/page.tsx"]) {
       const src = read(page);
       expect(src, page).not.toMatch(/err(or)?\.message/);
       expect(src, page).not.toMatch(/err instanceof Error \? err\.message/);

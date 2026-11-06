@@ -75,7 +75,7 @@ describe("freshness wording", () => {
   });
 
   it("every page that shows a price list renders the shared string", () => {
-    for (const p of ["app/ticker-grid.tsx", "app/discover/page.tsx", "app/ivy/layout.tsx", "app/watchlist/page.tsx"]) {
+    for (const p of ["app/ticker-grid.tsx", "app/discover/page.tsx", "app/watchlist/page.tsx"]) {     // the one Ivy page shows no prices (2026-11-02)
       expect(readFileSync(join(SRC, p), "utf8"), p).toMatch(/freshnessLine\(|priceSourceLine\(/);
     }
   });

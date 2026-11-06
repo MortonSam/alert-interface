@@ -7,6 +7,7 @@ import { COUNTER_CSS } from "@/lib/siteCounters";
 import { fetchSiteStatsServer } from "@/lib/siteStats";
 import { IvyMark } from "@/components/IvyMark";
 import { BRAND } from "@/lib/brand";
+import LearnEntry from "@/components/walkthrough/LearnEntry";
 
 // The counters are rendered on the server and revalidated: a backend that is slow, restarting or erroring never costs the
 // page its first screen, because a failed revalidation keeps the last good render (lib/siteStats). Next needs this export as a
@@ -76,6 +77,7 @@ export default async function Home() {
                 >
                   Build a trade →
                 </Link>
+                <LearnEntry className="border border-border text-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:border-foreground/40 transition-colors" />
               </div>
             </div>
           </div>

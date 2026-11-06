@@ -27,3 +27,15 @@ export function explainSegments(text: string): Segment[] {
   if (last < text.length) out.push({ text: text.slice(last), key: null });
   return out;
 }
+
+/** Each text's segments, a glossary term explained only at its first mention across the texts (in the order given, the order they
+ *  read on screen): a later mention is plain text (Sam, 2026-10-29: one tooltip per term per walkthrough step). */
+export function explainOnce(texts: (string | null | undefined)[]): Segment[][] {
+  const seen = new Set<string>();
+  return texts.map((t) => (t ? explainSegments(t) : []).map((seg) => {
+    if (!seg.key) return seg;
+    if (seen.has(seg.key)) return { text: seg.text, key: null };
+    seen.add(seg.key);
+    return seg;
+  }));
+}

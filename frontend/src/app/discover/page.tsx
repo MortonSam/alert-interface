@@ -11,7 +11,6 @@ import NewsSections, { newsSectionsShown } from "@/components/NewsSections";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import {
   justReportedSentence,
-  latestPickSentence,
   reportingSoonSentence,
   sharedSessionLine,
   suggestionSentence,
@@ -28,7 +27,6 @@ import {
   type UnusuallyActiveResponse,
   NewsSectionsResponse,
   type BatchQuote,
-  type LatestPickItem,
   type HealthStatus,
 } from "@/lib/api";
 import { capture } from "@/lib/analytics";
@@ -95,7 +93,6 @@ export default function DiscoverPage() {
   const [suggestions, setSuggestions] = useState<SuggestionItem[] | null>(null);
   const [unusuallyActive, setUnusuallyActive] = useState<UnusuallyActiveItem[] | null>(null);
   const [tapeShared, setTapeShared] = useState<UnusuallyActiveResponse["shared_dominant_session"]>(null);
-  const [latestPick, setLatestPick] = useState<LatestPickItem | null | undefined>(undefined);
   const [news, setNews] = useState<NewsSectionsResponse | null>(null);   // behind DISCOVER_NEWS_ENABLED; the admin token sees it
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -120,14 +117,12 @@ export default function DiscoverPage() {
       JUST_REPORTED_ENABLED ? api.discover.justReported(5, LIMIT) : Promise.resolve({ items: [], total: 0 }),
       api.discover.suggestions(5),
       api.discover.unusuallyActive(LIMIT),
-      api.discover.latestPick().catch(() => ({ pick: null })),
-    ]).then(([rs, jr, sg, ua, lp]) => {
+    ]).then(([rs, jr, sg, ua]) => {
       setReportingSoon(rs);
       setJustReported(jr);
       setSuggestions(sg.items);
       setUnusuallyActive(ua.items);
       setTapeShared(ua.shared_dominant_session ?? null);
-      setLatestPick(lp.pick);
       setLoading(false);
       capture("discover_viewed");
 
@@ -138,7 +133,6 @@ export default function DiscoverPage() {
         ...sg.items.map((i) => i.symbol),
         ...ua.items.map((i) => i.symbol),
       ];
-      if (lp.pick) allSymbols.push(lp.pick.symbol);
       const unique = [...new Set(allSymbols)];
       if (unique.length > 0) {
         api.tickers
@@ -161,7 +155,7 @@ export default function DiscoverPage() {
     api.system.health().then(setHealth).catch(() => {});
   }, []);
 
-  // Sections are numbered as they render, so a hidden one (Just reported off, no ledger pick, no active names) never leaves a gap.
+  // Sections are numbered as they render, so a hidden one (Just reported off, no active names) never leaves a gap.
   let sectionN = 0;
   const nextIndex = () => String(++sectionN).padStart(2, "0");
   return (
@@ -217,21 +211,6 @@ export default function DiscoverPage() {
           const indexes = { movers: shown.movers ? nextIndex() : undefined, stories: shown.stories ? nextIndex() : undefined };
           return <NewsSections data={news} indexes={indexes} />;
         })()}
-
-        {/* ── 01 · Ivy's Pick ──────────────────────────── */}
-        {!loading && latestPick && (
-          <section className="border-t border-border py-10">
-            <SectionKicker index={nextIndex()} label="From the ledger" />
-            <DiscoverRows>
-              <DiscoverRow
-                symbol={latestPick.symbol}
-                price={quotes.get(latestPick.symbol)?.price != null ? fmtPrice(quotes.get(latestPick.symbol)!.price) : undefined}
-                priceAsOf={quoteAsOf(quotes.get(latestPick.symbol)?.timestamp, quotes.get(latestPick.symbol)?.quote_basis, quotes.get(latestPick.symbol)?.delay_minutes)}
-                sentence={latestPickSentence(latestPick)}
-              />
-            </DiscoverRows>
-          </section>
-        )}
 
         {/* ── 02 · Reporting soon ─────────────────────── */}
         {!fetchError && loading ? (
@@ -295,7 +274,7 @@ export default function DiscoverPage() {
           <section className="border-t border-border py-10">
             <SectionKicker index={nextIndex()} label="Suggestion score" />
             <h2 className="text-headline font-display font-bold text-foreground">Worth a look</h2>
-            <p className="text-sm text-muted-foreground mt-1 mb-6"><Explained text="Ranked by a simple score: earnings soon, a recent reaction, realized volatility. Not Ivy's rule; her picks are on the ledger." /></p>
+            <p className="text-sm text-muted-foreground mt-1 mb-6"><Explained text="Ranked by a simple score: earnings soon, a recent reaction, realized volatility." /></p>
 
             {suggestions && suggestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">

@@ -462,7 +462,10 @@ def parse_release_basic_eps(text: str, report_date: date | None = None) -> dict 
     return None
 
 
-PE_COMPUTATION_VERSION = 2       # 2 (2026-10-07): quarters and closes restated to the current share basis across recorded splits before any window or history
+PE_COMPUTATION_VERSION = 3       # 2 (2026-10-07): quarters and closes restated to the current share basis across recorded splits before any window or history
+                                 # 3 (2026-10-29): a quarter is known from its first filing (eps_quarters' filed), not the latest one that restated
+                                 #   it: NVDA's quarters, restated in the next year's filings (and across its 2024 split), were each unknown to the
+                                 #   five-year history for a year, a 614-day hole in its P/E series
 
 
 def split_factor(filed: date, splits: list[tuple[date, float | None]] | None) -> tuple[float, list[str]]:
@@ -479,13 +482,16 @@ def split_factor(filed: date, splits: list[tuple[date, float | None]] | None) ->
 def eps_quarters(facts: dict, splits: list[tuple[date, float | None]] | None = None) -> list[dict]:
     """Pure: quarterly GAAP diluted EPS from a companyfacts document, oldest first: the quarterly facts, plus the fourth
     quarter derived as the fiscal year's annual figure less the three quarters inside it. One value per period end, the
-    latest filed wins. Every fact is first restated to the current share basis across `splits` [(effective date, new-for-old
+    latest filed wins for the value. Every fact is first restated to the current share basis across `splits` [(effective date, new-for-old
     ratio)]: a fact filed before a split is divided by its ratio (BKNG's 10-K of Feb 2026, before the 25:1 split of Apr 6, 2026,
     carries $79.66 that is $3.19 today), so a derived quarter never subtracts restated quarters from an unrestated year.
+    `filed` is the period's first filing, when its figure was first public (the point-in-time rule of trailing_four), never the
+    later filing that restated it (a 10-Q repeats the year-earlier quarter; PE_COMPUTATION_VERSION 3).
     Each: {end, start, eps, filed, form, derived, source, diluted_shares, rebased?}."""
     series = (facts.get("facts", {}).get("us-gaap", {}).get("EarningsPerShareDiluted", {}).get("units", {}).get("USD/shares", []))
     quarters: dict[date, dict] = {}
     annual: list[dict] = []
+    first_filed: dict[tuple[date, bool], date] = {}         # (period end, annual?): its first filing
     for e in series:
         try:
             start, end, filed = date.fromisoformat(e["start"]), date.fromisoformat(e["end"]), date.fromisoformat(e["filed"])
@@ -499,17 +505,22 @@ def eps_quarters(facts: dict, splits: list[tuple[date, float | None]] | None = N
         if notes:
             row["rebased"] = "; ".join(notes)
         if QUARTER_DAYS[0] <= days <= QUARTER_DAYS[1]:
+            first_filed[(end, False)] = min(filed, first_filed.get((end, False), filed))
             if end not in quarters or filed >= quarters[end]["filed"]:
                 quarters[end] = row
         elif YEAR_DAYS[0] <= days <= YEAR_DAYS[1]:
+            first_filed[(end, True)] = min(filed, first_filed.get((end, True), filed))
             annual.append(row)
+    for q in quarters.values():
+        q["filed"] = first_filed[(q["end"], False)]
     for a in annual:
         if a["end"] in quarters:
             continue
         inside = [q for q in quarters.values() if a["start"] <= q["start"] and q["end"] < a["end"]]
         if len(inside) == 3:
+            known = max([first_filed[(a["end"], True)]] + [q["filed"] for q in inside])     # the year and its three quarters all public
             quarters[a["end"]] = {"end": a["end"], "start": max(q["end"] for q in inside) + timedelta(days=1), "eps": round(a["eps"] - sum(q["eps"] for q in inside), 4),
-                                  "filed": a["filed"], "form": a["form"], "derived": True, "source": "xbrl", **({"rebased": a["rebased"]} if a.get("rebased") else {})}
+                                  "filed": known, "form": a["form"], "derived": True, "source": "xbrl", **({"rebased": a["rebased"]} if a.get("rebased") else {})}
     shares = share_quarters(facts, splits)
     for q in quarters.values():
         q["diluted_shares"] = shares.get(q["end"])
@@ -760,6 +771,21 @@ def pe_history_clean(bars: list[tuple[date, float]], quarters: list[dict], curre
     out = {"sessions": len(kept), "excluded": excluded, "median": round(statistics.median(kept), 1) if kept else None, "first": first, "last": last, "share_above": None}
     if kept and current is not None:
         out["share_above"] = round(sum(1 for v in kept if v < current) / len(kept) * 100)
+    return out
+
+
+def pe_series_clean(bars: list[tuple[date, float]], quarters: list[dict], action_dates: list[date]) -> list[tuple[date, float]]:
+    """Pure: the daily P/E series pe_history_clean summarises ([(session, close over the four quarters filed by then)], the same
+    sessions kept), for a chart of the stock against its own five-year range. Its median is pe_history_clean's median."""
+    out: list[tuple[date, float]] = []
+    for d, close in bars:
+        four = trailing_four(quarters, d, d)
+        if four is None:
+            continue
+        total = sum(q["eps"] for q in four)
+        if total <= 0 or total < MIN_EARNINGS_YIELD * close or any(four[0]["start"] <= a <= d for a in action_dates):
+            continue
+        out.append((d, round(close / total, 2)))
     return out
 
 
