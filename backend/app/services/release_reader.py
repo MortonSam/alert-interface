@@ -38,6 +38,9 @@ The figure wanted is GAAP diluted earnings per share for the most recent quarter
   the month's or the year to date's: in "September Quarter 2026 2025 Change 2026 2025 Change ... $ 1.08 $ 0.52 109 % $ 4.37 $ 4.45" the
   quarter's figure is 4.37, the third number;
 - in a block headed "Diluted:" with continuing and discontinued operations lines, the figure is the block's total line (net earnings);
+- a table that states continuing operations, discontinued operations and net income, each with its own Basic and Diluted rows, states
+  the total on the net income line's Diluted row ("Net income: Basic $ 4.25 ... Diluted $ 4.25"), never the continuing operations' row,
+  even when a sentence elsewhere calls the continuing operations' figure "GAAP diluted earnings per share";
 - a per-share figure in a table whose share count is diluted ("Average diluted equivalent common shares") is diluted EPS, even when its
   own row reads "Per share available to common shareholders";
 - the quote is one row or one sentence only, never two rows joined.
