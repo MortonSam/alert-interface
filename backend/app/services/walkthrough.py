@@ -226,22 +226,33 @@ def merger_line(merger: dict, what: str) -> str:
 SPLIT_WORDS = {"business segment": "by business segment", "product or service": "by product and market"}
 
 
-def mentions(text: str | None, segs: list[dict]) -> int:
-    """Pure: how many of a split's names the description names (case-insensitive, whole words)."""
+def mentions(text: str | None, first: list[dict], second: list[dict]) -> tuple[int, int]:
+    """Pure: how many of each split's names the description names (case-insensitive, whole words, "&" read as "and"). Longer names
+    are matched first and blanked out, so "Compute" never counts inside "Compute and Networking"."""
     import re
     norm = lambda x: re.sub(r"\s+", " ", re.sub(r"\s*&\s*", " and ", (x or "").lower()))     # "Compute & Networking" is "Compute and Networking"
     t = norm(text)
-    return sum(1 for g in segs if g.get("label") and re.search(r"(?<![a-z])" + re.escape(norm(g["label"])) + r"(?![a-z])", t))
+    found = [0, 0]
+    names = sorted(((norm(g["label"]), side) for side, segs in enumerate((first, second)) for g in segs if g.get("label")), key=lambda x: -len(x[0]))
+    for name, side in names:
+        pat = r"(?<![a-z])" + re.escape(name) + r"(?![a-z])"
+        if re.search(pat, t):
+            found[side] += 1
+            t = re.sub(pat, " ", t)
+    return found[0], found[1]
 
 
 def split_for(segments: dict, desc: str | None) -> tuple[dict, dict | None]:
     """Pure: (the split step 1 shows, the other one or None). When the 10-K splits revenue both by business segment and by product
     and market, the figures follow the breakdown the description names more of; a tie keeps the reader's first (segments.AXES)."""
     other = segments.get("other")
-    if other and mentions(desc, other["segments"]) > mentions(desc, segments["segments"]):
-        return ({**segments, **other, "other": None},
-                {k: segments[k] for k in ("axis", "axis_label", "tag", "total", "segments")})
+    if other:
+        mine, theirs = mentions(desc, segments["segments"], other["segments"])
+        if theirs > mine:
+            return ({**segments, **other, "other": None},
+                    {k: segments[k] for k in ("axis", "axis_label", "tag", "total", "segments")})
     return segments, other
+
 
 def nouned(text: str, noun: str) -> str:
     """Pure: a stored reason's "sales" said as "revenue" for a bank or an insurer."""
