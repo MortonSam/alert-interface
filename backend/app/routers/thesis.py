@@ -890,10 +890,6 @@ async def draft_thesis(
     cached = await draft_cache.get(db, cache_key)
     if cached is not None:                              # the same draft for everyone for the rest of this chain's day, at no cost
         return ThesisDraftRead(**draft_cache.restamp(cached, data))
-    from app.services import ai_spend
-    from app.services.draft_limiter import DRAFT_POLICY
-    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
-        raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
     from app.services.ivy_v2 import options_premium_check
     premium = await options_premium_check(db, payload.symbol.upper())     # Ivy's own comparison: expensive options get a cheaper spread
@@ -1922,20 +1918,11 @@ async def draft_alternative(
     user_id: str = Depends(get_draft_caller),
     db: AsyncSession = Depends(get_db),
 ) -> ThesisDraftAlternativeRead:
-    """Generate a budget-constrained alternative to the best trade draft.
-
-    Reuses market-data gather + chain fetch + _build_strike_lines.
-    Returns fits=False (never crashes) when:
-      - no liquid options exist for the symbol
-      - only lottery-ticket far-OTM plays fit the budget
-      - AI returns invalid strikes or cost above budget (validation failure)
-    The existing /theses/draft endpoint and its output are never touched.
-    """
+    """A cheaper alternative to the draft under the visitor's budget, built by rules from the same stored chain
+    (services/draft_rules.alternative, sentences from services/draft_copy): no model call, so the site's AI cap never closes it.
+    Returns fits=False with the reason when no liquid options exist, or nothing within reach of the money fits the budget
+    without being a lottery ticket. The /theses/draft endpoint and its output are never touched."""
     client_ip = get_client_ip(request)
-    from app.services import ai_spend
-    from app.services.draft_limiter import DRAFT_POLICY
-    if await ai_spend.cap_reached(db):                       # the site-wide AI cap: the feature's own closed message, until midnight ET
-        raise HTTPException(status_code=429, detail=DRAFT_POLICY.global_message)
     await check_draft_limit(db, user_id, client_ip)
     sym = payload.symbol.upper()
     direction = payload.direction.lower()
@@ -1945,18 +1932,7 @@ async def draft_alternative(
     budget = payload.budget
     generated_at = datetime.now(tz=timezone.utc).isoformat()
 
-    # ── 1. Finnhub quote ─────────────────────────────────────────────────────
-    try:
-        quote = await live_data.now_quote(db, sym)            # the delayed quote every page shows (2026-11-02)
-    except Exception as exc:
-        print(f"[draft] {sym}: market data fetch failed: {redact(exc)}", flush=True)
-        raise HTTPException(status_code=502, detail=MARKET_DATA_UNAVAILABLE)
-
-    current_price: float | None = float(quote.get("c") or 0) or None
-    if not current_price:
-        raise HTTPException(status_code=422, detail=f"No live price available for {sym}")
-
-    # ── 2. DB: ticker + next earnings ─────────────────────────────────────────
+    # ── 1. The ticker ─────────────────────────────────────────────────────────
     ticker_row = (await db.execute(select(Ticker).where(Ticker.symbol == sym))).scalar_one_or_none()
     if not ticker_row:
         raise HTTPException(status_code=404, detail=f"Ticker {sym} not found")
@@ -1965,223 +1941,43 @@ async def draft_alternative(
     if await is_excluded(db, sym):
         raise HTTPException(status_code=422, detail=f"{sym}: {EXCLUSION_REASON}")
 
-    today = date.today()
-    ned_val = (await db.execute(
-        select(func.min(Event.event_date))
-        .where(Event.event_type == "earnings", Event.event_date >= today,
-               Event.ticker_id == ticker_row.id)
-    )).scalar_one_or_none()
-    earnings_str: str | None = (
-        ned_val.isoformat() if ned_val and hasattr(ned_val, "isoformat") else (str(ned_val) if ned_val else None)
-    )
+    # ── 2-5. The draft's own data: the same stored chain, expiration and price the draft was built from ──
+    data = await _gather_draft_data(sym, db)
+    draft_spot: float = data["draft_spot"]
+    atm_strike = data["atm_strike"]
+    calls_raw, puts_raw = data["calls_raw"], data["puts_raw"]
 
-    # ── 3. Choose expiration from ingested chains ─────────────────────────────
-    min_exp = earnings_str or (today + timedelta(days=7)).isoformat()
-    chosen_exp = await chain_store.pick_expiration(db, sym, min_exp)
+    # ── 6. Quality-filtered strikes on the side of the bet ─────────────────────
+    _, primary_rows = _build_strike_lines(calls_raw if direction == "bullish" else puts_raw, atm_strike, draft_spot)
 
-    # ── 4. Options chain from ingested store ──────────────────────────────────
-    chain: dict = {"calls": [], "puts": []}
-    if chosen_exp:
-        chain_result = await chain_store.get_chain(db, sym, chosen_exp)
-        if chain_result and chain_store.is_fresh(chain_result[1]):
-            chain = chain_result[0]
-
-    calls_raw: list[dict] = chain.get("calls", [])
-    puts_raw:  list[dict] = chain.get("puts",  [])
-
-    # Use snapshot spot (underlying price at chain-capture time) for all
-    # arithmetic that touches chain mids, falling back to Finnhub if absent.
-    snapshot_price: float | None = chain.get("underlying_price")
-    draft_spot: float = snapshot_price if snapshot_price is not None else current_price
-
-    # ── 5. ATM strike ─────────────────────────────────────────────────────────
-    atm_strike: float | None = None
-    intersection = {c["strike"] for c in calls_raw} & {p["strike"] for p in puts_raw}
-    if intersection:
-        atm_strike = min(intersection, key=lambda s: abs(s - draft_spot))
-
-    # ── 6. Quality-filtered strike lists ──────────────────────────────────────
-    if direction == "bullish":
-        primary_raw, secondary_raw = calls_raw, puts_raw
-        primary_label   = "CALLS (for bullish position)"
-        secondary_label = "PUTS (for spread second leg)"
-    else:
-        primary_raw, secondary_raw = puts_raw, calls_raw
-        primary_label   = "PUTS (for bearish position)"
-        secondary_label = "CALLS (for spread second leg)"
-
-    primary_text,   primary_rows   = _build_strike_lines(primary_raw,   atm_strike, draft_spot)
-    secondary_text, secondary_rows = _build_strike_lines(secondary_raw, atm_strike, draft_spot, limit=8)
-
-    valid_primary_strikes = {r["strike"] for r in primary_rows}
-
-    # ── NVR / no-options early exit ───────────────────────────────────────────
-    if not primary_rows:
-        await record_draft(db, user_id, client_ip, sym)
-        return ThesisDraftAlternativeRead(
-            fits=False,
-            strategy=None, suggested_strike=None, suggested_spread_strike=None,
-            cost_to_enter=None, target=None, tradeoff=None, reasoning=None,
-            note=f"No liquid options found for {sym}. No alternative structure can be constructed.",
-            model_used="n/a",
-            generated_at=generated_at,
-        )
-
-    # ── 7. Build prompt ───────────────────────────────────────────────────────
-    if payload.best_spread_strike is not None:
-        best_play_desc = f"${payload.best_strike:.2f}/${payload.best_spread_strike:.2f} {direction} spread"
-    else:
-        best_play_desc = f"${payload.best_strike:.2f} {direction} option"
-
-    prompt = f"""\
-You are a financial data assistant. The user wants a {direction} trade on {sym} but their budget of ${budget:.0f} per contract is below the best play's cost of ${payload.best_cost:.0f} ({best_play_desc}). Find a REAL cheaper alternative from the available strikes, OR honestly report that nothing good fits within the budget.
-
-CRITICAL RULES (violating any is an error):
-1. Output ONLY the JSON object. Do not write any reasoning, explanation, or "thinking out loud" text before the JSON. Your response must begin with {{ and end with }}.
-2. You may and should verify your arithmetic, but show any necessary math compactly INSIDE the JSON fields (e.g. in "tradeoff": "Caps max gain at $253 ([$5.00 width - $2.47 debit] x 100)"), NOT as prose before the JSON object.
-3. "suggested_strike" and "suggested_spread_strike" MUST be exact float values listed under AVAILABLE STRIKES, never invent a strike
-4. "cost_to_enter" MUST be <= {budget:.2f} when fits=true. Naked cost = premium x 100; spread cost = net_debit x 100 where net_debit = leg1_mid - leg2_mid
-5. HONESTY GUARDRAIL: If every structure that fits the budget is far-OTM (more than 3 strikes from ATM) or costs less than $50 per contract for this underlying, it is a lottery ticket. Set fits=false and explain honestly. It is better to report nothing fits than to suggest a low-probability play
-6. Frame as a data-grounded suggestion to review, not financial advice
-
-═══════════════════ INJECTED FACT BLOCK ═══════════════════
-SYMBOL / DIRECTION: {sym} / {direction}
-PRICE:              ${draft_spot:.2f}
-ATM STRIKE:         {f"${atm_strike:.2f}" if atm_strike else "(unavailable)"}
-EXPIRATION:         {chosen_exp or "(none)"}
-NEXT EARNINGS:      {earnings_str or "(unknown)"}
-AGGRESSIVENESS:     {aggressiveness}
-USER BUDGET:        ${budget:.2f} per contract (hard ceiling, must not exceed)
-
-BEST PLAY (context only, do NOT suggest this):
-  Structure: {best_play_desc}
-  Cost:      ${payload.best_cost:.0f} per contract (exceeds user budget)
-
-AVAILABLE STRIKES ({primary_label}):
-{primary_text}
-
-AVAILABLE STRIKES ({secondary_label}):
-{secondary_text}
-═══════════════════ END FACT BLOCK ═══════════════════════
-
-SEARCH ORDER FOR ALTERNATIVES (prefer in this order):
-  1. A tighter spread using real strikes where net_debit × 100 <= {budget:.0f}
-  2. A further-OTM naked option (1-2 strikes OTM from ATM) where mid × 100 <= {budget:.0f}
-  3. fits=false: if nothing affordable is within 3 strikes of ATM or if all affordable plays cost < $50, report nothing good fits
-
-When fits=true, "tradeoff" MUST state what is given up vs {best_play_desc} (e.g. "Caps max gain at $X vs unlimited for the naked call" or "Requires a move to $X vs $Y, lower probability of profit").
-
-SPREAD MAX-GAIN MATH (READ THIS CAREFULLY):
-  MAX GAIN for a vertical spread = (width - net_debit) x 100.
-  Example: $15-wide spread at $6.00 net debit: (15 - 6) x 100 = $900. The max gain is $900, NOT $1,500.
-  $1,500 is the gross spread width x 100. That figure is WRONG as max gain and must NEVER appear as the max gain.
-  The single max-gain dollar figure you state in "tradeoff" MUST equal (width - net_debit) x 100. State that one number only.
-  SANITY CHECK before you write the tradeoff: does your stated max gain equal (width - net_debit) x 100?
-  If you wrote width x 100 anywhere as the max gain, it is wrong. Recompute before responding.
-
-Return ONLY this JSON object (no other text):
-{{
-  "fits": <true|false>,
-  "strategy": "<description with real strikes and real cost, e.g. 'Bull call spread $305/$320 ($8.10 net debit)', or null if fits=false>",
-  "suggested_strike": <float, must appear verbatim in AVAILABLE STRIKES, or null if fits=false>,
-  "suggested_spread_strike": <float from AVAILABLE STRIKES or null>,
-  "cost_to_enter": <float, must be <= {budget:.2f} if fits=true, else null>,
-  "target": <float, data-grounded price target at {aggressiveness} aggressiveness>,
-  "tradeoff": "<honest comparison to best play, null if fits=false>",
-  "reasoning": "<2-3 sentences citing real strike values and mids from the fact block, null if fits=false>",
-  "note": "<when fits=false: specific reason nothing fits + recommendation (try larger budget or lower-priced underlying); null when fits=true>"
-}}"""
-
-    print(
-        f"[draft-alternative] {sym} {direction} {aggressiveness} | "
-        f"budget=${budget:.0f} best_cost=${payload.best_cost:.0f} "
-        f"primary_strikes={len(primary_rows)}",
-        flush=True,
-    )
-
-    # ── 8. Generate ───────────────────────────────────────────────────────────
-    client = AnthropicClient()
-    try:
-        gen = await client.generate_thesis_draft_alternative(prompt)
-    except Exception as exc:
-        print(f"[draft-alternative] {sym}: AI generation failed: {redact(exc)}", flush=True)
-        raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
-
-    print(
-        f"[draft-alternative] {sym}: {gen['input_tokens']} in / {gen['output_tokens']} out | raw:\n{gen['content']}",
-        flush=True,
-    )
-
-    # ── 9. Parse ──────────────────────────────────────────────────────────────
-    try:
-        parsed = _extract_json(gen["content"])
-    except Exception as exc:
-        print(f"[draft-alternative] {sym}: AI returned non-JSON output: {redact(exc)}\nRaw: {gen['content'][:300]}", flush=True)
-        raise HTTPException(status_code=502, detail=DRAFT_UNAVAILABLE)
-
-    fits              = bool(parsed.get("fits", False))
-    strategy          = parsed.get("strategy")
-    suggested_strike  = parsed.get("suggested_strike")
-    spread_strike     = parsed.get("suggested_spread_strike")
-    cost_to_enter     = parsed.get("cost_to_enter")  # AI value; overridden below from chain mids
-    target            = parsed.get("target")
-    tradeoff          = parsed.get("tradeoff")
-    reasoning         = parsed.get("reasoning")
-    note              = parsed.get("note")
-
-    # Canonicalize leg order: suggested_strike is always the long leg.
-    suggested_strike, spread_strike = _canonicalize_spread(suggested_strike, spread_strike, direction)
-
-    # Override cost_to_enter with Python-computed value from chain mids — never trust the AI's figure.
-    # primary_rows is already in scope: list of {"strike": float, "mid": float, "iv": ...}
-    if fits and suggested_strike is not None:
-        def _find_mid(k: float) -> float | None:
-            row = next((r for r in primary_rows if abs(r["strike"] - k) < 1e-6), None)
-            return row["mid"] if row else None
-
-        long_mid = _find_mid(suggested_strike)
-        if long_mid is None:
-            cost_to_enter = None
-        elif spread_strike is not None:
-            short_mid = _find_mid(spread_strike)
-            if short_mid is None:
-                cost_to_enter = None
-            else:
-                cost_to_enter = round((long_mid - short_mid) * 100, 2)
-        else:
-            cost_to_enter = round(long_mid * 100, 2)
-
-    # ── 10. Validate — prefer fits=false over returning bad data ──────────────
+    # ── 7. The alternative, by rules (services/draft_rules.alternative; Sam, 2026-11-06: no model in drafting) ──
+    from app.services import draft_copy as copy
+    from app.services import draft_rules as rules
+    kind = copy.KIND[direction]
+    alt = rules.alternative(direction, primary_rows, draft_spot, budget, payload.best_strike, payload.best_target)
+    fits = isinstance(alt, rules.Alternative)
+    strategy = suggested_strike = spread_strike = cost_to_enter = tradeoff = reasoning = note = None
     if fits:
-        failures: list[str] = []
-
-        if suggested_strike is None:
-            failures.append("fits=true but no suggested_strike returned")
-        elif suggested_strike not in valid_primary_strikes:
-            failures.append(
-                f"strike ${suggested_strike:.2f} not in available chain "
-                f"(valid: {', '.join(f'${s:.2f}' for s in sorted(valid_primary_strikes)[:5])})"
-            )
-
-        if spread_strike is not None and spread_strike not in valid_primary_strikes:
-            failures.append(f"spread strike ${spread_strike:.2f} not in available chain")
-
-        if cost_to_enter is None:
-            failures.append("fits=true but cost_to_enter could not be computed (strike mid not found in chain)")
-        elif cost_to_enter > budget:
-            failures.append(
-                f"cost_to_enter ${cost_to_enter:.2f} exceeds budget ${budget:.2f}"
-            )
-
-        if failures:
-            fits              = False
-            strategy          = None
-            suggested_strike  = None
-            spread_strike     = None
-            cost_to_enter     = None
-            tradeoff          = None
-            reasoning         = None
-            note = "Alternative validation failed: " + "; ".join(failures) + ". No reliable alternative could be confirmed within budget."
+        suggested_strike, spread_strike, cost_to_enter = alt.long_strike, alt.short_strike, alt.cost
+        if alt.structure == "spread":
+            strategy = copy.strategy_spread(direction, alt.long_strike, alt.short_strike, alt.debit)
+            max_gain = abs(alt.short_strike - alt.long_strike) * 100 - alt.cost
+            best_max_gain = (abs(payload.best_spread_strike - payload.best_strike) * 100 - payload.best_cost
+                             if payload.best_spread_strike is not None else None)
+            tradeoff = copy.alt_tradeoff_spread(direction, kind, payload.best_strike, payload.best_spread_strike, max_gain, best_max_gain)
+            reasoning = copy.alt_reasoning_spread(kind, budget, payload.best_cost, alt.long_strike, alt.long_mid, alt.short_strike,
+                                                  alt.short_mid, alt.cost, payload.best_strike)
+        else:
+            sign = 1 if direction == "bullish" else -1
+            strategy = copy.strategy_long(alt.long_strike, kind, alt.long_mid)
+            tradeoff = copy.alt_tradeoff_long(direction, kind, alt.long_strike, alt.long_strike + sign * alt.long_mid, payload.best_strike,
+                                              payload.best_strike + sign * payload.best_cost / 100)
+            reasoning = copy.alt_reasoning_long(kind, budget, payload.best_cost, alt.long_strike, alt.long_mid, alt.cost)
+    else:
+        note = copy.alt_none(alt.reason, sym, budget, rules.ALT_MAX_STEPS, rules.ALT_MIN_COST, alt.cheapest)
+    print(f"[draft-alternative] {sym} {direction} {aggressiveness} | budget=${budget:.0f} best_cost=${payload.best_cost:.0f} "
+          f"-> {strategy or alt.reason}", flush=True)
+    target = payload.best_target if fits else None
 
     await record_draft(db, user_id, client_ip, sym)
     return ThesisDraftAlternativeRead(
@@ -2194,7 +1990,7 @@ Return ONLY this JSON object (no other text):
         tradeoff=tradeoff,
         reasoning=reasoning,
         note=note,
-        model_used=gen["model_used"],
+        model_used="deterministic",
         generated_at=generated_at,
     )
 

@@ -84,8 +84,9 @@ async def test_every_feature_adds_to_one_ledger_and_the_cap_closes_each_with_its
             await s.commit()
     src = (ROOT / "app" / "routers").glob("*.py")
     joined = "".join(p.read_text() for p in src)
-    assert joined.count("ai_spend.cap_reached(db)") == 4          # notes, drafts, the drafts' alternative, Ask Ivy
-    assert "detail=DRAFT_POLICY.global_message" in joined and "RESEARCH_GENERATION_POLICY.global_message.format" in joined
+    assert joined.count("ai_spend.cap_reached(db)") == 2          # notes and Ask Ivy; drafts and their alternative call no model (2026-11-06)
+    assert "ai_spend.cap_reached" not in (ROOT / "app" / "routers" / "thesis.py").read_text()
+    assert "RESEARCH_GENERATION_POLICY.global_message.format" in joined
 
 
 def test_the_dead_man_alert_fires_two_hours_after_the_start_with_no_finished_run():

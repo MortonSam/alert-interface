@@ -159,6 +159,7 @@ class ThesisDraftAlternativeRequest(BaseModel):
     best_strike: float                       # leg 1 of the best play (context only)
     best_spread_strike: float | None = None  # leg 2 of best play if spread
     best_cost: float                         # cost of best play per contract (context only)
+    best_target: float | None = None         # the draft's target: the alternative aims at the same price
 
 
 class SignalLean(BaseModel):

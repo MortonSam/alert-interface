@@ -106,3 +106,89 @@ def draft(direction: str, risk: str, regime: str | None, rows: list[dict], spot:
                 reaches = sold["strike"] >= target if direction == "bullish" else sold["strike"] <= target
                 return RuleDraft("spread", leg["strike"], leg["mid"], sold["strike"], sold["mid"], target, flag, reaches)
     return RuleDraft("long", leg["strike"], leg["mid"], None, None, target, flag)
+
+
+# ── The budget alternative (Sam, 2026-11-06: no part of drafting uses the model) ─────────────────────────────────────────────
+# The old prompt's search order, applied in code: 1. a spread whose net debit fits the budget, keeping the option the draft bought
+# (or the next strike out when even its narrowest spread does not fit); 2. a single option further from the money that fits;
+# 3. nothing. Its guard against a lottery ticket: the option bought is at most ALT_MAX_STEPS strikes from the money, and anything
+# costing under ALT_MIN_COST for one contract is refused; like the draft's, it stays within SINGLE_LEG_MAX of the price.
+ALT_MAX_STEPS = 3
+ALT_MIN_COST = 50.0
+
+
+@dataclass
+class Alternative:
+    structure: str                 # "spread" | "long"
+    long_strike: float
+    long_mid: float
+    short_strike: float | None
+    short_mid: float | None
+    cost: float                    # for one contract, in dollars
+
+    @property
+    def debit(self) -> float:
+        return round(self.long_mid - (self.short_mid or 0.0), 2)
+
+
+@dataclass
+class NoAlternative:
+    reason: str                    # "no_options" | "too_far" | "too_cheap"
+    cheapest: float | None = None  # the cheapest structure within reach, for one contract (too_far)
+
+
+def _priced(rows: list[dict]) -> list[dict]:
+    return sorted((r for r in rows if r.get("mid") and r["mid"] > 0), key=lambda r: r["strike"])
+
+
+def steps_from_money(direction: str, rows: list[dict], spot: float, strike: float) -> int:
+    """Pure: how many priced strikes `strike` sits past the at-the-money one (0 at or inside it)."""
+    ks = [r["strike"] for r in _priced(rows)]
+    if direction == "bullish":
+        return sum(1 for k in ks if spot < k <= strike)
+    return sum(1 for k in ks if strike <= k < spot)
+
+
+def alternative(direction: str, rows: list[dict], spot: float, budget: float, best_long: float,
+                target: float | None) -> Alternative | NoAlternative:
+    """Pure: the cheaper alternative to a draft that buys `best_long`, under `budget` dollars for one contract."""
+    bull = direction == "bullish"
+    priced = _priced(rows)
+    if not priced:
+        return NoAlternative("no_options")
+    outward = priced if bull else priced[::-1]                          # strikes in the direction of the bet
+    reach = [r for r in outward if steps_from_money(direction, rows, spot, r["strike"]) <= ALT_MAX_STEPS
+             and abs(r["strike"] - spot) / spot <= SINGLE_LEG_MAX]
+    longs = [r for r in reach if (r["strike"] >= best_long if bull else r["strike"] <= best_long)]
+    cheapest: float | None = None      # the cheapest structure within reach that is not a lottery ticket
+    lottery = False                    # something under the budget was refused for costing under ALT_MIN_COST
+
+    def consider(cost: float) -> bool:
+        nonlocal cheapest, lottery
+        if cost < ALT_MIN_COST:
+            lottery = lottery or cost <= budget
+            return False
+        cheapest = cost if cheapest is None else min(cheapest, cost)
+        return cost <= budget
+
+    # 1. a spread: the option bought, then the widest spread that fits, its option sold never past the first strike at the target
+    for leg in longs:
+        past = [r for r in outward if (r["strike"] > leg["strike"] if bull else r["strike"] < leg["strike"])]
+        if target is not None:
+            at = next((i for i, r in enumerate(past) if (r["strike"] >= target if bull else r["strike"] <= target)), None)
+            past = past if at is None else past[:at + 1]
+        fits = []
+        for sold in past:
+            debit = round(leg["mid"] - sold["mid"], 2)
+            if 0 < debit < abs(sold["strike"] - leg["strike"]) and consider(round(debit * 100, 2)):
+                fits.append(Alternative("spread", leg["strike"], leg["mid"], sold["strike"], sold["mid"], round(debit * 100, 2)))
+        if fits:
+            return max(fits, key=lambda a: abs(a.short_strike - a.long_strike))
+    # 2. a single option further from the money than the draft's
+    for leg in longs:
+        if leg["strike"] != best_long and consider(round(leg["mid"] * 100, 2)):
+            return Alternative("long", leg["strike"], leg["mid"], None, None, round(leg["mid"] * 100, 2))
+    # 3. nothing fits
+    if lottery and (cheapest is None or cheapest > budget):
+        return NoAlternative("too_cheap", cheapest)
+    return NoAlternative("too_far", cheapest)

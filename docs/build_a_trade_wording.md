@@ -211,4 +211,33 @@ Drafting no longer calls a model (`backend/app/services/draft_rules.py`). The st
 **Unchanged:**
 - The expensive-options spread (already built by rules).
 - The page's "drafted by Ivy from the options data on file" label (`model_used: deterministic`).
-- The budget alternative ("a cheaper alternative under $X"), which still calls the model and keeps its cap check.
+- (Changed Nov 6: the budget alternative is built by rules too; see below.)
+
+### The budget alternative, by rules (Nov 6)
+
+"Too expensive? See an affordable alternative" no longer calls the model (`draft_rules.alternative`). It reads the same stored chain the draft was built from (before, it picked its own expiration and found no options whenever that chain was not marked fresh). With no model anywhere in drafting, neither the draft nor the alternative is closed by the site's AI spending cap any more, so section C's "drafting unavailable" message would no longer be shown for drafts; the daily draft limit per visitor stays.
+
+**The rules (the old prompt's search order):**
+1. A spread that keeps the option the draft bought, selling the farthest strike that fits the budget, never past the first strike at the draft's target. When no spread from that strike fits, the next strike out is tried.
+2. Otherwise, a single option further from the money than the draft's.
+3. Otherwise, nothing.
+- The guard against a lottery ticket: the option bought is at most {3} strikes past the money and within 10% of the price, and anything costing under {$50} for one contract is refused.
+- The target is the draft's own.
+
+**Sentences** (`draft_copy.py`):
+- Tradeoff, a spread:
+  - "The gain stops at ${g} for one contract, where the ${k} call alone has no cap."
+  - (bearish, from a single put) "The gain stops at ${g} for one contract, where the ${k} put alone gains more the further the stock falls."
+  - (from a spread) "The gain stops at ${g} for one contract, against ${G} for the ${a}/${b} spread."
+- Tradeoff, a single option: "The stock has to finish {above/below} ${be} by expiration to come out ahead, against ${BE} for the ${k} {call/put}."
+- Reasoning, a spread: "Your budget of ${B} is below the ${C} the draft costs. [No spread from the draft's ${k} {call/put} fits, so this one starts further out.] The ${a} {call/put} bought is ${m} a share and the ${b} {call/put} sold brings in ${n}, so one contract costs ${c}. It is the widest spread from that strike that fits the budget."
+- Reasoning, a single option: "Your budget of ${B} is below the ${C} the draft costs, and no spread from its strike fits. The ${k} {call/put} is the nearest strike further out that does: ${m} a share, ${c} for one contract."
+- Nothing fits:
+  - "Nothing within {3} strikes of the stock's price fits a budget of ${B}. The cheapest costs ${c} for one contract. A larger budget or a stock with a lower price would leave more room."
+  - "Only options costing under {$50} for one contract fit a budget of ${B}, and Ivy doesn't suggest those. A larger budget or a stock with a lower price would leave more room."
+  - "No priced options on {SYM} for this expiration, so there is no cheaper version of this trade to show."
+
+**Examples (dev data, Nov 6):**
+- AAPL bullish moderate, draft "Long $345 call ($8.25 mid)" at $825, budget $495: "Bull call spread $345/$355 ($4.42 net debit)". "The gain stops at $558 for one contract, where the $345 call alone has no cap." "Your budget of $495 is below the $825 the draft costs. The $345 call bought is $8.25 a share and the $355 call sold brings in $3.83, so one contract costs $442. It is the widest spread from that strike that fits the budget."
+- JPM bearish conservative, draft "Bear put spread $337.5/$327.5" at $316, budget $190: "Bear put spread $337.5/$332.5 ($1.55 net debit)". "The gain stops at $345 for one contract, against $684 for the $337.5/$327.5 spread."
+- NVDA bullish aggressive, budget $30: "Nothing within 3 strikes of the stock's price fits a budget of $30. The cheapest costs $90 for one contract. A larger budget or a stock with a lower price would leave more room."

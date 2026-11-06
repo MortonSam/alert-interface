@@ -367,6 +367,7 @@ function DraftDisplay({
         best_strike: draft.suggested_strike,
         best_spread_strike: draft.suggested_spread_strike ?? null,
         best_cost: costPerContract,
+        best_target: draft.suggested_target ?? null,
       });
       setAltResult(result);
     } catch (err) {

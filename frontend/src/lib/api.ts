@@ -1016,6 +1016,7 @@ export interface ThesisDraftAlternativeRequest {
   best_strike: number;
   best_spread_strike?: number | null;
   best_cost: number;
+  best_target?: number | null;   // the draft's target: the alternative aims at the same price
 }
 
 export interface SignalLean {

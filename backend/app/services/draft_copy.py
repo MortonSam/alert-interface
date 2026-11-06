@@ -80,3 +80,44 @@ def flag_beyond_history(target: float, move_pct: float, max_pct: float, n: int) 
 
 def flag_beyond_implied(target: float, move_pct: float, implied_pct: float) -> str:
     return f"A target of ${target:.2f} needs a {move_pct:.1f}% move, more than twice the ±{implied_pct:.1f}% options price."
+
+
+# ── The budget alternative (services/draft_rules.alternative) ─────────────────────────────────────────────────────────────
+def alt_tradeoff_spread(direction: str, kind: str, best_long: float, best_short: float | None, max_gain: float,
+                        best_max_gain: float | None) -> str:
+    if best_short is not None and best_max_gain is not None:
+        return f"The gain stops at ${max_gain:,.0f} for one contract, against ${best_max_gain:,.0f} for the ${best_long:g}/${best_short:g} spread."
+    if direction == "bullish":
+        return f"The gain stops at ${max_gain:,.0f} for one contract, where the ${best_long:g} {kind} alone has no cap."
+    return f"The gain stops at ${max_gain:,.0f} for one contract, where the ${best_long:g} {kind} alone gains more the further the stock falls."
+
+
+def alt_tradeoff_long(direction: str, kind: str, strike: float, breakeven: float, best_long: float, best_breakeven: float) -> str:
+    side = "above" if direction == "bullish" else "below"
+    return (f"The stock has to finish {side} ${breakeven:,.2f} by expiration to come out ahead, against ${best_breakeven:,.2f} "
+            f"for the ${best_long:g} {kind}.")
+
+
+def alt_reasoning_spread(kind: str, budget: float, best_cost: float, long_k: float, long_mid: float, short_k: float,
+                         short_mid: float, cost: float, best_long: float | None = None) -> str:
+    moved = (f" No spread from the draft's ${best_long:g} {kind} fits, so this one starts further out."
+             if best_long is not None and best_long != long_k else "")
+    return (f"Your budget of ${budget:,.0f} is below the ${best_cost:,.0f} the draft costs.{moved} The ${long_k:g} {kind} bought is "
+            f"${long_mid:.2f} a share and the ${short_k:g} {kind} sold brings in ${short_mid:.2f}, so one contract costs ${cost:,.0f}. "
+            f"It is the widest spread from that strike that fits the budget.")
+
+
+def alt_reasoning_long(kind: str, budget: float, best_cost: float, strike: float, mid: float, cost: float) -> str:
+    return (f"Your budget of ${budget:,.0f} is below the ${best_cost:,.0f} the draft costs, and no spread from its strike fits. "
+            f"The ${strike:g} {kind} is the nearest strike further out that does: ${mid:.2f} a share, ${cost:,.0f} for one contract.")
+
+
+def alt_none(reason: str, sym: str, budget: float, steps: int, min_cost: float, cheapest: float | None) -> str:
+    if reason == "no_options":
+        return f"No priced options on {sym} for this expiration, so there is no cheaper version of this trade to show."
+    if reason == "too_cheap":
+        return (f"Only options costing under ${min_cost:,.0f} for one contract fit a budget of ${budget:,.0f}, and Ivy doesn't suggest "
+                f"those. A larger budget or a stock with a lower price would leave more room.")
+    tail = f" The cheapest costs ${cheapest:,.0f} for one contract." if cheapest is not None else ""
+    return (f"Nothing within {steps} strikes of the stock's price fits a budget of ${budget:,.0f}.{tail} "
+            f"A larger budget or a stock with a lower price would leave more room.")
