@@ -93,6 +93,10 @@ _DILUTED_BLOCK_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)(?:\s
 # "Diluted: Continuing operations $ 0.60 $ 0.70 ... Discontinued operations — (0.02) — (0.02) Net earnings (loss) $ 0.60" (CARR): the block under a "Diluted:" label
 _DILUTED_COLON_BLOCK = re.compile(rf"diluted:\s*continuing\s+operations\s+\$?\s?{_NUMTOK}(?:\s+\$?\s?{_NUMTOK}|\s+[—–-])*"
                                   rf"\s+discontinued\s+operations(?:\s+\$?\s?{_NUMTOK}|\s+[—–-])*\s+net\s+(?:earnings|income)(?:\s*\(loss\))?\s+\$?\s?{_PER_SHARE_NUM}", re.I)
+# SPGI 2026-10-27: "Income from continuing operations: Basic $ 4.45 ... Diluted $ 4.45 ... (Loss) income from discontinued operations: Basic
+# $ (0.20) ... Diluted $ (0.20) ... Net income: Basic $ 4.25 $ 3.86 10% ... Diluted $ 4.25": the total is the net income line's diluted figure
+_SPLIT_BASIC_DILUTED_NET = re.compile(rf"continuing\s+operations:\s*basic\s[^:]{{0,200}}?discontinued\s+operations:\s*basic\s[^:]{{0,200}}?"
+                                      rf"net\s+(?:income|earnings)(?:\s*\(loss\))?:\s*basic\s*\$?\s?{_NUMTOK}[^A-Za-z]{{0,80}}?diluted\s*\$?\s?{_PER_SHARE_NUM}", re.I)
 # a per-share block whose header is followed straight by the attributable line ("Diluted earnings per common share … Net income attributable to PFG $1.84"):
 # the amount must look like a per-share figure (two decimals, under 1,000), which a net income in millions ("$ 397.0", "$ 1,204.2") never does
 _DILUTED_HEADER_NET = re.compile(rf"diluted\s+(?:net\s+)?(?:earnings|income)\s+per\s+(?:common\s+)?share(?![^$]{{0,120}}continuing)[^$]{{0,120}}?\bnet\s+(?:income|earnings)(?:\s*\(loss\))?\s+attributable\s+to\s+[A-Z][\w.&'’ ]{{0,40}}?\s+\$?\s?{_PER_SHARE_NUM}(?![\d,])", re.I)
@@ -119,7 +123,8 @@ _GUIDANCE_NEAR = re.compile(r"outlook|guidance|expect|forecast|anticipat|project
 _ITEM_NEAR = re.compile(r"related to|impact of|impacts? from|charges?\s+of|approximately|amortization|adjustments?|impairment|benefit of|expense of|effect of|headwind|tailwind|one-time|non-?recurring", re.I)
 # a figure introduced by a comparison is the prior period's (introduced_by_comparison)
 _RANGE_AFTER = re.compile(r"^\s*(?:to|[–—-]|±)\s*\$?\s?\d", re.I)
-_CONTINUING_TABLE = re.compile(r"(?:diluted\s+)?(?:earnings|income|EPS)[^.]{0,60}?\(a\)\s+from\s+continuing\s+operations|per\s+share:?\s+continuing\s+operations\s+\$|\(a\)\s+from\s+continuing\s+operations", re.I)
+_CONTINUING_TABLE = re.compile(r"(?:diluted\s+)?(?:earnings|income|EPS)[^.]{0,60}?\(a\)\s+from\s+continuing\s+operations|per\s+share:?\s+continuing\s+operations\s+\$|\(a\)\s+from\s+continuing\s+operations"
+                               r"|(?:income|earnings)\s+from\s+continuing\s+operations:\s*basic\s", re.I)      # SPGI's "Income from continuing operations: Basic $ 4.45"
 
 # Basic versus diluted (2026-10-13). A release that states diluted EPS anywhere has a diluted row, and a figure from a row labelled basic
 # alone is never its diluted EPS (states_diluted_eps, basic_only_label). A release with no diluted figure at all (ED's "Reported earnings per
@@ -398,7 +403,7 @@ def parse_release_eps(text: str, report_date: date | None = None) -> dict | None
         if _guidance_near(flat, hit.start(), hit.end()) or _disqualified(flat, hit.start(), hit.end()) or is_annual_figure(flat, hit.start(), hit.end(), hit.start(1)):
             continue
         return {"eps": _num(hit.group(1)), "how": "highlights sentence", "evidence": flat[max(0, hit.start() - 20):hit.end() + 10].strip(), "period_end": period_end}
-    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_DILUTED_COLON_BLOCK, "diluted EPS block (colon), net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0),
+    attempts = ((_DILUTED_BLOCK_NET, "diluted EPS block, net earnings line", 0), (_SPLIT_BASIC_DILUTED_NET, "continuing and discontinued block, net income line", 0), (_DILUTED_COLON_BLOCK, "diluted EPS block (colon), net earnings line", 0), (_DILUTED_HEADER_NET, "diluted EPS block, attributable line", 0),
                 (_GAAP_NET_EPS_ROW, "GAAP net EPS row, basic then diluted", 12), (_GAAP_EPS_DILUTED_ROW, "GAAP EPS, diluted row", 12), (_REPORTED_EPS_DILUTED_ROW, "reported EPS, dash diluted row", 12),
                 (_GAAP_BASIS_WAS, "diluted EPS on a GAAP basis sentence", 12), (_ROW, "diluted EPS row", 12), (_ROW2, "income statement EPS row", 12), (_ROW_NET_BASIC_DILUTED, "net income per share row, basic then diluted", 12),
                 (_LABELLED, "labelled GAAP EPS", 40), (_GAAP_EPS_WAS, "GAAP EPS sentence", 12), (_EPS_GAAP_BASIS, "EPS on a GAAP basis", 12), (_REPORTED_EPS_GAAP, "reported EPS, GAAP named", 12),

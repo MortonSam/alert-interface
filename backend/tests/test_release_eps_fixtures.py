@@ -146,3 +146,19 @@ def test_msft_and_xom_wordings_and_a_dollar_total_is_never_eps():
     hit = V.parse_release_eps(row)
     assert (hit["eps"], hit["how"]) == (3.48, "EPS assuming dilution row")
     assert V.parse_release_eps("fourth-quarter 2025 earnings of $6.5 billion, or $1.53 per share.") is None      # "per share" alone is not diluted
+
+
+# SPGI 2026-10-27: the highlights sentence states diluted EPS from continuing operations ($4.45); the table splits it into continuing and
+# discontinued operations under Basic and Diluted rows, and the quarter's whole GAAP diluted EPS is the net income line's ($4.25, as its 10-Q)
+SPGI = ("Third quarter GAAP net income increased 20% to $1.298 billion and GAAP diluted earnings per share increased 26% to $4.45. Adjusted net income "
+        "for the third quarter increased 4% to $1.337 billion. Earnings per share attributable to S&P Global Inc. common shareholders: Income from continuing "
+        "operations: Basic $ 4.45 $ 3.54 26% $ 12.99 $ 10.11 28% Diluted $ 4.45 $ 3.54 26% $ 12.98 $ 10.10 29% (Loss) income from discontinued operations: "
+        "Basic $ (0.20) $ 0.32 N/M $ 0.08 $ 0.81 (89)% Diluted $ (0.20) $ 0.32 N/M $ 0.08 $ 0.80 (89)% Net income: Basic $ 4.25 $ 3.86 10% $ 13.07 $ 10.91 20% "
+        "Diluted $ 4.25 $ 3.86 10% $ 13.06 $ 10.90 20% Weighted-average number of common shares outstanding: Basic 291.4 304.3 294.7 305.8")
+
+
+def test_a_continuing_operations_figure_is_never_the_total_when_the_table_states_net_income():
+    hit = V.parse_release_eps(SPGI, date(2026, 10, 27))
+    assert hit is not None and hit["eps"] == 4.25 and "net income line" in hit["how"], hit
+    sentence_only = SPGI.split(" Earnings per share attributable")[0] + " Income from continuing operations: Basic $ 4.45 $ 3.54 Diluted $ 4.45 $ 3.54"
+    assert V.parse_release_eps(sentence_only, date(2026, 10, 27)) is None          # the split table with no total line: nothing is read
