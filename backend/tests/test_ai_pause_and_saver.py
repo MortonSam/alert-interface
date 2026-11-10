@@ -49,7 +49,7 @@ async def test_a_paused_night_sends_no_model_call(monkeypatch):
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"""), {"k": P.PAUSE_KEY, "v": '{"since": "2026-11-05T07:32:00+00:00", "kind": "billing"}'})
         await s.commit()
         try:
-            with pytest.raises(A.NightlyBudgetReached, match="AI paused since 2026-11-05"):
+            with pytest.raises(A.NightlyBudgetReached, match="AI paused since Nov 5"):
                 await A.check_nightly(s, "claude-haiku-4-5-20251001", {"messages": [], "max_tokens": 5})
         finally:
             await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": P.PAUSE_KEY})

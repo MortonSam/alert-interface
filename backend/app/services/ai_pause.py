@@ -33,6 +33,11 @@ def started(prior: dict | None, kind: str, now: datetime) -> dict:
     return prior if prior else {"since": now.isoformat(), "kind": kind, "alerted_on": None}
 
 
+def since_words(pause: dict) -> str:
+    """Pure: the pause's start as the site writes a date ("Nov 5")."""
+    return datetime.fromisoformat(pause["since"]).strftime("%b %-d")
+
+
 def nights(pause: dict, today: date) -> int:
     """Pure: nights paused, tonight included."""
     return (today - datetime.fromisoformat(pause["since"]).date()).days + 1

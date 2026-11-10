@@ -173,7 +173,7 @@ async def check_nightly(db, model: str | None, request: dict, now: datetime | No
     from app.services import ai_pause
     pause = await ai_pause.paused(db)
     if pause:                                     # the key check found no credit: nothing is sent tonight (services/ai_pause)
-        raise NightlyBudgetReached(f"nightly AI call refused: AI paused since {pause['since'][:10]} ({pause.get('kind')})")
+        raise NightlyBudgetReached(f"nightly AI call refused: AI paused since {ai_pause.since_words(pause)} ({pause.get('kind')})")
     ceiling = call_ceiling_usd(model, request)
     if ceiling is None:
         return
