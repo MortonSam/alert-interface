@@ -127,7 +127,8 @@ async def featured(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_
     return {"symbol": sym if name else None, "name": name, "rule": pick.get("rule"), "date": pick.get("date"), "minutes": W.MINUTES}
 
 
-IVY_QUICK_PICKS = ("NVDA", "JPM")                  # the /ivy page's quick picks (Sam, 2026-11-03), offered only with a walkthrough entry
+QUICK_PICK_COUNT = 2                                # the /ivy page's quick picks, chosen by rule (Sam, 2026-11-10; NVDA and JPM by name before):
+QUICK_PICK_LOOK = 30                                # the largest companies whose served walkthrough shows content on all seven steps
 _ENTRY_CACHE: dict = {}
 
 
@@ -208,20 +209,42 @@ async def _check_example(db: AsyncSession) -> dict | None:
         await edgar.close()
 
 
+def full(payload: dict | None) -> bool:
+    """Pure: a served walkthrough (after the flags) with content on every one of its seven steps."""
+    steps = (payload or {}).get("steps") or []
+    return bool(payload and payload.get("entry")) and len(steps) == 7 and all(
+        s["status"] != "absent" and (s.get("numbers") or s.get("sentences") or s.get("risks")) for s in steps)
+
+
+async def quick_picks(db) -> list[str]:
+    """The quick picks: the QUICK_PICK_COUNT largest companies (by the stored market value, which only orders them) whose walkthrough,
+    as served, shows content on all seven steps."""
+    rows = (await db.execute(text("""SELECT w.symbol FROM ivy_walkthroughs w JOIN tickers t ON t.symbol = w.symbol
+        WHERE t.is_active AND w.steps_shown = 7 ORDER BY t.market_cap DESC NULLS LAST, w.symbol LIMIT :n"""), {"n": QUICK_PICK_LOOK})).scalars().all()
+    out = []
+    for sym in rows:
+        if full(await _payload(db, sym)):
+            out.append(sym)
+            if len(out) == QUICK_PICK_COUNT:
+                break
+    return out
+
+
 @router.get("/ivy-page")
 async def ivy_page(db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> dict:
-    """The /ivy page's live parts. quick_picks: IVY_QUICK_PICKS that have a walkthrough entry. ideas: for each of the seven steps, its
+    """The /ivy page's live parts. quick_picks: quick_picks(), each with a walkthrough entry. ideas: for each of the seven steps, its
     idea from the first quick pick (then the featured stock) where that step shows data, with the step to open. trust: counts of
     stored records, each with the date it is as of: served research notes (complete and checked), the statements in them the checker
     confirmed against the filings, and the stocks with a walkthrough entry."""
     _shown(admin)
-    examples = list(IVY_QUICK_PICKS)
+    picks = await quick_picks(db)
+    examples = list(picks)
     raw = (await db.execute(text("SELECT value FROM system_metadata WHERE key = 'ivy_featured'"))).scalar()
     featured = (json.loads(raw) if raw else {}).get("symbol")
     if featured and featured not in examples:
         examples.append(featured)
     payloads = {sym: p for sym in examples if (p := await _payload(db, sym))}
-    quick = [{"symbol": s, "name": payloads[s]["name"]} for s in IVY_QUICK_PICKS if s in payloads and payloads[s]["entry"]]
+    quick = [{"symbol": s, "name": payloads[s]["name"]} for s in picks if s in payloads and payloads[s]["entry"]]
     ideas = []
     for n in range(1, 8):
         for sym in examples:

@@ -133,7 +133,14 @@ describe("a check whose answer is the same for every stock", () => {
 
 describe("known-concept heading", () => {
   it("reads naturally for a title that starts with The", () => {
-    expect(WALK_COPY.knownFrom("The report move", "Tesla")).toBe("You know the report move from Tesla");
-    expect(WALK_COPY.knownFrom("Growth", "Micron Technology")).toBe("You know Growth from Micron Technology");
+    expect(WALK_COPY.knownFrom("Where the money comes from", "NVIDIA")).toBe("Where the money comes from, which you met in the NVIDIA walkthrough");
+    expect(WALK_COPY.knownFrom("Growth", "Micron Technology")).toBe("Growth, which you met in the Micron Technology walkthrough");
+    // every idea's title (backend services/walkthrough IDEAS) reads naturally: no doubled word, no capital after the start
+    for (const t of ["Where the money comes from", "Growth", "Margins", "Market or company", "Price for each $1 of profit", "Price to FFO",
+                     "The report move", "Risk factors"]) {
+      const line = WALK_COPY.knownFrom(t, "NVIDIA");
+      expect(line).not.toMatch(/\b(\w+) \1\b/i);
+      expect(line.slice(t.length)).toBe(", which you met in the NVIDIA walkthrough");
+    }
   });
 });
