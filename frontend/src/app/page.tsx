@@ -183,9 +183,9 @@ export default async function Home() {
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">
               The analyst
             </p>
-            {/* Sam's placeholder copy (2026-10-29); the picks ledger is not named on the home page */}
+            {/* Sam's line (2026-11-10), the same as the /ivy page's headline; the picks ledger is not named on the home page */}
             <h2 className="statement-h2 font-display font-bold text-foreground max-w-[20ch] mx-auto">
-              Ivy reads the filings so you can understand the company, and shows her work.
+              Ivy reads the filings, so you understand the company.
             </h2>
             <p className="text-sm text-muted-foreground mt-6 max-w-lg mx-auto">
               What it does, whether it&#39;s growing, how much of each sale it keeps, whether it&#39;s expensive, and what could go

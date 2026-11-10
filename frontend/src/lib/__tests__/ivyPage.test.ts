@@ -15,7 +15,7 @@ const lines = (): string[] => [
 
 describe("the one Ivy page (Sam, 2026-11-02)", () => {
   it("says what Sam wrote, and no line has a colon, a dash, a pick or advice", () => {
-    expect(IVY_PAGE.headline).toBe("Ivy reads the filings so you can understand the company, and shows her work.");
+    expect(IVY_PAGE.headline).toBe("Ivy reads the filings, so you understand the company.");
     expect(IVY_PAGE.closing).toBe("Ivy doesn't tell you what to buy or sell. She shows you how to decide for yourself.");
     for (const l of lines()) {
       expect(l, l).not.toMatch(/[:—–]/);
