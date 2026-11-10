@@ -225,3 +225,50 @@ def test_the_note_eps_check_skips_adjusted_non_gaap_trailing_four_quarter_and_ot
     assert named_quarter("Diluted EPS of $0.24 in the March 2026 quarter") == (date(2026, 3, 31), True)
     assert quarter_text_eps(["Year-to-date diluted EPS of $3.10 compares with $2.90."], JUNE) is None
     assert eps_disagreement(strip(1.50), "Diluted EPS of $1.71 for the quarter.", JUNE) == "strip EPS $1.50, text $1.71"   # unlabeled: compared
+
+
+# ── a served note survives its rewrite (Sam, 2026-11-10: an empty credit balance took 168 notes down, Nov 5 to 10) ──
+
+async def _row(tid):
+    from app.database import ScriptSessionLocal
+    async with ScriptSessionLocal() as s:
+        return (await s.execute(text("SELECT status, generated_at, structured_content->>'what_they_do' AS what, verification IS NOT NULL AS checked "
+                                     "FROM research_notes WHERE ticker_id = :t"), {"t": tid})).one()
+
+
+@pytest.mark.asyncio
+async def test_a_served_note_stays_served_through_a_failed_refused_or_held_rewrite_and_is_replaced_only_by_a_passed_one(monkeypatch, ticker_id):
+    from app.database import ScriptSessionLocal
+    from app.services import research_note_service as R
+    from app.services.ai_spend import NightlyBudgetReached
+    calls = _wire(monkeypatch, [0])
+    async with ScriptSessionLocal() as db:
+        await R.start_research_note_generation(db, ticker_id, None)
+    await R.run_research_note_background(ticker_id=ticker_id, symbol=SYM)
+    served = await _row(ticker_id)
+    assert served.status == "complete" and served.checked
+
+    for failure in (RuntimeError("Your credit balance is too low"), NightlyBudgetReached("refused")):
+        async def broken(prompt, symbol, failure=failure):
+            raise failure
+        monkeypatch.setattr(R, "_generate_structured", broken)
+        async with ScriptSessionLocal() as db:
+            assert (await R.start_research_note_generation(db, ticker_id, None)).status == "complete"     # nothing emptied at the start
+        await R.run_research_note_background(ticker_id=ticker_id, symbol=SYM)
+        assert tuple(await _row(ticker_id)) == tuple(served)                                            # the same note, its own date
+
+    calls = _wire(monkeypatch, [4, 4])                      # written twice, losing too much both times: held, but the served note stays
+    await R.run_research_note_background(ticker_id=ticker_id, symbol=SYM)
+    assert calls["gen"] == 2 and tuple(await _row(ticker_id)) == tuple(served)
+
+    async def verify_fails(*a, **k):
+        raise RuntimeError("verifier down")
+    _wire(monkeypatch, [0])
+    monkeypatch.setattr(R, "_run_verification", verify_fails)
+    await R.run_research_note_background(ticker_id=ticker_id, symbol=SYM)
+    assert tuple(await _row(ticker_id)) == tuple(served)
+
+    _wire(monkeypatch, [0])                                 # a rewrite that passes replaces it, with its new date
+    await R.run_research_note_background(ticker_id=ticker_id, symbol=SYM)
+    after = await _row(ticker_id)
+    assert after.status == "complete" and after.checked and after.generated_at > served.generated_at

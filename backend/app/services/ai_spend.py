@@ -65,19 +65,36 @@ NOTES_NIGHT_USD = 6.0
 NOTES_WITH_WALKTHROUGHS_USD = 6.0
 WALKTHROUGHS_NIGHT_USD = 5.0
 VISITOR_RESERVE_USD = 4.0
+VISITOR_RESERVE_SHARE = 0.5          # under a small cap visitors keep half of it (Sam, 2026-11-10: $3 a day until the plan's credit, Nov 19)
 WALKTHROUGH_STEP = "Ivy walkthroughs"
+
+
+# Until the plan's monthly credit arrives (Sam, 2026-11-10: $20 of credit, a $3 daily cap, until about Nov 19) the nightly spends on
+# notes alone: no note is written for a material 8-K alone or checked again (scripts/generate_notes), and the release reader reads
+# with its pattern parser only (scripts/seed_release_eps; nothing new is stored, since both readers must agree).
+SAVER_UNTIL = date(2026, 11, 19)
+
+
+def saver_on(today: date) -> bool:
+    return today < SAVER_UNTIL
+
+
+def visitor_reserve(cap: float) -> float:
+    """Pure: what visitors always keep of the day's cap: VISITOR_RESERVE_USD, or half of a cap too small to leave the nightly anything
+    above that ($1.50 of a $3 cap)."""
+    return min(VISITOR_RESERVE_USD, cap * VISITOR_RESERVE_SHARE)
 
 
 def notes_night_budget(cap: float, walkthroughs_live: bool) -> float:
     """Pure: what tonight's research notes may spend: their share, never past what leaves the walkthroughs theirs (when they run)
     and visitors VISITOR_RESERVE_USD."""
     share = NOTES_WITH_WALKTHROUGHS_USD if walkthroughs_live else NOTES_NIGHT_USD
-    return max(0.0, min(share, cap - VISITOR_RESERVE_USD - (WALKTHROUGHS_NIGHT_USD if walkthroughs_live else 0.0)))
+    return max(0.0, min(share, cap - visitor_reserve(cap) - (WALKTHROUGHS_NIGHT_USD if walkthroughs_live else 0.0)))
 
 
 def nightly_room(cap: float, spent_total: float) -> float:
     """Pure: what nightly-pool calls may still spend today: whatever keeps visitors VISITOR_RESERVE_USD of the cap."""
-    return max(0.0, cap - VISITOR_RESERVE_USD - spent_total)
+    return max(0.0, cap - visitor_reserve(cap) - spent_total)
 
 
 def call_ceiling_usd(model: str | None, request: dict) -> float | None:
@@ -153,13 +170,17 @@ async def check_nightly(db, model: str | None, request: dict, now: datetime | No
     call passes (its feature checks `cap_reached` itself); so does an unpriced model's call, which is counted apart."""
     if pool() != NIGHTLY:
         return
+    from app.services import ai_pause
+    pause = await ai_pause.paused(db)
+    if pause:                                     # the key check found no credit: nothing is sent tonight (services/ai_pause)
+        raise NightlyBudgetReached(f"nightly AI call refused: AI paused since {pause['since'][:10]} ({pause.get('kind')})")
     ceiling = call_ceiling_usd(model, request)
     if ceiling is None:
         return
     room = nightly_room(cap_usd(), await spend_today(db, now))
     if ceiling > room:
         raise NightlyBudgetReached(f"nightly AI call refused: it could cost ${ceiling:.2f} and only ${room:.2f} of today's "
-                                   f"${cap_usd():.0f} cap is left before visitors' ${VISITOR_RESERVE_USD:.0f}")
+                                   f"${cap_usd():.2f} cap is left before visitors' ${visitor_reserve(cap_usd()):.2f}")
 
 
 async def record_call(db, feature: str, cost: float | None, now: datetime | None = None) -> None:
@@ -195,5 +216,5 @@ async def summary(db, now: datetime | None = None) -> dict:
     spent = await spend_today(db, now)
     by_pool = {p: round(float(await get_value(db, f"{POOL_KEY}:{spend_day(now)}:{p}") or 0), 4) for p in (VISITOR, NIGHTLY)}
     return {"day": spend_day(now), "clock": "America/New_York", "spent_usd": round(spent, 4), "cap_usd": cap_usd(), "reached": reached(spent),
-            "unpriced_calls": await unpriced_today(db, now), "by_pool": by_pool, "visitor_reserve_usd": VISITOR_RESERVE_USD,
+            "unpriced_calls": await unpriced_today(db, now), "by_pool": by_pool, "visitor_reserve_usd": visitor_reserve(cap_usd()),
             "nightly_room_usd": round(nightly_room(cap_usd(), spent), 4)}

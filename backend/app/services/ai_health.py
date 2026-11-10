@@ -60,8 +60,9 @@ def _redacted(exc: BaseException) -> str:
     return redact(str(exc))[:300]
 
 
-async def record_failure(method: str, exc: BaseException) -> dict:
-    """Log the failed call at ERROR and keep it in system_metadata. Never raises."""
+async def record_failure(method: str, exc: BaseException, alarm: bool = True) -> dict:
+    """Log the failed call at ERROR and keep it in system_metadata. Never raises. alarm=False: no phone alert (the key check's
+    credit failure, whose pause sends its own, services/ai_pause)."""
     entry = {"at": datetime.now(timezone.utc).isoformat(), "feature": FEATURES.get(method, method), "method": method,
              "kind": classify(exc), "status": getattr(exc, "status_code", None), "message": _redacted(exc)}
     _log.error("Anthropic API call failed: %s (%s, status %s): %s", entry["feature"], entry["kind"], entry["status"], entry["message"])
@@ -80,7 +81,7 @@ async def record_failure(method: str, exc: BaseException) -> dict:
             await s.commit()
     except Exception as e:                       # the record must never turn a failed call into a second failure
         _log.error("could not record the failed API call: %s", e)
-    if first:
+    if first and alarm:
         try:
             from app.services.notify import PRIORITY_HIGH, notify
             await notify(*alarm_message(entry), PRIORITY_HIGH, ("rotating_light",))
