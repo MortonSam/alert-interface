@@ -660,8 +660,13 @@ async def start_research_note_generation(
     ticker_id: uuid.UUID | None,
     symbol: str | None,
 ) -> ResearchNote:
-    """Upsert a placeholder row with status='generating' and return immediately."""
+    """Upsert a placeholder row with status='generating' and return immediately. A stock whose note is served keeps that row as it
+    is (Sam, 2026-11-10): the rewrite replaces it only once the new note passes its check (run_research_note_background), so a
+    failed, refused or held rewrite never takes a served note down."""
     ticker = await _resolve_ticker(db, ticker_id, symbol)
+    existing = (await db.execute(select(ResearchNote).where(ResearchNote.ticker_id == ticker.id))).scalar_one_or_none()
+    if existing is not None and is_verified(existing):
+        return existing
 
     now = datetime.now(timezone.utc)
     stmt = (
@@ -756,8 +761,11 @@ async def run_research_note_background(
             await refund_use(db, RESEARCH_GENERATION_POLICY, charge["ip"], charge.get("at"))
 
     async with AsyncSessionLocal() as db:
+        served = False                                    # a served note stands: nothing is written until the new one passes its check
         try:
             ticker = await _resolve_ticker(db, ticker_id, symbol)
+            standing = (await db.execute(select(ResearchNote).where(ResearchNote.ticker_id == ticker.id))).scalar_one_or_none()
+            served = standing is not None and is_verified(standing)
             filing, sections, reactions = await _fetch_context(db, ticker)
             from app.services.material_filings import prompt_block as material_prompt_block
             from app.services.note_live import keep_available, values_for
@@ -796,22 +804,12 @@ async def run_research_note_background(
             now = datetime.now(timezone.utc)
             gen_cost = estimate_cost_usd(gen["model_used"], gen["input_tokens"], gen["output_tokens"],
                                          gen.get("cache_write_tokens", 0), gen.get("cache_read_tokens", 0))
-            await db.execute(
-                update(ResearchNote)
-                .where(ResearchNote.ticker_id == ticker.id)
-                .values(
-                    content            = content_text,
-                    structured_content = structured,
-                    model_used         = gen["model_used"],
-                    input_tokens       = gen["input_tokens"],
-                    output_tokens      = gen["output_tokens"],
-                    estimated_cost_usd = gen_cost,
-                    source_filings     = source_filings,
-                    status             = "verifying",
-                    data_version       = NOTE_RULE_VERSION,
-                    updated_at         = now,
-                )
-            )
+            draft = dict(content=content_text, structured_content=structured, model_used=gen["model_used"], input_tokens=gen["input_tokens"],
+                         output_tokens=gen["output_tokens"], estimated_cost_usd=gen_cost, source_filings=source_filings,
+                         data_version=NOTE_RULE_VERSION, generated_at=now)
+            if not served:                                  # with a served note standing, the draft waits for its check
+                await db.execute(update(ResearchNote).where(ResearchNote.ticker_id == ticker.id)
+                                 .values(**{k: v for k, v in draft.items() if k != "generated_at"}, status="verifying", updated_at=now))
             await _add_to_daily_spend(db, gen_cost, now)   # spent whether or not verification passes
             await db.commit()
 
@@ -821,9 +819,12 @@ async def run_research_note_background(
                 print(f"Research note for {symbol}: not written tonight ({exc})", flush=True)
                 await _refund(db)
                 return
-            print(f"Research note generation failed for {symbol}: {exc!r}", flush=True)
+            print(f"Research note generation failed for {symbol}: {exc!r}" + (" (the served note stays)" if served else ""), flush=True)
             from app.services import user_errors
             await user_errors.record("research_note", exc, symbol)          # the digest gets the real error; the note says PLAIN
+            if served:
+                await _refund(db)
+                return
             now = datetime.now(timezone.utc)
             await db.execute(
                 update(ResearchNote)
@@ -844,21 +845,23 @@ async def run_research_note_background(
             total_cost = None if gen_cost is None and ver_cost is None else (gen_cost or 0.0) + (ver_cost or 0.0)
             verdict = check_outcome(structured, verification)
             status = "complete" if verdict is None else ("verifying" if not regenerated else STATUS_HELD)
-            await db.execute(
-                update(ResearchNote)
-                .where(ResearchNote.ticker_id == ticker.id)
-                .values(
-                    verification       = verification,
-                    verified_at        = now,
-                    verification_model = verification_model,
-                    verification_input_tokens  = ver_in,
-                    verification_output_tokens = ver_out,
-                    estimated_cost_usd = total_cost,
-                    status             = status,
-                    error              = None if verdict is None else f"held: {verdict}",
-                    updated_at         = now,
+            if not (served and verdict is not None):   # a rewrite that did not pass leaves the served note untouched
+                await db.execute(
+                    update(ResearchNote)
+                    .where(ResearchNote.ticker_id == ticker.id)
+                    .values(
+                        **({k: v for k, v in draft.items() if k != "estimated_cost_usd"} if served else {}),   # the passed rewrite replaces the served note in one write
+                        verification       = verification,
+                        verified_at        = now,
+                        verification_model = verification_model,
+                        verification_input_tokens  = ver_in,
+                        verification_output_tokens = ver_out,
+                        estimated_cost_usd = total_cost,
+                        status             = status,
+                        error              = None if verdict is None else f"held: {verdict}",
+                        updated_at         = now,
+                    )
                 )
-            )
             await _add_to_daily_spend(db, ver_cost, now)
             await db.commit()
             if verdict is not None:
@@ -870,9 +873,12 @@ async def run_research_note_background(
                 else:
                     await run_research_note_background(ticker_id, symbol, charge, regenerated=True)
         except Exception as exc:
-            print(f"Verification failed for {symbol}: {exc!r} — note withheld from visitors", flush=True)
+            print(f"Verification failed for {symbol}: {exc!r}" + (" (the served note stays)" if served else " — note withheld from visitors"), flush=True)
             from app.services import user_errors
             await user_errors.record("research_verify", exc, symbol)
+            if served:
+                await _refund(db)
+                return
             now = datetime.now(timezone.utc)
             await db.execute(
                 update(ResearchNote)

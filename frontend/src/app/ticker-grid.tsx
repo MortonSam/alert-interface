@@ -1,7 +1,7 @@
 "use client";
 
 import { visitorMessage } from "@/lib/errors";
-import { datasetAgeLine, datasetsStale, freshnessLine } from "@/lib/freshness";
+import { priceSourceLine } from "@/lib/freshness";
 import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
@@ -10,6 +10,8 @@ import { SHARE_CLASS, gridEarningsLine } from "@/lib/earningsSource";
 
 import { fmtDate as fmtOneDate } from "@/lib/dates";
 const PAGE_SIZE = 24;            // before the grid's box is measured
+export const PHONE_PAGE_SIZE = 10;   // below 640px the section grows with its page: about ten whole cards (Sam, 2026-11-10)
+const PHONE_QUERY = "(max-width: 639.98px)";
 const GRID_GAP_PX = 12;          // gap-3
 const ROW_GUESS_PX = 120;        // a card's height before one is on screen
 
@@ -19,19 +21,6 @@ export function fitPageSize(boxHeight: number, cols: number, rowHeight: number, 
   const rows = Math.max(1, Math.floor((boxHeight + gap) / (rowHeight + gap)));
   return Math.max(1, cols) * rows;
 }
-
-function fmtAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-// the grid shows next earnings dates and earnings history: those datasets date its freshness line
-const GRID_DATASETS = ["earnings_calendar", "reactions"];
 
 const fmtMcap = fmtMarketCap;
 
@@ -63,7 +52,9 @@ export function TickerGrid() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sector, setSector] = useState<string | null>(null);
-  const [sort, setSort] = useState<SortKey>("market_cap");
+  // the market cap on file is withheld from visitors (personal-use data): with none shown, no sort may claim it (Sam, 2026-11-10:
+  // "Market Cap ↓" over an alphabetical list); the default is then the order the list really has
+  const [sort, setSort] = useState<SortKey>("symbol");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const gridBox = useRef<HTMLDivElement | null>(null);
@@ -71,7 +62,10 @@ export function TickerGrid() {
   useEffect(() => {
     api.tickers
       .list()
-      .then(setTickers)
+      .then((t) => {
+        setTickers(t);
+        if (t.some((x) => x.market_cap != null)) setSort((cur) => (cur === "symbol" ? "market_cap" : cur));
+      })
       .catch((e: Error) => setError(visitorMessage(e)))
       .finally(() => setLoading(false));
     api.system.status().then(setSystemStatus).catch(() => null);
@@ -140,6 +134,10 @@ export function TickerGrid() {
     const box = gridBox.current;
     if (!box) return;
     const measure = () => {
+      if (window.matchMedia(PHONE_QUERY).matches) {        // a phone: a fixed page of whole cards, the section grows to hold it
+        setPageSize((cur) => (cur === PHONE_PAGE_SIZE ? cur : PHONE_PAGE_SIZE));
+        return;
+      }
       const grid = box.firstElementChild as HTMLElement | null;
       if (!grid) return;
       const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
@@ -153,7 +151,9 @@ export function TickerGrid() {
     ro.observe(box);
     return () => ro.disconnect();
   }, [loading, filtered.length === 0]);
-  const isFiltered = !!debouncedSearch || !!sector || sort !== "market_cap";
+  const hasCaps = tickers.some((t) => t.market_cap != null);
+  const defaultSort: SortKey = hasCaps ? "market_cap" : "symbol";
+  const isFiltered = !!debouncedSearch || !!sector || sort !== defaultSort;
 
   // ── Batch quote fetch for the current page ──────────────────────────────────
   const [quotes, setQuotes] = useState<Map<string, BatchQuote>>(new Map());
@@ -179,7 +179,7 @@ export function TickerGrid() {
     setSearch("");
     setDebouncedSearch("");
     setSector(null);
-    setSort("market_cap");
+    setSort(defaultSort);
   }, []);
 
   if (loading) {
@@ -227,15 +227,9 @@ export function TickerGrid() {
 
   return (
     <section className="mt-8 flex flex-1 min-h-0 flex-col gap-4">
-      {/* Freshness indicator */}
+      {/* The price delay note alone: a refresh step's state is Sam's (the digest and the phone alert), never a visitor's (2026-11-10) */}
       <div className="flex justify-end items-center">
-        <span
-          className={`text-xs ${
-            datasetsStale(systemStatus?.datasets, GRID_DATASETS) ? "text-warning" : "text-muted-foreground"
-          }`}
-        >
-          {freshnessLine(datasetAgeLine(systemStatus?.datasets, GRID_DATASETS, fmtAgo), systemStatus?.cadence)}
-        </span>
+        <span className="text-xs text-muted-foreground">{priceSourceLine(systemStatus?.cadence)}</span>
       </div>
 
       {/* Search + Sort */}
@@ -252,7 +246,7 @@ export function TickerGrid() {
           onChange={(e) => setSort(e.target.value as SortKey)}
           className="h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
-          <option value="market_cap">Market Cap ↓</option>
+          {hasCaps && <option value="market_cap">Market Cap ↓</option>}
           <option value="symbol">Symbol A-Z</option>
           <option value="name">Name A-Z</option>
           <option value="next_earnings">Next Earnings</option>
@@ -318,7 +312,7 @@ export function TickerGrid() {
           </button>
         </div>
       ) : (
-        <div ref={gridBox} className="flex-1 min-h-0 overflow-hidden flex flex-col justify-center">
+        <div ref={gridBox} className="sm:flex-1 sm:min-h-0 sm:overflow-hidden flex flex-col sm:justify-center">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
           {paginated.map((ticker) => {
             const q = quotes.get(ticker.symbol);
@@ -362,13 +356,13 @@ export function TickerGrid() {
 
                 {/* Company name */}
                 {ticker.name && (
-                  <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
+                  <div className="text-xs text-muted-foreground sm:line-clamp-2 leading-snug">
                     {ticker.name}{SHARE_CLASS[ticker.symbol] ? `, ${SHARE_CLASS[ticker.symbol]}` : ""}
                   </div>
                 )}
 
                 {/* Footer: Sector + Market Cap + Earnings */}
-                <div className="mt-auto pt-1 space-y-0.5">
+                <div className="sm:mt-auto pt-1 space-y-0.5">
                   <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     {/* the full sector name, wrapped, never truncated */}
                     {ticker.sector && (

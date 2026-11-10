@@ -2099,6 +2099,11 @@ async def check_ai_api(session) -> CheckResult:
                                serious_raw=await get_value(session, H.SERIOUS_KEY))
     check, serious = summary["key_check"], summary["last_billing_or_auth_failure"]
     rows = [f"{f['at']} {f['feature']}: {f['kind']} (status {f['status']}) {f['message'][:120]}" for f in _json.loads(await get_value(session, H.FAILURES_KEY) or "[]")[:10]]
+    from app.services import ai_pause
+    pause = ai_pause.parse(await get_value(session, ai_pause.PAUSE_KEY))
+    if pause and check and check.get("ok") is False:          # known, alerted and handled: the night's AI is paused (services/ai_pause)
+        return CheckResult("ai_api", WARN, f"AI paused since {pause['since'][:10]} ({pause.get('kind')}): the key check failed at {check['at']}; "
+                           "AI steps skip until a key check passes", rows)
     if check and check.get("ok") is False:
         return CheckResult("ai_api", ERROR, f"The nightly AI key check failed at {check['at']}: {check.get('error')}", rows)
     if summary["billing_or_auth_failure_recent"]:
@@ -3936,6 +3941,10 @@ async def check_step_age(session) -> CheckResult:
     ))).all()
     stored = {k[len("step:"):-len(":last_success")]: v for k, v in rows}
     steps = {label: stored.get(label) for label, _ in STEPS if label != "Validate data"}
+    from app.services import ai_pause
+    from app.services.system_metadata_service import get_value
+    if ai_pause.parse(await get_value(session, ai_pause.PAUSE_KEY)):      # skipped for the AI pause, not failing: their age says nothing
+        steps = {k: v for k, v in steps.items() if k not in ai_pause.AI_ONLY_STEPS and k != "AI key check"}
     return step_age_result(steps, datetime.now(timezone.utc))
 
 

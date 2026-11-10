@@ -275,6 +275,49 @@ def _run_step(label: str, cmd: list[str]) -> bool:
     return ok
 
 
+def _pause() -> dict | None:
+    """The AI pause the key check recorded tonight (services/ai_pause), or None."""
+    from app.services import ai_pause
+    try:
+        return ai_pause.parse(_db_get(ai_pause.PAUSE_KEY))
+    except Exception:
+        return None
+
+
+def _skip_step(label: str, pause: dict) -> bool:
+    """An AI-only step skipped for the pause: recorded as skipped with its reason, never failed (its last success stays its own)."""
+    print(f"\n  [SKIP] {label}: AI paused since {pause['since'][:10]} ({pause.get('kind')}); no model call sent")
+    try:
+        raw = _db_get("step_outcomes")
+        outcomes = json.loads(raw) if raw else {}
+        entry = outcomes.get(label, {})
+        entry.update({"exit": 0, "seconds": 0, "at": datetime.now(timezone.utc).isoformat(),
+                      "skipped": f"AI paused since {pause['since'][:10]} ({pause.get('kind')})"})
+        outcomes[label] = entry
+        _db_upsert("step_outcomes", json.dumps(outcomes))
+    except Exception as exc:
+        print(f"  [WARN] could not record the skip of {label}: {redact(exc)}")
+    _record_step_timing(label, datetime.now(timezone.utc), 0.0, True)
+    return True
+
+
+def _alert_pause(pause: dict, skipped: list[str]) -> None:
+    """The pause's phone alert: high priority the first night, a reminder every night after (services/ai_pause.alert_for)."""
+    from app.services import ai_pause
+    from datetime import date as _date
+    today = _date.today()
+    msg = ai_pause.alert_for(pause, today, skipped)
+    if not msg:
+        return
+    try:
+        from app.services.notify import PRIORITY_DEFAULT, PRIORITY_HIGH, notify_sync
+        title, body, high = msg
+        notify_sync(title, body, PRIORITY_HIGH if high else PRIORITY_DEFAULT, ("pause_button",))
+        _db_upsert(ai_pause.PAUSE_KEY, json.dumps({**pause, "alerted_on": today.isoformat()}))
+    except Exception as exc:
+        print(f"  [WARN] could not send the AI pause alert: {redact(exc)}")
+
+
 def _alert_step_failure(label: str, exit_code: int, seconds: float, tail: str | None) -> None:
     """One ntfy message per failed or timed-out step (services/notify)."""
     try:
@@ -459,8 +502,13 @@ def main(slot: str | None = None) -> int:
         except (TypeError, ValueError):
             pass
     _record_run(run_fields)
+    from app.services.ai_pause import AI_ONLY_STEPS
+    skipped_ai = [label for label, _ in STEPS if label in AI_ONLY_STEPS]
     for label, cmd in todo:
-        ok = _run_step(label, cmd)
+        pause = _pause() if label in AI_ONLY_STEPS else None
+        ok = _skip_step(label, pause) if pause else _run_step(label, cmd)
+        if label in PROBE_STEPS and (pause := _pause()):
+            _alert_pause(pause, skipped_ai)
         results.append((label, ok))
         if slot and ok:
             done[label] = datetime.now(timezone.utc).isoformat()
@@ -499,6 +547,9 @@ def main(slot: str | None = None) -> int:
         raw = _db_get("step_outcomes")
         title, body = digest_fields(results, json.loads(raw) if raw else {}, datetime.now(timezone.utc))
         body += user_errors_tail(datetime.now(timezone.utc))
+        from app.services.ai_pause import digest_line
+        from datetime import date as _d
+        body += digest_line(_pause(), _d.today(), skipped_ai)
         from app.services.ai_spend import cap_reminders, cap_usd, spend_day
         from datetime import date as _date
         for r in cap_reminders(_date.fromisoformat(spend_day()), cap_usd()):

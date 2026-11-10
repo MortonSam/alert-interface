@@ -124,7 +124,10 @@ async def run(argv: list[str]) -> int:
     yoy_warnings = []
     disagreements = []
     model_costs: list[float] = []
-    use_model = "--no-model" not in argv
+    from app.services.ai_spend import SAVER_UNTIL, saver_on
+    use_model = "--no-model" not in argv and not saver_on(date.today())
+    if not use_model and "--no-model" not in argv:
+        print(f"  the model reader is off until {SAVER_UNTIL} (services/ai_spend.saver_on): the pattern parser reads, nothing new stores", flush=True)
     model_client = None
     if use_model:
         from app.config import settings

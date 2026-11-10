@@ -96,8 +96,9 @@
 main .screen-section { min-height: calc(100svh - 3.25rem - 1px); }
 /* A section whose content would run past one screen (the market grid) is held to exactly one, and fits its content to it: the grid
    shows the whole rows that fit (app/ticker-grid fitPageSize). Every home section is then one screen, so a section scrolled to
-   fills the screen alone (Sam, 2026-11-02). */
-main .screen-fit { height: calc(100svh - 3.25rem - 1px); }
+   fills the screen alone (Sam, 2026-11-02). From 640px up only: on a phone the market section grows with its page of whole cards
+   (Sam, 2026-11-10: one clipped row and 252 pages on an iPhone). */
+@media (min-width: 640px) { main .screen-fit { height: calc(100svh - 3.25rem - 1px); } }
 
 /* Headings are Newsreader (self-hosted; app/layout.tsx). Large and section headlines at 600; smaller headings a step heavier so
    they hold at small sizes; a serif's tracking (-0.01em) whatever tracking utility a heading carries. */
@@ -114,4 +115,10 @@ main .screen-fit { height: calc(100svh - 3.25rem - 1px); }
   text-underline-offset: 4px;
   text-decoration-color: hsl(var(--muted-foreground) / 0.6);
   cursor: help;
+}
+
+/* The home page's Ivy section on a phone (Sam, 2026-11-10): not a full screen; its top keeps the space centering gave it (half of a
+   screen less its content, about 25.5rem at 390 wide) and it ends at its button, so the next section starts 2rem below it. */
+@media (max-width: 639.98px) {
+  main .screen-section.ivy-home-section { min-height: 0; padding-top: max(3rem, calc((100svh - 3.25rem - 1px - 25.5rem) / 2)); padding-bottom: 0; }
 }

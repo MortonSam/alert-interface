@@ -177,7 +177,9 @@ export default async function Home() {
         </section>
 
         {/* ── 6. The Analyst ───────────────────────────────────── */}
-        <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8">
+        {/* On a phone the section ends at its button (Sam, 2026-11-10): the space above its content stays what centering gave it, and
+            "See it in action" follows at the section's own spacing instead of half a screen below */}
+        <section className="screen-section py-12 sm:py-0 flex items-center justify-center px-4 sm:px-8 ivy-home-section">
           <div className="text-center">
             <IvyMark size={48} className="mb-5" />
             <p className="font-mono text-xs uppercase tracking-[.16em] text-primary mb-6">

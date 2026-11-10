@@ -379,6 +379,11 @@ async def apply_ticker(session, ticker: Ticker, stored: list[Event], protected: 
         if res.action == "superseded":
             plan.superseded.append(label)
             await session.delete(e)
+        elif res.action == "reported" and res.report_date != e.event_date and await _has_report(session, ticker.id, res.report_date, e.id):
+            # the report is already on file under its own date (TECH, 2026-11-10: confirmed Nov 6 beside a stale Nov 9 estimate);
+            # moving the estimate onto it would break the one-row-per-date key and fail the night's whole ticker: it is the same report
+            plan.superseded.append(f"{label} (the {res.report_date.isoformat()} report is already on file)")
+            await session.delete(e)
         elif res.action == "reported":
             e.event_date = res.report_date
             e.is_confirmed = True
@@ -399,6 +404,13 @@ async def apply_ticker(session, ticker: Ticker, stored: list[Event], protected: 
         plan.no_date.append(ticker.symbol)
     ticker.earnings_checked_at = now
     plan.checked += 1
+
+
+async def _has_report(session, ticker_id, day: date, other_than) -> bool:
+    """Another earnings row of the ticker already holds `day`."""
+    from sqlalchemy import select as _select
+    return (await session.execute(_select(Event.id).where(Event.ticker_id == ticker_id, Event.event_type == EventType.EARNINGS,
+                                                          Event.event_date == day, Event.id != other_than).limit(1))).first() is not None
 
 
 async def reconcile(session, tickers: list[Ticker], sources: dict, now: datetime, edgar: EdgarClient | None = None,

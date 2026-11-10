@@ -30,6 +30,8 @@ MAX_PER_NIGHT = 170
 CONCURRENCY = 4
 NOTE_ROOM_USD = 0.75           # the most one note's calls can cost (writing, check, a second writing and its check, at their
                                # ceilings): a note starts only with this much room per running note (services/ai_spend.nightly_room)
+# Until services/ai_spend.SAVER_UNTIL: notes go to the companies that reported most recently, the largest first; a material 8-K
+# alone makes no note due, and no note is checked again.
 NOTE_SECONDS = 840             # one note's generation and verification, and its second writing, each bounded by MODEL_TIMEOUT_SECONDS
 
 
@@ -53,7 +55,17 @@ def due_kind(status: str | None, stale: bool, check_version: int | None = None, 
     return None
 
 
-def queue(rows: list[tuple], limit: int) -> list[str]:
+def saver_on(today: date) -> bool:
+    from app.services.ai_spend import saver_on as on
+    return on(today)
+
+
+def concurrency_for(budget: float) -> int:
+    """Pure: notes run at once: CONCURRENCY, fewer when tonight's budget holds less than two notes' ceilings each (one under $3)."""
+    return max(1, min(CONCURRENCY, int(budget // (2 * NOTE_ROOM_USD))))
+
+
+def queue(rows: list[tuple], limit: int, saver: bool = False) -> list[str]:
     """Pure: rows (symbol, note status or None, reported or filed a material 8-K since the note[, the check's version[, market value[,
     hidden from visitors[, inputs disagree]]]]) to tonight's symbols: no note and a hidden note first, then a failed generation or check, then a note
     checked before the current check, then a note the company has reported since; within each, the largest market value first
@@ -61,14 +73,19 @@ def queue(rows: list[tuple], limit: int) -> list[str]:
     due = []
     for r in rows:
         k = due_kind(r[1], r[2], r[3] if len(r) > 3 else None, bool(r[5]) if len(r) > 5 else False, bool(r[6]) if len(r) > 6 else False)
-        if k is not None:
+        if k is None or (saver and k[1] == "recheck"):
+            continue
+        if saver:       # rows[7]: the latest report: the most recent first, then the largest (SAVER_UNTIL)
+            reported = r[7] if len(r) > 7 and r[7] else date.min
+            due.append((-reported.toordinal(), -(r[4] or 0), r[0]))
+        else:
             due.append((k[0], -(r[4] or 0) if len(r) > 4 else 0, r[0]))
     return [sym for _, _, sym in sorted(due)][:limit]
 
 
 async def candidates(today: date) -> list[tuple]:
-    """(symbol, status, stale, check version, market value, hidden from visitors, inputs disagree) for every active stock. Stale: the
-    company reported, or filed a material 8-K, after the note was written."""
+    """(symbol, status, stale, check version, market value, hidden from visitors, inputs disagree, latest report) for every active stock.
+    Stale: the company reported, or (after SAVER_UNTIL) filed a material 8-K, after the note was written."""
     from app.models.research_note import ResearchNote
     from app.services.material_filings import newer_than, stored
     from app.services.note_quarters import disagreement, note_inputs
@@ -79,7 +96,9 @@ async def candidates(today: date) -> list[tuple]:
             SELECT t.symbol, t.market_cap, n.id AS note_id, n.status, (n.verification->>'version')::int AS check_version,
                    n.generated_at,
                    EXISTS (SELECT 1 FROM events e WHERE e.ticker_id = t.id AND e.event_type = 'earnings' AND e.is_confirmed
-                           AND e.event_date >= (n.generated_at AT TIME ZONE 'America/New_York')::date AND e.event_date <= :today) AS stale
+                           AND e.event_date >= (n.generated_at AT TIME ZONE 'America/New_York')::date AND e.event_date <= :today) AS stale,
+                   (SELECT max(e.event_date) FROM events e WHERE e.ticker_id = t.id AND e.event_type = 'earnings'
+                           AND (e.is_confirmed OR e.eps_actual IS NOT NULL) AND e.event_date <= :today) AS reported
             FROM tickers t LEFT JOIN research_notes n ON n.ticker_id = t.id
             WHERE t.is_active ORDER BY t.symbol"""), {"today": today})).all()
         notes = {n.id: n for n in (await db.execute(select(ResearchNote).where(ResearchNote.status == "complete"))).scalars().all()}
@@ -89,9 +108,9 @@ async def candidates(today: date) -> list[tuple]:
             hidden = bool(n and withheld(n))
             disagree = bool(n and is_verified(n) and disagreement(await note_inputs(db, n)))
             written = r.status not in (None, "failed", "verification_failed")
-            material = bool(written and r.generated_at and newer_than(await stored(db, r.symbol), r.generated_at))
+            material = bool(written and not saver_on(today) and r.generated_at and newer_than(await stored(db, r.symbol), r.generated_at))
             out.append((r.symbol, r.status, bool(r.stale or material) if written else False, r.check_version,
-                        r.market_cap, hidden, disagree))
+                        r.market_cap, hidden, disagree, r.reported))
     return out
 
 
@@ -107,12 +126,22 @@ async def write_waits(edgar, symbol: str, today: date) -> str | None:
     return f"waiting: the inputs name different quarters ({why})" if why else None
 
 
-async def outcome_of(symbol: str) -> str:
+async def written_at(symbol: str):
     async with AsyncSessionLocal() as db:
-        row = (await db.execute(text("""SELECT n.status, n.verification IS NOT NULL AS checked, n.estimated_cost_usd
+        return (await db.execute(text("SELECT n.generated_at FROM research_notes n JOIN tickers t ON t.id = n.ticker_id WHERE t.symbol = :s"),
+                                 {"s": symbol})).scalar()
+
+
+async def outcome_of(symbol: str, before=None) -> str:
+    """The rewrite's outcome. `before`: the served note's written time when one stood; unchanged after the rewrite means the
+    rewrite did not pass (or was refused) and the served note stays ("kept"), never a failure of the note shown (Sam, 2026-11-10)."""
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(text("""SELECT n.status, n.verification IS NOT NULL AS checked, n.estimated_cost_usd, n.generated_at
             FROM research_notes n JOIN tickers t ON t.id = n.ticker_id WHERE t.symbol = :s"""), {"s": symbol})).first()
     if row is None:
         return "missing"
+    if before is not None and row.generated_at == before and row.status == "complete" and row.checked:
+        return "kept"
     return "passed" if row.status == "complete" and row.checked else row.status
 
 
@@ -123,7 +152,7 @@ async def run(argv: list[str]) -> int:
     check_production_key()
     limit = next((int(a.split("=", 1)[1]) for a in argv if a.startswith("--limit=")), MAX_PER_NIGHT)
     rows = await candidates(date.today())
-    todo = queue(rows, limit)
+    todo = queue(rows, limit, saver_on(date.today()))
     kind = {r[0]: due_kind(r[1], r[2], r[3], r[5], r[6])[1] for r in rows if r[0] in set(todo)}
     from app.services.edgar_client import EdgarClient
     edgar = EdgarClient()
@@ -136,19 +165,21 @@ async def run(argv: list[str]) -> int:
     async with AsyncSessionLocal() as db:
         spent_at_start = await ai_spend.spend_today(db)
     budget = ai_spend.notes_night_budget(ai_spend.cap_usd(), ai_spend.walkthroughs_live())
-    sem = asyncio.Semaphore(CONCURRENCY)
+    running = concurrency_for(budget)
+    sem = asyncio.Semaphore(running)
     t0 = time.monotonic()
 
     async def one(sym: str) -> None:
         nonlocal stopped
+        before = None
         async with sem:
             if stopped:
                 return
             async with AsyncSessionLocal() as db:
                 spent = await ai_spend.spend_today(db)
-                if spent - spent_at_start >= budget or ai_spend.nightly_room(ai_spend.cap_usd(), spent) < NOTE_ROOM_USD * CONCURRENCY:
+                if spent - spent_at_start >= budget or ai_spend.nightly_room(ai_spend.cap_usd(), spent) < NOTE_ROOM_USD * running:
                     stopped = (f"stopped at ${spent:.2f} of the ${ai_spend.cap_usd():.0f} daily cap: notes' ${budget:.0f} for the night used "
-                               f"or ${ai_spend.VISITOR_RESERVE_USD:.0f} left for visitors")
+                               f"or ${ai_spend.visitor_reserve(ai_spend.cap_usd()):.2f} left for visitors")
                     return
                 if kind[sym] == "write":
                     try:
@@ -160,7 +191,9 @@ async def run(argv: list[str]) -> int:
                         results[sym] = waits
                         print(f"  {sym}: {waits}", flush=True)
                         return
-                    ticker_id = (await start_research_note_generation(db, None, sym)).ticker_id
+                    standing = await start_research_note_generation(db, None, sym)
+                    ticker_id = standing.ticker_id
+                    before = standing.generated_at if standing.status == "complete" and standing.verification is not None else None
             try:
                 if kind[sym] == "recheck":
                     await asyncio.wait_for(recheck_note(sym), NOTE_SECONDS)
@@ -169,7 +202,7 @@ async def run(argv: list[str]) -> int:
             except Exception as exc:                      # the background path records its own failure; a timeout is noted here
                 from app.services.redact import redact
                 print(f"  {sym}: {redact(exc)[:120]}", flush=True)
-            results[sym] = await outcome_of(sym)
+            results[sym] = await outcome_of(sym, before if kind[sym] == "write" else None)
             print(f"  {sym}: {results[sym]}", flush=True)
 
     try:
