@@ -37,6 +37,13 @@ STEP_LABEL = "Release EPS (8-K exhibits)"
 WRITES = WriteFailures(STEP_LABEL)
 WRITES = WriteFailures(STEP_LABEL)
 LOOKBACK_DAYS = 45
+READ_KEY = "release_eps_read"     # system_metadata: {"SYM|YYYY-MM-DD": "the 8-K accessions both readers read"}: each release is read once
+                                  # (Sam, 2026-11-10: the unread ones were read again every night, $3.41 on Nov 4); a new 8-K reads again
+
+
+def read_before(done: dict, sym: str, report_date, accessions: list[str]) -> bool:
+    """Pure: both readers have already read these 8-Ks for this report."""
+    return done.get(f"{sym}|{report_date}") == ",".join(sorted(accessions))
 MATCH_DAYS = 5          # the 8-K is filed within this many days of the report
 
 
@@ -136,8 +143,14 @@ async def run(argv: list[str]) -> int:
             model_client = AnthropicClient()
         else:
             print("  no Anthropic key: the model reader is off, so nothing can store (both readers must agree)", flush=True)
+    import json as _json
+    from app.services.system_metadata_service import get_value, set_value
+    async with ScriptSessionLocal() as s:
+        done = _json.loads(await get_value(s, READ_KEY) or "{}")
+    skipped_read = 0
     try:
         for sym, report_date in rows:
+            model_tried = False
             try:
                 cik = await edgar.get_cik(sym)
                 if not cik:
@@ -146,6 +159,9 @@ async def run(argv: list[str]) -> int:
                         and abs((date.fromisoformat(r["filing_date"]) - report_date).days) <= MATCH_DAYS]
                 if not recs:
                     print(f"  {sym} {report_date}: no Item 2.02 8-K within {MATCH_DAYS} days"); unread += 1; continue
+                accessions = [r["accession"] for r in recs]
+                if due and model_client is not None and read_before(done, sym, report_date, accessions):
+                    skipped_read += 1; unread += 1; continue           # both readers read these 8-Ks already: not again until a new one
                 ex, hit, rec = None, None, recs[0]
                 releases, kept, kept_rec = 0, [], recs[0]
                 for rec in recs:                              # a company may file more than one Item 2.02 8-K that week (DTE Gas beside DTE Energy)
@@ -178,6 +194,7 @@ async def run(argv: list[str]) -> int:
                     try:
                         cands = exhibit_candidates(texts)
                         exhibit_for_model = ex[1] if ex else (cands[0][1] if cands else "")
+                        model_tried = True
                         model = await R.model_read(model_client, exhibit_for_model, report_date)
                         if model.get("cost_usd") is not None:
                             model_costs.append(model["cost_usd"])
@@ -228,16 +245,27 @@ async def run(argv: list[str]) -> int:
             except Exception as exc:
                 WRITES.note(f"{sym} {report_date}", exc)
                 print(f"  {sym} {report_date}: failed: {redact(exc)[:120]}"); unread += 1
+            finally:
+                if model_tried and write:            # read by both readers: recorded, so it is never read again for the same 8-Ks
+                    done[f"{sym}|{report_date}"] = ",".join(sorted(accessions))
     finally:
         await edgar.close()
+        if write:
+            cutoff = (today - timedelta(days=LOOKBACK_DAYS + 5)).isoformat()
+            done = {k: v for k, v in done.items() if k.split("|")[1] >= cutoff}       # past the lookback nothing is read again anyway
+            async with ScriptSessionLocal() as s:
+                await set_value(s, READ_KEY, _json.dumps(done))
+                await s.commit()
     total_cost = round(sum(model_costs), 4)
+    print(f"  {skipped_read} release(s) both readers had read before were not read again", flush=True)
     print(f"  read {parsed} (both readers agree), stored {stored}, unread {unread}, reader disagreements {len(disagreements)}; model reads {len(model_costs)}, "
           f"cost ${total_cost:.4f} total, ${(total_cost / len(model_costs)) if model_costs else 0:.4f} per release" + ("" if write else "; dry run, nothing written"))
     for d in disagreements:
         print(f"    disagreement: {d[:300]}")
     if write and due:
         await record_step_fields(STEP_LABEL, {"reports": len(rows), "read": parsed, "stored": stored, "unread": unread, "rows": results[:50], "yoy_warnings": yoy_warnings[:20],
-                                              "disagreements": disagreements, "model_reads": len(model_costs), "model_cost_usd": total_cost, "error": None})
+                                              "disagreements": disagreements, "model_reads": len(model_costs), "model_cost_usd": total_cost,
+                                              "not_read_again": skipped_read, "error": None})
     return await WRITES.finish(0)
 
 

@@ -62,3 +62,11 @@ def test_until_the_plan_credit_the_cap_is_held_to_three_dollars(monkeypatch):
     assert A.cap_usd(date(2026, 11, 10)) == 3.0 and A.cap_usd(date(2026, 11, 19)) == 15.0
     monkeypatch.setattr(settings, "ai_daily_spend_cap_usd", 2.0)
     assert A.cap_usd(date(2026, 11, 10)) == 2.0                        # a lower cap set on Railway still wins
+
+
+def test_each_release_is_read_by_both_readers_once():
+    from app.scripts.seed_release_eps import read_before
+    done = {"SPGI|2026-10-27": "0000064040-26-000053"}
+    assert read_before(done, "SPGI", "2026-10-27", ["0000064040-26-000053"])
+    assert not read_before(done, "SPGI", "2026-10-27", ["0000064040-26-000053", "0000064040-26-000060"])   # a new 8-K: read again
+    assert not read_before(done, "MU", "2026-10-27", ["x"])
