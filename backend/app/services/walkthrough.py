@@ -500,7 +500,7 @@ def margin_cells(m: dict, periods: dict | None, keep_then: bool) -> dict:
 
 def step_margins(name: str, m: dict | None, actions: list[dict], periods: dict | None = None, noun: str = "revenue") -> dict:
     if not m or not m.get("ok"):
-        why = (m or {}).get("reason") or "Its filings do not tag the figures."
+        why = nouned((m or {}).get("reason") or "Its filings do not tag the figures.", noun)     # a stored reason says "revenue" too
         return _absent(3, name, why[0].upper() + why[1:] + ("" if why.endswith(".") else "."), margin_gap(why), "margins", noun)
     hold_all, act = margin_hold(m, actions)
     if hold_all:
