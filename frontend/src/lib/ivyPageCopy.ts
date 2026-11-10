@@ -4,7 +4,7 @@
 // No line has a colon or an em dash, and none tells anyone to buy or sell (lib/__tests__/ivyPage.test.ts).
 
 export const IVY_PAGE = {
-  headline: "Ivy reads the filings so you can understand the company, and shows her work.",
+  headline: "Ivy reads the filings, so you understand the company.",
   searchLabel: "Walk through a stock with Ivy",
   searchPlaceholder: "Symbol or company name",
   quickPicks: "Or start with",
