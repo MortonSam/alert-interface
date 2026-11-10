@@ -146,4 +146,4 @@ def _read(us_gaap: dict, sector: str | None, candidates: list, today: date) -> d
             return {"ok": True, "measure": measure, "label": MEASURE_LABEL[measure], "plain": MEASURE_PLAIN[measure], "now": now, "then": then,
                     "now_start": four_now[0], "now_end": end, "then_end": then_end, "filed_on": filed_on, "revenue_tag": rtag, "then_revenue_tag": then_tag,
                     "profit_tag": ptag, "now_revenue": r_now, "now_profit": p_now, "then_revenue": r_then, "then_profit": p_then}
-    return {"ok": False, "reason": "its filings do not tag four straight recent quarters of sales and profit"}
+    return {"ok": False, "reason": "its filings do not tag four straight recent quarters of revenue and profit"}
