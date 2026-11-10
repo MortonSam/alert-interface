@@ -18,7 +18,7 @@ describe("the market grid's page holds what fits", () => {
 });
 
 describe("one screen per home section", () => {
-  it("every top-level home section is a screen section, and the market grid is held to exactly one", () => {
+  it("every top-level home section is a screen section, and the market grid is held to exactly one from 640px up", () => {
     const home = read("app/page.tsx");
     const sections = [...home.matchAll(/<section(?: id="[^"]*")? className="([^"]*)"/g)].map((m) => m[1]);
     expect(sections.length).toBeGreaterThanOrEqual(8);
@@ -26,10 +26,23 @@ describe("one screen per home section", () => {
     expect(home).toMatch(/id="market" className="screen-section screen-fit flex flex-col/);
     expect(home).toContain('className="screen-section flex flex-col justify-center"');      // the latest verified note
     const css = read("app/globals.css");
-    expect(css).toMatch(/^main \.screen-fit \{ height: calc\(100svh - 3\.25rem - 1px\); \}$/m);
+    expect(css).toMatch(/^@media \(min-width: 640px\) \{ main \.screen-fit \{ height: calc\(100svh - 3\.25rem - 1px\); \} \}$/m);
     const grid = read("app/ticker-grid.tsx");
     expect(grid).toContain("fitPageSize(box.clientHeight, cols, rowH)");
-    expect(grid).toContain('className="flex-1 min-h-0 overflow-hidden flex flex-col justify-center"');
+    expect(grid).toContain('className="sm:flex-1 sm:min-h-0 sm:overflow-hidden flex flex-col sm:justify-center"');
+  });
+
+  it("on a phone the market section grows with a page of whole cards, and the Ivy section ends at its button (Sam, 2026-11-10)", async () => {
+    const { PHONE_PAGE_SIZE } = await import("@/app/ticker-grid");
+    expect(PHONE_PAGE_SIZE).toBe(10);
+    const grid = read("app/ticker-grid.tsx");
+    expect(grid).toContain("window.matchMedia(PHONE_QUERY).matches");
+    expect(grid).toContain('"text-xs text-muted-foreground sm:line-clamp-2 leading-snug"');     // a phone card's name is never cut
+    expect(grid).toContain('"sm:mt-auto pt-1 space-y-0.5"');                                    // no gap between name and sector
+    expect(grid).not.toMatch(/datasetAgeLine|freshnessLine\(/);                                    // the status line: the price note alone
+    expect(grid).toContain("{hasCaps && <option value=\"market_cap\">");                        // no sort named for a value not shown
+    const css = read("app/globals.css");
+    expect(css).toContain("main .screen-section.ivy-home-section { min-height: 0; padding-top: max(3rem, calc((100svh - 3.25rem - 1px - 25.5rem) / 2)); padding-bottom: 0; }");
   });
 
   it("the opening keeps its cue at the bottom of its own screen, and the header hides what scrolls under it", () => {

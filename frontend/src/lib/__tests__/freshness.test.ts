@@ -44,7 +44,7 @@ describe("freshness wording", () => {
     };
     expect(datasetAgeLine(datasets, ["reactions"], ago)).toBe("Earnings history as of 2h ago");
     expect(datasetAgeLine(datasets, ["reactions", "analyst"], ago)).toBe("Analyst data as of 30h ago");
-    expect(datasetAgeLine(datasets, ["reactions", "iv"], ago)).toBe("Earnings history as of 2h ago · last refresh step failed for Implied volatility");
+    expect(datasetAgeLine(datasets, ["reactions", "iv"], ago)).toBe("Earnings history as of 2h ago");   // a failed step is never named to a visitor
     expect(datasetAgeLine(datasets, ["chains"], ago)).toBeNull();            // never succeeded: no claim
     expect(datasetAgeLine(null, ["reactions"], ago)).toBeNull();
     expect(datasetsStale(datasets, ["reactions"], 3, Date.parse("2026-10-05T09:00:00Z"))).toBe(false);

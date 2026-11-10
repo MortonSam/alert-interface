@@ -84,8 +84,9 @@ export const DATASET_LABELS: Record<string, string> = {
 
 export interface DatasetAgeLike { at: string | null; ok: boolean; failed?: string[] }
 
-/** The oldest of the named datasets, dated by its own last success: "Earnings history as of 6h ago". A dataset whose
- * last nightly step failed says so. Null when none of the named datasets has ever succeeded. */
+/** The oldest of the named datasets, dated by its own last success: "Earnings history as of 6h ago". A failed refresh step is
+ * never named to a visitor (Sam, 2026-11-10: "last refresh step failed for Earnings calendar" on the home page): it goes to the
+ * digest and the phone alert. Null when none of the named datasets has ever succeeded. */
 export function datasetAgeLine(
   datasets: Record<string, DatasetAgeLike> | null | undefined, keys: string[], ago: (iso: string) => string,
 ): string | null {
@@ -97,8 +98,7 @@ export function datasetAgeLine(
   const dated = known.filter(([, d]) => d.at) as Array<readonly [string, DatasetAgeLike]>;
   const [key, oldest] = dated.reduce((a, b) => (new Date(b[1].at as string) < new Date(a[1].at as string) ? b : a));
   const label = DATASET_LABELS[key] ?? key;
-  const failed = known.filter(([, d]) => !d.ok).map(([k]) => DATASET_LABELS[k] ?? k);
-  return `${label} as of ${ago(oldest.at as string)}` + (failed.length ? ` · last refresh step failed for ${failed.join(", ")}` : "");
+  return `${label} as of ${ago(oldest.at as string)}`;
 }
 
 /** The oldest named dataset is older than `days`: the line turns amber. */
