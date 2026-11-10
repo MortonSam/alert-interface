@@ -27,6 +27,7 @@ from app.services import walkthrough as W
 from app.services.redact import redact
 
 STEP_LABEL = "Ivy walkthroughs"
+FILING_GROWTH_VERSION = 1             # step 2's fallback: the filing's own growth where the release reads differently (2026-11-10)
 SEC_SECONDS = 120                      # one SEC read (a 10-K's instance, its risk factors, the company facts) at most
 FEATURED_KEY = "ivy_featured"
 
@@ -52,10 +53,15 @@ async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: 
     periodic = latest_periodic(await edgar.get_submissions(cik)) if cik else None
     m = out.get("margins") or {}
     p = out.get("periods") or {}
+    fgs = out.get("filing_growth") or {}
     if cik and (m.get("periodic") != periodic or m.get("version") != M.MARGINS_VERSION or not m.get("periodic")
+                or fgs.get("periodic") != periodic or fgs.get("version") != FILING_GROWTH_VERSION
                 or p.get("periodic") != periodic or p.get("version") != F.FISCAL_PERIODS_VERSION):
         facts = await asyncio.wait_for(company_facts_merged(edgar, cik, sym), SEC_SECONDS)
         out["margins"] = {**_jsonable(M.margins(facts, sector, today)), "version": M.MARGINS_VERSION, "periodic": periodic}
+        from app.services.growth import filing_growth
+        fg = filing_growth((facts.get("facts") or {}).get("us-gaap") or {}, sector, today)
+        out["filing_growth"] = {**_jsonable(fg or {}), "ok": bool(fg), "version": FILING_GROWTH_VERSION, "periodic": periodic}
         out["periods"] = {"map": F.period_map(facts), "version": F.FISCAL_PERIODS_VERSION, "periodic": periodic}
     return out
 
@@ -118,7 +124,8 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     close = await D.last_close(db, sym)
     s1 = W.step_business(name, u["profiles"].get(sym), seg, merger, periods, noun, u["notes"].get(sym))
     growth_rows = u["growth"].get(sym)
-    s2 = W.step_growth(name, growth_rows, sector, True, periods, reit, ffo, noun)
+    fg = _dates(src.get("filing_growth"), "period_end", "year_ago_end", "filed") if (src.get("filing_growth") or {}).get("ok") else None
+    s2 = W.step_growth(name, growth_rows, sector, True, periods, reit, ffo, noun, filing=fg)
     s3 = W.step_margins(name, m, actions, periods, noun)
     rdays = await D.report_days(db, t["id"])
     stock = u["closes"].get(sym, [])
