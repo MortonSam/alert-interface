@@ -64,7 +64,11 @@ async def load_universe(db, today: date) -> dict:
             FROM growth_figures WHERE symbol = ANY(:s) ORDER BY symbol, metric, period_end"""), {"s": syms})).all():
         growth.setdefault(r.symbol, []).append(dict(r._mapping))
     pe = {r.symbol: dict(r._mapping) for r in (await db.execute(text("""SELECT DISTINCT ON (symbol) symbol, as_of_date, price, status, reason, pe, trailing_eps, window_start, window_end,
-            window_source, hist_median, hist_share_above, hist_sessions, hist_first, hist_last FROM pe_snapshots WHERE symbol = ANY(:s) ORDER BY symbol, as_of_date DESC"""), {"s": syms})).all()}
+            window_source, hist_median, hist_share_above, hist_sessions, hist_first, hist_last, latest_report FROM pe_snapshots WHERE symbol = ANY(:s) ORDER BY symbol, as_of_date DESC"""), {"s": syms})).all()}
+    # the last P/E on file, for step 5 while the newest quarter is not in the filings' data yet (Sam, 2026-11-10)
+    pe_last_ok = {r.symbol: dict(r._mapping) for r in (await db.execute(text("""SELECT DISTINCT ON (symbol) symbol, as_of_date, price, status, reason, pe, trailing_eps,
+            window_start, window_end, window_source, hist_median, hist_share_above, hist_sessions, hist_first, hist_last, latest_report FROM pe_snapshots
+            WHERE symbol = ANY(:s) AND status = 'ok' ORDER BY symbol, as_of_date DESC"""), {"s": syms})).all()}
     pe_sector = {r.sector: dict(r._mapping) for r in (await db.execute(text(
         "SELECT DISTINCT ON (sector) sector, as_of_date, median_pe, shown, reason, fresh, active FROM pe_sector_snapshots ORDER BY sector, as_of_date DESC"))).all()}
     # step 1's description: the served research note's own "what they do", word for word (Sam, 2026-11-03); a note's text with a live
@@ -79,7 +83,7 @@ async def load_universe(db, today: date) -> dict:
     nexts = await batch_next_earnings(db, ids, today)
     next_by_symbol = {t["symbol"]: nexts.get(t["id"]) for t in tickers.values()}
     return {"today": today, "tickers": tickers, "profiles": profiles, "notes": notes, "mergers": mergers, "actions": actions, "splits": splits, "closes": closes,
-            "spy": spy, "sectors": sectors, "growth": growth, "pe": pe, "pe_sector": pe_sector, "next": next_by_symbol}
+            "spy": spy, "sectors": sectors, "growth": growth, "pe": pe, "pe_last_ok": pe_last_ok, "pe_sector": pe_sector, "next": next_by_symbol}
 
 
 # ── prices: the stock against SPY and its sector ───────────────────────────────────────────────────────────────────────────

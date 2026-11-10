@@ -134,6 +134,9 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     snap = u["pe"].get(sym)
     if snap and "pe" in held:
         snap = None
+    pe_behind = None
+    if snap and snap["status"] == "missing" and (last_ok := u.get("pe_last_ok", {}).get(sym)) and W.last_pe_usable(last_ok, snap, today):
+        pe_behind, snap = snap, last_ok           # the last P/E on file, labelled with its own date and quarter (W.pe_behind_line)
     if reit:
         s5 = W.step_valuation_reit(name, ffo, close, periods)
     else:
@@ -146,6 +149,10 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
             left_out = D.pe_left_out(bars, quarters, act_dates)
             year = D.pe_year(bars, quarters, snap, s4.get("year_pct"))
         s5 = W.step_valuation(name, sector, snap, series, u["pe_sector"].get(sector), True, periods, left_out, year)
+        if pe_behind and s5["status"] != "absent":
+            s5["sentences"].append(W.pe_behind_line(pe_behind.get("latest_report"), snap, periods))
+            s5["status"], s5["behind"] = "partial", {"end": str(snap["window_end"]), "latest_report": str(pe_behind.get("latest_report"))}
+            s5["gap"] = f"{W.gap_topic(5, noun)} (its newest quarter isn't in its filings' data yet)"
     ne = u["next"].get(sym) if "report_date" not in held else None
     timing = None
     implied = None

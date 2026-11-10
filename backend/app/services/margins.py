@@ -4,6 +4,7 @@ The measure depends on the sector, and its plain label says which it is:
     gross      sales less the cost of what was sold, only when the company itself files GrossProfit (a cost-of-goods tag can cover
                part of the costs: UnitedHealth's covers pharmacy goods, not medical costs, and would read as an 89% gross margin)
     operating  profit from operations, for a company that reports no gross profit
+               (and the net margin below for one that files neither recently)
     net        profit after every cost, for banks, insurers and other financials, which have no cost of goods
 Real estate trusts get no measure: depreciation makes their margins say little, and the funds-from-operations figure they are
 judged by is not in XBRL. "Now" is the latest four consecutive quarters as first filed; "three years earlier" is the four
@@ -19,8 +20,10 @@ from datetime import date, timedelta
 
 from app.services.growth import quarter_readings, revenue_tags
 
-MARGINS_VERSION = 3                  # 2 (2026-10-19): the profit line with a recent quarter; three years earlier on any revenue tag
+MARGINS_VERSION = 4                  # 2 (2026-10-19): the profit line with a recent quarter; three years earlier on any revenue tag
                                      # 3 (same day): every measure the company files (by_measure), so Compare can set like against like
+                                     # 4 (2026-11-10): a company that files neither gross profit nor operating income recently is read on
+                                     #   its profit margin (56 stocks showed no margin; 39 of them file only net income)
 THREE_YEARS_DAYS = 1092              # 156 weeks: the fiscal quarter three years earlier (52/53-week years drift a few days)
 END_MATCH_DAYS = 20
 FRESH_DAYS = 230                     # the latest quarter used ended within this many days (a tag the company stopped filing is skipped)
@@ -67,7 +70,9 @@ def _profit_candidates(us_gaap: dict, measure: str) -> list[tuple[str, dict[date
     """[(the measure, {end: reading} of the profit line, its tag)] in the order tried: net income for "net"; gross profit, then
     operating income, otherwise. The caller keeps the first that carries a recent quarter (a company that filed GrossProfit
     until 2009 or 2020, AMZN and CAT, is read on operating income now)."""
-    tags = [("net", t) for t in NET_TAGS] if measure == "net" else [("gross", t) for t in GROSS_TAGS] + [("operating", t) for t in OPERATING_TAGS]
+    tags = [("net", t) for t in NET_TAGS] if measure == "net" else (
+        [("gross", t) for t in GROSS_TAGS] + [("operating", t) for t in OPERATING_TAGS]
+        + [("net", t) for t in NET_TAGS])       # neither filed recently (XOM, LLY, MRK, PFE): the profit margin, labelled as such (2026-11-10)
     return [(m, q, t) for m, t in tags if (q := _quarters(us_gaap, t))]
 
 

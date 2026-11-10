@@ -750,6 +750,25 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
                  fact=fact, point=f"The {per_dollar(pe)} investors pay for each $1 of its profit", cell={"pe": {"value": per_dollar(pe), "as_of": as_of, "end": str(snap["as_of_date"])}})
 
 
+LAST_PE_DAYS = 120                    # the last P/E on file stands in for at most this long after its close (step 5, Sam 2026-11-10)
+
+
+def last_pe_usable(last_ok: dict, missing: dict, today: date) -> bool:
+    """Pure: the last P/E on file may stand in while the newest quarter is not in the filings' data: it is recent, and the snapshot
+    that has none is missing only for that (a loss or a corporate action is never covered over)."""
+    reason = (missing.get("reason") or "").lower()
+    newer = "newer than xbrl" in reason or "not yet in" in reason or "not on file" in reason
+    return newer and last_ok.get("pe") is not None and (today - last_ok["as_of_date"]).days <= LAST_PE_DAYS
+
+
+def pe_behind_line(reported: date | None, snap: dict, periods: dict | None) -> str:
+    """Pure: step 5's line while it shows the last P/E on file: "Its newest quarter, reported Nov 5, 2026, isn't in its filings' data
+    yet; the figures above are as of the Oct 30, 2026 close, with earnings through Q3 2026." """
+    when = f", reported {fmt_date(reported)}," if reported else ""
+    return (f"Its newest quarter{when} isn't in its filings' data yet; the figures above are as of the {fmt_date(snap['as_of_date'])} close, "
+            f"with earnings {through(periods, snap['window_end'])}.")
+
+
 def step_valuation_reit(name: str, ffo: dict | None, close: dict | None, periods: dict | None = None) -> dict:
     """A real estate trust is never taught P/E: price to FFO per share over the last four quarters, or the honest absence."""
     ttm = (ffo or {}).get("ttm")

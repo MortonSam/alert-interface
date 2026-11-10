@@ -271,11 +271,15 @@ def parse_release_revenue(text: str) -> dict | None:
 
 
 def revenue_agrees(xbrl: float, release: dict) -> bool:
-    """Pure: the release's figure is the XBRL figure at the release's precision: in the unit the table states, or, with no unit
-    stated, in whichever of dollars, thousands, millions or billions makes them match."""
+    """Pure: the release's figure is the XBRL figure at the release's precision, in the unit the table states or, when that does not
+    match, in whichever of dollars, thousands, millions or billions does."""
     raw = release["raw"].strip("()$ ")
     decimals = len(raw.split(".")[1]) if "." in raw else 0
-    for factor in ([{"thousands": 1e3, "millions": 1e6, "billions": 1e9}[release["scale"]]] if release.get("scale") in ("thousands", "millions", "billions") else [1, 1e3, 1e6, 1e9]):
+    # the stated unit first, then every other: a heading's last unit can be another column's (AAPL, 2026-11-10: "(In millions, except
+    # number of shares, which are reflected in thousands ...)" read as thousands), and a figure equal to the last digit in some unit is
+    # the same figure; a different one never lines up digit for digit
+    stated = {"thousands": 1e3, "millions": 1e6, "billions": 1e9}.get(release.get("scale"))
+    for factor in ([stated] if stated else []) + [f for f in (1, 1e3, 1e6, 1e9) if f != stated]:
         if abs(release["number"] * factor - xbrl) <= factor * 10 ** -decimals + 1:      # one unit of the release's last digit (BSX 5,286 against XBRL $5.2854B, rounded differently)
             return True
     return False
