@@ -244,13 +244,13 @@ export default async function Home() {
             <div className="flex justify-center gap-8 mt-6">
               <Link
                 href="/build"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                className="tap text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 Build a trade →
               </Link>
               <Link
                 href="/ivy"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                className="tap text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 Meet Ivy →
               </Link>

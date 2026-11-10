@@ -239,12 +239,12 @@ export function TickerGrid() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search symbol or name…"
-          className="flex-1 min-w-[200px] h-9 rounded-md border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          className="flex-1 min-w-[200px] h-11 sm:h-9 rounded-md border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-11 sm:h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           {hasCaps && <option value="market_cap">Market Cap ↓</option>}
           <option value="symbol">Symbol A-Z</option>
@@ -257,7 +257,7 @@ export function TickerGrid() {
       <div className="flex gap-2 flex-wrap">
         <button
           onClick={() => setSector(null)}
-          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+          className={`tap px-3 py-1 rounded-full text-xs font-medium transition-colors ${
             sector === null
               ? "bg-primary text-primary-foreground"
               : "bg-muted text-muted-foreground hover:bg-accent"
@@ -269,7 +269,7 @@ export function TickerGrid() {
           <button
             key={s}
             onClick={() => setSector(sector === s ? null : s)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            className={`tap px-3 py-1 rounded-full text-xs font-medium transition-colors ${
               sector === s
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-accent"
@@ -389,7 +389,7 @@ export function TickerGrid() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={safePage === 1}
-            className="px-3 py-1.5 rounded text-sm border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            className="tap px-3 py-1.5 rounded text-sm border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
           >
             ← Prev
           </button>
@@ -402,7 +402,7 @@ export function TickerGrid() {
               <button
                 key={p}
                 onClick={() => setPage(p as number)}
-                className={`px-3 py-1.5 rounded text-sm border transition-colors ${
+                className={`tap px-3 py-1.5 rounded text-sm border transition-colors ${
                   safePage === p
                     ? "bg-primary text-primary-foreground border-primary"
                     : "hover:bg-accent"
@@ -415,7 +415,7 @@ export function TickerGrid() {
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={safePage === totalPages}
-            className="px-3 py-1.5 rounded text-sm border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            className="tap px-3 py-1.5 rounded text-sm border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Next →
           </button>

@@ -955,7 +955,7 @@ function VerificationPanel({
     <div className="border-t">
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-6 py-3 text-xs hover:bg-muted/30 transition-colors"
+        className="tap w-full flex items-center justify-between px-6 py-3 text-xs hover:bg-muted/30 transition-colors"
       >
         <span className="flex items-center gap-3 font-medium">
           <span className="text-foreground">✓ {supported} supported</span>
@@ -1991,7 +1991,7 @@ export default function TickerPage() {
             <div className="mt-5 flex items-center gap-2" data-testid="build-trade-row">
               <Link
                 href={`/build?ticker=${ticker.symbol}`}
-                className="rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className="tap rounded-xl bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 Build a trade on {ticker.symbol} →
               </Link>

@@ -468,7 +468,7 @@ function DraftDisplay({
                 type="button"
                 onClick={() => setReasoningMode(mode)}
                 className={cn(
-                  "rounded-md px-3 py-1.5 transition-colors",
+                  "tap rounded-md px-3 py-1.5 transition-colors",
                   reasoningMode === mode
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
@@ -598,7 +598,7 @@ function DraftDisplay({
             <button
               type="button"
               onClick={() => setAltOpen(true)}
-              className="text-sm font-medium text-cool hover:text-cool/80 transition-colors"
+              className="tap text-sm font-medium text-cool hover:text-cool/80 transition-colors"
             >
               Too expensive? See an affordable alternative →
             </button>
@@ -1083,7 +1083,7 @@ function BuildTradePageContent() {
                 <button
                   type="button"
                   onClick={handleChangeTicker}
-                  className="text-xs text-cool hover:text-cool/80 transition-colors ml-4 shrink-0"
+                  className="tap text-xs text-cool hover:text-cool/80 transition-colors ml-4 shrink-0"
                 >
                   Change
                 </button>
@@ -1139,7 +1139,7 @@ function BuildTradePageContent() {
                         type="button"
                         onClick={() => setAggressiveness(a)}
                         className={cn(
-                          "px-3.5 py-1.5 rounded-lg text-sm capitalize transition-colors",
+                          "tap px-3.5 py-1.5 rounded-lg text-sm capitalize transition-colors",
                           aggressiveness === a
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted text-muted-foreground hover:bg-accent",
@@ -1153,7 +1153,7 @@ function BuildTradePageContent() {
                     type="button"
                     onClick={() => { void handleGenerate(); }}
                     disabled={step === "generating"}
-                    className="rounded-lg bg-primary text-primary-foreground px-6 py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                    className="tap rounded-lg bg-primary text-primary-foreground px-6 py-2 text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                   >
                     {step === "generating" ? "Ivy is drafting…" : "Generate trade →"}
                   </button>
