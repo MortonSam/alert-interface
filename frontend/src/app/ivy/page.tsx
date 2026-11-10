@@ -127,7 +127,7 @@ export default function IvyPageView() {
                 <blockquote className="mt-3 border-l-2 border-primary/60 pl-4 font-display text-xl leading-relaxed text-foreground/90">
                   “{page.check.passage}”
                 </blockquote>
-                <a href={page.check.url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm text-cool hover:text-foreground">{C.readFiling} →</a>
+                <a href={page.check.url} target="_blank" rel="noopener noreferrer" className="tap mt-3 inline-block text-sm text-cool hover:text-foreground">{C.readFiling} →</a>
               </figure>
             </div>
             {checkedOn && (
@@ -147,7 +147,7 @@ export default function IvyPageView() {
               {page.ideas.map((idea) => (
                 <li key={idea.n} className="flex gap-4">
                   <span className="w-6 shrink-0 text-right font-mono text-muted-foreground">{idea.n}</span>
-                  <Link href={walkHref(idea.symbol, idea.n)} className="text-foreground hover:text-primary transition-colors">{idea.title}</Link>
+                  <Link href={walkHref(idea.symbol, idea.n)} className="tap text-foreground hover:text-primary transition-colors">{idea.title}</Link>
                 </li>
               ))}
             </ol>
