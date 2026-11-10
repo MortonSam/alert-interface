@@ -1031,3 +1031,14 @@ def test_revenue_for_every_company_and_step_5_in_dollars_with_p_e_named_once():
                                  "That figure is the price-to-earnings ratio, or P/E.")
     shown = json.dumps({k: s[k] for k in ("numbers", "sentences", "check", "idea", "deeper", "summary")})
     assert shown.count("P/E") == 1
+
+
+def test_step_1_writes_split_names_the_companys_way():
+    segs = [{"label": "Commercial & Investment Bank"}, {"label": "Consumer & Community Banking"}, {"label": "Asset & Wealth Management"}]
+    desc = ("JPMorgan Chase operates through three reportable segments: Consumer and Community Banking, Commercial and Investment Bank, and "
+            "Asset and Wealth Management. It also runs commercial and investment banking desks.")
+    out = W.own_names(desc, segs)
+    assert "Consumer & Community Banking, Commercial & Investment Bank, and Asset & Wealth Management." in out
+    assert "commercial and investment banking desks" in out                         # a phrase that is not the name stays as written
+    nv = W.own_names("Revenue flows from Compute and Networking and Graphics.", [{"label": "Compute & Networking"}, {"label": "Graphics"}])
+    assert nv == "Revenue flows from Compute & Networking and Graphics."

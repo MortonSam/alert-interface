@@ -27,7 +27,9 @@ export const WALK_COPY = {
   compareTitle: "Compare side by side",
   rivalChoice: (name: string, label?: string) => `${name}, ${label ?? "another company in its industry"}`,
   rulerChoice: (name: string) => `${name}, a company you know`,
-  knownFrom: (title: string, from: string) => `You know ${title.replace(/^The /, "the ")} from ${from}`,
+  // an idea met on an earlier walkthrough (Sam, 2026-11-10: "You know Where the money comes from from NVIDIA"): the idea's own
+  // title leads, so its capital and its last word stay as written
+  knownFrom: (title: string, from: string) => `${title}, which you met in the ${from} walkthrough`,
   searchPrompt: "Or pick any S&P 500 stock",
   searchPlaceholder: "Symbol or company name",
   noWalkthrough: (name: string) => `Ivy has no walkthrough for ${name} yet.`,

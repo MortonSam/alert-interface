@@ -302,22 +302,33 @@ async def test_a_quote_the_verifier_rejects_twice_is_dropped():
 
 
 def test_one_quarter_across_the_steps():
-    """MU (Sam's review, 2026-11-02): step 2 showed fiscal Q3 2026 beside step 3 through fiscal Q4. Every quarter step shows the latest
-    quarter the company has filed, or says that quarter's figure is not on file yet; never an older quarter."""
+    """MU (Sam's review, 2026-11-02): step 2 showed fiscal Q3 2026 beside step 3 through fiscal Q4. A quarter step whose figure is for an
+    earlier quarter than the latest reported keeps its figure, labelled with its period, and says the newer quarter's figure is not on
+    file yet (Sam, 2026-11-10: JPM's steps 2 and 5 had gone blank); it never blanks."""
     def ok(n):
         return W._step(n, status="ok", numbers=[W._num("x", "1", "y")], sentences=["s"], idea={2: "growth", 3: "margins", 5: "pe"}[n])
     steps = [W._step(1, status="ok", idea="segments"), ok(2), ok(3), W._step(4, status="ok", idea="market_vs_company"), ok(5),
              W._step(6, status="ok", idea="report_move"), W._step(7, status="ok", idea="risk_factors")]
     q3, q4 = date(2026, 5, 28), date(2026, 9, 3)
-    replaced = W.one_quarter(steps, {2: q3, 3: q4, 5: date(2026, 8, 28)}, q4, None, "Micron")
-    assert replaced == [2]                                                  # Aug 28 and Sep 3 are the same quarter; May 28 is not
-    assert steps[1]["status"] == "absent" and steps[1]["numbers"] == []
-    assert steps[1]["absent"] == ("Ivy can't show this for Micron yet. Its revenue growth for the quarter ended Sep 3, 2026 is not on file yet, "
-                                  "so this step shows no older quarter.")
+    marked = W.one_quarter(steps, {2: q3, 3: q4, 5: date(2026, 8, 28)}, q4, None, "Micron")
+    assert marked == [2]                                                    # Aug 28 and Sep 3 are the same quarter; May 28 is not
+    assert steps[1]["status"] == "partial" and steps[1]["numbers"] == [W._num("x", "1", "y")]
+    assert steps[1]["sentences"][-1] == ("Its revenue growth for the quarter ended Sep 3, 2026 isn't on file yet; the figures above are for "
+                                         "the quarter ended May 28, 2026.")
+    assert "shows no older quarter" not in str(steps)
     assert steps[1]["behind"] == {"end": "2026-05-28", "latest": "2026-09-03"}
     assert steps[2]["status"] == "ok" and steps[4]["status"] == "ok"
-    bank = [W._step(1, status="ok", idea="segments"), ok(2), ok(3), W._step(4, status="ok", idea="market_vs_company"), ok(5),
-            W._step(6, status="ok", idea="report_move"), W._step(7, status="ok", idea="risk_factors")]
-    W.one_quarter(bank, {3: q3}, q4, None, "JPMorgan", noun="revenue")
-    assert "How much of each revenue dollar it keeps for the quarter ended Sep 3, 2026 is not on file yet" in bank[2]["absent"]
-    assert W.one_quarter(bank, {2: q4}, None, None, "X") == []              # no filed quarter known: nothing changes
+    assert W.one_quarter(steps, {2: q4}, None, None, "X") == []             # no reported quarter known: nothing changes
+
+
+def test_no_step_blanks_while_its_figures_are_on_file_and_an_unreported_quarter_never_counts():
+    """Sam, 2026-11-10: the walkthrough's quarter is the latest the company has reported (NVIDIA's quarter ended Oct 26, reported Nov 17,
+    is not it on Nov 10), and no quarter step with figures on file ever goes blank, whatever the quarter."""
+    assert W.reported_quarter([date(2026, 7, 26), date(2026, 10, 26)], date(2026, 8, 26)) == date(2026, 7, 26)
+    assert W.reported_quarter([date(2026, 7, 26)], None) == date(2026, 7, 26) and W.reported_quarter([None], None) is None
+    for latest in (date(2026, 9, 30), date(2027, 3, 31), date(2028, 6, 30)):
+        steps = [W._step(n, status="ok", numbers=[W._num("x", "1", "y")], sentences=["s"],
+                         idea={1: "segments", 2: "growth", 3: "margins", 4: "market_vs_company", 5: "pe", 6: "report_move", 7: "risk_factors"}[n])
+                 for n in range(1, 8)]
+        W.one_quarter(steps, {2: date(2026, 6, 30), 3: date(2025, 12, 31), 5: date(2026, 3, 31)}, latest, None, "X")
+        assert all(s["status"] != "absent" and s["numbers"] for s in steps), [s["status"] for s in steps]

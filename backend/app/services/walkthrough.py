@@ -242,6 +242,20 @@ def mentions(text: str | None, first: list[dict], second: list[dict]) -> tuple[i
     return found[0], found[1]
 
 
+def own_names(text: str | None, segs: list[dict]) -> str | None:
+    """Pure: the description with each split name the filing writes with "&" written the filing's way (Sam, 2026-11-10: JPM's note
+    says "Commercial and Investment Bank" where its 10-K and the figures below it say "Commercial & Investment Bank")."""
+    import re
+    if not text:
+        return text
+    for g in segs:
+        label = g.get("label") or ""
+        if "&" in label:
+            words = r"\s+and\s+".join(re.escape(part.strip()) for part in label.split("&"))
+            text = re.sub(r"(?<![A-Za-z])" + words + r"(?![A-Za-z])", label, text)
+    return text
+
+
 def split_for(segments: dict, desc: str | None) -> tuple[dict, dict | None]:
     """Pure: (the split step 1 shows, the other one or None). When the 10-K splits revenue both by business segment and by product
     and market, the figures follow the breakdown the description names more of; a tie keeps the reader's first (segments.AXES)."""
@@ -279,6 +293,8 @@ def step_business(name: str, profile: dict | None, segments: dict | None, merger
     sentences, numbers, deeper = [], [], []
     as_of_profile = (profile or {}).get("fetched_at")
     if profile_ok:
+        if seg_ok:      # the company's own punctuation for its split names, as the figures below write them
+            desc = own_names(desc, segments["segments"] + ((segments.get("other") or {}).get("segments") or []))
         sentences.append(desc)
     source = fact = point = cell = gap = None
     summary = None
@@ -903,7 +919,7 @@ def with_risk_story(step: dict, name: str, risk_sentences: list[dict], headings:
 # ── summary, compare, fingerprints ─────────────────────────────────────────────────────────────────────────────────────────
 
 SAME_QUARTER_DAYS = 45            # two period ends this close are the same fiscal quarter (a 52/53-week year shifts the end a few days)
-QUARTER_WHAT = {2: "its {noun} growth", 3: "how much of each {unit} it keeps", 5: "its P/E"}
+QUARTER_WHAT = {2: "its {noun} growth", 3: "how much of each {unit} it keeps", 5: "what investors pay for each $1 of its profit"}
 QUARTER_WHAT_REIT = {5: "its price against FFO per share"}
 QUARTER_IDEA = {2: "growth", 3: "margins", 5: "pe"}
 
@@ -912,24 +928,39 @@ def one_quarter(steps: list[dict], ends: dict[int, date | None], latest: date | 
                 noun: str = "revenue", reit: bool = False) -> list[int]:
     """One quarter across the steps (Sam's review of MU, 2026-11-02: step 2 showed fiscal Q3 2026 beside step 3 through fiscal Q4).
 
-    The walkthrough's quarter is the latest one the company has filed: `latest`, the newest period end among its stored SEC quarters
-    and the steps' own figures. Each step that names a quarter (2 growth, 3 margins, 5 the P/E or the price against FFO) shows its
-    figure only for that quarter; a step whose figure is for an earlier quarter shows nothing from it and says the latest quarter's
-    figure is not on file yet. Changes `steps` in place; returns the steps it replaced."""
+    The walkthrough's quarter is the latest one the company has reported: `latest` (scripts/build_walkthroughs: the newest quarter
+    filed before its latest report on file, never one that has merely ended). A step whose figure is for an earlier quarter keeps that
+    figure, labelled with its own period as every figure is, and says in one plain line that the newer quarter's figure is not on file
+    yet (Sam, 2026-11-10: JPM's steps 2 and 5 had gone blank). Changes `steps` in place; returns the steps it marked."""
     if latest is None:
         return []
-    replaced = []
+    marked = []
     for n, end in ends.items():
         if end is None or (latest - end).days <= SAME_QUARTER_DAYS or steps[n - 1]["status"] == "absent":
             continue
         what = (QUARTER_WHAT_REIT.get(n) if reit else None) or QUARTER_WHAT[n].format(noun=noun, unit=each_unit(noun))
-        qtr = quarter(periods, latest)
-        st = _absent(n, name, f"{cap(what)} for {qtr} is not on file yet, so this step shows no older quarter.",
-                     f"not on file for {qtr} yet", "p_ffo" if reit and n == 5 else QUARTER_IDEA[n], noun)
+        st = steps[n - 1]
+        st["sentences"] = list(st["sentences"]) + [behind_line(what, quarter(periods, latest), quarter(periods, end))]
+        st["status"] = "partial"
         st["behind"] = {"end": str(end), "latest": str(latest)}
-        steps[n - 1] = st
-        replaced.append(n)
-    return replaced
+        st["gap"] = f"{gap_topic(n, noun)} (not on file for {quarter(periods, latest)} yet)"
+        marked.append(n)
+    return marked
+
+
+def reported_quarter(ends: list[date | None], reported_on: date | None) -> date | None:
+    """Pure: the walkthrough's quarter: the newest of `ends` that ended before the company's latest report on file (a quarter that
+    has ended but not been reported is never it); with no report on file, the newest of them."""
+    known = [d for d in ends if d]
+    if reported_on:
+        known = [d for d in known if d < reported_on]
+    return max(known, default=None)
+
+
+def behind_line(what: str, latest_q: str, shown_q: str) -> str:
+    """Pure: the one line a step adds when its figure is a quarter behind: "Its revenue growth for Q3 2026 isn't on file yet; the
+    figures above are for Q2 2026, ended Jun 30, 2026." """
+    return f"{cap(what)} for {latest_q} isn't on file yet; the figures above are for {shown_q}."
 
 
 def summary(name: str, steps: list[dict]) -> dict:

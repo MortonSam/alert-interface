@@ -169,9 +169,13 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     quarter_ends = {2: _end(s2.get("cell"), "quarter", "ttm") if s2["status"] != "absent" else None,
                     3: _end(s3.get("cell"), "keeps_now") if s3["status"] != "absent" else None,
                     5: _iso_date(pe_end or reit_end)}
-    filed_latest = (await db.execute(text("SELECT max(period_end) FROM eps_quarters WHERE symbol = :s AND (filed_on IS NULL OR filed_on <= :d)"),
+    # the latest quarter the company has REPORTED (Sam, 2026-11-10): filed before today and ended before its latest report on file,
+    # never a quarter that has merely ended
+    reported_on = (await db.execute(text("""SELECT max(e.event_date) FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = :s
+        AND e.event_type = 'earnings' AND e.event_date <= :d AND (e.is_confirmed OR e.eps_actual IS NOT NULL)"""), {"s": sym, "d": today})).scalar()
+    filed_latest = (await db.execute(text("SELECT max(period_end) FROM eps_quarters WHERE symbol = :s AND filed_on IS NOT NULL AND filed_on <= :d"),
                                      {"s": sym, "d": today})).scalar()
-    latest_q = max([d for d in [filed_latest, *quarter_ends.values()] if d] or [None], default=None) if (filed_latest or any(quarter_ends.values())) else None
+    latest_q = W.reported_quarter([filed_latest, *quarter_ends.values()], reported_on)
     quarter_check = {"latest": str(latest_q) if latest_q else None, "ends": {str(k): str(v) if v else None for k, v in quarter_ends.items()},
                      "replaced": W.one_quarter(steps, quarter_ends, latest_q, periods, name, noun, reit)}
     s2, s3, s5 = steps[1], steps[2], steps[4]

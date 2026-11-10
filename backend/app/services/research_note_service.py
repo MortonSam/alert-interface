@@ -332,6 +332,8 @@ RULES:
 - The bottom_line summarizes what to watch and stays neutral. No verdict on the stock, no rating, and none of "compelling",
   "exceptional", "strong buy", "undervalued", "overvalued", "bullish", "bearish", "attractive valuation" or anything similar.
 - No em dashes or en dashes anywhere. Use commas or separate sentences.
+- Write a segment's, product's or business's name exactly as the filing writes it, its "&" included ("Compute & Networking", never
+  "Compute and Networking").
 - Use "an" before a number spoken with a vowel sound ("an 18% rise", "an 8-quarter run", "an 11.5% margin") and "a" otherwise.
 - Only state facts about the business that appear in the filing excerpt, ITEM 1 (BUSINESS) or COMPARISON FACTS. A second model checks
   every sentence against those sources, and a sentence it cannot confirm there is removed from the note before anyone reads it.
