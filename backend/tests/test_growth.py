@@ -71,3 +71,12 @@ def test_the_flag_defaults_off_and_the_route_reads_it():
     assert "if not (settings.growth_enabled or admin):" in src
     refresh = (Path(__file__).parent.parent / "app" / "scripts" / "refresh.py").read_text()
     assert '"app.scripts.compute_growth", "--due", "--write"' in refresh                   # Block 2: computed nightly; shown only with the flag
+
+
+def test_a_release_figure_in_another_unit_agrees_with_the_filing():
+    """AAPL (2026-11-10): its statement's heading "(In millions, except number of shares, which are reflected in thousands ...)" was
+    read as thousands, so its $143,756 million never matched the filing's $143.756 billion."""
+    from app.services import growth as G
+    aapl = {"raw": "143,756", "number": 143756.0, "scale": "thousands"}
+    assert G.revenue_agrees(143_756_000_000.0, aapl)
+    assert not G.revenue_agrees(143_900_000_000.0, aapl)

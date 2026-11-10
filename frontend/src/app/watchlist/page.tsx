@@ -6,7 +6,7 @@ import SignedOutNotice from "@/components/SignedOutNotice";
 import { WATCHLISTS_SIGN_IN_PROMPT, isSignedIn } from "@/lib/session";
 
 import { earningsProximity } from "@/lib/encodings/earningsProximity";
-import { datasetAgeLine, priceSourceLine, quoteAsOf } from "@/lib/freshness";
+import { priceSourceLine, quoteAsOf } from "@/lib/freshness";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { recentSwings, RV_RANK_TIP, RV_RANK_TIP_SHORT, IMPLIED_MOVE_TIP } from "@/lib/utils";
@@ -30,19 +30,6 @@ interface RowState {
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-
-function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  return `${days}d ago`;
-}
-
 
 function fmtPrice(n: number | null): string {
   return n == null ? "n/a" : `$${n.toFixed(2)}`;
@@ -212,7 +199,6 @@ function WatchlistRow({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 // the watchlist shows earnings history and realized volatility
-const WATCHLIST_DATASETS = ["reactions", "rv"];
 
 export default function WatchlistPage() {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
@@ -449,11 +435,8 @@ export default function WatchlistPage() {
               </Link>
             </div>
             <h1 className="text-display font-display font-bold">Watchlist</h1>
-            {datasetAgeLine(health?.datasets, WATCHLIST_DATASETS, timeAgo) && (
-              <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">
-                {datasetAgeLine(health?.datasets, WATCHLIST_DATASETS, timeAgo)}
-              </p>
-            )}
+            {/* the price delay note alone (Sam, 2026-11-10) */}
+            <p className="text-[11px] font-mono text-muted-foreground/60 mt-0.5">{priceSourceLine(health?.cadence)}</p>
           </div>
           <div className="flex items-center gap-2">
             {rows.length > 0 && (

@@ -3,7 +3,7 @@
 import Explained from "@/components/Explained";
 import { JUST_REPORTED_ENABLED } from "@/lib/features";
 import { MoveComparisonLine } from "@/components/MoveComparisonLine";
-import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, freshnessLine, quoteAsOf } from "@/lib/freshness";
+import { fmtIsoDateTime, priceSourceLine, quoteAsOf } from "@/lib/freshness";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";
@@ -34,11 +34,6 @@ import { capture } from "@/lib/analytics";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // one timestamp format across Discover (2026-10-15): "Oct 15, 4:00 PM ET", the format every quote and headline on it uses
-function asOfTime(iso: string): string {
-  return fmtIsoDateTime(iso) ?? "";
-}
-
-
 function fmtPrice(n: number | null | undefined): string {
   return n == null ? "" : `$${n.toFixed(2)}`;
 }
@@ -79,7 +74,6 @@ function SectionSkeleton() {
 const LIMIT = 12;
 
 // Discover shows earnings history, analyst data and the volatility snapshots: those datasets date its line
-const DISCOVER_DATASETS = ["reactions", "analyst", "rv", "iv"];
 
 export default function DiscoverPage() {
   const [reportingSoon, setReportingSoon] = useState<{
@@ -177,17 +171,8 @@ export default function DiscoverPage() {
           <p className="text-sm text-muted-foreground mt-1">
             What&apos;s worth researching across the S&amp;P 500 right now.
           </p>
-          {(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime) || quotes.size > 0) && (
-            <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">
-              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime) && <>{freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime), health?.cadence)}</>}
-              {datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime) && quotes.size > 0 && " · "}
-              {quotes.size > 0 && (() => {
-                const ts = [...quotes.values()].map(q => q.timestamp).filter(Boolean);
-                const latest = ts.length > 0 ? Math.max(...(ts as number[])) : null;
-                return latest ? <>Quotes as of {fmtQuoteDateTime(latest)}</> : null;
-              })()}
-            </p>
-          )}
+          {/* the price delay note alone: a dataset's age or a failed step is Sam's (the digest and the phone alert), never a visitor's (2026-11-10) */}
+          <p className="text-[11px] font-mono text-muted-foreground/60 mt-1.5">{priceSourceLine(health?.cadence)}</p>
         </div>
 
         {/* ── Fetch error ──────────────────────────────── */}
