@@ -1,7 +1,7 @@
 "use client";
 
 import Explained from "@/components/Explained";
-import { datasetAgeLine, optionsDataPhrase } from "@/lib/freshness";
+import { optionsDataPhrase } from "@/lib/freshness";
 import { evidenceSummary, ledgerHeadline, ledgerLinkLabel, limitLines, refusalTile, ruleTiles, whoSheIsLine, type RuleTile } from "@/lib/ivyRule";
 import { IVY_BACKTEST_ENCODING, backtestScale, ivyBacktestLegend } from "@/lib/encodings/ivyBacktest";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -12,20 +12,6 @@ import { api, type HealthStatus, type IvyActivity } from "@/lib/api";
 import { IvyMark } from "@/components/IvyMark";
 
 import { fmtDate as fmtOneDate, fmtDateTime as fmtOneDateTime, axisDay, axisTime } from "@/lib/dates";
-function timeAgo(iso: string): string {
-  const seconds = Math.floor(
-    (Date.now() - new Date(iso).getTime()) / 1000
-  );
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  return `${days}d ago`;
-}
-
 function fmtRvDate(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   const today = new Date();
@@ -177,11 +163,7 @@ export default function MeetIvyPage() {
 
   const railRows: { label: string; value: string }[] = [];
   if (!loading && !error) {
-    if (health?.refresh_in_progress) {
-      railRows.push({ label: "Data refreshed", value: "Now" });
-    } else if (datasetAgeLine(health?.datasets, ["chains", "reactions"], timeAgo)) {
-      railRows.push({ label: "Data refreshed", value: datasetAgeLine(health?.datasets, ["chains", "reactions"], timeAgo) as string });
-    }
+    // no row for the data's age: a dataset's age is Sam's (the digest and the phone alert), never a visitor's (2026-11-10)
     if (health?.rv_latest_date) {
       railRows.push({ label: "RV snapshot", value: fmtRvDate(health.rv_latest_date) });
     }

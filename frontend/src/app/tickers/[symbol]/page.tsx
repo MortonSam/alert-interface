@@ -8,10 +8,9 @@ import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { shortCompanyName } from "@/lib/companyName";
-import { datasetAgeLine, fmtIsoDateTime, fmtQuoteDateTime, intradayBarsLine, quoteAsOf, oneDayHistoryLine, oneDaySessionLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
+import { fmtIsoDateTime, fmtQuoteDateTime, intradayBarsLine, quoteAsOf, oneDayHistoryLine, oneDaySessionLine, priceAsOfPhrase, priceStateLine } from "@/lib/freshness";
 
 // the ticker page shows earnings history, analyst data, IV and the courier's options data: those datasets date its line
-const TICKER_DATASETS = ["reactions", "analyst", "iv", "chains"];
 import { analystSampleLabel, analystSampleFooter, hasAnalystSignal, streetPulseLine } from "@/lib/analystSample";
 import { EARNINGS_MARKER_DASH, EARNINGS_MARKER_ENCODING, earningsMarkerColor, earningsMarkerLegend } from "@/lib/encodings/earningsMarkers";
 import EncodingLegend from "@/components/EncodingLegend";
@@ -2029,12 +2028,6 @@ export default function TickerPage() {
 
           {/* "Why now" strip */}
           <WhyNowStrip events={events} />
-
-          {!dealNote && datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo) && (
-            <p className="text-xs text-muted-foreground mt-1">
-              {datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo)}
-            </p>
-          )}
 
           {quote && priceStateLine(quote.quote_state, quote.quote_reason) && (
             <p className="mt-5 text-sm text-muted-foreground">

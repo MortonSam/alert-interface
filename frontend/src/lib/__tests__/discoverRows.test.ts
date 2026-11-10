@@ -61,7 +61,7 @@ describe("Discover is a list of rows, not a card grid", () => {
   });
 
   it("keeps the freshness line and numbers sections as they render", () => {
-    expect(page).toContain("freshnessLine(datasetAgeLine(health?.datasets, DISCOVER_DATASETS, asOfTime), health?.cadence)");
+    expect(page).toContain("{priceSourceLine(health?.cadence)}");          // the price delay note alone (Sam, 2026-11-10)
     expect(page).not.toMatch(/timeAgo|\bago\b/);                       // one timestamp format on Discover: "Oct 15, 4:00 PM ET"
     expect(page).not.toContain("health.last_refreshed_at");            // the global stamp dates nothing a visitor sees
     expect(page.match(/index=\{nextIndex\(\)\}/g)?.length).toBe(5);

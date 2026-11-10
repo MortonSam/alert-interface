@@ -16,7 +16,7 @@ describe("a held ticker's page shows plain price facts below the deal note", () 
     expect(page.indexOf("No reaction history available for this ticker yet.")).toBeGreaterThan(i);
   });
   it("the options-data line and the analyst move statistics are hidden", () => {
-    expect(page).toContain("{!dealNote && datasetAgeLine(health?.datasets, TICKER_DATASETS, timeAgo) && (");
+    expect(page).not.toContain("datasetAgeLine(");                         // no data age on the page at all (Sam, 2026-11-10)
     expect(page).toContain("{!dealNote && analystStats && (hasAnalystSignal(");
     expect(page).toContain("{!dealNote && analystInsight && (");
     expect(page).toContain("if (dealNote || !analystDetail || !analystStats) return null;");

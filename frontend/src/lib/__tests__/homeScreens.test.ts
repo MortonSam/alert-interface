@@ -51,3 +51,12 @@ describe("one screen per home section", () => {
     expect(read("app/layout.tsx")).toContain('<header className="border-b bg-background sticky top-0 z-40">');   // opaque, no blur
   });
 });
+
+describe("status lines (Sam, 2026-11-10)", () => {
+  it("no page shows a dataset's age or a refresh step's state to a visitor: the price delay note alone", () => {
+    for (const p of ["app/discover/page.tsx", "app/ivy/layout.tsx", "app/ivy/page.tsx", "app/tickers/[symbol]/page.tsx", "app/watchlist/page.tsx", "app/ticker-grid.tsx"]) {
+      const src = read(p);
+      expect(src, p).not.toMatch(/datasetAgeLine\(|freshnessLine\(|Data refreshed|refreshing her data/);
+    }
+  });
+});

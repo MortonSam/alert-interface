@@ -1,27 +1,11 @@
 "use client";
 
-import { datasetAgeLine, freshnessLine } from "@/lib/freshness";
+import { priceSourceLine } from "@/lib/freshness";
 
-// Ivy reads the courier's options data and the earnings history
-const IVY_DATASETS = ["chains", "reactions"];
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, type HealthStatus } from "@/lib/api";
-
-function timeAgo(iso: string): string {
-  const seconds = Math.floor(
-    (Date.now() - new Date(iso).getTime()) / 1000
-  );
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  return `${days}d ago`;
-}
 
 const tabs = [
   { href: "/ivy", label: "Meet Ivy" },
@@ -37,14 +21,9 @@ export default function IvyLayout({ children }: { children: React.ReactNode }) {
     api.system.health().then(setHealth).catch(() => {});
   }, []);
 
-  let stripText: string | null = null;
-  let pulse = false;
-  if (health?.refresh_in_progress) {
-    stripText = "Ivy is refreshing her data…";
-    pulse = true;
-  } else if (datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo)) {
-    stripText = freshnessLine(datasetAgeLine(health?.datasets, IVY_DATASETS, timeAgo), health?.cadence);
-  }
+  // the price delay note alone: the refresh's state and a dataset's age are Sam's (the digest and the phone alert), never a visitor's (2026-11-10)
+  const stripText: string | null = health ? priceSourceLine(health.cadence) : null;
+  const pulse = false;
 
   const isWide = pathname === "/ivy" || pathname === "/ivy/desk";
   const widthClass = isWide ? "max-w-6xl" : "max-w-4xl";
