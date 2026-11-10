@@ -55,7 +55,7 @@ def test_fable_5_is_priced_so_draft_spend_counts():
 def test_the_site_wide_ai_cap_resets_at_midnight_new_york():
     assert ai_spend.spend_day(datetime(2026, 10, 13, 3, 30, tzinfo=timezone.utc)) == "2026-10-12"      # 23:30 ET on the 12th
     assert ai_spend.spend_day(datetime(2026, 10, 13, 4, 30, tzinfo=timezone.utc)) == "2026-10-13"
-    assert ai_spend.reached(20.0, 20.0) and not ai_spend.reached(19.99, 20.0) and ai_spend.cap_usd() == 20.0
+    assert ai_spend.reached(20.0, 20.0) and not ai_spend.reached(19.99, 20.0) and ai_spend.cap_usd(date(2030, 1, 5)) == 20.0
 
 
 @pytest.mark.asyncio
