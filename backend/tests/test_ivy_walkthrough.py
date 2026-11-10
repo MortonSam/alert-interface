@@ -1057,3 +1057,22 @@ def test_step_2_shows_the_filings_own_growth_when_the_readers_disagree():
     assert s["numbers"][0]["as_of"].endswith("from its 10-K filed Oct 30, 2026")
     assert "as its 10-K reports it" in s["sentences"][0] and "the filing's alone" in s["sentences"][1] and s["check"] is None
     assert W.step_growth("Apple", [], "Information Technology", True, None)["status"] == "absent"          # no filing figure either
+
+
+def test_step_5_shows_the_last_pe_on_file_while_the_newest_quarter_is_not_in_yet():
+    last = {"as_of_date": date(2026, 11, 3), "pe": 18.2, "window_end": date(2026, 9, 30)}
+    missing = {"status": "missing", "reason": "the Nov 4, 2026 report is newer than XBRL (through Jun 30, 2026) and its release EPS is not on file",
+               "latest_report": date(2026, 11, 4)}
+    assert W.last_pe_usable(last, missing, date(2026, 11, 10))
+    assert not W.last_pe_usable(last, {**missing, "reason": "it lost money"}, date(2026, 11, 10))             # never covers a loss
+    assert not W.last_pe_usable(last, missing, date(2027, 4, 1))                                               # too old to stand in
+    assert W.pe_behind_line(date(2026, 11, 4), last, None) == ("Its newest quarter, reported Nov 4, 2026, isn't in its filings' data yet; the figures "
+                                                               "above are as of the Nov 3, 2026 close, with earnings through the quarter ended Sep 30, 2026.")
+
+
+def test_a_release_figure_in_another_unit_agrees_with_the_filing():
+    from app.services import growth as G
+    aapl = {"raw": "143,756", "number": 143756.0, "scale": "thousands"}     # "(In millions, except number of shares, which are reflected in thousands)"
+    assert G.revenue_agrees(143_756_000_000.0, aapl)                         # AAPL's Dec 2025 quarter: the same figure, in millions
+    assert not G.revenue_agrees(143_900_000_000.0, aapl)                     # a different figure never agrees
+    assert G.revenue_agrees(5_285_400_000.0, {"raw": "5,286", "number": 5286.0, "scale": "millions"})   # BSX: one unit of the last digit
