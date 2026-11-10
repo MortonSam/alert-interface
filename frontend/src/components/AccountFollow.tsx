@@ -35,7 +35,7 @@ export function EarningsEmailLine({ symbol, name }: { symbol: string; name: stri
   if (!shown) return null;
   return (
     <p className="mt-2 text-sm" data-testid="earnings-email-line">
-      <Link href={`/account?follow=${encodeURIComponent(symbol)}&name=${encodeURIComponent(name)}`} className="text-muted-foreground hover:text-foreground">
+      <Link href={`/account?follow=${encodeURIComponent(symbol)}&name=${encodeURIComponent(name)}`} className="tap text-muted-foreground hover:text-foreground">
         {C.tickerEmailLine(name)} →
       </Link>
     </p>
