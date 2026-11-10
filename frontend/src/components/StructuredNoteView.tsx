@@ -428,8 +428,10 @@ export default function StructuredNoteView({
 
       {/* ── Stat strip ────────────────────────────────────────────────────── */}
       {statCells.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 rounded-lg bg-secondary/50 px-4 py-3">
-          {statCells}
+        // sized to its figures (Sam, 2026-11-10: NVDA's lone "EPS $2.46" sat in a wide empty bar): one, two or three figures, each set
+        // off by a thin rule, in a strip only as wide as they are
+        <div data-testid="note-stat-strip" className="flex w-fit max-w-full flex-wrap items-stretch gap-y-3 rounded-lg bg-secondary/50 px-1 py-3 divide-x divide-border/60">
+          {statCells.map((c, i) => <div key={i} className="px-4">{c}</div>)}
         </div>
       )}
 
