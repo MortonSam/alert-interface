@@ -32,7 +32,7 @@ function SignIn() {
       }}>
         <label htmlFor="account-email" className="block text-sm text-muted-foreground">{C.emailLabel}</label>
         <input id="account-email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={C.emailPlaceholder}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-foreground/40" />
+          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 max-sm:min-h-11 text-sm outline-none focus:border-foreground/40" />
         {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
         <button type="submit" disabled={state === "sending"} className="tap rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60">
           {state === "sending" ? C.sending : C.sendLink}
