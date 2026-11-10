@@ -54,8 +54,13 @@ def spend_day(now: datetime | None = None) -> str:
     return (now or datetime.now(timezone.utc)).astimezone(CLOCK).strftime("%Y-%m-%d")
 
 
-def cap_usd() -> float:
-    return float(settings.ai_daily_spend_cap_usd)
+SAVER_CAP_USD = 3.0                  # the day's cap until SAVER_UNTIL whatever AI_DAILY_SPEND_CAP_USD says (Sam, 2026-11-10: $3 a day on $20)
+
+
+def cap_usd(today: date | None = None) -> float:
+    """The day's AI cap: AI_DAILY_SPEND_CAP_USD, held to SAVER_CAP_USD until SAVER_UNTIL (the plan's monthly credit)."""
+    cap = float(settings.ai_daily_spend_cap_usd)
+    return min(cap, SAVER_CAP_USD) if saver_on(today or datetime.now(CLOCK).date()) else cap
 
 
 # The nightly's share of the cap (Sam, 2026-11-02, with the cap at $15): research notes at most NOTES_NIGHT_USD a night, the
@@ -155,7 +160,7 @@ async def unpriced_today(db, now: datetime | None = None) -> int:
 
 
 async def cap_reached(db, now: datetime | None = None) -> bool:
-    return reached(await spend_today(db, now))
+    return reached(await spend_today(db, now), cap_usd(date.fromisoformat(spend_day(now))))
 
 
 async def _incr(db, key: str, amount: float) -> None:
@@ -177,10 +182,11 @@ async def check_nightly(db, model: str | None, request: dict, now: datetime | No
     ceiling = call_ceiling_usd(model, request)
     if ceiling is None:
         return
-    room = nightly_room(cap_usd(), await spend_today(db, now))
+    day = date.fromisoformat(spend_day(now))
+    room = nightly_room(cap_usd(day), await spend_today(db, now))
     if ceiling > room:
         raise NightlyBudgetReached(f"nightly AI call refused: it could cost ${ceiling:.2f} and only ${room:.2f} of today's "
-                                   f"${cap_usd():.2f} cap is left before visitors' ${visitor_reserve(cap_usd()):.2f}")
+                                   f"${cap_usd(day):.2f} cap is left before visitors' ${visitor_reserve(cap_usd(day)):.2f}")
 
 
 async def record_call(db, feature: str, cost: float | None, now: datetime | None = None) -> None:
@@ -215,6 +221,7 @@ async def breakdown(db, day: str) -> dict:
 async def summary(db, now: datetime | None = None) -> dict:
     spent = await spend_today(db, now)
     by_pool = {p: round(float(await get_value(db, f"{POOL_KEY}:{spend_day(now)}:{p}") or 0), 4) for p in (VISITOR, NIGHTLY)}
-    return {"day": spend_day(now), "clock": "America/New_York", "spent_usd": round(spent, 4), "cap_usd": cap_usd(), "reached": reached(spent),
-            "unpriced_calls": await unpriced_today(db, now), "by_pool": by_pool, "visitor_reserve_usd": visitor_reserve(cap_usd()),
-            "nightly_room_usd": round(nightly_room(cap_usd(), spent), 4)}
+    cap = cap_usd(date.fromisoformat(spend_day(now)))
+    return {"day": spend_day(now), "clock": "America/New_York", "spent_usd": round(spent, 4), "cap_usd": cap, "reached": reached(spent, cap),
+            "unpriced_calls": await unpriced_today(db, now), "by_pool": by_pool, "visitor_reserve_usd": visitor_reserve(cap),
+            "nightly_room_usd": round(nightly_room(cap, spent), 4)}

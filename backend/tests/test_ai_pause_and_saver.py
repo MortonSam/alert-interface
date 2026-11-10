@@ -54,3 +54,11 @@ async def test_a_paused_night_sends_no_model_call(monkeypatch):
         finally:
             await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": P.PAUSE_KEY})
             await s.commit()
+
+
+def test_until_the_plan_credit_the_cap_is_held_to_three_dollars(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "ai_daily_spend_cap_usd", 15.0)
+    assert A.cap_usd(date(2026, 11, 10)) == 3.0 and A.cap_usd(date(2026, 11, 19)) == 15.0
+    monkeypatch.setattr(settings, "ai_daily_spend_cap_usd", 2.0)
+    assert A.cap_usd(date(2026, 11, 10)) == 2.0                        # a lower cap set on Railway still wins

@@ -40,7 +40,7 @@ async def test_a_nightly_call_is_refused_before_it_is_sent_and_a_visitor_call_is
         try:
             await s.execute(text("DELETE FROM system_metadata WHERE key LIKE :p"), {"p": "ai_spend%:2030-01-06%"})
             await s.execute(text("INSERT INTO system_metadata (key, value) VALUES ('ai_spend:2030-01-06', :v)"),
-                            {"v": f"{ai_spend.cap_usd() - ai_spend.VISITOR_RESERVE_USD - 0.01:.2f}"})
+                            {"v": f"{ai_spend.cap_usd(date(2030, 1, 6)) - ai_spend.visitor_reserve(ai_spend.cap_usd(date(2030, 1, 6))) - 0.01:.2f}"})
             await s.commit()
             with pytest.raises(ai_spend.NightlyBudgetReached):
                 await ai_spend.check_nightly(s, "claude-sonnet-4-6", request, DAY)
