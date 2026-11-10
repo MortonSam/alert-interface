@@ -259,13 +259,13 @@ export default function MeetIvyPage() {
           <div className="flex flex-wrap gap-3">
             <Link
               href="/ivy/desk"
-              className="bg-primary text-primary-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:opacity-90 transition-opacity whitespace-nowrap"
+              className="tap bg-primary text-primary-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:opacity-90 transition-opacity whitespace-nowrap"
             >
               See what&apos;s on her desk →
             </Link>
             <Link
               href="/ivy/trades"
-              className="border border-border text-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:border-foreground/40 transition-colors whitespace-nowrap"
+              className="tap border border-border text-foreground font-semibold rounded-xl px-5 py-2.5 text-sm hover:border-foreground/40 transition-colors whitespace-nowrap"
             >
               {ivy ? ledgerLinkLabel(ivy.rule) : "Her record \u2192"}
             </Link>

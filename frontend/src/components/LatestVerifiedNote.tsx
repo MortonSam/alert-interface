@@ -51,7 +51,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
       <div className="px-6 py-5 space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Link href={`/tickers/${note.symbol}`} className="font-sans text-2xl font-bold text-foreground hover:text-primary transition-colors">
+            <Link href={`/tickers/${note.symbol}`} className="tap font-sans text-2xl font-bold text-foreground hover:text-primary transition-colors">
               {note.symbol}
             </Link>
             {note.company_name && <p className="text-sm text-muted-foreground">{note.company_name}</p>}
@@ -83,7 +83,7 @@ export default function LatestVerifiedNote({ className = "" }: { className?: str
         {verified && <p className="font-mono text-[11px] text-muted-foreground">{verified}</p>}
       </div>
       <div className="flex justify-center py-4 border-t border-border">
-        <Link href={`/tickers/${note.symbol}`} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+        <Link href={`/tickers/${note.symbol}`} className="tap text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
           Read the full note for {note.symbol}
         </Link>
       </div>
