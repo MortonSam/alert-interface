@@ -358,7 +358,7 @@ def ttm_growth(rows: list[dict]) -> tuple[float, float, float, date] | None:
 
 
 def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled: bool, periods: dict | None = None, reit: bool = False,
-                ffo: dict | None = None, noun: str = "revenue") -> dict:
+                ffo: dict | None = None, noun: str = "revenue", filing: dict | None = None) -> dict:
     if not enabled:
         return _absent(2, name, GROWTH_IN_REVIEW, "figures still being checked", "growth", noun)
     Noun = cap(noun)
@@ -370,7 +370,10 @@ def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled:
     latest = max(agreed, key=lambda r: r["period_end"], default=None)     # the newest quarter both readers agree on (it carries its own date)
     if newest and newest.get("held_reason"):
         return _absent(2, name, f"{iso_dates(newest['held_reason'])}.", "its latest quarter is held for a corporate action", "growth", noun)
-    if not latest:
+    if not latest or (filing and filing["period_end"] > latest["period_end"] + timedelta(days=SAME_QUARTER_DAYS)):
+        # the readers do not agree (or agree only on an older quarter): the SEC filing's own figure, labelled as the filing's (Sam, 2026-11-10)
+        if filing and filing.get("value") is not None:
+            return step_growth_filing(name, filing, periods, noun)
         return _absent(2, name, "Its filings and its earnings releases do not yet agree on these figures.", "its filings and earnings releases don't agree yet", "growth", noun)
     end = latest["period_end"]
     g = float(latest["growth_pct"]) if latest.get("growth_pct") is not None else None
@@ -420,6 +423,33 @@ def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled:
         point = f"The {pct(g)} {'rise' if g >= 0 else 'fall'} in its {noun} in {qname}"
     st = _step(2, status="ok" if t else "partial", numbers=numbers, sentences=sentences, idea="growth", check=check, deeper=deeper, summary=summary,
                fact=fact, point=point, cell=cell or None, noun=noun)
+    return st
+
+
+def step_growth_filing(name: str, f: dict, periods: dict | None, noun: str = "revenue") -> dict:
+    """Step 2 from the SEC filing alone (growth.filing_growth): the quarter's revenue against the same quarter a year earlier, each as
+    first filed, every figure labelled as the filing's. No quick check: the earnings release reads the quarter differently."""
+    end = f["period_end"]
+    g = float(f["growth_pct"]) if f.get("growth_pct") is not None else None
+    q = quarter(periods, end)
+    qname = quarter_name(periods, end) or f"the quarter ended {fmt_date(end)}"
+    form = f.get("form") or "10-Q"
+    as_of = f"{quarter_label(periods, end)}, from its {form} filed {fmt_date(f['filed'])}" if f.get("filed") else f"{quarter_label(periods, end)}, from its {form}"
+    numbers = [_num(f"{cap(noun)} against a year earlier, as filed", signed(g) if g is not None else f["phrase"], as_of)]
+    sentences = [f"In {q}, {name}'s {noun} was {money_words(float(f['value']))}, {change_phrase(g, f.get('phrase'))}, as its {form} reports it.",
+                 "Its earnings release reads the quarter differently, so these figures are the filing's alone."]
+    summary = f"Its {noun} {moved(g)} in {qname} against a year earlier, as its {form} reports it." if g is not None else f"Its {noun} in {qname} {f['phrase']}, as its {form} reports it."
+    deeper = [_num(f"{cap(noun)}, {quarter_name(periods, end) or 'quarter'}", money_words(float(f["value"])), as_of),
+              _num(f"{cap(noun)}, a year earlier", money_words(float(f["year_ago_value"])), f"Ended {fmt_date(f['year_ago_end'])}, as first filed")]
+    cell = {"quarter": {"value": signed(g), "as_of": f"{as_of}, against a year earlier", "end": str(end)}} if g is not None else None
+    fact = point = None
+    if g is not None:
+        fact = {"concept": "growth", "measure": "sales_yoy", "lead": f"{name}'s {noun} {grew(g, noun)} {pct(g)} from a year earlier", "short": f"{name}'s {grew(g, noun)} {pct(g)}",
+                "tail": f"in {qname}"}
+        point = f"The {pct(g)} {'rise' if g >= 0 else 'fall'} in its {noun} in {qname}"
+    st = _step(2, status="partial", numbers=numbers, sentences=sentences, idea="growth", deeper=deeper, summary=summary, fact=fact,
+               point=point, cell=cell, noun=noun)
+    st["from_filing"] = True
     return st
 
 

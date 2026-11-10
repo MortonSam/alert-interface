@@ -1042,3 +1042,18 @@ def test_step_1_writes_split_names_the_companys_way():
     assert "commercial and investment banking desks" in out                         # a phrase that is not the name stays as written
     nv = W.own_names("Revenue flows from Compute and Networking and Graphics.", [{"label": "Compute & Networking"}, {"label": "Graphics"}])
     assert nv == "Revenue flows from Compute & Networking and Graphics."
+
+
+def test_step_2_shows_the_filings_own_growth_when_the_readers_disagree():
+    from app.services import growth as G
+    us_gaap = {"RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [
+        {"start": "2025-06-29", "end": "2025-09-27", "val": 102_466_000_000, "filed": "2025-10-31", "form": "10-K"},
+        {"start": "2026-06-28", "end": "2026-09-26", "val": 111_184_000_000, "filed": "2026-10-30", "form": "10-K"}]}}}
+    f = G.filing_growth(us_gaap, "Information Technology", date(2026, 11, 10))
+    assert f["period_end"] == date(2026, 9, 26) and f["growth_pct"] == 8.5 and f["form"] == "10-K"
+    assert G.filing_growth(us_gaap, "Information Technology", date(2026, 10, 1)) is None          # not filed yet: never counted
+    s = W.step_growth("Apple", [], "Information Technology", True, None, filing=f)
+    assert s["status"] == "partial" and s["from_filing"] and s["numbers"][0]["label"] == "Revenue against a year earlier, as filed"
+    assert s["numbers"][0]["as_of"].endswith("from its 10-K filed Oct 30, 2026")
+    assert "as its 10-K reports it" in s["sentences"][0] and "the filing's alone" in s["sentences"][1] and s["check"] is None
+    assert W.step_growth("Apple", [], "Information Technology", True, None)["status"] == "absent"          # no filing figure either

@@ -134,6 +134,27 @@ def year_ago(end: date, quarters: dict[date, dict]) -> date | None:
     return min(cands, key=lambda d: abs((end - d).days - 365)) if cands else None
 
 
+def filing_growth(us_gaap: dict, sector: str | None, filed_by: date | None = None) -> dict | None:
+    """Pure: the latest quarter's revenue against the same quarter a year earlier from the SEC filings alone (Sam, 2026-11-10: the
+    walkthrough shows the filing's figure, labelled as the filing's, where the release reads differently): {period_end, value,
+    year_ago_end, year_ago_value, growth_pct, phrase, tag, form, filed}, each value as first filed; None when no tag carries the
+    quarter and its year-ago quarter. Only quarters filed by `filed_by` count."""
+    best = None
+    for tag, q in revenue_by_tag(us_gaap, sector):
+        ends = sorted(e for e, r in q.items() if filed_by is None or r["as_filed_on"] <= filed_by)
+        for end in reversed(ends):
+            ya = year_ago(end, q)
+            if ya:
+                cur, prior = q[end]["as_filed"], q[ya]["as_filed"]
+                pct_, phrase = growth_words("revenue", cur, prior)
+                row = {"period_end": end, "value": cur, "year_ago_end": ya, "year_ago_value": prior, "growth_pct": pct_, "phrase": phrase,
+                       "tag": tag, "form": q[end]["form"], "filed": q[end]["as_filed_on"]}
+                if best is None or end > best["period_end"]:
+                    best = row
+                break
+    return best
+
+
 # ── the release's revenue line ───────────────────────────────────────────────────────────────────────────────────────────────
 
 _REV_LABELS = [r"total\s+net\s+revenues?", r"total\s+revenues?(?:\s+and\s+other\s+income)?", r"net\s+revenues?", r"total\s+net\s+sales",
