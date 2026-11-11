@@ -157,25 +157,60 @@ def filing_growth(us_gaap: dict, sector: str | None, filed_by: date | None = Non
 
 # ── the release's revenue line ───────────────────────────────────────────────────────────────────────────────────────────────
 
-_REV_LABELS = [r"total\s+net\s+revenues?", r"total\s+revenues?(?:\s+and\s+other\s+income)?", r"net\s+revenues?", r"total\s+net\s+sales",
+_REV_LABELS = [r"(?:total\s+)?net\s+sales\s+and\s+operating\s+revenues?", r"total\s+net\s+revenues?", r"total\s+revenues?(?:\s+and\s+other\s+income)?", r"total\s+operating\s+revenues?",
+               r"net\s+operating\s+revenues?", r"sales\s+and\s+other\s+operating\s+revenues?", r"railway\s+operating\s+revenues?",
+               r"rental\s+and\s+other\s+property\s+revenues?", r"operating\s+revenues?", r"net\s+revenues?", r"total\s+net\s+sales",
                r"net\s+sales", r"revenues?", r"sales"]
+# a label that is the company's revenue only when it starts its row: the word before it is not another label word (Nov 10, 2026: AXP's
+# "Discount revenue", CPRT's "Service revenues", DRI's "Unearned revenues", REGN's "Collaboration revenue", USB's "Card revenue")
+_BARE_LABELS = {r"operating\s+revenues?", r"net\s+revenues?", r"net\s+sales", r"revenues?", r"sales"}
+_ROW_OPENERS = {"total", "consolidated", "gaap", "reported", "operations", "income", "earnings", "unaudited", "millions", "thousands",
+                "billions", "amounts", "data", "except", "per", "share", "ended", "months", "weeks", "quarter", "dollars", "change", "gaap",
+                "statements", "statement",
+                # a column heading's last word, before the table's first row (the 385 other stocks' releases, Nov 10, 2026: HCA's
+                # "Amount Ratio Revenues", AOS's "% Change YoY Net sales", WDC's "Q/Q Y/Y Revenue", CHTR's "Actual REVENUES", PM's
+                # "Currency Net Revenues", CEG's "Non-GAAP Adjustments Operating revenues", CBRE's "Operating Results Revenue")
+                "amount", "ratio", "yoy", "y/y", "q/q", "actual", "currency", "adjustments", "results", "forma"}
+
+
+_LABEL_WORDS = {"revenue", "revenues", "sales"}
+
+
+def _row_start(before: str) -> bool:
+    """Pure: the text before a label leaves it at the start of its row (a figure, a bracket, a heading word ends it), not mid-label."""
+    m = re.search(r"([A-Za-z][A-Za-z'’\-/]*)\s*(:?)\s*$", before)
+    # a heading ends in a colon ("Revenue: Revenue $ 1,090,579", IDXX) or repeats the label's own word as a column's ("% of Net
+    # Revenues Net revenues $ 1,445.9", HAS; "Net Sales Sales Net sales", TSCO)
+    return not m or bool(m.group(2)) or m.group(1).lower() in _ROW_OPENERS or m.group(1).lower() in _LABEL_WORDS
+
+
 _AMOUNT = r"\$?\s?(\(?\d{1,3}(?:,\d{3})+(?:\.\d+)?\)?|\(?\d+\.\d+\)?|\(?\d{2,}\)?)"
 _SCALE = re.compile(r"\(\s*(?:dollars\s+|\$\s*)?in\s+(millions|thousands|billions)|(?:in|\$)\s+(millions|thousands|billions)\b", re.I)
 
 
-_PROSE_REV = re.compile(r"(?<![A-Za-z])(?:(reported|total|net|gaap|quarterly|consolidated)\s+)?(?:net\s+)?revenues?\s+(?:of|was|were|totaled)\s+"
+_PROSE_REV = re.compile(r"(?<![A-Za-z])(?:(reported|total|net|gaap|quarterly|consolidated)\s+)?(?:operating\s+)?(?:net\s+)?revenues?(?:,\s*net\s+of\s+interest\s+expense,)?\s+(?:of|was|were|totaled)\s+"
                         r"\$\s?(\d[\d,]*(?:\.\d+)?)\s+(billion|million)", re.I)
+_PROSE_OPENERS = {"quarter", "quarterly", "record", "company", "company's", "firm", "firmwide", "its", "our", "the", "and", "with", "of",
+                  "in", "q1", "q2", "q3", "q4", "first-quarter", "second-quarter", "third-quarter", "fourth-quarter", "delivered", "reported",
+                  "generated", "achieved", "posted", "on", "worldwide"}
+_COMPANY_WORDS = {"total", "consolidated"}       # never "reported": a segment reports too ("Engine Structures reported revenue of $294 million", HWM)
 _SEGMENT_BEFORE = re.compile(r"(?:[A-Z][\w&.'-]*\s*)$")
 
 
 def _prose_revenue(flat: str) -> dict | None:
     """The company-level revenue sentence ("Reported revenue of $49.8 billion", "Revenue of $11.32 billion"): never a segment's
     ("Markets revenue reached ...", "In the CIB, revenue grew"), never guidance or a year's."""
+    found = []
     for m in _PROSE_REV.finditer(flat):
         if not m.group(1):
             prev = flat[max(0, m.start() - 30):m.start()]
             if _SEGMENT_BEFORE.search(prev.rstrip()) and not re.search(r"(?:^|[.;:•\n])\s*$", prev):
                 continue                         # a capitalised word right before "revenue" names a segment or product
+            if re.search(r"(?:increase|decrease|growth|change|rise|decline|gain|drop)\s+in\s*$", prev, re.I):
+                continue                         # "an increase in revenue of $27.3 million" (CPRT) is a change, not the quarter's revenue
+            w = re.search(r"([A-Za-z][A-Za-z'’\-]*)\s*$", prev)
+            if w and w.group(1).lower() not in _PROSE_OPENERS:
+                continue                         # "performance revenues of $78.8 million" (ARES), "servicing fee revenue" (STT): a line's
         # its own sentence (GS: "Net revenues were $ 56.24 billion ... for the first nine months of 2026" follows the quarter's sentence)
         left = max(flat.rfind(". ", 0, m.start()), flat.rfind("•", 0, m.start()), 0)
         right = min([i for i in (flat.find(". ", m.end()), flat.find("•", m.end())) if i >= 0] or [len(flat)])
@@ -186,9 +221,13 @@ def _prose_revenue(flat: str) -> dict | None:
         if re.search(r"\bfiscal\s+(?:year\s+)?(?:20)?\d{2}\b|\bFY\s?'?\d{2}\b|\b20\d{2}\s*$", near, re.I) and not re.search(r"quarter|\bQ[1-4]\b", near, re.I):
             continue                             # "Fiscal 2025 revenue of $37.38 billion" is the year's (MU); "fourth quarter of fiscal 2025" stays
         num = float(m.group(2).replace(",", ""))
-        return {"raw": m.group(2), "value": num * (1e9 if m.group(3).lower() == "billion" else 1e6), "number": num,
-                "scale": m.group(3).lower() + "s", "how": "revenue sentence", "evidence": flat[max(0, m.start() - 10):m.end() + 10]}
-    return None
+        found.append({"raw": m.group(2), "value": num * (1e9 if m.group(3).lower() == "billion" else 1e6), "number": num,
+                      "scale": m.group(3).lower() + "s", "how": "revenue sentence", "evidence": flat[max(0, m.start() - 10):m.end() + 10],
+                      "company": (m.group(1) or "").lower() in _COMPANY_WORDS or "interest expense" in m.group(0).lower()})
+    # the first company-level sentence, one that says so first ("Total revenue", "Revenue, net of interest expense,": BAC's segment
+    # bullet "Revenue of $11.6 billion" comes earlier); never the largest (a fourth quarter's release may state the year's revenue in
+    # a bullet further down: CVNA's "Revenue totaled $20.322 billion" for 2025)
+    return min(found, key=lambda f: 0 if f["company"] else 1) if found else None
 
 
 # Block 2 (2026-10-20): the release reader took a segment's line for total revenue in 2,045 of 2,182 growth disagreements (Agilent:
@@ -229,6 +268,8 @@ def _table_revenue(flat: str, lo: int, hi: int, how_suffix: str = "", last_colum
                 continue
             if skip_annual and _annual_heading(flat[:at]):
                 continue
+            if label in _BARE_LABELS and not _row_start(flat[max(0, at - 40):at]):
+                continue                         # "Discount revenue", "Service revenues", "Deferred revenue": a line, never the total
             amounts = _row_amounts(flat, lo + m.start(2))
             if last_column and amounts:
                 raw = amounts[-1]
