@@ -19,6 +19,25 @@ pytestmark = pytest.mark.xdist_group(name="accounts")
 SITE = "https://alertinterface.com"
 
 
+# AMD's history as stored on Nov 10, 2026: each chain's report move as a fraction (0.077 is 7.7%)
+AMD_HISTORY = {"2026-10-26": {"pct": 0.06299656872880094, "method": "pair", "version": 3}, "2026-10-27": {"pct": 0.03450147295754263, "method": "term", "version": 4},
+               "2026-10-28": {"pct": 0.0577835537245765, "method": "term", "version": 4}, "2026-10-30": {"pct": 0.04896474190701707, "method": "term", "version": 4},
+               "2026-11-02": {"pct": 0.07732275692712348, "method": "term", "version": 4}}
+
+
+def test_the_morning_after_uses_the_figure_on_file_from_before_the_report_in_percent():
+    # was "about ±0.1%": the stored fraction 0.077 was rounded as if it were a percent (Sam, 2026-11-10)
+    assert E.priced_before_report(AMD_HISTORY, date(2026, 11, 3), "amc") == 7.7
+    later = {**AMD_HISTORY, "2026-11-03": {"pct": 0.05}, "2026-11-04": {"pct": 0.01}}
+    assert E.priced_before_report(later, date(2026, 11, 3), "amc") == 5.0         # the report day's closing chain precedes an after-close release
+    assert E.priced_before_report(later, date(2026, 11, 3), "bmo") == 7.7         # never a chain of the day a before-open report came out, or later
+    assert E.priced_before_report(later, date(2026, 11, 3), None) == 7.7
+    assert E.priced_before_report({"2026-11-04": {"pct": 0.05}}, date(2026, 11, 3), "amc") is None
+    sec = E.after_section({"symbol": "AMD", "name": "AMD", "session": date(2026, 11, 4), "move": 1.0,
+                           "implied": E.priced_before_report(AMD_HISTORY, date(2026, 11, 3), "amc")}, "https://alertinterface.com")
+    assert "Options had priced a move of about ±7.7% from the report itself, so it moved less than options priced." in sec.lines
+
+
 def test_the_sunday_email_is_offered_only_with_its_flag():
     assert set(K.offered_kinds(False)) == {"date_confirmed", "earnings_eve", "morning_after"}
     assert set(K.offered_kinds(True)) == set(K.KINDS)

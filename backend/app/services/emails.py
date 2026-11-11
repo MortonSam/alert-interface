@@ -258,14 +258,23 @@ async def report_share(db, symbol: str, report_date: date, today: date, typical:
     return {"pct": v["rep"], "verdict": v.get("move_comparison")} if v.get("rep") is not None and v.get("move_comparison") else None
 
 
-async def priced_before(db, symbol: str, report_date: date) -> float | None:
-    """The report move options priced on the last stored chain before the report (services/report_move history)."""
+def priced_before_report(hist: dict, report_date: date, timing: str | None) -> float | None:
+    """Pure: the report move options priced, in percent, on the newest chain on file from before the report, never one taken after it
+    (Sam, 2026-11-10). The history keeps each chain's move as a fraction (report_move.ReportMove.pct, 0.077 for 7.7%). A chain
+    of the report day itself counts only for a report after the close (its closing prices precede the release); a report before the
+    open, or at an unknown time, counts only chains of earlier days."""
+    last = report_date.isoformat()
+    ok = lambda d: d < last or (d == last and timing == "amc")
+    before = [(d, h["pct"]) for d, h in sorted(hist.items()) if ok(d) and h.get("pct") is not None]
+    return round(float(before[-1][1]) * 100, 1) if before else None
+
+
+async def priced_before(db, symbol: str, report_date: date, timing: str | None) -> float | None:
+    """The report move options priced before the report (priced_before_report over services/report_move's stored history)."""
     import json
     from app.services.report_move import history_key
     from app.services.system_metadata_service import get_value
-    hist = json.loads(await get_value(db, history_key(symbol, report_date.isoformat())) or "{}")
-    before = [(d, h["pct"]) for d, h in sorted(hist.items()) if d <= report_date.isoformat() and h.get("pct") is not None]
-    return round(float(before[-1][1]), 1) if before else None
+    return priced_before_report(json.loads(await get_value(db, history_key(symbol, report_date.isoformat())) or "{}"), report_date, timing)
 
 
 async def first_session_move(db, symbol: str, report_date: date, timing: str | None) -> tuple[date | None, float | None]:
@@ -359,13 +368,14 @@ async def after_for(db, user_id: str, s: dict, name: str, session: date, seen: s
         if first != session or ("morning_after", s["symbol"], session.isoformat()) in seen:
             continue
         hist = []
-        for h in (await db.execute(text("""SELECT event_date, pct_change_1d FROM historical_reactions WHERE ticker_id = :t AND event_type = 'earnings'
-                AND pct_change_1d IS NOT NULL ORDER BY event_date DESC LIMIT 12"""), {"t": s["id"]})).all():
-            hist.append((float(h.pct_change_1d), await priced_before(db, s["symbol"], h.event_date)))
+        for h in (await db.execute(text("""SELECT h.event_date, h.pct_change_1d, e.report_timing::text AS timing FROM historical_reactions h
+                LEFT JOIN events e ON e.ticker_id = h.ticker_id AND e.event_type = 'earnings' AND e.event_date = h.event_date
+                WHERE h.ticker_id = :t AND h.event_type = 'earnings' AND h.pct_change_1d IS NOT NULL ORDER BY h.event_date DESC LIMIT 12"""), {"t": s["id"]})).all():
+            hist.append((float(h.pct_change_1d), await priced_before(db, s["symbol"], h.event_date, h.timing)))
         trades = [{"label": label_of(t), "result": t.result} for t in (await db.execute(text("""SELECT th.result, th.option_type, th.strike, th.strike2, th.option_expiration
             FROM theses th WHERE th.user_id = :u AND th.ticker_id = :t AND th.result IS NOT NULL AND th.option_expiration BETWEEN :a AND :b"""),
             {"u": user_id, "t": s["id"], "a": r.event_date, "b": session})).all()]
-        return after_section({"symbol": s["symbol"], "name": name, "session": session, "move": move, "implied": await priced_before(db, s["symbol"], r.event_date),
+        return after_section({"symbol": s["symbol"], "name": name, "session": session, "move": move, "implied": await priced_before(db, s["symbol"], r.event_date, r.timing),
                               "history": hist, "trades": trades}, site)
     return None
 
