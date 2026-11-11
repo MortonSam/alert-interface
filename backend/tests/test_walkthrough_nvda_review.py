@@ -50,7 +50,7 @@ def _step4(share_pct: float | None):
 def test_step4_leads_with_the_industry_and_gives_a_stock_that_is_part_of_the_market_no_market_verdict():
     s = _step4(7.1)
     assert s["sentences"][0] == ("Over the past year NVIDIA's stock rose 17.3%, against a 24.1% rise for the median Information Technology stock in the S&P 500, "
-                                 "so it lagged its industry.")
+                                 "so it lagged its sector.")
     assert s["sentences"][1] == "The S&P 500 rose 14.9% over the same year, and NVIDIA makes up 7.1% of the index by market value."
     shown = " ".join(s["sentences"] + [s["summary"]] + [d["as_of"] for d in s["deeper"]] + [s["check"]["question"], s["check"]["why"]])
     assert not re.search(r"\bmostly\b|the whole market|the market's|carried", shown)       # no market-or-company verdict, for the year or a day
@@ -63,7 +63,7 @@ def test_step4_leads_with_the_industry_and_gives_a_stock_that_is_part_of_the_mar
 def test_step4_for_a_smaller_stock_keeps_the_market_question_without_a_verdict_on_screen():
     s = _step4(1.4)
     assert "lagged" not in s["sentences"][0] and "for the S&P 500 itself" in s["sentences"][0]
-    assert s["check"]["options"] == ["The company", "Its industry", "The whole market"]
+    assert s["check"]["options"] == ["The company", "Its sector", "The whole market"]
     assert "so that move was mostly NVIDIA's own" in s["sentences"][-1]
 
 
@@ -92,7 +92,25 @@ def test_a_pe_chart_never_breaks_and_says_where_it_starts():
     assert s["chart"] and W.chart_gaps(s["chart"]) == []
     assert s["chart"]["start"] == second[0][0].isoformat() and s["chart"]["points"][0][0] == second[0][0].isoformat()
     assert f"The chart starts on {W.fmt_date(second[0][0])}. Before that, investors paid more than $100 for each $1 of its profit at times" in s["sentences"][-1]
-    assert "Its five-year range" in [n["label"] for n in s["numbers"]]                       # the range stays the history's
+    n_left = sum(1 for d in left if series[0][0] <= d <= series[-1][0])
+    rng = next(n for n in s["numbers"] if n["label"].startswith("Its range"))                 # the range says what it covers (Sam, 2026-11-10)
+    assert rng["label"] == f"Its range, leaving out {n_left} days"
+    assert rng["as_of"] == f"{len(series):,} trading days, {W.fmt_date(series[0][0])} to {W.fmt_date(series[-1][0])}, {n_left} left out"
+    assert (f"Leaving out the {n_left} days when the price topped $100 for each $1 of its profit, investors paid between $40 and $69 for each $1 "
+            f"from {W.fmt_date(series[0][0])} to {W.fmt_date(series[-1][0])}, and ${med:.0f} at the median.") in s["sentences"]
+    assert not any("Over five years" in x for x in s["sentences"])
+
+
+def test_the_range_says_five_years_only_when_it_runs_five_years_with_nothing_left_out():
+    whole = [(d, 30.0 + (i % 9)) for i, d in enumerate(_sessions(1305, date(2026, 10, 27)))]
+    s = W.step_valuation("X", "Industrials", _snap(pe=30.0, median=34.0), whole, None, True)
+    assert s["numbers"][1]["label"] == "Its five-year range"
+    assert "Over five years investors paid between $30 and $38 for each $1, and $34 at the median." in s["sentences"]
+    late = whole[-500:]
+    s = W.step_valuation("X", "Industrials", _snap(pe=30.0, median=34.0), late, None, True)
+    assert s["numbers"][1]["label"] == f"Its range since {W.fmt_date(late[0][0])}"
+    assert f"Since {W.fmt_date(late[0][0])}, investors paid between $30 and $38 for each $1, and $34 at the median." in s["sentences"]
+    assert s["deeper"][-1]["label"] == "Median of those days, paid for each $1 of profit"
 
 
 def test_a_short_break_widened_by_sampling_still_draws_no_gap():

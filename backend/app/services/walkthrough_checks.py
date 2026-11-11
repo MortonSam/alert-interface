@@ -197,18 +197,18 @@ def close(a: float, b: float) -> bool:
 
 
 def year_owner(stock: float, sector: float, market: float) -> str:
-    """Pure: "market", "industry" or "company" for a year's move: the closer of the two benchmarks when it is close by the rule
+    """Pure: "market", "industry" (its sector, as the visitor reads it) or "company" for a year's move: the closer of the two benchmarks when it is close by the rule
     (the S&P 500 on a tie), else the company's own."""
     near = [(abs(stock - market), 0, "market"), (abs(stock - sector), 1, "industry")]
     near = [x for x in near if close(stock, market if x[2] == "market" else sector)]
     return min(near)[2] if near else "company"
 
 
-OWNER_SUMMARY = {"market": "in step with the whole market", "industry": "in step with its industry", "company": "mostly its own"}
+OWNER_SUMMARY = {"market": "in step with the whole market", "industry": "in step with its sector", "company": "mostly its own"}
 
 
 def market_check(name: str, sector: str, stock: float, sector_pct: float, market: float) -> dict:
-    options = ["The company", "Its industry", "The whole market"]
+    options = ["The company", "Its sector", "The whole market"]
     owner = year_owner(stock, sector_pct, market)
     near_m, near_s = close(stock, market), close(stock, sector_pct)
     typ = f"the typical {sector} stock's"
@@ -216,13 +216,13 @@ def market_check(name: str, sector: str, stock: float, sector_pct: float, market
         why = f"{name}'s move is far from both {typ} and the S&P 500's, so its year was mostly the company's own."
     else:
         mine, other = ("the S&P 500's", typ) if owner == "market" else (typ, "the S&P 500's")
-        whose = "the whole market" if owner == "market" else "its industry"
+        whose = "the whole market" if owner == "market" else "its sector"
         why = (f"{name}'s move is close to both, and closer to {mine} than to {other}, so its year was mostly {whose}." if near_m and near_s else
                f"{name}'s move is close to {mine} and far from {other}, so its year was mostly {whose}.")
-    return {"concept": "market_vs_company", "options": options, "answer": options.index({"company": "The company", "industry": "Its industry", "market": "The whole market"}[owner]),
+    return {"concept": "market_vs_company", "options": options, "answer": options.index({"company": "The company", "industry": "Its sector", "market": "The whole market"}[owner]),
             "why": why,
             "question": f"Over the year {name} {moved(stock)}, the typical {sector} stock {moved(sector_pct)} and the S&P 500 {moved(market)}. "
-                        f"Was {name}'s year mostly the company, its industry, or the whole market?"}
+                        f"Was {name}'s year mostly the company, its sector, or the whole market?"}
 
 
 INDEX_SHARE_RIGHT = "Its own moves are part of the index's move"
@@ -235,7 +235,7 @@ def index_share_check(name: str, share_pct: float) -> dict:
     return {"concept": "market_vs_company", "options": options, "answer": answer, "same_answer": "index_share",
             "question": f"{name} makes up {num(share_pct)}% of the S&P 500 by market value. What does that mean when you set its year beside the index's?",
             "why": f"At {num(share_pct)}% of the index, {name}'s own rises and falls are a real part of the S&P 500's, so the index's year is partly "
-                   f"{name}'s year. The median stock of its industry is the fairer yardstick."}
+                   f"{name}'s year. The median stock of its sector is the fairer yardstick."}
 
 
 def move_owner(stock_pct: float, spy_pct: float | None, min_spy_pct: float) -> str:

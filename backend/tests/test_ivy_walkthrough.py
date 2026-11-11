@@ -272,11 +272,11 @@ def test_market_check_picks_the_closer_benchmark():
     assert C.year_owner(10.0, 12.0, 8.0) == "market"                         # a tie goes to the market
     assert C.close(100.0, 120.0) and not C.close(100.0, 126.0)               # a fifth of the larger move once that is wider than 5 points
     c = C.market_check("NVIDIA", "Information Technology", 19.4, 20.1, 16.0)
-    assert c["options"] == ["The company", "Its industry", "The whole market"] and c["answer"] == 1
+    assert c["options"] == ["The company", "Its sector", "The whole market"] and c["answer"] == 1
     assert "close to both, and closer to the typical Information Technology stock's than to the S&P 500's" in c["why"]
     c = C.market_check("Micron", "Information Technology", 358.4, 20.1, 16.0)
     assert c["answer"] == 0 and c["question"] == ("Over the year Micron rose 358.4%, the typical Information Technology stock rose 20.1% and the S&P 500 rose 16.0%. "
-                                                  "Was Micron's year mostly the company, its industry, or the whole market?")
+                                                  "Was Micron's year mostly the company, its sector, or the whole market?")
     assert "within 5 points" not in c["why"] and not hasattr(C, "CLOSE_RULE")        # Sam, 2026-10-29: the rule's text left Go deeper
 
 
