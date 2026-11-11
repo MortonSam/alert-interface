@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Ivy's walkthrough and Compare (routers/walkthrough). Off in production until Sam approves its wording; the admin token sees it.
     # The nightly builds the walkthroughs either way.
     ivy_walkthrough_enabled: bool = False
+    # WALKTHROUGH_STORIES_ENABLED: the nightly walkthrough step writes its model sentences (stories, step 7's risks, Compare's pairs,
+    # the quotes' checks). Off until Sam turns it on after Nov 19, 2026: until then the step runs with --no-story and calls no model.
+    walkthrough_stories_enabled: bool = False
     # The options chain every page reads (services/options_source): "courier" (the default) or "intrinio", with the courier as the
     # fallback. A Railway variable; switching is an env change and a redeploy, never a code change.
     options_primary_source: str = "courier"

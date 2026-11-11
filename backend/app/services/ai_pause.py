@@ -14,9 +14,20 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 
+from app.config import settings
+
 PAUSE_KEY = "ai_paused"              # system_metadata: {"since": iso, "kind": "billing", "alerted_on": "YYYY-MM-DD" | None}
 PAUSE_KINDS = ("billing",)           # an invalid key ("auth") is a real failure, never a pause
-AI_ONLY_STEPS = ("Research notes (nightly)", "Research note check", "Ivy walkthroughs")
+WALKTHROUGH_STEP = "Ivy walkthroughs"
+
+
+def ai_only_steps(stories_on: bool) -> tuple[str, ...]:
+    """Pure: the steps a pause skips outright. The walkthrough step is one only while its stories are on: with --no-story
+    (scripts/refresh walkthrough_cmd) it calls no model, so a pause leaves it running."""
+    return ("Research notes (nightly)", "Research note check") + ((WALKTHROUGH_STEP,) if stories_on else ())
+
+
+AI_ONLY_STEPS = ai_only_steps(settings.walkthrough_stories_enabled)
 
 
 def parse(raw: str | None) -> dict | None:
