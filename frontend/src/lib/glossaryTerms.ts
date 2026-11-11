@@ -26,7 +26,7 @@ export const TERMS: GlossaryTerm[] = [
     match: ["ATM IV", "IV", "implied vol", "implied volatility"] },
   { key: "vol-regime", term: "IV rich / IV cheap (vol regime)", explanation: "A label comparing what options are paying for with how much the stock actually moved lately: rich means options cost more than recent swings suggest, cheap means less, fair means close. The cutoffs appear beside the label.",
     match: ["IV Rich", "IV Cheap", "IV Fair", "IV rich", "IV cheap", "vol regime", "IV in line with realized"] },
-  { key: "iv-rv-spread", term: "IV-RV spread", explanation: "The swing options expect minus the swing the stock has actually shown lately, in points of those yearly figures, so a positive gap means options are pricing in more movement.",
+  { key: "iv-rv-spread", term: "IV-RV spread", explanation: "How the yearly swing options expect compares with the yearly swing the stock has actually shown lately (for example, 38% expected where the stock has shown 30% means options are pricing in more movement).",
     match: ["IV-RV spread", "IV/RV spread", "IV-RV"] },
   { key: "options-chain", term: "Options chain / chain date", explanation: "The full list of a stock's available option contracts with their prices. The chain date is the trading day those prices come from; the site stops using a list once it is a few trading days old.",
     match: ["options chain", "option chain", "chain date", "chain dated"] },

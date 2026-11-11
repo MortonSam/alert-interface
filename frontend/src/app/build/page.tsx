@@ -4,6 +4,7 @@ import { estimatesShown } from "@/lib/licensedEstimates";
 import Explained from "@/components/Explained";
 import { cheaperCostLine, expensiveOptionsLine } from "@/lib/cheaperDraft";
 import { volRegime } from "@/lib/encodings/volRegime";
+import { spreadChipValue } from "@/lib/optionsRows";
 import { earlierSessionLine, impliedSpanPhrase, optionsCadencePhrase, premiumSourcePhrase, pricedAtLine } from "@/lib/freshness";
 import { useIvyRule } from "@/lib/useIvyRule";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -513,7 +514,7 @@ function DraftDisplay({
         {estimatesShown(fb) && <span><Explained text="Beat rate:" /> <span className="font-mono text-foreground">{fb.beat_rate_pct != null ? `${fb.beat_rate_pct.toFixed(0)}%` : absentCell(fb, "beat_rate_pct", "no quarters with an EPS outcome on file")}</span>{fb.basis_excluded_note ? <span className="text-muted-foreground"> ({fb.basis_excluded_note})</span> : null}</span>}
         <span><Explained text="ATM IV:" /> <span className="font-mono text-foreground">{fb.atm_iv_pct != null ? `${fb.atm_iv_pct.toFixed(1)}%` : absentCell(fb, "atm_iv_pct", "no implied volatility on the ATM strike")}</span></span>
         <span><Explained text="Recent swings vs. its past year: " />{fb.rv_rank != null && fb.rv_percentile != null ? (<><span className="font-mono text-foreground">{recentSwings(fb.rv_percentile).figure}</span> · <span className={recentSwings(fb.rv_percentile).colorClass}>{recentSwings(fb.rv_percentile).tag}</span></>) : absentCell(fb, "rv_rank", "no realized-volatility snapshot that passed the price-history check")}</span>
-        <span><Explained text="IV−RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null ? `${(fb.iv_rv_spread_pp as number) > 0 ? "+" : ""}${(fb.iv_rv_spread_pp as number).toFixed(1)}pp` : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
+        <span><Explained text="IV−RV spread:" /> <span className="font-mono text-foreground">{fb.iv_rv_spread_pp != null && fb.atm_iv_pct != null && fb.rv_20d_pct != null ? spreadChipValue(fb.atm_iv_pct, fb.rv_20d_pct) : absentCell(fb, "iv_rv_spread_pp", "needs implied and realized volatility")}</span></span>
         {draft.vol_regime && (
           <span>
             <Explained text="Vol regime:" />{" "}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { ROW_LABELS, TRADING_DAYS_PER_YEAR, dailyPct, ivRowValue, rankRowValue, rvRowValue, spreadRowValue } from "@/lib/optionsRows";
+import { ROW_LABELS, TRADING_DAYS_PER_YEAR, dailyPct, ivRowValue, rankRowValue, rvRowValue, spreadChipValue, spreadRowValue } from "@/lib/optionsRows";
+import { explanationOf } from "@/lib/glossary";
 import { RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL } from "@/lib/thresholds";
 import { SPREAD_CHEAP_PP, SPREAD_RICH_PP } from "@/lib/thresholds";
 import GLOSSARY from "@/lib/glossary";
@@ -17,16 +18,28 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
       "38.0% a year, about 2.4% on a typical day, from its daily moves over the last 20 trading days (as of Oct 19, 2026)");
   });
   it("the spread's three wordings follow the thresholds", () => {
-    // the two yearly figures the rows above show, never their difference in "points" (Sam, 2026-11-11)
+    // the two yearly figures the rows above show, in whole numbers, never their difference in "points" (Sam, 2026-11-11)
     const rich = 0.3 + (SPREAD_RICH_PP + 3.2) / 100, cheap = 0.3 + (SPREAD_CHEAP_PP - 3.2) / 100;
-    expect(spreadRowValue(SPREAD_RICH_PP + 3.2, rich, 0.3)).toBe(`Options expect swings of about ${(rich * 100).toFixed(1)}% a year, more than the 30.0% the stock has shown lately, so they look pricey`);
-    expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2, cheap, 0.3)).toBe(`Options expect swings of about ${(cheap * 100).toFixed(1)}% a year, less than the 30.0% the stock has shown lately, so they look cheap`);
+    expect(spreadRowValue(SPREAD_RICH_PP + 3.2, rich, 0.3)).toBe(`Options expect swings of about ${Math.round(rich * 100)}% a year, more than the 30% the stock has shown lately, so they look pricey`);
+    expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2, cheap, 0.3)).toBe(`Options expect swings of about ${Math.round(cheap * 100)}% a year, less than the 30% the stock has shown lately, so they look cheap`);
     for (const x of [3.2, SPREAD_RICH_PP, SPREAD_CHEAP_PP, 0, -3.2]) expect(spreadRowValue(x, 0.3 + x / 100, 0.3)).toBe(
-      `Options expect swings of about ${(30 + x).toFixed(1)}% a year against the 30.0% the stock has shown lately, so they look neither pricey nor cheap`);
+      `Options expect swings of about ${Math.round(30 + x)}% a year against the 30% the stock has shown lately, so they look neither pricey nor cheap`);
+    expect(spreadRowValue(19.7, 0.477, 0.28)).toBe("Options expect swings of about 48% a year, more than the 28% the stock has shown lately, so they look pricey");
+    for (const t of [spreadRowValue(19.7, 0.477, 0.28), spreadRowValue(-13.2, 0.4804, 0.6124), spreadRowValue(8.7, 0.579, 0.492)]) expect(t).not.toMatch(/\d\.\d/);
     // without both figures, the direction alone
     expect(spreadRowValue(SPREAD_RICH_PP + 3.2)).toBe("Options expect more swing than the stock has shown lately, so they look pricey");
     expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2, null, 0.3)).toBe("Options expect less swing than the stock has shown lately, so they look cheap");
     expect(spreadRowValue(3.2, 0.332, null)).toBe("Options expect about the same swing the stock has shown lately");
+  });
+  it("Build a Trade's chip and the glossary line say the same thing with no points, pp or colon (Sam, 2026-11-11)", () => {
+    expect(spreadChipValue(47.7, 28.0)).toBe("48% a year expected, 28% shown lately");
+    const hover = explanationOf("iv/rv spread", false)!;
+    expect(explanationOf("IV-RV spread", true)).toBe(hover);
+    for (const t of [spreadChipValue(47.7, 28.0), hover]) expect(t).not.toMatch(/:|\bpp\b|\bpoints?\b/);
+    expect(hover.match(/for example/g)?.length).toBe(1);
+    const build = readFileSync(join(__dirname, "../../app/build/page.tsx"), "utf8");
+    expect(build).toContain("spreadChipValue(fb.atm_iv_pct, fb.rv_20d_pct)");
+    expect(build).not.toMatch(/toFixed\(1\)\}pp/);
   });
   it("the RV rank row, verbatim, from the percentile of days with its band by the same cutoffs", () => {
     expect(ROW_LABELS.rank).toBe("Recent swings against its past year");

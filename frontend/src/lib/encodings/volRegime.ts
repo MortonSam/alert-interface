@@ -3,19 +3,20 @@
 import { DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP } from "@/lib/thresholds";
 import type { LegendItem } from "./types";
 
-// Each rule is one plain sentence with one example, comparing two yearly figures and never in "points" (Sam, 2026-11-11). The
-// example is worked from the cutoffs: the regime is rich above EXAMPLE_RV + RICH and cheap below EXAMPLE_RV - CHEAP.
+// Each rule is one plain sentence with one example in parentheses, comparing two yearly figures, with no colon and never in
+// "points" (Sam, 2026-11-11). The example is worked from the cutoffs: the regime is rich above EXAMPLE_RV + RICH and cheap below
+// EXAMPLE_RV - CHEAP.
 const EXAMPLE_RV = 30;
 const RICH = DISCOVER_IV_RICH_PP, CHEAP = Math.abs(DISCOVER_IV_CHEAP_PP);
-const SHOWN = `a year where the stock has shown ${EXAMPLE_RV}%, for example.`;
+const example = (range: string) => `(for example, ${range} a year where the stock has shown ${EXAMPLE_RV}%).`;
 
 export const VOL_REGIME_ENCODING = {
   iv_rich:  { label: "IV Rich",  className: "bg-warning/10 text-warning",
-              rule: `Options expect more swing than the stock has shown lately: over ${EXAMPLE_RV + RICH}% ${SHOWN}` },
+              rule: `Options expect more swing than the stock has shown lately ${example(`over ${EXAMPLE_RV + RICH}%`)}` },
   iv_cheap: { label: "IV Cheap", className: "bg-cool/10 text-cool",
-              rule: `Options expect less swing than the stock has shown lately: under ${EXAMPLE_RV - CHEAP}% ${SHOWN}` },
+              rule: `Options expect less swing than the stock has shown lately ${example(`under ${EXAMPLE_RV - CHEAP}%`)}` },
   iv_fair:  { label: "IV Fair",  className: "bg-muted text-muted-foreground",
-              rule: `Options expect about the swing the stock has shown lately: from ${EXAMPLE_RV - CHEAP}% to ${EXAMPLE_RV + RICH}% ${SHOWN}` },
+              rule: `Options expect about the swing the stock has shown lately ${example(`from ${EXAMPLE_RV - CHEAP}% to ${EXAMPLE_RV + RICH}%`)}` },
 } as const;
 
 export type VolRegimeKey = keyof typeof VOL_REGIME_ENCODING;
