@@ -34,7 +34,7 @@ FEATURED_KEY = "ivy_featured"
 
 async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: date, industry: str | None = None) -> dict:
     """The 10-K readings (segments, risk factors) and margins, reusing a stored reading of the same 10-K."""
-    from app.scripts.compute_pe import company_facts_merged
+    from app.scripts.compute_pe import company_facts_joined, company_facts_merged
     from app.services.edgar_client import PREDECESSOR_CIKS
     from app.services import fiscal_periods as F, margins as M, risk_factors as R, segments as S
     out = dict(stored or {})
@@ -58,7 +58,8 @@ async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: 
                 or fgs.get("periodic") != periodic or fgs.get("version") != FILING_GROWTH_VERSION
                 or p.get("periodic") != periodic or p.get("version") != F.FISCAL_PERIODS_VERSION):
         facts = await asyncio.wait_for(company_facts_merged(edgar, cik, sym), SEC_SECONDS)
-        out["margins"] = {**_jsonable(M.margins(facts, sector, today, industry)), "version": M.MARGINS_VERSION, "periodic": periodic}
+        whole = await asyncio.wait_for(company_facts_joined(edgar, cik, sym), SEC_SECONDS) if PREDECESSOR_CIKS.get(sym) else facts
+        out["margins"] = {**_jsonable(M.margins(whole, sector, today, industry)), "version": M.MARGINS_VERSION, "periodic": periodic}
         from app.services.growth import filing_growth
         fg = filing_growth((facts.get("facts") or {}).get("us-gaap") or {}, sector, today)
         out["filing_growth"] = {**_jsonable(fg or {}), "ok": bool(fg), "version": FILING_GROWTH_VERSION, "periodic": periodic}

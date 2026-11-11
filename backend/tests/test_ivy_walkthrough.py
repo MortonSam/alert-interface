@@ -163,6 +163,113 @@ def test_a_tag_the_company_stopped_filing_is_not_now():
     assert not out["ok"]
 
 
+def _period_facts(tag_rows: dict[str, list[tuple[str, str, float, str, str]]]) -> dict:
+    """(start, end, value, filed, accession) rows, for a reading that depends on which filing states a period."""
+    return {"facts": {"us-gaap": {t: {"units": {"USD": [{"start": s, "end": e, "val": v, "filed": f, "accn": a, "form": "10-Q"} for s, e, v, f, a in rows]}}
+                                  for t, rows in tag_rows.items()}}}
+
+
+def test_revenue_is_the_companys_total_never_a_part_of_it():
+    # URI (Sam's item 6, 2026-11-11): contract revenue leaves out its rentals, and read alone made a 167.7% gross margin
+    part, whole, gp = ([(s, e, v) for s, e in QUARTERS] for v in (60.0, 100.0, 40.0))
+    out = M.margins(_facts({REV: part, "Revenues": whole, "GrossProfit": gp}), "Industrials", date(2026, 10, 19))
+    assert out["ok"] and out["now"] == 40.0 and out["then"] == 40.0 and out["revenue_tag"] == "Revenues" and out["then_revenue_tag"] == "Revenues"
+    same = M.margins(_facts({REV: whole, "Revenues": whole, "GrossProfit": gp}), "Industrials", date(2026, 10, 19))
+    assert same["revenue_tag"] == REV and same["now"] == 40.0                      # `Revenues` no larger: the sector's first tag stands
+    smaller = M.margins(_facts({REV: whole, "Revenues": part, "GrossProfit": gp}), "Industrials", date(2026, 10, 19))
+    assert smaller["revenue_tag"] == REV and smaller["now"] == 40.0
+
+
+def test_a_changed_revenue_tag_is_one_series_when_both_state_the_same_shared_quarters():
+    # CMI, FISV: 2026's quarters and their year-ago columns under the new tag, everything through 2025 under the old one
+    old, new = QUARTERS[:14], QUARTERS[10:12] + QUARTERS[14:]
+    facts = lambda v: _facts({"Revenues": [(s, e, 100.0) for s, e in old], REV: [(s, e, v if e < "2026" else 100.0) for s, e in new],
+                              "GrossProfit": [(s, e, 25.0) for s, e in QUARTERS]})
+    out = M.margins(facts(100.0), "Industrials", date(2026, 10, 19))
+    assert out["ok"] and out["now"] == 25.0 and out["now_end"] == date(2026, 6, 30) and out["revenue_tag"] == f"{REV} and Revenues"
+    assert out["then"] == 25.0 and out["then_revenue_tag"] == "Revenues"
+    assert not M.margins(facts(105.0), "Industrials", date(2026, 10, 19))["ok"]     # they disagree on the quarters they share: never joined
+    q = lambda rows: {date.fromisoformat(e): {"as_filed": 1.0} for _, e in rows}
+    assert M.joined(q(QUARTERS[:6]), q(QUARTERS[:4]), date(2023, 12, 31)) is None     # one inside the other is one tag, not a change of tag
+    assert M.joined(q(QUARTERS[:5]), q(QUARTERS[4:8]), date(2023, 12, 31)) is None    # one shared quarter is not enough (JOIN_MIN_SHARED)
+
+
+def test_the_year_and_the_year_to_date_stand_in_where_four_straight_quarters_are_missing():
+    # CAH: the SEC's facts leave out one 10-Q, so the fourth quarter cannot be worked out. The year, plus the first quarter, less
+    # the first quarter a year earlier as the newer 10-Q restates it; three years earlier the same way.
+    def cah(year, q1, before_first, before_restated, year23, q1_24, q1_23):
+        return [("2025-07-01", "2026-06-30", year, "2026-08-15", "k26"), ("2026-07-01", "2026-09-30", q1, "2026-11-01", "q27"),
+                ("2025-07-01", "2025-09-30", before_first, "2025-11-01", "q26"), ("2025-07-01", "2025-09-30", before_restated, "2026-11-01", "q27"),
+                ("2025-10-01", "2025-12-31", before_first, "2026-02-01", "q26b"),
+                ("2022-07-01", "2023-06-30", year23, "2023-08-15", "k23"), ("2023-07-01", "2023-09-30", q1_24, "2023-11-01", "q24"),
+                ("2022-07-01", "2022-09-30", q1_23, "2022-11-01", "q23")]
+    out = M.margins(_period_facts({REV: cah(400.0, 120.0, 90.0, 100.0, 300.0, 80.0, 70.0), "GrossProfit": cah(40.0, 15.0, 9.0, 10.0, 30.0, 8.0, 7.0)}),
+                    "Health Care", date(2026, 11, 11))
+    assert out["ok"] and out["measure"] == "gross" and (out["now_revenue"], out["now_profit"], out["now"]) == (420.0, 45.0, 10.7)
+    assert (out["now_start"], out["now_end"], out["filed_on"]) == (date(2025, 10, 1), date(2026, 9, 30), date(2026, 11, 1))
+    assert (out["then_revenue"], out["then_profit"], out["then"], out["then_end"]) == (310.0, 31.0, 10.0, date(2023, 9, 30))
+    assert out["basis"] == M.YEAR_AND_PART_BASIS
+    # KR: a 16-week first quarter is too long to sit in four straight quarters, so the year to date carries it
+    kr = lambda year, ytd, before: [("2025-02-02", "2026-01-31", year, "2026-03-31", "k"), ("2026-02-01", "2026-08-15", ytd, "2026-09-10", "q2"),
+                                    ("2025-02-02", "2025-08-16", before, "2025-09-10", "p2"), ("2026-02-01", "2026-05-23", ytd * 0.6, "2026-06-20", "q1"),
+                                    ("2026-05-24", "2026-08-15", ytd * 0.4, "2026-09-10", "q2")]
+    out = M.margins(_period_facts({REV: kr(1000.0, 600.0, 500.0), "OperatingIncomeLoss": kr(20.0, 10.0, 8.0)}), "Consumer Staples", date(2026, 11, 11))
+    assert out["ok"] and out["measure"] == "operating" and out["now"] == 2.0 and out["then"] is None
+    assert (out["now_start"], out["now_end"]) == (date(2025, 8, 17), date(2026, 8, 15))
+    # AZO, COST: no filing states the fourth quarter alone, and the fiscal year itself ends on the day read
+    azo = lambda v: [("2025-08-31", "2026-08-29", v, "2026-10-20", "k"), ("2026-02-15", "2026-05-09", v / 4, "2026-06-10", "q3")]
+    out = M.margins(_period_facts({REV: azo(2000.0), "GrossProfit": azo(1000.0)}), "Consumer Discretionary", date(2026, 11, 11))
+    assert out["ok"] and out["now"] == 50.0 and (out["now_start"], out["now_end"]) == (date(2025, 8, 31), date(2026, 8, 29)) and out["basis"] == M.YEAR_BASIS
+
+
+def test_a_later_period_end_is_read_first_and_filed_quarters_before_arithmetic():
+    rev = [(s, e, 100.0) for s, e in QUARTERS]
+    # CME, PH: the first profit tag stops a quarter back and another carries on; the later end is the one read
+    facts = _facts({"Revenues": rev, "NetIncomeLoss": [(s, e, 50.0) for s, e in QUARTERS[:15]],
+                    "NetIncomeLossAvailableToCommonStockholdersBasic": [(s, e, 60.0) for s, e in QUARTERS]})
+    out = M.margins(facts, "Financials", date(2026, 10, 19))
+    assert (out["now_end"], out["now"], out["then"]) == (date(2026, 6, 30), 60.0, 60.0) and out["profit_tag"] == "NetIncomeLossAvailableToCommonStockholdersBasic"
+    # no tag reads at the latest end: the one before it, on the first tag in order (CLX)
+    out = M.margins(_facts({"Revenues": rev, "NetIncomeLoss": [(s, e, 50.0) for s, e in QUARTERS[:15]], "ProfitLoss": [(s, e, 55.0) for s, e in QUARTERS[:15]],
+                            "NetIncomeLossAvailableToCommonStockholdersBasic": [(s, e, 70.0) for s, e in QUARTERS[-1:]]}), "Financials", date(2026, 10, 19))
+    assert (out["now_end"], out["now"], out["profit_tag"]) == (date(2026, 3, 31), 50.0, "NetIncomeLoss")
+    # FCX: the first tag reads only as the year plus the year to date; the second states the four quarters, so it is the one read
+    stretch = lambda a, b, c: [("2025-01-01", "2025-12-31", a, "2026-02-15", "k"), ("2026-01-01", "2026-06-30", b, "2026-08-01", "q2"),
+                               ("2025-01-01", "2025-06-30", c, "2025-08-01", "p2")]
+    q = lambda v: [(s, e, v, e[:4] + "-12-31", "q" + e) for s, e in QUARTERS]
+    facts = _period_facts({"Revenues": stretch(400.0, 200.0, 200.0) + q(100.0), "NetIncomeLoss": stretch(52.0, 26.0, 26.0) + q(13.0)[-1:], "ProfitLoss": q(19.0)})
+    out = M.margins(facts, "Financials", date(2026, 10, 19))
+    assert out["profit_tag"] == "ProfitLoss" and out["now"] == 19.0 and out["then"] == 19.0 and "basis" not in out
+    del facts["facts"]["us-gaap"]["ProfitLoss"]
+    alone = M.margins(facts, "Financials", date(2026, 10, 19))
+    assert alone["profit_tag"] == "NetIncomeLoss" and alone["now"] == 13.0 and alone["then"] is None and alone["basis"] == M.YEAR_AND_PART_BASIS
+
+
+def test_margins_read_the_registrant_before_too_and_never_half_a_history():
+    # XOM: ExxonMobil Holdings files from the second quarter of 2026; the quarters before sit under Exxon Mobil Corp's CIK
+    import asyncio
+    from app.scripts.compute_pe import company_facts_joined
+    from app.services.edgar_client import PREDECESSOR_CIKS
+    before, now = PREDECESSOR_CIKS["XOM"]
+    docs = {cik: _facts({"Revenues": [(s, e, 100.0) for s, e in rows], "NetIncomeLoss": [(s, e, 10.0) for s, e in rows]})
+            for cik, rows in ((before, QUARTERS[:15]), (now, QUARTERS[15:]))}
+
+    class Edgar:
+        def __init__(self, unread: tuple = ()):
+            self.unread = unread
+
+        async def get_company_facts(self, cik: str) -> dict:
+            if cik in self.unread:
+                raise RuntimeError("not read")
+            return json.loads(json.dumps(docs[cik]))
+
+    assert not M.margins(docs[now], "Energy", date(2026, 10, 19))["ok"]
+    out = M.margins(asyncio.run(company_facts_joined(Edgar(), now, "XOM")), "Energy", date(2026, 10, 19))
+    assert out["ok"] and out["measure"] == "net" and (out["now"], out["then"], out["now_end"]) == (10.0, 10.0, date(2026, 6, 30))
+    with pytest.raises(RuntimeError):
+        asyncio.run(company_facts_joined(Edgar(unread=(before,)), now, "XOM"))
+
+
 # ── fiscal quarter names (DEI DocumentFiscalPeriodFocus / DocumentFiscalYearFocus) ───────────────────────────────────────────
 
 def _fy_facts(rows: list[tuple[str, str, str, int, str, str]]) -> dict:

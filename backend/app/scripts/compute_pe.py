@@ -56,6 +56,26 @@ async def company_facts_merged(edgar: EdgarClient, cik: str, symbol: str, failed
     return facts
 
 
+async def company_facts_joined(edgar: EdgarClient, cik: str, symbol: str) -> dict:
+    """company_facts_merged with every other us-gaap fact of the ticker's predecessor CIKs joined on, tag by tag and unit by unit,
+    for a reading that takes each period from its earliest filing (margins). ExxonMobil Holdings files from the second quarter of
+    2026 and the quarters before sit under Exxon Mobil Corp's CIK, so XOM's own facts never held four straight quarters. A
+    predecessor that cannot be read raises: half a history is not a history."""
+    facts = await company_facts_merged(edgar, cik, symbol)
+    own = facts.setdefault("facts", {}).setdefault("us-gaap", {})
+    for other in PREDECESSOR_CIKS.get(symbol.upper(), []):
+        if other.zfill(10) == cik.zfill(10):
+            continue
+        earlier = ((await edgar.get_company_facts(other)).get("facts") or {}).get("us-gaap") or {}
+        for tag, body in earlier.items():
+            if tag == "EarningsPerShareDiluted":
+                continue                                                                     # company_facts_merged joined it
+            for unit, entries in (body.get("units") or {}).items():
+                units = own.setdefault(tag, {}).setdefault("units", {})
+                units[unit] = list(entries) + list(units.get(unit, []))
+    return facts
+
+
 def _rows_to_quarters(rows) -> list[dict]:
     return [{"end": r[0], "start": r[1], "eps": float(r[2]), "filed": r[3], "form": r[4], "derived": bool(r[5]), "source": "xbrl"} for r in rows]
 
