@@ -36,7 +36,7 @@ export function PriceVsMarketChart({ chart, name, sector }: { chart: PriceChart;
   );
 }
 
-/** Step 5: the valuation multiple each trading day over five years, its median, the sector median now, and today (chart.points). */
+/** Step 5: the valuation multiple each trading day over the step's window, that window's median (named by the API), the sector median now, and today (chart.points). */
 export function PeRangeChart({ chart }: { chart: PeChart }) {
   const rows = timeRows(chart.points.map(([d, v]) => ({ d, pe: v as number | null })), ["pe"]);
   const keys: PeMarkKey[] = ["pe", "median", ...(chart.sector_median != null ? (["sectorMedian"] as PeMarkKey[]) : []), "today"];
@@ -57,7 +57,7 @@ export function PeRangeChart({ chart }: { chart: PeChart }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <EncodingLegend items={peRangeLegend(keys, { sector: chart.sector })} className="mt-2" />
+      <EncodingLegend items={peRangeLegend(keys, { sector: chart.sector, median: chart.median_label })} className="mt-2" />
     </figure>
   );
 }

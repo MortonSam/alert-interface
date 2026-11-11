@@ -24,12 +24,18 @@ describe("walkthrough charts", () => {
   });
   it("P/E chart: one legend row per mark; today is a dot, every other mark a line, no two alike", () => {
     const keys = Object.keys(PE_RANGE_ENCODING) as PeMarkKey[];
-    const legend = peRangeLegend(keys, { sector: "Information Technology" });
+    const legend = peRangeLegend(keys, { sector: "Information Technology", median: "Its median since Oct 20, 2023" });
     expect(legend.map((l) => l.key)).toEqual(keys);
     for (const l of legend) {
       expect(l.swatch.color).toBe(peMark(l.key as PeMarkKey).stroke);
       expect(l.swatch.kind).toBe(l.key === "today" ? "dot" : "line");
+      expect(l.label).not.toMatch(/\{|\}/);
     }
+    // the median's name is the API's, by the window it covers; the page never types "five-year" itself (Sam, 2026-11-10)
+    expect(legend.find((l) => l.key === "median")?.label).toBe("Its median since Oct 20, 2023");
+    expect(peRangeLegend(["median"], { sector: null })[0].label).toBe("Its median");
+    expect(JSON.stringify(PE_RANGE_ENCODING)).not.toMatch(/five/i);
+    expect(read("components/walkthrough/WalkthroughCharts.tsx")).toContain("median: chart.median_label");
     const sigs = Object.values(PE_RANGE_ENCODING).map((m) => `${m.color}|${m.dash}|${"dot" in m}`);
     expect(new Set(sigs).size).toBe(sigs.length);
   });

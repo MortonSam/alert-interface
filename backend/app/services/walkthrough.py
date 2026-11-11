@@ -30,7 +30,7 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 5                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 6                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
@@ -39,14 +39,17 @@ WALKTHROUGH_VERSION = 5                           # 2 (2026-10-19): fiscal quart
                                                   # 5 (2026-11-06, Sam's Nov 4 review): "revenue" for every company; step 5 in dollars ("about $28 for
                                                   #   every $1 of profit"), "P/E" named once; step 1 says which split its figures use and follows the
                                                   #   description's breakdown when the 10-K files both
+                                                  # 6 (2026-11-10, Sam): step 5's range, median, chart, summary and check read one window, the
+                                                  #   continuous recent stretch ("Since {date}, ..."), "five-year" only over five full years;
+                                                  #   a real estate company that is not a trust (CBRE, CSGP) gets a margin step
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
 CLOSING_LINE = "Ivy doesn't make buy or sell calls."
-REIT_SECTOR = "Real Estate"
 REVENUE_INDUSTRY_WORDS = ("Bank", "Insurance", "Reinsurance")    # GICS sub-industries of banks and insurers, which say "revenue", never "sales"
 ENTRY_MIN_STEPS = 5                               # a walkthrough is shown only when at least this many of the seven steps show data (Sam, 2026-11-02; 4 before)
 COMPARE_PERIOD_DAYS = 120                         # a Compare row is hidden when the two companies' periods end further apart than this
+CHART_PAUSE_DAYS = 7                              # sessions further apart than a long weekend: both are kept when a chart is sampled
 CHART_GAP_DAYS = 21                               # frontend lib/walkthroughAxis GAP_DAYS: points further apart break the line; no chart is built with one
 INDEX_SHARE_NO_VERDICT = 2.0                      # a stock above this percent of the S&P 500's market value is part of the market: step 4 gives no
                                                   # market-or-company verdict for it (Sam, 2026-10-29, NVDA) and compares it with its industry
@@ -156,8 +159,9 @@ def iso_dates(text: str) -> str:
 
 
 def is_reit(sector: str | None, industry: str | None) -> bool:
-    """Pure: GICS Real Estate with a REIT sub-industry ("Retail REITs"); real estate services (CBRE) are not trusts and keep the P/E."""
-    return (sector or "") == REIT_SECTOR and "REIT" in (industry or "")
+    """Pure: a real estate trust (margins.is_trust, the one rule): FFO in place of earnings, no margin. CBRE and CoStar are not."""
+    from app.services.margins import is_trust
+    return is_trust(sector, industry)
 
 
 def noun_for(industry: str | None) -> str:
@@ -557,6 +561,17 @@ def _points(series: list[tuple[date, float]]) -> list[list]:
     return [[d.isoformat(), round(v, 2)] for d, v in pts]
 
 
+def _window_points(run: list[tuple[date, float]]) -> list[list]:
+    """Pure: _points for step 5's window, keeping the sessions on both sides of any pause in it, so sampling every fifth session
+    never widens a short pause past CHART_GAP_DAYS and the chart starts where the window does."""
+    n = len(run)
+    keep = set(range(0, n, CHART_EVERY)) | {n - 1}
+    for i in range(n - 1):
+        if (run[i + 1][0] - run[i][0]).days > CHART_PAUSE_DAYS:
+            keep |= {i, i + 1}
+    return [[run[i][0].isoformat(), round(run[i][1], 2)] for i in sorted(keep)]
+
+
 def index_share(symbol: str, tickers: dict) -> dict | None:
     """Pure: the stock's share of the S&P 500's market value, {pct, as_of}: its stored market value over the sum of every active
     index member's, dated by the oldest stored value among them. None without its own value."""
@@ -679,50 +694,77 @@ def chart_gaps(chart: dict | None, gap_days: int = CHART_GAP_DAYS) -> list[str]:
     return out
 
 
-LEFT_OUT_WORDS = {"loss": "its earnings over four quarters were below zero", "over_cap": "investors paid more than {cap} for each $1 of its profit",
-                  "action": "a merger or spin-off sat inside its four quarters"}
+RANGE_BEFORE = {"over_cap": "they paid more than {cap}", "loss": "it had lost money over four quarters",
+                "action": "a merger or spin-off sat inside its four quarters"}
+FIVE_YEAR_SLACK_DAYS = 7              # a window that starts within this of five years before its last day counts five full years
+RANGE_MIN_SESSIONS = 60               # a stretch shorter than about a quarter is no range: step 5 shows today's figure alone
 
 
-def left_out_line(start: date, reasons: set[str]) -> str:
-    """Pure: why the chart starts where it does: "The chart starts on Oct 20, 2023. Before that, its P/E was above 100 at times, which
-    Ivy leaves out of its P/E history." (the cap from valuation.MIN_EARNINGS_YIELD)."""
+def _cap() -> str:
     from app.services.valuation import MIN_EARNINGS_YIELD
-    words = [LEFT_OUT_WORDS[r].format(cap=f"${1 / MIN_EARNINGS_YIELD:,.0f}") for r in ("loss", "over_cap", "action") if r in reasons]
-    why = " or ".join(words) if words else "the price of its profit could not be worked out"
-    return f"The chart starts on {fmt_date(start)}. Before that, {why} at times, which Ivy leaves out of this history."
+    return f"${1 / MIN_EARNINGS_YIELD:,.0f}"
 
 
-RANGE_WHEN = {"loss": "it had lost money over four quarters", "over_cap": "the price topped {cap} for each $1 of its profit",
-              "action": "a merger or spin-off sat inside its four quarters"}
-FIVE_YEAR_SLACK_DAYS = 30             # a range that starts within this of five years before its last day is a five-year range
+def range_window(series: list[tuple[date, float]], left_out: dict) -> dict | None:
+    """Pure: step 5's window (Sam, 2026-11-10): the continuous recent stretch of the P/E history, the sessions after the last one
+    the history leaves out (a loss, a price over the cap, a corporate action) and after the last break in the series, so "since
+    {first}" is true of every session in it. The range, the median, the chart, the summary and the quick check all read this one
+    window. {run, first, last, low, high, median, five_year, before, last_gone, last_reason}: five_year only when the window is the whole
+    history and starts five years before its last day; before lists why earlier sessions were left out; median is the window's
+    own. None for an empty series."""
+    from statistics import median
+    from app.services.valuation import RANGE_YEARS
+    if not series:
+        return None
+    gone = [d for d in left_out if d <= series[-1][0]]
+    last_gone = max(gone, default=None)
+    run = [x for x in runs(series)[-1] if last_gone is None or x[0] > last_gone]
+    if not run:
+        return None
+    first, last = run[0][0], run[-1][0]
+    vals = [v for _, v in run]
+    five = len(run) == len(series) and not gone and (first - (last - timedelta(days=round(365.25 * RANGE_YEARS)))).days <= FIVE_YEAR_SLACK_DAYS
+    return {"run": run, "first": first, "last": last, "low": min(vals), "high": max(vals), "median": round(median(vals), 1), "five_year": five,
+            "before": [r for r in RANGE_BEFORE if r in {left_out[d] for d in gone}], "last_gone": last_gone,
+            "last_reason": left_out[last_gone] if last_gone else None}
 
 
-def range_words(series: list[tuple[date, float]], left_out: dict, med: float) -> tuple[str, str, str]:
-    """Pure: step 5's range (label, as of, sentence), saying exactly what it covers (Sam, 2026-11-10): "Over five years" only when the
-    days run five years with none left out; otherwise the first and last day, and how many days in between the history leaves out
-    and why ("Leaving out the 412 days when the price topped $100 for each $1 of its profit, ...")."""
-    from app.services.valuation import MIN_EARNINGS_YIELD, RANGE_YEARS
-    first, last = series[0][0], series[-1][0]
-    vals = [v for _, v in series]
-    lo, hi = per_dollar(min(vals)), per_dollar(max(vals))
-    gone = {d: r for d, r in left_out.items() if first <= d <= last}
-    span = f"{len(series):,} trading days, {fmt_date(first)} to {fmt_date(last)}"
-    if not gone:
-        if (first - (last - timedelta(days=round(365.25 * RANGE_YEARS)))).days <= FIVE_YEAR_SLACK_DAYS:
-            return "Its five-year range", span, f"Over five years investors paid between {lo} and {hi} for each $1, and {per_dollar(med)} at the median."
-        return f"Its range since {fmt_date(first)}", span, f"Since {fmt_date(first)}, investors paid between {lo} and {hi} for each $1, and {per_dollar(med)} at the median."
-    why = " or ".join(RANGE_WHEN[r].format(cap=f"${1 / MIN_EARNINGS_YIELD:,.0f}") for r in ("loss", "over_cap", "action") if r in gone.values())
-    n = len(gone)
-    return (f"Its range, leaving out {n:,} day{'s' if n != 1 else ''}", f"{span}, {n:,} left out",
-            f"Leaving out the {n:,} day{'s' if n != 1 else ''} when {why}, investors paid between {lo} and {hi} for each $1 from "
-            f"{fmt_date(first)} to {fmt_date(last)}, and {per_dollar(med)} at the median.")
+def before_words(reasons: list[str]) -> str:
+    """Pure: "they paid more than $100 at times", "they paid more than $100 or it had lost money over four quarters at times"."""
+    return " or ".join(RANGE_BEFORE[r].format(cap=_cap()) for r in reasons) + " at times"
+
+
+def range_words(w: dict) -> tuple[str, str, str]:
+    """Pure: step 5's range (label, as of, sentence) over range_window's stretch, in Sam's words (2026-11-10): "Since Oct 20, 2023,
+    investors have paid between $25 and $68 for each $1 of its profit, and $41 at the median. Before that, they paid more than
+    $100 at times." "Over five years" only when five full years are counted."""
+    lo, hi, med = per_dollar(w["low"]), per_dollar(w["high"]), per_dollar(w["median"])
+    span = f"{len(w['run']):,} trading days, {fmt_date(w['first'])} to {fmt_date(w['last'])}"
+    if w["five_year"]:
+        return "Its five-year range", span, f"Over five years, investors have paid between {lo} and {hi} for each $1 of its profit, and {med} at the median."
+    line = f"Since {fmt_date(w['first'])}, investors have paid between {lo} and {hi} for each $1 of its profit, and {med} at the median."
+    if w["before"]:
+        line += f" Before that, {before_words(w['before'])}."
+    return f"Its range since {fmt_date(w['first'])}", span, line
+
+
+NO_RANGE_WHY = {"over_cap": "investors paid more than {cap} for each $1 of its profit", "loss": "it had lost money over its last four quarters",
+                "action": "a merger or spin-off sat inside its last four quarters"}
+
+
+def no_range_line(w: dict | None) -> str:
+    """Pure: step 5's line when the stretch is shorter than RANGE_MIN_SESSIONS: no range, and why (the last session left out)."""
+    if w and w["last_gone"]:
+        return f"Ivy has no recent range to set that against yet. As recently as {fmt_date(w['last_gone'])}, {NO_RANGE_WHY[w['last_reason']].format(cap=_cap())}."
+    return "Ivy has no recent range to set that against yet."
 
 
 def step_valuation(name: str, sector: str | None, snap: dict | None, series: list[tuple[date, float]], sec_row: dict | None, enabled: bool,
                    periods: dict | None = None, left_out: dict | None = None, year: dict | None = None) -> dict:
-    """The P/E chart is the series' latest unbroken run (runs): a stretch the history leaves out (left_out: {session: reason}, a loss,
-    a P/E over the cap or a corporate action) is never drawn across, and the chart says where it starts and why. The range and the
-    median stay the five-year history's. year (walkthrough_data.pe_year) lets the check name this company's reason."""
+    """The range, its median, the chart, the summary and the quick check all read one window (range_window): five years when five
+    full years are counted, otherwise the continuous recent stretch, named by its first day. A stretch shorter than
+    RANGE_MIN_SESSIONS shows today's figure alone. year (walkthrough_data.pe_year) lets the check name this company's reason, when
+    the day a year earlier sits inside the window."""
     from statistics import median
     if not enabled:
         return _absent(5, name, PE_IN_REVIEW, "P/E figures still being checked", "pe")
@@ -749,46 +791,42 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
     med_stored = float(snap["hist_median"]) if snap.get("hist_median") is not None else None
     chart = check = None
     vals = [v for _, v in series]
+    # the series is the stored history when its median is the stored one; only then is any of it shown
     series_ok = bool(vals) and med_stored is not None and abs(round(median(vals), 1) - med_stored) <= PE_MEDIAN_AGREEMENT
     sector_median = float(sec_row["median_pe"]) if sec_row and sec_row.get("shown") and sec_row.get("median_pe") is not None else None
-    if series_ok:
-        label, span, line = range_words(series, left_out or {}, med_stored)
-        numbers.append(_num(label, f"{per_dollar(min(vals))} to {per_dollar(max(vals))}", span))
+    w = range_window(series, left_out or {}) if series_ok else None
+    ranged = bool(w) and len(w["run"]) >= RANGE_MIN_SESSIONS
+    med = since = None
+    if ranged:
+        med = med_stored if w["five_year"] else w["median"]          # five full years: the stored five-year median itself
+        since = None if w["five_year"] else w["first"]
+        w = {**w, "median": med}
+        label, span, line = range_words(w)
+        numbers.append(_num(label, f"{per_dollar(w['low'])} to {per_dollar(w['high'])}", span))
         sentences.append(line)
-        drawn = runs(series)[-1]
-        pts = _points(drawn)
-        sampled = runs([(date.fromisoformat(d), v) for d, v in pts])[-1]       # every fifth session can widen a short break past the limit
-        if len(sampled) < len(pts):
-            pts = pts[len(pts) - len(sampled):]
-            drawn = [x for x in drawn if x[0] >= sampled[0][0]]
-        chart = {"kind": "pe_range", "as_of": snap["as_of_date"].isoformat(), "points": pts, "median": med_stored, "today": pe,
-                 "sector_median": sector_median, "sector": sector if sector_median is not None else None, "start": drawn[0][0].isoformat()}
-        if len(drawn) < len(series):
-            gaps = [(a[0], b[0]) for a, b in zip(series, series[1:]) if (b[0] - a[0]).days > CHART_GAP_DAYS]
-            reasons = {r for d, r in (left_out or {}).items() if any(g0 < d < g1 for g0, g1 in gaps)}
-            sentences.append(left_out_line(drawn[0][0], reasons))
+        pts = _window_points(w["run"])
+        chart = {"kind": "pe_range", "as_of": snap["as_of_date"].isoformat(), "points": pts, "median": med, "median_label": C.median_label(since),
+                 "today": pe, "sector_median": sector_median, "sector": sector if sector_median is not None else None, "start": w["first"].isoformat()}
         if chart_gaps(chart):
-            chart = None                                   # never: runs() leaves none; a chart with a break is not shown
-    elif med_stored is not None:
-        sentences.append(f"Over the past five years investors paid {per_dollar(med_stored)} for each $1 at the median.")
+            chart = None                                   # never: the window has no break; a chart with one is not shown
+    elif series_ok:
+        sentences.append(no_range_line(w))
     if sector_median is not None:
         sentences.append(f"For the median {sector} stock in the S&P 500, they pay {per_dollar(sector_median)}.")
     summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters."
-    if med_stored:
-        check = C.pe_check(name, pe, med_stored, year)
-        rel = {"More than usual": "above", "Less than usual": "below", "About the same as usual": "about level with"}[C.pe_word(pe, med_stored)]
-        summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters, {rel} its five-year median of {per_dollar(med_stored)}."
+    if ranged:
+        check = C.pe_check(name, pe, med, year if year and year.get("then") and year["then"] >= w["first"] else None, since)
+        rel = {"More than usual": "above", "Less than usual": "below", "About the same as usual": "about level with"}[C.pe_word(pe, med)]
+        summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters, {rel} {C.median_words(med, since)}."
     deeper = [_num("Earnings per share, last four quarters", dollars(float(snap["trailing_eps"])), f"Four quarters {through(periods, snap['window_end'])}")]
-    if med_stored is not None:
-        if series_ok and label != "Its five-year range":           # the median covers the range's days, said the range's way
-            deeper.append(_num("Median of those days, paid for each $1 of profit", per_dollar(med_stored), span))
-        else:
-            deeper.append(_num("Five-year median, paid for each $1 of profit", per_dollar(med_stored), f"{snap['hist_sessions']:,} trading days, {fmt_date(snap['hist_first'])} to {fmt_date(snap['hist_last'])}"))
+    if ranged:
+        own = C.median_label(since).removeprefix("Its ")                       # "Five-year median", "Median since Oct 20, 2023"
+        deeper.append(_num(f"{own[0].upper()}{own[1:]}, paid for each $1 of profit", per_dollar(med), span))
     if sec_row and not sec_row.get("shown"):
         deeper.append(_num(f"Median {sector} stock, paid for each $1 of profit", "Not shown", f"Only {sec_row['fresh']} of {sec_row['active']} stocks in the sector have a current figure"))
     fact = {"concept": "pe", "measure": "pe", "lead": f"Investors pay about {per_dollar(pe)} for every $1 of {name}'s profit",
             "short": f"For {name}'s, about {per_dollar(pe)}", "tail": f"at the {fmt_date(snap['as_of_date'])} close"}
-    return _step(5, status="ok" if series_ok else "partial", numbers=numbers, sentences=sentences, idea="pe", chart=chart, check=check, deeper=deeper, summary=summary,
+    return _step(5, status="ok" if ranged else "partial", numbers=numbers, sentences=sentences, idea="pe", chart=chart, check=check, deeper=deeper, summary=summary,
                  fact=fact, point=f"The {per_dollar(pe)} investors pay for each $1 of its profit", cell={"pe": {"value": per_dollar(pe), "as_of": as_of, "end": str(snap["as_of_date"])}})
 
 

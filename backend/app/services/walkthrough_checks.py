@@ -21,7 +21,7 @@ The rules (each constant below is the threshold the explanation quotes):
           wider. The year was the closer of the S&P 500 and the median stock of its sector when that one is close, else the
           company's own. A stock over walkthrough.INDEX_SHARE_NO_VERDICT of the index's market value gets no such verdict: its
           check asks what that share means (index_share_check).
-  step 5  investors pay more or less than usual when the P/E is more than PE_SAME_RATIO above or below its five-year median;
+  step 5  investors pay more or less than usual when the P/E is more than PE_SAME_RATIO above or below the median of its window;
           about usual asks nothing. The right answer fits the company's year (pe_check): when its four-quarter earnings per share
           and its price over the year differ by more than SAME_RATIO (as growth factors), in the direction that moved the P/E, and
           the P/E a year earlier was not already on the same side of the median, the answer is that fact; else the usual reading.
@@ -286,21 +286,37 @@ def usd(x: float) -> str:
     return f"${x:,.0f}" if x >= 10 else f"${x:,.1f}"
 
 
-def pe_check(name: str, pe: float, median: float, year: dict | None = None) -> dict | None:
-    """Investors pay more or less than usual (the P/E against its own five-year median): what is a common reason? None when about
-    usual. The right answer fits the company (pe_fact) when its year shows why; year: {eps_pct, price_pct, pe_then, now}."""
+def median_label(since=None) -> str:
+    """Pure: the name of step 5's median, by its window: "Its five-year median" only when five full years are counted
+    (walkthrough.range_window), otherwise "Its median since Oct 20, 2023". The chart's legend and Go deeper read it."""
+    from app.services.briefing import fmt_date
+    return f"Its median since {fmt_date(since)}" if since else "Its five-year median"
+
+
+def median_words(median: float, since=None) -> str:
+    """Pure: the median as the summary and the check's answer say it: "its five-year median of $24" or "the $24 they have paid at
+    the median since Oct 20, 2023"."""
+    from app.services.briefing import fmt_date
+    return f"the {usd(median)} they have paid at the median since {fmt_date(since)}" if since else f"its five-year median of {usd(median)}"
+
+
+def pe_check(name: str, pe: float, median: float, year: dict | None = None, since=None) -> dict | None:
+    """Investors pay more or less than usual (the P/E against the median of step 5's window, five years or since `since`): what is
+    a common reason? None when about usual. The right answer fits the company (pe_fact) when its year shows why; year: {eps_pct,
+    price_pct, pe_then, now}."""
     from app.services.briefing import fmt_date
     a = against(pe, median)
     if a == "same":
         return None
     lower = a == "below"
     fact = pe_fact(a, year, median)
+    said = f"Investors pay about {usd(pe)} for each $1 of its profit, {'below' if lower else 'above'} {median_words(median, since)}"
     if fact:
         options, answer = _ordered([fact, PE_RIGHT["above" if lower else "below"], PE_SPLIT], fact, name)
         verb = lambda x: f"{'rose' if x >= 0 else 'fell'} {pct(x)}"
         return {"concept": "pe", "options": options, "answer": answer,
                 "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is the reason here?",
-                "why": f"Investors pay about {usd(pe)} for each $1 of its profit, {'below' if lower else 'above'} the {usd(median)} of its five-year median, and a year earlier "
+                "why": f"{said}, and a year earlier "
                        f"they paid {usd(year['pe_then'])}. In the year to {fmt_date(year['now'])} its earnings per share over four quarters {verb(year['eps_pct'])} while its "
                        f"share price {verb(year['price_pct'])}, so each dollar of profit costs {'less' if lower else 'more'} than it did. A stock split changes the share "
                        f"price and earnings per share together, so it leaves this figure unchanged."}
@@ -308,7 +324,7 @@ def pe_check(name: str, pe: float, median: float, year: dict | None = None) -> d
     options, answer = _ordered([right, PE_RIGHT["above" if a == "below" else "below"], PE_SPLIT], right, name)
     return {"concept": "pe", "options": options, "answer": answer,
             "question": f"Investors are paying {'less' if lower else 'more'} for each dollar of {name}'s profit than they usually do. What is a common reason?",
-            "why": f"Investors pay about {usd(pe)} for each $1 of its profit, {'below' if lower else 'above'} its five-year median of {usd(median)}. Paying "
+            "why": f"{said}. Paying "
                    f"{'less' if lower else 'more'} than usual commonly means " + ("investors expect its profits to fall from here, or its profits have grown faster than its price. " if lower else
                                         "investors expect its profits to keep growing, or its profits have fallen while its price held. ")
                    + "A stock split changes the share price and earnings per share together, so it leaves this figure unchanged."}

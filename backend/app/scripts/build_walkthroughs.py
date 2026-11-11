@@ -32,7 +32,7 @@ SEC_SECONDS = 120                      # one SEC read (a 10-K's instance, its ri
 FEATURED_KEY = "ivy_featured"
 
 
-async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: date) -> dict:
+async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: date, industry: str | None = None) -> dict:
     """The 10-K readings (segments, risk factors) and margins, reusing a stored reading of the same 10-K."""
     from app.scripts.compute_pe import company_facts_merged
     from app.services.edgar_client import PREDECESSOR_CIKS
@@ -58,7 +58,7 @@ async def sources_for(edgar, sym: str, sector: str | None, stored: dict, today: 
                 or fgs.get("periodic") != periodic or fgs.get("version") != FILING_GROWTH_VERSION
                 or p.get("periodic") != periodic or p.get("version") != F.FISCAL_PERIODS_VERSION):
         facts = await asyncio.wait_for(company_facts_merged(edgar, cik, sym), SEC_SECONDS)
-        out["margins"] = {**_jsonable(M.margins(facts, sector, today)), "version": M.MARGINS_VERSION, "periodic": periodic}
+        out["margins"] = {**_jsonable(M.margins(facts, sector, today, industry)), "version": M.MARGINS_VERSION, "periodic": periodic}
         from app.services.growth import filing_growth
         fg = filing_growth((facts.get("facts") or {}).get("us-gaap") or {}, sector, today)
         out["filing_growth"] = {**_jsonable(fg or {}), "ok": bool(fg), "version": FILING_GROWTH_VERSION, "periodic": periodic}
@@ -240,7 +240,7 @@ async def run(argv: list[str]) -> int:
         for i, sym in enumerate(symbols, 1):
             prior = stored.get(sym) or {}
             try:
-                src = await sources_for(edgar, sym, u["tickers"][sym]["sector"], prior.get("sources") or {}, today)
+                src = await sources_for(edgar, sym, u["tickers"][sym]["sector"], prior.get("sources") or {}, today, u["tickers"][sym]["industry"])
             except Exception as exc:
                 sec_failed += 1
                 print(f"  {sym}: SEC read failed, stored readings kept: {redact(exc)[:120]}", flush=True)

@@ -4,6 +4,7 @@ the next Fed decision chosen when served, and the options line beside the typica
 from __future__ import annotations
 
 import re
+import statistics
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -82,35 +83,79 @@ def _snap(pe=27.6, median=52.6):
             "hist_sessions": 1060, "hist_first": date(2021, 10, 25), "hist_last": date(2026, 10, 27), "price": 217.9}
 
 
-def test_a_pe_chart_never_breaks_and_says_where_it_starts():
+def test_step_5_reads_one_window_the_continuous_recent_stretch():
+    """Sam, 2026-11-10: the range, the median, the chart, the summary and the quick check all cover the stretch since the last
+    session the history leaves out, in the same words; "five-year" is never said of it."""
     first = [(d, 60.0) for d in _sessions(300, date(2023, 2, 22))]
     second = [(d, 40.0 + (i % 30)) for i, d in enumerate(_sessions(760, date(2026, 10, 27)))]
     series = first + second
     left = {d: "over_cap" for d in _sessions(150, date(2023, 9, 20))[:140] if d > date(2023, 2, 22)}
     med = round(sorted(v for _, v in series)[len(series) // 2], 1)
-    s = W.step_valuation("NVIDIA", "Information Technology", _snap(median=med), series, None, True, None, left)
-    assert s["chart"] and W.chart_gaps(s["chart"]) == []
+    s = W.step_valuation("NVIDIA", "Information Technology", _snap(pe=27.6, median=med), series, None, True, None, left)
+    start = W.fmt_date(second[0][0])
+    own = sorted(v for _, v in second)
+    own_med = (own[379] + own[380]) / 2
+    assert s["status"] == "ok" and s["chart"] and W.chart_gaps(s["chart"]) == []
     assert s["chart"]["start"] == second[0][0].isoformat() and s["chart"]["points"][0][0] == second[0][0].isoformat()
-    assert f"The chart starts on {W.fmt_date(second[0][0])}. Before that, investors paid more than $100 for each $1 of its profit at times" in s["sentences"][-1]
-    n_left = sum(1 for d in left if series[0][0] <= d <= series[-1][0])
-    rng = next(n for n in s["numbers"] if n["label"].startswith("Its range"))                 # the range says what it covers (Sam, 2026-11-10)
-    assert rng["label"] == f"Its range, leaving out {n_left} days"
-    assert rng["as_of"] == f"{len(series):,} trading days, {W.fmt_date(series[0][0])} to {W.fmt_date(series[-1][0])}, {n_left} left out"
-    assert (f"Leaving out the {n_left} days when the price topped $100 for each $1 of its profit, investors paid between $40 and $69 for each $1 "
-            f"from {W.fmt_date(series[0][0])} to {W.fmt_date(series[-1][0])}, and ${med:.0f} at the median.") in s["sentences"]
-    assert not any("Over five years" in x for x in s["sentences"])
+    assert s["chart"]["median"] == own_med and s["chart"]["median_label"] == f"Its median since {start}"
+    rng = s["numbers"][1]
+    assert rng["label"] == f"Its range since {start}" and rng["value"] == "$40 to $69"
+    assert rng["as_of"] == f"760 trading days, {start} to {W.fmt_date(second[-1][0])}"
+    assert (f"Since {start}, investors have paid between $40 and $69 for each $1 of its profit, and ${own_med:.0f} at the median. "
+            "Before that, they paid more than $100 at times.") in s["sentences"]
+    assert s["summary"].endswith(f"below the ${own_med:.0f} they have paid at the median since {start}.")
+    assert f"below the ${own_med:.0f} they have paid at the median since {start}" in s["check"]["why"]
+    assert s["deeper"][-1]["label"] == f"Median since {start}, paid for each $1 of profit"
+    said = " ".join(s["sentences"] + [s["summary"], s["check"]["why"], s["chart"]["median_label"]] + [n["label"] for n in s["numbers"] + s["deeper"]])
+    assert "five-year" not in said.lower() and "five years" not in said.lower() and "The chart starts" not in said
+    both = {**left, **{d: "loss" for d in list(left)[:5]}}
+    s = W.step_valuation("NVIDIA", "Information Technology", _snap(median=med), series, None, True, None, both)
+    assert "Before that, they paid more than $100 or it had lost money over four quarters at times." in s["sentences"][1]
+    # the year behind the check is used only when the day a year earlier sits inside the window
+    year = {"eps_pct": 80.0, "price_pct": 10.0, "pe_then": 70.0, "now": date(2026, 10, 27), "then": second[0][0] - timedelta(days=30)}
+    s = W.step_valuation("NVIDIA", "Information Technology", _snap(median=med), series, None, True, None, left, year)
+    assert "a year earlier" not in s["check"]["why"]
+    s = W.step_valuation("NVIDIA", "Information Technology", _snap(median=med), series, None, True, None, left, {**year, "then": date(2025, 10, 27)})
+    assert "a year earlier they paid $70" in s["check"]["why"]
 
 
-def test_the_range_says_five_years_only_when_it_runs_five_years_with_nothing_left_out():
+def test_a_session_left_out_inside_the_last_run_starts_the_window_after_it():
+    """ServiceNow, Nov 2026: a few sessions over $100 a week ago sit inside the chart's last unbroken run. "Since" must be true of
+    every session in the window, so it starts after them, and a stretch that short is no range."""
+    days = _sessions(400, date(2026, 10, 27))
+    gone = set(days[-12:-8])
+    series = [(d, 60.0 + (i % 20)) for i, d in enumerate(days) if d not in gone]
+    med = round(statistics.median(v for _, v in series), 1)
+    w = W.range_window(series, {d: "over_cap" for d in gone})
+    assert w["first"] == days[-8] and len(w["run"]) == 8 and not w["five_year"] and w["before"] == ["over_cap"]
+    s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=med), series, None, True, None, {d: "over_cap" for d in gone})
+    assert s["status"] == "partial" and s["chart"] is None and s["check"] is None and len(s["numbers"]) == 1
+    assert s["sentences"][1] == (f"Ivy has no recent range to set that against yet. As recently as {W.fmt_date(days[-9])}, investors paid more than $100 "
+                                 "for each $1 of its profit.")
+    assert s["summary"] == "Investors pay about $70 for every $1 of its profit over the last four quarters."
+    long_enough = [(d, 60.0 + (i % 20)) for i, d in enumerate(days) if d not in set(days[-70:-66])]
+    med = round(statistics.median(v for _, v in long_enough), 1)
+    s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=med), long_enough, None, True, None, {d: "loss" for d in days[-70:-66]})
+    assert s["status"] == "ok" and s["numbers"][1]["as_of"].startswith(f"{W.RANGE_MIN_SESSIONS + 6} trading days")
+    assert "Before that, it had lost money over four quarters at times." in s["sentences"][1]
+
+
+def test_five_year_is_said_only_when_five_full_years_are_counted():
     whole = [(d, 30.0 + (i % 9)) for i, d in enumerate(_sessions(1305, date(2026, 10, 27)))]
-    s = W.step_valuation("X", "Industrials", _snap(pe=30.0, median=34.0), whole, None, True)
-    assert s["numbers"][1]["label"] == "Its five-year range"
-    assert "Over five years investors paid between $30 and $38 for each $1, and $34 at the median." in s["sentences"]
+    s = W.step_valuation("X", "Industrials", _snap(pe=40.0, median=34.0), whole, None, True)
+    assert s["numbers"][1]["label"] == "Its five-year range" and s["chart"]["median_label"] == "Its five-year median" and s["chart"]["median"] == 34.0
+    assert "Over five years, investors have paid between $30 and $38 for each $1 of its profit, and $34 at the median." in s["sentences"]
+    assert s["summary"].endswith("above its five-year median of $34.") and "above its five-year median of $34" in s["check"]["why"]
+    assert s["deeper"][-1]["label"] == "Five-year median, paid for each $1 of profit"
     late = whole[-500:]
-    s = W.step_valuation("X", "Industrials", _snap(pe=30.0, median=34.0), late, None, True)
-    assert s["numbers"][1]["label"] == f"Its range since {W.fmt_date(late[0][0])}"
-    assert f"Since {W.fmt_date(late[0][0])}, investors paid between $30 and $38 for each $1, and $34 at the median." in s["sentences"]
-    assert s["deeper"][-1]["label"] == "Median of those days, paid for each $1 of profit"
+    s = W.step_valuation("X", "Industrials", _snap(pe=40.0, median=34.0), late, None, True)
+    since = W.fmt_date(late[0][0])
+    assert s["numbers"][1]["label"] == f"Its range since {since}" and s["chart"]["median_label"] == f"Its median since {since}"
+    assert s["sentences"][1] == f"Since {since}, investors have paid between $30 and $38 for each $1 of its profit, and $34 at the median."
+    assert s["summary"].endswith(f"above the $34 they have paid at the median since {since}.")
+    assert not any("five" in x.lower() for x in s["sentences"] + [s["summary"], s["check"]["why"]] + [n["label"] for n in s["deeper"]])
+    a_month_short = whole[25:]                                         # 30 days is no longer close enough to call five years
+    assert not W.range_window(a_month_short, {})["five_year"] and W.range_window(whole, {})["five_year"]
 
 
 def test_a_short_break_widened_by_sampling_still_draws_no_gap():
@@ -118,6 +163,7 @@ def test_a_short_break_widened_by_sampling_still_draws_no_gap():
     series = [(d, 30.0) for i, d in enumerate(days) if not 600 <= i < 612]          # a 12-session break: under the limit daily, over it sampled
     s = W.step_valuation("X", "Industrials", _snap(pe=30.0, median=30.0), series, None, True)
     assert s["chart"] and W.chart_gaps(s["chart"]) == []
+    assert s["chart"]["start"] == s["chart"]["points"][0][0] == days[0].isoformat()      # the chart is the window the range names
 
 
 def test_no_walkthrough_chart_ever_has_a_gap():

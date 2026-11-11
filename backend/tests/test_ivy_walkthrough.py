@@ -147,7 +147,12 @@ def test_no_gross_profit_filed_reads_operating_margin_and_reits_get_none():
     op = [(s, e, 5.0) for s, e in QUARTERS]
     out = M.margins(_facts({"Revenues": rev, "OperatingIncomeLoss": op, "CostOfGoodsAndServicesSold": [(s, e, 10.0) for s, e in QUARTERS]}), "Health Care", date(2026, 10, 19))
     assert out["measure"] == "operating" and out["now"] == 5.0           # never revenue less a partial cost tag (UNH)
-    assert not M.margins({}, "Real Estate", date(2026, 10, 19))["ok"]
+    trust = M.margins(_facts({"Revenues": rev, "OperatingIncomeLoss": op}), "Real Estate", date(2026, 10, 19), "Retail REITs")
+    assert not trust["ok"] and "funds from operations" in trust["reason"]
+    # CBRE and CoStar sit in Real Estate and are not trusts (Sam, 2026-11-10): a margin like any other company's
+    services = M.margins(_facts({"Revenues": rev, "OperatingIncomeLoss": op}), "Real Estate", date(2026, 10, 19), "Real Estate Services")
+    assert services["ok"] and services["measure"] == "operating" and services["now"] == 5.0 and "operating" in services["by_measure"]
+    assert W.is_reit("Real Estate", "Retail REITs") and not W.is_reit("Real Estate", "Real Estate Services") and not W.is_reit("Financials", "Mortgage REITs")
     banks = M.margins(_facts({"Revenues": rev, "NetIncomeLoss": [(s, e, 30.0) for s, e in QUARTERS]}), "Financials", date(2026, 10, 19))
     assert banks["measure"] == "net" and banks["now"] == 30.0
 
