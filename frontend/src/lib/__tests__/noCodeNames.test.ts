@@ -68,7 +68,7 @@ describe("customer-facing text names no code", () => {
   });
 
   it("the glossary names no code", () => {
-    const found = [...TERMS.flatMap((t) => [t.term, t.explanation]), ...Object.values(GLOSSARY).map(String)].flatMap((t) => codeNames(t).map((h) => `${h} in ${t}`));
+    const found = [...TERMS.flatMap((t) => [t.term, t.explanation, t.walkthrough ?? ""]), ...Object.values(GLOSSARY).map(String)].flatMap((t) => codeNames(t).map((h) => `${h} in ${t}`));
     expect(found).toEqual([]);
   });
 

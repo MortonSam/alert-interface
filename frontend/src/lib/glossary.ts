@@ -106,8 +106,22 @@ const LEGACY: Record<string, string> = {
 // One map for ExplainTip: every term by its key, its name and each of its visible strings (lowercase), from TERMS; the older
 // entries above stay only for keys TERMS does not cover.
 const GLOSSARY: Record<string, string> = { ...LEGACY, ...Object.fromEntries(Object.entries(LEGACY).map(([k, v]) => [k.toLowerCase(), v])) };
+// What the terms with a `walkthrough` reading say once the walkthrough is on, under the same names in lowercase (null: retired).
+const WALKTHROUGH: Record<string, string | null> = {};
 for (const t of TERMS) {
-  for (const alias of [t.key, t.term, ...t.match]) { GLOSSARY[alias.toLowerCase()] = t.explanation; GLOSSARY[alias] = t.explanation; }
+  for (const alias of [t.key, t.term, ...t.match]) {
+    GLOSSARY[alias.toLowerCase()] = t.explanation; GLOSSARY[alias] = t.explanation;
+    if (t.walkthrough !== undefined) WALKTHROUGH[alias.toLowerCase()] = t.walkthrough;
+  }
+}
+
+/** Whether a term reads differently once the walkthrough is on, so only those ask which it is (lib/useIvyMode useWalkthroughOn). */
+export const variesWithWalkthrough = (term: string): boolean => term.toLowerCase() in WALKTHROUGH;
+
+/** A term's explanation as the site stands: its walkthrough reading while the walkthrough is on (null for a retired term), else its own. */
+export function explanationOf(term: string, walkthrough: boolean): string | null {
+  const k = term.toLowerCase();
+  return walkthrough && k in WALKTHROUGH ? WALKTHROUGH[k] : GLOSSARY[k] ?? null;
 }
 
 export default GLOSSARY;

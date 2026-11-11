@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import GLOSSARY from "@/lib/glossary";
+import { explanationOf, variesWithWalkthrough } from "@/lib/glossary";
+import { useWalkthroughOn } from "@/lib/useIvyMode";
 
 // Global close function — opening one ExplainTip closes any other
 let globalClose: (() => void) | null = null;
@@ -35,7 +36,8 @@ export default function ExplainTip({
   const ref = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const definition = GLOSSARY[term.toLowerCase()] ?? null;
+  // a term that reads differently once the walkthrough is on follows the flag (lib/glossaryTerms `walkthrough`)
+  const definition = explanationOf(term, useWalkthroughOn(variesWithWalkthrough(term)));
 
   const doOpen = useCallback(() => {
     // Close any other open ExplainTip

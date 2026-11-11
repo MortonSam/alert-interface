@@ -38,7 +38,7 @@ describe("visible copy never says stored", () => {
   });
 
   it("the glossary never says stored", () => {
-    const found = [...TERMS.flatMap((t) => [t.term, t.explanation, ...(t.match ?? [])]), ...Object.values(GLOSSARY).map(String)].filter((t) => STORED.test(t));
+    const found = [...TERMS.flatMap((t) => [t.term, t.explanation, t.walkthrough ?? "", ...(t.match ?? [])]), ...Object.values(GLOSSARY).map(String)].filter((t) => STORED.test(t));
     expect(found).toEqual([]);
   });
 

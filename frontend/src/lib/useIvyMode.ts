@@ -34,6 +34,25 @@ export const ivyMode = (page: IvyPage | null | undefined, served?: boolean): Ivy
   page !== undefined ? { mode: page ? "walkthrough" : "old" }
     : served === undefined ? { mode: "loading" } : { mode: served ? "walkthrough" : "old" };
 
+let textAsked: Promise<IvyPage | null> | null = null;
+
+/**
+ * Whether text that differs with the walkthrough (lib/glossary, Sam 2026-11-11) reads its walkthrough form: by the server's answer
+ * where the page hands one down (the /ivy frame, Disclosures), else by the browser's, asked once per page load and only when `ask`
+ * (a tip whose term reads the same either way never asks). Off until an answer is in, as it is for the pages.
+ */
+export function useWalkthroughOn(ask: boolean): boolean {
+  const served = useContext(IvyFlag);
+  const [page, setPage] = useState<IvyPage | null | undefined>(settled);
+  useEffect(() => {
+    if (!ask || served !== undefined) return;
+    let alive = true;
+    (textAsked ??= readIvyPage()).then((p) => { if (alive) setPage(p); });
+    return () => { alive = false; };
+  }, [ask, served]);
+  return ivyMode(page, served).mode === "walkthrough";
+}
+
 export function useIvyMode(): IvyMode {
   const served = useContext(IvyFlag);
   const [page, setPage] = useState<IvyPage | null | undefined>(settled);
