@@ -963,7 +963,8 @@ function VerificationPanel({
           {unsupported > 0 && <span className="text-muted-foreground">⚠ {unsupported} unsupported</span>}
           {contradicted > 0 && <span className="text-amber-600 dark:text-amber-400">✗ {contradicted} contradicted</span>}
           <span className="text-muted-foreground font-normal">
-            · verified {verifiedAt ? timeAgo(verifiedAt) : "—"}
+            {/* the check's own date, never an age (Sam, 2026-11-10: "verified 8d ago" read as stale) */}
+            · verified {verifiedAt ? fmtOneDate(verifiedAt) : "—"}
           </span>
         </span>
         <span className="text-muted-foreground">{open ? "▲" : "▼"} {total} claims</span>
