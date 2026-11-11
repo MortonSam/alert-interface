@@ -1,9 +1,11 @@
-// A legal draft (lib/legalDrafts), rendered only while NEXT_PUBLIC_ACCOUNTS_ENABLED is "true", with its draft status shown on the page.
+// A legal draft (lib/legalDrafts), rendered only while NEXT_PUBLIC_ACCOUNTS_ENABLED is "true", with its draft status shown on the page;
+// until then /privacy and /terms are the site's not-found page (Sam, 2026-11-10).
+import { notFound } from "next/navigation";
 import { ACCOUNTS_ON } from "@/lib/account";
 import type { LegalDoc } from "@/lib/legalDrafts";
 
 export default function LegalPage({ doc }: { doc: LegalDoc }) {
-  if (!ACCOUNTS_ON) return <main className="max-w-7xl mx-auto px-4 sm:px-8 py-10" />;
+  if (!ACCOUNTS_ON) notFound();
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-8 py-10">
       <p className="font-mono text-xs uppercase tracking-[.16em] text-primary">{doc.status}</p>

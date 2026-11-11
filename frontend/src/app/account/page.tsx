@@ -1,11 +1,12 @@
 "use client";
 
 // Sign in with an email link, and the signed-in person's settings: each email on or off, sign out (here or everywhere), delete the
-// account. Only while NEXT_PUBLIC_ACCOUNTS_ENABLED is "true"; reading the site never needs this page.
+// account. Only while NEXT_PUBLIC_ACCOUNTS_ENABLED is "true" (the layout beside this file answers not-found until then); reading the
+// site never needs this page.
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ACCOUNTS_ON, account, moveLocalIntoAccount, type Me } from "@/lib/account";
+import { account, moveLocalIntoAccount, type Me } from "@/lib/account";
 import { ACCOUNT_COPY as C } from "@/lib/accountCopy";
 
 function SignIn() {
@@ -121,7 +122,6 @@ function AccountScreen() {
 }
 
 export default function AccountPage() {
-  if (!ACCOUNTS_ON) return <main className="max-w-7xl mx-auto px-4 sm:px-8 py-10" />;
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-8 py-10">
       <Suspense fallback={null}><AccountScreen /></Suspense>

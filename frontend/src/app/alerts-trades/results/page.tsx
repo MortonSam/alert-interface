@@ -19,7 +19,6 @@ function label(i: ResultItem): string {
 export default function ResultsPage() {
   const [data, setData] = useState<{ summary: string | null; items: ResultItem[] } | null | undefined>(undefined);
   useEffect(() => { if (ACCOUNTS_ON) account.results().then((r) => setData(r.ok ? r.data : null)); }, []);
-  if (!ACCOUNTS_ON) return <main className="max-w-7xl mx-auto px-4 sm:px-8 py-10" />;
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-8 py-10">
       <p className="font-mono text-xs uppercase tracking-[.16em] text-primary">{C.hypothetical}</p>

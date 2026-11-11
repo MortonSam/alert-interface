@@ -23,6 +23,19 @@ describe("the account screens' words", () => {
     }
     expect(PRIVACY_DRAFT.sections.map((s) => s.heading)).toContain("Deleting your data");
   });
+  it("with accounts off the new routes are the not-found page, never a blank one (Sam, 2026-11-10)", () => {
+    const SRC = join(__dirname, "..", "..");
+    const read = (f: string) => readFileSync(join(SRC, f), "utf8");
+    // /account and /account/verify through one layout, the results through theirs, /privacy and /terms through the page they share
+    for (const f of ["app/account/layout.tsx", "app/alerts-trades/results/layout.tsx", "components/legal/LegalPage.tsx"]) {
+      expect(read(f), f).toContain("if (!ACCOUNTS_ON) notFound();");
+      expect(read(f), f).not.toContain('"use client"');
+    }
+    for (const f of ["app/privacy/page.tsx", "app/terms/page.tsx"]) expect(read(f), f).toContain("<LegalPage doc=");
+    for (const f of ["app/account/page.tsx", "app/account/verify/page.tsx", "app/alerts-trades/results/page.tsx", "components/legal/LegalPage.tsx"]) {
+      expect(read(f), f).not.toMatch(/if \(!ACCOUNTS_ON\) return </);
+    }
+  });
   it("the prompts appear only at Ask Ivy's box, the follow star, Build a Trade's save and the ticker page's email line", () => {
     const SRC = join(__dirname, "..", "..");
     const uses = ["components/AskIvy.tsx", "app/build/page.tsx", "app/tickers/[symbol]/page.tsx", "components/AccountFollow.tsx", "app/alerts-trades/results/page.tsx"]
