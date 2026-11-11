@@ -38,6 +38,18 @@ def test_the_morning_after_uses_the_figure_on_file_from_before_the_report_in_per
     assert "Options had priced a move of about ±7.7% from the report itself, so it moved less than options priced." in sec.lines
 
 
+def test_the_morning_after_leaves_out_the_tally_of_past_reports_with_fewer_than_four_on_file():
+    # was "In 0 of its last 1 reports on file, it moved more than options priced." on AMD's email (Sam, 2026-11-10)
+    f = {"symbol": "AMD", "name": "AMD", "session": date(2026, 11, 4), "move": 1.0, "implied": 7.7}
+    past = [(9.0, 7.0), (-2.0, 6.5), (3.0, 6.0), (8.0, 5.5)]
+    for n in range(E.AFTER_HISTORY_MIN):
+        lines = E.after_section({**f, "history": past[:n]}, "https://alertinterface.com").lines
+        assert not any("reports on file" in ln for ln in lines), (n, lines)
+    assert E.after_section({**f, "history": past[:3] + [(4.0, None), (None, 6.0)]}, "https://alertinterface.com").lines == lines   # three with both figures
+    assert "In 2 of its last 4 reports on file, it moved more than options priced." in E.after_section({**f, "history": past}, "https://alertinterface.com").lines
+    assert E.AFTER_HISTORY_MIN == 4
+
+
 def test_the_sunday_email_is_offered_only_with_its_flag():
     assert set(K.offered_kinds(False)) == {"date_confirmed", "earnings_eve", "morning_after"}
     assert set(K.offered_kinds(True)) == set(K.KINDS)
