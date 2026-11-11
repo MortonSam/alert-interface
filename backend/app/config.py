@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # that rests on them is displayed (services/personal_use: quotes from the stored Intrinio close, company news, analyst data, the
     # Finnhub market cap, vendor calendar dates, the Yahoo forward ex-dividend date). Stays off until Sam's go.
     personal_use_data_shown: bool = False
+    # MARKET_VALUE_ENABLED: the ticker header's market cap and the Overview's "worth about" clause come from market_values (each share
+    # class on the latest 10-Q or 10-K cover times its own licensed close, one figure per company; services/market_value). A stock
+    # with no figure there shows none, never the vendor's. Off until Sam's go; the nightly computes the figures either way.
+    market_value_enabled: bool = False
     # The free-text question box under the question strip (services/ask_ivy). Off in production until launched; on locally.
     ask_ivy_enabled: bool = False
     live_data_enabled: bool = False           # LIVE_DATA_ENABLED: delayed Intrinio quotes and intraday chart bars shown to visitors (services/live_data)

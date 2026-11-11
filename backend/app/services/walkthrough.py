@@ -30,7 +30,7 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 6                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 7                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
@@ -42,6 +42,9 @@ WALKTHROUGH_VERSION = 6                           # 2 (2026-10-19): fiscal quart
                                                   # 6 (2026-11-10, Sam): step 5's range, median, chart, summary and check read one window, the
                                                   #   continuous recent stretch ("Since {date}, ..."), "five-year" only over five full years;
                                                   #   a real estate company that is not a trust (CBRE, CSGP) gets a margin step
+                                                  # 7 (2026-11-10, Sam): step 4's share of the index reads the company's own market value
+                                                  #   (services/market_value: each share class at its own close, one figure per company, counted
+                                                  #   once), never the vendor's; a stock on the hold-out list gets no share and is out of the sum
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
@@ -53,6 +56,7 @@ CHART_PAUSE_DAYS = 7                              # sessions further apart than 
 CHART_GAP_DAYS = 21                               # frontend lib/walkthroughAxis GAP_DAYS: points further apart break the line; no chart is built with one
 INDEX_SHARE_NO_VERDICT = 2.0                      # a stock above this percent of the S&P 500's market value is part of the market: step 4 gives no
                                                   # market-or-company verdict for it (Sam, 2026-10-29, NVDA) and compares it with its industry
+INDEX_SHARE_MIN_COVERAGE = 0.9                    # the index-share line is shown only when this share of the index's stocks have a market value on file
 
 QUESTIONS = {
     1: "What does it do, and how does it make money?",
@@ -573,15 +577,19 @@ def _window_points(run: list[tuple[date, float]]) -> list[list]:
 
 
 def index_share(symbol: str, tickers: dict) -> dict | None:
-    """Pure: the stock's share of the S&P 500's market value, {pct, as_of}: its stored market value over the sum of every active
-    index member's, dated by the oldest stored value among them. None without its own value."""
+    """Pure: the company's share of the S&P 500's market value, {pct, as_of, members}: its market value on file (services/market_value:
+    each share class at its own close, one figure per company) over the sum of every index company's, a company counted once however
+    many of its classes are in the index, dated by the oldest close among them. A stock with no figure on file (the hold-out list) is
+    left out of the sum and gets no line of its own; no stock gets one while fewer than INDEX_SHARE_MIN_COVERAGE of the index's stocks
+    have a figure. members counts the index stocks with a figure."""
     me = tickers.get(symbol) or {}
-    members = [t for t in tickers.values() if t.get("index_member") and t.get("market_cap")]
-    if not me.get("market_cap") or not me.get("index_member") or not members:
+    index = {s: t for s, t in tickers.items() if t.get("index_member")}
+    valued = {s: t for s, t in index.items() if t.get("market_value")}
+    if not me.get("market_value") or symbol not in valued or len(valued) < INDEX_SHARE_MIN_COVERAGE * len(index):
         return None
-    dates = [t.get("market_cap_updated_at") for t in members if t.get("market_cap_updated_at")]
-    as_of = min(dates).date() if dates else None
-    return {"pct": round(me["market_cap"] / sum(t["market_cap"] for t in members) * 100, 1), "as_of": as_of, "members": len(members)}
+    companies = {t.get("company") or s: t["market_value"] for s, t in valued.items()}
+    dates = [t["market_value_as_of"] for t in valued.values() if t.get("market_value_as_of")]
+    return {"pct": round(me["market_value"] / sum(companies.values()) * 100, 1), "as_of": min(dates) if dates else None, "members": len(valued)}
 
 
 def industry_verdict(stock: float, sector_pct: float) -> str:

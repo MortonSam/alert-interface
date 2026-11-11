@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.services import user_errors
 from app.auth import get_draft_caller, is_admin, require_admin, _get_admin_token
 from app.config import settings
-from app.services import live_data, personal_use
+from app.services import live_data, market_value_store, personal_use
 from app.database import get_db
 from app.models.event import Event
 from app.services.dates import fmt_days_in   # Ivy's written text dates any ISO day "Oct 23, 2026" as served
@@ -230,10 +230,13 @@ async def list_tickers(
     tickers = list(result.scalars().all())
 
     next_map = await batch_next_earnings(db, [t.id for t in tickers])
+    figures = await market_value_store.values(db) if settings.market_value_enabled else None
 
     enriched: list[TickerRead] = []
     for t in tickers:
         r = TickerRead.model_validate(t)
+        if figures is not None:
+            market_value_store.show(r, figures if t.is_active else {})
         ne = next_map.get(t.id)
         if ne is not None:
             for k, v in ne.as_api().items():
@@ -2149,6 +2152,8 @@ async def get_ticker_by_symbol(symbol: str, db: AsyncSession = Depends(get_db)) 
     # Enrich with next_earnings_date
     today = date.today()
     r = TickerRead.model_validate(ticker)
+    if settings.market_value_enabled:
+        market_value_store.show(r, await market_value_store.values(db, [sym]) if ticker.is_active else {})
     for k, v in (await next_earnings_for(db, ticker.id)).as_api().items():
         setattr(r, k, v)
     from app.services.pending_deals import deal_for, note_for

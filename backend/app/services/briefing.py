@@ -49,6 +49,11 @@ SOURCE_NAMES = {"yfinance": "earnings calendar", "finnhub": "earnings calendar",
 ABBREVIATIONS = {"inc", "corp", "co", "ltd", "plc", "llc", "lp", "sa", "nv", "ag", "mr", "ms", "dr", "st", "no", "vs", "u.s", "e.g", "i.e"}
 MARKET_VALUE_AGREEMENT = 0.25  # quote x shares shown only within this share of the dated market cap on file; past it the share count is
                                # stale (VMRK on 2026-10-15: a pre-merger 374.9M shares gave $23B against a $47B market cap), so no value
+# MARKET_VALUE_ENABLED (services/market_value): the receipt of the Overview's "worth about" when it is the company's own market value
+OWN_VALUE_SOURCE = "each class of shares on the cover of its latest 10-Q or 10-K times that class's own closing price"
+OWN_VALUE_RULE = ("The market value is the shares on the cover of the company's latest 10-Q or 10-K, each class of shares times its own closing "
+                  "price, one figure per company, in round words, one decimal at most, dated by that close; a company whose cover does not "
+                  "give a share count that can be priced shows none.")
 BOILERPLATE = ("was incorporated", "is incorporated", "was formerly known", "changed its name", "formerly known as")   # investor-relations sentences dropped
 
 
@@ -194,10 +199,12 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
                      gics_sector: str | None = None, gics_sub_industry: str | None = None, gics_as_of: date | None = None, index_member: bool = False,
                      quote_price: float | None = None, quote_ts: int | None = None, shares_outstanding: float | None = None, shares_as_of: date | None = None,
                      profile_filed: date | None = None, merged_name: str | None = None, merged_on: date | None = None,
-                     market_cap: float | None = None) -> dict | None:
+                     market_cap: float | None = None, own_value_on: bool = False, own_value: dict | None = None) -> dict | None:
     """The description, then "It's part of the S&P 500's <GICS sector> sector (<sub-industry>), worth about <quote x shares>." None without a profile.
     A merger into this company after the profile's latest filing replaces the description with the merger (merger_text); a market
-    value that disagrees with the dated market cap on file is left out (market_value_agrees)."""
+    value that disagrees with the dated market cap on file is left out (market_value_agrees). With own_value_on (MARKET_VALUE_ENABLED)
+    "worth about" is the company's own market value on file (own_value, a services/market_value_store.values row) or is left out:
+    never the quote times the vendor's shares."""
     desc = description_text(short_description)
     if not desc:
         return None
@@ -221,7 +228,17 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
             dates.append(gics_as_of)
     from app.services.personal_use import shown
     # the shares outstanding and the market cap on file are Finnhub's (personal use only): no market value while that data is held
-    mv = market_value_words(quote_price * shares_outstanding) if shown() and market_value_agrees(quote_price, shares_outstanding, market_cap) else None
+    mv = (market_value_words(quote_price * shares_outstanding)
+          if not own_value_on and shown() and market_value_agrees(quote_price, shares_outstanding, market_cap) else None)
+    if own_value_on and own_value and own_value.get("value") and own_value.get("close_date"):
+        from app.services.market_value import CLASS_MULTIPLE
+        own = market_value_words(own_value["value"])
+        bits.append(f"worth about {own}")
+        inputs.append(_input("market cap", own, own_value["close_date"], OWN_VALUE_SOURCE))
+        if own_value.get("shares") and own_value.get("shares_as_of") and own_value.get("company") not in CLASS_MULTIPLE:
+            inputs.append(_input("shares outstanding", f"{own_value['shares'] / 1e6:,.1f} million", own_value["shares_as_of"],
+                                 f"the cover of its {own_value.get('form') or '10-Q or 10-K'}" + (f" filed {fmt_date(own_value['filed'])}" if own_value.get("filed") else "")))
+        dates.append(own_value["close_date"])
     if mv and quote_ts and shares_as_of:
         bits.append(f"worth about {mv}")
         t = fmt_quote_time(quote_ts)
@@ -232,9 +249,10 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
     rule = (f"The first sentence of the company's description as recorded by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
             f"{SECOND_SENTENCE_IF_FIRST_UNDER} characters and when it is not a list of segments, products or brands; incorporation and renaming boilerplate removed; "
             f"{DESCRIPTION_CAP} characters at most, whole sentences only). Sector and sub-industry are GICS from the S&P 500 constituent list, never the profile vendor's "
-            "categories; membership from the nightly list. The market value is the latest quote times the shares outstanding from the company profile, in round words, "
+            "categories; membership from the nightly list. " + (OWN_VALUE_RULE if own_value_on else
+            "The market value is the latest quote times the shares outstanding from the company profile, in round words, "
             "one decimal at most, each dated, and shown only within "
-            f"{MARKET_VALUE_AGREEMENT:.0%} of the dated market cap on file. A merger into the company completed after its profile's latest filing replaces "
+            f"{MARKET_VALUE_AGREEMENT:.0%} of the dated market cap on file.") + " A merger into the company completed after its profile's latest filing replaces "
             "the description with the merger and the date it completed.")
     return _sentence("profile", text, rule, max(dates) if dates else None, inputs)
 

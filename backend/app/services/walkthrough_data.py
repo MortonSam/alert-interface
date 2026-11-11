@@ -28,8 +28,8 @@ async def load_universe(db, today: date) -> dict:
     from app.services.market_day import BENCHMARK
     from app.services.next_earnings import batch_next_earnings
     from app.services.ticker_exits import MERGED, REASON_PREFIXES
-    tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text(
-        "SELECT id, symbol, name, sector, industry, market_cap, market_cap_updated_at, index_member FROM tickers WHERE is_active ORDER BY symbol"))).all()}
+    from app.services.market_value_store import TICKERS_WITH_VALUE
+    tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text(TICKERS_WITH_VALUE))).all()}
     syms = list(tickers)
     profiles = {r.symbol: dict(r._mapping) for r in (await db.execute(text(
         "SELECT symbol, short_description, fetched_at, latest_filing_date FROM company_profiles WHERE symbol = ANY(:s)"), {"s": syms})).all()}

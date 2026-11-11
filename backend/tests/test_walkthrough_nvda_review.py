@@ -68,11 +68,21 @@ def test_step4_for_a_smaller_stock_keeps_the_market_question_without_a_verdict_o
     assert "so that move was mostly NVIDIA's own" in s["sentences"][-1]
 
 
-def test_index_share_is_the_stored_market_value_over_the_index():
-    t = lambda mc, member=True: {"market_cap": mc, "index_member": member, "market_cap_updated_at": datetime(2026, 10, 20, tzinfo=NY)}
+def test_index_share_is_the_companys_own_market_value_over_the_index():
+    t = lambda mv, member=True, company=None: {"market_value": mv, "index_member": member, "market_value_as_of": date(2026, 10, 20), "company": company,
+                                               "market_cap": 9e15}       # the vendor's figure rides along for ordering and is never read here
     tickers = {"NVDA": t(5.25e12), "AAA": t(30e12), "BBB": t(38.65e12), "OUT": t(9e12, False)}
     assert W.index_share("NVDA", tickers) == {"pct": 7.1, "as_of": date(2026, 10, 20), "members": 3}
     assert W.index_share("OUT", tickers) is None
+    # two classes of one company carry the same figure and count once; each class's line is the company's share
+    two = {"GOOG": t(3.5e12, company="GOOGL"), "GOOGL": t(3.5e12, company="GOOGL"), "AAA": t(31.5e12), "BBB": t(35e12)}
+    assert W.index_share("GOOG", two) == W.index_share("GOOGL", two) == {"pct": 5.0, "as_of": date(2026, 10, 20), "members": 4}
+    # a stock with no figure (the hold-out list) gets no line and is out of the sum; the oldest close dates the line
+    held = {**{f"S{i}": t(1e12) for i in range(9)}, "V": t(None), "OLD": {**t(1e12), "market_value_as_of": date(2026, 10, 16)}}
+    assert W.index_share("V", held) is None
+    assert W.index_share("S0", held) == {"pct": 10.0, "as_of": date(2026, 10, 16), "members": 10}
+    # under INDEX_SHARE_MIN_COVERAGE of the index with a figure, no stock gets a line
+    assert W.index_share("S0", {**held, "W": t(None), "X": t(None)}) is None
     assert W.industry_verdict(17.3, 24.1) == "lagged" and W.industry_verdict(30.0, 24.1) == "kept pace with" and W.industry_verdict(60.0, 24.1) == "outpaced"
 
 

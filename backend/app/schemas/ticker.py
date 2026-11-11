@@ -45,10 +45,17 @@ class TickerRead(TickerBase):
 
     @field_serializer("market_cap")
     def _market_cap(self, v: int | None) -> int | None:
-        """The market cap on file is Finnhub's (personal use only): withheld while that data is held (services/personal_use)."""
+        """The market cap on the ticker row is Finnhub's (personal use only): withheld while that data is held (services/personal_use).
+        The company's own market value (services/market_value_store.show, market_cap_basis "filings") is served as it is, and
+        with MARKET_VALUE_ENABLED the vendor's is never served."""
+        from app.config import settings
         from app.services.personal_use import shown
-        return v if shown() else None
+        if self.market_cap_basis == "filings":
+            return v
+        return v if shown() and not settings.market_value_enabled else None
 
+    market_cap_as_of: date | None = None             # with market_cap_basis "filings": the close the figure rests on
+    market_cap_basis: str | None = None              # "filings" when market_cap is the company's own market value (MARKET_VALUE_ENABLED)
     id: uuid.UUID
     next_earnings_date: date | None = None
     next_earnings_source: str | None = None          # events.source of that date ("finnhub", "yfinance", ...)

@@ -133,6 +133,9 @@ STEPS: list[tuple[str, list[str]]] = [
     ("Material filings (8-K)",         ["python", "-m", "app.scripts.scan_material_filings"]),
     ("Research notes (nightly)",       ["python", "-m", "app.scripts.generate_notes"]),
     ("Research note check",            ["python", "-m", "app.scripts.note_smoke", "--rotate=3"]),
+    # each company's market value from its latest 10-Q or 10-K cover and tonight's closes (services/market_value), one SEC request a
+    # company and a cover read only when a new one is filed; before the walkthrough, whose share-of-the-index line reads it. No model call.
+    ("Market values",                   ["python", "-m", "app.scripts.compute_market_values", "--write"]),
     # after the P/E, the reactions, the chains and the calendar it reads: Ivy's walkthrough, rule-built steps for every stock and
     # model sentences only where a stock's filing facts changed (services/walkthrough_story's nightly cap); --no-story, and so no
     # model call at all, until WALKTHROUGH_STORIES_ENABLED is on (Sam, 2026-11-10: after Nov 19)
@@ -150,6 +153,7 @@ STEP_TIMEOUTS: dict[str, int] = {
     "Research notes (nightly)": 3600,         # 170 notes, four at a time, about a minute each
     "Refresh profiles (Finnhub)": 300,
     "Growth (XBRL and 8-K releases)": 3600,      # --due; the first night reads every active ticker's facts and releases (about 40 minutes)
+    "Market values": 1800,                       # the first night reads every company's cover (two SEC requests a company); later nights one
     "Ivy walkthroughs": 2400,                    # the first night reads every 10-K (about 8 SEC requests a stock); later nights only new ones
     "Security records (Intrinio)": 600,          # one Intrinio request per active ticker at 4/s
     "Price bars shadow (Intrinio)": 1800,        # one request per record per night; the first run writes five years

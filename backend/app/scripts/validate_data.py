@@ -4142,7 +4142,95 @@ async def check_walkthrough_claims(session) -> CheckResult:
     return CheckResult("walkthrough_claims", PASS, f"{len(rows)} walkthrough(s): every model sentence verified, every figure in its band")
 
 
+MARKET_VALUE_GAP = 0.10              # the company's own market value against the vendor's market cap, when their share counts agree
+MARKET_VALUE_SHARES_AGREE = 0.01     # "equal share counts": the cover's shares within this of the vendor's shares outstanding
+MARKET_VALUE_CLOSE_MATCH = 0.005     # the vendor's figure over its shares is "an earlier close" within this of one on file
+MARKET_VALUE_CLOSE_LOOKBACK_DAYS = 45  # how far back an earlier close is looked for
+MARKET_VALUE_BAND = (1e9, 1e13)      # $1 billion to $10 trillion: outside it a figure for an S&P 500 company is wrong
+MARKET_VALUE_MIN_COVERAGE = 0.9      # services/walkthrough.INDEX_SHARE_MIN_COVERAGE: under it no stock gets a share-of-the-index line
+MARKET_VALUE_MAX_AGE_DAYS = 5        # the close a figure rests on, against the newest close on file for SPY
+
+
+def market_value_gaps(rows: list[dict], closes: dict[str, list[tuple]] | None = None) -> tuple[list[str], list[str]]:
+    """Pure: (unexplained, vendor on an older close): the stocks whose own market value differs from the vendor's market cap by more
+    than MARKET_VALUE_GAP while the two share counts agree within MARKET_VALUE_SHARES_AGREE, so the gap is in the price and not in
+    the shares. One whose vendor figure, over the vendor's shares, is an earlier close on file (closes: {symbol: [(date, close)]},
+    within MARKET_VALUE_CLOSE_MATCH) is explained: the vendor's figure is old, ours rests on the newest close. A company with more
+    than one listed class is skipped (the vendor's figure is per symbol, ours per company). rows: {symbol, company, value, shares,
+    vendor_cap, vendor_shares, close_date, vendor_at}."""
+    from app.services.market_value import LISTED_CLASSES
+    unexplained, old = [], []
+    for r in rows:
+        if not (r.get("value") and r.get("shares") and r.get("vendor_cap") and r.get("vendor_shares")) or r.get("company") in LISTED_CLASSES:
+            continue
+        if abs(r["shares"] / r["vendor_shares"] - 1) > MARKET_VALUE_SHARES_AGREE:
+            continue
+        gap = r["value"] / r["vendor_cap"] - 1
+        if abs(gap) <= MARKET_VALUE_GAP:
+            continue
+        line = (f"{r['symbol']}: ${r['value'] / 1e9:,.1f}bn on file against the vendor's ${r['vendor_cap'] / 1e9:,.1f}bn ({gap:+.1%}), shares within "
+                f"{MARKET_VALUE_SHARES_AGREE:.0%} (close {r.get('close_date')}, vendor updated {r.get('vendor_at')})")
+        price = r["vendor_cap"] / r["vendor_shares"]
+        on = next((day for day, close in sorted((closes or {}).get(r["symbol"], []), reverse=True)
+                   if day != r.get("close_date") and close and abs(price / close - 1) <= MARKET_VALUE_CLOSE_MATCH), None)
+        if on:
+            old.append(f"{line}; the vendor's figure is the close of {on}")
+        else:
+            unexplained.append(line)
+    return unexplained, old
+
+
+async def _market_value_rows(session) -> list[dict]:
+    from app.services.market_value import MARKET_VALUE_VERSION
+    return [dict(r) for r in (await session.execute(text("""SELECT mv.symbol, mv.company, mv.value::float8 AS value, mv.shares::float8 AS shares, mv.close_date,
+            mv.held_reason, t.index_member, t.market_cap::float8 AS vendor_cap, t.shares_outstanding::float8 AS vendor_shares, t.market_cap_updated_at::date AS vendor_at
+        FROM market_values mv JOIN tickers t ON t.symbol = mv.symbol AND t.is_active WHERE mv.version = :v ORDER BY mv.symbol"""),
+        {"v": MARKET_VALUE_VERSION})).mappings().all()]
+
+
+async def check_market_value_vendor_gap(session) -> CheckResult:
+    """WARN when a stock's own market value (market_values) and the vendor's market cap differ by more than MARKET_VALUE_GAP while
+    their share counts agree and the vendor's figure is not simply an earlier close (market_value_gaps): one of the two prices is
+    wrong, and a person should look (Sam, 2026-11-10). The vendor's figure is only the comparison; it is displayed nowhere."""
+    rows = await _market_value_rows(session)
+    closes: dict[str, list[tuple]] = {}
+    for r in (await session.execute(text("""SELECT symbol, date, close::float8 AS close FROM price_bars_shadow
+            WHERE close IS NOT NULL AND date >= (SELECT max(date) FROM price_bars_shadow WHERE symbol = 'SPY') - CAST(:d AS integer)"""), {"d": MARKET_VALUE_CLOSE_LOOKBACK_DAYS})).all():
+        closes.setdefault(r.symbol, []).append((r.date, r.close))
+    bad, old = market_value_gaps(rows, closes)
+    valued = sum(1 for r in rows if r["value"])
+    if bad:
+        return CheckResult("market_value_vendor_gap", WARN, f"{len(bad)} market value(s) over {MARKET_VALUE_GAP:.0%} from the vendor's with equal share counts "
+                           f"({len(old)} more where the vendor's figure is an earlier close)", (bad + old)[:60])
+    return CheckResult("market_value_vendor_gap", PASS, f"{valued} market value(s): none over {MARKET_VALUE_GAP:.0%} from the vendor's with equal share counts, "
+                       f"other than {len(old)} where the vendor's figure is an earlier close", old[:60])
+
+
+async def check_market_value_sanity(session) -> CheckResult:
+    """ERROR when a market value on file is outside MARKET_VALUE_BAND or rests on a close more than MARKET_VALUE_MAX_AGE_DAYS behind
+    SPY's newest (a displayed figure dated as current that is not). WARN when fewer than MARKET_VALUE_MIN_COVERAGE of the index's
+    stocks have a figure, when no stock gets a share-of-the-index line. The details list the stocks with no figure and why."""
+    rows = await _market_value_rows(session)
+    newest = (await session.execute(text("SELECT max(date) FROM price_bars_shadow WHERE symbol = 'SPY'"))).scalar()
+    bad = [f"{r['symbol']}: ${r['value']:,.0f} is outside ${MARKET_VALUE_BAND[0]:,.0f} to ${MARKET_VALUE_BAND[1]:,.0f}" for r in rows
+           if r["value"] and not MARKET_VALUE_BAND[0] <= r["value"] <= MARKET_VALUE_BAND[1]]
+    bad += [f"{r['symbol']}: its figure rests on the close of {r['close_date']}, SPY's newest is {newest}" for r in rows
+            if r["value"] and newest and r["close_date"] and (newest - r["close_date"]).days > MARKET_VALUE_MAX_AGE_DAYS]
+    if bad:
+        return CheckResult("market_value_sanity", ERROR, f"{len(bad)} market value(s) out of band or on an old close", bad[:60])
+    index = (await session.execute(text("SELECT count(*) FROM tickers WHERE is_active AND index_member"))).scalar() or 0
+    valued = sum(1 for r in rows if r["value"] and r["index_member"])
+    none = [f"{r['symbol']}: {r['held_reason']}" for r in rows if not r["value"]]
+    if index and valued < MARKET_VALUE_MIN_COVERAGE * index:
+        return CheckResult("market_value_sanity", WARN, f"{valued} of {index} index stocks have a market value ({MARKET_VALUE_MIN_COVERAGE:.0%} needed for the "
+                           "share-of-the-index line)", none[:60])
+    return CheckResult("market_value_sanity", PASS, f"{valued} of {index} index stocks have a market value in band on a recent close; {len(none)} with none", none[:60])
+
+
 CHECKS = [
+    # market values (services/market_value)
+    check_market_value_vendor_gap,
+    check_market_value_sanity,
     # Ivy's walkthrough
     check_walkthrough_coverage,
     check_walkthrough_chart_gaps,

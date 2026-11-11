@@ -103,6 +103,11 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
     # a company merged into this one (its exit record: ticker_aliases from a ticker marked merged): the latest such merger
     merger = (await db.execute(text("""SELECT o.name, a.renamed_on FROM ticker_aliases a JOIN tickers o ON o.symbol = a.old_symbol
         WHERE a.symbol = :s AND o.inactive_reason LIKE :m ORDER BY a.renamed_on DESC LIMIT 1"""), {"s": sym, "m": REASON_PREFIXES[MERGED] + "%"})).first()
+    own_value = None
+    from app.config import settings
+    if prof and settings.market_value_enabled:
+        from app.services.market_value_store import values
+        own_value = (await values(db, [sym])).get(sym)
     if prof:
         s1 = B.profile_sentence(name=ticker.name, symbol=sym, short_description=prof["short_description"], profile_as_of=prof["fetched_at"].date() if prof["fetched_at"] else None,
                                 profile_source=(prof["source"] or "intrinio").capitalize(), gics_sector=ticker.sector, gics_sub_industry=ticker.industry,
@@ -110,7 +115,8 @@ async def build_briefing(db: AsyncSession, symbol: str, today: date | None = Non
                                 quote_price=quote_price, quote_ts=quote_ts, shares_outstanding=_f(ticker.shares_outstanding),
                                 shares_as_of=ticker.shares_as_of.date() if ticker.shares_as_of else None,
                                 profile_filed=prof["latest_filing_date"], merged_name=merger.name if merger else None,
-                                merged_on=merger.renamed_on if merger else None, market_cap=_f(ticker.market_cap))
+                                merged_on=merger.renamed_on if merger else None, market_cap=_f(ticker.market_cap),
+                                own_value_on=settings.market_value_enabled, own_value=own_value)
         if s1:
             sentences.append(s1)
 
