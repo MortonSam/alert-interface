@@ -21,10 +21,10 @@ export async function activeSymbols(apiBase: string | undefined, fetcher: typeof
 }
 
 /** Whether the walkthrough is on, by the API's own answer; a failed read counts as off, as it does for the pages (lib/useIvyMode). */
-export async function walkthroughOn(apiBase: string | undefined, fetcher: typeof fetch = fetch): Promise<boolean> {
+export async function walkthroughOn(apiBase: string | undefined, fetcher: typeof fetch = fetch, seconds = 3600): Promise<boolean> {
   if (!apiBase) return false;
   try {
-    return (await fetcher(apiBase + "/v1/ivy-page", { next: { revalidate: 3600 } })).ok;
+    return (await fetcher(apiBase + "/v1/ivy-page", { next: { revalidate: seconds } })).ok;
   } catch {
     return false;
   }

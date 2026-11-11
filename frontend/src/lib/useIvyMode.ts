@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { fetchIvyPage, type IvyPage } from "@/lib/walkthrough";
 
 /**
  * Which Ivy a visitor gets (Sam, 2026-11-10). The API serves /ivy-page only while IVY_WALKTHROUGH_ENABLED is on (or to the admin
  * token, the preview), so its answer is the flag: with an answer the one new page shows; without one (a 404, or a read that
  * failed) Meet Ivy, the Desk and the Trades stay as they were. One read per page load, shared by the layout and the page inside it.
+ *
+ * The server asks the same question when it renders the /ivy routes (app/ivy/layout) and hands its answer down through IvyFlag,
+ * so the page is the right Ivy from the first paint (Sam, 2026-11-11). The browser's own answer replaces it once it is in: that
+ * is what shows the preview to the admin token, and a flag changed since the server last asked.
  */
-export type IvyMode = { mode: "loading" } | { mode: "old" } | { mode: "walkthrough"; page: IvyPage };
+export type IvyMode = { mode: "loading" } | { mode: "old" } | { mode: "walkthrough" };
+
+/** The flag as the server read it for this page; undefined outside the /ivy frame. */
+export const IvyFlag = createContext<boolean | undefined>(undefined);
 
 let settled: IvyPage | null | undefined;
 let pending: Promise<IvyPage | null> | null = null;
@@ -22,15 +29,18 @@ export function readIvyPage(): Promise<IvyPage | null> {
   return pending;
 }
 
-export const ivyMode = (page: IvyPage | null | undefined): IvyMode =>
-  page === undefined ? { mode: "loading" } : page ? { mode: "walkthrough", page } : { mode: "old" };
+/** The browser's answer when it has one, the server's until then, and loading only where neither is known. */
+export const ivyMode = (page: IvyPage | null | undefined, served?: boolean): IvyMode =>
+  page !== undefined ? { mode: page ? "walkthrough" : "old" }
+    : served === undefined ? { mode: "loading" } : { mode: served ? "walkthrough" : "old" };
 
 export function useIvyMode(): IvyMode {
+  const served = useContext(IvyFlag);
   const [page, setPage] = useState<IvyPage | null | undefined>(settled);
   useEffect(() => {
     let alive = true;
     readIvyPage().then((p) => { if (alive) setPage(p); });
     return () => { alive = false; };
   }, []);
-  return ivyMode(page);
+  return ivyMode(page, served);
 }

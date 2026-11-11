@@ -24,7 +24,7 @@ describe("390px layout (audit item 24)", () => {
     expect(ivy).toContain("flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 sm:gap-6");
     expect(ivy).not.toMatch(/font-display text-xl font-bold text-foreground whitespace-nowrap/);
     expect(ivy).toContain('<div className="flex flex-wrap gap-3">');
-    expect(read("app/ivy/layout.tsx")).toContain('className="flex flex-wrap gap-1 border-b mb-6"');
+    expect(read("components/ivy/IvyFrame.tsx")).toContain('className="flex flex-wrap gap-1 border-b mb-6"');
     const walk = read("components/ivy/IvyPageView.tsx");               // the new page, shown with the walkthrough on
     expect(walk).toContain('grid grid-cols-1 gap-10 md:grid-cols-2');        // the note and the filing stack on a phone
     expect(walk).toContain('flex flex-wrap items-center justify-center');   // the quick picks wrap

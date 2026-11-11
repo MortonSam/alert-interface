@@ -66,16 +66,19 @@ function WalkSearch({ page }: { page: IvyPage | null }) {
         )}
       </div>
       {missing && <p className="mt-3 text-sm text-muted-foreground">{missing}</p>}
-      {page && page.quick_picks.length > 0 && (
-        <p className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-          <span>{C.quickPicks}</span>
-          {page.quick_picks.map((q) => (
-            <Link key={q.symbol} href={walkHref(q.symbol)} data-testid="ivy-quick-pick" className="tap font-semibold text-primary hover:text-foreground transition-colors">
-              {q.symbol}
-            </Link>
-          ))}
-        </p>
-      )}
+      {/* the row holds its line before the picks are in, so the headline above never moves when they arrive */}
+      <p className="mt-5 min-h-[1.25rem] flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+        {page && page.quick_picks.length > 0 && (
+          <>
+            <span>{C.quickPicks}</span>
+            {page.quick_picks.map((q) => (
+              <Link key={q.symbol} href={walkHref(q.symbol)} data-testid="ivy-quick-pick" className="tap font-semibold text-primary hover:text-foreground transition-colors">
+                {q.symbol}
+              </Link>
+            ))}
+          </>
+        )}
+      </p>
     </div>
   );
 }

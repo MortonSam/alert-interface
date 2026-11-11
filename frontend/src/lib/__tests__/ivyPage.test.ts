@@ -39,11 +39,11 @@ describe("the one Ivy page (Sam, 2026-11-02)", () => {
     expect(ivyMode(undefined)).toEqual({ mode: "loading" });
     expect(ivyMode(null)).toEqual({ mode: "old" });                         // a 404 (the flag off) or a failed read
     const served = { minutes: 3 } as IvyPage;
-    expect(ivyMode(served)).toEqual({ mode: "walkthrough", page: served });
+    expect(ivyMode(served)).toEqual({ mode: "walkthrough" });
     const route = read("app/ivy/page.tsx");
     expect(route).toContain('ivy.mode === "walkthrough" ? <IvyPageView /> : <MeetIvyPage />');
     expect(route).toContain('if (ivy.mode === "loading") return null;');
-    expect(read("app/ivy/layout.tsx")).toContain('ivy.mode === "walkthrough" ? <>{children}</> : <OldIvyLayout>{children}</OldIvyLayout>');
+    expect(read("components/ivy/IvyFrame.tsx")).toContain('ivy.mode === "walkthrough" ? <>{children}</> : <OldIvyLayout>{children}</OldIvyLayout>');
     for (const [p, name] of [["app/ivy/desk/page.tsx", "IvyDeskPage"], ["app/ivy/trades/page.tsx", "IvyTradesPage"]]) {
       expect(read(p), p).toContain(`<OldIvyOnly><${name} /></OldIvyOnly>`);
     }
@@ -54,6 +54,27 @@ describe("the one Ivy page (Sam, 2026-11-02)", () => {
     expect(read("app/alerts-trades/page.tsx")).toContain('redirect("/ivy/trades")');
     // the new page is never the route's fallback: it is reached through the mode alone
     expect(read("lib/useIvyMode.ts")).toContain("fetchIvyPage()");
+  });
+
+  it("the page arrives as the right Ivy: the server's reading of the flag stands until the browser's own is in (Sam, 2026-11-11)", async () => {
+    const served = { minutes: 3 } as IvyPage;
+    expect(ivyMode(undefined, false)).toEqual({ mode: "old" });            // never the blank while the browser asks
+    expect(ivyMode(undefined, true)).toEqual({ mode: "walkthrough" });
+    expect(ivyMode(served, false)).toEqual({ mode: "walkthrough" });       // the admin token's preview, or a flag turned on since
+    expect(ivyMode(null, true)).toEqual({ mode: "old" });                  // a flag turned off since, or a read that failed
+    const layout = read("app/ivy/layout.tsx");
+    expect(layout).not.toContain('"use client"');
+    expect(layout).toContain("await walkthroughOn(process.env.NEXT_PUBLIC_API_URL, fetch, FLAG_SECONDS)");
+    expect(layout).toContain("<IvyFrame walkthrough={walkthrough}>{children}</IvyFrame>");
+    const frame = read("components/ivy/IvyFrame.tsx");
+    expect(frame).toContain("<IvyFlag.Provider value={walkthrough}>");
+    expect(frame).not.toContain("aria-busy");
+    expect(read("lib/useIvyMode.ts")).toContain("return ivyMode(page, served);");
+    const asked: unknown[] = [];
+    const fetcher = (async (_url: string, init: unknown) => { asked.push(init); return { ok: true }; }) as unknown as typeof fetch;
+    await walkthroughOn("http://api", fetcher, 60);
+    await walkthroughOn("http://api", fetcher);
+    expect(asked).toEqual([{ next: { revalidate: 60 } }, { next: { revalidate: 3600 } }]);
   });
 
   it("the sitemap lists the Desk and the Trades only while the old Ivy shows", async () => {
