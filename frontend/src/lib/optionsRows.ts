@@ -31,11 +31,20 @@ export function rvRowValue(rv: number, windowDays: number, asOf: string | null):
   return `${one(rv * 100)}% a year, about ${dailyPct(rv)}% on a typical day, from its daily moves over the last ${windowDays} trading days${tail}`;
 }
 
-/** The spread in points (implied minus realized, annual), worded by the same thresholds as the backend's spread_label. */
-export function spreadRowValue(spreadPts: number): string {
-  if (spreadPts > SPREAD_RICH_PP) return `Options expect ${one(spreadPts)} points more swing than the stock has shown lately, so they look pricey`;
-  if (spreadPts < SPREAD_CHEAP_PP) return `Options expect ${one(-spreadPts)} points less swing than the stock has shown lately, so they look cheap`;
-  return "Options expect about the same swing the stock has shown lately";
+/** The spread (implied minus realized, annual), worded by the same thresholds as the backend's spread_label. The row names the two
+ * yearly figures the rows above it show, never their difference in "points" (Sam, 2026-11-11); without both it says the direction alone. */
+export function spreadRowValue(spreadPts: number, iv?: number | null, rv?: number | null): string {
+  const both = iv != null && rv != null;
+  const lead = both ? `Options expect swings of about ${one(iv * 100)}% a year` : "";
+  if (spreadPts > SPREAD_RICH_PP) return both
+    ? `${lead}, more than the ${one(rv * 100)}% the stock has shown lately, so they look pricey`
+    : "Options expect more swing than the stock has shown lately, so they look pricey";
+  if (spreadPts < SPREAD_CHEAP_PP) return both
+    ? `${lead}, less than the ${one(rv * 100)}% the stock has shown lately, so they look cheap`
+    : "Options expect less swing than the stock has shown lately, so they look cheap";
+  return both
+    ? `${lead} against the ${one(rv * 100)}% the stock has shown lately, so they look neither pricey nor cheap`
+    : "Options expect about the same swing the stock has shown lately";
 }
 
 /** "It is swinging more than on 62% of days in the past year, which counts as elevated (as of Oct 19, 2026)", from rv_percentile

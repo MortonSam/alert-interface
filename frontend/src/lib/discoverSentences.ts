@@ -226,8 +226,8 @@ export function tapeReceipt(item: UnusuallyActiveItem, now: Date = new Date()): 
   if (item.rank_hold_reason) lines.push(`Rank held: ${item.rank_hold_reason}`);
   if (item.iv_rv_note) lines.push(`${upperFirst(item.iv_rv_note)}; implied against realized not compared`);
   else if (item.iv_rv_spread_pp != null && item.atm_iv != null && item.iv_date) {
-    const sign = item.iv_rv_spread_pp > 0 ? "above" : "below";
-    lines.push(`Implied volatility ${pct(item.atm_iv)} from the ${fmtEarningsDate(item.iv_date)} chain, ${Math.abs(item.iv_rv_spread_pp).toFixed(1)} points ${sign} realized`);
+    const sign = item.iv_rv_spread_pp > 0 ? "above" : "below";      // both figures are in the hover; their difference in "points" is not (Sam, 2026-11-11)
+    lines.push(`Implied volatility ${pct(item.atm_iv)} from the ${fmtEarningsDate(item.iv_date)} chain, ${sign} its realized volatility`);
   } else lines.push("No fresh options chain: implied volatility not compared");
   lines.push(upperFirst(earningsClause(item.earnings_date, item.earnings_source, item.earnings_checked_at, item.earnings_confirmation, item.earnings_note, now, item.earnings_window_center, item.earnings_window_source, item.earnings_window_company)));
   return lines.join("\n");

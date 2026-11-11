@@ -94,8 +94,17 @@ describe("RV tier", () => {
 
 describe("vol regime", () => {
   it("rules quote the thresholds, and cheap is not the up/beat green", () => {
-    expect(VOL_REGIME_ENCODING.iv_rich.rule).toContain(String(DISCOVER_IV_RICH_PP));
-    expect(VOL_REGIME_ENCODING.iv_cheap.rule).toContain(String(Math.abs(DISCOVER_IV_CHEAP_PP)));
+    // one plain sentence with one example worked from the cutoffs, and no "points" (Sam, 2026-11-11)
+    const rich = 30 + DISCOVER_IV_RICH_PP, cheap = 30 + DISCOVER_IV_CHEAP_PP;
+    expect(VOL_REGIME_ENCODING.iv_rich.rule).toBe(`Options expect more swing than the stock has shown lately: over ${rich}% a year where the stock has shown 30%, for example.`);
+    expect(VOL_REGIME_ENCODING.iv_cheap.rule).toBe(`Options expect less swing than the stock has shown lately: under ${cheap}% a year where the stock has shown 30%, for example.`);
+    expect(VOL_REGIME_ENCODING.iv_fair.rule).toBe(`Options expect about the swing the stock has shown lately: from ${cheap}% to ${rich}% a year where the stock has shown 30%, for example.`);
+    for (const r of Object.values(VOL_REGIME_ENCODING)) {
+      expect(r.rule).not.toMatch(/\bpoints?\b|volatility|\bpp\b/);
+      expect(r.rule.match(/[.!?](\s|$)/g)?.length).toBe(1);
+      expect(r.rule.match(/for example/g)?.length).toBe(1);
+    }
+    expect(volRegimeLegend().find((l) => l.key === "iv_rich")!.label).toBe(`IV Rich: options expect more swing than the stock has shown lately: over ${rich}% a year where the stock has shown 30%, for example.`);
     expect(VOL_REGIME_ENCODING.iv_cheap.className).not.toMatch(/success|green|emerald/);
   });
   it("legend covers every regime; unknown keys render nothing", () => {

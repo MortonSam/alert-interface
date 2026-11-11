@@ -17,9 +17,16 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
       "38.0% a year, about 2.4% on a typical day, from its daily moves over the last 20 trading days (as of Oct 19, 2026)");
   });
   it("the spread's three wordings follow the thresholds", () => {
-    expect(spreadRowValue(SPREAD_RICH_PP + 3.2)).toBe(`Options expect ${(SPREAD_RICH_PP + 3.2).toFixed(1)} points more swing than the stock has shown lately, so they look pricey`);
-    expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2)).toBe(`Options expect ${(-(SPREAD_CHEAP_PP - 3.2)).toFixed(1)} points less swing than the stock has shown lately, so they look cheap`);
-    for (const x of [3.2, SPREAD_RICH_PP, SPREAD_CHEAP_PP, 0, -3.2]) expect(spreadRowValue(x)).toBe("Options expect about the same swing the stock has shown lately");
+    // the two yearly figures the rows above show, never their difference in "points" (Sam, 2026-11-11)
+    const rich = 0.3 + (SPREAD_RICH_PP + 3.2) / 100, cheap = 0.3 + (SPREAD_CHEAP_PP - 3.2) / 100;
+    expect(spreadRowValue(SPREAD_RICH_PP + 3.2, rich, 0.3)).toBe(`Options expect swings of about ${(rich * 100).toFixed(1)}% a year, more than the 30.0% the stock has shown lately, so they look pricey`);
+    expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2, cheap, 0.3)).toBe(`Options expect swings of about ${(cheap * 100).toFixed(1)}% a year, less than the 30.0% the stock has shown lately, so they look cheap`);
+    for (const x of [3.2, SPREAD_RICH_PP, SPREAD_CHEAP_PP, 0, -3.2]) expect(spreadRowValue(x, 0.3 + x / 100, 0.3)).toBe(
+      `Options expect swings of about ${(30 + x).toFixed(1)}% a year against the 30.0% the stock has shown lately, so they look neither pricey nor cheap`);
+    // without both figures, the direction alone
+    expect(spreadRowValue(SPREAD_RICH_PP + 3.2)).toBe("Options expect more swing than the stock has shown lately, so they look pricey");
+    expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2, null, 0.3)).toBe("Options expect less swing than the stock has shown lately, so they look cheap");
+    expect(spreadRowValue(3.2, 0.332, null)).toBe("Options expect about the same swing the stock has shown lately");
   });
   it("the RV rank row, verbatim, from the percentile of days with its band by the same cutoffs", () => {
     expect(ROW_LABELS.rank).toBe("Recent swings against its past year");
@@ -32,8 +39,8 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
     expect(rankRowValue(RV_RANK_NORMAL - 1, null)).toContain("counts as quiet");
   });
   it("no colons, pp, ≥ or monospace in the rows", () => {
-    const texts = [...Object.values(ROW_LABELS), ivRowValue(0.412, "Oct 19, 2026"), rvRowValue(0.38, 20, null), spreadRowValue(20), spreadRowValue(-20), spreadRowValue(0), rankRowValue(62, "Oct 19, 2026")];
-    for (const t of texts) expect(t).not.toMatch(/:|\bpp\b|≥/);
+    const texts = [...Object.values(ROW_LABELS), ivRowValue(0.412, "Oct 19, 2026"), rvRowValue(0.38, 20, null), spreadRowValue(20, 0.5, 0.3), spreadRowValue(-20, 0.3, 0.5), spreadRowValue(0, 0.3, 0.3), spreadRowValue(20), spreadRowValue(-20), spreadRowValue(0), rankRowValue(62, "Oct 19, 2026")];
+    for (const t of texts) expect(t).not.toMatch(/:|\bpp\b|≥|\bpoints?\b/);
     const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
     for (const id of ["iv-row", "rv-row", "spread-row", "rank-row"]) {
       const at = page.indexOf(`data-testid="${id}"`);

@@ -3,13 +3,19 @@
 import { DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP } from "@/lib/thresholds";
 import type { LegendItem } from "./types";
 
+// Each rule is one plain sentence with one example, comparing two yearly figures and never in "points" (Sam, 2026-11-11). The
+// example is worked from the cutoffs: the regime is rich above EXAMPLE_RV + RICH and cheap below EXAMPLE_RV - CHEAP.
+const EXAMPLE_RV = 30;
+const RICH = DISCOVER_IV_RICH_PP, CHEAP = Math.abs(DISCOVER_IV_CHEAP_PP);
+const SHOWN = `a year where the stock has shown ${EXAMPLE_RV}%, for example.`;
+
 export const VOL_REGIME_ENCODING = {
   iv_rich:  { label: "IV Rich",  className: "bg-warning/10 text-warning",
-              rule: `options price in ${DISCOVER_IV_RICH_PP}+ points more volatility than the stock recently delivered` },
+              rule: `Options expect more swing than the stock has shown lately: over ${EXAMPLE_RV + RICH}% ${SHOWN}` },
   iv_cheap: { label: "IV Cheap", className: "bg-cool/10 text-cool",
-              rule: `options price in ${Math.abs(DISCOVER_IV_CHEAP_PP)}+ points less volatility than the stock recently delivered` },
+              rule: `Options expect less swing than the stock has shown lately: under ${EXAMPLE_RV - CHEAP}% ${SHOWN}` },
   iv_fair:  { label: "IV Fair",  className: "bg-muted text-muted-foreground",
-              rule: `implied and realized volatility are within ${Math.abs(DISCOVER_IV_CHEAP_PP)} points below to ${DISCOVER_IV_RICH_PP} points above` },
+              rule: `Options expect about the swing the stock has shown lately: from ${EXAMPLE_RV - CHEAP}% to ${EXAMPLE_RV + RICH}% ${SHOWN}` },
 } as const;
 
 export type VolRegimeKey = keyof typeof VOL_REGIME_ENCODING;
@@ -20,7 +26,7 @@ export function volRegime(key: string | null | undefined) {
 
 export function volRegimeLegend(): LegendItem[] {
   return (Object.keys(VOL_REGIME_ENCODING) as VolRegimeKey[]).map((key) => ({
-    key, label: `${VOL_REGIME_ENCODING[key].label}: ${VOL_REGIME_ENCODING[key].rule}`,
+    key, label: `${VOL_REGIME_ENCODING[key].label}: ${VOL_REGIME_ENCODING[key].rule.replace(/^O/, "o")}`,
     swatch: { kind: "pill", className: VOL_REGIME_ENCODING[key].className },
   }));
 }

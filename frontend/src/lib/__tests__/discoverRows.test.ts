@@ -168,7 +168,8 @@ describe("row sentences", () => {
     // the figures are the hover
     const receipt = tapeReceipt(u, NOW);
     expect(receipt).toContain("Swinging more than on 99% of days in the past year; 20-day realized volatility 62.0%");
-    expect(receipt).toContain("Implied volatility 54.8% from the Sep 28, 2026 chain, 7.2 points below realized");
+    expect(receipt).toContain("Implied volatility 54.8% from the Sep 28, 2026 chain, below its realized volatility");
+    expect(receipt).not.toMatch(/\bpoints?\b/);
     expect(receipt).toContain("Reports Oct 21, 2026 (confirmed by the company)");
   });
 
