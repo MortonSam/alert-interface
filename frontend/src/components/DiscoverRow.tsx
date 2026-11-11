@@ -23,16 +23,16 @@ export default function DiscoverRow({ symbol, name, price, priceAsOf, sentence, 
         title={title}
         className="group block py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6 [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:bg-muted/40 transition-colors"
       >
-        <div className="flex items-baseline gap-2 min-w-0">
-          <span className="font-sans text-sm font-bold text-foreground [@media(hover:hover)]:group-hover:opacity-80 transition-colors shrink-0">
-            {symbol}
-          </span>
-          {name && <span className="text-sm text-muted-foreground min-w-0 break-words">{name}</span>}
-          {price && priceAsOf && (
-            <span className="ml-auto pl-2 font-mono text-xs text-muted-foreground shrink-0 text-right">
-              {price}<span className="block text-[10px] text-muted-foreground/60 font-sans">as of {priceAsOf}</span>
+        {/* the quote's time sits on its own line under the row's first: beside the name it took the column and left the name a letter wide */}
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="font-sans text-sm font-bold text-foreground [@media(hover:hover)]:group-hover:opacity-80 transition-colors shrink-0">
+              {symbol}
             </span>
-          )}
+            {name && <span className="text-sm text-muted-foreground min-w-0 break-words">{name}</span>}
+            {price && priceAsOf && <span className="ml-auto pl-2 font-mono text-xs text-muted-foreground shrink-0 text-right">{price}</span>}
+          </div>
+          {price && priceAsOf && <p className="text-[10px] text-muted-foreground/60 text-right">as of {priceAsOf}</p>}
         </div>
         <div className="mt-0.5 sm:mt-0 min-w-0">
           <p className="text-sm text-foreground/80 leading-snug break-words"><Explained text={sentence} /></p>

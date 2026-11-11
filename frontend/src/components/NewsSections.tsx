@@ -58,14 +58,16 @@ function RowExplanation({ ivy, headline }: { ivy: IvyLine | null; headline: News
 function MoverRow({ m }: { m: MoverItem }) {
   return (
     <li className="py-3 sm:grid sm:grid-cols-[18rem_minmax(0,1fr)] sm:gap-x-6" data-testid="mover-row">
-      <div className="flex items-baseline gap-2 min-w-0">
-        <Link href={`/tickers/${m.symbol}`} className="tap font-sans text-sm font-bold text-foreground [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:opacity-80 shrink-0">{m.symbol}</Link>
-        {m.name && <span className="text-sm text-muted-foreground min-w-0 break-words">{m.name}</span>}
-        <span className="ml-auto pl-2 font-mono text-xs text-right shrink-0">
-          <span className="text-muted-foreground">${m.price.toFixed(2)}</span>{" "}
-          <MoveChange pct={m.change_pct} />
-          <span className="block text-[10px] text-muted-foreground/60 font-sans">as of {fmtIsoDateTime(m.quote_time)}</span>
-        </span>
+      <div className="min-w-0">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <Link href={`/tickers/${m.symbol}`} className="tap font-sans text-sm font-bold text-foreground [-webkit-tap-highlight-color:transparent] [@media(hover:hover)]:hover:opacity-80 shrink-0">{m.symbol}</Link>
+          {m.name && <span className="text-sm text-muted-foreground min-w-0 break-words">{m.name}</span>}
+          <span className="ml-auto pl-2 font-mono text-xs text-right shrink-0">
+            <span className="text-muted-foreground">${m.price.toFixed(2)}</span>{" "}
+            <MoveChange pct={m.change_pct} />
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground/60 text-right">as of {fmtIsoDateTime(m.quote_time)}</p>
       </div>
       <RowExplanation ivy={m.ivy ?? null} headline={m.headline} />
     </li>

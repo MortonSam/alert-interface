@@ -41,6 +41,14 @@ describe("Discover is a list of rows, not a card grid", () => {
     expect(existsSync(join(SRC, "components/DiscoverCard.tsx"))).toBe(false);
   });
 
+  it("the quote's time is a line of its own, never a third item beside the name (it left the name one letter wide on a desktop)", () => {
+    for (const src of [row, read("components/NewsSections.tsx")]) {
+      const line = src.split("\n").find((l) => l.includes(">as of {"))!;
+      expect(line.trim()).toMatch(/^(\{price && priceAsOf && )?<p className="[^"]*text-right[^"]*">as of \{/);
+      expect(src).not.toMatch(/<span className="block[^"]*">as of/);
+    }
+  });
+
   it("every section renders the row template with its own sentence", () => {
     expect(page).toContain('import DiscoverRow, { DiscoverRows } from "@/components/DiscoverRow";');
     for (const fn of ["reportingSoonSentence(item)", "justReportedSentence(item)", "suggestionSentence(item)", "unusuallyActiveSentence(item)"]) {
