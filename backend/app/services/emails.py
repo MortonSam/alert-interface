@@ -28,6 +28,7 @@ from app.services import account_copy as K
 SEND_HOUR = 18
 ALL = "all"                      # the unsubscribe key for a merged email: it turns off every kind the person has on
 WEEK_TOP = 10
+AFTER_HISTORY_MIN = 4            # the morning-after tally of past reports is shown from this many on file; with fewer the line is left out
 ADVICE = re.compile(r"\b(?:buy|sell|sold|bought|hold(?:ing)? on|should|consider|opportunit\w*|act now|don't miss|last chance|hurry|"
                     r"limited time|before it'?s too late|time to|recommend\w*|target price|upside|downside|entry|exit)\b", re.I)
 URGENCY = re.compile(r"\b(?:now|today only|ends|countdown|last chance|only \d+ left|expires? soon)\b|!", re.I)
@@ -129,7 +130,8 @@ def eve_section(f: dict, site: str) -> Section | None:
 
 
 def after_section(f: dict, site: str) -> Section | None:
-    """f: {symbol, name, session, move, implied, history: [(move, implied)], trades: [result dict + label]}; None without the move."""
+    """f: {symbol, name, session, move, implied, history: [(move, implied)] of the reports before this one, trades: [result dict +
+    label]}; None without the move. The tally of past reports needs AFTER_HISTORY_MIN of them with both figures on file."""
     if f.get("move") is None:
         return None
     lines = [K.EMAIL["after_move"].format(name=f["name"], moved=moved(f["move"]), day=day_words(f["session"]))]
@@ -138,7 +140,7 @@ def after_section(f: dict, site: str) -> Section | None:
         word = compare_moves(abs(f["move"]), f["implied"])
         lines.append(K.EMAIL["after_vs_priced"].format(implied=pct(f["implied"]), cmp=K.COMPARE[word]))
     hist = [(m, i) for m, i in f.get("history") or [] if m is not None and i]
-    if hist:
+    if len(hist) >= AFTER_HISTORY_MIN:          # "In 0 of its last 1 reports" says nothing (Sam, 2026-11-10)
         lines.append(K.EMAIL["after_history"].format(k=sum(1 for m, i in hist if abs(m) > i), n=len(hist)))
     for t in f.get("trades") or []:
         r = t["result"]
@@ -370,7 +372,8 @@ async def after_for(db, user_id: str, s: dict, name: str, session: date, seen: s
         hist = []
         for h in (await db.execute(text("""SELECT h.event_date, h.pct_change_1d, e.report_timing::text AS timing FROM historical_reactions h
                 LEFT JOIN events e ON e.ticker_id = h.ticker_id AND e.event_type = 'earnings' AND e.event_date = h.event_date
-                WHERE h.ticker_id = :t AND h.event_type = 'earnings' AND h.pct_change_1d IS NOT NULL ORDER BY h.event_date DESC LIMIT 12"""), {"t": s["id"]})).all():
+                WHERE h.ticker_id = :t AND h.event_type = 'earnings' AND h.pct_change_1d IS NOT NULL AND h.event_date < :d
+                ORDER BY h.event_date DESC LIMIT 12"""), {"t": s["id"], "d": r.event_date})).all():       # past reports: never the one this email is about
             hist.append((float(h.pct_change_1d), await priced_before(db, s["symbol"], h.event_date, h.timing)))
         trades = [{"label": label_of(t), "result": t.result} for t in (await db.execute(text("""SELECT th.result, th.option_type, th.strike, th.strike2, th.option_expiration
             FROM theses th WHERE th.user_id = :u AND th.ticker_id = :t AND th.result IS NOT NULL AND th.option_expiration BETWEEN :a AND :b"""),

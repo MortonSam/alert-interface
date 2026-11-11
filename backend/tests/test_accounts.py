@@ -177,11 +177,11 @@ def test_the_morning_after_and_the_week():
     trades = [{"label": "The Nov 20 $200 call", "result": T.score(option_type="call", strike=200, entry_premium=5.0, contracts=1, close_at_expiration=212.0,
                                                                    entry_price=198.0, expiration=date(2026, 11, 20), saved_on=date(2026, 10, 1))}]
     a = E.after_section({"symbol": "NVDA", "name": "NVIDIA", "session": date(2026, 11, 18), "move": -4.2, "implied": 7.4,
-                         "history": [(5.0, 7.0), (-9.0, 6.5), (2.0, 6.0)], "trades": trades}, SITE)
+                         "history": [(5.0, 7.0), (-9.0, 6.5), (2.0, 6.0), (1.0, 5.5), (3.0, None)], "trades": trades}, SITE)
     t = "\n".join(a.lines)
     assert "NVIDIA fell 4.2% on Wed, Nov 18, 2026, the first session after its report." in t
     assert "Options had priced a move of about ±7.4% from the report itself, so it moved less than options priced." in t
-    assert "In 1 of its last 3 reports on file, it moved more than options priced." in t
+    assert "In 1 of its last 4 reports on file, it moved more than options priced." in t      # a report with no priced figure on file is not counted
     assert "cost $500.00, worth $1,200.00 at expiration, ahead by $700.00 (140.0%)." in t and K.EMAIL["hypothetical"] in t
     w = E.week_section([{"symbol": f"S{i}", "name": f"Co {i}", "date": date(2026, 11, 2), "timing": "bmo"} for i in range(12)],
                        [{"symbol": "S11", "name": "Co 11", "date": date(2026, 11, 2), "timing": "bmo"}], date(2026, 11, 2), date(2026, 11, 6), SITE)
