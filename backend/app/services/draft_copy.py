@@ -16,18 +16,23 @@ def strategy_spread(direction: str, long_k: float, short_k: float, debit: float)
     return f"{SPREAD_NAME[direction]} ${long_k:g}/${short_k:g} (${debit:.2f} net debit)"
 
 
-# 1. why this structure: the options' price against how much the stock has moved
+# 1. why this structure: the swings the options are pricing in against the swings the stock has made (plain words, Sam 2026-11-10:
+#    no "points of movement"; spread_pp, implied less realized volatility, picks the regime and is not shown)
+SWINGS = "over the last 20 trading days"
+
+
 def vol_sentence(sym: str, regime: str | None, spread_pp: float | None, structure: str) -> str:
     if regime == "iv_rich" and spread_pp is not None:
-        why = (f"Options on {sym} are priced for {spread_pp:.1f} points more movement than the stock has shown over the last 20 trading days")
+        why = f"Options on {sym} are pricing in bigger swings than the stock has actually made {SWINGS}"
         return why + (", so the draft is a spread, where the option sold pays for part of the one bought." if structure == "spread"
                       else ". The aggressive draft buys the option outright anyway, for the larger gain if the stock moves far.")
     if regime == "iv_cheap" and spread_pp is not None:
-        return (f"Options on {sym} are priced for {abs(spread_pp):.1f} points less movement than the stock has shown over the last 20 trading days, "
-                f"so buying the option outright doesn't pay extra for movement.")
+        return (f"Options on {sym} are pricing in smaller swings than the stock has actually made {SWINGS}, "
+                f"so buying the option outright doesn't mean paying extra for big swings.")
+    why = f"Options on {sym} are pricing in about the same swings the stock has actually made {SWINGS}"
     if structure == "spread":
-        return f"Options on {sym} are priced close to how much the stock has moved lately, and the conservative draft is a spread, which costs less and caps the gain."
-    return f"Options on {sym} are priced close to how much the stock has moved lately, so the draft buys the option outright."
+        return why + ", and the conservative draft is a spread, which costs less and caps the gain."
+    return why + ", so the draft buys the option outright."
 
 
 # 2. the stock's own history after reports

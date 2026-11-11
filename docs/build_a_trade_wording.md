@@ -184,11 +184,11 @@ Drafting no longer calls a model (`backend/app/services/draft_rules.py`). The st
 **Cost:** $0 per draft (was about $0.088 and 17 seconds).
 
 1. **Why this structure** (one of):
-   - "Options on {SYM} are priced for {x} points more movement than the stock has shown over the last 20 trading days, so the draft is a spread, where the option sold pays for part of the one bought."
+   - "Options on {SYM} are pricing in bigger swings than the stock has actually made over the last 20 trading days, so the draft is a spread, where the option sold pays for part of the one bought."
    - (aggressive with expensive options) "…over the last 20 trading days. The aggressive draft buys the option outright anyway, for the larger gain if the stock moves far."
-   - "Options on {SYM} are priced for {x} points less movement than the stock has shown over the last 20 trading days, so buying the option outright doesn't pay extra for movement."
-   - "Options on {SYM} are priced close to how much the stock has moved lately, and the conservative draft is a spread, which costs less and caps the gain."
-   - "Options on {SYM} are priced close to how much the stock has moved lately, so the draft buys the option outright."
+   - "Options on {SYM} are pricing in smaller swings than the stock has actually made over the last 20 trading days, so buying the option outright doesn't mean paying extra for big swings."
+   - "Options on {SYM} are pricing in about the same swings the stock has actually made over the last 20 trading days, and the conservative draft is a spread, which costs less and caps the gain."
+   - "Options on {SYM} are pricing in about the same swings the stock has actually made over the last 20 trading days, so the draft buys the option outright."
 2. **History:** "After its last {n} reports, {SYM} moved {avg}% on a typical report day, and {max}% at most."
 3. **The strike:**
    - "The {call/put} bought is at the money or just inside it, so less of its price is a bet on the move."
@@ -206,7 +206,7 @@ Drafting no longer calls a model (`backend/app/services/draft_rules.py`). The st
 - "A target of ${t} needs a {x}% move, more than the largest move after any of its last {n} reports ({max}%)."
 - "A target of ${t} needs a {x}% move, more than twice the ±{x}% options price."
 
-**Example (AAPL, bullish, conservative, dev data):** "Options on AAPL are priced for 19.1 points more movement than the stock has shown over the last 20 trading days, so the draft is a spread, where the option sold pays for part of the one bought. After its last 20 reports, AAPL moved 3.1% on a typical report day, and 7.6% at most. The call bought is at the money or just inside it, so less of its price is a bet on the move. The call sold, at $352.5, sits at or just past the target and caps the gain there. The target, $352.02, is about two thirds of the ±6.2% move options price by Nov 20, 2026, the conservative choice. After 21 analyst upgrades, AAPL's median move the next day was +1.67%."
+**Example (AAPL, bullish, conservative, dev data):** "Options on AAPL are pricing in bigger swings than the stock has actually made over the last 20 trading days, so the draft is a spread, where the option sold pays for part of the one bought. After its last 20 reports, AAPL moved 3.1% on a typical report day, and 7.6% at most. The call bought is at the money or just inside it, so less of its price is a bet on the move. The call sold, at $352.5, sits at or just past the target and caps the gain there. The target, $352.02, is about two thirds of the ±6.2% move options price by Nov 20, 2026, the conservative choice. After 21 analyst upgrades, AAPL's median move the next day was +1.67%."
 
 **Unchanged:**
 - The expensive-options spread (already built by rules).

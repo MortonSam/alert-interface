@@ -43,3 +43,5 @@ def test_every_sentence_is_plain_and_gives_no_advice():
     for line in lines:
         assert not re.search(r"\b(?:you should|buy now|sell now|recommend|consider buying|a good trade)\b", line, re.I), line
         assert "—" not in line and ":" not in line, line
+    for line in lines[:8]:                                                        # the structure line in plain words (Sam, 2026-11-10)
+        assert "points" not in line and "swings" in line and "over the last 20 trading days" in line, line
