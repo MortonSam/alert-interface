@@ -414,7 +414,7 @@ def step_growth(name: str, rows: list[dict] | None, sector: str | None, enabled:
     deeper = [_num(f"{Noun}, {quarter_name(periods, r['period_end']) or 'quarter'}",
                    f"{money_words(float(r['value']))}, {change_phrase(float(r['growth_pct']) if r.get('growth_pct') is not None else None, r.get('phrase'))}"
                    if r.get("value") is not None and (r.get("phrase") or r.get("growth_pct") is not None) else "Not shown",
-                   f"Ended {fmt_date(r['period_end'])}, " + (f"checked by {r['readers'].split(' / ')[0]}" if r.get("readers") else "held"))
+                   f"Ended {fmt_date(r['period_end'])}, " + (f"checked {readers_words(r['readers'])}" if r.get("readers") else "held"))
               for r in sorted(rev, key=lambda r: r["period_end"], reverse=True)]
     fact = point = None
     if g is not None:
@@ -498,6 +498,20 @@ def margin_cells(m: dict, periods: dict | None, keep_then: bool) -> dict:
     return out
 
 
+PROFIT_LINE = {"gross": "Gross profit", "operating": "Operating income", "net": "Net income"}   # step 3's Go deeper, never a tag name
+
+
+def readers_words(readers: str) -> str:
+    """Pure: which readers agreed on a growth figure, as a visitor reads it (Sam, 2026-11-10: no "XBRL" or tag name on screen):
+    "against the filing and the earnings release", "against the filing as first filed and as restated a year later"."""
+    first = readers.split(" / ")[0]
+    if "restated" in first:
+        return "against the filing as first filed and as restated a year later"
+    if "release" in first:
+        return "against the filing and the earnings release"
+    return "against the filing"
+
+
 def step_margins(name: str, m: dict | None, actions: list[dict], periods: dict | None = None, noun: str = "revenue") -> dict:
     if not m or not m.get("ok"):
         why = nouned((m or {}).get("reason") or "Its filings do not tag the figures.", noun)     # a stored reason says "revenue" too
@@ -518,7 +532,7 @@ def step_margins(name: str, m: dict | None, actions: list[dict], periods: dict |
     if act:
         sentences.append(f"Three years earlier is left out because it {action_words(act)} in between.")
     check = C.margins_check(name, now, then, unit)
-    deeper = [_num("Measure", m["label"].capitalize(), f"From {m['profit_tag']} over {m['revenue_tag']} in its SEC filings"),
+    deeper = [_num("Measure", m["label"].capitalize(), f"{PROFIT_LINE[m['measure']]} over revenue, from its SEC filings"),
               _num("Last four quarters", f"{money_words(m['now_profit'])} kept of {money_words(m['now_revenue'])}", now_as_of)]
     if then is not None and m.get("then_revenue"):
         deeper.append(_num("Three years earlier", f"{money_words(m['then_profit'])} kept of {money_words(m['then_revenue'])}", f"Four quarters {through(periods, m['then_end'])}"))
@@ -556,13 +570,13 @@ def index_share(symbol: str, tickers: dict) -> dict | None:
 
 
 def industry_verdict(stock: float, sector_pct: float) -> str:
-    """Pure: "outpaced", "lagged" or "kept pace with" its industry, by walkthrough_checks' closeness rule."""
+    """Pure: "outpaced", "lagged" or "kept pace with" its sector (the median stock of its sector in the index), by walkthrough_checks' closeness rule."""
     return "kept pace with" if C.close(stock, sector_pct) else "outpaced" if stock > sector_pct else "lagged"
 
 
 def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], spy: list[tuple[date, float]], sec: dict | None, moves: list[dict], min_spy_pct: float,
                today: date, share: dict | None = None) -> dict:
-    """Step 4 leads with the industry (the median stock of its sector in the index), then the S&P 500. A stock over
+    """Step 4 leads with the sector (the median stock of its sector in the index, called its sector on screen), then the S&P 500. A stock over
     INDEX_SHARE_NO_VERDICT of the index's market value is part of the market's move: no market-or-company verdict, for the year or a
     day, and its check asks what that share means instead (Sam, 2026-10-29)."""
     from app.services.walkthrough_data import QUARTER_SESSIONS, STALE_BAR_DAYS, YEAR_SESSIONS, aligned, change
@@ -585,7 +599,7 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
     sentences = []
     if sec and heavy:
         sentences.append(f"Over the past year {name}'s stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock in the S&P 500, "
-                         f"so it {industry_verdict(c1[0], sec['change_1y'])} its industry.")
+                         f"so it {industry_verdict(c1[0], sec['change_1y'])} its sector.")
     elif sec:
         sentences.append(f"Over the past year {name}'s stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock in the S&P 500 "
                          f"and {change_noun(p1[0])} for the S&P 500 itself.")
@@ -625,7 +639,7 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
                            "" if heavy else "Mostly the company" if mv["owner"] == "company" else "Mostly the market"))
     if sec and heavy:
         summary = (f"Over the year to {fmt_date(end)} the stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock, "
-                   f"so it {industry_verdict(c1[0], sec['change_1y'])} its industry.")
+                   f"so it {industry_verdict(c1[0], sec['change_1y'])} its sector.")
     elif sec:
         summary = (f"Over the year to {fmt_date(end)} the stock {moved(c1[0])}, against {change_noun(sec['change_1y'])} for the median {sector} stock and "
                    f"{change_noun(p1[0])} for the S&P 500, so its year was {C.OWNER_SUMMARY[C.year_owner(c1[0], sec['change_1y'], p1[0])]}.")
@@ -678,6 +692,32 @@ def left_out_line(start: date, reasons: set[str]) -> str:
     return f"The chart starts on {fmt_date(start)}. Before that, {why} at times, which Ivy leaves out of this history."
 
 
+RANGE_WHEN = {"loss": "it had lost money over four quarters", "over_cap": "the price topped {cap} for each $1 of its profit",
+              "action": "a merger or spin-off sat inside its four quarters"}
+FIVE_YEAR_SLACK_DAYS = 30             # a range that starts within this of five years before its last day is a five-year range
+
+
+def range_words(series: list[tuple[date, float]], left_out: dict, med: float) -> tuple[str, str, str]:
+    """Pure: step 5's range (label, as of, sentence), saying exactly what it covers (Sam, 2026-11-10): "Over five years" only when the
+    days run five years with none left out; otherwise the first and last day, and how many days in between the history leaves out
+    and why ("Leaving out the 412 days when the price topped $100 for each $1 of its profit, ...")."""
+    from app.services.valuation import MIN_EARNINGS_YIELD, RANGE_YEARS
+    first, last = series[0][0], series[-1][0]
+    vals = [v for _, v in series]
+    lo, hi = per_dollar(min(vals)), per_dollar(max(vals))
+    gone = {d: r for d, r in left_out.items() if first <= d <= last}
+    span = f"{len(series):,} trading days, {fmt_date(first)} to {fmt_date(last)}"
+    if not gone:
+        if (first - (last - timedelta(days=round(365.25 * RANGE_YEARS)))).days <= FIVE_YEAR_SLACK_DAYS:
+            return "Its five-year range", span, f"Over five years investors paid between {lo} and {hi} for each $1, and {per_dollar(med)} at the median."
+        return f"Its range since {fmt_date(first)}", span, f"Since {fmt_date(first)}, investors paid between {lo} and {hi} for each $1, and {per_dollar(med)} at the median."
+    why = " or ".join(RANGE_WHEN[r].format(cap=f"${1 / MIN_EARNINGS_YIELD:,.0f}") for r in ("loss", "over_cap", "action") if r in gone.values())
+    n = len(gone)
+    return (f"Its range, leaving out {n:,} day{'s' if n != 1 else ''}", f"{span}, {n:,} left out",
+            f"Leaving out the {n:,} day{'s' if n != 1 else ''} when {why}, investors paid between {lo} and {hi} for each $1 from "
+            f"{fmt_date(first)} to {fmt_date(last)}, and {per_dollar(med)} at the median.")
+
+
 def step_valuation(name: str, sector: str | None, snap: dict | None, series: list[tuple[date, float]], sec_row: dict | None, enabled: bool,
                    periods: dict | None = None, left_out: dict | None = None, year: dict | None = None) -> dict:
     """The P/E chart is the series' latest unbroken run (runs): a stretch the history leaves out (left_out: {session: reason}, a loss,
@@ -712,10 +752,9 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
     series_ok = bool(vals) and med_stored is not None and abs(round(median(vals), 1) - med_stored) <= PE_MEDIAN_AGREEMENT
     sector_median = float(sec_row["median_pe"]) if sec_row and sec_row.get("shown") and sec_row.get("median_pe") is not None else None
     if series_ok:
-        lo, hi = min(vals), max(vals)
-        span = f"{fmt_date(series[0][0])} to {fmt_date(series[-1][0])}"
-        numbers.append(_num("Its five-year range", f"{per_dollar(lo)} to {per_dollar(hi)}", span))
-        sentences.append(f"Over five years investors paid between {per_dollar(lo)} and {per_dollar(hi)} for each $1, and {per_dollar(med_stored)} at the median.")
+        label, span, line = range_words(series, left_out or {}, med_stored)
+        numbers.append(_num(label, f"{per_dollar(min(vals))} to {per_dollar(max(vals))}", span))
+        sentences.append(line)
         drawn = runs(series)[-1]
         pts = _points(drawn)
         sampled = runs([(date.fromisoformat(d), v) for d, v in pts])[-1]       # every fifth session can widen a short break past the limit
@@ -741,7 +780,10 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
         summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters, {rel} its five-year median of {per_dollar(med_stored)}."
     deeper = [_num("Earnings per share, last four quarters", dollars(float(snap["trailing_eps"])), f"Four quarters {through(periods, snap['window_end'])}")]
     if med_stored is not None:
-        deeper.append(_num("Five-year median, paid for each $1 of profit", per_dollar(med_stored), f"{snap['hist_sessions']:,} trading days, {fmt_date(snap['hist_first'])} to {fmt_date(snap['hist_last'])}"))
+        if series_ok and label != "Its five-year range":           # the median covers the range's days, said the range's way
+            deeper.append(_num("Median of those days, paid for each $1 of profit", per_dollar(med_stored), span))
+        else:
+            deeper.append(_num("Five-year median, paid for each $1 of profit", per_dollar(med_stored), f"{snap['hist_sessions']:,} trading days, {fmt_date(snap['hist_first'])} to {fmt_date(snap['hist_last'])}"))
     if sec_row and not sec_row.get("shown"):
         deeper.append(_num(f"Median {sector} stock, paid for each $1 of profit", "Not shown", f"Only {sec_row['fresh']} of {sec_row['active']} stocks in the sector have a current figure"))
     fact = {"concept": "pe", "measure": "pe", "lead": f"Investors pay about {per_dollar(pe)} for every $1 of {name}'s profit",

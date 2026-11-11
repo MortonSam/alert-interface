@@ -31,7 +31,8 @@ function IdeaBox({ idea, known, segments }: { idea: WalkIdea; known: { from: str
       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{T.idea}</p>
       {known ? (
         <>
-          <p className="mt-1.5 text-sm font-semibold text-foreground">{T.knownFrom(idea.title, known.from)}</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">{T.knownFrom(known.from)}</p>
+          <p className="mt-0.5 text-sm font-semibold text-foreground">{idea.title}</p>
           <p className="mt-1 text-sm leading-relaxed text-foreground/85">{known.line}</p>
         </>
       ) : (
