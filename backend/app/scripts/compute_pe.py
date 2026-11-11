@@ -35,7 +35,7 @@ def _eps_series(facts: dict) -> list[dict]:
     return facts.get("facts", {}).get("us-gaap", {}).get("EarningsPerShareDiluted", {}).get("units", {}).get("USD/shares", [])
 
 
-async def company_facts_merged(edgar: EdgarClient, cik: str, symbol: str) -> dict:
+async def company_facts_merged(edgar: EdgarClient, cik: str, symbol: str, failed: list[str] | None = None) -> dict:
     """Company facts for a CIK plus those of the ticker's predecessor CIKs named in edgar_client.PREDECESSOR_CIKS (PSKY's filings
     under Paramount Global's CIK). Never the CIK in an accession prefix: that is the submitter, often a filing agent, and Workiva
     Inc. files for its clients under its own CIK, so its calendar-quarter EPS (0.33 for 2026-03-31, 0.24 for 2026-06-30) once
@@ -48,6 +48,8 @@ async def company_facts_merged(edgar: EdgarClient, cik: str, symbol: str) -> dic
         try:
             series.extend(_eps_series(await edgar.get_company_facts(other)))
         except Exception:
+            if failed is not None:
+                failed.append(f"predecessor CIK {other} EPS facts")           # the caller can tell a history it read from one it did not
             continue
     if series:
         facts.setdefault("facts", {}).setdefault("us-gaap", {}).setdefault("EarningsPerShareDiluted", {}).setdefault("units", {})["USD/shares"] = series

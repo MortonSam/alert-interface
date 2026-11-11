@@ -168,13 +168,15 @@ class EdgarClient:
 
     # ── 8-K retrieval with pagination ────────────────────────────────────────
 
-    async def get_all_8k_records(self, cik: str) -> list[dict]:
+    async def get_all_8k_records(self, cik: str, failed: list[str] | None = None) -> list[dict]:
         """Every 8-K for a CIK as {filing_date, acceptance, items, accession}.
 
         Follows filings.files pagination to get the complete history. `items`
         is EDGAR's comma-separated item list, e.g. "2.02,9.01" (earnings
         releases carry Item 2.02). The first 10 digits of `accession` identify
-        the filer agent that submitted the document.
+        the filer agent that submitted the document. An older page that cannot
+        be read is skipped; `failed`, when given, receives its name, so a caller
+        can tell a history it read from one it did not.
         """
         subs = await self.get_submissions(cik)
         filings = subs.get("filings", {})
@@ -203,6 +205,8 @@ class EdgarClient:
                 resp.raise_for_status()
                 records.extend(_extract(resp.json()))
             except Exception:
+                if failed is not None:
+                    failed.append(f"8-K index page {name}")
                 continue
             await asyncio.sleep(0.12)
         return records
@@ -351,16 +355,19 @@ class EdgarClient:
             pass
         return resp.text
 
-    async def filing_texts(self, cik: str, accession_number: str, primary_document: str, every_exhibit: bool = False) -> list[tuple[str, str]]:
+    async def filing_texts(self, cik: str, accession_number: str, primary_document: str, every_exhibit: bool = False,
+                           failed: list[str] | None = None) -> list[tuple[str, str]]:
         """(document name, plain text) for the cover and every exhibit of a filing; the cover first. every_exhibit as in
-        list_filing_documents (REG's "reg-ex99_1.htm" starts with "r")."""
+        list_filing_documents (REG's "reg-ex99_1.htm" starts with "r"). A document that cannot be read is left out; `failed`,
+        when given, receives what was not read, so a caller can tell a filing it read from one it did not."""
         from bs4 import BeautifulSoup
         out = []
         try:
             html = await self.fetch_filing_html(cik, accession_number, primary_document)
             out.append((primary_document, BeautifulSoup(html, "html.parser").get_text(" ")))
         except Exception:
-            pass
+            if failed is not None:
+                failed.append(f"{accession_number} cover")
         try:
             for name in await self.list_filing_documents(cik, accession_number, every_exhibit):
                 if name == primary_document:
@@ -368,7 +375,8 @@ class EdgarClient:
                 html = await self.fetch_filing_document(cik, accession_number, name)
                 out.append((name, BeautifulSoup(html, "html.parser").get_text(" ")))
         except Exception:
-            pass
+            if failed is not None:
+                failed.append(f"{accession_number} exhibits")
         return out
 
     # ── Section extraction ───────────────────────────────────────────────────

@@ -345,6 +345,19 @@ def confirm(metric: str, q: dict, release_value) -> tuple[float | None, str, str
     return None, "", "one reader only: no readable release and no later filing yet"
 
 
+def no_longer_confirmed(stored: list[tuple[str, date]], rows: list[dict], unread: list[str]) -> list[tuple[str, date]]:
+    """Pure: the stored figures [(metric, period_end)] a run no longer confirms, which are removed (Sam, 2026-11-10). A figure goes
+    only when the reader read every source (`unread` is empty) and the quarter is one it read (on or after the oldest quarter in
+    `rows`) yet came out without both of its values agreed, or is no longer a quarter the filings yield. Nothing is removed when a
+    read failed (the stored figure stands until a run that reads everything), and a quarter older than those read is left alone:
+    the reader did not look at it."""
+    if unread or not rows:
+        return []
+    confirmed = {(r["metric"], r["period_end"]) for r in rows if r["value"] is not None and r["year_ago_value"] is not None}
+    floor = min(r["period_end"] for r in rows)
+    return sorted((m, e) for m, e in stored if e >= floor and (m, e) not in confirmed)
+
+
 def growth_words(metric: str, current: float, prior: float) -> tuple[float | None, str]:
     """Pure: (percent change or None, the phrase). Between a loss and a profit, or from zero, the phrase is in words only."""
     if prior > 0 and current >= 0:

@@ -4,6 +4,10 @@ reported quarters. Two readers must agree for each figure: XBRL as first filed, 
 symbol's earlier ones are replaced, so the table holds the current readings); with --write the agreed figures go to growth_figures.
 The nightly runs --due --write (Block 2, 2026-10-20); what visitors see stays behind GROWTH_ENABLED.
 
+A stored figure the run no longer confirms is removed (Sam, 2026-11-10; growth.no_longer_confirmed): only when every source of
+the ticker was read (its facts, its 8-K index, every release exhibit) and only among the quarters the run read. A ticker that
+failed, or with any source unread, keeps what it has. A dry run prints each figure it would remove and the total.
+
 --due (2026-10-21: the step hit its 3600-second limit with nothing written, every night): a ticker is due only when EDGAR's filing
 index shows a 10-Q, 10-K, 20-F or 40-F, or an 8-K with Item 2.02 (a results release), accepted after its last growth run, or when it
 has never run. Each run is recorded per ticker (system_metadata growth_run:{SYM}) whatever it found, each ticker's figures are
@@ -96,15 +100,17 @@ async def due_symbols(s, edgar: EdgarClient) -> list[str]:
     return due_order(runs, newest)
 
 
-async def _release(edgar: EdgarClient, cik: str, records: list[dict], end: date, cache: dict) -> dict:
-    """The quarter's earnings release readings: {eps, revenue, filed, accession} (each None when unread)."""
+async def _release(edgar: EdgarClient, cik: str, records: list[dict], end: date, cache: dict, unread: list[str] | None = None) -> dict:
+    """The quarter's earnings release readings: {eps, revenue, filed, accession} (each None when unread). `unread` receives each
+    document of a release that could not be fetched."""
     recs = sorted((r for r in records if "2.02" in (r.get("items") or "")
                    and RELEASE_AFTER_DAYS[0] <= (date.fromisoformat(r["filing_date"]) - end).days <= RELEASE_AFTER_DAYS[1]),
                   key=lambda r: r["filing_date"])
     for rec in recs:
         key = rec["accession"]
         if key not in cache:
-            texts = await edgar.filing_texts(rec.get("_cik", cik), rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""))
+            texts = await edgar.filing_texts(rec.get("_cik", cik), rec["accession"], rec.get("primary_document") or rec.get("primaryDocument", ""),
+                                             failed=unread)
             cache[key] = exhibit_candidates(texts)
         filed = date.fromisoformat(rec["filing_date"])
         eps = rev = None
@@ -151,18 +157,26 @@ async def run(argv: list[str]) -> int:
         # fourth quarter it replaces the year total less three quarters, which drifts by cents as share counts change
         stored_release = {r[0]: (float(r[1]), r[2]) for r in (await s.execute(text(
             "SELECT accession, diluted_eps_gaap, report_date FROM release_eps WHERE symbol = ANY(:s) AND eps_basis = 'diluted'"), {"s": symbols})).all()}
+        # the figures on file, to find the ones this run no longer confirms (growth.no_longer_confirmed)
+        on_file: dict[str, dict[tuple[str, date], str]] = {}
+        for r in (await s.execute(text("SELECT symbol, metric, period_end, phrase, held_reason, readers FROM growth_figures WHERE symbol = ANY(:s)"),
+                                  {"s": symbols})).all():
+            on_file.setdefault(r[0], {})[(r[1], r[2])] = f"{r[4] or r[3] or 'no phrase'} [{r[5]}]"
     tags_by_sector: dict[str, dict[str, int]] = {}
+    unread_syms: dict[str, list[str]] = {}
+    removals: list[tuple[str, str, date, str, str]] = []
 
-    async def process(sym: str) -> tuple[list[dict], list[tuple]] | None:
-        """One ticker's rows and disagreements, or None when it failed (it stays due)."""
+    async def process(sym: str) -> tuple[list[dict], list[tuple], list[tuple[str, date]]] | None:
+        """One ticker's rows, its disagreements and the figures on file it no longer confirms, or None when it failed (it stays due)."""
         rows_out: list[dict] = []
         disagreements: list[tuple] = []
+        unread: list[str] = []                                  # each source that could not be read: with any, no figure is removed
         try:
             cik = await edgar.get_cik(sym)
             if not cik:
                 print(f"{sym}: no CIK")
-                return rows_out, disagreements
-            facts = await company_facts_merged(edgar, cik, sym)
+                return rows_out, disagreements, []
+            facts = await company_facts_merged(edgar, cik, sym, unread)
             us = facts.get("facts", {}).get("us-gaap", {})
             # a company that moved to a new CIK (XOM to ExxonMobil Holdings in 2026): its revenue facts and 8-K releases before the
             # move are under the predecessor CIK (edgar_client.PREDECESSOR_CIKS); company_facts_merged merges EPS only
@@ -172,6 +186,7 @@ async def run(argv: list[str]) -> int:
                     ous = (await edgar.get_company_facts(other)).get("facts", {}).get("us-gaap", {})
                 except Exception as exc:
                     print(f"  {sym}: predecessor CIK {other} facts unread: {redact(exc)[:100]}")
+                    unread.append(f"predecessor CIK {other} facts")
                     continue
                 for tag in G.revenue_tags(sectors.get(sym)):
                     extra = ous.get(tag, {}).get("units", {}).get("USD", [])
@@ -192,14 +207,15 @@ async def run(argv: list[str]) -> int:
                     tags_by_sector.setdefault(sectors.get(sym) or "?", {}).setdefault(tag_used, 0)
                     tags_by_sector[sectors.get(sym) or "?"][tag_used] += 1
             needed = sorted({e for (_, end), (_, _, ya) in pairs.items() for e in (end, ya) if e})
-            records = list(await edgar.get_all_8k_records(cik))
+            records = list(await edgar.get_all_8k_records(cik, unread))
             for other in others:
                 try:
-                    records += [{**r, "_cik": other} for r in await edgar.get_all_8k_records(other)]
+                    records += [{**r, "_cik": other} for r in await edgar.get_all_8k_records(other, unread)]
                 except Exception as exc:
                     print(f"  {sym}: predecessor CIK {other} 8-Ks unread: {redact(exc)[:100]}")
+                    unread.append(f"predecessor CIK {other} 8-Ks")
             cache: dict = {}
-            releases = {end: await _release(edgar, cik, records, end, cache) for end in needed}
+            releases = {end: await _release(edgar, cik, records, end, cache, unread) for end in needed}
             agreed: dict[tuple[str, date], tuple[float, str]] = {}
 
             def confirm_one(metric: str, qs: dict, end: date):
@@ -237,7 +253,13 @@ async def run(argv: list[str]) -> int:
         except Exception as exc:
             print(f"{sym}: failed: {redact(exc)[:160]}")
             return None                                         # not recorded as run: due again next time
-        return rows_out, disagreements
+        if unread:
+            unread_syms[sym] = unread
+            print(f"  {sym}: {len(unread)} source(s) unread ({'; '.join(unread[:3])}); the figures on file stand", flush=True)
+        gone = G.no_longer_confirmed(list(on_file.get(sym, {})), rows_out, unread)
+        now = {(r["metric"], r["period_end"]): r["readers"] for r in rows_out}
+        removals.extend((sym, m, e, on_file[sym][(m, e)], now.get((m, e), "not a quarter the filings yield now")) for m, e in gone)
+        return rows_out, disagreements, gone
 
     rows_out: list[dict] = []
     disagreements: list[tuple] = []
@@ -278,15 +300,23 @@ async def run(argv: list[str]) -> int:
     for d in disagreements:
         print(f"  {d[0]} {d[1]} {d[2]}: {d[3]}")
     print("\nrevenue tags by sector: " + "; ".join(f"{sec}: " + ", ".join(f"{t} ({n})" for t, n in tags.items()) for sec, tags in sorted(tags_by_sector.items())))
+    shown = [r for r in removals if r[0] in done_syms]
+    print(f"\n{len(shown)} figure(s) on file no longer confirmed, {'removed' if write else 'which --write would remove'}, in {len({r[0] for r in shown})} ticker(s); "
+          f"{len(unread_syms)} ticker(s) had a source unread and keep what they have; {len(symbols) - len(done_syms)} did not finish:")
+    for sym, metric, end, was, now in shown:
+        print(f"  {sym} {metric} {end}: on file {was}; now {now}")
     if write:
         print(f"written to the local database: {len(done_syms)} ticker(s) in {time.time() - t0:.0f}s")
     await edgar.close()
     return await WRITES.finish()
 
 
-async def write_symbol(sym: str, rows: list[dict], disagreements: list[tuple]) -> None:
-    """One ticker's agreed figures and current disagreements, and the record of its run, committed as soon as it is done."""
+async def write_symbol(sym: str, rows: list[dict], disagreements: list[tuple], gone: list[tuple[str, date]] = ()) -> None:
+    """One ticker's agreed figures and current disagreements, the figures on file it no longer confirms removed (`gone`), and the
+    record of its run, committed as soon as it is done."""
     async with ScriptSessionLocal() as s:
+        for metric, end in gone:
+            await s.execute(text("DELETE FROM growth_figures WHERE symbol = :s AND metric = :m AND period_end = :e"), {"s": sym, "m": metric, "e": end})
         for r in rows:
             if r["value"] is None or r["year_ago_value"] is None:
                 continue
