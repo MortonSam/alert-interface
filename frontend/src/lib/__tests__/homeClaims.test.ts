@@ -36,11 +36,13 @@ describe("home page claims the disclosures support (audit items 8, 9, 21)", () =
     expect(verificationLine(null)).toBeNull();
   });
 
-  it("the disclosures name no ledger or pick (Sam, 2026-11-02) and Discover names the S&P 500", () => {
+  it("the disclosures carry the ledger start date from the server and Discover names the S&P 500", () => {
     const disc = read("app/disclosures/page.tsx");
     expect(disc).toContain("export default async function DisclosuresPage()");
-    expect(disc).toContain("/v1/theses/ivy-rule");                   // the refresh cadence word still comes from the rule record
-    expect(disc).not.toMatch(/ledger|Ivy's picks|LedgerStartDate|its start date/i);
+    expect(disc).toContain("/v1/theses/ivy-rule");
+    expect(disc).toContain("The ledger began {fmtLongDate(start)}");
+    expect(disc).not.toMatch(/LedgerStartDate|its start date/);
+    expect(disc).toContain("The ledger&apos;s start date is shown on Ivy&apos;s page.");
     const discover = read("app/discover/page.tsx");
     expect(discover).toContain("across the S&amp;P 500 right now");
     expect(discover).not.toContain("your universe");

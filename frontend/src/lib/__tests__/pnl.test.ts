@@ -27,4 +27,8 @@ describe("P&L percent is a percent everywhere", () => {
     }
   });
 
+  it("the trades page average comes from the shared helper", () => {
+    const src = readFileSync(join(__dirname, "../../app/ivy/trades/page.tsx"), "utf8");
+    expect(src).toContain("averagePnlPct(closedPicks.map((p) => p.option_pnl_pct))");
+  });
 });

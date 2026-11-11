@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { IVY_PAGE } from "@/lib/ivyPageCopy";
-import { PUBLIC_PATHS } from "@/app/sitemap";
+import { OLD_IVY_PATHS, PUBLIC_PATHS, publicPaths, walkthroughOn } from "@/app/sitemap";
+import { ivyMode } from "@/lib/useIvyMode";
+import type { IvyPage } from "@/lib/walkthrough";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -24,8 +26,8 @@ describe("the one Ivy page (Sam, 2026-11-02)", () => {
   });
 
   it("types no count or date: they come from the API with their own dates", () => {
-    const page = read("app/ivy/page.tsx");
-    expect(page).toContain("fetchIvyPage()");
+    const page = read("components/ivy/IvyPageView.tsx");
+    expect(page).toContain("readIvyPage()");
     expect(page).toContain("C.checked(page.trust.checked.count");
     expect(page).not.toMatch(/(?<![-\w])(?:300|398|452|503)\b/);         // no count typed by hand
     expect(page).toMatch(/walkHref\(idea\.symbol, idea\.n\)/);           // each idea opens its example step
@@ -33,14 +35,37 @@ describe("the one Ivy page (Sam, 2026-11-02)", () => {
     expect(page).not.toMatch(/cards|ivy-trust|Ivy's Read/);                // no descriptive boxes (Sam, 2026-11-03)
   });
 
-  it("the old pages redirect to /ivy and leave the sitemap, the nav and every page", () => {
-    for (const p of ["app/ivy/desk/page.tsx", "app/ivy/trades/page.tsx", "app/ivy/picks/page.tsx", "app/alerts-trades/page.tsx"]) {
-      expect(read(p), p).toContain('permanentRedirect("/ivy")');
+  it("the old Ivy stays until the walkthrough is on, and the new page shows only then (Sam, 2026-11-10)", async () => {
+    expect(ivyMode(undefined)).toEqual({ mode: "loading" });
+    expect(ivyMode(null)).toEqual({ mode: "old" });                         // a 404 (the flag off) or a failed read
+    const served = { minutes: 3 } as IvyPage;
+    expect(ivyMode(served)).toEqual({ mode: "walkthrough", page: served });
+    const route = read("app/ivy/page.tsx");
+    expect(route).toContain('ivy.mode === "walkthrough" ? <IvyPageView /> : <MeetIvyPage />');
+    expect(route).toContain('if (ivy.mode === "loading") return null;');
+    expect(read("app/ivy/layout.tsx")).toContain('ivy.mode === "walkthrough" ? <>{children}</> : <OldIvyLayout>{children}</OldIvyLayout>');
+    for (const [p, name] of [["app/ivy/desk/page.tsx", "IvyDeskPage"], ["app/ivy/trades/page.tsx", "IvyTradesPage"]]) {
+      expect(read(p), p).toContain(`<OldIvyOnly><${name} /></OldIvyOnly>`);
     }
-    expect(PUBLIC_PATHS).toContain("/ivy");
+    const gate = read("components/ivy/OldIvyOnly.tsx");
+    expect(gate).toContain('if (ivy.mode === "walkthrough") router.replace("/ivy");');
+    expect(gate).toContain('return ivy.mode === "old" ? <>{children}</> : null;');
+    expect(read("app/ivy/picks/page.tsx")).toContain('redirect("/ivy/desk")');
+    expect(read("app/alerts-trades/page.tsx")).toContain('redirect("/ivy/trades")');
+    // the new page is never the route's fallback: it is reached through the mode alone
+    expect(read("lib/useIvyMode.ts")).toContain("fetchIvyPage()");
+  });
+
+  it("the sitemap lists the Desk and the Trades only while the old Ivy shows", async () => {
+    expect(publicPaths(true)).toEqual(PUBLIC_PATHS);
     expect(PUBLIC_PATHS.filter((p) => p.startsWith("/ivy/"))).toEqual([]);
-    expect(read("app/ivy/layout.tsx")).not.toMatch(/\/ivy\/(?:desk|trades)|<nav/);
-    for (const p of ["app/page.tsx", "app/discover/page.tsx", "app/disclosures/page.tsx", "app/build/page.tsx", "components/NavLinks.tsx"]) {
+    expect(publicPaths(false)).toEqual(["/", "/discover", "/build", "/ivy", ...OLD_IVY_PATHS, "/disclosures"]);
+    const answers = (ok: boolean) => (async () => ({ ok })) as unknown as typeof fetch;
+    expect(await walkthroughOn("http://api", answers(true))).toBe(true);
+    expect(await walkthroughOn("http://api", answers(false))).toBe(false);
+    expect(await walkthroughOn("http://api", (async () => { throw new Error("down"); }) as unknown as typeof fetch)).toBe(false);
+    expect(await walkthroughOn(undefined)).toBe(false);
+    for (const p of ["app/page.tsx", "app/discover/page.tsx", "app/build/page.tsx", "components/NavLinks.tsx"]) {
       expect(read(p), p).not.toMatch(/\/ivy\/(?:desk|trades|picks)|Ivy's Desk|Ivy's Trades|From the ledger/);
     }
   });
