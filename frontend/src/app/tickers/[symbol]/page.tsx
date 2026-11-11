@@ -6,7 +6,7 @@ import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 import { eventConfirmationBadge, expectedWindowLine, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
-import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, spreadUnavailableReason } from "@/lib/optionsReadFacts";
+import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, shownIvExpiration, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { shortCompanyName } from "@/lib/companyName";
@@ -2907,7 +2907,7 @@ export default function TickerPage() {
                 {showSpread && spread != null && (
                   <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-y-0.5 gap-x-6 py-1.5 border-b border-border/40" data-testid="spread-row">
                     <span className="text-sm text-muted-foreground"><ExplainTip term="iv/rv spread" metric="iv_rv_spread" symbol={upperSymbol}>{ROW_LABELS.spread}</ExplainTip></span>
-                    <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">{spreadRowValue(spread, ivVal, rvVal)}</span>
+                    <span className="text-sm text-foreground sm:text-right sm:max-w-[65%]">{spreadRowValue(spread, ivVal, rvVal, fmtOneDate(shownIvExpiration(shown, realizedVol)))}</span>
                   </div>
                 )}
                 {rvRk != null && rvPct != null && (

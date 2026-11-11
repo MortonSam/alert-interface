@@ -5,7 +5,7 @@ or, with OPTIONS_PRIMARY_SOURCE=intrinio, the solver's rows from Intrinio's chai
 ticker's options are hidden (no fresh chain passing the parity check), no IV is served and the reason says why. Rows are dated by their chain, so an unrefreshed chain leaves the window empty and the
 reason names the chain's age in sessions.
 
-get_servable_iv(db, symbol) -> IVState(value, as_of, reason)
+get_servable_iv(db, symbol) -> IVState(value, as_of, reason, expiration)
 
 The newest row within IV_WINDOW_DAYS whose atm_iv is not null is served, dated
 by its own row. A null row never hides an older value. When nothing in the
@@ -30,10 +30,11 @@ class IVState:
     value: float | None      # 0-1 decimal, None unless served
     as_of: str | None        # ISO date of the row served
     reason: str | None       # plain language when value is None
+    expiration: str | None = None    # ISO date the options behind the served row end (solver rows record it; courier rows do not)
 
 
 _WINDOW_SQL = sa.text("""
-    SELECT date, atm_iv, atm_iv_reason FROM iv_history
+    SELECT date, atm_iv, atm_iv_reason, expiration FROM iv_history
     WHERE symbol = :s AND iv_source = :src AND date >= :cutoff
     ORDER BY date DESC
 """)
@@ -80,7 +81,7 @@ async def get_servable_iv(db: AsyncSession, symbol: str, today: date | None = No
     rows = (await db.execute(_WINDOW_SQL, {"s": symbol, "src": src, "cutoff": today - timedelta(days=IV_WINDOW_DAYS)})).all()
     served, newest = pick_servable(rows, today)
     if served is not None:
-        return IVState(float(served.atm_iv), served.date.isoformat(), None)
+        return IVState(float(served.atm_iv), served.date.isoformat(), None, served.expiration.isoformat() if served.expiration else None)
     reason = f"No ATM implied volatility in the last {IV_WINDOW_DAYS} days"
     chain_age = await stale_chain_line(db, symbol, today)
     if chain_age:

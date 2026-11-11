@@ -6,6 +6,7 @@ less than VISITOR_RESERVE_USD; a request's calls are the visitor pool. A draft f
 again to everyone at no cost, with this request's stock price.
 """
 from datetime import date, datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -103,7 +104,7 @@ async def test_a_request_counts_against_the_visitor_pool():
 
 def test_a_draft_is_kept_by_its_inputs_and_chain_day_and_served_with_this_requests_quote():
     k = draft_cache.key_for("mu", "bullish", "moderate", "2026-10-30T16:00:00-04:00", "2026-11-20", None)
-    assert k == f"draft_cache:2026-10-30:MU:bullish:moderate:2026-11-20:none:v{draft_cache.DRAFT_CACHE_VERSION}"
+    assert k == f"draft_cache:2026-10-30:MU:bullish:moderate:2026-11-20:none:v{draft_cache.DRAFT_CACHE_VERSION}-{draft_cache.WORDING}"
     assert draft_cache.key_for("MU", "bullish", "moderate", "2026-10-31T16:00:00-04:00", "2026-11-20", None) != k   # the next chain
     assert draft_cache.key_for("MU", "bearish", "moderate", "2026-10-30T16:00:00-04:00", "2026-11-20", None) != k
     assert draft_cache.key_for("MU", "bullish", "aggressive", "2026-10-30T16:00:00-04:00", "2026-11-20", None) != k
@@ -114,6 +115,44 @@ def test_a_draft_is_kept_by_its_inputs_and_chain_day_and_served_with_this_reques
     served = draft_cache.restamp(stored, {"current_price": 149.004, "price_as_of": "now", "quote_basis": "close", "delay_minutes": None})
     assert served["fact_block"] == {"quote_price": 149.0, "price_as_of": "now", "quote_basis": "close", "delay_minutes": None, "atm_strike": 150}
     assert stored["fact_block"]["quote_price"] == 147.11 and served["strategy"] == "Long $150 call"
+
+
+def test_a_draft_kept_under_an_earlier_version_or_earlier_wording_is_never_read():
+    # Sam, 2026-11-11: production held three v1 drafts, one written by the model ("IV is 10.0pp above RV")
+    k = draft_cache.key_for("NVDA", "bullish", "moderate", "2026-11-10T16:00:00-05:00", "2026-12-04", None)
+    assert draft_cache.DRAFT_CACHE_VERSION >= 2 and k != "draft_cache:2026-11-10:NVDA:bullish:moderate:2026-12-04:none:v1"
+    assert not k.endswith(":v1") and k.endswith(f":v{draft_cache.DRAFT_CACHE_VERSION}-{draft_cache.WORDING}")
+    # the stamp is the code that writes a draft, read from the files themselves: any change to a sentence, a rule or the fact block
+    # is a new key, with no version to remember to bump
+    app_dir = Path(draft_cache.__file__).resolve().parents[1]
+    sources = [(app_dir / rel).read_bytes() for rel in draft_cache.WORDING_SOURCES]
+    assert draft_cache.WORDING == draft_cache.wording_stamp(sources) != "nosource" and len(draft_cache.WORDING) == 8
+    assert {"services/draft_copy.py", "services/draft_rules.py", "routers/thesis.py"} <= set(draft_cache.WORDING_SOURCES)
+    for i in range(len(sources)):
+        changed = [*sources]
+        changed[i] = sources[i] + b"# a reworded sentence"
+        assert draft_cache.wording_stamp(changed) != draft_cache.WORDING
+    # every draft the endpoint writes is stamped the way the cache requires
+    src = (app_dir / "routers/thesis.py").read_text()
+    region = src[src.index("async def _run_draft_generation("):src.index("def build_defined_risk_spread(")]
+    assert region.count("model_used=") == region.count(f'model_used="{draft_cache.RULES_MODEL}"') == 2
+
+
+@pytest.mark.asyncio
+async def test_a_draft_the_model_wrote_is_never_served_whatever_its_key():
+    key = draft_cache.key_for("ZZDC", "bullish", "moderate", "2030-01-04T16:00:00-05:00", "2030-02-15", None)
+    try:
+        async with ScriptSessionLocal() as s:
+            await draft_cache.put(s, key, {"strategy": "x", "reasoning": "IV is 10.0pp above RV", "model_used": "claude-fable-5"}, today=date(2030, 1, 6))
+            assert await draft_cache.get(s, key) is None
+            await draft_cache.put(s, key, {"strategy": "x", "reasoning": "r"}, today=date(2030, 1, 6))        # no stamp at all
+            assert await draft_cache.get(s, key) is None
+            await draft_cache.put(s, key, {"strategy": "x", "reasoning": "r", "model_used": draft_cache.RULES_MODEL}, today=date(2030, 1, 6))
+            assert (await draft_cache.get(s, key))["reasoning"] == "r"
+    finally:
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": key})
+            await s.commit()
 
 
 @pytest.mark.asyncio
@@ -141,7 +180,7 @@ async def test_a_kept_draft_is_served_free_even_with_the_cap_reached(monkeypatch
     kept = thesis.ThesisDraftRead(symbol="AAPL", direction="bullish", aggressiveness="moderate", suggested_target=110.0,
                                   suggested_strike=100.0, suggested_spread_strike=None, strategy="Long $100 call ($4.00 mid)",
                                   reasoning="r", realism_flag=None, fact_block={"quote_price": 99.0, "atm_strike": 100.0},
-                                  model_used="claude-fable-5", generated_at="2030-01-06T14:00:00+00:00").model_dump()
+                                  model_used=draft_cache.RULES_MODEL, generated_at="2030-01-06T14:00:00+00:00").model_dump()
     async with ScriptSessionLocal() as s:
         await draft_cache.put(s, key, kept, today=date(2030, 1, 6))
     try:

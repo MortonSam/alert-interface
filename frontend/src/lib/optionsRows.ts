@@ -14,6 +14,10 @@ export const ROW_LABELS = {
 
 const one = (x: number) => x.toFixed(1);
 const whole = (x: number) => String(Math.round(x));
+/** " through Nov 18, 2026": the day the options behind a yearly figure end. The ticker page reads the nearest options at least 7
+ * days out and Build a Trade the draft's own expiration, so each line says which it covers (NVDA on Nov 10, 2026: 87% through
+ * Nov 18 and 62% through Dec 4, both right; Sam, 2026-11-11). Empty when the figure's row records no expiration. */
+const through = (ends?: string | null) => (ends ? ` through ${ends}` : "");
 
 /** The typical day's figure from an annual one (0-1 decimal in, percent string out): annual / sqrt(252), one decimal. */
 export function dailyPct(annual: number): string {
@@ -34,10 +38,10 @@ export function rvRowValue(rv: number, windowDays: number, asOf: string | null):
 
 /** The spread (implied minus realized, annual), worded by the same thresholds as the backend's spread_label. The row names the two
  * yearly figures the rows above it show, in whole numbers, never their difference in "points" (Sam, 2026-11-11); without both it
- * says the direction alone. */
-export function spreadRowValue(spreadPts: number, iv?: number | null, rv?: number | null): string {
+ * says the direction alone. `ends` is the day those options end, already formatted (lib/dates). */
+export function spreadRowValue(spreadPts: number, iv?: number | null, rv?: number | null, ends?: string | null): string {
   const both = iv != null && rv != null;
-  const lead = both ? `Options expect swings of about ${whole(iv * 100)}% a year` : "";
+  const lead = both ? `Options expect swings of about ${whole(iv * 100)}% a year${through(ends)}` : "";
   if (spreadPts > SPREAD_RICH_PP) return both
     ? `${lead}, more than the ${whole(rv * 100)}% the stock has shown lately, so they look pricey`
     : "Options expect more swing than the stock has shown lately, so they look pricey";
@@ -45,14 +49,15 @@ export function spreadRowValue(spreadPts: number, iv?: number | null, rv?: numbe
     ? `${lead}, less than the ${whole(rv * 100)}% the stock has shown lately, so they look cheap`
     : "Options expect less swing than the stock has shown lately, so they look cheap";
   return both
-    ? `${lead} against the ${whole(rv * 100)}% the stock has shown lately, so they look neither pricey nor cheap`
+    ? `${lead}${ends ? "," : ""} against the ${whole(rv * 100)}% the stock has shown lately, so they look neither pricey nor cheap`
     : "Options expect about the same swing the stock has shown lately";
 }
 
-/** Build a Trade's fact grid, the same two yearly figures in a chip (both already in percent): "48% a year expected, 39% shown
- * lately", never their difference in "points" or "pp" (Sam, 2026-11-11). */
-export function spreadChipValue(ivPct: number, rvPct: number): string {
-  return `${whole(ivPct)}% a year expected, ${whole(rvPct)}% shown lately`;
+/** Build a Trade's fact grid, the same two yearly figures in a chip (both already in percent): "48% a year expected through
+ * Dec 4, 2026, 39% shown lately", never their difference in "points" or "pp" (Sam, 2026-11-11). `ends` is the draft's expiration,
+ * already formatted (lib/dates). */
+export function spreadChipValue(ivPct: number, rvPct: number, ends?: string | null): string {
+  return `${whole(ivPct)}% a year expected${through(ends)}, ${whole(rvPct)}% shown lately`;
 }
 
 /** "It is swinging more than on 62% of days in the past year, which counts as elevated (as of Oct 19, 2026)", from rv_percentile

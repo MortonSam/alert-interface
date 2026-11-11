@@ -74,6 +74,16 @@ export function displayedOptionFacts(
   };
 }
 
+/** The day the options behind the shown IV end, for the spread row's "through ..." (lib/optionsRows): the /rv row's own
+ * expiration, and only while the figure shown is that row's (same day, same value). A read written from another day's IV, or a
+ * row that records no expiration, gives null and the row names no date. */
+export function shownIvExpiration(shown: DisplayedOptionFacts, realizedVol: RealizedVol | null | undefined): string | null {
+  const ends = realizedVol?.atm_iv_expiration;
+  if (!ends || shown.atm_iv == null || realizedVol?.atm_iv == null || !shown.atm_iv_as_of || !realizedVol.atm_iv_as_of) return null;
+  if (shown.atm_iv_as_of.slice(0, 10) !== realizedVol.atm_iv_as_of.slice(0, 10)) return null;
+  return Math.abs(shown.atm_iv - realizedVol.atm_iv) < 1e-6 ? ends : null;
+}
+
 /** The full-period caveat when the expiry is more than EXPIRY_CAVEAT_DAYS after earnings: the same sentence the API writes
  * (backend services/implied_move.expiry_caveat, mirrored by test), built from the figures the block shows. */
 export function expiryCaveat(expiration: string | null | undefined, earningsDate: string | null | undefined): string | null {

@@ -1925,6 +1925,7 @@ async def get_realized_vol(
             window_days=20,
             as_of=latest.as_of_date.isoformat() if latest is not None else as_of,
             rv_rank_labeled=None, atm_iv=atm_iv, atm_iv_as_of=atm_iv_as_of, atm_iv_reason=atm_iv_reason,
+            atm_iv_expiration=iv_state.expiration,
             iv_rv_spread_pp=None, data_error=data_error, reason=reason,
         )
 
@@ -1957,6 +1958,7 @@ async def get_realized_vol(
         atm_iv=atm_iv,
         atm_iv_as_of=atm_iv_as_of,
         atm_iv_reason=atm_iv_reason,
+        atm_iv_expiration=iv_state.expiration,
         iv_rv_spread_pp=spread_pp,
         data_error=data_error,
     )

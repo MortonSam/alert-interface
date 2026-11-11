@@ -57,6 +57,27 @@ async def test_without_any_value_the_reason_names_the_null_snapshot_and_no_last_
                 raise _Rollback
 
 
+@pytest.mark.asyncio
+async def test_the_served_row_says_which_options_it_covers_and_a_row_without_an_expiration_says_none():
+    # NVDA on 2026-11-10 (Sam, 2026-11-11): the ticker page's 87% is the Nov 18 options, Build a Trade's 62% the Dec 4 ones
+    async with ScriptSessionLocal() as s:
+        with pytest.raises(_Rollback):
+            async with s.begin():
+                await _fixture(s)                                                   # courier rows: no expiration recorded
+                iv = await get_servable_iv(s, SYM, TODAY)
+                assert iv.value == pytest.approx(0.468908) and iv.expiration is None
+                await s.execute(text("UPDATE iv_history SET expiration = :e WHERE symbol = :s AND date = :d"),
+                                {"e": date(2026, 10, 2), "s": SYM, "d": date(2026, 9, 21)})
+                iv = await get_servable_iv(s, SYM, TODAY)
+                assert iv.as_of == "2026-09-21" and iv.expiration == "2026-10-02"
+                iv = await get_servable_iv(s, SYM, date(2026, 9, 25))               # nothing served: nothing covered
+                assert iv.value is None and iv.expiration is None
+                raise _Rollback
+    src = Path(__file__).resolve().parents[1].joinpath("app/routers/tickers.py").read_text()
+    region = src[src.index('@router.get("/rv/{symbol}"'):]
+    assert region.count("atm_iv_expiration=iv_state.expiration") == 2             # the served and the RV-absent answers both
+
+
 def test_pick_servable_is_pure_and_orders_by_date():
     from types import SimpleNamespace as R
     rows = [R(date=date(2026, 9, 23), atm_iv=None, atm_iv_reason="x"), R(date=date(2026, 9, 21), atm_iv=Decimal("0.468908"), atm_iv_reason=None)]

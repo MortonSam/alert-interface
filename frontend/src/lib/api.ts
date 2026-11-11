@@ -844,6 +844,7 @@ export interface RealizedVol {
   atm_iv: number | null;
   atm_iv_as_of: string | null;
   atm_iv_reason?: string | null;   // why atm_iv is null (iv_store); never blank when it is
+  atm_iv_expiration?: string | null;   // the day the options behind atm_iv end; null when its row records none
   iv_rv_spread_pp: number | null;
   data_error: boolean;
   reason?: string | null;

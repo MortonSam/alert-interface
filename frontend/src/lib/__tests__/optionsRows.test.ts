@@ -3,6 +3,8 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { ROW_LABELS, TRADING_DAYS_PER_YEAR, dailyPct, ivRowValue, rankRowValue, rvRowValue, spreadChipValue, spreadRowValue } from "@/lib/optionsRows";
 import { explanationOf } from "@/lib/glossary";
+import { displayedOptionFacts, shownIvExpiration } from "@/lib/optionsReadFacts";
+import type { RealizedVol } from "@/lib/api";
 import { RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL } from "@/lib/thresholds";
 import { SPREAD_CHEAP_PP, SPREAD_RICH_PP } from "@/lib/thresholds";
 import GLOSSARY from "@/lib/glossary";
@@ -26,6 +28,19 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
       `Options expect swings of about ${Math.round(30 + x)}% a year against the 30% the stock has shown lately, so they look neither pricey nor cheap`);
     expect(spreadRowValue(19.7, 0.477, 0.28)).toBe("Options expect swings of about 48% a year, more than the 28% the stock has shown lately, so they look pricey");
     for (const t of [spreadRowValue(19.7, 0.477, 0.28), spreadRowValue(-13.2, 0.4804, 0.6124), spreadRowValue(8.7, 0.579, 0.492)]) expect(t).not.toMatch(/\d\.\d/);
+    // each line says which options it covers (NVDA, Nov 10, 2026: the page's Nov 18 options and the draft's Dec 4 ones; Sam, 2026-11-11)
+    expect(spreadRowValue(36.1, 0.8707, 0.5095, "Nov 18, 2026")).toBe(
+      "Options expect swings of about 87% a year through Nov 18, 2026, more than the 51% the stock has shown lately, so they look pricey");
+    expect(spreadRowValue(-13.2, 0.4804, 0.6124, "Nov 18, 2026")).toBe(
+      "Options expect swings of about 48% a year through Nov 18, 2026, less than the 61% the stock has shown lately, so they look cheap");
+    expect(spreadRowValue(3.2, 0.332, 0.3, "Nov 18, 2026")).toBe(
+      "Options expect swings of about 33% a year through Nov 18, 2026, against the 30% the stock has shown lately, so they look neither pricey nor cheap");
+    expect(spreadChipValue(62.4, 51.0, "Dec 4, 2026")).toBe("62% a year expected through Dec 4, 2026, 51% shown lately");
+    for (const none of [null, undefined, ""]) {
+      expect(spreadRowValue(19.7, 0.477, 0.28, none)).toBe(spreadRowValue(19.7, 0.477, 0.28));
+      expect(spreadChipValue(47.7, 28.0, none)).toBe("48% a year expected, 28% shown lately");
+    }
+    expect(spreadRowValue(SPREAD_RICH_PP + 3.2, null, 0.3, "Nov 18, 2026")).not.toContain("through");      // no figure, nothing to cover
     // without both figures, the direction alone
     expect(spreadRowValue(SPREAD_RICH_PP + 3.2)).toBe("Options expect more swing than the stock has shown lately, so they look pricey");
     expect(spreadRowValue(SPREAD_CHEAP_PP - 3.2, null, 0.3)).toBe("Options expect less swing than the stock has shown lately, so they look cheap");
@@ -38,8 +53,21 @@ describe("Options Details rows in plain words (Sam, 2026-10-22)", () => {
     for (const t of [spreadChipValue(47.7, 28.0), hover]) expect(t).not.toMatch(/:|\bpp\b|\bpoints?\b/);
     expect(hover.match(/for example/g)?.length).toBe(1);
     const build = readFileSync(join(__dirname, "../../app/build/page.tsx"), "utf8");
-    expect(build).toContain("spreadChipValue(fb.atm_iv_pct, fb.rv_20d_pct)");
+    expect(build).toContain("spreadChipValue(fb.atm_iv_pct, fb.rv_20d_pct, fmtOneDate(fb.expiration_used))");      // the draft's own expiration
+    const page = readFileSync(join(__dirname, "../../app/tickers/[symbol]/page.tsx"), "utf8");
+    expect(page).toContain("spreadRowValue(spread, ivVal, rvVal, fmtOneDate(shownIvExpiration(shown, realizedVol)))");
     expect(build).not.toMatch(/toFixed\(1\)\}pp/);
+  });
+  it("the row names the day its options end only while the figure shown is the /rv row's own", () => {
+    const rv = { atm_iv: 0.8707, atm_iv_as_of: "2026-11-10", atm_iv_expiration: "2026-11-18" } as RealizedVol;
+    const live = displayedOptionFacts(null, null, rv);
+    expect(shownIvExpiration(live, rv)).toBe("2026-11-18");
+    expect(shownIvExpiration({ ...live, source: "read" }, rv)).toBe("2026-11-18");                       // a read written from the same row
+    expect(shownIvExpiration({ ...live, atm_iv_as_of: "2026-11-09" }, rv)).toBeNull();                   // a read from another day's IV
+    expect(shownIvExpiration({ ...live, atm_iv: 0.84 }, rv)).toBeNull();
+    expect(shownIvExpiration(live, { ...rv, atm_iv_expiration: null })).toBeNull();                      // a row that records none
+    expect(shownIvExpiration(live, { ...rv, atm_iv_expiration: undefined })).toBeNull();
+    expect(shownIvExpiration(displayedOptionFacts(null, null, null), null)).toBeNull();
   });
   it("the RV rank row, verbatim, from the percentile of days with its band by the same cutoffs", () => {
     expect(ROW_LABELS.rank).toBe("Recent swings against its past year");
