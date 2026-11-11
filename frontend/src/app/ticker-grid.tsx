@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } fr
 import Link from "next/link";
 import { api, type BatchQuote, type SystemStatus, type Ticker } from "@/lib/api";
 import { fmtMarketCap } from "@/lib/utils";
+import { bySize } from "@/lib/tickerSearch";
 import { SHARE_CLASS, gridEarningsLine } from "@/lib/earningsSource";
 
 import { fmtDate as fmtOneDate } from "@/lib/dates";
@@ -119,7 +120,7 @@ export function TickerGrid() {
           return dateA < dateB ? -1 : dateA > dateB ? 1 : 0;
         }
         default: // market_cap desc
-          return (b.market_cap ?? 0) - (a.market_cap ?? 0);
+          return bySize(a, b);
       }
     });
   }, [tickers, debouncedSearch, sector, sort]);

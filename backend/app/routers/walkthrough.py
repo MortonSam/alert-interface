@@ -98,8 +98,8 @@ async def walkthrough(symbol: str, db: AsyncSession = Depends(get_db), admin: bo
     p = await _payload(db, symbol)
     if not p:
         raise HTTPException(status_code=404, detail=f"No walkthrough for {symbol.upper()}")
-    tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text(
-        "SELECT symbol, name, sector, industry, market_cap, index_member FROM tickers WHERE is_active"))).all()}
+    from app.services.market_value_store import TICKERS_WITH_VALUE
+    tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text(TICKERS_WITH_VALUE))).all()}
     have = set((await db.execute(text("SELECT symbol FROM ivy_walkthroughs"))).scalars().all())
     rival = rival_for(p["symbol"], tickers, have)
     ruler = ruler_for(p["symbol"])
@@ -217,14 +217,17 @@ def full(payload: dict | None) -> bool:
 
 
 async def quick_picks(db) -> list[str]:
-    """The quick picks: the QUICK_PICK_COUNT largest companies (by the stored market value, which only orders them) whose walkthrough,
-    as served, shows content on all seven steps."""
-    rows = (await db.execute(text("""SELECT w.symbol FROM ivy_walkthroughs w JOIN tickers t ON t.symbol = w.symbol
-        WHERE t.is_active AND w.steps_shown = 7 ORDER BY t.market_cap DESC NULLS LAST, w.symbol LIMIT :n"""), {"n": QUICK_PICK_LOOK})).scalars().all()
-    out = []
-    for sym in rows:
-        if full(await _payload(db, sym)):
-            out.append(sym)
+    """The quick picks: the QUICK_PICK_COUNT largest companies (by the company's own market value, services/market_value; never the
+    vendor's market cap) whose walkthrough, as served, shows content on all seven steps. One pick a company: a second share class
+    of a company already picked is passed over."""
+    from app.services.market_value_store import BY_SIZE, SIZE_JOIN
+    rows = (await db.execute(text(f"""SELECT w.symbol, COALESCE(mv.company, w.symbol) AS company FROM ivy_walkthroughs w JOIN tickers t ON t.symbol = w.symbol
+        {SIZE_JOIN} WHERE t.is_active AND w.steps_shown = 7 ORDER BY {BY_SIZE} LIMIT :n"""), {"n": QUICK_PICK_LOOK})).all()
+    out, companies = [], set()
+    for r in rows:
+        if r.company not in companies and full(await _payload(db, r.symbol)):
+            out.append(r.symbol)
+            companies.add(r.company)
             if len(out) == QUICK_PICK_COUNT:
                 break
     return out

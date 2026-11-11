@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Ticker } from "@/lib/api";
-import { SEARCH_LIMIT, matchTickers, tickerPath } from "@/lib/tickerSearch";
+import { SEARCH_LIMIT, bySize, matchTickers, tickerPath } from "@/lib/tickerSearch";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -25,6 +25,18 @@ describe("one ticker matcher for every search box", () => {
     expect(matchTickers(Array.from({ length: 20 }, (_, i) => t(`X${i}`, "Xylo", i)), "x")).toHaveLength(SEARCH_LIMIT);
     expect(tickerPath(matchTickers(LIST, "micro"))).toBe("/tickers/MSFT");
     expect(tickerPath([])).toBeNull();
+  });
+
+  it("a list by size puts a stock with no figure last, and the home grid sorts with the same rule", () => {
+    const held = { ...t("V", "Visa Inc.", 0), market_cap: null };                 // MARKET_VALUE_ENABLED: a held-out company is served no figure
+    const twin = t("GOOG", "Alphabet Inc.", 3.5e12);                               // two classes of one company carry one figure
+    expect([held, ...LIST, twin].sort(bySize).map((x) => x.symbol)).toEqual(["AAPL", "GOOG", "MSFT", "AMD", "AMAT", "MU", "A", "V"]);
+    expect(matchTickers([held, t("VZ", "Verizon", 2e11), t("VRT", "Vertiv", 5e10)], "v").map((x) => x.symbol)).toEqual(["V", "VZ", "VRT"]);   // the exact symbol still leads
+    expect(matchTickers([held, t("VZ", "Verizon", 2e11), t("VRT", "Vertiv", 5e10)], "ve").map((x) => x.symbol)).toEqual(["VZ", "VRT"]);
+    expect(matchTickers([{ ...held, symbol: "VISA" }, t("VZ", "Verizon", 2e11), t("VRT", "Vertiv", 5e10)], "v").map((x) => x.symbol)).toEqual(["VZ", "VRT", "VISA"]);
+    const grid = read("app/ticker-grid.tsx");
+    expect(grid).toContain("return bySize(a, b);");
+    expect(grid).not.toMatch(/b\.market_cap \?\? 0\) - \(a\.market_cap/);
   });
 
   it("Build's picker and the search box both call it, and Build keeps no matcher of its own", () => {

@@ -1,6 +1,6 @@
 """The market values on file (market_values, written by scripts/compute_market_values): what a page reads. A row with no value
 (a company on the hold-out list, or one that could not be worked out) is never returned as a figure, and the vendor's market cap
-is never read here."""
+is never read here: a list ordered by size is ordered by this figure, a company with none last (BY_SIZE)."""
 from __future__ import annotations
 
 from sqlalchemy import text
@@ -10,12 +10,18 @@ from app.services.market_value import MARKET_VALUE_VERSION
 FILINGS = "filings"      # TickerRead.market_cap_basis: shares from the latest 10-Q or 10-K cover, each class at its own close
 
 # the tickers a walkthrough run reads: the company's own market value beside each (market_value, None when held or not worked out;
-# market_value_as_of, the close it rests on; company, the key its share classes share). tickers.market_cap, the vendor's, comes
-# along only to order stocks by size (a rival, the featured pick) and is never displayed.
-TICKERS_WITH_VALUE = """SELECT t.id, t.symbol, t.name, t.sector, t.industry, t.index_member, t.market_cap, mv.value::float8 AS market_value,
+# market_value_as_of, the close it rests on; company, the key its share classes share). The same figure orders stocks by size (a
+# rival, the featured pick); tickers.market_cap, the vendor's, is not read.
+TICKERS_WITH_VALUE = """SELECT t.id, t.symbol, t.name, t.sector, t.industry, t.index_member, mv.value::float8 AS market_value,
         mv.close_date AS market_value_as_of, COALESCE(mv.company, t.symbol) AS company
     FROM tickers t LEFT JOIN market_values mv ON mv.symbol = t.symbol AND mv.version = """ + str(MARKET_VALUE_VERSION) + """
     WHERE t.is_active ORDER BY t.symbol"""
+
+# a list a visitor sees largest first (Sam, 2026-11-11): the join and the ORDER BY for a query whose tickers table is aliased t. The
+# company's own figure orders it, a company with none (held out, or not worked out) comes last, and the symbol settles a tie.
+SIZE_JOIN = "LEFT JOIN market_values mv ON mv.symbol = t.symbol AND mv.version = " + str(MARKET_VALUE_VERSION)
+BY_SIZE = "mv.value DESC NULLS LAST, t.symbol"
+
 
 
 async def values(db, symbols: list[str] | None = None) -> dict[str, dict]:

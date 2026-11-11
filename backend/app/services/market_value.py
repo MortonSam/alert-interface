@@ -46,7 +46,7 @@ SPLIT = "a stock split after the cover date"
 NO_CLOSE = "no recent close on file for a class on the cover"
 UNPRICED_CLASS = "a class on the cover has no listed symbol to price it"
 HELD: dict[str, tuple[str, date | None]] = {
-    "KMB": (MERGER, date(2026, 10, 29)), "CHTR": (MERGER, date(2026, 9, 30)), "FOX": (MERGER, date(2026, 10, 28)), "FOXA": (MERGER, date(2026, 10, 28)),
+    "KMB": (MERGER, date(2026, 10, 29)), "CHTR": (MERGER, date(2026, 9, 30)),      # Fox (FOX, FOXA) came off on 2026-11-11 (Sam)
     "IBKR": (STRUCTURE, None), "BX": (STRUCTURE, None), "ARES": (STRUCTURE, None),
     "PCG": (UNEXPLAINED, None), "ACN": (UNEXPLAINED, None), "MPC": (UNEXPLAINED, None), "APA": (UNEXPLAINED, None), "DVN": (UNEXPLAINED, None),
     "CF": (UNEXPLAINED, None),

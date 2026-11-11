@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from app.services import market_value as MV
 
 
@@ -83,8 +85,19 @@ def test_the_hold_out_list_gets_no_figure_and_a_dated_hold_lifts_on_a_newer_cove
     assert MV.company_value("V", one(date(2027, 1, 30)), {"V": (DAY, 50.0)})["value"] is None                  # an undated hold stands
     assert MV.held_reason("KMB", one(date(2026, 10, 29))) == MV.MERGER and MV.held_reason("KMB", one(date(2027, 1, 22))) is None
     assert MV.company_value("LULU", one(date(2026, 11, 27)), {"LULU": (DAY, 200.0)})["value"] == 2e11
-    assert MV.held_reason("FOX", GOOGL_COVER) == MV.held_reason("FOXA", GOOGL_COVER) == MV.MERGER               # either symbol holds the company
     assert MV.held_reason("NVDA", None) is None
+
+
+def test_a_hold_on_one_symbol_holds_the_company_and_fox_is_not_held(monkeypatch):
+    fox = {"as_of": date(2026, 10, 28), "classes": [("us-gaap:CommonClassAMember", 201.55e6), ("us-gaap:CommonClassBMember", 220.25e6)], "total": 421.8e6}
+    closes = {"FOXA": (DAY, 66.0), "FOX": (DAY, 62.0)}
+    assert "FOX" not in MV.HELD and "FOXA" not in MV.HELD                                                       # Sam, 2026-11-11: the hold is lifted
+    for sym in ("FOX", "FOXA"):                                                                                 # each class at its own close, one figure for both
+        v = MV.company_value(sym, fox, closes)
+        assert v["company"] == "FOXA" and v["held_reason"] is None and v["value"] == 201.55e6 * 66.0 + 220.25e6 * 62.0
+    monkeypatch.setitem(MV.HELD, "FOX", (MV.MERGER, date(2026, 10, 28)))
+    assert MV.held_reason("FOX", fox) == MV.held_reason("FOXA", fox) == MV.MERGER                               # either symbol holds the company
+    assert MV.company_value("FOXA", fox, closes)["value"] is None
 
 
 def test_a_cover_on_file_is_read_again_from_its_row():
@@ -124,7 +137,8 @@ def test_the_overview_says_the_companys_own_value_or_nothing():
                 index_member=True, quote_price=291.0, quote_ts=1_794_000_000, shares_outstanding=5_579e6, shares_as_of=date(2026, 10, 1), market_cap=1.6e12)
     own = {"value": 3_530.58e9, "close_date": DAY, "shares": 12_294e6, "shares_as_of": date(2026, 10, 21), "form": "10-Q", "filed": date(2026, 10, 29), "company": "GOOGL"}
     s = B.profile_sentence(**base, own_value_on=True, own_value=own)
-    assert "worth about $3.5 trillion." in s["text"] and B.OWN_VALUE_RULE in s["rule"] and "latest quote" not in s["rule"]
+    assert "worth about $3.5 trillion." in s["text"] and "market value" not in s["rule"] and "latest quote" not in s["rule"]   # no rule sentence is approved
+    assert "membership from the nightly list. A merger into the company" in s["rule"] and not hasattr(B, "OWN_VALUE_RULE")
     inputs = {i["name"]: i for i in s["inputs"]}
     assert inputs["market cap"]["value"] == "$3.5 trillion" and inputs["market cap"]["source"] == B.OWN_VALUE_SOURCE and "quote" not in inputs
     assert inputs["shares outstanding"]["value"] == "12,294.0 million" and inputs["shares outstanding"]["source"] == f"the cover of its 10-Q filed {fmt_date(date(2026, 10, 29))}"
@@ -132,7 +146,7 @@ def test_the_overview_says_the_companys_own_value_or_nothing():
     assert "worth about" not in none["text"] and "market cap" not in {i["name"] for i in none["inputs"]}
     brk = B.profile_sentence(**base, own_value_on=True, own_value={**own, "company": "BRK-B"})
     assert "shares outstanding" not in {i["name"] for i in brk["inputs"]}                         # its count is in Class B equivalents
-    assert "stored" not in B.OWN_VALUE_RULE + B.OWN_VALUE_SOURCE
+    assert "stored" not in B.OWN_VALUE_SOURCE
 
 
 def test_validate_flags_a_gap_over_ten_percent_only_with_equal_share_counts():
@@ -157,3 +171,36 @@ def test_the_nightly_computes_market_values_before_the_walkthrough():
     labels = [label for label, _ in refresh.STEPS]
     assert labels.index("Price bars shadow (Intrinio)") < labels.index(compute_market_values.STEP_LABEL) < labels.index("Ivy walkthroughs")
     assert dict(refresh.STEPS)[compute_market_values.STEP_LABEL][-1] == "--write" and compute_market_values.STEP_LABEL in refresh.STEP_TIMEOUTS
+
+
+def test_no_list_a_visitor_sees_is_ordered_by_the_vendors_market_cap():
+    """Sam, 2026-11-11: a list ordered by size is ordered by the company's own figure, a company with none last, never the vendor's.
+    The walkthrough (rival, featured pick, quick picks, compare stories, payload) and the emails do not read tickers.market_cap at
+    all; the home grid and the search box sort by the figure the API serves, which MARKET_VALUE_ENABLED makes the company's own."""
+    import pathlib, re
+    app = pathlib.Path(__file__).resolve().parents[1] / "app"
+    for rel in ("services/walkthrough_compare.py", "services/walkthrough_story.py", "services/walkthrough_data.py", "services/walkthrough.py",
+                "routers/walkthrough.py", "scripts/build_walkthroughs.py", "services/emails.py"):
+        assert not re.search(r"market_cap\b(?!_)", (app / rel).read_text()), rel
+    for path in [*(app / "routers").glob("*.py"), *(app / "services").glob("*.py")]:
+        assert not re.search(r"ORDER BY[^\n]*market_cap", path.read_text(), re.I), path.name
+    from app.services import market_value_store as S
+    assert "market_cap" not in S.TICKERS_WITH_VALUE and S.BY_SIZE == "mv.value DESC NULLS LAST, t.symbol"
+
+
+@pytest.mark.asyncio
+async def test_by_size_orders_by_the_figure_on_file_with_no_figure_last():
+    from sqlalchemy import text
+    from app.database import ScriptSessionLocal
+    from app.services import market_value_store as S
+    syms = ["AAPL", "MSFT", "NVDA", "V"]
+    async with ScriptSessionLocal() as db:
+        try:
+            await db.execute(text("DELETE FROM market_values WHERE symbol = ANY(:s)"), {"s": syms})
+            for sym, value in (("NVDA", 5.2e12), ("AAPL", 4.1e12), ("V", None)):               # Visa is held out; Microsoft has no row at all
+                await db.execute(text("""INSERT INTO market_values (symbol, company, value, held_reason, version)
+                    VALUES (:s, :s, :v, :r, :ver)"""), {"s": sym, "v": value, "r": None if value else MV.CONVERSION, "ver": MV.MARKET_VALUE_VERSION})
+            got = (await db.execute(text(f"SELECT t.symbol FROM tickers t {S.SIZE_JOIN} WHERE t.symbol = ANY(:s) ORDER BY {S.BY_SIZE}"), {"s": syms})).scalars().all()
+            assert got == ["NVDA", "AAPL", "MSFT", "V"]                                        # the two with no figure last, by symbol
+        finally:
+            await db.rollback()

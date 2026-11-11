@@ -477,11 +477,11 @@ def test_summary_lists_takeaways_and_this_stocks_real_gaps():
 
 # ── rules: rival, ruler, featured ───────────────────────────────────────────────────────────────────────────────────────────
 
-TICKERS = {"MU": {"symbol": "MU", "industry": "Semiconductors", "sector": "IT", "market_cap": 1.0e12, "index_member": True},
-           "AVGO": {"symbol": "AVGO", "industry": "Semiconductors", "sector": "IT", "market_cap": 1.5e12, "index_member": True},
-           "AMD": {"symbol": "AMD", "industry": "Semiconductors", "sector": "IT", "market_cap": 0.6e12, "index_member": True},
-           "NVDA": {"symbol": "NVDA", "industry": "Semiconductors", "sector": "IT", "market_cap": 5.0e12, "index_member": True},
-           "ORCL": {"symbol": "ORCL", "industry": "Software", "sector": "IT", "market_cap": 0.9e12, "index_member": True}}
+# market_value is the company's own figure (services/market_value); market_cap, the vendor's, points the other way and is never read
+_T = lambda sym, industry, mv, cap=None, company=None: {"symbol": sym, "industry": industry, "sector": "IT", "market_value": mv, "company": company or sym,
+                                                        "market_cap": cap, "index_member": True}
+TICKERS = {"MU": _T("MU", "Semiconductors", 1.0e12, 1.0e12), "AVGO": _T("AVGO", "Semiconductors", 1.5e12, 9e12), "AMD": _T("AMD", "Semiconductors", 0.6e12, 1.0e12),
+           "NVDA": _T("NVDA", "Semiconductors", 5.0e12, 1.1e12), "ORCL": _T("ORCL", "Software", 0.9e12, 0.9e12)}
 
 
 def test_rival_is_the_closest_value_by_ratio_in_the_sub_industry():
@@ -491,15 +491,32 @@ def test_rival_is_the_closest_value_by_ratio_in_the_sub_industry():
     assert WC.ruler_for("MU") == "AAPL" and WC.ruler_for("AAPL") == "MSFT"
 
 
+def test_rival_reads_the_companys_own_value_and_never_another_class_of_the_same_company():
+    media = {"GOOGL": _T("GOOGL", "Interactive Media", 3.5e12, company="GOOGL"), "GOOG": _T("GOOG", "Interactive Media", 3.5e12, company="GOOGL"),
+             "META": _T("META", "Interactive Media", 1.6e12), "V": _T("V", "Interactive Media", None, cap=3.4e12), "MTCH": _T("MTCH", "Interactive Media", 9e9)}
+    have = set(media)
+    assert WC.rival_for("GOOGL", media, have) == WC.rival_for("GOOG", media, have) == {"symbol": "META", "basis": "sub-industry"}   # not its own other class
+    assert WC.rival_for("META", media, have)["symbol"] == "GOOG"                # two classes carry one figure: the symbol settles it
+    assert WC.rival_for("V", media, have) is None                               # held out, no figure: no rival, whatever the vendor says
+    assert all(WC.rival_for(s, media, have)["symbol"] != "V" for s in ("GOOGL", "META", "MTCH"))    # and no one's rival
+    alone = {"FOXA": _T("FOXA", "Broadcasting", 27e9, company="FOXA"), "FOX": _T("FOX", "Broadcasting", 27e9, company="FOXA"), "ORCL": TICKERS["ORCL"]}
+    assert WC.rival_for("FOX", alone, set(alone)) == {"symbol": "ORCL", "basis": "sector"}          # its only sub-industry peer is itself: the sector
+
+
 def test_featured_rule():
     today = date(2026, 10, 19)
-    cands = [{"symbol": "AAPL", "market_cap": 5e12, "full": True, "next_date": date(2026, 10, 29), "confirmed": True},
-             {"symbol": "NVDA", "market_cap": 6e12, "full": True, "next_date": date(2026, 11, 19), "confirmed": True},
-             {"symbol": "MSFT", "market_cap": 4e12, "full": False, "next_date": date(2026, 10, 22), "confirmed": True}]
+    cands = [{"symbol": "AAPL", "market_value": 5e12, "full": True, "next_date": date(2026, 10, 29), "confirmed": True},
+             {"symbol": "NVDA", "market_value": 6e12, "full": True, "next_date": date(2026, 11, 19), "confirmed": True},
+             {"symbol": "MSFT", "market_value": 4e12, "full": False, "next_date": date(2026, 10, 22), "confirmed": True}]
     assert WC.choose_featured(cands, today, [])["symbol"] == "AAPL"            # reports within 14 days, full; MSFT is not full
     later = [{**c, "next_date": None} for c in cands]
     assert WC.choose_featured(later, today, [])["symbol"] == "NVDA"
     assert WC.choose_featured(later, today, [{"symbol": "NVDA", "date": "2026-10-10"}])["symbol"] == "AAPL"
+    held = [{"symbol": "V", "market_value": None, "market_cap": 9e12, "full": True, "next_date": date(2026, 10, 21), "confirmed": True}]
+    assert WC.choose_featured(held + cands, today, [])["symbol"] == "AAPL"     # a held-out company is never the largest
+    assert WC.choose_featured(held, today, []) is None
+    twins = [{**cands[1], "symbol": s, "next_date": None} for s in ("GOOGL", "GOOG")]
+    assert WC.choose_featured(twins, today, [])["symbol"] == "GOOG"            # one figure for both classes: the first in the alphabet
 
 
 # ── story sentences ─────────────────────────────────────────────────────────────────────────────────────────────────────────

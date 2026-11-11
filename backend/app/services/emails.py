@@ -297,7 +297,7 @@ async def first_session_move(db, symbol: str, report_date: date, timing: str | N
 async def followed(db, user_id: str) -> list[dict]:
     """The stocks a person follows: every stock on their watchlists, once."""
     from sqlalchemy import text
-    rows = (await db.execute(text("""SELECT DISTINCT t.id, t.symbol, t.name, t.market_cap FROM watchlists w JOIN watchlist_tickers wt ON wt.watchlist_id = w.id
+    rows = (await db.execute(text("""SELECT DISTINCT t.id, t.symbol, t.name FROM watchlists w JOIN watchlist_tickers wt ON wt.watchlist_id = w.id
         JOIN tickers t ON t.id = wt.ticker_id WHERE w.user_id = :u AND t.is_active ORDER BY t.symbol"""), {"u": user_id})).all()
     return [dict(r._mapping) for r in rows]
 
@@ -391,13 +391,15 @@ def label_of(t) -> str:
 
 
 async def week_for(db, stocks: list[dict], today: date, site: str) -> Section | None:
-    """Sunday: the company-confirmed reports of the coming Monday to Friday."""
+    """Sunday: the company-confirmed reports of the coming Monday to Friday, the largest companies first (by the company's own
+    market value, services/market_value; one with no figure comes last, and the vendor's market cap is not read)."""
     from sqlalchemy import text
     from app.services.briefing import short_name
+    from app.services.market_value_store import BY_SIZE, SIZE_JOIN
     start, end = today + timedelta(days=1), today + timedelta(days=5)
-    rows = (await db.execute(text("""SELECT t.symbol, t.name, t.market_cap, e.event_date, e.report_timing::text AS timing FROM events e JOIN tickers t ON t.id = e.ticker_id
-        WHERE t.is_active AND t.index_member AND e.event_type = 'earnings' AND e.is_confirmed AND e.event_date BETWEEN :a AND :b
-        ORDER BY t.market_cap DESC NULLS LAST"""), {"a": start, "b": end})).all()
-    facts = [{"symbol": r.symbol, "name": short_name(r.name, r.symbol) or r.symbol, "date": r.event_date, "timing": r.timing, "cap": r.market_cap} for r in rows]
+    rows = (await db.execute(text(f"""SELECT t.symbol, t.name, e.event_date, e.report_timing::text AS timing FROM events e JOIN tickers t ON t.id = e.ticker_id
+        {SIZE_JOIN} WHERE t.is_active AND t.index_member AND e.event_type = 'earnings' AND e.is_confirmed AND e.event_date BETWEEN :a AND :b
+        ORDER BY {BY_SIZE}"""), {"a": start, "b": end})).all()
+    facts = [{"symbol": r.symbol, "name": short_name(r.name, r.symbol) or r.symbol, "date": r.event_date, "timing": r.timing} for r in rows]
     mine = {s["symbol"] for s in stocks}
     return week_section(facts[:WEEK_TOP], [f for f in facts if f["symbol"] in mine], start, end, site)

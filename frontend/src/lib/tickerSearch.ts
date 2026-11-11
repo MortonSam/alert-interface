@@ -5,6 +5,13 @@ import type { Ticker } from "@/lib/api";
 
 export const SEARCH_LIMIT = 8;
 
+/** Largest first by the market cap the API serves (the vendor's, or with MARKET_VALUE_ENABLED the company's own figure, where a
+ *  held-out company has none): a stock with no figure comes last, and the symbol settles a tie. The home grid sorts with it too. */
+export function bySize(a: Ticker, b: Ticker): number {
+  if ((a.market_cap == null) !== (b.market_cap == null)) return a.market_cap == null ? 1 : -1;
+  return (b.market_cap ?? 0) - (a.market_cap ?? 0) || a.symbol.localeCompare(b.symbol);
+}
+
 /** Tickers whose symbol or company name contains the query: exact symbol first, then symbol prefix, then market cap. */
 export function matchTickers(tickers: Ticker[], query: string, limit = SEARCH_LIMIT): Ticker[] {
   if (!query.trim()) return [];
@@ -19,7 +26,7 @@ export function matchTickers(tickers: Ticker[], query: string, limit = SEARCH_LI
       const bStarts = b.symbol.startsWith(q2);
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
-      return (b.market_cap ?? 0) - (a.market_cap ?? 0);
+      return bySize(a, b);
     })
     .slice(0, limit);
 }

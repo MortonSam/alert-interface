@@ -49,11 +49,10 @@ SOURCE_NAMES = {"yfinance": "earnings calendar", "finnhub": "earnings calendar",
 ABBREVIATIONS = {"inc", "corp", "co", "ltd", "plc", "llc", "lp", "sa", "nv", "ag", "mr", "ms", "dr", "st", "no", "vs", "u.s", "e.g", "i.e"}
 MARKET_VALUE_AGREEMENT = 0.25  # quote x shares shown only within this share of the dated market cap on file; past it the share count is
                                # stale (VMRK on 2026-10-15: a pre-merger 374.9M shares gave $23B against a $47B market cap), so no value
-# MARKET_VALUE_ENABLED (services/market_value): the receipt of the Overview's "worth about" when it is the company's own market value
+# MARKET_VALUE_ENABLED (services/market_value): the receipt of the Overview's "worth about" when it is the company's own market value.
+# Sam approved this source line and the share-count source line (2026-11-11); a rule sentence for it is not approved, so the receipt's
+# rule says nothing of the market value while the flag is on and the two source lines carry it.
 OWN_VALUE_SOURCE = "each class of shares on the cover of its latest 10-Q or 10-K times that class's own closing price"
-OWN_VALUE_RULE = ("The market value is the shares on the cover of the company's latest 10-Q or 10-K, each class of shares times its own closing "
-                  "price, one figure per company, in round words, one decimal at most, dated by that close; a company whose cover does not "
-                  "give a share count that can be priced shows none.")
 BOILERPLATE = ("was incorporated", "is incorporated", "was formerly known", "changed its name", "formerly known as")   # investor-relations sentences dropped
 
 
@@ -249,10 +248,10 @@ def profile_sentence(*, name: str | None = None, symbol: str | None = None, shor
     rule = (f"The first sentence of the company's description as recorded by the nightly records step and dated by that fetch (a second sentence joins only after a first under "
             f"{SECOND_SENTENCE_IF_FIRST_UNDER} characters and when it is not a list of segments, products or brands; incorporation and renaming boilerplate removed; "
             f"{DESCRIPTION_CAP} characters at most, whole sentences only). Sector and sub-industry are GICS from the S&P 500 constituent list, never the profile vendor's "
-            "categories; membership from the nightly list. " + (OWN_VALUE_RULE if own_value_on else
+            "categories; membership from the nightly list. " + ("" if own_value_on else
             "The market value is the latest quote times the shares outstanding from the company profile, in round words, "
             "one decimal at most, each dated, and shown only within "
-            f"{MARKET_VALUE_AGREEMENT:.0%} of the dated market cap on file.") + " A merger into the company completed after its profile's latest filing replaces "
+            f"{MARKET_VALUE_AGREEMENT:.0%} of the dated market cap on file. ") + "A merger into the company completed after its profile's latest filing replaces "
             "the description with the merger and the date it completed.")
     return _sentence("profile", text, rule, max(dates) if dates else None, inputs)
 

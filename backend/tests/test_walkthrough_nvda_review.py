@@ -70,7 +70,7 @@ def test_step4_for_a_smaller_stock_keeps_the_market_question_without_a_verdict_o
 
 def test_index_share_is_the_companys_own_market_value_over_the_index():
     t = lambda mv, member=True, company=None: {"market_value": mv, "index_member": member, "market_value_as_of": date(2026, 10, 20), "company": company,
-                                               "market_cap": 9e15}       # the vendor's figure rides along for ordering and is never read here
+                                               "market_cap": 9e15}       # the vendor's figure is never read here
     tickers = {"NVDA": t(5.25e12), "AAA": t(30e12), "BBB": t(38.65e12), "OUT": t(9e12, False)}
     assert W.index_share("NVDA", tickers) == {"pct": 7.1, "as_of": date(2026, 10, 20), "members": 3}
     assert W.index_share("OUT", tickers) is None

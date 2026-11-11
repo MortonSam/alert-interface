@@ -199,7 +199,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     row = W.compare_row(name, sym, steps, reit=reit, noun=noun, ffo_growth=ffo_cell, dividend=await D.dividend_yield(db, sym, close))
     as_of = max([d for d, _ in u["spy"][-1:]] or [today])
     payload = {"version": W.WALKTHROUGH_VERSION, "symbol": sym, "name": name, "sector": sector, "industry": t["industry"], "reit": reit, "noun": noun, "minutes": W.MINUTES,
-               "as_of": as_of.isoformat(), "steps": steps, "compare": row, "market_cap": t["market_cap"]}
+               "as_of": as_of.isoformat(), "steps": steps, "compare": row}
     story_facts = {"name": name, "sector": sector, "industry": t["industry"], "noun": noun,
                    "description": (s1["sentences"][0] if s1["status"] != "absent" and u["profiles"].get(sym) and not s1.get("from_note") else None),
                    "from_note": bool(s1.get("from_note")),

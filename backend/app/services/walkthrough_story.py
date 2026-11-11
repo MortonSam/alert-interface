@@ -596,7 +596,8 @@ async def compare_stories(built: dict, spent: float, cap: float) -> float:
     from app.services.walkthrough_compare import rival_for, ruler_for
     from app.services.redact import redact
     async with ScriptSessionLocal() as db:
-        tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text("SELECT symbol, sector, industry, market_cap, index_member FROM tickers WHERE is_active"))).all()}
+        from app.services.market_value_store import TICKERS_WITH_VALUE
+        tickers = {r.symbol: dict(r._mapping) for r in (await db.execute(text(TICKERS_WITH_VALUE))).all()}
         have = set(built) | set((await db.execute(text("SELECT symbol FROM ivy_walkthroughs"))).scalars().all())
         stored = {(r.symbol, r.other): r.fingerprint for r in (await db.execute(text("SELECT symbol, other, fingerprint FROM ivy_compare_stories"))).all()}
         payloads = {r.symbol: r.payload for r in (await db.execute(text("SELECT symbol, payload FROM ivy_walkthroughs"))).all()}
