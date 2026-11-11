@@ -192,7 +192,6 @@ def q_volatile_now(*, name: str, symbol: str, rv_20d: float, rv_percentile: floa
 
 # 9 ─────────────────────────────────────────────────────────────────────────────
 PE_FORBIDDEN_WORDS = ("cheap", "expensive", "undervalued", "overvalued")     # never in a P/E answer: a ratio is not a verdict
-REIT_SECTOR = "Real Estate"
 REIT_NOTE = ("Real estate companies are usually judged against funds from operations rather than earnings, because depreciation makes their reported "
              "earnings look small, so a REIT's P/E says less than other companies'.")
 
@@ -204,22 +203,41 @@ def pe_history_words(pe: float, median: float) -> str:
     return "above" if a > b else "below" if a < b else "in line with"
 
 
-def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: date, as_of: date, hist_median: float | None, hist_share_above: int | None,
-         hist_sessions: int | None, hist_excluded: int | None, hist_first: date | None, hist_last: date | None, sector: str | None, sector_median: float | None,
-         sector_fresh: int | None = None, sector_active: int | None = None) -> dict | None:
-    """The stock's trailing P/E against its own five-year history and its sector. Shown with any stored P/E; the history and the
-    sector clauses appear only when stored (a sector median is absent below 90% coverage, and the answer says so)."""
+def pe_median_name(since: date | None) -> str:
+    """The name of the median a P/E is set against, by its window (walkthrough.history_window): "five-year median P/E" only over
+    five full years, otherwise "median P/E since Oct 20, 2023". The receipt and Ask Ivy's fact carry it."""
+    return f"median P/E since {fmt_date(since)}" if since else "five-year median P/E"
+
+
+PE_LEFT_OUT = {"over_cap": "a P/E above {cap}", "loss": "a loss over four quarters", "action": "a merger or spin-off inside the four quarters"}
+
+
+def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: date, as_of: date, history: dict | None, sector: str | None,
+         sector_median: float | None, sector_fresh: int | None = None, sector_active: int | None = None, trust: bool = False) -> dict | None:
+    """The stock's trailing P/E against its own history and its sector. Shown with any stored P/E. history is the window step 5 of
+    the walkthrough reads (walkthrough.history_window: {median, since, first, last, sessions, share_above, before}), called
+    five-year only over five full years and otherwise named by its first day; None when the stretch is under a year of sessions,
+    and the answer then gives today's figure and the sector comparison only (a sector median is absent below 90% coverage, and
+    the answer says so). trust: a real estate trust (margins.is_trust), whose answer carries REIT_NOTE; a real estate company
+    that is not a trust (CBRE, CoStar) is read on its earnings like any other, with no note."""
+    from app.services.valuation import PE_MAX_MEANINGFUL
+    from app.services.walkthrough import RANGE_MIN_SESSIONS
     data = f"{symbol} trades at {pe:.1f} times its earnings over {fmt_date(window_start)} to {fmt_date(window_end)}"
     inputs = [_input("P/E", f"{pe:.1f}", as_of, "close over four reported quarters of GAAP diluted EPS (from the filings' tagged data, else the earnings release), restated across recorded splits"),
               _input("window start", fmt_date(window_start), window_start, "the first of the four quarters"), _input("window end", fmt_date(window_end), window_end, "the latest reported quarter")]
-    if hist_median is not None and hist_share_above is not None and hist_sessions:
-        data += (f", {pe_history_words(pe, hist_median)} its five-year median of {hist_median:.1f} and higher than in {hist_share_above}% of {hist_sessions:,} sessions"
-                 + (f" ({hist_excluded:,} left out for negative or tiny earnings)" if hist_excluded else ""))
-        inputs += [_input("five-year median P/E", f"{hist_median:.1f}", hist_last, f"P/E history, median over sessions {fmt_date(hist_first)} to {fmt_date(hist_last)}"),
-                   _input("sessions below today's P/E", f"{hist_share_above}%", hist_last, "P/E history, share of the five-year sessions"),
-                   _input("sessions compared", f"{hist_sessions:,}", hist_last, "P/E history, sessions counted")]
-        if hist_excluded:
-            inputs.append(_input("sessions left out", f"{hist_excluded:,}", hist_last, "trailing EPS negative or under 1% of price (P/E above 100)"))
+    if history:
+        med, since, n, last = history["median"], history.get("since"), history["sessions"], history["last"]
+        word = pe_history_words(pe, med)
+        if since:
+            data += f", {word} its median of {med:.1f} since {fmt_date(since)} and higher than in {history['share_above']}% of the {n:,} sessions since then"
+            why = " or ".join(PE_LEFT_OUT[r].format(cap=PE_MAX_MEANINGFUL) for r in history.get("before") or [])
+            inputs.append(_input("history since", fmt_date(since), since, "P/E history, the first session of the unbroken stretch since the last one left out" + (f" ({why})" if why else "")))
+        else:
+            data += f", {word} its five-year median of {med:.1f} and higher than in {history['share_above']}% of {n:,} sessions"
+        span = f"sessions {fmt_date(history['first'])} to {fmt_date(last)}"
+        inputs += [_input(pe_median_name(since), f"{med:.1f}", last, f"P/E history, median over {span}"),
+                   _input("sessions below today's P/E", f"{history['share_above']}%", last, f"P/E history, share of the {span}"),
+                   _input("sessions compared", f"{n:,}", last, "P/E history, sessions counted")]
     data += "."
     if sector and sector_median is not None:
         data += f" Its {sector} sector's median is {sector_median:.1f}, so it sits {pe_history_words(pe, sector_median)} its peers."
@@ -232,12 +250,13 @@ def q_pe(*, name: str, symbol: str, pe: float, window_start: date, window_end: d
                    _input("coverage needed", needed, as_of, "the coverage a sector median needs")]
     idea = ("P/E is the price paid for each dollar of the last year's earnings, and it means most when compared with the same company's history and its peers; "
             "for companies whose earnings swing with the cycle, a low P/E near a peak in earnings can mislead.")
-    if sector == REIT_SECTOR:
+    if trust:
         idea += " " + REIT_NOTE
     return _q("pe_compare", f"How does {name}'s P/E compare with its own history and its sector?", data, idea, inputs, as_of,
               "The latest P/E: the close over the four latest reported quarters' GAAP diluted EPS (XBRL, with the earnings release for a quarter XBRL does not "
-              "hold yet), every quarter and close restated to today's share count across recorded splits; the five-year summary is the median and the share of sessions below today's value, after leaving out sessions with negative trailing EPS or a P/E "
-              "above 100; the sector median shows only when at least 90% of the sector's active tickers have a fresh window.")
+              "hold yet), every quarter and close restated to today's share count across recorded splits; its history is the unbroken stretch of sessions since the last one left out (negative trailing EPS, a P/E "
+              f"above {PE_MAX_MEANINGFUL}, or a merger or spin-off inside the four quarters), called five-year only when it covers five full years and compared only when it holds at least {RANGE_MIN_SESSIONS} sessions: "
+              "the median and the share of its sessions below today's value; the sector median shows only when at least 90% of the sector's active tickers have a fresh window.")
 
 
 PINNED = "pe_compare"     # question 9 always takes a slot when it qualifies, displacing the lowest-priority other question

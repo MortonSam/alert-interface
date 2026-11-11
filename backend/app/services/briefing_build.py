@@ -312,10 +312,20 @@ async def build_questions(db: AsyncSession, symbol: str, today: date | None = No
         sec_row = (await db.execute(text("SELECT median_pe, shown, reason, fresh, active FROM pe_sector_snapshots WHERE sector = :sec ORDER BY as_of_date DESC LIMIT 1"),
                                     {"sec": ticker.sector or ""})).mappings().first()
         sector_median = float(sec_row["median_pe"]) if sec_row and sec_row["shown"] and sec_row["median_pe"] is not None else None
+        from app.services.margins import is_trust
+        trust = is_trust(ticker.sector, ticker.industry)          # CBRE and CoStar are real estate companies, not trusts: no trust note
+        # the P/E is set against the same window as the walkthrough's step 5 (walkthrough.history_window): under a year of sessions, none
+        history = None
+        if pe_row["hist_median"] is not None:
+            from app.services import walkthrough as W, walkthrough_data as WD
+            w = await WD.pe_window(db, sym, _f(pe_row["hist_median"]), today)
+            if w:
+                history = {"median": w["median"], "since": w["since"], "first": w["first"], "last": w["last"], "sessions": len(w["run"]),
+                           "share_above": W.share_below(w, float(pe_row["pe"])), "before": w["before"]}
         if raw is not None:
-            raw.update(pe={"pe": float(pe_row["pe"]), "as_of": pe_row["as_of_date"], "hist_median": _f(pe_row["hist_median"]), "sector": ticker.sector, "sector_median": sector_median})
+            raw.update(pe={"pe": float(pe_row["pe"]), "as_of": pe_row["as_of_date"], "hist_median": history["median"] if history else None,
+                           "since": history["since"] if history else None, "sector": ticker.sector, "sector_median": sector_median, "trust": trust})
         cands.append(Q.q_pe(name=name, symbol=sym, pe=float(pe_row["pe"]), window_start=pe_row["window_start"], window_end=pe_row["window_end"], as_of=pe_row["as_of_date"],
-                            hist_median=_f(pe_row["hist_median"]), hist_share_above=pe_row["hist_share_above"], hist_sessions=pe_row["hist_sessions"], hist_excluded=pe_row["hist_excluded"],
-                            hist_first=pe_row["hist_first"], hist_last=pe_row["hist_last"], sector=ticker.sector, sector_median=sector_median,
+                            history=history, sector=ticker.sector, sector_median=sector_median, trust=trust,
                             sector_fresh=(sec_row["fresh"] if sec_row and not sec_row["shown"] else None), sector_active=(sec_row["active"] if sec_row and not sec_row["shown"] else None)))
     return {"symbol": sym, "name": name, "questions": [c for c in cands if c] if all_candidates else Q.choose(cands)}

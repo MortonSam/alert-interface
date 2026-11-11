@@ -125,11 +125,19 @@ COMPARISONS: list[tuple[re.Pattern, dict[str, str]]] = [
     (re.compile(r"(?<!not )(?<!un)\bconfirmed\b", re.I), {"next_report_status": "confirmed", "dividend_status": "declared"}),
     (re.compile(r"\b(?:an )?estimated(?: date| report date)?\b|\bnot (?:yet )?confirmed\b|\bunconfirmed\b|\bnot (?:yet )?declared\b", re.I), {"next_report_status": "estimated", "dividend_status": "estimated"}),
     (re.compile(r"(?<!not )(?<!yet )\bdeclared\b", re.I), {"dividend_status": "declared"}),
-    (re.compile(r"\babove its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\bricher than its (?:own )?history\b|\bhigher than its (?:own )?(?:five-year )?median\b", re.I), {"pe_vs_history": "above"}),
-    (re.compile(r"\bbelow its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\blower than its (?:own )?(?:five-year )?median\b", re.I), {"pe_vs_history": "below"}),
+    # the P/E against its own history: "five-year" is said only of the five-year fact (pe_vs_history); a history named by its first
+    # day (pe_vs_since, questions.pe_median_name) is "its median since {date}", and the general words fit either
+    (re.compile(r"\b(?:above|higher than) its (?:own )?(?:five-year|5-year) (?:median|norm|average)\b", re.I), {"pe_vs_history": "above"}),
+    (re.compile(r"\b(?:below|lower than) its (?:own )?(?:five-year|5-year) (?:median|norm|average)\b", re.I), {"pe_vs_history": "below"}),
+    (re.compile(r"\b(?:in line with|at|matches|equal to) its (?:own )?(?:five-year|5-year) (?:median|norm|average)\b", re.I), {"pe_vs_history": "in line with"}),
+    (re.compile(r"\babove its (?:own )?(?:historical|long-run) (?:median|norm|average)\b|\bricher than its (?:own )?history\b|\b(?:above|higher than) its (?:own )?median\b(?! (?:move|reaction|daily|swing))", re.I),
+     {"pe_vs_history": "above", "pe_vs_since": "above"}),
+    (re.compile(r"\bbelow its (?:own )?(?:historical|long-run) (?:median|norm|average)\b|\b(?:below|lower than) its (?:own )?median\b(?! (?:move|reaction|daily|swing))", re.I),
+     {"pe_vs_history": "below", "pe_vs_since": "below"}),
+    (re.compile(r"\bin line with its (?:own )?(?:historical|long-run) (?:median|norm|average)\b|\b(?:in line with|at|matches|equal to) its (?:own )?median\b(?! (?:move|reaction|daily|swing))", re.I),
+     {"pe_vs_history": "in line with", "pe_vs_since": "in line with"}),
     (re.compile(r"\babove (?:its |the )?(?:sector|peer|peers'|industry) median\b|\babove its peers\b|\bhigher than its (?:sector|peers)\b", re.I), {"pe_vs_sector": "above"}),
     (re.compile(r"\bbelow (?:its |the )?(?:sector|peer|peers'|industry) median\b|\bbelow its peers\b|\blower than its (?:sector|peers)\b", re.I), {"pe_vs_sector": "below"}),
-    (re.compile(r"\bin line with its (?:own )?(?:five-year|5-year|historical|long-run) (?:median|norm|average)\b|\b(?:at|matches|equal to) its (?:own )?(?:five-year|5-year) median\b", re.I), {"pe_vs_history": "in line with"}),
     (re.compile(r"\bin line with (?:its |the )?(?:sector|peer|peers'|industry) median\b|\bin line with its peers\b|\b(?:at|matches|equal to) (?:its |the )?(?:sector|peer) median\b", re.I), {"pe_vs_sector": "in line with"}),
 ]
 VALUATION_VERDICTS = re.compile(r"\b(?:cheap|expensive|undervalued|overvalued|pricey|a bargain|overpriced|underpriced)\b", re.I)   # a ratio is never a verdict
@@ -506,14 +514,16 @@ def word_facts(raw: dict) -> list[dict]:
             out.append(_fact("next_report_timing", "next report timing", B.TIMING_PHRASE[nxt["timing"]], nxt["date"], "earnings calendar, report timing", "word"))
     pe = raw.get("pe")
     if pe:
-        if pe.get("sector") == "Real Estate":
+        from app.services.questions import pe_history_words, pe_median_name
+        since = pe.get("since")                                   # the history's first day when it is not five full years (walkthrough.history_window)
+        if pe.get("trust"):                                       # a real estate trust (margins.is_trust); never CBRE or CoStar
             from app.services.questions import REIT_NOTE
             out.append({**_fact("earnings_measure_note", "how real estate companies are judged", REIT_NOTE, pe["as_of"], "services/questions REIT_NOTE", "note"),
-                        "hidden": True, "applies_to": ("p_e", "five_year_median_p_e", "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_sector")})
-        from app.services.questions import pe_history_words
+                        "hidden": True, "applies_to": ("p_e", slug(pe_median_name(since)), "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_since",
+                                                       "pe_vs_sector")})
         if pe.get("hist_median") is not None:
-            out.append(_fact("pe_vs_history", "P/E against its five-year median", pe_history_words(pe["pe"], pe["hist_median"]),
-                             pe["as_of"], "P/E against its five-year median, judged at one decimal", "word"))
+            against = f"P/E against its {'median since ' + B.fmt_date(since) if since else 'five-year median'}"
+            out.append(_fact("pe_vs_since" if since else "pe_vs_history", against, pe_history_words(pe["pe"], pe["hist_median"]), pe["as_of"], f"{against}, judged at one decimal", "word"))
         if pe.get("sector_median") is not None:
             out.append(_fact("pe_vs_sector", "P/E against its sector median", pe_history_words(pe["pe"], pe["sector_median"]),
                              pe["as_of"], "P/E against its sector median, judged at one decimal", "word"))
@@ -605,6 +615,19 @@ def date_phrases(facts: list[dict]) -> None:
             f["phrase"] = f"{f['value']} on {when}"                       # the name says "last close"; the phrase never repeats it
 
 
+FIVE_YEARS = " over the past five years"                                 # the share of sessions below today's P/E, as PHRASES and DENOMINATORS word its window
+
+
+def pe_window_phrases(facts: list[dict], pe: dict | None) -> None:
+    """In place: the share of sessions below today's P/E is said of its own window: "since Oct 20, 2023" when the history is the
+    stretch named by its first day (raw["pe"]["since"]), "over the past five years" only when five full years are counted."""
+    if not pe or not pe.get("since"):
+        return
+    for f in facts:
+        if f["name"] == "sessions below today's P/E" and f["phrase"].endswith(FIVE_YEARS):
+            f["phrase"] = f["phrase"].removesuffix(FIVE_YEARS) + f" since {B.fmt_date(pe['since'])}"
+
+
 async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) -> dict:
     """{symbol, name, facts, context, fingerprint}: the receipts behind the Overview and every qualifying strip question,
     plus the word-valued comparisons, the event facts (event_facts), and the sentences the page already shows as context."""
@@ -617,6 +640,7 @@ async def fact_pack(db: AsyncSession, symbol: str, today: date | None = None) ->
     ids: set[str] = set()
     facts = [f for f in facts if not (f["id"] in ids or ids.add(f["id"]))]        # a receipt's fact first, the event fact of the same id dropped
     date_phrases(facts)
+    pe_window_phrases(facts, raw.get("pe"))
     last = raw.get("last_report") or {}
     for f in facts:
         if f["id"] == "move_session" and last.get("timing") == "bmo":

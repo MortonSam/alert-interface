@@ -30,7 +30,7 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 7                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 8                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
@@ -45,6 +45,8 @@ WALKTHROUGH_VERSION = 7                           # 2 (2026-10-19): fiscal quart
                                                   # 7 (2026-11-10, Sam): step 4's share of the index reads the company's own market value
                                                   #   (services/market_value: each share class at its own close, one figure per company, counted
                                                   #   once), never the vendor's; a stock on the hold-out list gets no share and is out of the sum
+                                                  # 8 (2026-11-11, Sam): step 5's range needs 252 sessions in its stretch (it was 60); under that,
+                                                  #   today's figure and the sector comparison only, with no line about the missing range
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
@@ -705,7 +707,8 @@ def chart_gaps(chart: dict | None, gap_days: int = CHART_GAP_DAYS) -> list[str]:
 RANGE_BEFORE = {"over_cap": "they paid more than {cap}", "loss": "it had lost money over four quarters",
                 "action": "a merger or spin-off sat inside its four quarters"}
 FIVE_YEAR_SLACK_DAYS = 7              # a window that starts within this of five years before its last day counts five full years
-RANGE_MIN_SESSIONS = 60               # a stretch shorter than about a quarter is no range: step 5 shows today's figure alone
+RANGE_MIN_SESSIONS = 252              # a range needs a year of sessions in its stretch (Sam, 2026-11-11): under that, today's figure and the
+                                      #   sector comparison only, in step 5, the ticker page's P/E question and Ask Ivy alike (history_window)
 
 
 def _cap() -> str:
@@ -756,24 +759,33 @@ def range_words(w: dict) -> tuple[str, str, str]:
     return f"Its range since {fmt_date(w['first'])}", span, line
 
 
-NO_RANGE_WHY = {"over_cap": "investors paid more than {cap} for each $1 of its profit", "loss": "it had lost money over its last four quarters",
-                "action": "a merger or spin-off sat inside its last four quarters"}
+def history_window(series: list[tuple[date, float]], left_out: dict, med_stored: float | None) -> dict | None:
+    """Pure: the one window every comparison of a P/E with the stock's own history reads (step 5, the ticker page's P/E question and
+    Ask Ivy): range_window's stretch, when the series is the history on file (its median is the stored one, within
+    PE_MEDIAN_AGREEMENT) and the stretch holds at least RANGE_MIN_SESSIONS. None otherwise: no range, no median and no comparison
+    with its history are shown, only today's figure and the sector's. range_window's keys, with median the stored five-year median
+    over five full years and the stretch's own otherwise, and since: None over five full years, else the stretch's first day."""
+    from statistics import median
+    vals = [v for _, v in series]
+    if not vals or med_stored is None or abs(round(median(vals), 1) - med_stored) > PE_MEDIAN_AGREEMENT:
+        return None
+    w = range_window(series, left_out)
+    if not w or len(w["run"]) < RANGE_MIN_SESSIONS:
+        return None
+    return {**w, "median": med_stored if w["five_year"] else w["median"], "since": None if w["five_year"] else w["first"]}
 
 
-def no_range_line(w: dict | None) -> str:
-    """Pure: step 5's line when the stretch is shorter than RANGE_MIN_SESSIONS: no range, and why (the last session left out)."""
-    if w and w["last_gone"]:
-        return f"Ivy has no recent range to set that against yet. As recently as {fmt_date(w['last_gone'])}, {NO_RANGE_WHY[w['last_reason']].format(cap=_cap())}."
-    return "Ivy has no recent range to set that against yet."
+def share_below(w: dict, pe: float) -> int:
+    """Pure: the share of the window's sessions with a P/E below `pe`, in whole percent (valuation.pe_history's rule)."""
+    return round(sum(1 for _, v in w["run"] if v < pe) / len(w["run"]) * 100)
 
 
 def step_valuation(name: str, sector: str | None, snap: dict | None, series: list[tuple[date, float]], sec_row: dict | None, enabled: bool,
                    periods: dict | None = None, left_out: dict | None = None, year: dict | None = None) -> dict:
-    """The range, its median, the chart, the summary and the quick check all read one window (range_window): five years when five
+    """The range, its median, the chart, the summary and the quick check all read one window (history_window): five years when five
     full years are counted, otherwise the continuous recent stretch, named by its first day. A stretch shorter than
-    RANGE_MIN_SESSIONS shows today's figure alone. year (walkthrough_data.pe_year) lets the check name this company's reason, when
-    the day a year earlier sits inside the window."""
-    from statistics import median
+    RANGE_MIN_SESSIONS shows today's figure and the sector comparison only. year (walkthrough_data.pe_year) lets the check name
+    this company's reason, when the day a year earlier sits inside the window."""
     if not enabled:
         return _absent(5, name, PE_IN_REVIEW, "P/E figures still being checked", "pe")
     if not snap:
@@ -798,17 +810,12 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
                  f"That figure is the price-to-earnings ratio, or P/E."]
     med_stored = float(snap["hist_median"]) if snap.get("hist_median") is not None else None
     chart = check = None
-    vals = [v for _, v in series]
-    # the series is the stored history when its median is the stored one; only then is any of it shown
-    series_ok = bool(vals) and med_stored is not None and abs(round(median(vals), 1) - med_stored) <= PE_MEDIAN_AGREEMENT
     sector_median = float(sec_row["median_pe"]) if sec_row and sec_row.get("shown") and sec_row.get("median_pe") is not None else None
-    w = range_window(series, left_out or {}) if series_ok else None
-    ranged = bool(w) and len(w["run"]) >= RANGE_MIN_SESSIONS
+    w = history_window(series, left_out or {}, med_stored)        # the series is the history on file, with a year of sessions; else nothing of it is shown
+    ranged = w is not None
     med = since = None
     if ranged:
-        med = med_stored if w["five_year"] else w["median"]          # five full years: the stored five-year median itself
-        since = None if w["five_year"] else w["first"]
-        w = {**w, "median": med}
+        med, since = w["median"], w["since"]
         label, span, line = range_words(w)
         numbers.append(_num(label, f"{per_dollar(w['low'])} to {per_dollar(w['high'])}", span))
         sentences.append(line)
@@ -817,8 +824,6 @@ def step_valuation(name: str, sector: str | None, snap: dict | None, series: lis
                  "today": pe, "sector_median": sector_median, "sector": sector if sector_median is not None else None, "start": w["first"].isoformat()}
         if chart_gaps(chart):
             chart = None                                   # never: the window has no break; a chart with one is not shown
-    elif series_ok:
-        sentences.append(no_range_line(w))
     if sector_median is not None:
         sentences.append(f"For the median {sector} stock in the S&P 500, they pay {per_dollar(sector_median)}.")
     summary = f"Investors pay about {per_dollar(pe)} for every $1 of its profit over the last four quarters."

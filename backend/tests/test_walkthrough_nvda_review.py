@@ -140,12 +140,27 @@ def test_a_session_left_out_inside_the_last_run_starts_the_window_after_it():
     assert w["first"] == days[-8] and len(w["run"]) == 8 and not w["five_year"] and w["before"] == ["over_cap"]
     s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=med), series, None, True, None, {d: "over_cap" for d in gone})
     assert s["status"] == "partial" and s["chart"] is None and s["check"] is None and len(s["numbers"]) == 1
-    assert s["sentences"][1] == (f"Ivy has no recent range to set that against yet. As recently as {W.fmt_date(days[-9])}, investors paid more than $100 "
-                                 "for each $1 of its profit.")
+    assert len(s["sentences"]) == 1 and "range" not in s["sentences"][0]              # today's figure only: no line about the range that is not there
     assert s["summary"] == "Investors pay about $70 for every $1 of its profit over the last four quarters."
-    long_enough = [(d, 60.0 + (i % 20)) for i, d in enumerate(days) if d not in set(days[-70:-66])]
+    sec = {"shown": True, "median_pe": 31.0}
+    s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=med), series, sec, True, None, {d: "over_cap" for d in gone})
+    assert s["sentences"][1:] == ["For the median Information Technology stock in the S&P 500, they pay $31."] and s["chart"] is None     # and the sector comparison
+    assert W.history_window(series, {d: "over_cap" for d in gone}, med) is None
+    # a year of sessions is the floor (Sam, 2026-11-11): one session short is no range, a full year is
+    for kept, ranged in ((W.RANGE_MIN_SESSIONS - 1, False), (W.RANGE_MIN_SESSIONS, True)):
+        out = set(days[-kept - 4:-kept])
+        short = [(d, 60.0 + (i % 20)) for i, d in enumerate(days) if d not in out]
+        m = round(statistics.median(v for _, v in short), 1)
+        w = W.history_window(short, {d: "loss" for d in out}, m)
+        assert (w is not None) is ranged and (not ranged or (len(w["run"]) == 252 and w["since"] == days[-kept] and not w["five_year"]))
+        s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=m), short, None, True, None, {d: "loss" for d in out})
+        assert (s["status"] == "ok") is ranged and (len(s["numbers"]) == 2) is ranged and (s["chart"] is not None) is ranged
+    assert W.history_window(short, {d: "loss" for d in out}, m + 0.5) is None        # a series that is not the history on file shows nothing of itself
+    assert W.share_below({"run": [(days[0], 10.0), (days[1], 20.0), (days[2], 30.0)]}, 25.0) == 67
+    gap = set(days[-W.RANGE_MIN_SESSIONS - 10:-W.RANGE_MIN_SESSIONS - 6])
+    long_enough = [(d, 60.0 + (i % 20)) for i, d in enumerate(days) if d not in gap]
     med = round(statistics.median(v for _, v in long_enough), 1)
-    s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=med), long_enough, None, True, None, {d: "loss" for d in days[-70:-66]})
+    s = W.step_valuation("ServiceNow", "Information Technology", _snap(pe=70.0, median=med), long_enough, None, True, None, {d: "loss" for d in gap})
     assert s["status"] == "ok" and s["numbers"][1]["as_of"].startswith(f"{W.RANGE_MIN_SESSIONS + 6} trading days")
     assert "Before that, it had lost money over four quarters at times." in s["sentences"][1]
 

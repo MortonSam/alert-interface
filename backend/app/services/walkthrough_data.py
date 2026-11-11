@@ -22,6 +22,22 @@ BIG_MOVES_SHOWN = 3
 STALE_BAR_DAYS = 7                  # a stock whose last stored close is this much older than SPY's is not compared
 
 
+async def actions_and_splits(db, syms: list[str]) -> tuple[dict[str, list[dict]], dict[str, list[tuple]]]:
+    """Recorded corporate actions ({kind, date, name}) and splits ((date, ratio)) by symbol: what the P/E history is cleaned with."""
+    actions: dict[str, list[dict]] = {}
+    for r in (await db.execute(text("""SELECT t.symbol, e.event_date, COALESCE(e.metadata->>'corporate_action', 'spin_off') AS kind, e.metadata->>'counterparty' AS name
+            FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action'))"""),
+            {"s": syms})).all():
+        actions.setdefault(r.symbol, []).append({"kind": r.kind, "date": r.event_date, "name": r.name})
+    for r in (await db.execute(text("SELECT symbol, old_symbol, renamed_on FROM ticker_aliases WHERE symbol = ANY(:s)"), {"s": syms})).all():
+        actions.setdefault(r.symbol, []).append({"kind": "rename_merge", "date": r.renamed_on, "name": r.old_symbol})
+    splits: dict[str, list[tuple]] = {}
+    for r in (await db.execute(text("""SELECT t.symbol, e.event_date, e.metadata->>'split_ratio' FROM events e JOIN tickers t ON t.id = e.ticker_id
+            WHERE t.symbol = ANY(:s) AND e.event_type = 'split' ORDER BY e.event_date"""), {"s": syms})).all():
+        splits.setdefault(r[0], []).append((r[1], V.split_ratio(r[2])))
+    return actions, splits
+
+
 async def load_universe(db, today: date) -> dict:
     """Everything shared across stocks, read once per run: tickers, profiles, mergers and recorded corporate actions, adjusted
     closes for every active stock and SPY, sector medians, growth, P/E snapshots, sector P/E medians and next reports."""
@@ -37,22 +53,12 @@ async def load_universe(db, today: date) -> dict:
     for r in (await db.execute(text("""SELECT a.symbol, o.name, a.renamed_on FROM ticker_aliases a JOIN tickers o ON o.symbol = a.old_symbol
             WHERE o.inactive_reason LIKE :m ORDER BY a.renamed_on"""), {"m": REASON_PREFIXES[MERGED] + "%"})).all():
         mergers[r.symbol] = {"name": r.name, "date": r.renamed_on}
-    actions: dict[str, list[dict]] = {}
-    for r in (await db.execute(text("""SELECT t.symbol, e.event_date, COALESCE(e.metadata->>'corporate_action', 'spin_off') AS kind, e.metadata->>'counterparty' AS name
-            FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata ? 'corporate_action'))"""),
-            {"s": syms})).all():
-        actions.setdefault(r.symbol, []).append({"kind": r.kind, "date": r.event_date, "name": r.name})
-    for r in (await db.execute(text("SELECT symbol, old_symbol, renamed_on FROM ticker_aliases WHERE symbol = ANY(:s)"), {"s": syms})).all():
-        actions.setdefault(r.symbol, []).append({"kind": "rename_merge", "date": r.renamed_on, "name": r.old_symbol})
+    actions, splits = await actions_and_splits(db, syms)
     for sym, acts in actions.items():           # a recorded merger or share-exchange acquisition counts too (the exit record may be missing)
         deals = [a for a in acts if a["kind"] in ("merger", "acquisition") and a.get("name")]
         latest = max(deals, key=lambda a: a["date"], default=None)
         if latest and (sym not in mergers or latest["date"] > mergers[sym]["date"]):
             mergers[sym] = {"name": latest["name"], "date": latest["date"]}
-    splits: dict[str, list[tuple]] = {}
-    for r in (await db.execute(text("""SELECT t.symbol, e.event_date, e.metadata->>'split_ratio' FROM events e JOIN tickers t ON t.id = e.ticker_id
-            WHERE t.symbol = ANY(:s) AND e.event_type = 'split' ORDER BY e.event_date"""), {"s": syms})).all():
-        splits.setdefault(r[0], []).append((r[1], V.split_ratio(r[2])))
 
     frames = price_bars.bulk_closes_sync(syms + [BENCHMARK], today - timedelta(days=BARS_LOOKBACK_DAYS))
     closes = {s: [(ts.date(), float(c)) for ts, c in df["Close"].dropna().items()] for s, df in frames.items()}
@@ -263,6 +269,18 @@ async def pe_series(db, symbol: str, splits: list[tuple], actions: list[dict], t
     """The daily P/E over the stored five years, from the quarters and raw closes compute_pe reads (valuation.pe_series_clean)."""
     bars, quarters = await pe_inputs(db, symbol, splits, today)
     return V.pe_series_clean(bars, quarters, [a["date"] for a in actions]) if quarters else []
+
+
+async def pe_window(db, symbol: str, hist_median: float | None, today: date) -> dict | None:
+    """One stock's P/E history window (walkthrough.history_window), from the quarters, closes, splits and corporate actions step 5
+    is built from: what the ticker page's P/E question and Ask Ivy compare today's figure with. None when there is no range to show."""
+    from app.services import walkthrough as W
+    actions, splits = await actions_and_splits(db, [symbol])
+    bars, quarters = await pe_inputs(db, symbol, splits.get(symbol, []), today)
+    if not quarters:
+        return None
+    act_dates = [a["date"] for a in actions.get(symbol, [])]
+    return W.history_window(V.pe_series_clean(bars, quarters, act_dates), pe_left_out(bars, quarters, act_dates), hist_median)
 
 
 def pe_left_out(bars: list[tuple[date, float]], quarters: list[dict], action_dates: list[date]) -> dict[date, str]:

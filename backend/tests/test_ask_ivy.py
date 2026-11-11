@@ -349,9 +349,43 @@ def test_pe_word_facts_and_the_valuation_verdict_check():
     assert "contradicts" in A.verify_comparisons("It sits above its sector median.", facts)[0]
 
 
+def test_the_pe_history_is_named_by_its_window_and_five_year_is_never_said_of_a_shorter_one():
+    """Sam, 2026-11-11: Ask Ivy reads the window step 5 reads. A history that is not five full years is a different fact
+    (pe_vs_since, "its median since {date}"), so "five-year" has nothing behind it and is refused; under a year of sessions there
+    is no comparison with its history at all."""
+    pe = {"pe": 14.34, "as_of": date(2026, 10, 5), "hist_median": 16.8, "since": date(2023, 4, 20), "sector": "Information Technology", "sector_median": 43.4}
+    w = {f["id"]: f for f in A.word_facts({"pe": pe})}
+    assert "pe_vs_history" not in w and w["pe_vs_since"]["value"] == "below" and w["pe_vs_since"]["name"] == "P/E against its median since Apr 20, 2023"
+    facts = list(w.values())
+    assert A.verify_comparisons("It trades below its median since Apr 20, 2023.", facts) == []
+    assert "no stored comparison" in A.verify_comparisons("It trades below its five-year median.", facts)[0]
+    assert "contradicts" in A.verify_comparisons("It trades above its median since Apr 20, 2023.", facts)[0]
+    assert A.verify_comparisons("The stock rose above its median move after reports.", facts) == []
+    five = list(A.word_facts({"pe": {**pe, "since": None}}))
+    assert {f["id"] for f in five} >= {"pe_vs_history"} and A.verify_comparisons("It trades below its median.", five) == []
+    none = {f["id"] for f in A.word_facts({"pe": {**pe, "hist_median": None, "since": None}})}
+    assert "pe_vs_history" not in none and "pe_vs_since" not in none and "pe_vs_sector" in none
+    # the share of sessions is said of the same window
+    def share():
+        return A.with_denominators(A.number_facts([], [{"key": "pe_compare", "inputs": [{"name": "sessions below today's P/E", "value": "38%", "as_of": "2026-10-05", "source": "s"},
+                                                                                       {"name": "sessions compared", "value": "871", "as_of": "2026-10-05", "source": "s"}]}]))
+    facts = share()
+    A.pe_window_phrases(facts, pe)
+    assert A.render("It has been lower in {fact:sessions_below_today_s_p_e}.", facts)[0] == "It has been lower in 38% of its 871 sessions since Apr 20, 2023."
+    facts = share()
+    A.pe_window_phrases(facts, {**pe, "since": None})
+    assert A.render("It has been lower in {fact:sessions_below_today_s_p_e}.", facts)[0] == "It has been lower in 38% of its 871 sessions over the past five years."
+    assert all(t.endswith(A.FIVE_YEARS) for t in (A.PHRASES["sessions below today's P/E"], next(t for n, _, t in A.DENOMINATORS if n == "sessions below today's P/E")))
+    # a note's slots name the five-year median, so a shorter window fills neither and the sentence leaves the note as served
+    from app.services import note_live as L
+    assert "pe_vs_history" not in L.live_values(list(w.values())) and L.SLOTS["pe_5y_median"][0] == "five-year median P/E"
+
+
 def test_real_estate_note_fact_and_the_session_share_reads_as_one_clause():
-    w = {f["id"]: f["value"] for f in A.word_facts({"pe": {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8}})}
+    w = {f["id"]: f["value"] for f in A.word_facts({"pe": {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8, "trust": True}})}
     assert w["earnings_measure_note"].startswith("Real estate companies are usually judged against funds from operations")
+    cbre = {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8, "trust": False}     # a real estate company, not a trust
+    assert "earnings_measure_note" not in {f["id"] for f in A.word_facts({"pe": cbre})}
     assert "earnings_measure_note" not in {f["id"] for f in A.word_facts({"pe": {"pe": 14.3, "as_of": date(2026, 10, 5), "hist_median": 16.8, "sector": "Information Technology", "sector_median": None}})}
     facts = A.with_denominators(A.number_facts([], [{"key": "pe_compare", "inputs": [{"name": "sessions below today's P/E", "value": "38%", "as_of": "2026-10-05", "source": "s"},
                                                                                      {"name": "sessions compared", "value": "871", "as_of": "2026-10-05", "source": "s"}]}]))
@@ -364,7 +398,7 @@ def test_real_estate_note_fact_and_the_session_share_reads_as_one_clause():
 
 def test_a_sentence_fact_is_never_placed_by_the_model_and_is_appended_by_the_system():
     from app.services.questions import REIT_NOTE
-    facts = A.word_facts({"pe": {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8}})
+    facts = A.word_facts({"pe": {"pe": 26.0, "as_of": date(2026, 10, 5), "hist_median": 24.7, "sector": "Real Estate", "sector_median": 30.8, "trust": True}})
     note = next(f for f in facts if f["kind"] == "note")
     assert note["hidden"] and note["value"] == REIT_NOTE
     pack = {"symbol": "PLD", "name": "Prologis", "facts": facts + [{"id": "p_e", "name": "P/E", "value": "26.0", "as_of": "2026-10-05", "source": "s", "kind": "number", "phrase": "26.0 times"}],

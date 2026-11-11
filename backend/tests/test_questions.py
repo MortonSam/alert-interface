@@ -190,7 +190,7 @@ async def test_question_9_is_served_only_behind_the_pe_enabled_flag(monkeypatch)
     from app.main import app
     from app.services import ask_ivy as A
     from app.database import AsyncSessionLocal
-    pe_ids = {"p_e", "five_year_median_p_e", "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_sector", "earnings_measure_note", "window_start", "window_end"}
+    pe_ids = {"p_e", "five_year_median_p_e", "history_since", "sessions_below_today_s_p_e", "sector_median_p_e", "pe_vs_history", "pe_vs_since", "pe_vs_sector", "earnings_measure_note", "window_start", "window_end"}
     for enabled in (False, True):
         monkeypatch.setattr(settings, "pe_enabled", enabled)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -204,13 +204,17 @@ async def test_question_9_is_served_only_behind_the_pe_enabled_flag(monkeypatch)
             assert not any("P/E" in line for p in packs.values() for line in p["context"]), "a P/E sentence reached the Ask Ivy context with the flag off"
 
 
+FIVE = {"median": 16.8, "since": None, "first": date(2021, 10, 4), "last": date(2026, 10, 5), "sessions": 1256, "share_above": 38, "before": []}
+
+
 def test_9_pe_compares_with_history_and_sector_and_never_passes_a_verdict():
-    kw = dict(name="Micron Technology", symbol="MU", pe=14.34, window_start=date(2025, 8, 29), window_end=date(2026, 9, 3), as_of=date(2026, 10, 5), hist_median=16.8,
-              hist_share_above=38, hist_sessions=871, hist_excluded=385, hist_first=date(2021, 10, 4), hist_last=date(2026, 10, 5), sector="Information Technology")
+    kw = dict(name="Micron Technology", symbol="MU", pe=14.34, window_start=date(2025, 8, 29), window_end=date(2026, 9, 3), as_of=date(2026, 10, 5), history=FIVE,
+              sector="Information Technology")
     q = Q.q_pe(**kw, sector_median=43.4)
     assert q["question"] == "How does Micron Technology's P/E compare with its own history and its sector?"
-    assert q["data"] == ("MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026, below its five-year median of 16.8 and higher than in 38% of 871 sessions "
-                         "(385 left out for negative or tiny earnings). Its Information Technology sector's median is 43.4, so it sits below its peers.")
+    assert q["data"] == ("MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026, below its five-year median of 16.8 and higher than in 38% of 1,256 sessions. "
+                         "Its Information Technology sector's median is 43.4, so it sits below its peers.")
+    assert [i["name"] for i in q["inputs"]] == ["P/E", "window start", "window end", "five-year median P/E", "sessions below today's P/E", "sessions compared", "sector median P/E"]
     assert_clean(q)
     for w in Q.PE_FORBIDDEN_WORDS:
         assert w not in (q["data"] + q["idea"]).lower()
@@ -218,22 +222,50 @@ def test_9_pe_compares_with_history_and_sector_and_never_passes_a_verdict():
     q = Q.q_pe(**kw, sector_median=None, sector_fresh=62, sector_active=74)
     assert q["data"].endswith("No sector median is shown: only 62 of the 74 active stocks in its sector have a fresh P/E window, and 90% are needed.")
     assert_clean(q)
-    q = Q.q_pe(**{**kw, "hist_median": None, "hist_share_above": None, "hist_sessions": None, "hist_excluded": None}, sector_median=None)
-    assert q["data"] == "MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026."
     # equal at the one decimal shown reads "in line with": FDX at 15.6 against a median of 15.6 was rendered "below" on an invisible difference
     assert Q.pe_history_words(15.6, 15.6) == "in line with" and Q.pe_history_words(15.64, 15.58) == "in line with"
     assert Q.pe_history_words(15.54, 15.64) == "below" and Q.pe_history_words(15.7, 15.6) == "above"
-    q = Q.q_pe(**{**kw, "pe": 15.61, "hist_median": 15.58}, sector_median=15.6)
+    q = Q.q_pe(**{**kw, "pe": 15.61, "history": {**FIVE, "median": 15.58}}, sector_median=15.6)
     assert "in line with its five-year median of 15.6" in q["data"] and q["data"].endswith("so it sits in line with its peers.")
 
 
+def test_9_the_history_is_the_walkthroughs_window_named_by_its_first_day_and_absent_under_a_year_of_sessions():
+    """Sam, 2026-11-11: the ticker page's P/E question reads the window step 5 reads. "Five-year" is said only of five full years; a
+    shorter unbroken stretch is named by its first day; under 252 sessions there is today's figure and the sector comparison only."""
+    from app.services import walkthrough as W
+    kw = dict(name="Micron Technology", symbol="MU", pe=14.34, window_start=date(2025, 8, 29), window_end=date(2026, 9, 3), as_of=date(2026, 10, 5),
+              sector="Information Technology", sector_median=43.4)
+    since = {"median": 16.8, "since": date(2023, 4, 20), "first": date(2023, 4, 20), "last": date(2026, 10, 5), "sessions": 871, "share_above": 38, "before": ["over_cap", "loss"]}
+    q = Q.q_pe(**kw, history=since)
+    assert q["data"] == ("MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026, below its median of 16.8 since Apr 20, 2023 and higher than in 38% of the 871 sessions "
+                         "since then. Its Information Technology sector's median is 43.4, so it sits below its peers.")
+    said = q["data"] + " ".join(f"{i['name']} {i['source']}" for i in q["inputs"])
+    assert "five-year" not in said and "five years" not in said
+    by = {i["name"]: i for i in q["inputs"]}
+    assert Q.pe_median_name(date(2023, 4, 20)) == "median P/E since Apr 20, 2023" and Q.pe_median_name(None) == "five-year median P/E"
+    assert by["median P/E since Apr 20, 2023"]["source"] == "P/E history, median over sessions Apr 20, 2023 to Oct 5, 2026"
+    assert (by["history since"]["value"], by["history since"]["source"]) == ("Apr 20, 2023", "P/E history, the first session of the unbroken stretch since the last one left out "
+                                                                             "(a P/E above 100 or a loss over four quarters)")
+    assert by["sessions compared"]["value"] == "871" and "sessions left out" not in by
+    assert_clean(q)
+    q = Q.q_pe(**kw, history=None)
+    assert q["data"] == ("MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026. Its Information Technology sector's median is 43.4, so it sits below its peers.")
+    assert [i["name"] for i in q["inputs"]] == ["P/E", "window start", "window end", "sector median P/E"]
+    assert Q.q_pe(**{**kw, "sector_median": None}, history=None)["data"] == "MU trades at 14.3 times its earnings over Aug 29, 2025 to Sep 3, 2026."
+    assert f"at least {W.RANGE_MIN_SESSIONS} sessions" in q["rule"] and W.RANGE_MIN_SESSIONS == 252      # the rule's number is the constant's
+    assert set(Q.PE_LEFT_OUT) == set(W.RANGE_BEFORE)                                                      # every reason a session is left out has its words
+
+
 def test_9_real_estate_adds_the_funds_from_operations_note_and_the_pe_question_always_takes_a_slot():
-    kw = dict(name="Vornado", symbol="VMRK", pe=26.0, window_start=date(2025, 7, 1), window_end=date(2026, 6, 30), as_of=date(2026, 10, 5), hist_median=24.7, hist_share_above=60,
-              hist_sessions=1256, hist_excluded=0, hist_first=date(2021, 10, 4), hist_last=date(2026, 10, 5), sector="Real Estate", sector_median=30.8)
-    q = Q.q_pe(**kw)
+    kw = dict(name="Vornado", symbol="VMRK", pe=26.0, window_start=date(2025, 7, 1), window_end=date(2026, 6, 30), as_of=date(2026, 10, 5), history={**FIVE, "median": 24.7, "share_above": 60},
+              sector="Real Estate", sector_median=30.8)
+    q = Q.q_pe(**kw, trust=True)
     assert q["idea"].endswith(Q.REIT_NOTE) and q["idea"].count(". ") <= 1
     assert_clean(q)
-    assert Q.REIT_NOTE not in Q.q_pe(**{**kw, "sector": "Financials"})["idea"]
+    # CBRE and CoStar are real estate companies, not trusts (Sam, 2026-11-11): read on their earnings, with no trust note
+    from app.services.margins import is_trust
+    assert is_trust("Real Estate", "Retail REITs") and is_trust("Real Estate", "REIT - Residential") and not is_trust("Real Estate", "Real Estate Services")
+    assert Q.REIT_NOTE not in Q.q_pe(**kw)["idea"] and Q.REIT_NOTE not in Q.q_pe(**{**kw, "sector": "Financials"})["idea"]
     cands = [{"key": k} for k in ("reaction_normal", "beat_fell", "ex_dividend", "usual_move", "volatile_now", "pe_compare")]
     assert [c["key"] for c in Q.choose(cands)] == ["reaction_normal", "beat_fell", "ex_dividend", "pe_compare"]        # the lowest-priority others give way
     assert [c["key"] for c in Q.choose(cands[:5])] == ["reaction_normal", "beat_fell", "ex_dividend", "usual_move"]   # no P/E: unchanged
