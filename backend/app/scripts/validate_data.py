@@ -4213,6 +4213,43 @@ async def check_market_value_vendor_gap(session) -> CheckResult:
                        f"other than {len(old)} where the vendor's figure is an earlier close", old[:60])
 
 
+MARKET_VALUE_SHARES_HOLD = 0.03      # services/market_value.UNEXPLAINED: a cover's share count this far from the vendor's is held
+MARKET_VALUE_SHARES_EXPLAINED = {    # a figure on file whose two share counts differ on purpose: symbol -> why
+    "BRK-B": "the vendor counts Class A shares, the figure on file counts Class B equivalents",
+    "BLK": "the vendor counts the units that exchange into shares, the cover's common stock does not",
+}
+
+
+def market_value_share_gaps(rows: list[dict]) -> list[str]:
+    """Pure: the stocks with a market value on file whose share count is more than MARKET_VALUE_SHARES_HOLD from the vendor's shares
+    outstanding and that are not in MARKET_VALUE_SHARES_EXPLAINED. The hold-out list (services/market_value.HELD) is typed once
+    from the research of 2026-11-10 and nothing recomputes it, so a gap that opens later (a new class, a conversion ratio, a
+    merger's shares) would otherwise be displayed. rows: as market_value_gaps."""
+    out = []
+    for r in rows:
+        if not (r.get("value") and r.get("shares") and r.get("vendor_shares")) or r["symbol"] in MARKET_VALUE_SHARES_EXPLAINED:
+            continue
+        gap = r["shares"] / r["vendor_shares"] - 1
+        if abs(gap) > MARKET_VALUE_SHARES_HOLD:
+            out.append(f"{r['symbol']}: {r['shares']:,.0f} shares on file against the vendor's {r['vendor_shares']:,.0f} ({gap:+.1%}), "
+                       f"${r['value'] / 1e9:,.1f}bn on file against the vendor's ${(r.get('vendor_cap') or 0) / 1e9:,.1f}bn")
+    return out
+
+
+async def check_market_value_share_gap(session) -> CheckResult:
+    """WARN when a stock with a market value on file has a share count more than MARKET_VALUE_SHARES_HOLD from the vendor's and is
+    neither held nor explained (market_value_share_gaps): the rule that holds a figure is the same gap, and a person should decide
+    whether this one is held, explained or priced with a conversion ratio (Sam's overnight list, 2026-11-12)."""
+    rows = await _market_value_rows(session)
+    bad = market_value_share_gaps(rows)
+    valued = sum(1 for r in rows if r["value"])
+    if bad:
+        return CheckResult("market_value_share_gap", WARN, f"{len(bad)} of {valued} market value(s) rest on a share count over "
+                           f"{MARKET_VALUE_SHARES_HOLD:.0%} from the vendor's, neither held nor explained", bad[:60], {"market_value_share_gaps": len(bad)})
+    return CheckResult("market_value_share_gap", PASS, f"{valued} market value(s): every share count within {MARKET_VALUE_SHARES_HOLD:.0%} of the vendor's, "
+                       f"other than {len(MARKET_VALUE_SHARES_EXPLAINED)} explained", [], {"market_value_share_gaps": 0})
+
+
 async def check_market_value_sanity(session) -> CheckResult:
     """ERROR when a market value on file is outside MARKET_VALUE_BAND or rests on a close more than MARKET_VALUE_MAX_AGE_DAYS behind
     SPY's newest (a displayed figure dated as current that is not). WARN when fewer than MARKET_VALUE_MIN_COVERAGE of the index's
@@ -4401,6 +4438,7 @@ CHECKS = [
     check_same_number_same_answer,
     # market values (services/market_value)
     check_market_value_vendor_gap,
+    check_market_value_share_gap,
     check_market_value_sanity,
     # Ivy's walkthrough
     check_walkthrough_coverage,

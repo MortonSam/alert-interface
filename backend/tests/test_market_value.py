@@ -166,6 +166,27 @@ def test_validate_flags_a_gap_over_ten_percent_only_with_equal_share_counts():
     assert check_market_value_vendor_gap in CHECKS and check_market_value_sanity in CHECKS
 
 
+
+def test_validate_flags_a_valued_stock_whose_share_count_is_past_the_hold_rules_own_cutoff():
+    from app.scripts.validate_data import (CHECKS, MARKET_VALUE_SHARES_EXPLAINED, MARKET_VALUE_SHARES_HOLD, check_market_value_share_gap,
+                                           market_value_share_gaps)
+    assert check_market_value_share_gap in CHECKS
+    assert f"{MARKET_VALUE_SHARES_HOLD:.0%}" in MV.UNEXPLAINED                               # the hold rule's own cutoff, not a second number
+    row = lambda sym, shares, vendor, value=1.0e10: {"symbol": sym, "company": sym, "value": value, "shares": shares, "vendor_cap": 1.0e10, "vendor_shares": vendor}
+    rows = [row("ERIE", 46_191_610, 52_290_000),                 # Class B converts 2,400 to 1 and is counted one for one: flagged
+            row("SKYD", 5_044_222_368, 1_124_520_000),           # the cover is after a merger, the vendor's count before it: flagged
+            row("ZTS", 406_316_147, 413_220_000),                # 1.7% apart: fine
+            row("BRK-B", 2_124_519_594, 1_430_000),              # explained
+            row("BLK", 154_423_421, 162_200_000),                # explained
+            row("PCG", 2_000_000_000, 2_300_000_000, None),      # held: no figure on file, nothing to flag
+            row("NEW", 100.0, None)]                             # no vendor count: nothing to compare
+    bad = market_value_share_gaps(rows)
+    assert [b.split(":")[0] for b in bad] == ["ERIE", "SKYD"]
+    assert "(-11.7%)" in bad[0] and "46,191,610 shares on file against the vendor's 52,290,000" in bad[0]
+    assert set(MARKET_VALUE_SHARES_EXPLAINED) == {"BRK-B", "BLK"}
+    assert not set(MARKET_VALUE_SHARES_EXPLAINED) & set(MV.HELD)                             # a held stock needs no explanation
+
+
 def test_the_nightly_computes_market_values_before_the_walkthrough():
     from app.scripts import compute_market_values, refresh
     labels = [label for label, _ in refresh.STEPS]
