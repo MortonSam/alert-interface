@@ -4102,6 +4102,12 @@ def visible_text(payload: dict) -> list[str]:
     return [t for t in out if t]
 
 
+def walkthrough_valuation_figure(value: str) -> float:
+    """The valuation step's first figure as a number, however the step words it: "$35" paid for each $1 of profit
+    (services/walkthrough.per_dollar, in dollars since 2026-11-04) or "11.4" for price to FFO."""
+    return float(value.replace("$", "").replace(",", "").replace("\u2212", "-"))
+
+
 async def check_walkthrough_claims(session) -> CheckResult:
     """ERROR when a stored walkthrough shows a model sentence without a "supported" verdict or with a digit, a Compare sentence
     without one, or a figure outside its band: segment shares 0-100% adding to no more than 101%, margins inside
@@ -4132,7 +4138,7 @@ async def check_walkthrough_claims(session) -> CheckResult:
         for st in (payload or {}).get("steps", []):
             if st["key"] == "valuation" and st["status"] != "absent":
                 v = st["numbers"][0]["value"] if st["numbers"] else None
-                if v is None or not 0 < float(v.replace(",", "").replace("\u2212", "-")) <= 100:
+                if v is None or not 0 < walkthrough_valuation_figure(v) <= 100:
                     bad.append(f"{sym}: {st['numbers'][0]['label'] if st['numbers'] else 'P/E'} {v} outside 0 to 100")
         dy = (((payload or {}).get("compare") or {}).get("rows", {}).get("dividend_yield") or {}).get("close")
         if dy and not 0 < dy.get("pct", 0) <= DIVIDEND_YIELD_MAX_PCT:
