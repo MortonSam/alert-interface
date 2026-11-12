@@ -50,6 +50,8 @@ WALKTHROUGH_VERSION = 8                           # 2 (2026-10-19): fiscal quart
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
+PE_MEDIAN_MIN_SANE = 2.0                          # a median under twice earnings is a basis error, never a history to compare with (HAL's 0.00
+                                                  #   over quarters stored a million times too large stopped the whole build, 2026-11-12)
 CLOSING_LINE = "Ivy doesn't make buy or sell calls."
 REVENUE_INDUSTRY_WORDS = ("Bank", "Insurance", "Reinsurance")    # GICS sub-industries of banks and insurers, which say "revenue", never "sales"
 ENTRY_MIN_STEPS = 5                               # a walkthrough is shown only when at least this many of the seven steps show data (Sam, 2026-11-02; 4 before)
@@ -762,8 +764,8 @@ def range_words(w: dict) -> tuple[str, str, str]:
 def history_window(series: list[tuple[date, float]], left_out: dict, med_stored: float | None) -> dict | None:
     """Pure: the one window every comparison of a P/E with the stock's own history reads (step 5, the ticker page's P/E question and
     Ask Ivy): range_window's stretch, when the series is the history on file (its median is the stored one, within
-    PE_MEDIAN_AGREEMENT) and the stretch holds at least RANGE_MIN_SESSIONS. None otherwise: no range, no median and no comparison
-    with its history are shown, only today's figure and the sector's. range_window's keys, with median the stored five-year median
+    PE_MEDIAN_AGREEMENT), the stretch holds at least RANGE_MIN_SESSIONS and its median is at least PE_MEDIAN_MIN_SANE. None otherwise:
+    no range, no median and no comparison with its history are shown, only today's figure and the sector's. range_window's keys, with median the stored five-year median
     over five full years and the stretch's own otherwise, and since: None over five full years, else the stretch's first day."""
     from statistics import median
     vals = [v for _, v in series]
@@ -772,7 +774,10 @@ def history_window(series: list[tuple[date, float]], left_out: dict, med_stored:
     w = range_window(series, left_out)
     if not w or len(w["run"]) < RANGE_MIN_SESSIONS:
         return None
-    return {**w, "median": med_stored if w["five_year"] else w["median"], "since": None if w["five_year"] else w["first"]}
+    med = med_stored if w["five_year"] else w["median"]
+    if med < PE_MEDIAN_MIN_SANE:
+        return None
+    return {**w, "median": med, "since": None if w["five_year"] else w["first"]}
 
 
 def share_below(w: dict, pe: float) -> int:

@@ -3180,21 +3180,28 @@ PE_HIGH_NOTE = 300.0              # a P/E above this is real but rests on tiny e
 
 
 async def check_pe_sanity(session) -> CheckResult:
-    """ERROR when a latest ok P/E snapshot is under PE_MIN_SANE or was computed by an older version than valuation.PE_COMPUTATION_VERSION;
-    WARN listing those above PE_HIGH_NOTE."""
+    """ERROR when a latest ok P/E snapshot is under PE_MIN_SANE, its five-year median is under walkthrough.PE_MEDIAN_MIN_SANE (HAL's 0.00
+    over quarters stored a million times too large, 2026-11-12) or it was computed by an older version than
+    valuation.PE_COMPUTATION_VERSION; WARN listing those above PE_HIGH_NOTE."""
     from app.services.valuation import PE_COMPUTATION_VERSION
+    from app.services.walkthrough import PE_MEDIAN_MIN_SANE
     rows = (await session.execute(text("""
-        SELECT symbol, pe, price, trailing_eps, computation_version FROM (
-            SELECT DISTINCT ON (symbol) symbol, status, pe, price, trailing_eps, computation_version FROM pe_snapshots ORDER BY symbol, as_of_date DESC) latest
+        SELECT symbol, pe, price, trailing_eps, computation_version, hist_median, hist_sessions FROM (
+            SELECT DISTINCT ON (symbol) symbol, status, pe, price, trailing_eps, computation_version, hist_median, hist_sessions FROM pe_snapshots
+            ORDER BY symbol, as_of_date DESC) latest
         WHERE status = 'ok' AND pe IS NOT NULL ORDER BY pe"""))).all()
     low = [f"{r.symbol}: P/E {float(r.pe):.2f} (price {float(r.price):.2f} over trailing EPS {float(r.trailing_eps):.2f})" for r in rows if float(r.pe) < PE_MIN_SANE]
     stale = [f"{r.symbol}: computed by version {r.computation_version}, current is {PE_COMPUTATION_VERSION}" for r in rows if (r.computation_version or 1) < PE_COMPUTATION_VERSION]
-    if low or stale:
-        return CheckResult("pe_sanity", ERROR, f"{len(low)} P/E value(s) under {PE_MIN_SANE:g} and {len(stale)} computed by an older version", low[:20] + stale[:20])
+    low_median = [f"{r.symbol}: five-year median P/E {float(r.hist_median):.2f} over {r.hist_sessions} sessions (today's {float(r.pe):.2f})" for r in rows
+                  if r.hist_median is not None and float(r.hist_median) < PE_MEDIAN_MIN_SANE]
+    if low or stale or low_median:
+        return CheckResult("pe_sanity", ERROR, f"{len(low)} P/E value(s) under {PE_MIN_SANE:g} and {len(stale)} computed by an older version; "
+                           f"{len(low_median)} five-year median(s) under {PE_MEDIAN_MIN_SANE:g}", low[:20] + low_median[:20] + stale[:20])
     high = [f"{r.symbol}: P/E {float(r.pe):.0f} on trailing EPS {float(r.trailing_eps):.2f}" for r in rows if float(r.pe) > PE_HIGH_NOTE]
     if high:
         return CheckResult("pe_sanity", WARN, f"{len(high)} P/E value(s) above {PE_HIGH_NOTE:g}, resting on tiny earnings", high[:40])
-    return CheckResult("pe_sanity", PASS, f"Every shown P/E ({len(rows)}) is at least {PE_MIN_SANE:g}, at most {PE_HIGH_NOTE:g}, and computed by version {PE_COMPUTATION_VERSION}")
+    return CheckResult("pe_sanity", PASS, f"Every shown P/E ({len(rows)}) is at least {PE_MIN_SANE:g}, at most {PE_HIGH_NOTE:g}, and computed by version {PE_COMPUTATION_VERSION}; "
+                       f"every five-year median is at least {PE_MEDIAN_MIN_SANE:g}")
 
 
 EPS_OUTLIER_SHARE = 0.10          # a quarter under this share of its neighbours' average, all positive, is listed for a look

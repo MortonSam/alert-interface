@@ -236,6 +236,7 @@ async def run(argv: list[str]) -> int:
     built: dict[str, dict] = {}
     rows: list[dict] = []
     sec_failed = 0
+    build_failed: list[str] = []
     quote_spend = 0.0
     try:
         for i, sym in enumerate(symbols, 1):
@@ -246,8 +247,14 @@ async def run(argv: list[str]) -> int:
                 sec_failed += 1
                 print(f"  {sym}: SEC read failed, stored readings kept: {redact(exc)[:120]}", flush=True)
                 src = prior.get("sources") or {}
-            async with ScriptSessionLocal() as db:
-                b = await build_one(db, u, sym, src)
+            try:
+                async with ScriptSessionLocal() as db:
+                    b = await build_one(db, u, sym, src)
+            except Exception as exc:
+                # one stock's figures never cost the night every other walkthrough: its last build is kept and the step fails by name
+                build_failed.append(sym)
+                print(f"  {sym}: build failed, its last walkthrough is kept: {type(exc).__name__}: {redact(exc)[:160]}", flush=True)
+                continue
             from app.services import walkthrough_quotes as Q
             try:
                 # the quotes' checks share the night's walkthrough budget with the stories (WS.NIGHTLY_STORY_CAP_USD)
@@ -308,10 +315,13 @@ async def run(argv: list[str]) -> int:
     for k, c in counts.items():
         print(f"  step {k:<10} ok {c['ok']:>3}  partial {c['partial']:>3}  absent {c['absent']:>3}", flush=True)
     print(f"  SEC reads failed: {sec_failed}; story spend ${spent:.2f}; quote spend ${quote_spend:.2f}", flush=True)
+    if build_failed:
+        print(f"  {len(build_failed)} stock(s) not built: {', '.join(build_failed)}", flush=True)
     if report:
         with open(report, "w") as fh:
-            json.dump({"run_at": datetime.now(timezone.utc).isoformat(), "today": today.isoformat(), "counts": counts, "stocks": rows}, fh, default=str, indent=1)
-    return 0
+            json.dump({"run_at": datetime.now(timezone.utc).isoformat(), "today": today.isoformat(), "counts": counts, "stocks": rows,
+                       "not_built": build_failed}, fh, default=str, indent=1)
+    return 1 if build_failed else 0
 
 
 def main() -> None:

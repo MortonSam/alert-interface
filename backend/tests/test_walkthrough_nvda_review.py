@@ -421,3 +421,54 @@ def test_no_step_blanks_while_its_figures_are_on_file_and_an_unreported_quarter_
                  for n in range(1, 8)]
         W.one_quarter(steps, {2: date(2026, 6, 30), 3: date(2025, 12, 31), 5: date(2026, 3, 31)}, latest, None, "X")
         assert all(s["status"] != "absent" and s["numbers"] for s in steps), [s["status"] for s in steps]
+
+
+def test_a_median_under_twice_earnings_is_no_history_and_never_stops_the_build():
+    """Halliburton, Nov 12 2026: seven quarters stored a million times too large gave a five-year median of 0.00, and step 5's
+    quick check divided by it, which stopped the night's whole build. A median under PE_MEDIAN_MIN_SANE is a basis error: today's
+    figure and the sector's are shown, nothing is compared with that history, and validate's pe_sanity names the stock."""
+    days = _sessions(1257, date(2026, 11, 10))
+    series = [(d, 0.0 if i < 700 else 18.0 + (i % 5)) for i, d in enumerate(days)]
+    assert round(statistics.median(v for _, v in series), 1) == 0.0
+    assert W.history_window(series, {}, 0.0) is None
+    s = W.step_valuation("Halliburton", "Energy", _snap(pe=18.63, median=0.0), series, {"shown": True, "median_pe": 16.0}, True)
+    assert s["chart"] is None and s["check"] is None and len(s["numbers"]) == 1
+    assert s["summary"] == "Investors pay about $19 for every $1 of its profit over the last four quarters."
+    assert s["sentences"][1:] == ["For the median Energy stock in the S&P 500, they pay $16."]
+    low = [(d, W.PE_MEDIAN_MIN_SANE - 0.1) for d in days]
+    assert W.history_window(low, {}, W.PE_MEDIAN_MIN_SANE - 0.1) is None
+    ok = [(d, W.PE_MEDIAN_MIN_SANE) for d in days]
+    assert W.history_window(ok, {}, W.PE_MEDIAN_MIN_SANE)["median"] == W.PE_MEDIAN_MIN_SANE
+
+
+@pytest.mark.asyncio
+async def test_one_stock_that_fails_to_build_does_not_cost_the_others(monkeypatch, capsys):
+    """The build writes once, at the end, so a stock that raised lost the night all 503 walkthroughs. Now it is named, its last
+    walkthrough is kept, the others are built and the step exits 1."""
+    from app.scripts import build_walkthroughs as B
+    from app.services import edgar_client, walkthrough_quotes as Q
+
+    class NoEdgar:
+        async def get_cik(self, sym): return None
+        async def close(self): pass
+
+    real = B.build_one
+
+    async def one(db, u, sym, src):
+        if sym == "HAL":
+            raise ZeroDivisionError("float division by zero")
+        return await real(db, u, sym, src)
+
+    async def no_sources(*a, **k): return {}
+    async def no_quotes(*a, **k): raise RuntimeError("no network in this test")
+
+    monkeypatch.setattr(edgar_client, "EdgarClient", NoEdgar)
+    monkeypatch.setattr(B, "sources_for", no_sources)
+    monkeypatch.setattr(B, "build_one", one)
+    monkeypatch.setattr(Q, "refresh", no_quotes)
+    code = await B.run(["--symbols=HAL,AAPL", "--no-story"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "  HAL: build failed, its last walkthrough is kept: ZeroDivisionError: float division by zero" in out
+    assert "  1 stock(s) not built: HAL" in out
+    assert sum(int(line.split()[3]) + int(line.split()[5]) + int(line.split()[7]) for line in out.splitlines() if line.startswith("  step business")) == 1     # AAPL was built

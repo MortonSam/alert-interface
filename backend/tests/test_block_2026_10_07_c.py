@@ -9,6 +9,7 @@ from app.database import ScriptSessionLocal
 from app.scripts.list_release_eps import format_rows, xbrl_status
 from app.scripts.seed_dividends import CORRECTIONS, rebase_from_bars
 from app.scripts.validate_data import ERROR, WARN, check_eps_quarter_outliers, check_pe_sanity, run_checks
+from app.services.valuation import PE_COMPUTATION_VERSION
 
 # ZZRB is an active ticker while its test runs: the index membership test (shared_rows) clears every active ticker it does not list
 pytestmark = pytest.mark.xdist_group(name="shared_rows")
@@ -88,6 +89,14 @@ async def test_pe_sanity_flags_a_sub_two_pe_and_an_old_version():
         r = (await run_checks([check_pe_sanity]))[0]
         n = int(r.message.split(" and ")[1].split()[0])
         assert r.level == ERROR and n >= 1 and "computed by an older version" in r.message          # the listing is capped; the count carries the row
+        # a five-year median under twice earnings is a basis error too (HAL's 0.00, 2026-11-12)
+        async with ScriptSessionLocal() as s:
+            await s.execute(text("UPDATE pe_snapshots SET pe = 18.63, price = 31.86, trailing_eps = 1.71, hist_median = 0.00, hist_sessions = 1257, computation_version = :v WHERE symbol = :s"),
+                            {"s": sym, "v": PE_COMPUTATION_VERSION})
+            await s.commit()
+        r = (await run_checks([check_pe_sanity]))[0]
+        assert r.level == ERROR and "five-year median(s) under 2" in r.message
+        assert f"{sym}: five-year median P/E 0.00 over 1257 sessions (today's 18.63)" in r.rows
     finally:
         async with ScriptSessionLocal() as s:
             await s.execute(text("DELETE FROM pe_snapshots WHERE symbol = :s"), {"s": sym}); await s.commit()
