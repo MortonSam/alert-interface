@@ -13,4 +13,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, { silent: true });
+// Sentry here reports errors only (instrumentation-client.ts: tracesSampleRate 0, no replay), so its tracing, replay and debug code
+// is left out of the file every page downloads.
+export default withSentryConfig(nextConfig, {
+  silent: true,
+  bundleSizeOptimizations: { excludeDebugStatements: true, excludeTracing: true, excludeReplayIframe: true, excludeReplayShadowDom: true, excludeReplayWorker: true },
+});
