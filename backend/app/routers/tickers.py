@@ -805,6 +805,17 @@ async def _report_move_fields(db: AsyncSession, sym: str, today: date, held_fact
             "move_comparison": v["move_comparison"]}
 
 
+async def _named_report_date(db: AsyncSession, ticker_row, earnings_str: str | None) -> str | None:
+    """The report date a sentence may name: the calendar's earliest date only when it is the date the page's header shows
+    (services/next_earnings: while dates are licensed only, a date the company confirmed). The expiration is still chosen around the
+    calendar's date; a vendor's unconfirmed date is used for that and never named. Found 2026-11-12: JNJ's header read "expected
+    around Jan 20, 2027" while the options details named "the Jan 26, 2027 earnings date", a vendor's."""
+    if not earnings_str or ticker_row is None:
+        return None
+    ne = (await batch_next_earnings(db, [ticker_row.id])).get(ticker_row.id)
+    return earnings_str if ne is not None and ne.date is not None and ne.date.isoformat() == earnings_str else None
+
+
 @router.get("/expected-move/{symbol}", response_model=ExpectedMoveRead)
 async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), admin: bool = Depends(is_admin)) -> ExpectedMoveRead:
     sym = symbol.upper()
@@ -857,7 +868,7 @@ async def get_expected_move(symbol: str, db: AsyncSession = Depends(get_db), adm
         earnings_date_obj = date.fromisoformat(earnings_str)
         exp_date_obj = date.fromisoformat(chosen_exp)
         days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
-        data_quality_note = expiry_caveat(chosen_exp, earnings_str) or data_quality_note
+        data_quality_note = expiry_caveat(chosen_exp, await _named_report_date(db, ticker_row, earnings_str)) or data_quality_note
     else:
         data_quality_note = "No earnings date found; using nearest weekly expiration."
 
@@ -1219,10 +1230,12 @@ async def get_options_bundle(symbol: str, db: AsyncSession = Depends(get_db), ad
         earnings_date_obj = date.fromisoformat(earnings_str)
         exp_date_obj = date.fromisoformat(chosen_exp)
         days_expiration_past_earnings = (exp_date_obj - earnings_date_obj).days
+        named = await _named_report_date(db, ticker_row, earnings_str)
         if exp_date_obj < earnings_date_obj:
-            data_quality_note = f"No expiration covers earnings date {earnings_str}; using nearest available {chosen_exp}."
-        elif expiry_caveat(chosen_exp, earnings_str):
-            data_quality_note = expiry_caveat(chosen_exp, earnings_str)
+            if named:
+                data_quality_note = f"No expiration covers earnings date {named}; using nearest available {chosen_exp}."
+        elif expiry_caveat(chosen_exp, named):
+            data_quality_note = expiry_caveat(chosen_exp, named)
 
     # ── Fetch chain from ingested store ───────────────────────────────────────
     chain_result = await chain_store.get_chain(db, sym, chosen_exp)

@@ -6,7 +6,7 @@ import { visitorMessage } from "@/lib/errors";
 import Explained from "@/components/Explained";
 import { eventConfirmationBadge, expectedWindowLine, nextEarningsLine } from "@/lib/earningsSource";
 import { claimReason, claimVerdict, verdictTotals } from "@/lib/verification";
-import { absentReadLine, displayedOptionFacts, expiryCaveat, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, shownIvExpiration, spreadUnavailableReason } from "@/lib/optionsReadFacts";
+import { absentReadLine, displayedOptionFacts, expiryCaveat, namedReportDate, ivUnavailableReason, priceDriftNote, priceLabel, rvUnavailableReason, shownIvExpiration, spreadUnavailableReason } from "@/lib/optionsReadFacts";
 import { fmtTimestamp } from "@/lib/marks";
 import { fmtEpsSurprise } from "@/lib/epsSurprise";
 import { shortCompanyName } from "@/lib/companyName";
@@ -2823,9 +2823,9 @@ export default function TickerPage() {
                     )}
                   </>
                 )}
-                {emPct != null && expiryCaveat(facts.expiration_used, facts.next_earnings_date) && (
+                {emPct != null && expiryCaveat(facts.expiration_used, namedReportDate(facts.next_earnings_date, ticker.next_earnings_date)) && (
                   <p className="text-sm text-muted-foreground mt-1">
-                    {expiryCaveat(facts.expiration_used, facts.next_earnings_date)}
+                    {expiryCaveat(facts.expiration_used, namedReportDate(facts.next_earnings_date, ticker.next_earnings_date))}
                   </p>
                 )}
                 {oneDayHistoryLine(hist) && (

@@ -94,6 +94,14 @@ export function expiryCaveat(expiration: string | null | undefined, earningsDate
   return `Nearest available expiration (${fmtDate(exp)}) is ${days} days after the ${fmtDate(earn)} earnings date. The implied move covers the full period to expiration, not just the earnings event.`;
 }
 
+/** The report date the caveat may name: the options' own date only when it is the date the page's header shows (the ticker's
+ * next_earnings_date, which the API gives only once the company has confirmed it while vendor dates are held; backend
+ * routers/tickers._named_report_date, the same rule). A vendor's unconfirmed date still picks the expiration and is never named. */
+export function namedReportDate(optionsDate: string | null | undefined, headerDate: string | null | undefined): string | null {
+  if (!optionsDate || !headerDate) return null;
+  return optionsDate.slice(0, 10) === headerDate.slice(0, 10) ? optionsDate : null;
+}
+
 /** "priced at $339.07, last trade 17:59" for the block's label. */
 export function priceLabel(f: DisplayedOptionFacts, fmtTime: (iso: string | null) => string | null): string | null {
   if (f.current_price == null) return null;

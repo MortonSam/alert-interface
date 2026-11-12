@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fmtTimestamp } from "@/lib/marks";
-import { expiryCaveat } from "@/lib/optionsReadFacts";
+import { expiryCaveat, namedReportDate } from "@/lib/optionsReadFacts";
 import { EXPIRY_CAVEAT_DAYS } from "@/lib/thresholds";
 
 const read = (p: string) => readFileSync(join(__dirname, "../..", p), "utf8");
@@ -30,6 +30,19 @@ describe("the full-period caveat", () => {
     expect(expiryCaveat("2026-10-27", "2026-10-20")).toBeNull();          // exactly EXPIRY_CAVEAT_DAYS
     expect(EXPIRY_CAVEAT_DAYS).toBe(7);
     expect(expiryCaveat("2026-11-20", null)).toBeNull();
+  });
+
+  it("names a report date only when it is the date the header shows (JNJ, 2026-11-12: a vendor's Jan 26 under a header that said around Jan 20)", () => {
+    expect(namedReportDate("2027-01-26", null)).toBeNull();                // the company has not confirmed a date: the header shows a window
+    expect(namedReportDate("2027-01-26", "2027-01-28")).toBeNull();        // the header shows another day
+    expect(namedReportDate("2026-11-18", "2026-11-18T00:00:00Z")).toBe("2026-11-18");
+    expect(namedReportDate(null, "2026-11-18")).toBeNull();
+    expect(expiryCaveat("2027-03-19", namedReportDate("2027-01-26", null))).toBeNull();
+    const page = read("app/tickers/[symbol]/page.tsx");
+    expect(page.match(/expiryCaveat\(/g)?.length).toBe(2);
+    expect(page.match(/expiryCaveat\(facts\.expiration_used, namedReportDate\(facts\.next_earnings_date, ticker\.next_earnings_date\)\)/g)?.length).toBe(2);
+    const py = readFileSync(join(__dirname, "../../../../backend/app/routers/tickers.py"), "utf8");
+    expect(py).not.toContain("expiry_caveat(chosen_exp, earnings_str)");   // the API's own note follows the same rule
   });
 
   it("the backend writes the same sentence", () => {

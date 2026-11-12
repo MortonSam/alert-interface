@@ -88,3 +88,35 @@ def test_a_build_a_trade_draft_cites_no_analyst_figure_while_held(monkeypatch):
     src = Path(thesis.__file__).read_text()
     region = src[src.index("async def _run_draft_generation("):src.index("def build_defined_risk_spread(")]
     assert region.count('data["analyst_row"]') == 1 and 'analyst_row = draft_analyst_row(data["analyst_row"])' in region
+
+
+@pytest.mark.asyncio
+async def test_an_options_sentence_names_a_report_date_only_when_the_header_shows_it(monkeypatch):
+    """Found 2026-11-12: JNJ's header read "expected around Jan 20, 2027" (no date from the company yet) while the options details
+    under it named "the Jan 26, 2027 earnings date", a vendor's. The expiration is still chosen around the calendar's date."""
+    from datetime import date
+    from pathlib import Path
+    from app.routers import tickers
+    from app.services.implied_move import expiry_caveat
+    from app.services.next_earnings import NextEarnings
+    row = SimpleNamespace(id=7)
+    shown = {}
+
+    async def fake(db, ids):
+        return dict(shown)
+    monkeypatch.setattr(tickers, "batch_next_earnings", fake)
+    shown[7] = NextEarnings(confirmation="expected_window", window_center=date(2027, 1, 20))      # held: a window, no date
+    assert await tickers._named_report_date(None, row, "2027-01-26") is None
+    assert expiry_caveat("2027-03-19", await tickers._named_report_date(None, row, "2027-01-26")) is None
+    shown[7] = NextEarnings(date=date(2027, 1, 28), confirmation="confirmed")                     # the header shows another day
+    assert await tickers._named_report_date(None, row, "2027-01-26") is None
+    shown[7] = NextEarnings(date=date(2027, 1, 26), confirmation="confirmed")
+    assert await tickers._named_report_date(None, row, "2027-01-26") == "2027-01-26"
+    assert "the Jan 26, 2027 earnings date" in expiry_caveat("2027-03-19", await tickers._named_report_date(None, row, "2027-01-26"))
+    shown.clear()
+    assert await tickers._named_report_date(None, row, "2027-01-26") is None
+    assert await tickers._named_report_date(None, None, "2027-01-26") is None and await tickers._named_report_date(None, row, None) is None
+    # both endpoints that write the sentence take the date through that rule
+    src = Path(tickers.__file__).read_text()
+    assert "expiry_caveat(chosen_exp, earnings_str)" not in src and "earnings date {earnings_str}" not in src
+    assert src.count("_named_report_date(db, ticker_row, earnings_str)") == 2
