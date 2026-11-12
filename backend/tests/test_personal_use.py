@@ -72,3 +72,19 @@ async def test_discover_withholds_analyst_stats_while_held(monkeypatch):
         async def execute(self, *a, **k):
             raise AssertionError("analyst data was read while held")
     assert await _batch_analyst_stats(NoQuery(), ["NVDA"]) == {} and await _batch_buy_share_delta(NoQuery(), ["NVDA"]) == {}
+
+
+def test_a_build_a_trade_draft_cites_no_analyst_figure_while_held(monkeypatch):
+    """Found 2026-11-12: production's draft for NVDA read "After 18 analyst upgrades, NVDA's median move the next day was +1.81%"
+    while the ticker page's analyst section and Discover withheld the same Finnhub and Yahoo figures."""
+    from pathlib import Path
+    from app.routers import thesis
+    row = SimpleNamespace(upgrade_count=18, median_1d_upgrade=1.81, downgrade_count=4, median_1d_downgrade=-0.6)
+    monkeypatch.setattr(settings, "personal_use_data_shown", False)
+    assert thesis.draft_analyst_row(row) is None
+    monkeypatch.setattr(settings, "personal_use_data_shown", True)
+    assert thesis.draft_analyst_row(row) is row
+    # the draft reads the row only through that guard: its fact block's counts and its analyst sentence both come from this one name
+    src = Path(thesis.__file__).read_text()
+    region = src[src.index("async def _run_draft_generation("):src.index("def build_defined_risk_spread(")]
+    assert region.count('data["analyst_row"]') == 1 and 'analyst_row = draft_analyst_row(data["analyst_row"])' in region

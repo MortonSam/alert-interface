@@ -571,6 +571,14 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     }
 
 
+def draft_analyst_row(row):
+    """The analyst reaction row a Build a Trade draft may cite: none while personal-use data is held. Analyst actions come from
+    Finnhub and Yahoo (services/personal_use), and the ticker page and Discover withhold them, so until 2026-11-12 the draft was the
+    one place a visitor read "After 18 analyst upgrades, NVDA's median move the next day was +1.81%"."""
+    from app.services import personal_use
+    return row if personal_use.shown() else None
+
+
 async def _run_draft_generation(
     data: dict,
     direction: str,
@@ -606,7 +614,7 @@ async def _run_draft_generation(
     if not est_ok:              # LICENSED_ESTIMATES off: the draft's prompt names no beat, miss or estimate (the data itself is unchanged)
         beats, ce_misses, beat_rate, bbd_rate = [], [], None, None
         avg_1d_on_beat = median_1d_on_beat = avg_1d_on_miss = median_1d_on_miss = beat_cont_pct = miss_cont_pct = None
-    analyst_row = data["analyst_row"]
+    analyst_row = draft_analyst_row(data["analyst_row"])
     chosen_exp = data["chosen_exp"]
     days_to_exp = data["days_to_exp"]
     calls_raw = data["calls_raw"]
