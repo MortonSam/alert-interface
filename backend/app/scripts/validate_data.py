@@ -4234,7 +4234,171 @@ async def check_market_value_sanity(session) -> CheckResult:
     return CheckResult("market_value_sanity", PASS, f"{valued} of {index} index stocks have a market value in band on a recent close; {len(none)} with none", none[:60])
 
 
+# ── Same number, same answer (Sam's overnight comparison, 2026-11-12) ─────────────────────────────────────────────────────────
+
+SAME_NUMBER_TOLERANCE = {            # how far two readings of one figure may sit apart before they disagree
+    "revenue growth": 0.06,          # percent, each shown to one decimal
+    "typical move": 0.06,            # percent, each shown to one decimal
+    "trailing EPS": 0.006,           # dollars, each shown to the cent
+    "P/E": 0.51,                     # the walkthrough shows whole dollars paid per $1 of profit
+    "revenue growth, note tile": 50, # a note's trailing-year tile against the filings' latest quarter: past this, one of them is not growth
+}
+SAME_NUMBER_ANY_BASIS = {"latest quarter", "next report", "options word", "typical move", "revenue growth, note tile"}
+SAME_NUMBER_ROWS = 12                # lines listed per figure
+
+
+def shown_number(s) -> float | None:
+    """Pure: the number in a displayed figure ("+12.1%", "−4.6%", "$1,234.5", "±6.9%"), None when it holds none."""
+    m = re.search(r"([-−])?\s*[$±+]?\s*(\d[\d,]*(?:\.\d+)?)", str(s or ""))
+    if not m:
+        return None
+    return float(m.group(2).replace(",", "")) * (-1 if m.group(1) else 1)
+
+
+def same_number_pairs(readings: dict[str, dict[str, list[tuple]]]) -> dict[str, list[str]]:
+    """Pure: {figure: lines}, one line per stock whose figure reads differently in two places. readings: {symbol: {figure:
+    [(place, value, basis)]}}. Two readings of a figure are compared when they rest on the same basis (the same quarter, the same
+    close), or always for a figure in SAME_NUMBER_ANY_BASIS, where a different basis is itself the disagreement (a page a quarter
+    behind, a date against a window). Numbers disagree past SAME_NUMBER_TOLERANCE; dates and words when they are not equal."""
+    out: dict[str, list[str]] = {}
+    for sym in sorted(readings):
+        for figure, seen in readings[sym].items():
+            seen = [r for r in seen if r[1] is not None]
+            for i, (place_a, a, basis_a) in enumerate(seen):
+                differs = False
+                for place_b, b, basis_b in seen[i + 1:]:
+                    if figure not in SAME_NUMBER_ANY_BASIS and basis_a != basis_b:
+                        continue
+                    numeric = isinstance(a, (int, float)) and isinstance(b, (int, float))
+                    if (abs(a - b) > SAME_NUMBER_TOLERANCE.get(figure, 0)) if numeric else a != b:
+                        basis = "" if basis_a == basis_b else f" ({basis_a} against {basis_b})"
+                        out.setdefault(figure, []).append(f"{sym}: {place_a} {a}, {place_b} {b}{basis}")
+                        differs = True
+                        break
+                if differs:
+                    break
+    return out
+
+
+async def _same_number_readings(session) -> dict[str, dict[str, list[tuple]]]:
+    """Every figure a visitor can meet in two places that both rest on rows on file: the walkthrough against the ticker page's
+    growth rows, its P/E and trailing earnings, the report history, the header's next report and Ivy's Read; a research note's
+    growth tile against the filings; and the options word by the ticker page's rule against Build a Trade's and Discover's."""
+    from app.services.briefing import fmt_date
+    from app.services.growth import GROWTH_VERSION
+    from app.services.next_earnings import batch_next_earnings
+    from app.services.options_read_gate import OPTIONS_READ_CACHE_VERSION
+    from app.thresholds import spread_label, vol_regime_label
+    R: dict[str, dict[str, list[tuple]]] = {}
+    add = lambda sym, figure, place, value, basis=None: R.setdefault(sym, {}).setdefault(figure, []).append((place, value, basis))
+    ids = dict((await session.execute(text("SELECT symbol, id FROM tickers WHERE is_active"))).all())
+
+    growth: dict[str, dict[date, float]] = {}
+    for sym, end, pct in (await session.execute(text("""SELECT symbol, period_end, growth_pct::float8 FROM growth_figures
+            WHERE metric = 'revenue' AND growth_pct IS NOT NULL AND held_reason IS NULL AND version = :v"""), {"v": GROWTH_VERSION})).all():
+        growth.setdefault(sym, {})[end] = pct
+    pe = {r.symbol: r for r in (await session.execute(text("""SELECT DISTINCT ON (symbol) symbol, as_of_date, status, pe::float8 AS pe, trailing_eps::float8 AS eps
+            FROM pe_snapshots ORDER BY symbol, as_of_date DESC, computed_at DESC"""))).all()}
+    typical = {r.symbol: r for r in (await session.execute(text("""SELECT t.symbol, count(*) AS n, avg(abs(r.pct_change_1d))::float8 AS pct
+            FROM historical_reactions r JOIN tickers t ON t.id = r.ticker_id AND t.is_active
+            WHERE r.event_type = 'earnings' AND r.pct_change_1d IS NOT NULL GROUP BY t.symbol"""))).all()}
+    header = await batch_next_earnings(session, list(ids.values()))
+
+    def header_day(sym: str) -> date | None:           # the day the header's line starts from: the window's first day, or the date
+        ne = header.get(ids.get(sym))
+        if ne is None:
+            return None
+        return ne.window_start if ne.confirmation == "expected_window" and ne.window_start else ne.date
+
+    for sym, payload in (await session.execute(text("SELECT w.symbol, w.payload FROM ivy_walkthroughs w JOIN tickers t ON t.symbol = w.symbol AND t.is_active"))).all():
+        rows = ((payload or {}).get("compare") or {}).get("rows") or {}
+        steps = {s["key"]: s for s in (payload or {}).get("steps", [])}
+        shown = lambda key, label: next((n for n in (steps.get(key) or {}).get("numbers", []) + [d for d in (steps.get(key) or {}).get("deeper") or [] if isinstance(d, dict)]
+                                         if n.get("label") == label), None)
+        quarter = (rows.get("growth") or {}).get("quarter") or {}
+        if quarter.get("end") and growth.get(sym):
+            end = date.fromisoformat(quarter["end"])
+            add(sym, "latest quarter", "walkthrough", end)
+            add(sym, "latest quarter", "ticker page growth rows", max(growth[sym]))
+            add(sym, "revenue growth", "walkthrough", shown_number(quarter.get("value")), end)
+            if end in growth[sym]:
+                add(sym, "revenue growth", "ticker page growth rows", round(growth[sym][end], 1), end)
+        walk_pe = (rows.get("valuation") or {}).get("pe") or {}
+        snap = pe.get(sym)
+        if walk_pe.get("end") and snap is not None and snap.status == "ok" and snap.pe is not None:
+            close = date.fromisoformat(walk_pe["end"])
+            add(sym, "P/E", "walkthrough", shown_number(walk_pe.get("value")), close)
+            add(sym, "P/E", "ticker page", round(snap.pe, 2), snap.as_of_date)
+            eps = shown("valuation", "Earnings per share, last four quarters")
+            if eps and snap.eps is not None:
+                add(sym, "trailing EPS", "walkthrough", shown_number(eps["value"]), close)
+                add(sym, "trailing EPS", "ticker page", round(snap.eps, 2), snap.as_of_date)
+        move = shown("upcoming", "Typical move after a report")
+        if move and typical.get(sym):
+            n = re.match(r"(\d+) reports", move.get("as_of") or "")
+            add(sym, "typical move", "walkthrough", shown_number(move["value"]), f"{n.group(1)} reports" if n else None)
+            add(sym, "typical move", "report history", round(typical[sym].pct, 1), f"{typical[sym].n} reports")
+        nxt = shown("upcoming", "Next report")
+        if nxt or header_day(sym):
+            first = re.search(r"[A-Z][a-z]{2} \d{1,2}, \d{4}", (nxt or {}).get("value") or "")
+            add(sym, "next report", "walkthrough", datetime.strptime(first.group(0), "%b %d, %Y").date() if first else "no date")
+            add(sym, "next report", "ticker header", header_day(sym) or "no date")
+
+    # Ivy's Read for the newest chain day, where its text names a report day that has not passed
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    for key, value in (await session.execute(text("""SELECT key, value::jsonb FROM system_metadata WHERE key LIKE :p
+            AND split_part(key, ':', 4) = (SELECT max(split_part(key, ':', 4)) FROM system_metadata WHERE key LIKE :p)"""),
+            {"p": f"options_read:{OPTIONS_READ_CACHE_VERSION}:%"})).all():
+        sym = key.split(":")[2]
+        named = ((value or {}).get("facts") or {}).get("next_earnings_date")
+        if (sym in ids and named and re.fullmatch(r"\d{4}-\d{2}-\d{2}", named) and date.fromisoformat(named) >= today
+                and fmt_date(date.fromisoformat(named)) in ((value or {}).get("content") or "")):
+            add(sym, "next report", "Ivy's Read", date.fromisoformat(named))
+            if not any(place == "ticker header" for place, _, _ in R[sym]["next report"]):
+                add(sym, "next report", "ticker header", header_day(sym) or "no date")
+
+    for sym, tile in (await session.execute(text("""SELECT DISTINCT ON (t.symbol) t.symbol, (n.structured_content -> 'financials' ->> 'revenue_growth_ttm')::float8
+            FROM research_notes n JOIN tickers t ON t.id = n.ticker_id AND t.is_active WHERE n.status = 'complete' ORDER BY t.symbol, n.generated_at DESC"""))).all():
+        if tile is not None and growth.get(sym):
+            add(sym, "revenue growth, note tile", "research note", round(tile, 1), "trailing year")
+            add(sym, "revenue growth, note tile", "ticker page growth rows", round(growth[sym][max(growth[sym])], 1), "latest quarter")
+
+    word = lambda label: "neither" if label is None or label.label == "in line" else label.label.split()[-1]
+    for sym, iv, rv in (await session.execute(text("""SELECT DISTINCT ON (i.symbol) i.symbol, i.atm_iv::float8, r.rv_20d::float8
+            FROM iv_history i JOIN tickers t ON t.symbol = i.symbol AND t.is_active
+            JOIN LATERAL (SELECT rv_20d FROM rv_snapshots s WHERE s.symbol = i.symbol AND s.rv_20d IS NOT NULL ORDER BY s.as_of_date DESC LIMIT 1) r ON true
+            WHERE i.atm_iv IS NOT NULL AND i.iv_source = 'intrinio_mid' AND i.date = (SELECT max(date) FROM iv_history WHERE iv_source = 'intrinio_mid')
+            ORDER BY i.symbol, i.created_at DESC"""))).all():
+        spread = (iv - rv) * 100
+        add(sym, "options word", f"ticker page ({spread:+.1f})", word(spread_label(spread)))
+        add(sym, "options word", "Build a Trade and Discover", word(vol_regime_label(spread)))
+    return R
+
+
+async def check_same_number_same_answer(session) -> CheckResult:
+    """WARN when a figure reads differently in two places a visitor can meet it (same_number_pairs over _same_number_readings): the
+    walkthrough against the ticker page's growth rows, P/E and trailing earnings, the report history and the header's next report;
+    a report date Ivy's Read names against the header's; a research note's growth tile against the filings; and the options word
+    ("rich", "cheap") by the ticker page's cutoffs against Build a Trade's and Discover's. Figures worked out when a page is
+    requested (the price, the implied move on the current quote, the one-year chart) are not on file and are not compared here."""
+    readings = await _same_number_readings(session)
+    pairs = same_number_pairs(readings)
+    total = sum(len(v) for v in pairs.values())
+    by_figure = Counter(figure for figs in readings.values() for figure, seen in figs.items() if len([r for r in seen if r[1] is not None]) > 1)
+    compared = sum(by_figure.values())
+    looked = ["stocks with each figure in two places: " + ", ".join(f"{figure} {n}" for figure, n in sorted(by_figure.items()))]
+    if not total:
+        return CheckResult("same_number_same_answer", PASS, f"{compared} figure(s) shown in two places read the same in both", looked, figures={"same_number_pairs": 0})
+    counts = ", ".join(f"{figure} {len(lines)}" for figure, lines in sorted(pairs.items(), key=lambda kv: -len(kv[1])))
+    details = looked + [line for figure, lines in sorted(pairs.items(), key=lambda kv: -len(kv[1]))
+                        for line in [f"{figure}: {len(lines)} stock(s)"] + [f"  {x}" for x in lines[:SAME_NUMBER_ROWS]]]
+    return CheckResult("same_number_same_answer", WARN, f"{total} of {compared} figure(s) shown in two places read differently ({counts})", details,
+                       figures={"same_number_pairs": total})
+
+
 CHECKS = [
+    # a figure shown in two places reads the same in both
+    check_same_number_same_answer,
     # market values (services/market_value)
     check_market_value_vendor_gap,
     check_market_value_sanity,
