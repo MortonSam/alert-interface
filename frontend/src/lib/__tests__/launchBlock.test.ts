@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { shortCompanyName } from "@/lib/companyName";
@@ -37,6 +37,23 @@ describe("the launch block (2026-10-12)", () => {
     const provider = readFileSync(join(SRC, "components", "PostHogProvider.tsx"), "utf8");
     expect(provider).toMatch(/!analyticsAllowed\(consent\)\) return;/);
     expect(provider.indexOf("analyticsAllowed(consent)")).toBeLessThan(provider.indexOf("posthog.init("));
+  });
+
+  it("downloads posthog-js only after the visitor accepts: no file imports it at the top, the provider imports it after the consent check", () => {
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) { if (e.name !== "__tests__") walk(join(dir, e.name)); }
+        else if (/\.tsx?$/.test(e.name)) files.push(join(dir, e.name));
+      }
+    };
+    walk(SRC);
+    expect(files.length).toBeGreaterThan(50);
+    const topLevel = files.filter((f) => /^import (?!type )[^;]*from "posthog-js/m.test(readFileSync(f, "utf8")));
+    expect(topLevel).toEqual([]);
+    const provider = readFileSync(join(SRC, "components", "PostHogProvider.tsx"), "utf8");
+    expect(provider.indexOf("analyticsAllowed(consent)")).toBeLessThan(provider.indexOf('import("posthog-js")'));
+    expect(provider.indexOf('import("posthog-js")')).toBeGreaterThan(-1);
   });
 
   it("lists every public page and every active ticker in the sitemap, and robots points at it", () => {

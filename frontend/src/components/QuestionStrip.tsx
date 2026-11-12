@@ -2,7 +2,7 @@
 import Explained from "@/components/Explained";
 
 import { useEffect, useState } from "react";
-import posthog from "posthog-js";
+import { capture } from "@/lib/analytics";
 import { AskIvy } from "@/components/AskIvy";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import { api, type QuestionsResponse } from "@/lib/api";
@@ -28,7 +28,7 @@ export function QuestionStrip({ symbol }: { symbol: string }) {
     const next = open === key ? null : key;
     setOpen(next);
     if (next) {
-      try { posthog.capture("question_opened", { ticker: symbol, question: key }); } catch { /* analytics never breaks the page */ }
+      try { capture("question_opened", { ticker: symbol, question: key }); } catch { /* analytics never breaks the page */ }
     }
   };
   return (

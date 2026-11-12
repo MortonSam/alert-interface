@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import AccountPrompt from "@/components/AccountPrompt";
 import { ACCOUNTS_ON, SIGN_IN_STATUS, account } from "@/lib/account";
 import { ACCOUNT_COPY } from "@/lib/accountCopy";
-import posthog from "posthog-js";
+import { capture } from "@/lib/analytics";
 import ExplainTip from "@/components/ticker/ExplainTip";
 import { api, ApiError, type QuestionAnswer } from "@/lib/api";
 import { answerParts, asOfLabel } from "@/lib/questions";
@@ -36,7 +36,7 @@ export function AskIvy({ symbol, name, initialAnswer = null }: { symbol: string;
     try {
       const res = await api.tickers.ask(symbol, q);
       setAnswer(res.answer);
-      try { posthog.capture("question_asked", { ticker: symbol, covered: res.answer.inputs.length > 0, cached: res.cached }); } catch { /* analytics never breaks the page */ }
+      try { capture("question_asked", { ticker: symbol, covered: res.answer.inputs.length > 0, cached: res.cached }); } catch { /* analytics never breaks the page */ }
     } catch (err) {
       if (ACCOUNTS_ON && err instanceof ApiError && err.status === SIGN_IN_STATUS) { setSignedOut(true); return; }
       setError(visitorMessage(err, "Ivy couldn't answer just now. Try again in a few minutes."));

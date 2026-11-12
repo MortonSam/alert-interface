@@ -77,7 +77,7 @@ describe("the question strip renders answers from the API with a receipt on ever
     expect(src.replace(/className="[^"]*"/g, "")).not.toMatch(/[0-9]{2,}|[0-9]%|\$[0-9]/);
     expect(src).toContain("if (!hasQuestions(data)) return null;");
     expect(src).toContain("const next = open === key ? null : key;");                         // one open at a time
-    expect(src).toContain('posthog.capture("question_opened", { ticker: symbol, question: key })');
+    expect(src).toContain('capture("question_opened", { ticker: symbol, question: key })');
     expect(src).toContain("title={part.receipt ?? undefined}");                               // the receipt on the number
     expect(src).toContain("asOfLabel(q.as_of, q.as_of_kind)");
     const page = read("app/tickers/[symbol]/page.tsx");
@@ -94,6 +94,6 @@ describe("the question strip renders answers from the API with a receipt on ever
     expect(src).toContain("title={part.receipt ?? undefined}");                                                    // the receipt on the number
     expect(src).toContain("asOfLabel(answer.as_of, answer.as_of_kind)");                                           // dated by its facts
     expect(src).not.toMatch(/recommend(?!ations\.)/i);                                                            // the only mention says there are none
-    expect(src).toContain('posthog.capture("question_asked"');
+    expect(src).toContain('capture("question_asked"');
   });
 });
