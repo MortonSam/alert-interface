@@ -143,7 +143,7 @@ export function StepScreen({ step, w, learned, others, preview = false }: { step
                   <li key={r.n} className="border-l-2 border-primary/50 pl-3">
                     <Explained text={r.sentence} segments={rSegs[i]} />
                     {step.source?.url && (
-                      <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="ml-2 font-sans text-xs text-cool hover:text-cool/80">{T.readFiling}</a>
+                      <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="tap ml-2 font-sans text-xs text-cool hover:text-cool/80">{T.readFiling}</a>
                     )}
                   </li>
                 ))}
@@ -179,7 +179,7 @@ export function StepScreen({ step, w, learned, others, preview = false }: { step
             ))}
           </dl>
           {step.source?.url && (
-            <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-cool hover:text-cool/80">{step.source.label}</a>
+            <a href={step.source.url} target="_blank" rel="noopener noreferrer" className="tap mt-2 inline-block text-xs text-cool hover:text-cool/80">{step.source.label}</a>
           )}
         </details>
       )}
@@ -265,7 +265,7 @@ function CompareScreen({ w, other, setOther }: { w: Walkthrough; other: string |
       </div>
       <label className="mt-3 block text-xs text-muted-foreground" htmlFor="walk-compare-search">{T.searchPrompt}</label>
       <input id="walk-compare-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={T.searchPlaceholder} autoComplete="off"
-        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-foreground/40" />
+        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base sm:py-2 sm:text-sm outline-none focus:border-foreground/40" />
       {matches.length > 0 && (
         <ul className="mt-1 rounded-lg border border-border divide-y divide-border/60">
           {matches.map((t) => (

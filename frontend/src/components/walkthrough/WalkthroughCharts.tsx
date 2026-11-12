@@ -9,6 +9,10 @@ import { monthLabel, monthTicks, timeRows, yearLabel, yearTicks } from "@/lib/wa
 // Both charts plot points at their dates (a true time axis, lib/walkthroughAxis): a year takes a year's width, and a stretch with no
 // points is a gap in the line.
 
+// The last date label is centred on the final tick, so half of it ("Nov 26", 33px at this size) must fit inside the svg's right edge;
+// the left margin pulls the y axis in, whose width leaves room for a four-character label ("$100").
+const CHART_MARGIN = { top: 6, right: 18, bottom: 0, left: -12 };
+
 /** Step 4: the stock, SPY and the median stock of its sector, each indexed to 100 a year ago. */
 export function PriceVsMarketChart({ chart, name, sector }: { chart: PriceChart; name: string; sector: string | null }) {
   const byDate = new Map<string, Record<string, number | string>>();
@@ -20,7 +24,7 @@ export function PriceVsMarketChart({ chart, name, sector }: { chart: PriceChart;
     <figure className="mt-5">
       <div className="h-[190px] sm:h-[220px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ top: 6, right: 8, bottom: 0, left: -12 }}>
+          <LineChart data={rows} margin={CHART_MARGIN}>
             <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.4} vertical={false} />
             <XAxis dataKey="t" type="number" scale="time" domain={domain} ticks={monthTicks(domain[0], domain[1])} interval={0} tickFormatter={monthLabel} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={44} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
@@ -46,10 +50,10 @@ export function PeRangeChart({ chart }: { chart: PeChart }) {
     <figure className="mt-5">
       <div className="h-[190px] sm:h-[220px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ top: 6, right: 8, bottom: 0, left: -12 }}>
+          <LineChart data={rows} margin={CHART_MARGIN}>
             <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.4} vertical={false} />
             <XAxis dataKey="t" type="number" scale="time" domain={domain} ticks={yearTicks(domain[0], domain[1])} interval={0} tickFormatter={yearLabel} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={40} axisLine={false} tickLine={false} domain={[0, "auto"]} tickFormatter={(v: number) => `$${v}`} />
+            <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={44} axisLine={false} tickLine={false} domain={[0, "auto"]} tickFormatter={(v: number) => `$${v}`} />
             <ReferenceLine y={chart.median} {...peMark("median")} />
             {chart.sector_median != null && <ReferenceLine y={chart.sector_median} {...peMark("sectorMedian")} />}
             <Line dataKey="pe" dot={false} isAnimationActive={false} connectNulls={false} {...peMark("pe")} />
