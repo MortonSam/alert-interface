@@ -17,10 +17,11 @@ CLASS_AXIS = "StatementClassOfStockAxis"
 FORMS = ("10-Q", "10-K", "10-KT")
 
 # A class worth a multiple of the listed class it is priced by: Berkshire's Class A converts into 1,500 Class B shares (BRK-B's
-# close prices every class). Every other multi-class company in the index converts one for one.
-CLASS_MULTIPLE = {"BRK-B": {"ClassA": 1500}}
+# close prices every class); Erie Indemnity's Class B converts into 2,400 Class A shares (ERIE's close prices both). Every other
+# multi-class company in the index converts one for one.
+CLASS_MULTIPLE = {"BRK-B": {"ClassA": 1500}, "ERIE": {"ClassB": 2400}}
 
-MARKET_VALUE_VERSION = 1
+MARKET_VALUE_VERSION = 2        # 2 (2026-11-16): ERIE's Class B counted at 2,400 Class A, not one for one
 MAX_CLOSE_LAG_DAYS = 7          # a symbol whose newest close is this many days behind the newest close on file prices nothing
 
 # A company with more than one class listed in the index: each class on the cover is priced by its own listed symbol's close, and

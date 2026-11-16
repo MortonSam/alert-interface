@@ -40,6 +40,8 @@ def test_one_undimensioned_figure_stands_alone_and_berkshire_a_counts_as_1500_b(
     brk = {"classes": [("CommonClassAMember", 480_000), ("CommonClassBMember", 1_403_810_000)]}
     assert MV.priced_shares("BRK-B", brk) == 480_000 * 1500 + 1_403_810_000
     assert MV.priced_shares("GOOGL", brk) == 480_000 + 1_403_810_000
+    erie = {"classes": [("CommonClassAMember", 46_189_068), ("CommonClassBMember", 2_542)]}   # the 2026-10-23 cover
+    assert MV.priced_shares("ERIE", erie) == 46_189_068 + 2_542 * 2400 == 52_289_868
     assert MV.cover_shares(_ctx("z", "2026-10-23") + _fact("z", "—", fmt="ixt:fixed-zero"))["total"] == 0
     assert MV.cover_shares("<html></html>") is None
 
@@ -59,6 +61,9 @@ def test_each_class_is_priced_by_its_own_close_and_both_symbols_carry_one_figure
     brk = {"as_of": date(2026, 10, 23), "classes": [("us-gaap:CommonClassAMember", 480_000.0), ("us-gaap:CommonClassBMember", 1_403_810_000.0)], "total": 0}
     assert MV.company_value("BRK-B", brk, {"BRK-B": (DAY, 500.0)})["value"] == (480_000 * 1500 + 1_403_810_000) * 500.0
     one = {"as_of": date(2026, 10, 23), "classes": [("", 14_532_182_000.0)], "total": 14_532_182_000.0}
+    erie = {"as_of": date(2026, 10, 23), "classes": [("us-gaap:CommonClassAMember", 46_189_068.0), ("us-gaap:CommonClassBMember", 2_542.0)], "total": 0}
+    ev = MV.company_value("ERIE", erie, {"ERIE": (DAY, 272.09)})
+    assert ev["value"] == (46_189_068 + 2_542 * 2400) * 272.09 and [c["multiple"] for c in ev["classes"]] == [1, 2400]
     assert MV.company_value("AAPL", one, {"AAPL": (DAY, 270.0)})["value"] == 14_532_182_000.0 * 270.0
 
 
@@ -173,7 +178,8 @@ def test_validate_flags_a_valued_stock_whose_share_count_is_past_the_hold_rules_
     assert check_market_value_share_gap in CHECKS
     assert f"{MARKET_VALUE_SHARES_HOLD:.0%}" in MV.UNEXPLAINED                               # the hold rule's own cutoff, not a second number
     row = lambda sym, shares, vendor, value=1.0e10: {"symbol": sym, "company": sym, "value": value, "shares": shares, "vendor_cap": 1.0e10, "vendor_shares": vendor}
-    rows = [row("ERIE", 46_191_610, 52_290_000),                 # Class B converts 2,400 to 1 and is counted one for one: flagged
+    rows = [row("ERIE", 46_191_610, 52_290_000),                 # Class B counted one for one (version 1's figure): flagged
+            row("ERIE2", 52_289_868, 52_290_000),                # Class B at 2,400 Class A (version 2): agrees with the vendor
             row("SKYD", 5_044_222_368, 1_124_520_000),           # the cover is after a merger, the vendor's count before it: flagged
             row("ZTS", 406_316_147, 413_220_000),                # 1.7% apart: fine
             row("BRK-B", 2_124_519_594, 1_430_000),              # explained
