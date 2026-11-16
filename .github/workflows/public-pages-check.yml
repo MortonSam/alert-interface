@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04          # pinned: ubuntu-latest moved to 26.04 (Nov 15), which Playwright does not support
     timeout-minutes: 45
     env:
       BASE: https://alertinterface.com
