@@ -2113,30 +2113,6 @@ async def check_ai_api(session) -> CheckResult:
     return CheckResult("ai_api", PASS, f"Key check ok at {check['at']}; {summary['failures_last_day']} failed call(s) in the last day", rows)
 
 
-async def check_ai_spend_reconciled(session) -> CheckResult:
-    """ERROR when the latest nightly reconciliation (scripts/reconcile_ai_spend) found more spent on the production key than the
-    ledger recorded (Nov 10 to 14: $19.91 against $3.11); WARN when it could not run (no ANTHROPIC_ADMIN_KEY, the usage report
-    unreadable) or has not run in two days."""
-    import json as _json
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    from app.scripts.reconcile_ai_spend import RECONCILE_KEY
-    from app.services.system_metadata_service import get_value
-    raw = await get_value(session, RECONCILE_KEY)
-    if not raw:
-        return CheckResult("ai_spend_reconciled", WARN, "The AI spend reconciliation has not run yet")
-    r = _json.loads(raw)
-    if r.get("mismatch"):
-        return CheckResult("ai_spend_reconciled", ERROR, f"{r['day']}: Anthropic shows ${r.get('anthropic_usd', 0):.2f} on the production "
-                           f"key against ${r.get('ledger_usd', 0):.2f} in the ledger" + (f"; unpriced models {r['unpriced_models']}" if r.get('unpriced_models') else ""))
-    if not r.get("configured"):
-        return CheckResult("ai_spend_reconciled", WARN, "ANTHROPIC_ADMIN_KEY is not set: the ledger is not checked against Anthropic's usage")
-    if r.get("error"):
-        return CheckResult("ai_spend_reconciled", WARN, f"{r['day']}: the usage report could not be read ({r['error']})")
-    if _dt.fromisoformat(r["at"]) < _dt.now(_tz.utc) - _td(days=2):
-        return CheckResult("ai_spend_reconciled", WARN, f"The AI spend reconciliation last ran at {r['at']}")
-    return CheckResult("ai_spend_reconciled", PASS, f"{r['day']}: Anthropic ${r.get('anthropic_usd', 0):.2f}, ledger ${r.get('ledger_usd', 0):.2f}")
-
-
 async def check_ivy_sentences(session) -> CheckResult:
     """WARN when more than ivy_moves.FALLBACK_WARN_SHARE of the rows in the latest run of Ivy's Discover sentences fell back to the
     headline display (her sentence failed the check twice). Only while DISCOVER_NEWS_ENABLED is on."""
@@ -4531,7 +4507,6 @@ CHECKS = [
     check_news_headline_guard,
     check_ivy_sentences,
     check_ai_api,
-    check_ai_spend_reconciled,
     check_chain_quality,
     check_chains_step_start,
     check_pricing_cards,

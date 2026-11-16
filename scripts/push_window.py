@@ -41,11 +41,13 @@ VALIDATE_DB = "alertdb_validate"
 VALIDATE_DB_ASYNC = f"postgresql+asyncpg://alert:alert@db:5432/{VALIDATE_DB}"
 VALIDATE_FIXTURE = "backend/tests/fixtures/validate_fixture.sql"      # written by app.scripts.build_validate_fixture
 STEPS: list[tuple[str, list[str], Path]] = [
-    ("backend tests", ["docker", "compose", "exec", "-T", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",
+    # the key is blanked for every step but the note check: no test or check may reach the API (Sam, 2026-11-16: every local run
+    # blanks the key unless he approved that call; the note check runs only on his push)
+    ("backend tests", ["docker", "compose", "exec", "-T", "-e", "ANTHROPIC_API_KEY=", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",
                        "backend", "python", "-m", "pytest", "tests", "-q", "-n", "auto", "--dist", "loadgroup"], ROOT),
     # every validate check once, read only, on alertdb_validate (the schema with a small fixture loaded): a check whose query Postgres
     # cannot run fails here instead of in the nightly (app/scripts/validate_smoke)
-    ("validate smoke", ["docker", "compose", "exec", "-T", "backend", "python", "-m", "app.scripts.validate_smoke", "--url", VALIDATE_DB_ASYNC], ROOT),
+    ("validate smoke", ["docker", "compose", "exec", "-T", "-e", "ANTHROPIC_API_KEY=", "backend", "python", "-m", "app.scripts.validate_smoke", "--url", VALIDATE_DB_ASYNC], ROOT),
     # a research note end to end, generated, verified and read as a visitor would, for five stocks on the test copy with the dev key
     # (Sam, 2026-10-27: BNY's notes failed for a week unseen); nothing is stored (app/scripts/note_smoke)
     ("note check", ["docker", "compose", "exec", "-T", "-e", f"DATABASE_URL={TEST_DB_ASYNC}", "-e", f"DATABASE_URL_SYNC={TEST_DB_SYNC}",

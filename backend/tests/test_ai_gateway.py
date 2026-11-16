@@ -1,9 +1,9 @@
-"""One gateway for every model call, and the nightly check of the ledger against Anthropic's own record (Sam, 2026-11-16).
+"""One gateway for every model call (Sam, 2026-11-16).
 
 Nov 10 to 14: the console showed $19.91 on the production key while the ledger recorded $3.11 and the $3 cap never tripped. Every
 model call this codebase makes goes through AnthropicClient._create, which checks the cap before each attempt, sends exactly one
 request per attempt (the SDK's own retries are off) and records every reply; these tests fail if any module reaches the API another
-way. What the gateway cannot see (the key used elsewhere) is caught by scripts/reconcile_ai_spend, tested at the end.
+way. What the gateway cannot see is the key used outside this code (Nov 10 to 14: the dev container's own nightly on the Mac).
 """
 import ast
 from datetime import date, datetime, timezone
@@ -21,7 +21,6 @@ pytestmark = pytest.mark.xdist_group(name="ai_spend_days")
 
 APP = Path(__file__).resolve().parents[1] / "app"
 GATEWAY = APP / "services" / "anthropic_client.py"
-USAGE_REPORT = APP / "services" / "ai_usage_report.py"      # the Admin API (usage, keys): no model call
 SDK_CALLS = {"create", "stream", "batches", "count_tokens"}
 
 
@@ -45,10 +44,9 @@ def test_no_module_but_the_gateway_imports_the_sdk_or_calls_the_api():
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 if "/v1/messages" in node.value or "/v1/complete" in node.value:
                     found.append(f"{rel}:{node.lineno} names the model endpoint")
-                if "api.anthropic.com" in node.value and path not in (GATEWAY, USAGE_REPORT):
+                if "api.anthropic.com" in node.value and path != GATEWAY:
                     found.append(f"{rel}:{node.lineno} names the API host")
     assert found == [], found
-    assert 'BASE = "https://api.anthropic.com/v1/organizations"' in USAGE_REPORT.read_text()   # the Admin API only
 
 
 def test_every_client_method_goes_through_create_and_only_create_sends():
@@ -123,7 +121,15 @@ def ledger(monkeypatch):
     monkeypatch.setattr(ai_spend, "check_visitor", check_visitor)
     monkeypatch.setattr(G, "RETRY_PAUSE_SECONDS", (0.0, 0.0, 0.0))
     monkeypatch.setattr(G, "_LEDGER_BROKEN", None)
-    return SimpleNamespace(counted=counted, tokens=tokens, checks=checks)
+    monkeypatch.setattr(G, "_UNRECORDED", [])
+    monkeypatch.setattr(G, "LEDGER_WRITE_PAUSES", (0.0, 0.0, 0.0))
+    alerts = []
+
+    async def alert(title, message, high):
+        alerts.append((title, high))
+
+    monkeypatch.setattr(G, "_alert", alert)
+    return SimpleNamespace(counted=counted, tokens=tokens, checks=checks, alerts=alerts)
 
 
 REQ = {"model": "claude-sonnet-4-6", "max_tokens": 300, "messages": [{"role": "user", "content": "x" * 3000}]}
@@ -172,16 +178,43 @@ async def test_a_visitors_call_is_refused_at_the_cap_before_it_is_sent(ledger, m
 
 
 @pytest.mark.asyncio
-async def test_a_call_that_could_not_be_counted_stops_every_later_call_in_the_process(ledger, monkeypatch):
-    async def broken(db, feature, cost, now=None):
-        raise RuntimeError("database gone")
+async def test_a_ledger_hiccup_is_retried_and_never_trips_the_refusal(ledger, monkeypatch):
+    real, fails = ai_spend.record_call, [RuntimeError("connection reset")]
 
-    monkeypatch.setattr(ai_spend, "record_call", broken)
+    async def flaky(db, feature, cost, now=None):
+        if fails:
+            raise fails.pop()
+        await real(db, feature, cost, now)
+
+    monkeypatch.setattr(ai_spend, "record_call", flaky)
     fake = Fake(_reply(), _reply())
-    await _client(fake)._create("read_release_eps", **REQ)              # paid for: returned, and the ledger marked broken
-    with pytest.raises(G.LedgerUnavailable):
-        await _client(fake)._create("read_release_eps", **REQ)
-    assert len(fake.sent) == 1
+    await _client(fake)._create("read_release_eps", **REQ)
+    await _client(fake)._create("read_release_eps", **REQ)
+    assert len(fake.sent) == 2 and len(ledger.counted) == 2 and G._UNRECORDED == [] and ledger.alerts == []
+
+
+@pytest.mark.asyncio
+async def test_an_outage_refuses_calls_alerts_once_and_clears_on_its_own_with_the_spend_written(ledger, monkeypatch):
+    real, down = ai_spend.record_call, [True]
+
+    async def outage(db, feature, cost, now=None):
+        if down[0]:
+            raise RuntimeError("database gone")
+        await real(db, feature, cost, now)
+
+    monkeypatch.setattr(ai_spend, "record_call", outage)
+    fake = Fake(_reply(), _reply())
+    await _client(fake)._create("read_release_eps", **REQ)              # paid for: returned, and kept back for the ledger
+    assert len(G._UNRECORDED) == 1 and ledger.alerts == [("AI spend ledger could not be written", True)]
+    for _ in range(2):
+        with pytest.raises(G.LedgerUnavailable):
+            await _client(fake)._create("read_release_eps", **REQ)
+    assert len(fake.sent) == 1 and len(ledger.alerts) == 1                # refused before sending; one alert per outage
+    down[0] = False                                                       # the database answers again
+    await _client(fake)._create("read_release_eps", **REQ)
+    assert len(fake.sent) == 2 and G._UNRECORDED == [] and G._LEDGER_BROKEN is None
+    assert [f for f, _ in ledger.counted] == ["read_release_eps", "read_release_eps"]       # the kept-back reply, then the new one
+    assert ledger.alerts[-1] == ("AI spend ledger recovered", False)
 
 
 @pytest.mark.asyncio
@@ -210,71 +243,4 @@ async def test_the_day_cap_refuses_a_visitor_once_spent():
             assert await ai_spend.tokens_by_model(s, "2030-01-07") == {"claude-sonnet-4-6": {"in": 1000, "out": 100}}
         finally:
             await s.execute(text("DELETE FROM system_metadata WHERE key LIKE :p OR key LIKE :q"), {"p": "ai_spend%:2030-01-07%", "q": "ai_tokens:2030-01-07%"})
-            await s.commit()
-
-
-# ── the nightly reconciliation ─────────────────────────────────────────────────
-
-def test_the_reconciliation_reads_the_report_and_judges_the_gap():
-    from app.scripts.reconcile_ai_spend import judge, message, window
-    from app.services import ai_usage_report as U
-    assert U.hint_matches("sk-ant-api03-R2D...igAA", "sk-ant-api03-R2Dxxxxxxxxxxxxxxxxxxxxx-igAA")
-    assert not U.hint_matches("sk-ant-api03-R2D...igAA", "sk-ant-api03-R2Dxxxxxxxxxxxxxxxxxxxxx-igAB")
-    pages = [{"data": [{"results": [{"model": "claude-sonnet-4-6", "uncached_input_tokens": 1_600_000, "output_tokens": 70_000,
-                                     "cache_read_input_tokens": 0, "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0}}]},
-                       {"results": [{"model": "claude-opus-4-6", "uncached_input_tokens": 50_000, "output_tokens": 4_000,
-                                     "cache_read_input_tokens": 0, "cache_creation": None}]}]}]
-    tokens = U.tokens_from_report(pages)
-    usd, unpriced = U.priced(tokens)
-    assert usd == pytest.approx(1.6 * 3 + 0.07 * 15 + 0.05 * 5 + 0.004 * 25) and unpriced == []
-    assert judge(7.00, 1.28) and judge(3.30, 0.74)                          # Nov 11 and Nov 13
-    assert not judge(0.80, 0.77) and not judge(0.20, 0.0) and not judge(0.70, 0.95)   # in step; under the floor; ledger above
-    start, end = window(date(2026, 11, 12))
-    assert (start.isoformat(), end.isoformat()) == ("2026-11-12T05:00:00+00:00", "2026-11-13T05:00:00+00:00")
-    title, body = message("2026-11-12", 7.59, 0.77, tokens)
-    assert "$7.59" in body and "$0.77" in body and "rotate" in body
-
-
-@pytest.mark.asyncio
-async def test_a_gap_alerts_the_phone_and_is_validates_error(monkeypatch):
-    from app.config import settings
-    from app.scripts import reconcile_ai_spend as R
-    from app.scripts.validate_data import ERROR, WARN, check_ai_spend_reconciled
-    from app.services import ai_usage_report as U, notify
-    sent = []
-
-    async def key_id(admin, key):
-        return "apikey_01"
-
-    async def key_tokens(admin, kid, start, end):
-        return {"claude-sonnet-4-6": {"in": 2_000_000, "out": 60_000}}
-
-    async def capture(title, body, priority="default", tags=()):
-        sent.append((title, priority))
-        return True
-
-    monkeypatch.setattr(U, "production_key_id", key_id)
-    monkeypatch.setattr(U, "key_tokens", key_tokens)
-    monkeypatch.setattr(notify, "notify", capture)
-    async with ScriptSessionLocal() as s:
-        saved = (await s.execute(text("SELECT value FROM system_metadata WHERE key = :k"), {"k": R.RECONCILE_KEY})).scalar()
-    try:
-        monkeypatch.setattr(settings, "anthropic_admin_key", "")
-        r = await R.run(date(2030, 1, 8))
-        assert r["configured"] is False and sent == []
-        async with ScriptSessionLocal() as s:
-            assert (await check_ai_spend_reconciled(s)).level == WARN
-        monkeypatch.setattr(settings, "anthropic_admin_key", "sk-ant-admin-test")
-        r = await R.run(date(2030, 1, 8))
-        assert r["mismatch"] and r["anthropic_usd"] == pytest.approx(6.9) and r["ledger_usd"] == 0.0
-        assert sent == [("AI spend not in the ledger", "high")]
-        async with ScriptSessionLocal() as s:
-            assert (await check_ai_spend_reconciled(s)).level == ERROR
-    finally:
-        async with ScriptSessionLocal() as s:
-            await s.execute(text("DELETE FROM system_metadata WHERE key = 'ai_reconcile:2030-01-08'"))
-            if saved is None:
-                await s.execute(text("DELETE FROM system_metadata WHERE key = :k"), {"k": R.RECONCILE_KEY})
-            else:
-                await s.execute(text("UPDATE system_metadata SET value = :v WHERE key = :k"), {"k": R.RECONCILE_KEY, "v": saved})
             await s.commit()

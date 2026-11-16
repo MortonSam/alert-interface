@@ -34,7 +34,8 @@ def _scrub_dashes(text: str) -> str:
 # Every model call made by this codebase goes through AnthropicClient._create, and tests/test_ai_gateway.py fails if any module
 # imports the SDK, builds its client or calls the API anywhere else. _create, for every attempt of every call:
 #   - refuses before sending when the day's cap leaves it no room (a nightly-pool call: ai_spend.check_nightly, as before; a
-#     visitor's call: ai_spend.check_visitor, the cap itself) or when this process could not write the ledger earlier;
+#     visitor's call: ai_spend.check_visitor, the cap itself) or while a paid reply is still waiting to be written to the ledger
+#     (it is written first when the database answers, and the refusal clears on its own);
 #   - sends exactly one request: the SDK's own retries are off (max_retries=0), so no attempt is ever sent unseen; the gateway
 #     retries itself, re-checking the cap each time;
 #   - counts the reply's cost and tokens by day, pool, feature and model (ai_spend.record_call, record_tokens), and an attempt that
@@ -45,10 +46,12 @@ RETRY_PAUSE_SECONDS = (1.0, 4.0, 10.0)
 
 
 class LedgerUnavailable(RuntimeError):
-    """Refused before sending: an earlier call in this process could not be written to the spend ledger."""
+    """Refused before sending: a reply this process could not write to the spend ledger is still waiting to be written."""
 
 
-_LEDGER_BROKEN: str | None = None      # set once a reply could not be counted; every later call in this process is refused
+LEDGER_WRITE_PAUSES = (0.0, 0.5, 2.0)  # a reply's ledger write is tried three times before it is kept back
+_UNRECORDED: list[dict] = []           # replies (or timed-out attempts) paid for but not yet in the ledger, oldest first
+_LEDGER_BROKEN: str | None = None      # why, while _UNRECORDED is not empty: every call is refused until they are written
 
 
 def _retryable(exc: Exception) -> tuple[bool, bool]:
@@ -63,39 +66,82 @@ def _retryable(exc: Exception) -> tuple[bool, bool]:
     return (status in RETRYABLE_STATUS), False
 
 
-async def _record_call(method: str, model: str | None, msg) -> None:
-    """Count one reply's estimated cost and tokens in services/ai_spend. A reply that cannot be counted marks the ledger broken for
-    this process (every later call is refused) and is reported; it never fails the call it counts, which is already paid for."""
-    global _LEDGER_BROKEN
+async def _write(entry: dict) -> None:
+    """One ledger write: the reply's tokens (when known) and its cost, in one transaction (record_call commits)."""
+    from app.database import ScriptSessionLocal
+    from app.services import ai_spend
+    async with ScriptSessionLocal() as s:
+        if entry["tokens"] is not None:
+            await ai_spend.record_tokens(s, entry["model"], *entry["tokens"])
+        await ai_spend.record_call(s, entry["method"], entry["cost"])
+
+
+async def _alert(title: str, message: str, high: bool) -> None:
     try:
-        from app.database import ScriptSessionLocal
-        from app.services import ai_spend
-        from app.services.research_cost import estimate_cost_usd
-        u = getattr(msg, "usage", None)
-        tin, tout = getattr(u, "input_tokens", None), getattr(u, "output_tokens", None)
-        cw, cr = getattr(u, "cache_creation_input_tokens", 0) or 0, getattr(u, "cache_read_input_tokens", 0) or 0
-        cost = estimate_cost_usd(model, tin, tout, cw, cr)
-        async with ScriptSessionLocal() as s:
-            await ai_spend.record_tokens(s, model, tin or 0, cw, cr, tout or 0)
-            await ai_spend.record_call(s, method, cost)
-    except Exception as exc:
-        from app.services.redact import redact
-        _LEDGER_BROKEN = f"{method}: {redact(exc)[:120]}"
-        print(f"[ai-spend] {method}: spend not recorded, further calls refused in this process: {_LEDGER_BROKEN}", flush=True)
+        from app.services import notify
+        await notify.notify(title, message, notify.PRIORITY_HIGH if high else notify.PRIORITY_DEFAULT, ("money_with_wings",))
+    except Exception:
+        pass                               # the alert is a courtesy; the refusal does not depend on it
+
+
+async def _count(entry: dict) -> None:
+    """Write one paid reply to the ledger, retrying (LEDGER_WRITE_PAUSES). When every try fails it is kept in _UNRECORDED, calls are
+    refused until it is written (_settle_ledger), and Sam's phone is alerted once per outage. It never fails the call it counts,
+    which is already paid for."""
+    import asyncio
+    global _LEDGER_BROKEN
+    err: Exception | None = None
+    for pause in LEDGER_WRITE_PAUSES:
+        if pause:
+            await asyncio.sleep(pause)
+        try:
+            await _write(entry)
+            return
+        except Exception as exc:
+            err = exc
+    from app.services.redact import redact
+    _UNRECORDED.append(entry)
+    first = _LEDGER_BROKEN is None
+    _LEDGER_BROKEN = f"{entry['method']}: {redact(err)[:120]}"
+    print(f"[ai-spend] {entry['method']}: ${entry['cost'] or 0:.4f} not recorded; calls refused until it is: {_LEDGER_BROKEN}", flush=True)
+    if first:
+        await _alert("AI spend ledger could not be written",
+                     f"A model reply ({entry['method']}) could not be written to the spend ledger after {len(LEDGER_WRITE_PAUSES)} tries: "
+                     f"{_LEDGER_BROKEN}. AI calls are refused until it is written; this clears on its own once the database answers.", True)
+
+
+async def _settle_ledger() -> None:
+    """Before any call while replies are kept back: write them (one try each, oldest first). All written: the refusal clears and
+    the phone is told; any still failing: LedgerUnavailable, and the next call tries again."""
+    global _LEDGER_BROKEN
+    from app.services.redact import redact
+    while _UNRECORDED:
+        try:
+            await _write(_UNRECORDED[0])
+        except Exception as exc:
+            raise LedgerUnavailable(f"model call refused: {len(_UNRECORDED)} paid repl(ies) not yet in the spend ledger "
+                                    f"({_LEDGER_BROKEN}; now {redact(exc)[:80]})") from None
+        _UNRECORDED.pop(0)
+    if _LEDGER_BROKEN:
+        was, _LEDGER_BROKEN = _LEDGER_BROKEN, None
+        print(f"[ai-spend] ledger written again; calls allowed (was: {was})", flush=True)
+        await _alert("AI spend ledger recovered", f"The kept-back spend was written and AI calls are allowed again (was: {was}).", False)
+
+
+async def _record_call(method: str, model: str | None, msg) -> None:
+    """Count one reply's estimated cost and tokens in services/ai_spend (_count)."""
+    from app.services.research_cost import estimate_cost_usd
+    u = getattr(msg, "usage", None)
+    tin, tout = getattr(u, "input_tokens", None), getattr(u, "output_tokens", None)
+    cw, cr = getattr(u, "cache_creation_input_tokens", 0) or 0, getattr(u, "cache_read_input_tokens", 0) or 0
+    await _count({"method": method, "model": model, "tokens": (tin or 0, cw, cr, tout or 0),
+                  "cost": estimate_cost_usd(model, tin, tout, cw, cr)})
 
 
 async def _record_unseen(method: str, model: str | None, kwargs: dict) -> None:
     """An attempt that timed out after it was sent: counted at its ceiling (ai_spend.call_ceiling_usd), since it may be billed."""
-    global _LEDGER_BROKEN
-    try:
-        from app.database import ScriptSessionLocal
-        from app.services import ai_spend
-        async with ScriptSessionLocal() as s:
-            await ai_spend.record_call(s, method, ai_spend.call_ceiling_usd(model, kwargs))
-    except Exception as exc:
-        from app.services.redact import redact
-        _LEDGER_BROKEN = f"{method}: {redact(exc)[:120]}"
-        print(f"[ai-spend] {method}: a timed-out attempt not recorded: {_LEDGER_BROKEN}", flush=True)
+    from app.services import ai_spend
+    await _count({"method": method, "model": model, "tokens": None, "cost": ai_spend.call_ceiling_usd(model, kwargs)})
 
 
 class AnthropicClient:
@@ -120,8 +166,8 @@ class AnthropicClient:
         model = kwargs.get("model")
         attempts = 1 + getattr(self, "_retries", 0)
         for attempt in range(1, attempts + 1):
-            if _LEDGER_BROKEN:
-                raise LedgerUnavailable(f"model call refused: the spend ledger could not be written earlier ({_LEDGER_BROKEN})")
+            if _UNRECORDED:
+                await _settle_ledger()
             async with ScriptSessionLocal() as s:
                 if ai_spend.pool() == ai_spend.NIGHTLY:
                     await ai_spend.check_nightly(s, model, kwargs, skip_pause=probe)

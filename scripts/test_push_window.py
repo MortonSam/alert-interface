@@ -168,3 +168,12 @@ class NightlyTests(unittest.TestCase):
         finally:
             for p in patches:
                 p.stop()
+
+
+class KeyBlanked(unittest.TestCase):
+    def test_only_the_note_check_carries_the_key(self):
+        """Sam, 2026-11-16: every local run blanks the key unless he approved that call; only the note check (his push) needs it."""
+        for name, cmd, _ in STEPS:
+            if cmd[:3] == ["docker", "compose", "exec"] and "backend" in cmd:
+                blanked = "ANTHROPIC_API_KEY=" in cmd[:cmd.index("backend")]
+                self.assertEqual(blanked, name != "note check", name)
