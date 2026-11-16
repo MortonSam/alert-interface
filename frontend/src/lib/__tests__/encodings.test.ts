@@ -11,7 +11,7 @@ import { EARNINGS_PROXIMITY_ENCODING, earningsProximity, earningsProximityLegend
 import { PICK_MOVE_ENCODING, PICK_RESULT_ENCODING, pickMove, pickResult, pickResultLegend } from "../encodings/pickResult";
 import { MARK_BASIS_LABELS, markBasisLegend } from "../marks";
 import { rvRankShort } from "../utils";
-import { DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP, RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL, TAPE_CHOPPIEST_RANK, TAPE_ONE_OF_CHOPPIEST_RANK } from "../thresholds";
+import { SPREAD_CHEAP_PP, SPREAD_RICH_PP, RV_RANK_ELEVATED, RV_RANK_EXTREME, RV_RANK_NORMAL, TAPE_CHOPPIEST_RANK, TAPE_ONE_OF_CHOPPIEST_RANK } from "../thresholds";
 
 const SRC = join(__dirname, "../..");
 const read = (p: string) => readFileSync(join(SRC, p), "utf8");
@@ -95,7 +95,7 @@ describe("RV tier", () => {
 describe("vol regime", () => {
   it("rules quote the thresholds, and cheap is not the up/beat green", () => {
     // one plain sentence with one example in parentheses worked from the cutoffs, no colon and no "points" (Sam, 2026-11-11)
-    const rich = 30 + DISCOVER_IV_RICH_PP, cheap = 30 + DISCOVER_IV_CHEAP_PP;
+    const rich = 30 + SPREAD_RICH_PP, cheap = 30 + SPREAD_CHEAP_PP;
     expect(VOL_REGIME_ENCODING.iv_rich.rule).toBe(`Options expect more swing than the stock has shown lately (for example, over ${rich}% a year where the stock has shown 30%).`);
     expect(VOL_REGIME_ENCODING.iv_cheap.rule).toBe(`Options expect less swing than the stock has shown lately (for example, under ${cheap}% a year where the stock has shown 30%).`);
     expect(VOL_REGIME_ENCODING.iv_fair.rule).toBe(`Options expect about the swing the stock has shown lately (for example, from ${cheap}% to ${rich}% a year where the stock has shown 30%).`);

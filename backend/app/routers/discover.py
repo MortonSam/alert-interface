@@ -19,7 +19,7 @@ from app.services.earnings_calendar import level_of, shown_level
 from app.services.next_earnings import batch_next_earnings
 from app.constants import LEDGER_PUBLIC, LEDGER_START
 from app.thresholds import (
-    DISCOVER_IV_RICH_PP, DISCOVER_IV_CHEAP_PP,
+    vol_regime_key,
     DISCOVER_EXTREME_RV, DISCOVER_ELEVATED_RV,
     discover_rv_tier,
     rv_rank_label,
@@ -371,11 +371,8 @@ async def _batch_vol_regime(
             regime = None
         elif atm_iv is not None and rv_20d is not None and rv_20d > 0:
             spread_pp = round((atm_iv - rv_20d) * 100, 1)
-            if spread_pp > DISCOVER_IV_RICH_PP:
-                regime = "iv_rich"
-            elif spread_pp < DISCOVER_IV_CHEAP_PP:
-                regime = "iv_cheap"
-            else:
+            regime = vol_regime_key(spread_pp)
+            if regime == "iv_fair":
                 regime = None  # no chip
         else:
             spread_pp = None

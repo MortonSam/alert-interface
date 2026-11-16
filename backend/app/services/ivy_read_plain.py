@@ -24,7 +24,8 @@ from datetime import date
 from app.services.move_comparison import COMPARISON_WORDS
 from app.thresholds import SPREAD_CHEAP_PP, SPREAD_RICH_PP, rv_rank_label
 
-READ_PLAIN_VERSION = 4           # 2 (2026-10-26): typical move and the more/less/same swing line required; report share only on a company-confirmed date
+READ_PLAIN_VERSION = 5           # 5 (2026-11-16): line E's word by the one set of spread cutoffs (+8 / -4, the draft rules'), was +10 / -10
+                                 # 2 (2026-10-26): typical move and the more/less/same swing line required; report share only on a company-confirmed date
                                  # 3 (Sam, 2026-10-26 evening): the span sentence (line S), line D's words, line B ends with the comparison
                                  # 4 (Sam, 2026-10-27): the lines themselves, no model; line A names the company
 MAX_SENTENCES = 5                # A, S, C, E, D without a report share; A, B, E, D with one

@@ -1,13 +1,13 @@
 // IV versus realized volatility regime chip (discover cards, Build a Trade, My Trades).
 // "Cheap" is not "good": the chip uses a neutral cool color, never the up/beat green.
-import { DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP } from "@/lib/thresholds";
+import { SPREAD_CHEAP_PP, SPREAD_RICH_PP } from "@/lib/thresholds";
 import type { LegendItem } from "./types";
 
 // Each rule is one plain sentence with one example in parentheses, comparing two yearly figures, with no colon and never in
 // "points" (Sam, 2026-11-11). The example is worked from the cutoffs: the regime is rich above EXAMPLE_RV + RICH and cheap below
 // EXAMPLE_RV - CHEAP.
 const EXAMPLE_RV = 30;
-const RICH = DISCOVER_IV_RICH_PP, CHEAP = Math.abs(DISCOVER_IV_CHEAP_PP);
+const RICH = SPREAD_RICH_PP, CHEAP = Math.abs(SPREAD_CHEAP_PP);
 const example = (range: string) => `(for example, ${range} a year where the stock has shown ${EXAMPLE_RV}%).`;
 
 export const VOL_REGIME_ENCODING = {

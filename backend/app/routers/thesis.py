@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import check_ownership, get_current_user, get_draft_caller, may_read_ledger, viewer_role
-from app.thresholds import MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD
+from app.thresholds import MAGNITUDE_INCREASE_THRESHOLD, MAGNITUDE_DECREASE_THRESHOLD, vol_regime_key
 from app.database import get_db
 from app.models.alert_pick import AlertPick, AlertPickEvaluation
 from app.models.analyst_recommendation import AnalystRecommendation
@@ -502,14 +502,7 @@ async def _gather_draft_data(sym: str, db: AsyncSession, source: str = "manual")
     )
 
     # ── 5b. Vol-regime classification ───────────────────────────────────────
-    vol_regime: str | None = None
-    if iv_rv_spread_pp is not None:
-        if iv_rv_spread_pp > 8:
-            vol_regime = "iv_rich"
-        elif iv_rv_spread_pp < -4:
-            vol_regime = "iv_cheap"
-        else:
-            vol_regime = "iv_fair"
+    vol_regime: str | None = vol_regime_key(iv_rv_spread_pp)     # thresholds: the one set of cutoffs
 
     return {
         "sym": sym,

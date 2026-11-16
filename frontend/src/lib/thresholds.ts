@@ -11,13 +11,11 @@ export const RV_RANK_EXTREME = 90;
 export const RV_RANK_ELEVATED = 70;
 export const RV_RANK_NORMAL = 25;
 
-// ── IV-RV spread (ticker page) ─────────────────────────────────────
-export const SPREAD_RICH_PP = 10;
-export const SPREAD_CHEAP_PP = -10;
-
-// ── IV-RV spread (discover page vol regime) ────────────────────────
-export const DISCOVER_IV_RICH_PP = 8;
-export const DISCOVER_IV_CHEAP_PP = -4;
+// ── IV-RV spread: one set of cutoffs everywhere ────────────────────
+// The draft rules' cutoffs: the ticker page's spread row (lib/optionsRows) and the vol regime chip (lib/encodings/volRegime) both
+// read these, and nothing else may define its own (lib/__tests__/spreadCutoffs.test.ts, backend tests/test_spread_cutoffs.py).
+export const SPREAD_RICH_PP = 8;
+export const SPREAD_CHEAP_PP = -4;
 
 // ── Put/call ratio ─────────────────────────────────────────────────
 export const PC_PUT_HEAVY = 1.2;

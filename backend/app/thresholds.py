@@ -36,37 +36,47 @@ def rv_rank_label(rank: float | None) -> LabeledValue | None:
     return LabeledValue("quiet", f"rank below {RV_RANK_NORMAL}")
 
 
-# ── IV-RV spread ─────────────────────────────────────────────────────────────
+# ── IV-RV spread: one set of cutoffs everywhere ──────────────────────────────
+# Implied minus realized volatility, in points of annual volatility. Options are "rich" (pricey) above SPREAD_RICH_PP and
+# "cheap" below SPREAD_CHEAP_PP. These are the cutoffs Build a Trade's draft rules choose a structure by (vol_regime_key ->
+# services/draft_rules.structure_for); the ticker page's spread row, Ivy's Read, Discover's and Build a Trade's chip, the API's
+# label-and-rule fields and validate's same_number_same_answer all read them here (Sam's item 7, 2026-11-16: the row used
+# +10 / -10 and the chip +8 / -4, so 104 of 501 stocks read differently). tests/test_spread_cutoffs.py fails on any other copy.
 
-SPREAD_RICH_PP = 10
-SPREAD_CHEAP_PP = -10
+SPREAD_RICH_PP = 8
+SPREAD_CHEAP_PP = -4
 
 
-def spread_label(spread_pp: float | None) -> LabeledValue | None:
+def vol_regime_key(spread_pp: float | None) -> str | None:
+    """"iv_rich" | "iv_cheap" | "iv_fair", or None without a spread: the draft rules' regime, by the one set of cutoffs."""
     if spread_pp is None:
         return None
     if spread_pp > SPREAD_RICH_PP:
-        return LabeledValue("options rich", f"implied vol {SPREAD_RICH_PP}+ points above realized")
+        return "iv_rich"
     if spread_pp < SPREAD_CHEAP_PP:
+        return "iv_cheap"
+    return "iv_fair"
+
+
+def spread_label(spread_pp: float | None) -> LabeledValue | None:
+    """The ticker page's spread label (the API's spread_labeled), by vol_regime_key."""
+    regime = vol_regime_key(spread_pp)
+    if regime == "iv_rich":
+        return LabeledValue("options rich", f"implied vol {SPREAD_RICH_PP}+ points above realized")
+    if regime == "iv_cheap":
         return LabeledValue("options cheap", f"implied vol {abs(SPREAD_CHEAP_PP)}+ points below realized")
-    return LabeledValue("in line", "implied and realized vol within 10 points")
-
-
-# ── IV-RV spread for discover (vol regime) ───────────────────────────────────
-# Discover page uses wider asymmetric bands for badge assignment.
-
-DISCOVER_IV_RICH_PP = 8
-DISCOVER_IV_CHEAP_PP = -4
+    if regime == "iv_fair":
+        return LabeledValue("in line", f"implied vol from {abs(SPREAD_CHEAP_PP)} points below to {SPREAD_RICH_PP} points above realized")
+    return None
 
 
 def vol_regime_label(spread_pp: float | None) -> LabeledValue | None:
-    """Label used by the discover page vol-regime badges."""
-    if spread_pp is None:
-        return None
-    if spread_pp > DISCOVER_IV_RICH_PP:
-        return LabeledValue("IV rich", f"implied vol {DISCOVER_IV_RICH_PP}+ points above realized")
-    if spread_pp < DISCOVER_IV_CHEAP_PP:
-        return LabeledValue("IV cheap", f"implied vol {abs(DISCOVER_IV_CHEAP_PP)}+ points below realized")
+    """Label used by the Discover / Build a Trade vol-regime chip: none inside the band (no chip), by vol_regime_key."""
+    regime = vol_regime_key(spread_pp)
+    if regime == "iv_rich":
+        return LabeledValue("IV rich", f"implied vol {SPREAD_RICH_PP}+ points above realized")
+    if regime == "iv_cheap":
+        return LabeledValue("IV cheap", f"implied vol {abs(SPREAD_CHEAP_PP)}+ points below realized")
     return None  # no badge
 
 

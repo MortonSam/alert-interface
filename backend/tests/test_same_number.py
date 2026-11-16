@@ -54,12 +54,11 @@ def test_the_check_runs_nightly_and_every_figure_it_names_has_a_rule():
     assert all(t > 0 for t in SAME_NUMBER_TOLERANCE.values())
 
 
-def test_the_options_word_is_one_rule_or_the_check_says_where_it_is_not():
-    """The ticker page and Ivy's Read word the options by one pair of cutoffs, Build a Trade and Discover by another; until Sam picks
-    one, a stock between the two is listed by the check. With one rule, no stock can be."""
-    from app.thresholds import DISCOVER_IV_CHEAP_PP, DISCOVER_IV_RICH_PP, SPREAD_CHEAP_PP, SPREAD_RICH_PP, spread_label, vol_regime_label
+def test_the_options_word_is_one_rule():
+    """The ticker page, Ivy's Read, Build a Trade and Discover word the options by one pair of cutoffs (item 7, 2026-11-16), so the
+    check's two readings of the options word can never differ."""
+    from app.thresholds import SPREAD_CHEAP_PP, SPREAD_RICH_PP, spread_label, vol_regime_label
     word = lambda label: "neither" if label is None or label.label == "in line" else label.label.split()[-1]
-    between = [x for x in (-12, -7, 0, 9, 12) if word(spread_label(x)) != word(vol_regime_label(x))]
-    one_rule = (SPREAD_RICH_PP, SPREAD_CHEAP_PP) == (DISCOVER_IV_RICH_PP, DISCOVER_IV_CHEAP_PP)
-    assert (between == []) == one_rule
+    probes = [SPREAD_CHEAP_PP - 0.1, SPREAD_CHEAP_PP, SPREAD_CHEAP_PP + 0.1, -12, -7, 0, 9, 12, SPREAD_RICH_PP - 0.1, SPREAD_RICH_PP, SPREAD_RICH_PP + 0.1]
+    assert [x for x in probes if word(spread_label(x)) != word(vol_regime_label(x))] == []
     assert {word(spread_label(x)) for x in (-50, 0, 50)} == {word(vol_regime_label(x)) for x in (-50, 0, 50)} == {"cheap", "neither", "rich"}

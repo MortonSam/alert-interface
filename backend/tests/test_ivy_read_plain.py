@@ -6,9 +6,10 @@ import re
 from app.services import ivy_read_plain as P
 
 # NVDA as production showed it on 2026-10-22: Details ±8.9% / $19.65 by Nov 20, about 4.4% from the Nov 17 report, typical 6.5%
-# over 21 reports ("less than usual"), spread +8.8 points (the row: about the same), RV rank 11.4 (quiet)
+# over 21 reports ("less than usual"), RV rank 11.4 (quiet). Its spread was +8.8 points, about the same under the old +10 / -10 row
+# cutoffs and pricey under the one set (+8 / -4, 2026-11-16); the fixture takes +3.8 so the row still reads about the same.
 NVDA_VALUES = {"expected_move_pct": 0.0886, "expected_move_dollars": 19.65, "expiration_used": "2026-11-20", "chain_date": "2026-10-21",
-               "iv_rv_spread_pp": 8.8, "rv_rank": 11.4, "rv_percentile": 4.4, "next_earnings_date": "2026-11-17"}
+               "iv_rv_spread_pp": 3.8, "rv_rank": 11.4, "rv_percentile": 4.4, "next_earnings_date": "2026-11-17"}
 NVDA_REPORT = {"report_move_state": "ok", "report_move_pct": 0.044, "report_move": {"report_date": "2026-11-17"},
                "typical_move_pct": 6.5, "typical_n": 21, "move_comparison": "less than usual", "report_confirmed": True}
 NVDA = P.page_facts(symbol="NVDA", name="NVIDIA Corporation", fact_values=NVDA_VALUES, report=NVDA_REPORT)
@@ -46,7 +47,9 @@ def test_the_facts_and_band_words_are_the_pages_own():
     assert [short_name(n) for n in ("Goldman Sachs Group, Inc. (The)", "Coca-Cola Company (The)", "Procter & Gamble Company (The)",
                                      "Kimco Realty Corporation (HC)", "Southern Company (The)")] == \
         ["Goldman Sachs", "Coca-Cola", "Procter & Gamble", "Kimco Realty", "Southern"]
-    assert P.spread_word(10.1) == "pricey" and P.spread_word(10.0) == "about the same" and P.spread_word(-10.1) == "cheap"
+    from app.thresholds import SPREAD_CHEAP_PP, SPREAD_RICH_PP
+    assert P.spread_word(SPREAD_RICH_PP + 0.1) == "pricey" and P.spread_word(SPREAD_RICH_PP) == "about the same"
+    assert P.spread_word(SPREAD_CHEAP_PP) == "about the same" and P.spread_word(SPREAD_CHEAP_PP - 0.1) == "cheap"
     # the band is the percentile's, like the page's row (MRNA, Oct 23: rank 19.6 but more than on 90% of days)
     mrna = P.page_facts(symbol="MRNA", name="Moderna", fact_values={**NVDA_VALUES, "rv_rank": 19.6, "rv_percentile": 90.9}, report=None)
     assert mrna["swing_band"] == "extreme" and mrna["lately"] == "much busier than usual"
