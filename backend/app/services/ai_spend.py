@@ -29,6 +29,8 @@ UNPRICED_KEY = "ai_spend_unpriced"  # "ai_spend_unpriced:{day}" counts model cal
 POOL_KEY = "ai_spend_pool"          # "ai_spend_pool:{day}:{pool}": the day's spend by pool
 FEATURE_KEY = "ai_spend_feature"    # "ai_spend_feature:{day}:{pool}:{feature}": the day's spend by pool and feature
 CALLS_KEY = "ai_spend_calls"        # "ai_spend_calls:{day}:{pool}:{feature}": the day's model calls by pool and feature
+TOKENS_KEY = "ai_tokens"            # "ai_tokens:{day}:{model}:{kind}": the day's tokens by model (in, cache_write, cache_read, out), which
+                                    # the nightly reconciliation (scripts/reconcile_ai_spend) sets against Anthropic's own usage report
 CLOCK = ZoneInfo("America/New_York")
 
 VISITOR, NIGHTLY = "visitor", "nightly"
@@ -37,6 +39,10 @@ _POOL: contextvars.ContextVar[str] = contextvars.ContextVar("ai_spend_pool", def
 
 class NightlyBudgetReached(RuntimeError):
     """A nightly-pool model call refused before it was sent: it could leave visitors less than their reserve of today's cap."""
+
+
+class DailyCapReached(RuntimeError):
+    """A visitor's model call refused before it was sent: today's cap is spent (the gateway's own check, under each feature's)."""
 
 
 def pool() -> str:
@@ -170,13 +176,21 @@ async def _incr(db, key: str, amount: float) -> None:
         updated_at = now()"""), {"k": key, "v": f"{amount:.5f}"})
 
 
-async def check_nightly(db, model: str | None, request: dict, now: datetime | None = None) -> None:
+async def check_visitor(db, now: datetime | None = None) -> None:
+    """Before a visitor's call (the gateway, AnthropicClient._create): raise DailyCapReached once today's cap is spent, whatever
+    the feature checked itself."""
+    if await cap_reached(db, now):
+        raise DailyCapReached(f"model call refused: today's ${cap_usd(date.fromisoformat(spend_day(now))):.2f} AI cap is spent")
+
+
+async def check_nightly(db, model: str | None, request: dict, now: datetime | None = None, skip_pause: bool = False) -> None:
     """Before a nightly-pool call: raise NightlyBudgetReached when its ceiling would cut into the visitors' reserve. A visitor
-    call passes (its feature checks `cap_reached` itself); so does an unpriced model's call, which is counted apart."""
+    call passes here (the gateway checks it with check_visitor); so does an unpriced model's call, which is counted apart.
+    `skip_pause`: the key check, which runs while paused because it is what ends the pause."""
     if pool() != NIGHTLY:
         return
     from app.services import ai_pause
-    pause = await ai_pause.paused(db)
+    pause = None if skip_pause else await ai_pause.paused(db)
     if pause:                                     # the key check found no credit: nothing is sent tonight (services/ai_pause)
         raise NightlyBudgetReached(f"nightly AI call refused: AI paused since {ai_pause.since_words(pause)} ({pause.get('kind')})")
     ceiling = call_ceiling_usd(model, request)
@@ -187,6 +201,25 @@ async def check_nightly(db, model: str | None, request: dict, now: datetime | No
     if ceiling > room:
         raise NightlyBudgetReached(f"nightly AI call refused: it could cost ${ceiling:.2f} and only ${room:.2f} of today's "
                                    f"${cap_usd(day):.2f} cap is left before visitors' ${visitor_reserve(cap_usd(day)):.2f}")
+
+
+async def record_tokens(db, model: str | None, uncached_in: int, cache_write: int, cache_read: int, out: int,
+                        now: datetime | None = None) -> None:
+    """A reply's tokens by model and kind, added to the day (not committed: record_call commits)."""
+    day, m = spend_day(now), model or "unknown"
+    for kind, n in (("in", uncached_in), ("cache_write", cache_write), ("cache_read", cache_read), ("out", out)):
+        if n:
+            await _incr(db, f"{TOKENS_KEY}:{day}:{m}:{kind}", n)
+
+
+async def tokens_by_model(db, day: str) -> dict[str, dict[str, int]]:
+    """The day's ledger tokens: {model: {kind: n}}."""
+    rows = (await db.execute(text("SELECT key, value FROM system_metadata WHERE key LIKE :p"), {"p": f"{TOKENS_KEY}:{day}:%"})).all()
+    out: dict[str, dict[str, int]] = {}
+    for key, value in rows:
+        _k, _d, model, kind = key.split(":", 3)
+        out.setdefault(model, {})[kind] = int(float(value))
+    return out
 
 
 async def record_call(db, feature: str, cost: float | None, now: datetime | None = None) -> None:

@@ -70,8 +70,11 @@ async def test_the_client_refuses_a_nightly_call_without_sending_it_and_counts_e
             return SimpleNamespace(usage=SimpleNamespace(input_tokens=1000, output_tokens=100, cache_creation_input_tokens=0,
                                                          cache_read_input_tokens=0), content=[])
 
-    async def refuse(db, model, request, now=None):
+    async def refuse(db, model, request, now=None, skip_pause=False):
         raise ai_spend.NightlyBudgetReached("no room")
+
+    async def room(db, now=None):
+        return None
 
     async def count(db, feature, cost, now=None):
         counted.append((feature, cost, ai_spend.pool()))
@@ -80,10 +83,11 @@ async def test_the_client_refuses_a_nightly_call_without_sending_it_and_counts_e
     client._client = SimpleNamespace(messages=FakeMessages())
     monkeypatch.setattr(ai_spend, "record_call", count)
     monkeypatch.setattr(ai_spend, "check_nightly", refuse)
+    monkeypatch.setattr(ai_spend, "check_visitor", room)     # below the cap: the visitor's call goes (tests/test_ai_gateway holds the cap)
     with pytest.raises(ai_spend.NightlyBudgetReached):
         await client._create("generate_research_note", model="claude-sonnet-4-6", max_tokens=10, messages=[])
     assert sent == [] and counted == []
-    token = ai_spend.set_pool(ai_spend.VISITOR)                 # a visitor's call is never refused here, and is counted to visitors
+    token = ai_spend.set_pool(ai_spend.VISITOR)                 # a visitor's call under the cap goes, and is counted to visitors
     try:
         await client._create("generate_thesis_draft", model="claude-fable-5", max_tokens=10, messages=[])
     finally:

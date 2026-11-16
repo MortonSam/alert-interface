@@ -93,6 +93,7 @@ class Settings(BaseSettings):
 
     # External APIs
     anthropic_api_key: str = ""
+    anthropic_admin_key: str = ""     # read-only Admin API key for the nightly spend reconciliation (scripts/reconcile_ai_spend); never makes a model call
     finnhub_api_key: str = ""
     intrinio_api_key: str = ""          # Intrinio (security records, shadow price bars); read from .env locally, a Railway variable in production
     polygon_api_key: str = ""

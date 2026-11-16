@@ -68,6 +68,8 @@ WALKTHROUGH_CMD = walkthrough_cmd(settings.walkthrough_stories_enabled)
 STEPS: list[tuple[str, list[str]]] = [
     # first: one tiny API call, so a dead Anthropic key or an empty credit balance shows tonight, not when a visitor asks
     ("AI key check",                     ["python", "-m", "app.scripts.ai_key_check"]),
+    # yesterday's spend ledger against Anthropic's own usage report for the production key; a gap alerts Sam's phone. No model call.
+    ("AI spend reconciliation",          ["python", "-m", "app.scripts.reconcile_ai_spend"]),
     ("Ticker data (seed_sp500)",              ["python", "-m", "app.scripts.seed_sp500"]),
     ("Refresh profiles (Finnhub)",            ["python", "-m", "app.scripts.refresh_profiles"]),
     ("Security records (Intrinio)",           ["python", "-m", "app.scripts.build_security_records", "--write"]),

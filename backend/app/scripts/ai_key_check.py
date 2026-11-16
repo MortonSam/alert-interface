@@ -17,17 +17,14 @@ from app.services import ai_pause as P
 
 
 async def run() -> int:
-    from anthropic import AsyncAnthropic
-    from app.config import settings
     from app.database import ScriptSessionLocal
+    from app.services.anthropic_client import AnthropicClient
     from app.services.system_metadata_service import get_value, set_value
-    from app.services.prod_key_guard import check_production_key
-    check_production_key()              # production's key check only with production's key (services/prod_key_guard)
     result = {"at": datetime.now(timezone.utc).isoformat(), "model": H.CHECK_MODEL, "ok": False, "status": None, "error": None}
     try:
-        msg = await AsyncAnthropic(api_key=settings.anthropic_api_key).messages.create(
-            model=H.CHECK_MODEL, max_tokens=5, messages=[{"role": "user", "content": "ping"}])
-        result.update(ok=True, status=200, tokens=msg.usage.input_tokens + msg.usage.output_tokens)
+        # through the gateway like every model call (services/anthropic_client), which also applies services/prod_key_guard
+        gen = await AnthropicClient(max_retries=0).key_check(H.CHECK_MODEL)
+        result.update(ok=True, status=200, tokens=gen["input_tokens"] + gen["output_tokens"])
     except Exception as exc:
         # a credit or billing failure pauses the night's AI (services/ai_pause), whose own alert is the one sent
         entry = await H.record_failure("key_check", exc, alarm=H.classify(exc) not in P.PAUSE_KINDS)

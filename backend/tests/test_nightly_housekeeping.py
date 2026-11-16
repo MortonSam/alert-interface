@@ -15,7 +15,7 @@ pytestmark = pytest.mark.xdist_group(name="shared_rows")
 SCRIPTS = Path(__file__).resolve().parents[1] / "app" / "scripts"
 # steps that read no ticker list of their own: a key check, the index membership itself, macro dates, picks already made, the reads
 # warmed through the API's active list, and the validation pass over every stored row
-NO_TICKER_LIST = {"ai_key_check": "one API call", "seed_sp500": "it decides which tickers are active", "seed_macro": "FOMC dates, no tickers",
+NO_TICKER_LIST = {"ai_key_check": "one API call", "reconcile_ai_spend": "the spend ledger, no tickers", "seed_sp500": "it decides which tickers are active", "seed_macro": "FOMC dates, no tickers",
                   "close_alert_picks": "open picks only, whatever their ticker's status", "warm_options_reads": "asks the API for active tickers (active_only=true)",
                   "validate_data": "judges every stored row", "score_trades": "saved ideas only, whatever their ticker's status"}
 

@@ -24,11 +24,13 @@ class NeverAnswers:
 
 
 def test_the_ask_client_bounds_every_attempt_and_allows_one_retry():
+    from app.services.anthropic_client import RETRY_PAUSE_SECONDS
     c = A.ask_client()
-    assert c._client.timeout == A.MODEL_CALL_SECONDS and c._client.max_retries == 1
-    default = AnthropicClient()                       # the nightly's long generations keep the SDK's defaults
-    assert default._client.max_retries == 2
-    assert A.MODEL_CALL_SECONDS * 2 <= A.ANSWER_SECONDS     # one attempt and its retry fit inside the answer's deadline
+    # the gateway retries, never the SDK (Sam, 2026-11-16: an unseen retry is an unrecorded charge; tests/test_ai_gateway)
+    assert c._client.timeout == A.MODEL_CALL_SECONDS and c._client.max_retries == 0 and c._retries == 1
+    default = AnthropicClient()                       # the nightly's long generations keep two retries
+    assert default._client.max_retries == 0 and default._retries == 2
+    assert A.MODEL_CALL_SECONDS * 2 + RETRY_PAUSE_SECONDS[0] <= A.ANSWER_SECONDS     # one attempt, the pause and its retry fit inside the deadline
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,10 @@ Every visual encoding and every sentence about how the system behaves is a displ
 - **Backend values shown to visitors** (statuses, outcomes, mark bases) have a test that every value has a label.
 - **Unused components** are deleted or kept to this rule. A stale claim in an unmounted component is a claim waiting to ship.
 
+## AI Spend
+
+Every model call goes through one gateway, `AnthropicClient._create` (`backend/app/services/anthropic_client.py`): it checks the day's cap before each attempt (the nightly's room, or for a visitor the cap itself), sends one request per attempt (the SDK's own retries are off) and records every reply's cost and tokens in `services/ai_spend`. `tests/test_ai_gateway.py` fails if any module imports the SDK or calls the API another way. The ledger cannot see the key used outside this code: the nightly step "AI spend reconciliation" sets the previous New York day's ledger against Anthropic's usage report for the production key (needs `ANTHROPIC_ADMIN_KEY`, an Admin API key; no model call) and alerts Sam's phone on a gap.
+
 ## Ledger Launch
 
 The ledger is gated by `LEDGER_PUBLIC` env var (default `false`). While false, anonymous visitors see empty ledger/activity; requests carrying the admin token or a reviewer key (`REVIEWER_TOKENS`, comma-separated; ledger reads only, never admin-local) see the full post-LEDGER_START record. To launch: set `LEDGER_PUBLIC=true` on Railway and redeploy. No code change needed.
