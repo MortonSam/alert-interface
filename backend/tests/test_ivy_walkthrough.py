@@ -753,6 +753,58 @@ def test_dividend_yield_cell():
     assert W_D.dividend_cell([], {"date": date(2026, 10, 16), "close": 57.0}) is None
 
 
+def test_trailing_dividends_leaves_out_a_spin_off():
+    # FDX: the $82 FedEx Freight value booked on the spin-off date is not a dividend; the regular payments stay
+    rows = [(date(2025, 12, 15), 1.45), (date(2026, 3, 9), 1.45), (date(2026, 6, 1), 82.0), (date(2026, 6, 22), 1.22), (date(2026, 9, 14), 1.22)]
+    kept, changes = W_D.trailing_dividends(rows, [date(2026, 6, 1)], [])
+    assert [v for _, v in kept] == [1.45, 1.45, 1.22, 1.22]
+    assert changes == [{"date": date(2026, 6, 1), "amount": 82.0, "reason": "spin_off"}]
+    assert W_D.dividend_cell(kept, {"date": date(2026, 11, 10), "close": 319.48})["value"] == "1.7%"
+
+
+def test_trailing_dividends_spin_off_a_session_apart_takes_only_the_nearest():
+    # BDX: the spin-off is recorded Feb 9, the bar books its value Feb 10; a regular payment 4 days off is not taken with it
+    rows = [(date(2026, 2, 6), 1.05), (date(2026, 2, 10), 44.3682), (date(2026, 3, 10), 1.05)]
+    kept, changes = W_D.trailing_dividends(rows, [date(2026, 2, 9)], [])
+    assert kept == [(date(2026, 2, 6), 1.05), (date(2026, 3, 10), 1.05)] and [c["reason"] for c in changes] == ["spin_off"]
+    # two records of the same spin-off (reclassified split Jul 1, filing Jul 2) leave out one payment, not the regular one beside it
+    spgi = [(date(2026, 7, 1), 20.3), (date(2026, 7, 3), 0.97)]
+    assert W_D.trailing_dividends(spgi, [date(2026, 7, 1), date(2026, 7, 2)], [])[0] == [(date(2026, 7, 3), 0.97)]
+    # a spin-off with no payment within SPIN_OFF_MATCH_DAYS leaves every payment in
+    assert W_D.trailing_dividends(rows, [date(2026, 2, 9) - timedelta(days=W_D.SPIN_OFF_MATCH_DAYS + 5)], [])[0] == rows
+
+
+def test_trailing_dividends_only_a_spin_off_is_absent():
+    # APTV pays no dividend: its spin-off value was the year's only payment, so the cell is absent, never a figure
+    kept, _ = W_D.trailing_dividends([(date(2026, 4, 1), 9.4233)], [date(2026, 4, 1)], [])
+    assert kept == [] and W_D.dividend_cell(kept, {"date": date(2026, 11, 10), "close": 39.57}) is None
+
+
+def test_trailing_dividends_divides_a_payment_before_a_split():
+    # BKNG: $9.60 and $10.50 before the Apr 6 25:1 split are per old share; $0.42 after it is untouched
+    rows = [(date(2025, 12, 5), 9.6), (date(2026, 3, 6), 10.5), (date(2026, 6, 5), 0.42), (date(2026, 9, 11), 0.42)]
+    kept, changes = W_D.trailing_dividends(rows, [], [(date(2026, 4, 6), 25.0)])
+    assert [round(v, 4) for _, v in kept] == [0.384, 0.42, 0.42, 0.42]
+    assert [c["reason"] for c in changes] == ["split", "split"]
+    assert W_D.dividend_cell(kept, {"date": date(2026, 11, 10), "close": 159.26})["value"] == "1.0%"
+
+
+def test_trailing_dividends_split_factors_compound_and_reverse_and_same_day():
+    rows = [(date(2026, 1, 2), 1.0), (date(2026, 5, 1), 1.0), (date(2026, 9, 1), 1.0)]
+    # two later splits compound (2 x 3); a payment on a split's own date is already per new share; an unreadable ratio is skipped
+    kept, _ = W_D.trailing_dividends(rows, [], [(date(2026, 3, 1), 2.0), (date(2026, 5, 1), 3.0), (date(2026, 7, 1), None)])
+    assert [round(v, 6) for _, v in kept] == [round(1 / 6, 6), 1.0, 1.0]
+    # a reverse split (1:5 is 0.2) multiplies an earlier payment (AMCR)
+    assert [round(v, 6) for _, v in W_D.trailing_dividends([(date(2025, 11, 28), 0.13)], [], [(date(2026, 1, 15), V.split_ratio("1:5"))])[0]] == [0.65]
+
+
+def test_trailing_dividends_keeps_a_large_payment_with_no_recorded_action():
+    # nothing stored marks a special payout (PGR's annual variable dividend, SKYD's $1.99): until a stored mark exists it is
+    # counted, and a size rule is not used (NVDA's raise from $0.01 to $0.25 would trip one)
+    rows = [(date(2025, 10, 2), 0.1), (date(2026, 1, 2), 13.6), (date(2026, 4, 2), 0.1)]
+    assert W_D.trailing_dividends(rows, [], [])[0] == rows
+
+
 # ── Compare ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _side(reit=False, noun="sales", **rows):

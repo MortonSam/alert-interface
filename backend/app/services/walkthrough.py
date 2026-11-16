@@ -30,7 +30,7 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 8                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 9                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
@@ -47,6 +47,8 @@ WALKTHROUGH_VERSION = 8                           # 2 (2026-10-19): fiscal quart
                                                   #   once), never the vendor's; a stock on the hold-out list gets no share and is out of the sum
                                                   # 8 (2026-11-11, Sam): step 5's range needs 252 sessions in its stretch (it was 60); under that,
                                                   #   today's figure and the sector comparison only, with no line about the missing range
+                                                  # 9 (2026-11-16, Sam's item 9): Compare's dividend yield leaves out a payment booked on a recorded
+                                                  #   spin-off (walkthrough_data.trailing_dividends) and divides a payment made before a split by it
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)

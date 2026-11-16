@@ -187,16 +187,59 @@ async def last_close(db, symbol: str) -> dict | None:
 
 
 DIVIDEND_YEAR_DAYS = 365
+SPIN_OFF_MATCH_DAYS = 4             # a recorded spin-off and the bar that books its value can sit a weekend apart (BDX Feb 9 / Feb 10)
 
 
 async def dividend_yield(db, symbol: str, close: dict | None) -> dict | None:
-    """Dividends with ex-dates in the year to the latest close (stored on the Intrinio bars), over that close. None with no
-    dividend in the year."""
+    """Dividends with ex-dates in the year to the latest close (stored on the Intrinio bars), over that close, by
+    trailing_dividends' rule (no spin-off's value, payments before a later split divided by it). None with no dividend in the year."""
     if not close:
         return None
     rows = (await db.execute(text("""SELECT date, dividend FROM price_bars_shadow WHERE symbol = :s AND dividend > 0 AND date > :a AND date <= :b ORDER BY date"""),
                              {"s": symbol, "a": close["date"] - timedelta(days=DIVIDEND_YEAR_DAYS), "b": close["date"]})).all()
-    return dividend_cell([(d, float(v)) for d, v in rows], close)
+    if not rows:
+        return None
+    spin_offs, splits = await dividend_actions(db, symbol)
+    kept, _ = trailing_dividends([(d, float(v)) for d, v in rows], spin_offs, splits)
+    return dividend_cell(kept, close)
+
+
+async def dividend_actions(db, symbol: str) -> tuple[list[date], list[tuple[date, float | None]]]:
+    """The stock's recorded spin-off dates (event_type spin_off, as Reclassify spin-offs leaves them, or a filing's corporate
+    action spin_off) and its splits ((date, ratio), event_type split only)."""
+    spin = [r[0] for r in (await db.execute(text("""SELECT e.event_date FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = :s
+            AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata->>'corporate_action' = 'spin_off'))"""), {"s": symbol})).all()]
+    splits = [(r[0], V.split_ratio(r[1])) for r in (await db.execute(text("""SELECT e.event_date, e.metadata->>'split_ratio' FROM events e
+            JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = :s AND e.event_type = 'split' ORDER BY e.event_date"""), {"s": symbol})).all()]
+    return spin, splits
+
+
+def trailing_dividends(rows: list[tuple[date, float]], spin_offs: list[date], splits: list[tuple[date, float | None]]) -> tuple[list[tuple[date, float]], list[dict]]:
+    """Pure: the payments a trailing dividend yield counts, and the ones it leaves out ({date, amount, reason}).
+
+    - A spin-off's value is not a dividend: for each recorded spin-off, the payment nearest to it within SPIN_OFF_MATCH_DAYS
+      is left out (reason "spin_off"). Two records of one spin-off (the reclassified split and the filing's action, SPGI Jul 1
+      and Jul 2) find the same payment, so a regular one beside it is never taken for the second record.
+    - A payment made before a split is divided by every later split's ratio, so it is per share of today's count (reason
+      "split" on the adjusted ones, kept). A payment on or after a split's date is untouched; an unreadable ratio is skipped."""
+    left_out: dict[date, str] = {}
+    for s in spin_offs:
+        near = [(abs((d - s).days), d) for d, _ in rows if abs((d - s).days) <= SPIN_OFF_MATCH_DAYS]
+        if near:
+            left_out[min(near)[1]] = "spin_off"
+    kept, changes = [], []
+    for d, v in rows:
+        if d in left_out:
+            changes.append({"date": d, "amount": v, "reason": left_out[d]})
+            continue
+        factor = 1.0
+        for sd, ratio in splits:
+            if sd > d and ratio:
+                factor *= ratio
+        if factor != 1.0:
+            changes.append({"date": d, "amount": v, "reason": "split", "adjusted": v / factor})
+        kept.append((d, v / factor))
+    return kept, changes
 
 
 def dividend_cell(rows: list[tuple[date, float]], close: dict) -> dict | None:
