@@ -1,7 +1,7 @@
 """compute_growth --due (2026-10-21: the nightly step hit its 3600-second limit with nothing written, every night): due only with a
 growth filing since the ticker's last run, each ticker written as it finishes, and a time budget so the step ends inside ten minutes."""
 import inspect
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.scripts import compute_growth as C
 
@@ -95,3 +95,29 @@ def test_every_swallowed_read_failure_reaches_the_growth_run_and_a_failed_ticker
     assert asyncio.run(Down().filing_texts("1", "0000000001-26-000001", "a.htm", failed=failed)) == []
     assert failed == ["0000000001-26-000001 cover", "0000000001-26-000001 exhibits"]
     assert asyncio.run(Down().filing_texts("1", "0000000001-26-000001", "a.htm")) == []      # other callers: as before
+
+
+def test_a_run_covers_only_the_filings_older_than_the_facts_it_may_have_read():
+    """2026-11-16: company facts were cached 24 hours, so a night whose steps reached a company a little earlier than the night before
+    read facts without the 10-Q filed in between (AMZN's 10-Q accepted Oct 29 22:20 UTC, its run Oct 30 07:27), and the run, recorded
+    as done, left 86 stocks' growth rows a quarter behind until their next filing. Facts are now read anew each night, each run records
+    the age it read under, and a run recorded without one is trusted only for filings 24 hours older than it."""
+    from app.services import edgar_client as E
+    assert E.COMPANY_FACTS_CACHE_H <= 12                                                       # each nightly reads them anew
+    assert "_cache_fresh(cache_file, COMPANY_FACTS_CACHE_H)" in inspect.getsource(E.EdgarClient.get_company_facts)
+    assert '"facts_max_age_h": COMPANY_FACTS_CACHE_H' in inspect.getsource(C.write_symbol)
+    run = datetime(2026, 10, 30, 7, 27, tzinfo=timezone.utc)
+    ten_q = datetime(2026, 10, 29, 22, 20, tzinfo=timezone.utc)
+    assert C.covered_by(None, None) is None
+    sub = _sub(("8-K", "2.02", "2026-10-30T20:05:00.000Z"), ("10-Q", "", "2026-10-29T22:20:00.000Z"))
+    assert C.newest_filing(sub, periodic_only=True) == ten_q
+    # the legacy record: the 10-Q was filed nine hours before the run, inside the 24 hours its facts may have been cached, so due
+    assert C.due_order({"AMZN": run}, {"AMZN": ten_q}, {"AMZN": ten_q}, {"AMZN": None}) == ["AMZN"]
+    # an 8-K release alone reaches the run through its own exhibits, not the facts: nine hours before is covered
+    assert C.due_order({"X": run}, {"X": run - timedelta(hours=9)}, {"X": run - timedelta(days=80)}, {"X": None}) == []
+    # the re-run under the new age a night later covers the 10-Q, and the ticker rests until its next filing
+    again = datetime(2026, 10, 31, 8, 15, tzinfo=timezone.utc)
+    assert C.due_order({"AMZN": again}, {"AMZN": ten_q}, {"AMZN": ten_q}, {"AMZN": C.COMPANY_FACTS_CACHE_H}) == []
+    # under the new age a periodic report accepted within those hours of the run is read again; one before them is not
+    assert C.due_order({"X": run}, {"X": run - timedelta(hours=3)}, {"X": run - timedelta(hours=3)}, {"X": 6}) == ["X"]
+    assert C.due_order({"X": run}, {"X": run - timedelta(hours=7)}, {"X": run - timedelta(hours=7)}, {"X": 6}) == []

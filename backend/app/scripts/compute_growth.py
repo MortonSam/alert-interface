@@ -9,10 +9,11 @@ the ticker was read (its facts, its 8-K index, every release exhibit) and only a
 failed, or with any source unread, keeps what it has. A dry run prints each figure it would remove and the total.
 
 --due (2026-10-21: the step hit its 3600-second limit with nothing written, every night): a ticker is due only when EDGAR's filing
-index shows a 10-Q, 10-K, 20-F or 40-F, or an 8-K with Item 2.02 (a results release), accepted after its last growth run, or when it
-has never run. Each run is recorded per ticker (system_metadata growth_run:{SYM}) whatever it found, each ticker's figures are
-written as soon as it is done, and the run starts no new ticker after RUN_BUDGET_S, so it ends inside ten minutes; a ticker it
-didn't reach is still due the next night (the newest filings first, never-run tickers after them).
+index shows a 10-Q, 10-K, 20-F or 40-F, or an 8-K with Item 2.02 (a results release), accepted after its last growth run, or a periodic
+report accepted after the company facts that run may have read (covered_by; 2026-11-16), or when it has never run. Each run is recorded per ticker
+(system_metadata growth_run:{SYM}) whatever it found, each ticker's figures are written as soon as it is done, and the run starts no
+new ticker after RUN_BUDGET_S, so it ends inside ten minutes; a ticker it didn't reach is still due the next night (the newest
+filings first, never-run tickers after them).
 
 Usage: python -m app.scripts.compute_growth --symbols=MU,MSFT [--write]
        python -m app.scripts.compute_growth --due --write      # the nightly: every ticker that reported since its figures were computed
@@ -23,7 +24,7 @@ import asyncio
 import sys
 import json
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import text
 
@@ -32,7 +33,7 @@ from app.scripts.compute_pe import company_facts_merged
 from app.scripts.seed_release_eps import exhibit_candidates
 from app.services import growth as G
 from app.services import valuation as V
-from app.services.edgar_client import PREDECESSOR_CIKS, EdgarClient
+from app.services.edgar_client import COMPANY_FACTS_CACHE_H, PREDECESSOR_CIKS, EdgarClient
 from app.services.redact import redact
 from app.services.system_metadata_service import set_value
 from app.services.write_failures import WriteFailures
@@ -43,7 +44,11 @@ RUN_BUDGET_S = 8 * 60             # --due: no new ticker starts after this
 RUN_HARD_S = 9 * 60               # --due: a ticker still running now stops (it stays due), so the step ends inside ten minutes
 WORKERS = 6                       # --due: tickers read at once; every SEC request still waits its turn (edgar_client's pacing)
 WRITES = WriteFailures("Growth (XBRL and 8-K releases)")
-RUN_KEY = "growth_run:{sym}"      # system_metadata: {"at": <when the ticker's last growth run finished>}
+RUN_KEY = "growth_run:{sym}"      # system_metadata: {"at": <when the ticker's last growth run finished>, "facts_max_age_h": <hours>}
+# a run read company facts up to facts_max_age_h old (edgar_client's cache), so it covers only the filings accepted that long before
+# it. Runs recorded before 2026-11-16 carry no age and read facts cached up to 24 hours: 86 stocks' runs read facts without the
+# 10-Q filed hours before and were never due again (their growth rows a quarter behind the walkthrough's)
+LEGACY_FACTS_AGE_H = 24
 PERIODIC_FORMS = {"10-Q", "10-K", "10-Q/A", "10-K/A", "20-F", "40-F", "20-F/A", "40-F/A"}
 
 # the release reading that outranks another, when two exhibits both read: the consolidated statement's row, a company-level sentence,
@@ -53,12 +58,13 @@ def _rank(rev: dict) -> int:
     return 0 if "consolidated statement" in how or "consolidating statement" in how else (1 if how == "revenue sentence" else 2)
 
 
-def newest_filing(submissions: dict) -> datetime | None:
-    """Pure: when the newest filing growth reads was accepted (a periodic report, or an 8-K with Item 2.02), from EDGAR's index."""
+def newest_filing(submissions: dict, periodic_only: bool = False) -> datetime | None:
+    """Pure: when the newest filing growth reads was accepted (a periodic report, or an 8-K with Item 2.02), from EDGAR's index;
+    periodic_only: the newest periodic report, whose figures reach the run through the company facts."""
     r = (submissions.get("filings") or {}).get("recent") or {}
     best = None
     for form, items, acc in zip(r.get("form") or [], r.get("items") or [], r.get("acceptanceDateTime") or []):
-        if form in PERIODIC_FORMS or (form in ("8-K", "8-K/A") and "2.02" in (items or "")):
+        if form in PERIODIC_FORMS or (not periodic_only and form in ("8-K", "8-K/A") and "2.02" in (items or "")):
             try:
                 at = datetime.fromisoformat(acc.replace("Z", "+00:00"))
             except (TypeError, ValueError):
@@ -67,37 +73,58 @@ def newest_filing(submissions: dict) -> datetime | None:
     return best
 
 
-def due_order(last_runs: dict[str, datetime | None], newest: dict[str, datetime | None]) -> list[str]:
+def due_order(last_runs: dict[str, datetime | None], newest: dict[str, datetime | None], periodic: dict[str, datetime | None] | None = None,
+              facts_age_h: dict[str, float | None] | None = None) -> list[str]:
     """Pure: the due tickers, newest filing first, then the never-run ones by symbol. A ticker is due with a growth filing accepted
-    after its last run, or with no run at all."""
-    fresh = [(n, sym) for sym, n in newest.items() if n is not None and last_runs.get(sym) is not None and n > last_runs[sym]]
+    after its last run, with a periodic report accepted after the company facts its last run may have read (covered_by), or with
+    no run at all."""
+    def due(sym: str, n: datetime | None) -> bool:
+        at = last_runs.get(sym)
+        if n is None or at is None:
+            return False
+        p = (periodic or {}).get(sym)
+        return n > at or (p is not None and p > covered_by(at, (facts_age_h or {}).get(sym)))
+    fresh = [(n, sym) for sym, n in newest.items() if due(sym, n)]
     never = sorted(sym for sym, at in last_runs.items() if at is None)
     return [sym for _, sym in sorted(fresh, reverse=True)] + never
 
 
-async def last_runs(s) -> dict[str, datetime | None]:
-    """Every active ticker's last growth run: its recorded run, else when its figures or disagreements were last written."""
-    rows = (await s.execute(text("""SELECT t.symbol, greatest(g.at, d.at, (m.value::json->>'at')::timestamptz) FROM tickers t
+async def last_runs(s) -> tuple[dict[str, datetime | None], dict[str, float | None]]:
+    """Every active ticker's last growth run (its recorded run, else when its figures or disagreements were last written), and the
+    age of the company facts that run recorded (None before 2026-11-16)."""
+    rows = (await s.execute(text("""SELECT t.symbol, greatest(g.at, d.at, (m.value::json->>'at')::timestamptz), (m.value::json->>'facts_max_age_h')::float8 FROM tickers t
         LEFT JOIN (SELECT symbol, max(computed_at) AS at FROM growth_figures GROUP BY symbol) g ON g.symbol = t.symbol
         LEFT JOIN (SELECT symbol, max(logged_at) AS at FROM growth_disagreements GROUP BY symbol) d ON d.symbol = t.symbol
         LEFT JOIN system_metadata m ON m.key = 'growth_run:' || t.symbol
         WHERE t.is_active ORDER BY t.symbol"""))).all()
-    return {sym: (at.replace(tzinfo=timezone.utc) if at is not None and at.tzinfo is None else at) for sym, at in rows}
+    return ({sym: (at.replace(tzinfo=timezone.utc) if at is not None and at.tzinfo is None else at) for sym, at, _ in rows},
+            {sym: age for sym, _, age in rows})
+
+
+def covered_by(run_at: datetime | None, facts_max_age_h: float | None) -> datetime | None:
+    """Pure: the newest filing acceptance a run at run_at is sure to have read: the run less the age of the cached company facts it
+    may have used (LEGACY_FACTS_AGE_H for a run recorded without one). None for a ticker never run."""
+    if run_at is None:
+        return None
+    return run_at - timedelta(hours=LEGACY_FACTS_AGE_H if facts_max_age_h is None else facts_max_age_h)
 
 
 async def due_symbols(s, edgar: EdgarClient) -> list[str]:
-    """--due: the tickers with a growth filing since their last run (one filing-index read each), or never run."""
-    runs = await last_runs(s)
+    """--due: the tickers with a growth filing since their last run or a periodic report its facts may have missed (one
+    filing-index read each), or never run."""
+    runs, ages = await last_runs(s)
     newest: dict[str, datetime | None] = {}
+    periodic: dict[str, datetime | None] = {}
     for sym, at in runs.items():
         if at is None:
             continue
         try:
             cik = await edgar.get_cik(sym)
-            newest[sym] = newest_filing(await edgar.get_submissions(cik)) if cik else None
+            sub = await edgar.get_submissions(cik) if cik else {}
+            newest[sym], periodic[sym] = newest_filing(sub), newest_filing(sub, periodic_only=True)
         except Exception as exc:
             print(f"  {sym}: filing index unread, not due tonight: {redact(exc)[:100]}")
-    return due_order(runs, newest)
+    return due_order(runs, newest, periodic, ages)
 
 
 async def _release(edgar: EdgarClient, cik: str, records: list[dict], end: date, cache: dict, unread: list[str] | None = None) -> dict:
@@ -328,7 +355,7 @@ async def write_symbol(sym: str, rows: list[dict], disagreements: list[tuple], g
         await s.execute(text("DELETE FROM growth_disagreements WHERE symbol = :s"), {"s": sym})   # the current readings only
         for d in disagreements:
             await s.execute(text("INSERT INTO growth_disagreements (symbol, metric, period_end, detail) VALUES (:a, :b, :c, :d)"), {"a": d[0], "b": d[1], "c": d[2], "d": d[3]})
-        await set_value(s, RUN_KEY.format(sym=sym), json.dumps({"at": datetime.now(timezone.utc).isoformat()}))
+        await set_value(s, RUN_KEY.format(sym=sym), json.dumps({"at": datetime.now(timezone.utc).isoformat(), "facts_max_age_h": COMPANY_FACTS_CACHE_H}))
         await s.commit()
 
 

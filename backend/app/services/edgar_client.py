@@ -22,6 +22,10 @@ USER_AGENT = "AlertInterface research@example.com"
 CACHE_DIR  = Path(__file__).parent / "cache"
 CACHE_MAX_AGE_H = 24  # hours
 SUBMISSIONS_CACHE_H = 6           # a filing index is reread after this long: fresh for each nightly, shared within a run
+# company facts likewise (2026-11-16): at CACHE_MAX_AGE_H a night whose steps reached a company a little earlier than the night before
+# read the night before's facts, without a 10-Q filed in between, and compute_growth recorded that run as done (97 stocks' growth
+# rows a quarter behind the walkthrough's)
+COMPANY_FACTS_CACHE_H = 6
 MIN_INTERVAL_S = 0.125            # at most 8 requests a second to the SEC (its limit is 10)
 RETRY_DELAYS_S = (2.0, 5.0, 15.0) # after a 429 without a Retry-After header
 _last_request_at = 0.0
@@ -107,11 +111,11 @@ class EdgarClient:
             attempt += 1
 
     async def get_company_facts(self, cik: str) -> dict[str, Any]:
-        """XBRL company facts — revenue, EPS, etc. CIK must be zero-padded to 10 digits. Cached on disk for CACHE_MAX_AGE_H:
-        a document runs to several megabytes and the nightly reads hundreds."""
+        """XBRL company facts — revenue, EPS, etc. CIK must be zero-padded to 10 digits. Cached on disk for COMPANY_FACTS_CACHE_H:
+        a document runs to several megabytes and the nightly reads hundreds; each night reads them anew."""
         import json as _json
         cache_file = _cache_path(f"companyfacts_{cik.zfill(10)}.json")
-        if _cache_fresh(cache_file):
+        if _cache_fresh(cache_file, COMPANY_FACTS_CACHE_H):
             try:
                 return _json.loads(cache_file.read_text())
             except ValueError:
