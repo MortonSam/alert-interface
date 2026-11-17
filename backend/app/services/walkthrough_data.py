@@ -14,8 +14,9 @@ from sqlalchemy import text
 
 from app.services import price_bars
 from app.services import valuation as V
+from app.services.one_year import SPIN_OFF_MATCH_DAYS, one_year_change, start_session
 
-YEAR_SESSIONS = 252
+YEAR_SESSIONS = 252                 # the typical-day window (ordinary_move), never a one-year change: that is services/one_year's rule
 QUARTER_SESSIONS = 63
 BARS_LOOKBACK_DAYS = 400
 BIG_MOVES_SHOWN = 3
@@ -63,7 +64,11 @@ async def load_universe(db, today: date) -> dict:
     frames = price_bars.bulk_closes_sync(syms + [BENCHMARK], today - timedelta(days=BARS_LOOKBACK_DAYS))
     closes = {s: [(ts.date(), float(c)) for ts, c in df["Close"].dropna().items()] for s, df in frames.items()}
     spy = closes.get(BENCHMARK, [])
-    sectors = sector_changes(tickers, closes, spy)
+    # step 4 (the year and three months against SPY and the sector) reads closes adjusted for splits and spin-offs, the series every
+    # one-year change reads (services/one_year.holder_adjusted); the daily moves and the typical day keep the adjusted closes above
+    holder = price_bars.bulk_holder_closes_sync(syms + [BENCHMARK], today - timedelta(days=BARS_LOOKBACK_DAYS))
+    spy_holder = holder.get(BENCHMARK, [])
+    sectors = sector_changes(tickers, holder, spy_holder)
 
     growth: dict[str, list[dict]] = {}
     for r in (await db.execute(text("""SELECT symbol, metric, period_end, year_ago_end, value, year_ago_value, growth_pct, phrase, held_reason, readers, version, computed_at
@@ -89,19 +94,33 @@ async def load_universe(db, today: date) -> dict:
     nexts = await batch_next_earnings(db, ids, today)
     next_by_symbol = {t["symbol"]: nexts.get(t["id"]) for t in tickers.values()}
     return {"today": today, "tickers": tickers, "profiles": profiles, "notes": notes, "mergers": mergers, "actions": actions, "splits": splits, "closes": closes,
-            "spy": spy, "sectors": sectors, "growth": growth, "pe": pe, "pe_last_ok": pe_last_ok, "pe_sector": pe_sector, "next": next_by_symbol}
+            "spy": spy, "holder_closes": holder, "spy_holder": spy_holder, "sectors": sectors, "growth": growth, "pe": pe, "pe_last_ok": pe_last_ok, "pe_sector": pe_sector, "next": next_by_symbol}
 
 
 # ── prices: the stock against SPY and its sector ───────────────────────────────────────────────────────────────────────────
 
 def change(series: list[tuple[date, float]], sessions: int) -> tuple[float, date, date] | None:
-    """Pure: (percent change over the last `sessions` sessions, start session, end session) of an adjusted close series."""
+    """Pure: (percent change over the last `sessions` sessions, start session, end session) of a close series. The three-month
+    change; a one-year change is year_change."""
     if len(series) <= sessions:
         return None
     (d0, c0), (d1, c1) = series[-sessions - 1], series[-1]
     if c0 <= 0:
         return None
     return round((c1 / c0 - 1) * 100, 1), d0, d1
+
+
+def year_change(series: list[tuple[date, float]], end: date | None = None) -> tuple[float, date, date] | None:
+    """Pure: (one-year percent change to one decimal, start session, end session) by services/one_year's rule, over a holder-adjusted series."""
+    oy = one_year_change(series, end)
+    return (round(oy["pct"], 1), oy["start_date"], oy["end_date"]) if oy else None
+
+
+def year_calendar(spy: list[tuple[date, float]]) -> list[date]:
+    """Pure: SPY's sessions from its one-year start session (services/one_year) through its last session; [] when SPY's bars do not
+    cover the year."""
+    oy = one_year_change(spy)
+    return [d for d, _ in spy if d >= oy["start_date"]] if oy else []
 
 
 def aligned(series: list[tuple[date, float]], calendar: list[date]) -> dict[date, float] | None:
@@ -114,9 +133,11 @@ def aligned(series: list[tuple[date, float]], calendar: list[date]) -> dict[date
 
 def sector_changes(tickers: dict, closes: dict, spy: list[tuple[date, float]]) -> dict[str, dict]:
     """Pure: {sector: {members, change_1y, change_3m, index: [(date, median indexed level)]}} over the active S&P 500 members with a
-    full year of closes on SPY's calendar. The index line is the median member's level each session, each member indexed to 100
-    a year before the last session."""
-    cal = [d for d, _ in spy[-YEAR_SESSIONS - 1:]]
+    full year of closes on SPY's calendar (year_calendar). The index line is the median member's level each session, each member indexed
+    to 100 at the one-year start session; change_1y is the median member's one-year change (services/one_year)."""
+    cal = year_calendar(spy)
+    if len(cal) <= QUARTER_SESSIONS:
+        return {}
     out: dict[str, dict] = {}
     by_sector: dict[str, list[dict[date, float]]] = {}
     for sym, t in tickers.items():
@@ -131,7 +152,7 @@ def sector_changes(tickers: dict, closes: dict, spy: list[tuple[date, float]]) -
             continue
         idx = [(d, round(median(m[d] / m[cal[0]] * 100 for m in members), 2)) for d in cal]
         q0 = cal[-QUARTER_SESSIONS - 1]
-        out[sec] = {"members": len(members), "change_1y": round(median((m[cal[-1]] / m[cal[0]] - 1) * 100 for m in members), 1),
+        out[sec] = {"members": len(members), "change_1y": round(median(year_change([(d, m[d]) for d in cal])[0] for m in members), 1),
                     "change_3m": round(median((m[cal[-1]] / m[q0] - 1) * 100 for m in members), 1), "index": idx, "start": cal[0], "end": cal[-1]}
     return out
 
@@ -187,7 +208,6 @@ async def last_close(db, symbol: str) -> dict | None:
 
 
 DIVIDEND_YEAR_DAYS = 365
-SPIN_OFF_MATCH_DAYS = 4             # a recorded spin-off and the bar that books its value can sit a weekend apart (BDX Feb 9 / Feb 10)
 
 
 async def dividend_yield(db, symbol: str, close: dict | None) -> dict | None:
@@ -361,11 +381,11 @@ def pe_year(bars: list[tuple[date, float]], quarters: list[dict], snap: dict, pr
         return None
     eps_then = sum(q["eps"] for q in before)
     as_of = snap["as_of_date"]
-    then = [(d, c) for d, c in bars if d <= as_of - timedelta(days=PE_YEAR_DAYS)]
+    then = start_session(bars, as_of)                    # the one-year start session (services/one_year)
     if eps_then <= 0 or not then:
         return None
     eps_now, price_now = float(snap["trailing_eps"]), float(snap["price"])
-    t_day, t_close = then[-1]
+    t_day, t_close = then
     if price_pct is not None:
         t_close = price_now / (1 + price_pct / 100)
     return {"eps_pct": round((eps_now / eps_then - 1) * 100, 1), "price_pct": round((price_now / t_close - 1) * 100, 1),

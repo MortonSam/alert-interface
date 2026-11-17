@@ -731,6 +731,7 @@ async def get_ticker_chart(
         history=history if hist.ok else [],
         earnings_markers=markers,
         start_price=start_price if hist.ok else None,
+        one_year=_one_year_read(chart_result.get("one_year")) if hist.ok else None,
         history_state=hist.state,
         history_reason=hist.reason,
         last_bar_date=hist.last_bar_date.isoformat() if hist.last_bar_date else None,
@@ -740,6 +741,16 @@ async def get_ticker_chart(
         delay_minutes=live_data.DELAY_MINUTES if live_bars and live_bars["history"] else None,
     )
 
+
+
+def _one_year_read(oy: dict | None):
+    """The chart's one-year change (services/one_year) as served: dates in ISO, the rule's version stamped."""
+    from app.schemas.ticker import OneYearChange
+    from app.services.one_year import ONE_YEAR_VERSION
+    if not oy:
+        return None
+    return OneYearChange(pct=round(oy["pct"], 2), change=round(oy["change"], 4), start_date=oy["start_date"].isoformat(), start_close=round(oy["start_close"], 4),
+                         end_date=oy["end_date"].isoformat(), end_close=round(oy["end_close"], 4), version=ONE_YEAR_VERSION)
 
 
 async def _guarded_price(sym: str, db: AsyncSession | None = None, admin: bool = False) -> QuoteState:

@@ -89,12 +89,24 @@ class EarningsMarker(BaseModel):
     report_timing: str | None = None  # "bmo" | "amc" | "unknown"
 
 
+class OneYearChange(BaseModel):
+    """services/one_year.one_year_change: adjusted for splits and spin-offs, close to close, to the latest stored close."""
+    pct: float
+    change: float
+    start_date: str
+    start_close: float
+    end_date: str
+    end_close: float
+    version: int
+
+
 class TickerChartRead(BaseModel):
     symbol: str
     period: str
     history: list["SparklinePoint"]
     earnings_markers: list[EarningsMarker]
     start_price: float | None = None  # reference for the period's change calc
+    one_year: OneYearChange | None = None  # the 1y period's change (services/one_year); the header's 1Y figure, never recomputed on the page
     history_state: str = "ok"            # ok | stale | mismatch | no_data; history is [] unless ok
     history_reason: str | None = None    # why the history is withheld
     last_bar_date: str | None = None     # date of the newest bar the source returned

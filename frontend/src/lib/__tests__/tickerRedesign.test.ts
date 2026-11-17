@@ -60,6 +60,17 @@ describe("header change matches the API values it comes from", () => {
     expect(periodChange("1d", { ...TSLA_QUOTE, change: 0.004, change_pct: 0.001 }, null)!.direction).toBe("flat");
     expect(DIRECTION_STYLE.up.stroke).not.toBe(DIRECTION_STYLE.down.stroke);
   });
+  it("1Y is the chart's one_year as sent (backend services/one_year), never the quote against start_price", () => {
+    const oneYear = { pct: 10, change: 10, start_date: "2025-11-14", start_close: 100, end_date: "2026-11-16", end_close: 110, version: 1 };
+    const chart = { ...TSLA_7D, period: "1y", start_price: 98.5, one_year: oneYear } as unknown as TickerChart;
+    const c = periodChange("1y", TSLA_QUOTE, chart)!;
+    expect(c.change).toBe(10);
+    expect(c.pct).toBe(10);
+    expect(c.since).toBe("since Nov 14, 2025");
+    expect(fmtChange(c)).toBe("+10.00 (+10.00%)");
+    expect(periodChange("1y", TSLA_QUOTE, { ...chart, one_year: null })).toBeNull();      // absent, never worked out from the bars
+    expect(periodChange("1y", null, chart)).toBeNull();
+  });
   it("opens on 1D when it has bars, else the shortest period that does", async () => {
     const empty = { history: [], history_state: "no_data" } as unknown as TickerChart;
     const got = await openingPeriod(async (p) => (p === "1d" ? empty : { ...TSLA_7D, period: p }));

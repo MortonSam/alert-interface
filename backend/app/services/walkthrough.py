@@ -30,7 +30,7 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 9                           # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 10                          # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
@@ -49,6 +49,11 @@ WALKTHROUGH_VERSION = 9                           # 2 (2026-10-19): fiscal quart
                                                   #   today's figure and the sector comparison only, with no line about the missing range
                                                   # 9 (2026-11-16, Sam's item 9): Compare's dividend yield leaves out a payment booked on a recorded
                                                   #   spin-off (walkthrough_data.trailing_dividends) and divides a payment made before a split by it
+                                                  # 10 (2026-11-16, Sam's item 8): step 4's year is services/one_year's rule (the last session on or
+                                                  #   before the same date a year earlier, close to close, adjusted for splits and for spin-offs as
+                                                  #   a holder saw them; it counted 252 sessions back on dividend-adjusted closes), its chart and three
+                                                  #   months on the same closes; step 5's year-earlier close by the same start session, and no P/E
+                                                  #   year when a recorded spin-off falls inside it
 MINUTES = 3                                       # "about 3 minutes", stated on the entry
 CHART_EVERY = 5                                   # chart points: every fifth session, plus the last
 PE_MEDIAN_AGREEMENT = 0.15                        # the series' median must match the stored five-year median within this (one decimal rounding)
@@ -607,17 +612,20 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
                today: date, share: dict | None = None) -> dict:
     """Step 4 leads with the sector (the median stock of its sector in the index, called its sector on screen), then the S&P 500. A stock over
     INDEX_SHARE_NO_VERDICT of the index's market value is part of the market's move: no market-or-company verdict, for the year or a
-    day, and its check asks what that share means instead (Sam, 2026-10-29)."""
-    from app.services.walkthrough_data import QUARTER_SESSIONS, STALE_BAR_DAYS, YEAR_SESSIONS, aligned, change
-    cal = [d for d, _ in spy[-YEAR_SESSIONS - 1:]]
+    day, and its check asks what that share means instead (Sam, 2026-10-29). `stock` and `spy` are closes adjusted for splits
+    and spin-offs (price_bars.bulk_holder_closes_sync); the year is services/one_year's, from SPY's one-year start session to its last session."""
+    from app.services.walkthrough_data import QUARTER_SESSIONS, STALE_BAR_DAYS, aligned, change, year_calendar, year_change
+    cal = year_calendar(spy)
     if not cal or (today - cal[-1]).days > STALE_BAR_DAYS:
         return _absent(4, name, "The S&P 500's prices on file are not up to date, so Ivy can't compare against it.", "the S&P 500's prices are not up to date", "market_vs_company")
     a = aligned(stock, cal)
     if a is None or len(a) < len(cal):
         return _absent(4, name, "Its prices on file do not cover the past year up to the latest close.", "its prices don't cover the past year", "market_vs_company")
     s_series = [(d, a[d]) for d in cal]
-    c1, c3 = change(s_series, YEAR_SESSIONS), change(s_series, QUARTER_SESSIONS)
-    p1, p3 = change(spy, YEAR_SESSIONS), change(spy, QUARTER_SESSIONS)
+    c1, c3 = year_change(s_series), change(s_series, QUARTER_SESSIONS)
+    p1, p3 = year_change(spy, cal[-1]), change(spy, QUARTER_SESSIONS)
+    if c1 is None or p1 is None or c3 is None or p3 is None:
+        return _absent(4, name, "Its prices on file do not cover the past year up to the latest close.", "its prices don't cover the past year", "market_vs_company")
     end = cal[-1]
     as_of = f"Close {fmt_date(end)}"
     heavy = bool(share and share["pct"] > INDEX_SHARE_NO_VERDICT)
@@ -679,7 +687,7 @@ def step_stock(name: str, sector: str | None, stock: list[tuple[date, float]], s
     point = f"The {pct(c1[0])} {'rise' if c1[0] >= 0 else 'fall'} in its stock over the year"
     st = _step(4, status="ok", numbers=numbers, sentences=sentences, idea="market_vs_company", chart=chart, check=check, deeper=deeper, summary=summary,
                fact=fact, point=point, cell={"close": {"value": signed(c1[0]), "as_of": as_of, "end": str(end)}})
-    st["year_pct"] = c1[0]                                 # step 5's check sets the P/E against the stock's year
+    st["year_pct"], st["year_start"] = c1[0], c1[1]       # step 5's check sets the P/E against the stock's year
     return st
 
 

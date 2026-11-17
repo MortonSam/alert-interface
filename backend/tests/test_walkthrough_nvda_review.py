@@ -39,12 +39,12 @@ def _line(days: list[date], start: float, total_pct: float) -> list[tuple[date, 
 def _step4(share_pct: float | None):
     days = _sessions(300, date(2026, 10, 27))
     stock, spy = _line(days, 100, 25.0), _line(days, 100, 14.9)
-    year = days[-253:]
+    year = [d for d in days if d >= date(2025, 10, 27)]      # services/one_year: the last session on or before Oct 27, 2025
     sec = {"members": 74, "change_1y": 24.1, "change_3m": 12.3, "index": [(d, 100.0 + i * 0.1) for i, d in enumerate(year)]}
     moves = [{"date": date(2026, 8, 27), "move_pct": 8.7, "spy_pct": 0.7, "owner": "company", "report_day": True}]
     share = {"pct": share_pct, "as_of": date(2026, 10, 20), "members": 503} if share_pct is not None else None
-    stock = [(d, v) for d, v in stock[:-253]] + _line(year, 100, 17.3)
-    spy = [(d, 100.0) for d in days[:-253]] + _line(year, 100, 14.9)
+    stock = [(d, v) for d, v in stock[:-len(year)]] + _line(year, 100, 17.3)
+    spy = [(d, 100.0) for d in days[:-len(year)]] + _line(year, 100, 14.9)
     return W.step_stock("NVIDIA", "Information Technology", stock, spy, sec, moves, 0.5, date(2026, 10, 28), share)
 
 

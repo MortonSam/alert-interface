@@ -443,12 +443,25 @@ export interface EarningsMarker {
   eps_line?: string | null;        // LICENSED_ESTIMATES off: the quarter's EPS against a year earlier
 }
 
+/** The one-year change (backend services/one_year): the latest stored close against the close of the last session on or before the
+ * same date a year earlier, split-adjusted. Dates are ISO days. */
+export interface OneYearChange {
+  pct: number;
+  change: number;
+  start_date: string;
+  start_close: number;
+  end_date: string;
+  end_close: number;
+  version: number;
+}
+
 export interface TickerChart {
   symbol: string;
   period: string;
   history: SparklinePoint[];
   earnings_markers: EarningsMarker[];
   start_price: number | null;  // reference close for the period's change calculation
+  one_year?: OneYearChange | null;  // the 1y period's change (backend services/one_year): the header's 1Y figure, read as sent
   history_state?: "ok" | "stale" | "mismatch" | "no_data";
   history_reason?: string | null;
   last_bar_date?: string | null;

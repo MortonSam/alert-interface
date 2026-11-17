@@ -44,19 +44,25 @@ export interface PeriodChange {
   since: string;         // "since the previous close" | "since Oct 5, 2026"
 }
 
-/** The headline change for a period. 1D is the quote's own change against the previous close, as the API sent it; every other
- * period is the quote's price against the period's first close (the chart's start_price, dated by its first bar). Null when
- * either side is missing. */
+/** The headline change for a period. 1D is the quote's own change against the previous close, as the API sent it; 1Y is the
+ * chart's one_year as the API sent it (backend services/one_year: close to close, split-adjusted, dated by its start session),
+ * never recomputed here; every other period is the quote's price against the period's first close (the chart's start_price,
+ * dated by its first bar). Null when either side is missing. */
 export function periodChange(
   period: ChartPeriod,
   quote: Pick<TickerQuote, "price" | "change" | "change_pct"> | null | undefined,
-  chart: Pick<TickerChart, "start_price" | "history"> | null | undefined,
+  chart: Pick<TickerChart, "start_price" | "history" | "one_year"> | null | undefined,
 ): PeriodChange | null {
   if (!quote || quote.price == null) return null;
   let change: number, pct: number, since: string;
   if (period === "1d") {
     if (quote.change == null || quote.change_pct == null) return null;
     change = quote.change; pct = quote.change_pct; since = "since the previous close";
+  } else if (period === "1y") {
+    const oy = chart?.one_year;
+    const day = fmtDay(oy?.start_date ?? null);
+    if (!oy || !day) return null;
+    change = oy.change; pct = oy.pct; since = `since ${day}`;
   } else {
     const start = chart?.start_price;
     const first = chart?.history?.[0]?.date;

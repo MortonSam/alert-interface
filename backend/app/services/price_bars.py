@@ -107,6 +107,59 @@ def raw_closes_sync(symbol: str, start: date) -> list[tuple[date, float, float |
     return [(_as_date(r[0]), float(r[1]), f(r[2]), f(r[3]), f(r[4])) for r in rows]
 
 
+_RAW_SQL = "SELECT symbol, date, close, open, dividend, split_ratio FROM price_bars_shadow WHERE symbol = ANY(:s) AND date >= :d ORDER BY symbol, date"
+_SPLITS_SQL = """SELECT t.symbol, e.event_date, e.metadata->>'split_ratio' FROM events e JOIN tickers t ON t.id = e.ticker_id
+                 WHERE t.symbol = ANY(:s) AND e.event_type = 'split' AND e.event_date > :d ORDER BY e.event_date"""
+_SPIN_OFFS_SQL = """SELECT t.symbol, e.event_date, CASE WHEN e.event_type = 'spin_off' THEN e.metadata->>'split_ratio' END FROM events e JOIN tickers t ON t.id = e.ticker_id WHERE t.symbol = ANY(:s) AND e.event_date >= :d
+                    AND (e.event_type = 'spin_off' OR (e.event_type = 'other' AND e.metadata->>'corporate_action' = 'spin_off'))"""
+ONE_YEAR_READ_DAYS = 400         # the one-year change reads this far back: a year, the start session's gap and room to spare
+
+
+def _holder_by_symbol(rows, split_rows, spin_rows) -> dict[str, list[tuple[date, float]]]:
+    from app.services.one_year import holder_adjusted
+    from app.services.valuation import split_ratio
+    by: dict[str, list] = {}
+    for r in rows:
+        by.setdefault(r[0], []).append((_as_date(r[1]), *r[2:]))
+    splits: dict[str, list] = {}
+    for r in split_rows:
+        splits.setdefault(r[0], []).append((_as_date(r[1]), split_ratio(r[2])))
+    spins: dict[str, list] = {}
+    for r in spin_rows:
+        spins.setdefault(r[0], []).append((_as_date(r[1]), split_ratio(r[2])))
+    return {sym: s for sym, rs in by.items() if (s := holder_adjusted(rs, splits.get(sym, []), spins.get(sym, [])))}
+
+
+def _spin_params(symbols: list[str], start: date) -> dict:
+    from app.services.one_year import SPIN_OFF_MATCH_DAYS
+    return {"s": list(symbols), "d": start - timedelta(days=SPIN_OFF_MATCH_DAYS)}
+
+
+def bulk_holder_closes_sync(symbols: list[str], start: date) -> dict[str, list[tuple[date, float]]]:
+    """{symbol: [(date, close)]} raw closes adjusted for the recorded splits and spin-offs (services/one_year.holder_adjusted), oldest
+    first; symbols without bars are absent. The series every one-year change, and the ticker page's 1Y line, reads."""
+    p = {"s": list(symbols), "d": start}
+    with _engine().connect() as conn:
+        return _holder_by_symbol(conn.execute(text(_RAW_SQL), p).all(), conn.execute(text(_SPLITS_SQL), p).all(),
+                                 conn.execute(text(_SPIN_OFFS_SQL), _spin_params(symbols, start)).all())
+
+
+def holder_closes_sync(symbol: str, start: date) -> list[tuple[date, float]]:
+    return bulk_holder_closes_sync([symbol], start).get(symbol, [])
+
+
+async def holder_closes(session, symbol: str, start: date) -> list[tuple[date, float]]:
+    p = {"s": [symbol], "d": start}
+    return _holder_by_symbol((await session.execute(text(_RAW_SQL), p)).all(), (await session.execute(text(_SPLITS_SQL), p)).all(),
+                             (await session.execute(text(_SPIN_OFFS_SQL), _spin_params([symbol], start))).all()).get(symbol, [])
+
+
+def one_year_sync(symbol: str, today: date | None = None) -> dict | None:
+    """The one-year change (services/one_year.one_year_change) to the latest stored close; None when it cannot be worked out."""
+    from app.services.one_year import one_year_change
+    return one_year_change(holder_closes_sync(symbol, (today or date.today()) - timedelta(days=ONE_YEAR_READ_DAYS)))
+
+
 def close_on_date_sync(symbol: str, on) -> float | None:
     """The official close on that date, as traded (unadjusted); None when no bar is stored for it."""
     with _engine().connect() as conn:
@@ -137,9 +190,20 @@ def daily_closes_sync(symbol: str, period: str = "1mo", today: date | None = Non
 
 
 def chart_history_daily_sync(symbol: str, period: str, today: date | None = None) -> dict:
-    """The chart's daily series: {"history": [{date, close}], "start_price": first close or None}. Intraday periods are not served here."""
+    """The chart's daily series: {"history": [{date, close}], "start_price": first close or None}. Intraday periods are not served here.
+    The 1y period reads the closes the one-year change reads (services/one_year.holder_adjusted: splits and spin-offs, no dividends
+    added back), so the line and the header cannot disagree: it carries "one_year" (the figure the header shows) and its line begins at
+    that change's start session; without a one-year change it is None and the line covers what those closes hold of PERIOD_DAYS["1y"]."""
     if period in INTRADAY_PERIODS:
         raise ValueError(f"{period} is an intraday period: Intrinio's bars serve it")
+    if period == "1y":
+        from app.services.one_year import one_year_change
+        today = today or date.today()
+        series = holder_closes_sync(symbol, today - timedelta(days=ONE_YEAR_READ_DAYS))
+        oy = one_year_change(series)
+        begin = oy["start_date"] if oy else today - timedelta(days=PERIOD_DAYS["1y"])
+        history = [{"date": d.strftime("%Y-%m-%d"), "close": c} for d, c in series if d >= begin]
+        return {"history": history, "start_price": history[0]["close"] if history else None, "one_year": oy}
     history = daily_closes_sync(symbol, period, today)
     return {"history": history, "start_price": history[0]["close"] if history else None}
 

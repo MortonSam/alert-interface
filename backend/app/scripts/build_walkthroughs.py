@@ -131,7 +131,7 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
     rdays = await D.report_days(db, t["id"])
     stock = u["closes"].get(sym, [])
     moves = D.biggest_moves(stock, u["spy"], rdays, MARKET_DAY_MIN_SPY_PCT)
-    s4 = W.step_stock(name, sector, stock, u["spy"], u["sectors"].get(sector), moves, MARKET_DAY_MIN_SPY_PCT, today, W.index_share(sym, u["tickers"]))
+    s4 = W.step_stock(name, sector, u["holder_closes"].get(sym, []), u["spy_holder"], u["sectors"].get(sector), moves, MARKET_DAY_MIN_SPY_PCT, today, W.index_share(sym, u["tickers"]))
     snap = u["pe"].get(sym)
     if snap and "pe" in held:
         snap = None
@@ -148,7 +148,9 @@ async def build_one(db, u: dict, sym: str, src: dict) -> dict:
             act_dates = [a["date"] for a in actions]
             series = V.pe_series_clean(bars, quarters, act_dates) if quarters else []
             left_out = D.pe_left_out(bars, quarters, act_dates)
-            year = D.pe_year(bars, quarters, snap, s4.get("year_pct"))
+            # across a spin-off the year-earlier price and earnings are the whole company's and today's are not: no P/E year
+            spun = any(a["kind"] == "spin_off" and s4.get("year_start") and a["date"] > s4["year_start"] for a in actions)
+            year = None if spun else D.pe_year(bars, quarters, snap, s4.get("year_pct"))
         s5 = W.step_valuation(name, sector, snap, series, u["pe_sector"].get(sector), True, periods, left_out, year)
         if pe_behind and s5["status"] != "absent":
             s5["sentences"].append(W.pe_behind_line(pe_behind.get("latest_report"), snap, periods))
