@@ -30,7 +30,7 @@ from app.services.fiscal_periods import cap, four_label, quarter, quarter_label,
 from app.services import walkthrough_checks as C
 from app.services.walkthrough_checks import change_noun, kept, moved, num, pct, signed
 
-WALKTHROUGH_VERSION = 10                          # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
+WALKTHROUGH_VERSION = 11                          # 2 (2026-10-19): fiscal quarter names, checks that combine facts, REITs on FFO, gaps
                                                   # 3 (same day): checks ask what a fact means; Compare on one measure and comparable periods; "revenue" for banks
                                                   # 4 (2026-10-29, Sam's NVDA review): the company's own explanations quoted (walkthrough_quotes); step 4
                                                   #   leads with its industry and gives no market verdict for a stock over INDEX_SHARE_NO_VERDICT of the
@@ -49,6 +49,8 @@ WALKTHROUGH_VERSION = 10                          # 2 (2026-10-19): fiscal quart
                                                   #   today's figure and the sector comparison only, with no line about the missing range
                                                   # 9 (2026-11-16, Sam's item 9): Compare's dividend yield leaves out a payment booked on a recorded
                                                   #   spin-off (walkthrough_data.trailing_dividends) and divides a payment made before a split by it
+                                                  # 11 (2026-11-16, Sam): a dividend yield above walkthrough_data.DIVIDEND_YIELD_MAX_PCT with a
+                                                  #   payment the data can't classify is held, shown absent (SKYD's 27.2%)
                                                   # 10 (2026-11-16, Sam's item 8): step 4's year is services/one_year's rule (the last session on or
                                                   #   before the same date a year earlier, close to close, adjusted for splits and for spin-offs as
                                                   #   a holder saw them; it counted 252 sessions back on dividend-adjusted closes), its chart and three

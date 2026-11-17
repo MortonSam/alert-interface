@@ -44,6 +44,7 @@ from app.models.system_metadata import SystemMetadata
 from app.models.ticker import Ticker
 from app.models.watchlist import WatchlistTicker
 from app.services import chain_store
+from app.services.walkthrough_data import DIVIDEND_YIELD_MAX_PCT       # the limit above which the walkthrough holds a yield
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
@@ -4082,7 +4083,6 @@ async def check_walkthrough_staleness(session) -> CheckResult:
     return CheckResult("walkthrough_staleness", PASS, f"Every walkthrough is version {WALKTHROUGH_VERSION} and built within {WALKTHROUGH_MAX_AGE_HOURS} hours")
 
 
-DIVIDEND_YIELD_MAX_PCT = 20.0
 WALK_HYPHEN_MINUS = re.compile(r"(?<![\w-])-\d")                          # "-9.0%" where a true minus belongs
 WALK_NO_SEPARATOR = re.compile(r"(?<![\d,.])\d{4,}\.\d|\$\d{4,}")           # "1061.5" or "$1234" (years and dates have no decimals)
 

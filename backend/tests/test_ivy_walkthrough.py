@@ -1257,3 +1257,15 @@ def test_a_release_figure_in_another_unit_agrees_with_the_filing():
     assert G.revenue_agrees(143_756_000_000.0, aapl)                         # AAPL's Dec 2025 quarter: the same figure, in millions
     assert not G.revenue_agrees(143_900_000_000.0, aapl)                     # a different figure never agrees
     assert G.revenue_agrees(5_285_400_000.0, {"raw": "5,286", "number": 5286.0, "scale": "millions"})   # BSX: one unit of the last digit
+
+
+def test_a_yield_the_site_cannot_trust_is_absent_never_a_number():
+    # SKYD: $1.99 on Oct 14 against a $9.27 close, nothing in the data marking it regular or special: 27.2%, over the sanity limit
+    close = {"date": date(2026, 11, 12), "close": 9.27}
+    assert W_D.dividend_cell([(date(2026, 10, 14), 1.99), (date(2026, 7, 1), 0.53)], close) is None
+    assert W_D.yield_held(W_D.DIVIDEND_YIELD_MAX_PCT + 0.1, [(date(2026, 10, 14), 1.0)])
+    assert not W_D.yield_held(W_D.DIVIDEND_YIELD_MAX_PCT, [(date(2026, 10, 14), 1.0)])
+    # PGR: 6.0% with its special in it stays until payments carry a mark (Sam, 2026-11-16)
+    assert W_D.dividend_cell([(date(2026, 1, 2), 13.6)], {"date": date(2026, 11, 12), "close": 227.72})["value"] == "6.0%"
+    from app.scripts import validate_data
+    assert validate_data.DIVIDEND_YIELD_MAX_PCT is W_D.DIVIDEND_YIELD_MAX_PCT

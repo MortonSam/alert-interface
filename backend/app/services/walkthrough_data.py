@@ -208,6 +208,10 @@ async def last_close(db, symbol: str) -> dict | None:
 
 
 DIVIDEND_YEAR_DAYS = 365
+DIVIDEND_YIELD_MAX_PCT = 20.0       # the sanity limit (validate's walkthrough check reads it): a trailing yield above it with a payment the
+                                    # data can't classify is held, shown absent (Sam, 2026-11-16: SKYD's 27.2% includes a payment nothing
+                                    # marks as regular or special; every kept payment is unclassified until the 8-K declaration reader
+                                    # marks them)
 
 
 async def dividend_yield(db, symbol: str, close: dict | None) -> dict | None:
@@ -222,6 +226,12 @@ async def dividend_yield(db, symbol: str, close: dict | None) -> dict | None:
     spin_offs, splits = await dividend_actions(db, symbol)
     kept, _ = trailing_dividends([(d, float(v)) for d, v in rows], spin_offs, splits)
     return dividend_cell(kept, close)
+
+
+def yield_held(pct: float, kept: list[tuple[date, float]]) -> bool:
+    """Pure: a trailing yield the site can't trust: above DIVIDEND_YIELD_MAX_PCT with a payment in it the data can't classify (every
+    kept payment, until payments carry a mark; one marked special will then be left out, as a spin-off's value is)."""
+    return pct > DIVIDEND_YIELD_MAX_PCT and bool(kept)
 
 
 async def dividend_actions(db, symbol: str) -> tuple[list[date], list[tuple[date, float | None]]]:
@@ -263,11 +273,14 @@ def trailing_dividends(rows: list[tuple[date, float]], spin_offs: list[date], sp
 
 
 def dividend_cell(rows: list[tuple[date, float]], close: dict) -> dict | None:
-    """Pure: Compare's dividend yield cell from the year's ex-dates and the close."""
+    """Pure: Compare's dividend yield cell from the year's ex-dates and the close; None (shown absent) when the yield is held
+    (yield_held), never a number the site can't trust."""
     from app.services.briefing import fmt_date
     if not rows or close["close"] <= 0:
         return None
     total = sum(v for _, v in rows)
+    if yield_held(total / close["close"] * 100, rows):
+        return None
     return {"value": f"{total / close['close'] * 100:,.1f}%", "as_of": f"{len(rows)} dividends in the year to the {fmt_date(close['date'])} close",
             "pct": round(total / close["close"] * 100, 2), "end": str(close["date"])}
 
