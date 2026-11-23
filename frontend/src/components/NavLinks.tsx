@@ -7,12 +7,11 @@ import { usePathname } from "next/navigation";
 export const NAV_LINKS = [
   { href: "/discover", label: "Discover" },
   { href: "/build", label: "Build a Trade" },
-  { href: "/ivy", label: "Ivy" },
   { href: "/theses", label: "My Trades" },
   { href: "/watchlist", label: "Watchlists" },
 ];
 
-/** From 640px up the five links sit in the header row; below it a menu button opens them, so the header stays one row on a phone. */
+/** From 640px up the links sit in the header row; below it a menu button opens them, so the header stays one row on a phone. */
 export default function NavLinks() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);

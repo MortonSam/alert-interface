@@ -194,14 +194,6 @@ export default async function Home() {
               wrong, all from the company&#39;s own filings. Ivy explains. She never tells you what to buy or sell.
             </p>
 
-            <div className="mt-8">
-              <Link
-                href="/ivy"
-                className="bg-primary text-primary-foreground font-semibold rounded-xl px-6 py-3.5 text-sm hover:opacity-90 transition-opacity inline-block"
-              >
-                Meet Ivy →
-              </Link>
-            </div>
           </div>
         </section>
       {/* ── 7. See it in action: the latest verified note (the component renders nothing when none is current) ── */}
@@ -247,12 +239,6 @@ export default async function Home() {
                 className="tap text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 Build a trade →
-              </Link>
-              <Link
-                href="/ivy"
-                className="tap text-sm text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Meet Ivy →
               </Link>
             </div>
           </section>
